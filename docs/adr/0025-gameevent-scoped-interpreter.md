@@ -1,6 +1,6 @@
 # ADR 0025: GameEvent sequence engine: a scoped interpreter, not the full verb set
 
-- **Status:** accepted
+- **Status:** accepted (execution location superseded by [0035](0035-game-event-verdict.md); scoping and fail-closed philosophy retained)
 - **Date:** 2026-08-10
 - **Related:** [ADR 0010](0010-data-config-zig-plugins.md) (no script VM in
   core), [ADR 0023](0023-perk-attribute-system.md) (the same

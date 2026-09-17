@@ -1,6 +1,6 @@
 # ADR 0017: Player persist identity is login name (not platform id)
 
-- **Status:** accepted
+- **Status:** superseded by [0038](0038-player-persist-platform-identity.md) (2026-09-11)
 - **Date:** 2026-08-05
 - **Updated:** 2026-08-07 (ZPV3 progression magic landed; identity key unchanged)
 - **Related:** [0011](0011-custom-zch-world-overlay.md), [INVENTORY.md](../wire/INVENTORY.md), [GAME_OPTIONS.md](../GAME_OPTIONS.md)

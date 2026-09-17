@@ -52,7 +52,7 @@ behavior through `zdtd.toml` / preset packs.
 
 ## 5. Design notes
 
-See [RFC 0006](0006-honk-doors.md). The policy decision (which doors
+See [RFC 0006](../rfc/0006-honk-doors.md). The policy decision (which doors
 honk-open) is config-shaped; a plugin verdict is reserved for
 departures-from-stock custom rules.
 
@@ -62,7 +62,7 @@ G1 -> RFC 0006 §4; G2 -> RFC 0006 §4; G3 -> RFC 0006 §4; G4 -> RFC 0006 §4.
 
 ## 7. Open questions
 
-See [RFC 0006 §5](0006-honk-doors.md).
+See [RFC 0006 §5](../rfc/0006-honk-doors.md).
 
 ## 8. Acceptance criteria
 

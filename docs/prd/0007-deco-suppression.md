@@ -46,17 +46,17 @@ POIs.
 
 ## 5. Design notes
 
-See [RFC 0007](0007-deco-suppression.md).
+See [RFC 0007](../rfc/0007-deco-suppression.md).
 
 ## 6. Requirements traceability
 
 G1 -> RFC 0007 §4; G2 -> RFC 0007 §4; G3 -> RFC 0007 §4.
 
-**Status:** implemented 2026-09-12 (see [RFC 0007 §6](0007-deco-suppression.md) for the realization; the acceptance criteria below are met, with the lazy per-deco-chunk build in place of the eager map).
+**Status:** implemented 2026-09-12 (see [RFC 0007 §6](../rfc/0007-deco-suppression.md) for the realization; the acceptance criteria below are met, with the lazy per-deco-chunk build in place of the eager map).
 
 ## 7. Open questions
 
-See [RFC 0007 §5](0007-deco-suppression.md).
+See [RFC 0007 §5](../rfc/0007-deco-suppression.md).
 
 ## 8. Acceptance criteria
 
