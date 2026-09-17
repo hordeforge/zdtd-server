@@ -389,12 +389,14 @@ fn replicateBots(
 
         // Spawn-on-approach: the player-mesh body (hash 2001454542, the same
         // class_table[0] default a bot used as an ECS entity).
+        var spawn_mask: game_mod.ObsMask = 0;
         var m = in_range;
         while (m != 0) : (m &= m - 1) {
             const ci = @ctz(m);
             const cl = &self.clients[ci];
-            if (cl.known_bots.isSet(bi)) continue;
-            const peer = cl.peer orelse continue;
+            if (!cl.known_bots.isSet(bi) and cl.peer != null) spawn_mask |= game_mod.bitOf(ci);
+        }
+        if (spawn_mask != 0) {
             if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
                 .entity_id = b.net_id,
                 .entity_class = packages.stock_entity.class_player_male,
@@ -410,9 +412,15 @@ fn replicateBots(
                 .is_sleeper = false,
                 .trader_data = null,
             })) |spb| {
-                try self.sendGame(peer, "NetPackageEntitySpawn", spb);
-                cl.known_bots.set(bi);
-                self.harness.counters.inc(.replicate_fanouts);
+                m = spawn_mask;
+                while (m != 0) : (m &= m - 1) {
+                    const ci = @ctz(m);
+                    const cl = &self.clients[ci];
+                    const peer = cl.peer orelse continue;
+                    try self.sendGame(peer, "NetPackageEntitySpawn", spb);
+                    cl.known_bots.set(bi);
+                    self.harness.counters.inc(.replicate_fanouts);
+                }
                 self.harness.counters.inc(.packages_encoded);
             } else |_| {
                 self.harness.counters.inc(.encode_errors);
@@ -463,4 +471,48 @@ fn replicateBots(
             self.harness.counters.inc(.replicate_fanouts);
         }
     }
+}
+
+test "bot spawn encodes once for multiple viewers" {
+    const ln_peer = @import("../../litenet/peer.zig");
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    cap_a.clear();
+    cap_b.clear();
+    g.bots.bots[0] = .{ .alive = true, .net_id = 123456, .x = 0, .y = 70, .z = 0 };
+    g.tick_n = 1;
+    const obs_cx = [_]i32{0} ** game_mod.max_clients;
+    const obs_cz = [_]i32{0} ** game_mod.max_clients;
+    const obs_ok = [_]bool{true} ** game_mod.max_clients;
+    const obs_r = [_]i32{1} ** game_mod.max_clients;
+    const active = game_mod.bitOf(ca.slot) | game_mod.bitOf(cb.slot);
+    const encoded = g.harness.counters.get(.packages_encoded);
+    const fanouts = g.harness.counters.get(.replicate_fanouts);
+    try replicateBots(g, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+    try std.testing.expectEqual(encoded + 1, g.harness.counters.get(.packages_encoded));
+    try std.testing.expectEqual(fanouts + 2, g.harness.counters.get(.replicate_fanouts));
+    try std.testing.expect(ca.known_bots.isSet(0));
+    try std.testing.expect(cb.known_bots.isSet(0));
+    const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
+    const spawn_a = cap_a.findPkgId(spawn_id) orelse return error.TestUnexpectedResult;
+    const spawn_b = cap_b.findPkgId(spawn_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u8, spawn_a, spawn_b);
+    cap_a.clear();
+    cap_b.clear();
+    try replicateBots(g, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+    try std.testing.expectEqual(encoded + 1, g.harness.counters.get(.packages_encoded));
+    try std.testing.expect(cap_a.findPkgId(spawn_id) == null);
+    try std.testing.expect(cap_b.findPkgId(spawn_id) == null);
 }

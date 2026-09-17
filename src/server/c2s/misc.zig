@@ -785,8 +785,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // every other EnumDamageTypes member takes passive 43
         // ElementalDamageResist scaled by the damage type's tag
         // (combat-damage.md 2.1).
+        var foreign_resist: f32 = 0;
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
+                if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot >= 0 and
+                    self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot))) return true;
                 amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
                 // Spectral Grace (perkAgilityMastery): the victim's
                 // foreign-gated GDR rows evaluate here, where the attacker
@@ -794,21 +797,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // other in scope), so a passing row lands only on this hit.
                 // A passing Grace also starts the 60 s recharge buff, whose
                 // own start row sets the cvar that closes the gate.
-                const fg = self.foreignGatedResist(ei, actor_slot);
-                if (fg > 0) {
-                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
-                }
-                amount *= 1.0 - fg;
-                // Victim-side hit trigger: the victim's `onOtherAttackedSelf`
-                // rows (concussion/fatigue counters, PackMule display) fire
-                // with the attacker's tags as `other`.
-                self.fireAttackedSelf(ei, actor_slot, d.body_part);
-                // Attacker-side HitLocation gates (onSelfAttackedOther).
-                self.fireAttackedOther(actor_slot, ei, d.body_part);
+                foreign_resist = self.foreignGatedResist(ei, actor_slot);
+                amount *= 1.0 - foreign_resist;
                 if (self.sim.player[ei].peer_slot >= 0) {
-                    // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
-                    if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
-                        return true;
                     if (protocol.damageSourceAffectedByArmor(d.source)) {
                         if (protocol.damageTypeIsPhysical(d.dtype)) {
                             // Armor mitigation, less the attacker's held-item
@@ -842,6 +833,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const v = if (sv != 0) sv else self.wasm_plugins.playerDamage(atk, d.entity_id, @trunc(amount));
                 if (v < 0) return true;
                 if (v > 0) amount = amount * @as(f32, @floatFromInt(v)) / 100.0;
+                if (foreign_resist > 0) {
+                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
+                }
+                self.fireAttackedSelf(ei, actor_slot, d.body_part);
+                self.fireAttackedOther(actor_slot, ei, d.body_part);
             }
         }
         // Attribute the hit: stock's NetPackageDamageEntity carries

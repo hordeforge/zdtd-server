@@ -14872,8 +14872,21 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
 
     g.pvp_mode = 0;
     const vslot = g.sim.slotOfNetId(cb.entity_id) orelse return error.TestUnexpectedResult;
+    const aslot = g.sim.slotOfNetId(ca.entity_id) orelse return error.TestUnexpectedResult;
     const hp_before = g.sim.health[vslot].hp;
     try std.testing.expect(hp_before > 0);
+    g.buffs.deinit();
+    g.buffs = .{ .defs = &.{.{
+        .name = "testHitEffects",
+        .triggered = &.{
+            .{ .trigger = .other_attacked_self, .action = .modify_cvar, .cvar = "$victimHits", .cvar_op = .add, .value = 1 },
+            .{ .trigger = .self_attacked_other, .action = .modify_cvar, .cvar = "$attackerHits", .cvar_op = .add, .value = 1 },
+        },
+    }} };
+    try std.testing.expect(g.addCatalogBuff(ca.entity_id, aslot, "testHitEffects", ca.entity_id));
+    try std.testing.expect(g.addCatalogBuff(cb.entity_id, vslot, "testHitEffects", cb.entity_id));
+    const victim_buffs = g.sim.buffs[vslot];
+    const attacker_buffs = g.sim.buffs[aslot];
 
     var dmg: [256]u8 = undefined;
     var fbuf: [512]u8 = undefined;
@@ -14883,6 +14896,22 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", denied));
     try std.testing.expectApproxEqAbs(hp_before, g.sim.health[vslot].hp, 0.01);
     try std.testing.expectEqual(@as(u16, 0), ca.player_kills);
+    try std.testing.expectEqual(@as(f32, 0), cb.cvars.get("$victimHits"));
+    try std.testing.expectEqual(@as(f32, 0), ca.cvars.get("$attackerHits"));
+    try std.testing.expectEqualDeep(victim_buffs, g.sim.buffs[vslot]);
+    try std.testing.expectEqualDeep(attacker_buffs, g.sim.buffs[aslot]);
+
+    g.pvp_mode = 3;
+    g.wasm_plugins.loadAll(gpa, &.{"plugins/core_pvp/core_pvp.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.enable();
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", denied));
+    try std.testing.expectApproxEqAbs(hp_before, g.sim.health[vslot].hp, 0.01);
+    try std.testing.expectEqual(@as(f32, 0), cb.cvars.get("$victimHits"));
+    try std.testing.expectEqual(@as(f32, 0), ca.cvars.get("$attackerHits"));
+    try std.testing.expectEqualDeep(victim_buffs, g.sim.buffs[vslot]);
+    try std.testing.expectEqualDeep(attacker_buffs, g.sim.buffs[aslot]);
+    g.wasm_plugins.shutdown();
 
     // Same claim with PvP enabled lands, so the rejection above is the mode
     // gate and not some unrelated reason the packet never arrived.
@@ -14890,6 +14919,8 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     const allowed = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 1000, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
     try std.testing.expect(g.sim.health[vslot].hp < hp_before);
+    try std.testing.expectEqual(@as(f32, 1), cb.cvars.get("$victimHits"));
+    try std.testing.expectEqual(@as(f32, 1), ca.cvars.get("$attackerHits"));
     std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
 }
 
