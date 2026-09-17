@@ -2891,6 +2891,7 @@ test "item passive rows parse with their gates and inherit through Extends" {
 
 test "armor resist curves parse from stock items.xml (PDR quality curves)" {
     const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.fileExists(gd ++ "/Data/Config/items.xml")) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
     defer t.deinit();
     // armorPrimitiveHelmet carries PhysicalDamageResist "8,12.3" (Q1..Q6).
@@ -2940,6 +2941,7 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
 
 test "StaminaLoss parses as the per-attack cost" {
     const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.fileExists(gd ++ "/Data/Config/items.xml")) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
     defer t.deinit();
     var found = false;
