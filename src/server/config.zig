@@ -438,7 +438,15 @@ fn sandboxIntU16(v: i32) u16 {
 pub var effective: Config = .{};
 
 /// Parse serverconfig.xml bytes (subset of stock ServerSettings).
-pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
+pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
+    var comment_end: usize = 0;
+    while (std.mem.findPos(u8, src, comment_end, "<!--")) |start| {
+        const end = std.mem.findPos(u8, src, start + 4, "-->") orelse
+            return error.BadServerConfig;
+        comment_end = end + 3;
+    }
+    const raw = try xml.stripComments(allocator, src);
+    defer allocator.free(raw);
     if (std.mem.find(u8, raw, "<ServerSettings") == null or
         std.mem.find(u8, raw, "</ServerSettings>") == null)
     {
@@ -925,6 +933,40 @@ test "telnet defaults stay closed when properties are absent or malformed" {
     try std.testing.expect(!bare.telnet_enabled);
     try std.testing.expectEqual(@as(u16, 0), bare.telnet_port);
     try std.testing.expectEqual(@as(usize, 0), bare.telnet_password.len);
+}
+
+test "serverconfig ignores commented properties and roots" {
+    const src =
+        \\<!-- <ServerSettings><property name="ServerPort" value="12345"/></ServerSettings> -->
+        \\<ServerSettings>
+        \\  <!-- <property name="ServerPort" value="12346"/> -->
+        \\  <!--
+        \\    <property name="TelnetEnabled" value="true"/>
+        \\    <property name="AdminPort" value="8081"/>
+        \\    <property name="BuildCreate" value="true"/>
+        \\  -->
+        \\  <property name="ServerPort" value="27002"/>
+        \\  <property name="ServerDescription" value="Rock &amp; Roll"/>
+        \\</ServerSettings>
+    ;
+    var cfg = try parse(std.testing.allocator, src);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 27002), cfg.port);
+    try std.testing.expect(!cfg.telnet_enabled);
+    try std.testing.expectEqual(@as(u16, 0), cfg.admin_port);
+    try std.testing.expect(!cfg.build_create);
+    try std.testing.expectEqualStrings("Rock & Roll", cfg.server_description);
+    try std.testing.expectError(error.BadServerConfig, parse(std.testing.allocator, "<!-- <ServerSettings></ServerSettings> -->"));
+}
+
+test "serverconfig rejects unterminated comments" {
+    for ([_][]const u8{
+        "<!-- <ServerSettings></ServerSettings>",
+        "<ServerSettings><!-- </ServerSettings>",
+        "<ServerSettings></ServerSettings><!--",
+    }) |src| {
+        try std.testing.expectError(error.BadServerConfig, parse(std.testing.allocator, src));
+    }
 }
 
 test "parseXmlBool accepts stock spellings only" {
