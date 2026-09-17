@@ -179,7 +179,8 @@ fn parseModifiedTicks(s: []const u8) i64 {
     const h: i64 = std.fmt.parseInt(i64, s[11..13], 10) catch return 0;
     const mi: i64 = std.fmt.parseInt(i64, s[14..16], 10) catch return 0;
     const sec: i64 = std.fmt.parseInt(i64, s[17..19], 10) catch return 0;
-    if (mo < 1 or mo > 12 or d < 1 or d > 31 or h > 23 or mi > 59 or sec > 60) return 0;
+    if (y < 1 or mo < 1 or mo > 12 or d < 1 or h > 23 or mi > 59 or sec > 59) return 0;
+    if (d > std.time.epoch.getDaysInMonth(@intCast(y), @enumFromInt(mo))) return 0;
     // Days from civil date (Howard Hinnant's algorithm) → .NET ticks.
     var yy = y;
     if (mo <= 2) yy -= 1;
@@ -710,4 +711,24 @@ test "sign modified timestamps parse to .NET ticks" {
     try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("2026-02-27"));
     try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("2026-13-27 13:43:31Z"));
     try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("not a date"));
+}
+
+test "sign modified timestamps reject invalid calendar dates" {
+    const invalid = [_][]const u8{
+        "2023-02-29 00:00:00Z",
+        "1900-02-29 00:00:00Z",
+        "2100-02-29 00:00:00Z",
+        "2024-02-30 00:00:00Z",
+        "2026-04-31 00:00:00Z",
+        "0000-01-01 00:00:00Z",
+        "2016-12-31 23:59:60Z",
+    };
+    for (invalid) |stamp| {
+        try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks(stamp));
+    }
+    const ticks_per_day: i64 = 86400 * 10000000;
+    try std.testing.expectEqual(ticks_per_day, parseModifiedTicks("2000-03-01 00:00:00Z") - parseModifiedTicks("2000-02-29 00:00:00Z"));
+    try std.testing.expectEqual(ticks_per_day, parseModifiedTicks("2024-02-29 00:00:00Z") - parseModifiedTicks("2024-02-28 00:00:00Z"));
+    try std.testing.expectEqual(@as(i64, 10000000), parseModifiedTicks("0001-01-01 00:00:01Z"));
+    try std.testing.expectEqual(@as(i64, 3155378975990000000), parseModifiedTicks("9999-12-31 23:59:59Z"));
 }
