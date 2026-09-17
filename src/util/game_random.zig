@@ -113,7 +113,8 @@ pub const GameRandom = struct {
         if (span <= mbig) {
             return @as(i32, @intFromFloat(self.sample() * @as(f64, @floatFromInt(span)))) + min_value;
         }
-        return @as(i32, @intFromFloat(self.getSampleForLargeRange() * @as(f64, @floatFromInt(span)))) + min_value;
+        const offset: i64 = @intFromFloat(self.getSampleForLargeRange() * @as(f64, @floatFromInt(span)));
+        return @intCast(offset + min_value);
     }
 
     /// `GetSampleForLargeRange` (IL=489).
@@ -125,13 +126,13 @@ pub const GameRandom = struct {
 
     /// `RandomRange(Single _maxExclusive)` (IL=190).
     pub fn rangeFloat(self: *GameRandom, max_exclusive: f32) f32 {
-        return @floatCast(self.nextDouble() * @as(f64, @floatFromInt(max_exclusive)));
+        return @floatCast(self.nextDouble() * @as(f64, max_exclusive));
     }
 
     /// `RandomRange(Single _min, Single _maxExclusive)` (IL=199).
     pub fn rangeFloatBetween(self: *GameRandom, min_value: f32, max_exclusive: f32) f32 {
-        return @floatCast(self.nextDouble() * @as(f64, @floatFromInt(max_exclusive - min_value)) +
-            @as(f64, @floatFromInt(min_value)));
+        return @floatCast(self.nextDouble() * @as(f64, max_exclusive - min_value) +
+            @as(f64, min_value));
     }
 
     /// `RandomRange(Int32 _maxExclusive)` / `(Int32 _min, Int32 _maxExclusive)`
@@ -175,6 +176,23 @@ test "GameRandom matches System.Random goldens" {
         try std.testing.expectEqual(c.range5_10, r.nextRange(5, 10));
         try std.testing.expectApproxEqAbs(c.dbl1, r.nextDouble(), 1e-12);
     }
+}
+
+test "GameRandom large integer ranges narrow only after applying the lower bound" {
+    var r = GameRandom.init(42);
+    try std.testing.expectEqual(@as(i32, 1434747709), r.nextRange(std.math.minInt(i32), std.math.maxInt(i32)));
+    for (0..1000) |_| {
+        const value = r.nextRange(std.math.minInt(i32), std.math.maxInt(i32));
+        try std.testing.expect(value >= std.math.minInt(i32));
+        try std.testing.expect(value < std.math.maxInt(i32));
+    }
+}
+
+test "GameRandom float ranges preserve fractional bounds" {
+    var single = GameRandom.init(42);
+    var between = GameRandom.init(42);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.33405322), single.rangeFloat(0.5), 0.0000001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.08405322), between.rangeFloatBetween(-0.25, 0.25), 0.0000001);
 }
 
 test "seededOnPos folds position and seed the way Utils does" {
