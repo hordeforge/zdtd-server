@@ -70,7 +70,6 @@ pub fn isDroppablePackage(pkg_name: []const u8) bool {
     // UI while the reliable window is full (playtest: n=1 then n=100 drops).
     const names = [_][]const u8{
         "NetPackageChunk",
-        "NetPackageChunkRemove",
         "NetPackageDecoResetWorldChunk",
         "NetPackageEntityPosAndRot",
         "NetPackageEntitySpeeds",
@@ -580,4 +579,42 @@ test "the compressed set is exactly the stock get_Compress overrides we emit" {
         }
         try std.testing.expectEqual(expected, isCompressedPackage(n));
     }
+}
+
+test "chunk removal retries without forgetting the client chunk" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const peer = c.peer.?;
+    const key = packages.makeChunkKey(1000, 1000);
+    c.streamed_n = 1;
+    c.streamed[0] = key;
+    g.chunk_adds_per_stream_tick = 0;
+    g.deco_trees = true;
+    peer.capture = null;
+    for (0..ln_packet.window_size) |_| try peer.sendReliable(&g.net.sock, "pending");
+    const drops_before = g.harness.counters.get(.reliable_window_drops);
+    try std.testing.expectError(error.WindowFull, g.streamChunksForClient(c));
+    try std.testing.expectEqual(@as(usize, 1), c.streamed_n);
+    try std.testing.expectEqual(key, c.streamed[0]);
+    try std.testing.expectEqual(drops_before + 1, g.harness.counters.get(.reliable_window_drops));
+
+    for (&peer.pending) |*pending| pending.used = false;
+    peer.local_window_start = peer.local_seq;
+    peer.capture = &cap;
+    cap.clear();
+    try g.streamChunksForClient(c);
+    try std.testing.expectEqual(@as(usize, 0), c.streamed_n);
+    const body = cap.findPkgId(packages.idOf("NetPackageChunkRemove").?) orelse return error.TestUnexpectedResult;
+    var expected_buf: [16]u8 = undefined;
+    const expected = try packages.buildChunkRemoveBody(&expected_buf, 1000, 1000);
+    try std.testing.expectEqualSlices(u8, expected, body);
 }
