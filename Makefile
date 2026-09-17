@@ -185,6 +185,7 @@ check:
 	# and check_xml_audit are executed below anyway, but gen_provenance.py never
 	# runs in check, so a syntax error there would otherwise land unseen.
 	python3 -m py_compile tools/*.py scripts/gen_provenance.py
+	python3 -B -m unittest discover -s tools -p 'test_provenance_scan.py'
 	python3 tools/provenance_scan.py
 	# Catalog freshness gate: docs/catalogs/*.md is rendered from source by
 	# tools/gen_docs_catalogs.py; regenerate with `make docs-catalogs` and commit

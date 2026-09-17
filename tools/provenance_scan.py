@@ -15,6 +15,7 @@ Checks docs/PROVENANCE.md against the src/ tree:
 Usage: python3 tools/provenance_scan.py
 Exit 0 when file coverage is 100% and every ledger row is well-formed.
 """
+import argparse
 import os
 import pathlib
 import re
@@ -173,7 +174,38 @@ def src_constants(src_dir):
     return out
 
 
+def research_citation_errors(root, research_docs):
+    root = pathlib.Path(root)
+    research_docs = pathlib.Path(research_docs)
+    citation = re.compile(
+        r"7dtd-engine-research/docs/"
+        r"([A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\.md)"
+    )
+    errors = []
+    for directory, pattern in (("docs", "*.md"), ("src", "*.zig")):
+        for path in sorted((root / directory).rglob(pattern)):
+            text = path.read_text(encoding="utf-8")
+            for line_number, line in enumerate(text.splitlines(), 1):
+                for match in citation.finditer(line):
+                    if not (research_docs / match.group(1)).is_file():
+                        errors.append(
+                            f"{path.relative_to(root)}:{line_number} -> "
+                            f"7dtd-engine-research/docs/{match.group(1)}"
+                        )
+    return errors
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--research-root", type=pathlib.Path,
+        help="research repository path (default: sibling 7dtd-engine-research)",
+    )
+    args = parser.parse_args()
+    research_root = args.research_root or pathlib.Path(ROOT).parent / "7dtd-engine-research"
+    research_docs = research_root / "docs"
+    if args.research_root is not None and not research_docs.is_dir():
+        parser.error(f"research docs directory missing: {research_docs}")
     files = src_files()
     parsed = ledger_rows()
     if parsed is None:
@@ -236,18 +268,11 @@ def main():
 
     # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-engine-research/docs/<file>.md
     #    reference in zdtd docs resolves to an existing research doc.
-    research_docs = os.path.join(ROOT, "..", "7dtd-engine-research", "docs")
     bad_cites = []
-    if os.path.isdir(research_docs):
-        for sub, _dirs, names in os.walk("docs"):
-            for name in names:
-                if not name.endswith(".md"):
-                    continue
-                text = open(os.path.join(sub, name), encoding="utf-8", errors="replace").read()
-                for m in re.finditer(r"(\.\./[^)\s]+?/7dtd-engine-research/docs/[a-z0-9-]+\.md)", text):
-                    target = os.path.normpath(os.path.join(sub, m.group(1)))
-                    if not os.path.isfile(target):
-                        bad_cites.append(f"{os.path.join(sub, name)} -> {m.group(1)}")
+    if research_docs.is_dir():
+        bad_cites = research_citation_errors(ROOT, research_docs)
+    else:
+        print(f"SKIP: research citations not checked (missing {research_docs})")
     if bad_cites:
         print(f"FAIL: research-doc citations that do not resolve ({len(bad_cites)}):")
         for c in sorted(set(bad_cites))[:10]:
@@ -648,9 +673,7 @@ def main():
     #     dropping it is a legitimate choice; doing it silently is not, so
     #     require the name to appear in DIVERGENCES with its reasoning.
     #     Skipped when the research repo is absent, like check 5.
-    il_dir = pathlib.Path(
-        ROOT, "..", "7dtd-engine-research", "il", "full-v3.2.0", "_global"
-    )
+    il_dir = research_root / "il" / "full-v3.2.0" / "_global"
     if il_dir.is_dir():
         pkgs_src = pathlib.Path(ROOT, "src/wire/packages.zig").read_text(
             encoding="utf-8", errors="replace"
