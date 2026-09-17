@@ -96,7 +96,7 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Control | Default |
 |---|---|
 | Bind | IPv4 loopback only; remote access requires a TLS reverse proxy |
-| Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret). Token is deterministic per secret, so a valid cookie survives a server restart (browser Max-Age and logout still bound it) |
+| Auth | Shared secret header or POST `/login` form; cookie is an HMAC session token with a fresh random nonce per login (not the secret). Server-side expiry is 12 hours. Login replaces the shared browser session; logout and restart invalidate it, requiring sign-in again |
 | CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd` and `/logout`) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
@@ -125,7 +125,7 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools); feeds the dashboard latency chart series | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
 | `POST /login` | Form body `token=` → **303** + session cookie (missing token **400**, wrong secret **401**, non-form content type **415**, lockout **429**) | config secret |
-| `POST /logout` | Clear session cookie (CSRF: session token or secret) | session |
+| `POST /logout` | Revoke the server session and clear its cookie (CSRF: session token or secret) | session |
 | `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
 | `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
 | `GET /static/*` | htmx.min.js, alpine, app.css (not implemented; assets inline) | embed or files |

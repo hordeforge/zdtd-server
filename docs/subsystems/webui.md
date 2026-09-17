@@ -8,7 +8,7 @@ Sources: [`src/server/webui.zig`](../../src/server/webui.zig), [`src/server/webu
 
 The server is off unless `--webui-port` is non-zero; the flag defaults to `0` and the bind and secret default to `127.0.0.1` and the empty string (`src/server/game/types.zig:238-241`). The secret may come from `ZDTD_WEBUI_SECRET`, which wins over the CLI only when the CLI value is empty; a CLI secret prints a warning because argv is visible in process listings (`src/main.zig:586-597`). Startup fails closed: a non-zero port without a secret is a usage error, as is a secret shorter than `min_secret` (`src/main.zig:605-613`). Initialization then listens and installs the admin thunk, returning the error on failure so a requested-but-dead UI cannot look healthy (`src/server/game/init_world.zig:203-225`). Teardown closes the listener (`src/server/game/lifecycle.zig:34`) and the same call runs if a later init step fails (`src/server/game.zig:977`).
 
-The listener configuration record (src/server/webui.zig:54-62):
+The listener configuration record (src/server/webui.zig:48-56):
 
 ```zig
 pub const Config = struct {
@@ -42,7 +42,7 @@ The GET-only set is enumerated in one predicate: `/`, `/index.html`, `/partials/
 
 ## Login, session and lockout
 
-Three constants define the throttle and cookie lifetime (src/server/webui.zig:45-50):
+Three constants define the throttle and cookie lifetime (src/server/webui.zig:39-44):
 
 ```zig
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -53,7 +53,7 @@ pub const login_lockout_ns: u64 = 30 * std.time.ns_per_s;
 pub const session_cookie_max_age_s: u32 = 43_200;
 ```
 
-The session state lives on the server struct (src/server/webui.zig:191-203):
+The session state lives on the server struct (src/server/webui.zig:185-197):
 
 ```zig
 pub const Server = struct {
@@ -63,7 +63,7 @@ pub const Server = struct {
     secret_buf: [max_secret]u8 = undefined,
     secret_len: usize = 0,
     /// HMAC session material for cookie/CSRF (never the raw secret).
-    session_token: [session_token_hex_len]u8 = undefined,
+    session_token: [session_token_hex_len]u8 = .{'0'} ** session_token_hex_len,
     /// Monotonic deadline for the current browser session. The cookie's
     /// Max-Age is not an authorization boundary because a stolen cookie can be
     /// replayed by a non-browser client after that client-side deadline.
@@ -80,13 +80,13 @@ The login throttle fields follow the audit ring (src/server/webui.zig:227-230):
     login_lock_until_ns: u64 = 0,
 ```
 
-`fillSessionToken` derives the cookie and CSRF value as the first 16 bytes of `HMAC-SHA256(secret, "zdtd-webui-session-v1")` rendered as 32 lowercase hex characters, so the token is stable for a given secret and never equal to it (`src/server/webui.zig:30`, `src/server/webui.zig:1303-1308`). A zero deadline means "no login yet" and is treated as valid, which is what lets a still-valid cookie survive a restart; `issueSession` refreshes the deadline to `now + session_cookie_max_age_s` without changing the token value (`src/server/webui.zig:302-314`). The cookie is `HttpOnly; SameSite=Strict` with the 43200-second Max-Age (`src/server/webui.zig:1346-1352`). Each failed credential presentation increments `login_fails`; on the eighth the server arms a 30-second lock, resets the counter and prints a timestamped line, and a locked server answers 429 with `Retry-After` set to the whole seconds remaining (`src/server/webui.zig:334-342`, `src/server/webui.zig:326-332`). The lockout page substitutes that remaining value into `__ZDTD_RETRY_S__` and the page script counts down to zero before reloading `/login` (`src/server/webui.zig:1440-1446`, `src/server/webui/ts/lockout.ts:20-28`).
+`fillSessionToken` derives the cookie and CSRF value as the first 16 bytes of `HMAC-SHA256(secret, nonce)` rendered as 32 lowercase hex characters (`src/server/webui.zig:1292-1297`). Each login generates a fresh random nonce and replaces the session token and deadline. A zero deadline is invalid; logout clears session state, and restart requires a new login (`src/server/webui.zig:294-305`, `src/server/webui.zig:882-886`). The cookie is `HttpOnly; SameSite=Strict` with the 43200-second Max-Age (`src/server/webui.zig:1346-1352`). Each failed credential presentation increments `login_fails`; on the eighth the server arms a 30-second lock, resets the counter and prints a timestamped line, and a locked server answers 429 with `Retry-After` set to the whole seconds remaining (`src/server/webui.zig:334-342`, `src/server/webui.zig:326-332`). The lockout page substitutes that remaining value into `__ZDTD_RETRY_S__` and the page script counts down to zero before reloading `/login` (`src/server/webui.zig:1440-1446`, `src/server/webui/ts/lockout.ts:20-28`).
 
 Authorization accepts `Authorization: Bearer <secret>`, `X-Zdtd-Secret: <secret>`, or a `zdtd_webui` cookie whose value equals the session token; the raw secret in a cookie is rejected (`src/server/webui.zig:1015-1038`). Everything is compared with `util/secret.zig` constant-time equality. Mutating routes additionally require a `csrf` form field (or `token` on `/api/cmd`) matched against the session token or the secret (`src/server/webui.zig:736-746`, `src/server/webui.zig:639-648`, `src/server/webui.zig:1784-1795`). `POST /api/cmd` runs the line inline through the installed thunk (`Game.webuiAdminThunk` to `runAdminLine`, `src/server/admin_console.zig:597-604`); when no thunk is installed it falls back to the single `cmd_pending` slot queue, which answers 429 rather than 503 when full (`src/server/webui.zig:376-384`, `src/server/webui.zig:766-780`). Console lines must be printable single-line input with no C0 or DEL bytes (`src/server/webui.zig:973-978`). Each accepted line and the first line of its reply are pushed into a 24-entry audit ring and rendered by `/partials/console` (`src/server/webui.zig:247-254`, `src/server/webui.zig:1268-1296`). The ring is in memory only; the file-backed ops log in `docs/WEBUI.md:280` is not implemented here as of this reading.
 
 ## The snapshot and its published shape
 
-`Snapshot` is a plain by-value struct with fixed-capacity arrays, so the poll thread can render from it without locking and without allocating. Its head (src/server/webui.zig:86-101):
+`Snapshot` is a plain by-value struct with fixed-capacity arrays, so the poll thread can render from it without locking and without allocating. Its head (src/server/webui.zig:80-95):
 
 ```zig
 pub const Snapshot = struct {
@@ -109,7 +109,7 @@ pub const Snapshot = struct {
 
 The rest of the struct is counter fields mirroring the APM counter set by hand, section mean and p99 latencies, read-only config values, host OS gauges, and the two fixed rosters. Each roster row is its own record because the HTML partial and the JSON document render the same data.
 
-The player row (src/server/webui.zig:64-75):
+The player row (src/server/webui.zig:58-69):
 
 ```zig
 pub const PlayerRow = struct {

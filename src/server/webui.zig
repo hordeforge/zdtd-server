@@ -22,12 +22,6 @@ pub const max_secret: usize = 128;
 pub const min_secret: usize = 8;
 /// Hex length of HMAC-derived session token (cookie + CSRF; not the shared secret).
 pub const session_token_hex_len: usize = 32;
-/// Deterministic session "nonce": HMAC(secret, label) makes the session token
-/// stable across server restarts, so an operator's still-valid cookie keeps
-/// working after a restart (the cookie's own Max-Age still bounds it). The
-/// token leaks nothing about the secret, and the loopback ops threat model
-/// already assumes secret possession grants access.
-const session_nonce_label = "zdtd-webui-session-v1";
 /// One roster row per client slot: a 64-slot server must not hide the players
 /// past the cap from the operator (both the HTML partial and the stats JSON
 /// render a full roster inside the 16 KiB body buffer).
@@ -195,7 +189,7 @@ pub const Server = struct {
     secret_buf: [max_secret]u8 = undefined,
     secret_len: usize = 0,
     /// HMAC session material for cookie/CSRF (never the raw secret).
-    session_token: [session_token_hex_len]u8 = undefined,
+    session_token: [session_token_hex_len]u8 = .{'0'} ** session_token_hex_len,
     /// Monotonic deadline for the current browser session. The cookie's
     /// Max-Age is not an authorization boundary because a stolen cookie can be
     /// replayed by a non-browser client after that client-side deadline.
@@ -269,9 +263,7 @@ pub const Server = struct {
 
         @memcpy(self.secret_buf[0..cfg.secret.len], cfg.secret);
         self.secret_len = cfg.secret.len;
-        // Deterministic per secret so a valid cookie survives a server restart
-        // (session_expires_ns = 0 below means "valid until the next login").
-        fillSessionToken(cfg.secret, session_nonce_label, &self.session_token);
+        @memset(&self.session_token, '0');
         self.session_expires_ns = 0;
         self.port = self.listener.port;
         self.bind_addr = addr_host;
@@ -287,7 +279,7 @@ pub const Server = struct {
         self.port = 0;
         if (self.secret_len > 0) @memset(self.secret_buf[0..self.secret_len], 0);
         self.secret_len = 0;
-        @memset(&self.session_token, 0);
+        @memset(&self.session_token, '0');
         self.session_expires_ns = 0;
     }
 
@@ -300,16 +292,15 @@ pub const Server = struct {
     }
 
     fn sessionValid(self: *const Server) bool {
-        // Zero = "no login yet": valid from process start, which is exactly
-        // what makes a pre-restart cookie work again (deterministic token).
-        // Login always sets a deadline; unit fixtures install a token directly.
-        return self.session_expires_ns == 0 or clock.monoNs() < self.session_expires_ns;
+        return self.session_expires_ns != 0 and clock.monoNs() < self.session_expires_ns;
     }
 
     fn issueSession(self: *Server) void {
-        // Same deterministic token as init: a login refreshes the deadline but
-        // must not invalidate a cookie that already works across a restart.
-        fillSessionToken(self.secret(), session_nonce_label, &self.session_token);
+        var nonce: [32]u8 = undefined;
+        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer threaded.deinit();
+        threaded.io().random(&nonce);
+        fillSessionToken(self.secret(), &nonce, &self.session_token);
         self.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
     }
 
@@ -889,6 +880,9 @@ pub const Server = struct {
     }
 
     fn httpLogout(self: *Server, req: *http.Server.Request) !void {
+        self.session_expires_ns = 0;
+        @memset(&self.session_token, '0');
+        self.set_cookie = false;
         try req.respond("", .{
             .status = .see_other,
             .keep_alive = false,
@@ -1295,11 +1289,6 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
     return w.buffered();
 }
 
-/// HMAC-SHA256(secret, session_nonce_label) → first 16 bytes as hex (32 chars).
-/// Deterministic per secret: the same cookie value is re-derived after a server
-/// restart, so a still-valid operator cookie keeps working (browser Max-Age and
-/// logout still bound it). Cookie and CSRF use this so the shared secret is not
-/// stored in browser storage/HTML.
 fn fillSessionToken(secret: []const u8, nonce: []const u8, out: *[session_token_hex_len]u8) void {
     var mac: [std.crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
     std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, nonce, secret);
@@ -2231,18 +2220,15 @@ test "requestAuthorized cookie and bearer" {
     try std.testing.expect(!requestAuthorized(h4, "s3cr3t", &sess));
 }
 
-test "session token is deterministic per secret across restarts" {
-    // The token is HMAC(secret, fixed label): two processes started with the
-    // same secret derive the same cookie value, so a valid operator cookie
-    // survives a server restart without a re-login. A different secret must
-    // yield a different token.
+test "session token is bound to the secret" {
+    const nonce = [_]u8{0x5a} ** 32;
     var a: [session_token_hex_len]u8 = undefined;
     var b: [session_token_hex_len]u8 = undefined;
-    fillSessionToken("s3cr3t", session_nonce_label, &a);
-    fillSessionToken("s3cr3t", session_nonce_label, &b);
+    fillSessionToken("s3cr3t", &nonce, &a);
+    fillSessionToken("s3cr3t", &nonce, &b);
     try std.testing.expectEqualStrings(a[0..], b[0..]);
     var other: [session_token_hex_len]u8 = undefined;
-    fillSessionToken("different", session_nonce_label, &other);
+    fillSessionToken("different", &nonce, &other);
     try std.testing.expect(!std.mem.eql(u8, a[0..], other[0..]));
 }
 
@@ -2254,6 +2240,34 @@ fn testServeHttp(s: *Server, request: []const u8) !void {
     s.client_fd = -1; // no socket write; response is captured into test_resp
     s.test_resp_len = 0;
     try s.serveHttp();
+}
+
+test "browser session rejects revoked and renewed cookies" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const login = "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t";
+    try testServeHttp(&s, login);
+    const old_token = s.session_token;
+    var req_buf: [256]u8 = undefined;
+    const logout = try std.fmt.bufPrint(&req_buf, "POST /logout HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 37\r\n\r\ncsrf={s}", .{ old_token, old_token });
+    try testServeHttp(&s, logout);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") != null);
+    const replay = try std.fmt.bufPrint(&req_buf, "GET /api/apm.json HTTP/1.1\r\nCookie: zdtd_webui={s}\r\n\r\n", .{old_token});
+    try testServeHttp(&s, replay);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
+    try testServeHttp(&s, login);
+    try testServeHttp(&s, replay);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
+    const renewed = s.session_token;
+    const current = try std.fmt.bufPrint(&req_buf, "GET /api/apm.json HTTP/1.1\r\nCookie: zdtd_webui={s}\r\n\r\n", .{renewed});
+    try testServeHttp(&s, current);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try testServeHttp(&s, login);
+    try testServeHttp(&s, current);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
+    s.session_expires_ns = 0;
+    try std.testing.expect(!s.sessionValid());
 }
 
 test "POST /login sets session cookie only on valid token" {
@@ -2411,8 +2425,7 @@ test "GET /login redirects when session cookie is already valid" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
-    const nonce = [_]u8{0x5a} ** 32;
-    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.issueSession();
     var req_buf: [160]u8 = undefined;
     const req = try std.fmt.bufPrint(
         &req_buf,
