@@ -21,10 +21,11 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
 vnu_version="${VNU_VERSION:-26.8.20}"
 
 mapfile -t html_files < <(
-  find "$root" -name '*.html' \
+  find . -name '*.html' \
     -not -path '*/.*' \
     -not -path '*/node_modules/*' \
     -not -path '*/zig-pkg/*' \

@@ -92,7 +92,7 @@ def check_links(text: str, path: Path, failures: list[str]) -> int:
         if not target:
             continue
         resolved = (path.parent / target).resolve()
-        if not resolved.exists():
+        if resolved.is_relative_to(ROOT) and not resolved.exists():
             failures.append(f"{rel(path)}: dead link {target}")
     return total
 

@@ -10,6 +10,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := all
 
 ZIG ?= zig
+export ZIG
 # Debug for day-to-day; ReleaseSafe for operator-facing binaries.
 OPTIMIZE ?= Debug
 # The published artifact is named linux-x86_64 in CI, so do not let the
