@@ -1393,11 +1393,7 @@ const login_lockout_html = embedTrimmed("webui/login_lockout.html");
 const shell_html = embedTrimmed("webui/shell.html");
 
 /// Sign-in form; `bad_token` swaps the lead for the failure banner and flips
-/// the input's invalid flag + describedby (the old login_failed.html). Both
-/// placeholders are free-form attribute VALUES (data-invalid, describedby),
-/// so the raw template stays valid HTML for vnu — an aria-invalid token
-/// placeholder would fail validation. The role="alert" banner + describedby
-/// carry the error semantics to assistive tech.
+/// the input's invalid flag + describedby (the old login_failed.html).
 fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
     return renderTemplate(buf, login_html, &.{
         .{
@@ -1409,7 +1405,7 @@ fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
         },
         .{
             .key = "__ZDTD_LOGIN_INVALID__",
-            .val = if (bad_token) "true" else "false",
+            .val = if (bad_token) "true\" aria-invalid=\"true" else "false\" aria-invalid=\"false",
         },
         .{
             .key = "__ZDTD_LOGIN_DESCRIBEDBY__",
@@ -1748,10 +1744,12 @@ fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
         try htmlEscapeAttr(&w, csrf);
         try w.writeAll("\"><input type=\"hidden\" name=\"name\" value=\"");
         try htmlEscapeAttr(&w, m.name);
-        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\" class=\"mod-btn\">{s}</button></form></td></tr>", .{
+        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\" class=\"mod-btn\">{s}<span class=\"sr-only\"> ", .{
             if (off) "enable" else "disable",
             if (off) "Enable" else "Disable",
         });
+        try htmlEscape(&w, m.name);
+        try w.writeAll("</span></button></form></td></tr>");
     }
     try w.writeAll("</tbody></table>");
     if (modlets.statePath()) |sp| {
@@ -2351,7 +2349,7 @@ test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
     try std.testing.expect(std.mem.find(u8, s.testResp(), "UiMod") != null);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"disable\"") != null);
     // The action button carries the touch-target class.
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\"") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\">Disable<span class=\"sr-only\"> UiMod</span></button>") != null);
 
     const body = "csrf=s3cr3t&name=UiMod&action=disable";
     var req_buf: [256]u8 = undefined;
@@ -2361,6 +2359,7 @@ test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
     try std.testing.expect(modlets.isDisabled("UiMod"));
     // The refreshed partial now offers Enable.
     try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"enable\"") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\">Enable<span class=\"sr-only\"> UiMod</span></button>") != null);
     const saved = try io_fs.readFileAll(std.testing.allocator, state);
     defer std.testing.allocator.free(saved);
     try std.testing.expect(std.mem.find(u8, saved, "UiMod") != null);
@@ -2740,13 +2739,13 @@ test "renderLogin substitutes banner and input state" {
     try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "token.type = shown ? 'password' : 'text'") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
-    try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\" aria-invalid=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-describedby=\"login-help\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, ok, "__ZDTD_") == null);
     const bad = try renderLogin(&buf, true);
     try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
-    try std.testing.expect(std.mem.find(u8, bad, "data-invalid=\"true\"") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "data-invalid=\"true\" aria-invalid=\"true\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
     try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);
