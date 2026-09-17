@@ -400,11 +400,6 @@ fn elementMatches(hay: []const u8, open_at: usize, seg: XSeg) bool {
     return true;
 }
 
-/// Find open index of element matching full path; returns open_at or null.
-fn findElement(hay: []const u8, xp: ParsedXPath) ?usize {
-    return findElementIn(hay, xp, 0);
-}
-
 /// Cap on XPath result nodes per patch op (stock iterates the whole result
 /// list; a wildcard patch on a stock catalog can match hundreds of nodes).
 pub const max_xpath_matches: usize = 512;
@@ -503,46 +498,6 @@ fn pathIndex(xp: ParsedXPath) u32 {
         if (i > 0) out = i;
     }
     return out;
-}
-
-fn findElementIn(hay: []const u8, xp: ParsedXPath, start_seg: usize) ?usize {
-    if (start_seg >= xp.n) return null;
-    var search_from: usize = 0;
-    while (search_from < hay.len) {
-        const lt = std.mem.findPos(u8, hay, search_from, "<") orelse break;
-        if (lt + 1 < hay.len and (hay[lt + 1] == '/' or hay[lt + 1] == '!' or hay[lt + 1] == '?')) {
-            search_from = lt + 1;
-            continue;
-        }
-        if (elementMatches(hay, lt, xp.segs[start_seg])) {
-            if (start_seg + 1 == xp.n) return lt;
-            const gt = std.mem.findPos(u8, hay, lt, ">") orelse break;
-            if (gt > lt and hay[gt - 1] == '/') {
-                search_from = gt + 1;
-                continue;
-            }
-            const tag = xp.segs[start_seg].tag;
-            var close_buf: [64]u8 = undefined;
-            if (tag.len + 3 > close_buf.len) return null;
-            close_buf[0] = '<';
-            close_buf[1] = '/';
-            @memcpy(close_buf[2..][0..tag.len], tag);
-            close_buf[2 + tag.len] = '>';
-            const close_tag = close_buf[0 .. 3 + tag.len];
-            const close = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse {
-                search_from = gt + 1;
-                continue;
-            };
-            const body = hay[gt + 1 .. close];
-            if (findElementIn(body, xp, start_seg + 1)) |rel| {
-                return (gt + 1) + rel;
-            }
-            search_from = close + close_tag.len;
-            continue;
-        }
-        search_from = lt + 1;
-    }
-    return null;
 }
 
 fn elementSpan(hay: []const u8, open_at: usize) ?struct { start: usize, end: usize } {
