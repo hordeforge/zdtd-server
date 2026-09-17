@@ -155,7 +155,7 @@ lint: need-zig need-python3 lint-webui lint-html
 	  exit 127; \
 	}
 	for script in scripts/*.sh; do bash -n "$$script"; done
-	shellcheck scripts/*.sh
+	shellcheck -o add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat scripts/*.sh
 	$(ZIG) fmt --check build.zig build.zig.zon src mods plugins assets/fixtures
 	bash scripts/lint-architecture.sh
 	# Documentation gate: dead links, code citations in range, quoted Zig blocks
