@@ -406,6 +406,7 @@ test "le ints" {
     var w: Writer = .{ .buf = &buf };
     try w.writeI32(-1);
     try w.writeU16(0xABCD);
+    try std.testing.expectEqualSlices(u8, &.{ 0xFF, 0xFF, 0xFF, 0xFF, 0xCD, 0xAB }, w.written());
     var r: Reader = .{ .data = w.written() };
     try std.testing.expectEqual(@as(i32, -1), try r.readI32());
     try std.testing.expectEqual(@as(u16, 0xABCD), try r.readU16());
