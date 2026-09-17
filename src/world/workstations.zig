@@ -777,7 +777,8 @@ pub const WorkstationStore = struct {
                 @memcpy(buf[o .. o + rl], q.recipe[0..rl]);
                 o += rl;
             }
-            for (w.craft_complete) |cc| {
+            for (w.craft_complete, 0..) |entry, ci| {
+                const cc: CraftComplete = if (ci < w.craft_complete_n) entry else .{};
                 std.mem.writeInt(i32, buf[o..][0..4], cc.crafter_entity_id, .little);
                 std.mem.writeInt(i32, buf[o + 4 ..][0..4], cc.item_type, .little);
                 std.mem.writeInt(u16, buf[o + 8 ..][0..2], cc.item_count, .little);
@@ -1321,6 +1322,35 @@ test "craft complete list drains to what the client acknowledged" {
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     w.setCraftComplete(&.{});
     try std.testing.expectEqual(@as(u8, 0), w.craft_complete_n);
+}
+
+test "workstation save preserves partial and complete craft acknowledgements" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var s: WorkstationStore = .{};
+    const w = s.getOrCreate(5, 70, 6).?;
+    const first: QueueItem = .{ .output_type = 70000, .starting_entity_id = 171, .craft_exp_gain = 5 };
+    const second: QueueItem = .{ .output_type = 70001, .starting_entity_id = 172, .craft_exp_gain = 12 };
+    w.addCraftComplete(&first, "firstItem", 2);
+    w.addCraftComplete(&second, "secondItem", 3);
+    const pending = [_]CraftComplete{w.craft_complete[1]};
+    w.setCraftComplete(&pending);
+    try s.save(dir, std.testing.allocator);
+
+    var restored: WorkstationStore = .{};
+    try restored.load(dir, std.testing.allocator);
+    const remaining = restored.get(5, 70, 6).?;
+    try std.testing.expectEqual(@as(u8, 1), remaining.craft_complete_n);
+    try std.testing.expectEqualDeep(pending[0], remaining.craft_complete[0]);
+
+    remaining.setCraftComplete(&.{});
+    try restored.save(dir, std.testing.allocator);
+    var drained: WorkstationStore = .{};
+    try drained.load(dir, std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), drained.get(5, 70, 6).?.craft_complete_n);
 }
 
 test "craft complete list evicts the oldest instead of growing" {
