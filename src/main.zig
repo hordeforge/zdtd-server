@@ -482,12 +482,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // (game/init_world.zig, game/lifecycle.zig), so this one is ours to free.
     defer if (serveradmin_path) |p| gpa.free(p);
     if (serverconfig_path) |scp| {
-        if (std.fs.path.dirname(scp)) |dir| {
-            var p: [std.fs.max_path_bytes]u8 = undefined;
-            const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{dir}) catch null;
-            if (cand) |c| {
-                if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
-            }
+        var p: [std.fs.max_path_bytes]u8 = undefined;
+        if (serverAdminSiblingPath(&p, scp)) |c| {
+            if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
         }
     }
     if (serveradmin_path == null) {
@@ -1176,6 +1173,20 @@ test {
     _ = @import("world/root.zig");
     _ = @import("server/root.zig");
     _ = @import("plugin/root.zig");
+}
+
+fn serverAdminSiblingPath(buf: []u8, serverconfig_path: []const u8) ?[]const u8 {
+    const dir = std.fs.path.dirname(serverconfig_path) orelse ".";
+    return std.fmt.bufPrint(buf, "{s}/serveradmin.xml", .{dir}) catch null;
+}
+
+test "serveradmin sibling path accepts bare and qualified config names" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try std.testing.expectEqualStrings("./serveradmin.xml", serverAdminSiblingPath(&buf, "serverconfig.xml").?);
+    try std.testing.expectEqualStrings("./serveradmin.xml", serverAdminSiblingPath(&buf, "./serverconfig.xml").?);
+    try std.testing.expectEqualStrings("config/serveradmin.xml", serverAdminSiblingPath(&buf, "config/serverconfig.xml").?);
+    try std.testing.expectEqualStrings("/srv/my server/serveradmin.xml", serverAdminSiblingPath(&buf, "/srv/my server/serverconfig.xml").?);
+    try std.testing.expect(serverAdminSiblingPath(buf[0..1], "serverconfig.xml") == null);
 }
 
 test "splitFlag bare and equals forms" {

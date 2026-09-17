@@ -5,6 +5,25 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Breaking changes
+
+- The next release is **0.5.0**, not 0.4.1: added features and incompatible
+  configuration changes require a minor bump under the existing 0.x policy.
+- Before upgrading from 0.4.0, remove `[rules.c2s] quest_summon_per_request`
+  and `[rules.director] heat_feral_chance` / `heat_feral_cd_mult` from
+  `zdtd.toml` and custom preset packs. These removed keys now fail startup's
+  unknown-key validation. Quest summons always spawn one entity. The old feral
+  roll has no direct replacement; tune `heat_spawn_chance`,
+  `heat_long_cooldown_seconds` and `heat_neighbor_long_cooldown_seconds` for
+  the corrected heat-spawn behavior instead.
+- Saves written by this development line are not readable by 0.4.0:
+  `players.zsv` writes ZPV16 instead of ZPV12, `traders.zst` writes ZTR1
+  version 2 instead of version 1, and `entities.zen` can contain new record
+  types the old loader rejects. Stop the server and back up the entire world
+  directory and configuration before upgrading. Test on a copy first; to
+  roll back, restore the pre-upgrade backup together with the old binary,
+  rather than opening the upgraded save with 0.4.0.
+
 ### Added
 
 - **An item's stat entries survive a restart.** The wire carries an `ItemValue`'s stat block and the ECS slot holds it, but the player save (ZPV15 and older) dropped it, so a restart or relog stripped every rolled `EntityDamage`/`EconomicValue` bonus off a stored item - the same loss the wire fix removed for echoes. ZPV16 widens each slot record with `stats_n:u8 | stats_n x (type u8, slotA i16, slotB i16)` after the v12 mod ids; the writer emits it, the reader takes it only when the file's own magic says ZPV16, and older files read as "no stats" because their stride has no room. The version-history comment lists ZPV16.

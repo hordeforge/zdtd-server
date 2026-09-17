@@ -138,7 +138,7 @@ comment and mark the row `Policy` in [docs/GAME_OPTIONS.md](../GAME_OPTIONS.md).
 
 Precedence is call order, not binder logic. `main.zig` merges the preset pack
 first and `zdtd.toml` second, so the operator wins
-(`src/main.zig:936`):
+(`src/main.zig:933`):
 
 ```zig
     var rules_eff: ecs_mod.rules.Rules = .{};
