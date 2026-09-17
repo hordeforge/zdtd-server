@@ -1207,6 +1207,7 @@ pub const WasmHost = struct {
         // The operator's interception policy is config-derived, not part of the
         // module, so a reload keeps it (paper 3.2.3 right-bias must not wash out
         // on HMR). `refreshDenied` recombines it with the fresh declaration.
+        const module_deny = self.slots[idx].module_deny;
         const op_deny = self.slots[idx].op_deny;
         const op_allow = self.slots[idx].op_allow;
         _ = self.slots[idx].callHook(.on_shutdown);
@@ -1245,6 +1246,7 @@ pub const WasmHost = struct {
         self.slots[idx].display = display_copy;
         self.slots[idx].config_bytes = config_copy;
         self.slots[idx].manifest_loaded = manifest_loaded;
+        self.slots[idx].module_deny = module_deny;
         self.slots[idx].op_deny = op_deny;
         self.slots[idx].op_allow = op_allow;
         // Re-read the on-disk declaration before it goes live: a replaced
@@ -2896,6 +2898,11 @@ test "queued-verb policy: module deny, operator right-bias, reload" {
     host.slots[0].manifest_loaded = true;
     host.slots[0].display = try a.dupe(u8, "m");
     host.reconcileClaims(0, wasm_path);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
+
+    io_fs.deleteFile(man_path);
+    try std.testing.expect(host.reload(0, wasm_path));
     try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
     try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
 

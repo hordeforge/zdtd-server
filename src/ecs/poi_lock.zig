@@ -128,6 +128,12 @@ pub const Table = struct {
         self.entries[i].removeQuester(entity_id, world_time);
     }
 
+    pub fn removeEntity(self: *Table, entity_id: i32, world_time: u64) void {
+        for (self.entries[0..self.n]) |*entry| {
+            entry.removeQuester(entity_id, world_time);
+        }
+    }
+
     /// Lock state at (x,z) as CheckForPOILockouts sees it (asm.il 998957-999010):
     /// an expired instance is dropped first, a surviving one reports QuestLock
     /// with LockedOutUntil as extraData. Returns null when the POI is free.

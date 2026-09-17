@@ -836,6 +836,9 @@ pub const World = struct {
         }
         if (had_kind) self.kind_groups.remove(kind_val, slot);
         if (self.mask[slot].player) {
+            if (self.mask[slot].network_id) {
+                self.poi_locks.removeEntity(self.network_id[slot].id, self.director.clock.worldTimeBits());
+            }
             const peer_slot = self.player[slot].peer_slot;
             if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len)) and
                 self.peer_to_player[@intCast(peer_slot)] == slot)
@@ -2239,6 +2242,35 @@ test "player peer index follows replacement and destroy" {
     w.destroy(second);
     try std.testing.expect(w.playerByPeer(4) == null);
     try std.testing.expectEqual(first, w.playerByPeer(3).?);
+}
+
+test "destroy releases every POI lock held by a player" {
+    var w: World = .{};
+    defer w.deinit();
+    const first_id = w.spawnPlayer(0, 70, 0, 3).?;
+    const second_id = w.spawnPlayer(0, 70, 0, 4).?;
+    const first = w.slotOfNetId(first_id).?;
+    const second = w.slotOfNetId(second_id).?;
+    const now = w.director.clock.worldTimeBits();
+    const shared: c.PoiRect = .{ .x = 0, .z = 0, .size_x = 10, .size_y = 10, .size_z = 10 };
+    const solo: c.PoiRect = .{ .x = 100, .z = 0, .size_x = 10, .size_y = 10, .size_z = 10 };
+    try std.testing.expect(w.poi_locks.lock(shared, first_id, now));
+    try std.testing.expect(w.poi_locks.lock(shared, second_id, now));
+    try std.testing.expect(w.poi_locks.lock(solo, first_id, now));
+
+    w.destroy(first);
+    const until = now +| w.poi_locks.grace_ticks;
+    try std.testing.expectEqual(@as(?u64, 0), w.poi_locks.check(1, 1, now));
+    try std.testing.expectEqual(@as(?u64, until), w.poi_locks.check(101, 1, now));
+    try std.testing.expectEqual(@as(u8, 1), w.poi_locks.entries[0].quester_n);
+    try std.testing.expectEqual(second_id, w.poi_locks.entries[0].questers[0]);
+
+    w.destroy(second);
+    w.destroy(second);
+    try std.testing.expectEqual(@as(?u64, until), w.poi_locks.check(1, 1, until));
+    try std.testing.expect(w.poi_locks.check(1, 1, until + 1) == null);
+    try std.testing.expect(w.poi_locks.check(101, 1, until + 1) == null);
+    try std.testing.expectEqual(@as(usize, 0), w.poi_locks.n);
 }
 
 test "entity_count tracks spawn destroy and soft warn flag" {
