@@ -7,6 +7,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DELETE_ON_ERROR:
+.DEFAULT_GOAL := all
 
 ZIG ?= zig
 # Debug for day-to-day; ReleaseSafe for operator-facing binaries.
