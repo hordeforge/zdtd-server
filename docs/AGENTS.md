@@ -21,7 +21,7 @@ Each fact has exactly one home. Everywhere else, link to it.
 | [DIVERGENCES.md](DIVERGENCES.md) | every deliberate departure from stock behavior, with its cost | stock-fidelity claims that are not departures |
 | [adr/](adr/README.md), [prd/](prd/README.md), [rfc/](rfc/README.md) | decisions that were made, requirements, designs under review | current behavior (link the subsystem page) |
 | [wire/](wire/PACKAGES.md) | the package catalog and per-path wire notes | generic codec detail (to subsystems/wire.md) |
-| [PROVENANCE.md](PROVENANCE.md) | where each behavior, perk and value comes from in the stock game; generated and gated | prose explanations |
+| [PROVENANCE.md](PROVENANCE.md) | maintained source ledger for behaviors, constants and `src/**/*.zig` files; checked by `tools/provenance_scan.py` | generated dashboard (to `provenance.html`) |
 | Subject references: [ASSETS.md](ASSETS.md), [GAME_OPTIONS.md](GAME_OPTIONS.md), [RULES_CONFIG.md](RULES_CONFIG.md), [MAPS.md](MAPS.md), [WORLDGEN.md](WORLDGEN.md), [GAMEPLAY.md](GAMEPLAY.md), [STATE_MACHINES.md](STATE_MACHINES.md), [AUTHORITY.md](AUTHORITY.md), [APM.md](APM.md), [WEBUI.md](WEBUI.md), [SCALE.md](SCALE.md), [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) | the reference for that one subject | restating another subject's reference |
 | [glossary.md](glossary.md) | one canonical term per concept | implementation detail (link the owner) |
 | [testing.md](testing.md) | what each gate proves, and the rules that keep a green suite meaningful | command lists (root AGENTS.md owns them) |
