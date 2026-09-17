@@ -233,11 +233,13 @@ pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
             continue;
         }
         const cell = ringCell(ring, c.pending_area_idx);
-        c.pending_area_idx += 1;
         const cx = c.pending_area_cx + cell.dx;
         const cz = c.pending_area_cz + cell.dz;
         const key = packages.makeChunkKey(cx, cz);
-        if (clientHasStreamed(c, key)) continue;
+        if (clientHasStreamed(c, key)) {
+            c.pending_area_idx += 1;
+            continue;
+        }
         // Charge the shared budget per ATTEMPT, not per delivery: a refused
         // send (full reliable window) has already paid worldgen + encode, so
         // an untouched budget let one wedged peer walk every ring cell in a
@@ -245,6 +247,7 @@ pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
         budget.* -= 1;
         if (!try self.sendSpawnChunk(peer, cx, cz)) return;
         clientAddStreamed(self, c, key);
+        c.pending_area_idx += 1;
         // ACK-yield between drain chunks, same as the join core: a bursted
         // batch overflows the reliable window (measured 257 drops without it;
         // loopback RTT ~100 µs, so the 500 µs yield drains the window per
@@ -354,4 +357,61 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
             }
         }
     }
+}
+
+test "spawn area drain retries refused chunks before advancing" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const peer = c.peer.?;
+    c.streamed_n = 0;
+    c.pending_area_r = 2;
+    c.pending_area_ring = 2;
+    c.pending_area_idx = 0;
+    c.pending_area_cx = 0;
+    c.pending_area_cz = 0;
+    peer.capture = null;
+    for (0..@import("../../litenet/packet.zig").window_size) |_| try peer.sendReliable(&g.net.sock, "pending");
+    const drops_before = g.harness.counters.get(.reliable_window_drops);
+    var budget: u32 = 2;
+    try drainSpawnArea(g, c, &budget);
+    try std.testing.expectEqual(@as(u32, 1), budget);
+    try std.testing.expectEqual(@as(u32, 0), c.pending_area_idx);
+    try std.testing.expectEqual(@as(usize, 0), c.streamed_n);
+    try std.testing.expectEqual(drops_before + 1, g.harness.counters.get(.reliable_window_drops));
+
+    for (&peer.pending) |*pending| pending.used = false;
+    peer.local_window_start = peer.local_seq;
+    peer.capture = &cap;
+    cap.clear();
+    budget = 1;
+    try drainSpawnArea(g, c, &budget);
+    try std.testing.expectEqual(@as(u32, 0), budget);
+    try std.testing.expectEqual(@as(u32, 1), c.pending_area_idx);
+    try std.testing.expect(clientHasStreamed(c, packages.makeChunkKey(-2, -2)));
+    try std.testing.expect(cap.n > 0);
+    const framed = cap.slots[0].data[0..cap.slots[0].len];
+    try std.testing.expectEqual(@as(u8, 1), framed[5]);
+    var compressed: std.Io.Reader = .fixed(framed[9..]);
+    var inflated_buf: [32768]u8 = undefined;
+    var inflated: std.Io.Writer = .fixed(&inflated_buf);
+    var decoder: std.compress.flate.Decompress = .init(&compressed, .raw, &.{});
+    _ = try decoder.reader.streamRemaining(&inflated);
+    try std.testing.expectEqual(packages.idOf("NetPackageChunk").?, std.mem.readInt(u16, inflated.buffered()[4..6], .little));
+
+    c.pending_area_idx = 0;
+    budget = 1;
+    try drainSpawnArea(g, c, &budget);
+    try std.testing.expectEqual(@as(u32, 0), budget);
+    try std.testing.expectEqual(@as(u32, 2), c.pending_area_idx);
+    try std.testing.expectEqual(@as(usize, 2), c.streamed_n);
+    try std.testing.expect(clientHasStreamed(c, packages.makeChunkKey(-1, -2)));
 }
