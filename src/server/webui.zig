@@ -2394,6 +2394,19 @@ test "HEAD accepted on GET-only dashboard routes" {
     }
 }
 
+test "GET / serves the full rendered shell and not a truncated capture" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.endsWith(u8, resp, "</html>"));
+    try std.testing.expect(std.mem.find(u8, resp, "__ZDTD_") == null);
+}
+
 test "GET /login redirects when session cookie is already valid" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");

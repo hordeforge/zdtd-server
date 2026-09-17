@@ -89,7 +89,10 @@ pub const Reader = struct {
     pub fn readStringTruncating(self: *Reader, buf: []u8) ReadError![]const u8 {
         const len = try self.readStringLen();
         if (self.pos + len > self.data.len) return error.EndOfStream;
-        const keep = @min(len, buf.len);
+        var keep = @min(len, buf.len);
+        if (keep < len) {
+            while (keep > 0 and self.data[self.pos + keep] & 0xc0 == 0x80) keep -= 1;
+        }
         @memcpy(buf[0..keep], self.data[self.pos..][0..keep]);
         self.pos += len;
         return buf[0..keep];
@@ -320,6 +323,31 @@ test "readStringTruncating keeps the prefix and stays aligned for the next field
     // Truncation of the payload itself is still an error, not a short read.
     var r3: Reader = .{ .data = &.{ 4, 'a', 'b' } };
     try std.testing.expectError(error.EndOfStream, r3.readStringTruncating(&big));
+}
+
+test "readStringTruncating preserves UTF-8 boundaries at every byte cap" {
+    const cases = [_][]const u8{ "", "plain", "caf\u{e9}", "\u{65}\u{301}", "\u{65e5}\u{672c}", "\u{1f680}" };
+    for (cases) |text| {
+        var framed: [64]u8 = undefined;
+        var w: Writer = .{ .buf = &framed };
+        try w.writeString(text);
+        try w.writeByte(0x2a);
+        var out: [64]u8 = undefined;
+        for (0..text.len + 2) |cap| {
+            var r: Reader = .{ .data = w.written() };
+            const kept = try r.readStringTruncating(out[0..cap]);
+            try std.testing.expect(std.unicode.utf8ValidateSlice(kept));
+            var expected: usize = 0;
+            var iter = (try std.unicode.Utf8View.init(text)).iterator();
+            while (iter.nextCodepointSlice()) |cp| {
+                if (expected + cp.len > cap) break;
+                expected += cp.len;
+            }
+            try std.testing.expectEqualStrings(text[0..expected], kept);
+            try std.testing.expectEqual(@as(u8, 0x2a), try r.readByte());
+            try std.testing.expectEqual(@as(usize, 0), r.remaining());
+        }
+    }
 }
 
 test "f32 is a little-endian bit pattern, sign preserved" {
