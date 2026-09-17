@@ -74,6 +74,7 @@ fn parseUnixDateTime(s: []const u8) ?i64 {
     for (s) |c| {
         if (std.ascii.isDigit(c)) {
             cur = cur * 10 + @as(i64, c - '0');
+            if (cur > 9999) return null;
             have_digit = true;
             continue;
         }
@@ -112,11 +113,12 @@ fn parseUnixDateTime(s: []const u8) ?i64 {
         mo = digits[1];
         d = digits[2];
     }
-    if (mo < 1 or mo > 12 or d < 1 or d > 31) return null;
+    if (y < 1 or y > 9999 or mo < 1 or mo > 12 or d < 1) return null;
+    if (d > std.time.epoch.getDaysInMonth(@intCast(y), @enumFromInt(mo))) return null;
     if (nd >= 4) h = digits[3];
     if (nd >= 5) mi = digits[4];
     if (nd >= 6) sec = digits[5];
-    if (h > 23 or mi > 59 or sec > 60) return null;
+    if (h > 23 or mi > 59 or sec > 59) return null;
     // days from civil (Hinnant)
     const y2 = y - @as(i64, @intFromBool(mo <= 2));
     const era = @divFloor(y2, 400);
@@ -310,6 +312,17 @@ test "serveradmin.xml unbandate parses common forms" {
     try std.testing.expectEqual(@as(i64, 1893553445), parseUnixDateTime("01/02/2030 03:04:05").?);
     try std.testing.expect(parseUnixDateTime("not a date") == null);
     try std.testing.expect(parseUnixDateTime("2030-13-01") == null);
+}
+
+test "serveradmin.xml invalid calendar dates rejected" {
+    const invalid = [_][]const u8{
+        "2025-02-29", "2100-02-29",  "2030-04-31",          "02/30/2024",
+        "0000-01-01", "10000-01-01", "2030-01-02 23:59:60",
+    };
+    for (invalid) |s| try std.testing.expect(parseUnixDateTime(s) == null);
+    try std.testing.expectEqual(@as(i64, 951782400), parseUnixDateTime("2000-02-29").?);
+    try std.testing.expectEqual(@as(i64, 1709164800), parseUnixDateTime("2024-02-29").?);
+    try std.testing.expectEqual(@as(i64, 253402300799), parseUnixDateTime("9999-12-31 23:59:59").?);
 }
 
 test "serveradmin.xml accepts the older <admins><users> nesting" {
