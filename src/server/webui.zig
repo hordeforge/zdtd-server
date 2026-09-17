@@ -49,7 +49,7 @@ pub const login_lockout_ns: u64 = 30 * std.time.ns_per_s;
 /// Session cookie lifetime (seconds). Stolen cookies expire without process restart.
 pub const session_cookie_max_age_s: u32 = 43_200;
 /// Test-only response capture size; must hold any embedded page after rendering.
-const max_test_resp: usize = 64 * 1024;
+const max_test_resp: usize = max_shell_html + 4096;
 
 pub const Config = struct {
     port: u16 = 0,
