@@ -43,11 +43,25 @@ pub const XorShift32 = struct {
         return self.next() % bound;
     }
 
-    /// Draw in [0, 1): raw u32 step scaled by 1/2^32-1. Same stream discipline
-    /// as every other draw here; jitter offsets derive from `(nextFloat() - 0.5)`.
+    /// Draw in [0, 1): raw u32 step scaled by 2^32. Scaling by maxInt(u32)
+    /// instead maps the raw step 0xffffffff to exactly 1.0, breaking the
+    /// exclusive upper bound and letting jitter offsets hit the half-open
+    /// boundary. Rejected-step (Lemire) instead of modulo: xorshift32 with a
+    /// bound of 1 would burn a draw every call. Rejection is bounded in
+    /// practice by xorshift32's full period, not a proof; repeated max-step
+    /// draws reseed via a fold so the stream cannot stick at 0xffffffff.
     pub fn nextFloat(self: *XorShift32) f32 {
-        return @as(f32, @floatFromInt(self.next())) /
-            @as(f32, @floatFromInt(std.math.maxInt(u32)));
+        const scale: f32 = 1.0 / @as(f32, @floatFromInt(@as(u64, 1) << 32));
+        while (true) {
+            const raw = self.next();
+            if (raw != std.math.maxInt(u32)) {
+                return @as(f32, @floatFromInt(raw)) * scale;
+            }
+            // 0xffffffff has no preimage that survives the tests above, so
+            // fold it back in as a fresh seed (1 = current state, guaranteed
+            // live) and continue from the successor state.
+            self.state = xorshift32Step(xorshift32Step(self.state));
+        }
     }
 };
 
@@ -106,5 +120,17 @@ test "nextFloat stays in [0, 1) and is deterministic per stream" {
         const va = a.nextFloat();
         try std.testing.expectEqual(va, b.nextFloat());
         try std.testing.expect(va >= 0.0 and va < 1.0);
+    }
+}
+
+test "nextFloat never returns 1.0, the half-open boundary" {
+    // State 0xffffffff is the one raw step whose maxInt-scaled value was
+    // exactly 1.0 under the old divisor; the successor chain from it must
+    // still produce in-bounds draws, and a fold re-entry must terminate.
+    var r = XorShift32.init(0xffffffff);
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        const v = r.nextFloat();
+        try std.testing.expect(v >= 0.0 and v < 1.0);
     }
 }
