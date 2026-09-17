@@ -129,36 +129,6 @@ pub const Scan = struct {
     }
 };
 
-/// Subdirectory basenames of `dir_path`, sorted lexicographically (readdir
-/// order is filesystem-dependent; stock scan order is unverified, G2, so a
-/// deterministic sort is the documented fallback).
-fn listDirNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]const u8 {
-    var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
-    var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
-    defer dir.close(io);
-
-    var names: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (names.items) |n| allocator.free(n);
-        names.deinit(allocator);
-    }
-    var it = dir.iterate();
-    while (try it.next(io)) |entry| {
-        if (entry.kind != .directory) continue;
-        const name = try allocator.dupe(u8, entry.name);
-        errdefer allocator.free(name);
-        try names.append(allocator, name);
-    }
-    std.mem.sort([]const u8, names.items, {}, struct {
-        fn less(_: void, a: []const u8, b: []const u8) bool {
-            return std.mem.order(u8, a, b) == .lt;
-        }
-    }.less);
-    return try names.toOwnedSlice(allocator);
-}
-
 /// Stock `getElementAttributeValue`: exactly one child element of `element_name`
 /// carrying a `value` attribute. Returns the value or null (both violations log
 /// and return null in stock).
@@ -379,7 +349,7 @@ pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: 
     }
     loadDisabled(allocator, state_path orelse "");
 
-    const dir_names = listDirNames(allocator, mods_root) catch |err| switch (err) {
+    const dir_names = io_fs.listDirNames(allocator, mods_root) catch |err| switch (err) {
         error.FileNotFound => return .{ .mods = &.{}, .mod_dirs = &.{} },
         else => return err,
     };
