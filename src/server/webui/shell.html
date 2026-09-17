@@ -51,7 +51,9 @@ html{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line2) t
 body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 a{color:var(--acc-ink);text-decoration:underline;text-decoration-color:rgba(15,92,55,.35);text-underline-offset:2px}
 a:hover{color:var(--acc-ink)}
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,pre:focus-visible,canvas:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.tab:focus-visible,[role=tabpanel]:focus-visible,#players:focus-visible,#modules:focus-visible{outline-offset:-3px}
+pre:focus-visible,#apm-canvas:focus-visible,.chart-tools-right input:focus-visible,.chart-tools-right select:focus-visible{outline-color:var(--term-ok)}
 code{font-family:var(--mono);font-size:0.82em;background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
 kbd{font-family:var(--mono);font-size:0.78em;line-height:1;background:var(--bg2);border:1px solid var(--line2);border-radius:6px;padding:0.14em 0.32em;color:var(--muted)}
 .skip-link{position:absolute;left:0.75rem;top:-100%;background:var(--fg);color:var(--bg);padding:0.4rem 0.6rem;border-radius:0 0 6px 6px;font-weight:600;font-size:0.85rem;z-index:30;text-decoration:none}
@@ -69,7 +71,7 @@ header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1p
 .glance .lamp.bad{background:var(--err)}
 .header-actions{margin-left:auto;display:flex;align-items:center;gap:0.5rem}
 .refresh-ctrl{display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-family:var(--sans);font-size:0.85rem;font-weight:500;cursor:pointer;user-select:none;min-height:44px}
-.refresh-ctrl input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line2);border:1px solid var(--line2);position:relative;cursor:pointer;flex:none;margin:0}
+.refresh-ctrl input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line2);border:1px solid var(--edge);position:relative;cursor:pointer;flex:none;margin:0}
 .refresh-ctrl input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .12s}
 .refresh-ctrl input:checked{background:var(--acc);border-color:var(--acc)}
 .refresh-ctrl input:checked::after{transform:translateX(14px)}
@@ -96,7 +98,7 @@ section h2{margin:0;font-family:var(--sans);font-size:1.05rem;font-weight:600;le
 section h3{margin:0;font-family:var(--sans);font-size:0.9rem;font-weight:600;color:var(--fg);padding:0.9rem 1.25rem 0.3rem}
 .deck-sub{margin:0;padding:0 1.25rem 0.6rem;color:var(--muted);font-size:0.85rem}
 section > div[id]{padding:0}
-#players{overflow:auto}
+#players,#modules{overflow:auto}
 
 table{width:100%;border-collapse:collapse;font-size:0.95rem}
 th,td{padding:0.75rem 0.95rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
@@ -139,7 +141,7 @@ footer{border-top:1px solid var(--line);background:var(--panel)}
 #refresh-state{color:var(--muted)}
 
 .cmd-row{display:flex;gap:0.5rem;align-items:center;padding:0.9rem 1.25rem;background:var(--panel);border-bottom:1px solid var(--line)}
-.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:44px;background:var(--panel);border:1.5px solid var(--line2);color:var(--fg);padding:0.65rem 0.8rem;border-radius:var(--r-ctl);font-family:var(--mono);font-size:0.95rem;width:100%}
+.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:44px;background:var(--panel);border:1.5px solid var(--edge);color:var(--fg);padding:0.65rem 0.8rem;border-radius:var(--r-ctl);font-family:var(--mono);font-size:0.95rem;width:100%}
 .cmd-row input[type=text]::placeholder{color:var(--muted2)}
 .cmd-row input[type=text]:hover{border-color:var(--muted2)}
 .cmd-row input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
@@ -168,8 +170,8 @@ footer{border-top:1px solid var(--line);background:var(--panel)}
 a,button,input,[tabindex]{scroll-margin-top:6.5rem}
 pre.cmd-out,pre.cmd-log{margin:0 1.25rem 1.1rem;background:var(--term);color:var(--term-text);border:1px solid var(--term-line);border-radius:var(--r);padding:0.9rem 1rem;font-family:var(--mono);font-size:0.88rem;line-height:1.7;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
 #cmd-out{padding:0}
-pre .in{color:var(--term-faint)} .err{color:var(--term-bad)} .ok{color:var(--term-ok)} pre .meta{color:var(--term-faint)}
-#players:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.err{color:var(--err)} .ok{color:var(--ok)}
+pre .in,pre .meta{color:var(--term-faint)} pre.err,pre .err{color:var(--term-bad)} pre.ok,pre .ok{color:var(--term-ok)}
 @media(min-width:55rem){#players table{min-width:34rem}#modules table{min-width:34rem}}
 .meta{color:var(--muted);font-family:var(--sans);font-size:0.85rem}
 .empty-note{color:var(--muted)}
@@ -194,13 +196,24 @@ pre .in{color:var(--term-faint)} .err{color:var(--term-bad)} .ok{color:var(--ter
  .deck-head .meta{flex:1 1 100%;margin-left:0}
  .chart-tools-right{width:100%;justify-content:flex-start}
  #apm-chart-wrap{padding:0.7rem}
- table.stack thead{display:none}
+ table.stack thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
  table.stack tbody tr{display:block;border-bottom:1px solid var(--line);padding:0.4rem 0}
  table.stack tbody td,table.stack tbody th[scope=row]{display:grid;grid-template-columns:8.5rem minmax(0,1fr);gap:0.5rem;border:0;padding:0.4rem 0.95rem;align-items:baseline;white-space:normal;overflow-wrap:anywhere}
  table.stack tbody td::before,table.stack tbody th[scope=row]::before{content:attr(data-label);font-family:var(--sans);font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted2)}
- table.stack tbody td:last-child::before{content:""}
+  table.stack tbody td[data-label=Action]::before{content:""}
  table.stack tbody td.empty-note{display:block;white-space:normal}
  table.stack tbody td.empty-note::before{content:""}
+}
+@media(max-width:30rem){
+ .header-actions{flex-wrap:wrap}
+ .glance-band{grid-template-columns:minmax(0,1fr)}
+ .glance-cell{border-left:0;border-bottom:1px solid var(--line)}
+ .deck-body{padding:0.75rem}
+ .cmd-row{padding:0.75rem}
+ .cmd-row input[type=text]{flex-basis:100%}
+ table.stack tbody td,table.stack tbody th[scope=row]{grid-template-columns:minmax(0,1fr)}
+ .pill{white-space:normal;overflow-wrap:anywhere}
+ .deck-sub{overflow-wrap:anywhere}
 }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}html{scroll-behavior:auto}}
 #chart-history{min-height:44px;background:var(--term2);border:1px solid var(--term-line);color:var(--term-text);border-radius:var(--r-ctl);padding:0.3rem 0.5rem;font-family:var(--mono);font-size:0.8rem}
@@ -235,10 +248,10 @@ pre .in{color:var(--term-faint)} .err{color:var(--term-bad)} .ok{color:var(--ter
 </nav>
 <main id="main-content" tabindex="-1">
 <div class="glance-band" role="region" aria-label="Server health at a glance"><div class="glance-cell"><b id="glance-tick">–</b><span>server tick</span></div><div class="glance-cell"><b id="glance-players">–</b><span>players in world</span></div><div class="glance-cell"><b id="glance-p99">–</b><span>tick p99 / 50 ms budget</span><div class="meter" role="img" id="glance-meter" aria-label="tick p99 within budget"><i id="glance-meter-fill" style="width:0%"></i></div></div><div class="glance-cell"><b id="glance-state">–</b><span id="glance-state-label">blood moon</span><span class="pill ok glance-pill" id="glance-pill">live</span></div></div>
-<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Tick tape</h2><p class="deck-sub">Live latency on the terminal. Numbers beside every signal; exact values in Performance.</p><div class="deck" id="apm-chart-wrap"><div class="deck-head"><span class="job">tick · live</span><span class="meta" id="apm-chart-caption">collecting samples…</span><span class="chart-tools-right"><label class="refresh-ctrl" for="chart-history">history</label><select id="chart-history" aria-label="History window"><option value="120000">2 min</option><option value="300000">5 min</option><option value="600000">10 min</option></select><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></span></div><div class="deck-body"><canvas id="apm-canvas" width="600" height="150" role="img" tabindex="0" aria-label="Live tick latency and section means." aria-describedby="apm-chart-data apm-chart-live apm-chart-keys">Live performance graphs require JavaScript.</canvas></div><p id="apm-chart-live" class="sr-only" role="status">collecting samples…</p><p id="apm-chart-keys" class="sr-only">Focus and use left and right arrows to inspect past samples, Escape for live. Drag across the chart to inspect.</p><table id="apm-chart-data" class="sr-only"><caption>Newest tick section means, milliseconds</caption><thead><tr><th scope="col">Section</th><th scope="col">Mean</th></tr></thead><tbody></tbody></table></div><h3>Job file</h3><div id="status" hx-get="/partials/status" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
-<section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
+<section id="status-section" role="tabpanel" tabindex="0" aria-labelledby="tab-status"><h2 id="status-heading">Tick tape</h2><p class="deck-sub">Live latency on the terminal. Numbers beside every signal; exact values in Performance.</p><div class="deck" id="apm-chart-wrap"><div class="deck-head"><span class="job">tick · live</span><span class="meta" id="apm-chart-caption">collecting samples…</span><span class="chart-tools-right"><label class="refresh-ctrl" for="chart-history">history</label><select id="chart-history" aria-label="History window"><option value="120000">2 min</option><option value="300000">5 min</option><option value="600000">10 min</option></select><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></span></div><div class="deck-body"><canvas id="apm-canvas" width="600" height="150" role="img" tabindex="0" aria-label="Live tick latency and section means." aria-describedby="apm-chart-data apm-chart-live apm-chart-keys">Live performance graphs require JavaScript.</canvas></div><p id="apm-chart-live" class="sr-only" role="status">collecting samples…</p><p id="apm-chart-keys" class="sr-only">Focus and use left and right arrows to inspect past samples, Escape for live. Drag across the chart to inspect.</p><table id="apm-chart-data" class="sr-only"><caption>Newest tick section means, milliseconds</caption><thead><tr><th scope="col">Section</th><th scope="col">Mean</th></tr></thead><tbody></tbody></table></div><h3>Job file</h3><div id="status" hx-get="/partials/status" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
+<section id="apm-section" role="tabpanel" tabindex="0" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+<section id="players-section" role="tabpanel" tabindex="0" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
+<section id="console-section" role="tabpanel" tabindex="0" aria-labelledby="tab-console" hidden>
 <h2 id="console-heading">Console</h2>
 <p class="deck-sub">Same commands as the admin telnet console. Destructive verbs ask first.</p>
 <div class="deck"><div class="deck-head"><span class="job">admin · stdout</span><span class="meta" id="cmd-help-inline">history keeps the last 24 lines</span></div><div class="deck-body">
@@ -260,11 +273,11 @@ pre .in{color:var(--term-faint)} .err{color:var(--term-bad)} .ok{color:var(--ter
 <div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
 </div></div>
 </section>
-<section id="settings-section" role="tabpanel" aria-labelledby="tab-settings" hidden>
+<section id="settings-section" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" hidden>
 <h2 id="settings-heading">Settings</h2>
 <div id="settings" aria-live="polite" aria-atomic="true" hx-get="/partials/settings" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading settings…</p></div>
 </section>
-<section id="modules-section" role="tabpanel" aria-labelledby="tab-modules" hidden><h2 id="modules-heading">Modules</h2><div id="modules" role="region" aria-label="Loaded module list" tabindex="0" hx-get="/partials/modules" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading modules…</p></div></section>
+<section id="modules-section" role="tabpanel" tabindex="0" aria-labelledby="tab-modules" hidden><h2 id="modules-heading">Modules</h2><div id="modules" role="region" aria-label="Loaded module list" tabindex="0" hx-get="/partials/modules" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading modules…</p></div></section>
 </main>
 </div>
 <footer><div class="foot"><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></div></footer>

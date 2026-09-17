@@ -44,13 +44,13 @@ body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items
 a{color:var(--acc-ink);text-decoration:underline;text-decoration-color:rgba(15,92,55,.35);text-underline-offset:2px}
 a:hover{color:var(--acc-ink)}
 code{font-family:var(--mono);font-size:0.82em;background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
-main{width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.5rem 1.5rem 1.25rem}
+main{min-width:0;overflow-wrap:anywhere;width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.5rem 1.5rem 1.25rem}
 .meta{color:var(--muted);font-family:var(--sans);font-size:0.78rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
 .lead{color:var(--muted);font-size:1rem;margin:0 0 1rem;line-height:1.6}
 label{display:block;font-family:var(--sans);font-size:0.9rem;font-weight:600;color:var(--fg);margin:1.1rem 0 0.45rem}
 .secret-row{display:flex;align-items:stretch;gap:0.35rem}
 .secret-row input{flex:1;min-width:0}
-input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.65rem 0.8rem;border:1.5px solid var(--line2);border-radius:var(--r-ctl);background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.95rem}
+input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.65rem 0.8rem;border:1.5px solid var(--edge);border-radius:var(--r-ctl);background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.95rem}
 input[type=password]:focus,input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
 input[data-invalid=true]{border-color:var(--err-field);box-shadow:0 0 0 2px var(--err-soft)}
 button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:0.9rem;cursor:pointer}
@@ -67,7 +67,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 .signin{margin-top:0.65rem;width:100%}
 @media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 </style></head>
-<body><main><p class="brand">zdtd</p><p class="meta">operator console · sign in</p>
+<body><main><h1 class="brand">zdtd sign in</h1><p class="meta">operator console</p>
 __ZDTD_LOGIN_BANNER__
 <form method="post" action="/login">
 <label for="login-token">Shared secret</label>
