@@ -1969,9 +1969,11 @@ pub fn loadClaims(self: *Game) !void {
     defer self.allocator.free(data);
     if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZCLC")) return error.BadMagic;
     const count = std.mem.readInt(u16, data[4..6], .little);
+    if (count > max_land_claims) return error.BadRecord;
+    var claims: @TypeOf(self.land_claims) = undefined;
     var o: usize = 6;
     var i: usize = 0;
-    while (i < count and self.land_claims_n < max_land_claims) : (i += 1) {
+    while (i < count) : (i += 1) {
         if (o + 49 > data.len) return error.Truncated;
         const x = std.mem.readInt(i32, data[o..][0..4], .little);
         const y = std.mem.readInt(i32, data[o + 4 ..][0..4], .little);
@@ -1982,7 +1984,7 @@ pub fn loadClaims(self: *Game) !void {
         @memcpy(name[0..name_len], data[o + 13 ..][0..name_len]);
         const seen = std.mem.readInt(u32, data[o + 45 ..][0..4], .little);
         o += 49;
-        self.land_claims[self.land_claims_n] = .{
+        claims[i] = .{
             .x = x,
             .y = y,
             .z = z,
@@ -1992,8 +1994,9 @@ pub fn loadClaims(self: *Game) !void {
             .owner_name = name,
             .owner_name_len = name_len,
         };
-        self.land_claims_n += 1;
     }
+    @memcpy(self.land_claims[0..count], claims[0..count]);
+    self.land_claims_n = count;
 }
 
 /// Trader stock persists across restart (traders.zst, magic "ZTR1"): stock

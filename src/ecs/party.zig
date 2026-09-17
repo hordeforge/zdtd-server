@@ -169,7 +169,11 @@ pub const Manager = struct {
         while (i + 1 < p.n) : (i += 1) p.members[i] = p.members[i + 1];
         p.n -= 1;
         p.members[p.n] = -1;
-        if (p.leader_index >= p.n and p.n > 0) p.leader_index = 0;
+        if (idx == p.leader_index) {
+            p.leader_index = 0;
+        } else if (idx < p.leader_index) {
+            p.leader_index -= 1;
+        }
         if (p.n <= 1) {
             // Disband: the last survivor also leaves (party of one not kept).
             if (p.n == 1) out.changed_entity = p.members[0];
@@ -270,6 +274,38 @@ test "leader leaving promotes index 0; setLeader re-targets" {
     try std.testing.expect(!r.disband);
     try std.testing.expectEqual(@as(i32, 10), p.leader()); // reset to index 0
     try std.testing.expectEqual(@as(u8, 2), r.n);
+}
+
+test "party removal preserves a surviving leader at every member position" {
+    const members = [_]i32{ 10, 20, 30, 40, 50, 60, 70, 80 };
+    for (3..max_party_members + 1) |member_count| {
+        for (members[0..member_count]) |leader_id| {
+            for (members[0..member_count]) |removed_id| {
+                var m: Manager = .{};
+                m.init();
+                defer m.deinit();
+                const p = m.acceptInvite(members[0], members[1]).?;
+                for (members[2..member_count]) |member_id| {
+                    try std.testing.expect(m.addPlayer(p.id, member_id));
+                }
+                try std.testing.expect(m.setLeader(p.id, leader_id));
+
+                const removal = m.removePlayer(removed_id).?;
+                const expected_leader = if (removed_id == leader_id)
+                    (if (removed_id == members[0]) members[1] else members[0])
+                else
+                    leader_id;
+                try std.testing.expect(!removal.disband);
+                try std.testing.expectEqual(member_count - 1, p.n);
+                try std.testing.expectEqual(expected_leader, p.leader());
+                try std.testing.expectEqual(p.leader_index, removal.leader_index);
+                try std.testing.expectEqual(p.n, removal.n);
+                try std.testing.expectEqual(expected_leader, removal.members[removal.leader_index]);
+                try std.testing.expectEqualSlices(i32, p.members[0..p.n], removal.members[0..removal.n]);
+                try std.testing.expect(p.find(removed_id) == null);
+            }
+        }
+    }
 }
 
 test "auto join creates or reuses party id 1" {

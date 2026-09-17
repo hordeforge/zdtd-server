@@ -9636,6 +9636,16 @@ test "scenario land claims persist across restart and re-map on login" {
             g2.deinit();
             gpa.destroy(g2);
         }
+        const restored_claim = g2.land_claims[0];
+        for (0..2) |_| {
+            try persist.loadClaims(g2);
+            try std.testing.expectEqual(@as(usize, 1), g2.land_claims_n);
+            try std.testing.expectEqualDeep(restored_claim, g2.land_claims[0]);
+            try persist.saveClaims(g2);
+            const reloaded = try io_fs.readFileAll(gpa, cp);
+            defer gpa.free(reloaded);
+            try std.testing.expectEqualSlices(u8, raw, reloaded);
+        }
         var cap: ln_peer.Capture = .{};
         const c2 = try g2.attachJoinedClient(&cap); // login "Bot" re-maps the claim
         var sb: [64]u8 = undefined;
@@ -9682,6 +9692,37 @@ test "scenario land claims persist across restart and re-map on login" {
         try io_fs.writeFile(cp, &stride_short);
         try std.testing.expectError(error.Truncated, persist.loadClaims(g3));
 
+        const original_claim = g3.land_claims[0];
+        var partial: [6 + 49 * 2]u8 = @splat(0);
+        @memcpy(partial[0..raw.len], raw);
+        std.mem.writeInt(u16, partial[4..6], 2, .little);
+        std.mem.writeInt(i32, partial[6..10], claim_x + 10, .little);
+        partial[6 + 49 + 12] = 33;
+        for (0..2) |_| {
+            try io_fs.writeFile(cp, &partial);
+            try std.testing.expectError(error.BadRecord, persist.loadClaims(g3));
+            try std.testing.expectEqual(@as(usize, 1), g3.land_claims_n);
+            try std.testing.expectEqualDeep(original_claim, g3.land_claims[0]);
+            try io_fs.writeFile(cp, partial[0 .. partial.len - 1]);
+            try std.testing.expectError(error.Truncated, persist.loadClaims(g3));
+            try std.testing.expectEqual(@as(usize, 1), g3.land_claims_n);
+            try std.testing.expectEqualDeep(original_claim, g3.land_claims[0]);
+        }
+        std.mem.writeInt(u16, short[4..6], @intCast(g3.land_claims.len + 1), .little);
+        try io_fs.writeFile(cp, &short);
+        try std.testing.expectError(error.BadRecord, persist.loadClaims(g3));
+        try std.testing.expectEqual(@as(usize, 1), g3.land_claims_n);
+        try std.testing.expectEqualDeep(original_claim, g3.land_claims[0]);
+        try io_fs.writeFile(cp, raw);
+        try persist.loadClaims(g3);
+        try std.testing.expectEqual(@as(usize, 1), g3.land_claims_n);
+        try std.testing.expectEqualDeep(original_claim, g3.land_claims[0]);
+        std.mem.writeInt(u16, short[4..6], 0, .little);
+        try io_fs.writeFile(cp, &short);
+        for (0..2) |_| {
+            try persist.loadClaims(g3);
+            try std.testing.expectEqual(@as(usize, 0), g3.land_claims_n);
+        }
         std.debug.print("PASS claims-persist: short stride and oversized name_len fail closed\n", .{});
     }
 }
