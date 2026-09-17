@@ -829,20 +829,14 @@ pub fn savePlayers(self: *Game) !void {
     for (&self.clients) |*cl| {
         if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-        // The slot loop below breaks on a short buffer rather than failing,
-        // so a record that cannot hold a full inventory would silently drop
-        // the tail slots. Prove at compile time that it never has to: name
-        // header + position + wallet + inv_n + every slot at the version this
-        // build writes must fit, or the cap moved and this buffer needs to
-        // move with it. (ZPV16 widened the slot record, which is what caught
-        // the v12 literal that had been left in this assert.)
-        const rec_capacity = 4096;
-        comptime {
-            const head = 1 + 32 + 3 * 4 + 4 + 1;
-            const inv_bytes = ecs.components.max_inv_slots * zpvSlotStride(persist_version);
-            if (head + inv_bytes > rec_capacity)
-                @compileError("player record buffer too small for a full inventory at the current stride");
-        }
+        const head_bytes = 1 + 32 + 3 * 4 + 4 + 1;
+        const inv_bytes = comptime ecs.components.max_inv_slots * zpvSlotStride(persist_version);
+        const quest_bytes = 10 + 1 + max_quest_name_len + 25 + 1 + ecs.quest.max_quest_objectives * 2;
+        const journal_bytes = 1 + ecs.components.max_journal * quest_bytes;
+        const progression_bytes = 1 + 2 + 8 + 16 + 4 + 8 + 1;
+        const buff_bytes = ecs.components.max_buffs_per_entity * 19;
+        const bed_bytes = 1 + 12;
+        const rec_capacity = head_bytes + inv_bytes + journal_bytes + progression_bytes + buff_bytes + bed_bytes;
         var rec: [rec_capacity]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
@@ -875,7 +869,7 @@ pub fn savePlayers(self: *Game) !void {
                 // use_times:f32 (stock ItemValue.UseTimes), seed:u16 (stock
                 // ItemValue.Seed, so a plantable's seed survives a restart),
                 // then 4 mod ids:u16 (stock ItemValue.Modifications).
-                if (o + slot_bytes > rec.len) break;
+                if (o + slot_bytes > rec.len) return error.PlayerRecordTooLarge;
                 std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                 std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
                 rec[o + 4] = s.quality;
@@ -914,7 +908,8 @@ pub fn savePlayers(self: *Game) !void {
                 const qd = self.sim.catalog.byId(q.def_id);
                 const qname = if (qd) |d| d.name else "";
                 const obj_n: usize = if (qd) |d| @min(d.objectives.len, ecs.quest.max_quest_objectives) else 0;
-                if (qname.len > max_quest_name_len or o + 10 + 1 + qname.len + 25 + 1 + obj_n * 2 > rec.len) break;
+                if (qname.len > max_quest_name_len) return error.QuestNameTooLong;
+                if (o + 10 + 1 + qname.len + 25 + 1 + obj_n * 2 > rec.len) return error.PlayerRecordTooLarge;
                 std.mem.writeInt(u16, rec[o..][0..2], q.def_id, .little);
                 std.mem.writeInt(i32, rec[o + 2 ..][0..4], q.quest_code, .little);
                 rec[o + 6] = (@as(u8, @intFromBool(q.active))) | (@as(u8, @intFromBool(q.completed)) << 1) | (@as(u8, @intFromBool(q.ready_turn_in)) << 2) | (@as(u8, @intFromBool(q.rally_activated)) << 3) | (@as(u8, @intFromBool(q.failed)) << 4);
@@ -948,9 +943,8 @@ pub fn savePlayers(self: *Game) !void {
         }
         rec[j_start] = jn;
         // ZPV3 progression tail: level/xp/survival stats + active buffs.
-        // Best-effort like inv/journal: a full record simply truncates.
         var tail_has_prog = false;
-        if (o + 2 + 8 + 16 + 1 <= rec.len) {
+        if (o + progression_bytes + buff_bytes + bed_bytes <= rec.len) {
             tail_has_prog = true;
             rec[o] = 1;
             o += 1;
@@ -985,7 +979,7 @@ pub fn savePlayers(self: *Game) !void {
             if (self.sim.mask[ps].buffs) {
                 for (self.sim.buffs[ps].slots) |b| {
                     if (!b.active) continue;
-                    if (o + 19 > rec.len) break;
+                    if (o + 19 > rec.len) return error.PlayerRecordTooLarge;
                     std.mem.writeInt(u16, rec[o..][0..2], b.def_id, .little);
                     rec[o + 2] = b.stack_mult;
                     rec[o + 3] = @bitCast(b.flags);
@@ -1017,8 +1011,7 @@ pub fn savePlayers(self: *Game) !void {
                 }
             }
         } else {
-            rec[o] = 0; // truncated: mark no progression tail
-            o += 1;
+            return error.PlayerRecordTooLarge;
         }
         try out.appendSlice(self.allocator, rec[0..o]);
         // ZPV11 skill tail rides the progression tail: appended after the
@@ -1381,7 +1374,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                     off += 8;
                 }
                 if (off < data.len) {
-                    const buff_n = data[off];
+                    const buff_n: usize = data[off];
                     off += 1;
                     if (off + buff_n * 19 <= data.len) {
                         const bs = self.sim.buffsMut(ps);
@@ -2293,4 +2286,75 @@ pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []cons
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
     return .{ .blob = try out.toOwnedSlice(allocator), .removed = removed };
+}
+
+test "player save preserves full inventory journal and buffs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var capture: @import("../litenet/peer.zig").Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const objectives = [_]ecs.quest.FlatObjective{.{}} ** ecs.quest.max_quest_objectives;
+    const defs = [_]ecs.quest.QuestDef{.{
+        .id = 42,
+        .kind = .kill_zombies,
+        .name = "q" ** max_quest_name_len,
+        .title = "capacity",
+        .objectives = &objectives,
+    }};
+    const old_catalog = g.sim.catalog;
+    defer g.sim.catalog = old_catalog;
+    g.sim.catalog = .{ .defs = &defs };
+    for (&g.sim.inventory[ps].slots) |*slot| slot.* = .{ .item_id = 1, .count = 1 };
+    for (&g.sim.journal[ps].slots, 0..) |*q, i| q.* = .{
+        .active = true,
+        .def_id = 42,
+        .quest_code = @intCast(i + 1),
+        .obj_progress = [_]u16{7} ** ecs.quest.max_quest_objectives,
+    };
+    for (&g.sim.buffsMut(ps).slots, 0..) |*b, i| b.* = .{
+        .active = true,
+        .def_id = @intCast(i + 1),
+        .duration_ticks = 400,
+    };
+    cl.level = 7;
+    cl.has_bed = true;
+    cl.bed_x = 12;
+    cl.bed_y = 70;
+    cl.bed_z = 34;
+    try savePlayers(g);
+    var path_buf: [512]u8 = undefined;
+    const path = try playersPath(g, &path_buf);
+    const data = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqual(data.len - 8, try zpvRecordLen(data, 8, persist_version));
+    const inventory = g.sim.inventory[ps];
+    const journal = g.sim.journal[ps];
+    const buffs = g.sim.buffs[ps];
+    g.sim.inventory[ps] = .{};
+    g.sim.journal[ps] = .{};
+    g.sim.buffs[ps] = .{};
+    cl.level = 1;
+    cl.has_bed = false;
+    tryRestorePlayer(g, cl);
+    try std.testing.expectEqualDeep(inventory, g.sim.inventory[ps]);
+    try std.testing.expectEqualDeep(journal, g.sim.journal[ps]);
+    try std.testing.expectEqualDeep(buffs, g.sim.buffs[ps]);
+    try std.testing.expectEqual(@as(u16, 7), cl.level);
+    try std.testing.expect(cl.has_bed);
+    try std.testing.expectEqual(@as(i32, 34), cl.bed_z);
+    var oversized_defs = defs;
+    oversized_defs[0].name = "q" ** (max_quest_name_len + 1);
+    g.sim.catalog = .{ .defs = &oversized_defs };
+    try std.testing.expectError(error.QuestNameTooLong, savePlayers(g));
+    const unchanged = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(unchanged);
+    try std.testing.expectEqualSlices(u8, data, unchanged);
 }
