@@ -616,25 +616,40 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Fail fast on TCP listen collisions (UDP LiteNet is port+2; it can share a
     // number with a TCP listener, so only TCP↔TCP overlaps are fatal here).
     if (admin_port != 0 and admin_port == port) {
+        if (admin_port_cli and port_cli) {
+            usageError("options '--admin-port' and '--port' cannot use the same TCP port ({d})", .{admin_port});
+        }
         fatal("AdminPort/TelnetPort {d} collides with ServerPort (TCP GameServerInfo)", .{admin_port});
     }
     if (webui_port != 0 and webui_port == port) {
+        if (port_cli) {
+            usageError("options '--webui-port' and '--port' cannot use the same TCP port ({d})", .{webui_port});
+        }
         fatal("webui port {d} collides with ServerPort (TCP GameServerInfo)", .{webui_port});
     }
     if (webui_port != 0 and admin_port != 0 and webui_port == admin_port) {
+        if (admin_port_cli) {
+            usageError("options '--webui-port' and '--admin-port' cannot use the same TCP port ({d})", .{webui_port});
+        }
         fatal("webui port {d} collides with AdminPort/TelnetPort", .{webui_port});
     }
     if (mcp_port != 0 and !isLoopbackBind(mcp_bind)) {
         usageError("--mcp-bind must be loopback (127.0.0.1 or localhost); use a TLS reverse proxy for remote access", .{});
     }
     if (mcp_port != 0 and mcp_port == port) {
+        if (port_cli) {
+            usageError("options '--mcp-port' and '--port' cannot use the same TCP port ({d})", .{mcp_port});
+        }
         fatal("mcp port {d} collides with ServerPort (TCP GameServerInfo)", .{mcp_port});
     }
     if (mcp_port != 0 and admin_port != 0 and mcp_port == admin_port) {
+        if (admin_port_cli) {
+            usageError("options '--mcp-port' and '--admin-port' cannot use the same TCP port ({d})", .{mcp_port});
+        }
         fatal("mcp port {d} collides with AdminPort/TelnetPort", .{mcp_port});
     }
     if (mcp_port != 0 and webui_port != 0 and mcp_port == webui_port) {
-        fatal("mcp port {d} collides with webui port", .{mcp_port});
+        usageError("options '--mcp-port' and '--webui-port' cannot use the same TCP port ({d})", .{mcp_port});
     }
 
     // InitOptions: serverconfig → optional mode pack → zdtd.toml stream/authority.

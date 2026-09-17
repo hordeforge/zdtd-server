@@ -108,6 +108,33 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    const cli_test_step = b.step("test-cli", "Check CLI output and exit codes without starting the server");
+    test_step.dependOn(cli_test_step);
+    const collision_cases = .{
+        .{ "--admin-port", "--port" },
+        .{ "--webui-port", "--port" },
+        .{ "--webui-port", "--admin-port" },
+        .{ "--mcp-port", "--port" },
+        .{ "--mcp-port", "--admin-port" },
+        .{ "--mcp-port", "--webui-port" },
+    };
+    inline for (collision_cases) |flags| {
+        const collision = b.addRunArtifact(exe);
+        collision.addArgs(&.{ flags[0], "27111", flags[1], "27111" });
+        collision.setEnvironmentVariable("ZDTD_WEBUI_SECRET", "test-only-secret");
+        collision.expectExitCode(2);
+        collision.expectStdOutEqual("");
+        collision.expectStdErrEqual("zdtd: options '" ++ flags[0] ++ "' and '" ++ flags[1] ++
+            "' cannot use the same TCP port (27111)\nzdtd: try 'zdtd --help'\n");
+        cli_test_step.dependOn(&collision.step);
+    }
+    const default_collision = b.addRunArtifact(exe);
+    default_collision.addArgs(&.{ "--admin-port", "26902" });
+    default_collision.expectExitCode(1);
+    default_collision.expectStdOutEqual("");
+    default_collision.expectStdErrEqual("zdtd: AdminPort/TelnetPort 26902 collides with ServerPort (TCP GameServerInfo)\n");
+    cli_test_step.dependOn(&default_collision.step);
+
     // mods/plugin_common.zig is the shared guest helper (Buf, Config) that the
     // core plugins compile against for wasm32-freestanding. It is not part of
     // the server's import graph, so its tests would never run under the unit
