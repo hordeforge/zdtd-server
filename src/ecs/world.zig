@@ -355,6 +355,22 @@ pub const World = struct {
     /// applies `min(1, value)` to EVERY incoming damage type, so it joins every
     /// player-damage choke (AI melee, C2S claims, explosions, environmental DoT).
     buff_general_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// NoiseMultiplier product (passive 88, base 1.0) over the entity's buffs,
+    /// perks and worn/held items, refreshed by the survival tick. Stock
+    /// `PlayerStealth.CalcVolume`/`NotifyNoise` multiply the volume by
+    /// `GetValue(88)`. 1.0 = stock base (no rows), so the offline path that
+    /// never writes this column reads neutral.
+    stealth_noise_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
+    /// LightMultiplier product (passive 89, base 1.0) over the entity's buffs,
+    /// perks and worn/held items, refreshed by the survival tick. Stock
+    /// `PlayerStealth.TickServer` blends it into lightLevel as
+    /// `(0.32 + 0.68 x passive89)`. 1.0 = stock base, neutral offline.
+    stealth_light_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
+    /// LootStage product (passive 159, base 1.0) over the entity's buffs,
+    /// perks and worn/held items, refreshed by the survival tick. Stock
+    /// `EntityPlayer.GetLootStage` multiplies the floored total by
+    /// `GetValue(159)`. 1.0 = stock base, neutral offline.
+    loot_stage_mult: [max_entities]f32 = [_]f32{1} ** max_entities,
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,
@@ -1392,8 +1408,14 @@ pub const World = struct {
         self.mask[s].inventory = true;
         self.player[s] = .{ .peer_slot = peer_slot };
         // Fresh stealth-noise state (slot reuse must not carry a previous
-        // occupant's noise list / sleeper volume into the new body).
+        // occupant's noise list / sleeper volume into the new body). The
+        // stealth multiplier columns start at the Rules floors so legs that
+        // run before the first survival tick read tuned values, not stale
+        // folds or the neutral base.
         self.stealth[s] = .{};
+        self.stealth_noise_mult[s] = self.rules.ai.stealth_noise_passive;
+        self.stealth_light_mult[s] = self.rules.ai.stealth_light_passive;
+        self.loot_stage_mult[s] = 1.0;
         if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len))) {
             self.peer_to_player[@intCast(peer_slot)] = s;
         }

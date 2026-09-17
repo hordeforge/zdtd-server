@@ -440,6 +440,19 @@ const LootProbCtx = struct {
     }
 };
 
+/// `LootGateCtx.qty_scale` sink: folds the opener's `LootQuantity` passives
+/// onto a spawned stack's count.
+const LootQtyCtx = struct {
+    g: *Game,
+    peer_slot: usize,
+    ps: ecs.Slot,
+
+    fn scale(ctx: ?*anyopaque, item_name: []const u8, entry_tags: []const u8, base: u16) u16 {
+        const s: *@This() = @ptrCast(@alignCast(ctx.?));
+        return game_player.lootQtyScale(s.g, s.peer_slot, s.ps, item_name, entry_tags, base);
+    }
+};
+
 pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
     // Remember the table that filled this container: the destroy_on_close
     // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
@@ -472,6 +485,8 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     var buff_sink: ?assets_loot.LootBuffSink = null;
     var prob_ctx: LootProbCtx = undefined;
     var prob_sink: ?assets_loot.ProbScale = null;
+    var qty_ctx: LootQtyCtx = undefined;
+    var qty_sink: ?assets_loot.QtyScale = null;
     if (opener_peer >= 0 and @as(usize, @intCast(opener_peer)) < self.clients.len) {
         const oc = &self.clients[@intCast(opener_peer)];
         if (oc.joined) {
@@ -480,6 +495,8 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
                 buff_sink = .{ .ctx = &buff_ctx, .add = LootBuffCtx.add };
                 prob_ctx = .{ .g = self, .peer_slot = @intCast(opener_peer), .ps = ps };
                 prob_sink = .{ .ctx = &prob_ctx, .scale = LootProbCtx.scale };
+                qty_ctx = .{ .g = self, .peer_slot = @intCast(opener_peer), .ps = ps };
+                qty_sink = .{ .ctx = &qty_ctx, .scale = LootQtyCtx.scale };
             }
             // The decoded server sandbox code answers a `SandboxOption` gate;
             // the buffer lives for this call, which is all the ctx is used for.
@@ -496,6 +513,7 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         .player = player_ctx,
         .buffs = buff_sink,
         .prob_scale = prob_sink,
+        .qty_scale = qty_sink,
     };
     var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict

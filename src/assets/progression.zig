@@ -294,6 +294,39 @@ pub fn perkTotals(
     return out;
 }
 
+/// Named-passive fold over a player's purchased progression levels, chained
+/// over `base` (mirrors `perkTotals` but for multiplicative passives outside
+/// the additive tracked surface, e.g. NoiseMultiplier passive 88).
+pub fn namedPerkFold(
+    pt: *const Table,
+    skill_levels: []const SkillLevel,
+    name: []const u8,
+    base: f32,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) f32 {
+    var out = base;
+    for (skill_levels) |sl| {
+        if (sl.level == 0) continue;
+        var found = false;
+        for (pt.attributes) |a| {
+            if (std.mem.eql(u8, a.name, sl.name)) {
+                out = buffs.namedPassiveFold(name, a.passives, .{ .level = sl.level }, ctx, out, counts);
+                found = true;
+                break;
+            }
+        }
+        if (found) continue;
+        for (pt.perks) |pk| {
+            if (std.mem.eql(u8, pk.name, sl.name)) {
+                out = buffs.namedPassiveFold(name, pk.passives, .{ .level = sl.level }, ctx, out, counts);
+                break;
+            }
+        }
+    }
+    return out;
+}
+
 /// One body's direct `<level_requirements level="N">` children.
 /// `ProgressionFromXml` (IL=660) gives each block an `N` and a RequirementGroup
 /// built from its own direct `<requirement>` children (null when the block has

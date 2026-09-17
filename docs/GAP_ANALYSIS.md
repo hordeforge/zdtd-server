@@ -576,9 +576,48 @@ area and the concrete work.
     policy tunables in `[rules.progression]` (`food_depletion_per_hour`,
     `water_depletion_per_hour`, `starvation_damage_per_hour`,
     `well_fed_regen_per_hour`, `well_fed_threshold`, `survival_sync_seconds`)
-    because the stock FoodChangeOT/WaterOT/HealthChangeOT passive-effect
+    because the stock FoodChangeOT/WaterChangeOT/HealthChangeOT passive-effect
     defaults are not in the V3.1.0 IL corpus (Stat.Tick is not dumped); the
     defaults reproduce the stock feel (full Food drains in ~2 in-game days).
+    **FoodChangeOT/WaterChangeOT consumer closed 2026-09-17**: with a game-dir
+    the VM fold joins `UpdatePlayerFoodOT`/`UpdatePlayerWaterOT` (IL=71) —
+    `food_ot`/`water_ot` * secs compose on top of the Rules depletion floor
+    (`PlayerEntityStats` GetValue(115/123) * dt → Stat.regenAmount). Negative
+    regen is scaled by `Stat.LossSandboxModifier` (`UpdateSandboxOptions`
+    IL=21: Food=161 HungerMultiplier, Water=162 ThirstMultiplier).
+    Residual: `Stat.Tick` regen coupling (IL_0194: positive stamina/health
+    gains drain food/water regen x GetValue(119/127/120/126), base 1.0) is
+    not wired: with zdtd's 8/s stamina floor a 1:1 coupling would empty both
+    bars in seconds of regen, which contradicts observed stock drain, so the
+    stock stamina regen rate and food/water scale need pinning before the
+    proven mechanism ships (athletic -.1, nomad tiered, SlowMetabolism,
+    moonshine rows surveyed and ready).
+    **NoiseMultiplier consumer closed 2026-09-17**: buff+perk+worn-item rows
+    fold through `namedBuffFold`/`namedPerkFold`/`namedPassiveFold` (base 1.0)
+    into a per-tick `stealth_noise_mult` cache that scales both stealth legs
+    (`PlayerStealth` CalcVolume/NotifyNoise multiply by GetValue(88)); the
+    server mirrors crouch into the `_crouching` cvar from the move flags, so
+    the rogue/assassin crouch-gated rows and perkFromTheShadows resolve.
+    **LightMultiplier consumer closed 2026-09-17**: the same three legs fold
+    passive 89 (base 1.0) into a per-tick `stealth_light_mult` cache that the
+    sight legs blend as `(0.32 + 0.68 x p)` (`PlayerStealth.TickServer`
+    IL_0121-014F: snapshot sight gate, sleeper crouch reach, S2C broadcast).
+    The broadcast mirrors the pre-blend light x100 into `_lightlevel`
+    (IL_00B9), so the rogue/assassin LTE-65 rows and perkNightStalker resolve
+    against live light. Both stealth columns scale the Rules floors (operator
+    tuning kept) and spawn at those floors, so pre-first-tick legs read tuned
+    values.
+    **LootStage consumer closed 2026-09-17**: `EntityPlayer.GetLootStage`
+    multiplies the floored total by GetValue(159) (IL_00E1); buff/perk/item
+    rows (scavenger set, LuckyLooter, rogue helmet, EyeKandy, CharismaticNature,
+    twitch looter) fold through the same named-fold chain into a per-tick
+    `loot_stage_mult` cache that `lootStage()` applies before flooring, ahead
+    of the GlobalLootStageModifier scale.
+    **LootQuantity consumer closed 2026-09-17**: `SpawnItem` scales the rolled
+    count by GetValue(81) over the spawned item's tags (IL_0040, truncated).
+    A `qty_scale` sink on the loot roll resolves the opener's buff/perk/item
+    rows (rogue set dukes tiers, EyeKandy, LuckyLooter books); a 0 result
+    drops the stack (IL_0058 early-out). Container tags are not carried.
     **PASSIVE-EFFECTS VM SHIPPED 2026-08-25**: with a game-dir present the
     conditional legs come from buffs.xml via the revertible effect VM
     (assets/buffs.zig) - `tickSurvival` keeps the matching
@@ -3647,7 +3686,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   runtime exists" - that runtime now exists, so this is an ordinary partial
   with a named shortfall rather than a waiver: the VM covers the tracked stats,
   not every `passive_effect` row. Closing it is a scope question (which
-  stats to track), not a blocked dependency.
+  stats to track), not a blocked dependency. Tracked FoodChangeOT/WaterChangeOT
+  consumers closed 2026-09-17 (compose with Rules depletion in `tickSurvival`).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
 
@@ -3867,10 +3907,16 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     because the tagged row joins it).
     Fixed by it: `perkRuleOneCardio`'s `StaminaChangeOT tags="running,swimmingRun"`
     and the eight `walking`/`running` armor stamina rows in `buffStatusCheck02`
-    no longer inflate the **idle** regen total. Consumers still open: the sprint
-    leg should query `running` (zdtd uses the `Rules` drain floor there), and the
-    attacking item's `physicalDamageTypes` tags stay with the per-hit
-    `armorMitigation` leg rather than the per-tick cache.
+    no longer inflate the **idle** regen total. Sprint leg closed 2026-09-17:
+    `tickSurvival` queries `running` (buff+perk+item fold) and applies that OT
+    against the Rules drain floor (`stamina_drain_per_second - stamina_ot_running`);
+    stage-3 hunger/thirst OT still replaces the floor and the running OT still
+    joins. Walk leg closed 2026-09-17: non-sprint `move_tag=.walking` queries
+    `walking` via the same `taggedStaminaOt` fold and joins the Rules regen
+    total (`stamina_regen_per_second + stamina_ot_bonus + walking OT`); idle
+    keeps ignoring tagged rows. Still open on tags: the attacking item's
+    `physicalDamageTypes` stay with the per-hit `armorMitigation` leg rather
+    than the per-tick cache.
   - **buffs.xml is the larger half of the same gap and is now wired too
     (round 14, 2026-09-11).** The buff parser was a flat walk over the buff body
     with no effect_group context, so buff rows carried no gates either.

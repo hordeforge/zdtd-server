@@ -192,6 +192,15 @@ How to use:
 - Referencing: cite by number (`PRD 0003 §8`, `RFC 0001 §3`, `ADR 0026`), and
   keep links and cross-references in sync when a doc moves or renumbers.
 
+**Doc standard:** [`docs/AGENTS.md`](docs/AGENTS.md) owns the tier map (one home
+per fact), the writing rules and the gate list; [`docs/cookbook/`](docs/cookbook/README.md)
+holds the numbered how-tos and [`docs/subsystems/`](docs/subsystems/README.md)
+the per-subsystem reference pages. `make lint` runs `tools/check_docs.py`: dead
+relative links, `file:LINE` citations out of range, quoted `zig` blocks that
+drifted from source, and the word ceilings in [`docs/budgets.json`](docs/budgets.json).
+The catalogs under [`docs/catalogs/`](docs/catalogs/README.md) are generated with
+`make docs-catalogs` and freshness-gated in `make check`.
+
 ## Zig style
 
 Zig **0.16**. Shaped by wire fidelity, 20 TPS, SoA sim, and loadgen/stock-client evidence. Naming/memory follow usual Zig house style ([agave](https://github.com/hordeforge/agave/blob/main/AGENTS.md) is one reference); rest is dedi-specific.

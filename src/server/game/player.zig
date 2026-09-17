@@ -313,8 +313,13 @@ pub fn tickStealthBroadcast(self: *Game) void {
         const noise = self.sim.stealth[ps].noise_volume;
         const noise8: u8 = @trunc(@min(noise, 127.0));
         const crouch = self.sim.player[ps].crouching;
+        const held_light = self.sim.heldLightFor(ps);
+        // Mirror the pre-blend light x100 into `_lightlevel` (stock
+        // TickServer IL_00B9; the rogue/assassin LightMultiplier rows gate on
+        // it). `_` names never hit the wire; the fold reads it next tick.
+        _ = c.cvars.apply("_lightlevel", .set, systems.stealthLightPreBlend(self.sim.ambient_light, held_light, crouch) * 100.0);
         const light8: u8 = @trunc(@min(
-            systems.stealthLightLevel(self.sim.ambient_light, self.sim.heldLightFor(ps), crouch, self.sim.rules.ai.stealth_light_passive, self.sim.stealth[ps].speed_average),
+            systems.stealthLightLevel(self.sim.ambient_light, held_light, crouch, self.sim.stealth_light_mult[ps], self.sim.stealth[ps].speed_average),
             255.0,
         ));
         var alert = false;
@@ -498,6 +503,9 @@ pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32
         }
     }
     const global_mod = stageGlobalModifier(self, self.clients[slot].slot, "GlobalLootStageModifier");
+    // LootStage (passive 159) multiplies the total before flooring
+    // (`GetLootStage` IL_00E1); the survival tick caches the fold per entity.
+    const loot_mult = if (self.sim.playerByPeer(self.clients[slot].slot)) |ps| self.sim.loot_stage_mult[ps] else 1.0;
     return assets_gamestages.lootStage(.{
         .level = self.clients[slot].level,
         .poi_tier_mod = poi_mod,
@@ -509,6 +517,7 @@ pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32
         .container_mod = container_mod,
         .container_bonus = container_bonus,
         .global_modifier = global_mod,
+        .loot_mult = loot_mult,
     });
 }
 
@@ -867,6 +876,75 @@ pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const 
     return v;
 }
 
+/// Fold the opening player's `LootQuantity` rows (passive 81) onto a spawned
+/// stack's count: purchased perk/attribute rows at level, active buff rows at
+/// elapsed duration, held + equipped item rows at quality tier (stock
+/// `SpawnItem` -> `GetValue(81, holdingItem, count, ..., itemTags|...)`,
+/// truncated to int). The query set unions the spawned item def's own tags
+/// (e.g. casinoCoin's "dukes") with the loot entry's list; container tags are
+/// not carried. A 0 result drops the stack (IL_0058 early-out).
+pub fn lootQtyScale(self: *Game, peer_slot: usize, ps: ecs.Slot, item_name: []const u8, entry_tags: []const u8, base: u16) u16 {
+    var counts: requirements.Counts = .{};
+    // Union the spawned item's own tags with the entry list on the stack.
+    var tag_buf: [256]u8 = undefined;
+    var tags = entry_tags;
+    if (self.items.byName(item_name)) |def| {
+        if (def.tags.len > 0) {
+            if (entry_tags.len == 0) {
+                tags = def.tags;
+            } else if (std.fmt.bufPrint(&tag_buf, "{s},{s}", .{ entry_tags, def.tags }) catch null) |joined| {
+                tags = joined;
+            }
+        }
+    }
+    var v: f32 = @floatFromInt(base);
+    var armor_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined;
+    const armor_groups = armorGroupsForPeer(self, ps, &armor_buf);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .cvars = &c.cvars,
+            .tags = tags,
+            .armor_groups = armor_groups,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.namedPassiveFold("LootQuantity", progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .armor_groups = armor_groups };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.namedPassiveFold("LootQuantity", def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .armor_groups = armor_groups };
+        const inv = &self.sim.inventory[ps];
+        const held = inv.heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| {
+                v = assets_buffs.namedPassiveFold("LootQuantity", def.passives, itemQualityAxis(self, held.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.namedPassiveFold("LootQuantity", def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0) or !std.math.isFinite(v)) return 0;
+    // Stock truncates ((int)GetValue); saturate at the stack cap like the
+    // abundance path instead of trapping.
+    return @intCast(@min(@as(u32, @intFromFloat(v)), std.math.maxInt(u16)));
+}
+
 /// Fold PlayerExpGain (87) onto a non-kill XP award — same layers as
 /// `lootProbScale` (purchased perks/attrs, active buffs, held + equipped
 /// items), with `held_tags` filled so `HoldingItemHasTags` rows (miner69r)
@@ -921,6 +999,42 @@ fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64
     // Round toward nearest like a float→int XP grant; clamp to u64.
     const rounded: u128 = @intFromFloat(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
     return @intCast(@min(rounded, @as(u128, std.math.maxInt(u64))));
+}
+
+/// Worn armor groups and their lowest worn quality, into `out`. Local copy of
+/// tick.zig's helper — that one is file-private. Answers
+/// `ArmorGroupLowestQuality`/`ArmorGroupCount` rows (rogue/scavenger set
+/// bonuses) in the loot folds below.
+fn armorGroupsForPeer(self: *const Game, ps: ecs.Slot, out: []requirements.ArmorGroup) []const requirements.ArmorGroup {
+    if (!self.sim.mask[ps].inventory) return out[0..0];
+    const inv = &self.sim.inventory[ps];
+    var n: usize = 0;
+    var i: usize = ecs.components.inv_equip_start;
+    const end = @min(i + ecs.components.inv_equip_count, inv.slots.len);
+    while (i < end) : (i += 1) {
+        const s = inv.slots[i];
+        if (s.count == 0 or s.item_id == 0) continue;
+        const def = self.items.byId(s.item_id) orelse continue;
+        if (def.armor_group.len == 0) continue;
+        var it = std.mem.splitScalar(u8, def.armor_group, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            var hit = false;
+            for (out[0..n]) |*g| {
+                if (!std.mem.eql(u8, g.name, name)) continue;
+                if (s.quality < g.quality) g.quality = s.quality;
+                g.count +|= 1;
+                hit = true;
+                break;
+            }
+            if (hit) continue;
+            if (n >= out.len) return out[0..n];
+            out[n] = .{ .name = name, .quality = s.quality, .count = 1 };
+            n += 1;
+        }
+    }
+    return out[0..n];
 }
 
 /// Held-item tags for requirement rows (`HoldingItemHasTags`). Local copy of

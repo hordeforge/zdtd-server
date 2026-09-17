@@ -85,6 +85,11 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
 | [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) / [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) | Sim + architecture |
+| [`docs/subsystems/README.md`](docs/subsystems/README.md) | Per-subsystem reference: types, wire layouts, wiring, checked citations |
+| [`docs/AGENTS.md`](docs/AGENTS.md) | Documentation standard: tier map, writing rules, gates |
+| [`docs/cookbook/README.md`](docs/cookbook/README.md) | Numbered how-tos (tunable, package body, C2S handler, scenario, plugin, doc) |
+| [`docs/testing.md`](docs/testing.md) | What each gate proves, and the evidence rules |
+| [`docs/catalogs/README.md`](docs/catalogs/README.md) | Generated catalogs: config keys, admin verbs, save formats, module graph |
 | [`../7dtd-engine-research/docs/network/protocol.md`](../7dtd-engine-research/docs/network/protocol.md) | Envelope, join, goldens |
 
 Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).

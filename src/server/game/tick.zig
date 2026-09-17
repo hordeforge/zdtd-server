@@ -687,6 +687,68 @@ fn itemQualityAxis(self: *const Game, quality: u8) assets_buffs.Axis {
     return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
 }
 
+/// Fold buff+perk+held/equip item StaminaChangeOT for one query tag set
+/// (`PassiveEffect::hasMatchingTag` IL=53). Sprint uses `"running"`; walk uses
+/// `"walking"`. Untagged idle regen stays on the plain fold.
+fn taggedStaminaOt(
+    self: *Game,
+    ps: ecs.Slot,
+    skill_levels: []const assets_progression.SkillLevel,
+    base_ctx: requirements.Ctx,
+    tag: []const u8,
+    stamina_max: f32,
+    req_counts: *requirements.Counts,
+) f32 {
+    var ctx = base_ctx;
+    ctx.tags = tag;
+    const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, req_counts);
+    const pvm = assets_progression.perkTotals(&self.progression_table, skill_levels, ctx, req_counts);
+    var ivm: assets_buffs.TrackedDeltas = .{};
+    {
+        var item_ctx = ctx;
+        const held = self.sim.inventory[ps].heldItem();
+        if (held.count > 0) {
+            item_ctx.item_equipped = false;
+            item_ctx.item_active = (held.flags & 1) != 0;
+            if (self.items.byId(held.item_id)) |def| {
+                item_ctx.item_tags = def.tags;
+                item_ctx.item_quality = held.quality;
+                var held_mod_buf: [4]requirements.NameLevel = undefined;
+                item_ctx.item_mods = fillItemMods(self, held.mods, held.mod_qualities, &held_mod_buf);
+                ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, held.quality), item_ctx, req_counts));
+            }
+        }
+        item_ctx.item_equipped = true;
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = self.sim.inventory[ps].slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            item_ctx.item_tags = def.tags;
+            item_ctx.item_quality = slot.quality;
+            var slot_mod_buf: [4]requirements.NameLevel = undefined;
+            item_ctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &slot_mod_buf);
+            item_ctx.item_active = (slot.flags & 1) != 0;
+            ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, slot.quality), item_ctx, req_counts));
+        }
+    }
+    return (vm.stamina_ot + pvm.stamina_ot + ivm.stamina_ot) * stamina_max / 100.0;
+}
+
+/// Sandbox float option read off decoded groups, stock default when the code
+/// does not carry it (`UpdateSandboxOptions` IL=21 copies these into
+/// `Stat.LossSandboxModifier` per stat; Food=161 HungerMultiplier,
+/// Water=162 ThirstMultiplier).
+fn sandboxFloat(groups: []const sandbox.Group, name: []const u8) f32 {
+    const o = sandbox.optionByName(name) orelse return 1.0;
+    const set = sandbox.findSet(o.set_name) orelse return o.default_f;
+    for (groups) |g| {
+        if (g.option_id != o.id) continue;
+        return sandbox.valueF(o, set, g.index);
+    }
+    return o.default_f;
+}
+
 pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
     if (damage_tag.len == 0) return 0;
     if (!self.sim.mask[ps].inventory or !self.sim.mask[ps].health) return 0;
@@ -866,6 +928,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
         var hp_delta: f32 = 0;
         var stamina_penalty: f32 = 0;
         var stamina_ot_bonus: f32 = 0;
+        // Movement-tagged StaminaChangeOT (`running` sprint / `walking` walk).
+        var stamina_ot_running: f32 = 0;
         if (use_buff) {
             // Passive-effects VM (assets/buffs.zig): keep the matching
             // conditional stage buffs (buffStatusHungry/Thirsty01..03) in the
@@ -984,6 +1048,20 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // (true for an equipment slot, false for the hand - `Equipment::
             // GetItems` does not include the holding slot).
             var ivm: assets_buffs.TrackedDeltas = .{};
+            // NoiseMultiplier (passive 88) product over buffs, perks and worn
+            // items. Stock `PlayerStealth.CalcVolume`/`NotifyNoise` multiply
+            // the volume by `GetValue(88)` (base 1.0); no installed-mod rows
+            // carry it, so only item-def rows fold here.
+            var noise_mult: f32 = assets_buffs.namedBuffFold(&self.buffs, &self.sim.buffs[ps], "NoiseMultiplier", 1.0, req_ctx, &req_counts);
+            noise_mult = assets_progression.namedPerkFold(&self.progression_table, c.skill_levels[0..c.skill_level_n], "NoiseMultiplier", noise_mult, req_ctx, &req_counts);
+            // LightMultiplier (passive 89) product over the same three legs;
+            // item-def rows chain in the worn/held loops below.
+            var light_mult: f32 = assets_buffs.namedBuffFold(&self.buffs, &self.sim.buffs[ps], "LightMultiplier", 1.0, req_ctx, &req_counts);
+            light_mult = assets_progression.namedPerkFold(&self.progression_table, c.skill_levels[0..c.skill_level_n], "LightMultiplier", light_mult, req_ctx, &req_counts);
+            // LootStage (passive 159) product over the same three legs;
+            // item-def rows (rogue helmet, scavenger set) chain below.
+            var loot_mult: f32 = assets_buffs.namedBuffFold(&self.buffs, &self.sim.buffs[ps], "LootStage", 1.0, req_ctx, &req_counts);
+            loot_mult = assets_progression.namedPerkFold(&self.progression_table, c.skill_levels[0..c.skill_level_n], "LootStage", loot_mult, req_ctx, &req_counts);
             {
                 var item_ctx = req_ctx;
                 var mod_phys: f32 = 0;
@@ -999,6 +1077,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                         var held_mod_buf: [4]requirements.NameLevel = undefined;
                         item_ctx.item_mods = fillItemMods(self, held.mods, held.mod_qualities, &held_mod_buf);
                         ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, held.quality), item_ctx, &req_counts));
+                        noise_mult = assets_buffs.namedPassiveFold("NoiseMultiplier", def.passives, itemQualityAxis(self, held.quality), item_ctx, noise_mult, &req_counts);
+                        light_mult = assets_buffs.namedPassiveFold("LightMultiplier", def.passives, itemQualityAxis(self, held.quality), item_ctx, light_mult, &req_counts);
+                        loot_mult = assets_buffs.namedPassiveFold("LootStage", def.passives, itemQualityAxis(self, held.quality), item_ctx, loot_mult, &req_counts);
                         // The holding item's mod rows fold for their stats, but
                         // its physical resist is not armour: stock
                         // GetTotalPhysicalArmorRating walks the Equipment slots
@@ -1021,6 +1102,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     item_ctx.item_active = (slot.flags & 1) != 0;
                     ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, slot.quality), item_ctx, &req_counts));
                     ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, slot.mods, slot.mod_qualities, slot.quality, item_ctx, &req_counts, &mod_phys));
+                    noise_mult = assets_buffs.namedPassiveFold("NoiseMultiplier", def.passives, itemQualityAxis(self, slot.quality), item_ctx, noise_mult, &req_counts);
+                    light_mult = assets_buffs.namedPassiveFold("LightMultiplier", def.passives, itemQualityAxis(self, slot.quality), item_ctx, light_mult, &req_counts);
+                    loot_mult = assets_buffs.namedPassiveFold("LootStage", def.passives, itemQualityAxis(self, slot.quality), item_ctx, loot_mult, &req_counts);
                 }
                 // The item's own resist rows stay owned by the items.xml
                 // quality-curve path (`armor_pdr_fn` -> armorMitigation) and the
@@ -1036,6 +1120,20 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // so it comes off the plain fold and joins every player hit. Items
             // contribute through the same cache (`armorEnforcerOutfit` +0.05).
             self.sim.buff_general_resist[ps] = vm.general_resist + pvm.general_resist + ivm.general_resist;
+            // NoiseMultiplier cache for the stealth legs. Rules stays the
+            // offline floor: without a game-dir the fold is the neutral base
+            // and the Rules value wins; with data the fold scales it.
+            self.sim.stealth_noise_mult[ps] = self.sim.rules.ai.stealth_noise_passive * noise_mult;
+            // LightMultiplier cache for the sight legs. Stock blends it into
+            // lightLevel as (0.32 + 0.68 x passive89); the rogue/assassin rows
+            // additionally gate on `_lightlevel`, the pre-blend light x100
+            // mirrored in the stealth broadcast. Rules scales the fold like
+            // the noise column, so the operator tunable keeps working.
+            self.sim.stealth_light_mult[ps] = self.sim.rules.ai.stealth_light_passive * light_mult;
+            // LootStage (passive 159) cache for GetLootStage. Stock
+            // multiplies the floored total by GetValue(159); base 1.0, so no
+            // rows means no change.
+            self.sim.loot_stage_mult[ps] = loot_mult;
             // Perk/buff/item max-stat deltas: unconditional recompute from the
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
@@ -1081,12 +1179,36 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // the starvation/regen branches above.
             const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot;
             if (hp_ot != 0) hp_delta += hp_ot * secs;
+            // Food/Water ChangeOT (`UpdatePlayerFoodOT`/`UpdatePlayerWaterOT`
+            // IL=71): EffectManager.GetValue(115/123) * dt joins Stat.regenAmount
+            // then Stat.Tick adds it. A negative regen is scaled by
+            // `Stat.LossSandboxModifier` (`UpdateSandboxOptions` IL=21 sets
+            // Food=161 HungerMultiplier, Water=162 ThirstMultiplier). Compose
+            // with the Rules depletion floor above.
+            const food_ot = vm.food_ot + pvm.food_ot + ivm.food_ot;
+            if (food_ot != 0) {
+                const scale = if (food_ot < 0) sandboxFloat(sandbox_groups, "HungerMultiplier") else 1.0;
+                h.food = @min(h.food_max, @max(0, h.food + food_ot * scale * secs));
+            }
+            const water_ot = vm.water_ot + pvm.water_ot + ivm.water_ot;
+            if (water_ot != 0) {
+                const scale = if (water_ot < 0) sandboxFloat(sandbox_groups, "ThirstMultiplier") else 1.0;
+                h.water = @min(h.water_max, @max(0, h.water + water_ot * scale * secs));
+            }
             // Stamina OT consumer (perk/buff/item StaminaChangeOT): the VM's
             // perc fraction of max per second joins the idle regen (stock
             // applies the buff's OT continuously; perkRuleOneCardio .1..3
             // adds a regen bonus, the stage-3 starvation buff drains while
             // idle too). The sprint branch keeps the stage-3 penalty.
             stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot + ivm.stamina_ot) * h.stamina_max / 100.0;
+            // Sprint/walk legs query tagged StaminaChangeOT
+            // (`PassiveEffect::hasMatchingTag` IL=53): tagged rows stay out of
+            // the idle aggregate above and land here.
+            if (c.sprint_speed > 0) {
+                stamina_ot_running = taggedStaminaOt(self, ps, c.skill_levels[0..c.skill_level_n], req_ctx, "running", h.stamina_max, &req_counts);
+            } else if (c.move_tag == .walking) {
+                stamina_ot_running = taggedStaminaOt(self, ps, c.skill_levels[0..c.skill_level_n], req_ctx, "walking", h.stamina_max, &req_counts);
+            }
             // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
             // buffStatusHungry03 while its stage holds. The gate moved from
             // "food/water <= 0" to "stage-3 buff active" (the stock 2%
@@ -1095,6 +1217,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 stamina_penalty = @abs(vm.stamina_ot) * h.stamina_max / 100.0 * secs;
             }
         } else {
+            // Offline/no-buff path: both stealth columns are the Rules
+            // floors, so the legs read the operator tunables, not stale folds.
+            // LootStage resets to neutral (no Rules knob exists for it).
+            self.sim.stealth_noise_mult[ps] = self.sim.rules.ai.stealth_noise_passive;
+            self.sim.stealth_light_mult[ps] = self.sim.rules.ai.stealth_light_passive;
+            self.sim.loot_stage_mult[ps] = 1.0;
             if (h.food <= 0 or h.water <= 0) {
                 // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
                 // drowning/radiation above. GDR covers it too.
@@ -1125,15 +1253,21 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
         const stamina_was = h.stamina;
         if (c.sprint_speed > 0) {
             if (stamina_penalty > 0) {
-                h.stamina = @max(0, h.stamina - stamina_penalty);
+                // Stage-3 OT replaces the Rules floor; running-tagged OT still
+                // joins (cardio bonus / armor run penalty).
+                h.stamina = @max(0, h.stamina - stamina_penalty + stamina_ot_running * dt);
             } else {
-                h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
+                // Rules drain floor minus running-tagged StaminaChangeOT (perc
+                // of max per second). Positive cardio OT slows the drain;
+                // negative armor run OT deepens it.
+                h.stamina = @max(0, h.stamina - (prog.stamina_drain_per_second - stamina_ot_running) * dt);
             }
         } else {
             // Clamp both ways like the sprint branch: a draining
             // StaminaChangeOT buff (stage-3 starvation, modded data) must not
-            // drive stamina negative while idle.
-            h.stamina = @max(0, @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus) * dt));
+            // drive stamina negative while idle. Walking-tagged OT
+            // (armorFarmerHelmet -.0281, armor CVars) joins the regen total.
+            h.stamina = @max(0, @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus + stamina_ot_running) * dt));
         }
         const stamina_changed = h.stamina != stamina_was;
         // Stat-changed observer (ADR 0034): one bounded call per changed

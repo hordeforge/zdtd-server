@@ -191,6 +191,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // hearing and shrink sleeper detect for crouched players.
             if (self.sim.mask[idx].player) {
                 self.sim.player[idx].crouching = (f.flags & packages.cF_crouching) != 0;
+                // Mirror crouch into the `_crouching` cvar the stealth-armor
+                // rows gate on (`CVarCompare cvar="_crouching"` on rogue /
+                // assassin NoiseMultiplier). Stock sets it client-side and
+                // never networks `_` names; the server projects the same value
+                // from the reported flags word so the VM fold sees it. Only
+                // for the sender's own entity, like the speeds path below.
+                if (f.entity_id == c.entity_id) {
+                    _ = c.cvars.apply("_crouching", .set, if (self.sim.player[idx].crouching) 1 else 0);
+                }
             }
         }
         // Fan-out to other peers (stock tracked-players path). Re-encode from

@@ -10,6 +10,11 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phased milestones |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
+| [docs/subsystems/README.md](docs/subsystems/README.md) | Per-subsystem reference (types, wire layouts, wiring; checked citations) |
+| [docs/AGENTS.md](docs/AGENTS.md) | Documentation standard (tier map, writing rules, `tools/check_docs.py` gate) |
+| [docs/testing.md](docs/testing.md) | What each gate proves, and the evidence rules |
+| [docs/cookbook/README.md](docs/cookbook/README.md) | Numbered how-tos for common changes |
+| [docs/catalogs/README.md](docs/catalogs/README.md) | Generated catalogs (config keys, admin verbs, save formats, module graph) |
 
 **Gates (2026-09-01):** `make check` exit 0 · **1514/1515** tests (1 skipped; 2026-09-01 fresh run) · `lint-architecture: clean` · `lint-plugins: clean` · `make check-clean-build` ok and the same 1514/1515 from a cold `--cache-dir` in both Debug and ReleaseSafe (no stale-object masking) · `make smoke-modlet` and `scripts/smoke-navezgane.sh` pass (loadgen joins the running server on the stock map: 8 join passes, 0 deaths, 0 fails) · live stock-client gate **23/23** (last measured 2026-08-30). GAP **0 MISSING** (300 features: **297 WORKS, 3 PARTIAL** - the join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded in the row, and the perk/attribute passive-effects VM moved into the counted set by the 2026-09-02 waiver re-evaluation). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
 

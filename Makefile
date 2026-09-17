@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit
+.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -67,6 +67,12 @@ need-java:
 
 lint-html: need-oxlint need-java
 	bash scripts/lint-html.sh
+
+# Regenerate the generated reference catalogs under docs/catalogs (config keys,
+# admin verbs, save formats, module graph). `make check` fails when a committed
+# page no longer matches source, so regeneration and the doc change land together.
+docs-catalogs: need-python3
+	python3 tools/gen_docs_catalogs.py
 
 all: build
 
@@ -137,7 +143,7 @@ release: release-check need-zig need-release-tools
 	  rm -rf zig-out/bin/presets && cp -r presets zig-out/bin/presets; \
 	  echo "zdtd: release ok $$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)  $$bin"
 
-lint: need-zig lint-webui lint-html
+lint: need-zig need-python3 lint-webui lint-html
 	@command -v rg >/dev/null || { \
 	  echo "zdtd: missing required tool: rg (ripgrep); apt/brew/cargo install ripgrep" >&2; \
 	  exit 127; \
@@ -150,6 +156,9 @@ lint: need-zig lint-webui lint-html
 	shellcheck scripts/*.sh
 	$(ZIG) fmt --check build.zig build.zig.zon src
 	bash scripts/lint-architecture.sh
+	# Documentation gate: dead links, code citations in range, quoted Zig blocks
+	# that drifted from source, and the word ceilings in docs/budgets.json.
+	python3 tools/check_docs.py
 	bash scripts/lint-cycles.sh
 	bash scripts/lint-wire.sh
 	bash scripts/lint-plugins.sh
@@ -175,6 +184,10 @@ check:
 	# runs in check, so a syntax error there would otherwise land unseen.
 	python3 -m py_compile tools/*.py scripts/gen_provenance.py
 	python3 tools/provenance_scan.py
+	# Catalog freshness gate: docs/catalogs/*.md is rendered from source by
+	# tools/gen_docs_catalogs.py; regenerate with `make docs-catalogs` and commit
+	# the pages with the source change. Same pattern as the provenance page gate.
+	python3 tools/gen_docs_catalogs.py --check
 	# Dashboard freshness gate: gen_provenance.py regenerates docs/provenance.html
 	# from the live GAP_ANALYSIS markers; fail when the committed page is stale
 	# (regenerate and commit it with the doc change). Same pattern as the webui

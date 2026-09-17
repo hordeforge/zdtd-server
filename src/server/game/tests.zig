@@ -4332,6 +4332,224 @@ test "equipped item passives fold into the survival VM (stock data)" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.05), g.sim.buff_general_resist[ps], 0.0001);
 }
 
+test "rogue armor quiets stealth noise while crouching (NoiseMultiplier)" {
+    // Stock `PlayerStealth.CalcVolume`/`NotifyNoise` multiply the volume by
+    // `GetValue(88 NoiseMultiplier)`. armorRogueOutfit carries Q6 -.2 gated
+    // `CVarCompare _crouching`, which the server mirrors from the move flags;
+    // perkFromTheShadows level 5 folds -.5 untagged. The survival tick caches
+    // the product for the stealth legs.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.sim.stealth_noise_mult[ps], 0.0001);
+    const rogue = g.items.byName("armorRogueOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, rogue.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == rogue.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    // Standing: the _crouching gate refuses, the fold stays neutral.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.sim.stealth_noise_mult[ps], 0.0001);
+    // Crouched: the gate passes and Q6 -.2 joins (1 x 0.8).
+    _ = cl.cvars.apply("_crouching", .set, 1);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), g.sim.stealth_noise_mult[ps], 0.0001);
+    // Plus perkFromTheShadows 5 (-.5): 0.8 x 0.5.
+    cl.skill_levels[0] = .{ .name = "perkFromTheShadows", .level = 5 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), g.sim.stealth_noise_mult[ps], 0.0001);
+    // Revertible: standing again drops both crouch-gated rows (the perk's
+    // whole effect_group requires _crouching too).
+    _ = cl.cvars.apply("_crouching", .set, 0);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.sim.stealth_noise_mult[ps], 0.0001);
+}
+
+test "rogue armor dims stealth light in the dark (LightMultiplier)" {
+    // Stock `PlayerStealth.TickServer` blends GetValue(89 LightMultiplier)
+    // into lightLevel as (0.32 + 0.68 x p). armorRogueOutfit carries Q6 -.3
+    // gated `_lightlevel` LTE 65; the broadcast mirrors the pre-blend light
+    // x100 into that cvar (IL_00B9), and perkNightStalkerSilentNight folds an
+    // ungated -.05. The survival tick caches the product for the sight legs.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Pin the Rules knob to neutral so the test asserts the pure VM fold
+    // (the column otherwise scales by the 0.89 operator default).
+    g.sim.rules.ai.stealth_light_passive = 1.0;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.sim.stealth_light_mult[ps], 0.0001);
+    const rogue = g.items.byName("armorRogueOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, rogue.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == rogue.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    // Dark (ambient 0, no held light): the pre-blend mirror reads 0, the LTE
+    // 65 gate passes, Q6 -.3 joins. The whole effect_group also requires
+    // _crouching, so crouch first (pre-blend stays 0 in the dark).
+    _ = cl.cvars.apply("_crouching", .set, 1);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("_lightlevel"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), g.sim.stealth_light_mult[ps], 0.0001);
+    // Plus perkNightStalkerSilentNight (-.05, night-gated): 0.7 x 0.95.
+    // Midnight forces IsNight.
+    g.sim.director.clock.hours = 0;
+    cl.skill_levels[0] = .{ .name = "perkNightStalkerSilentNight", .level = 1 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.665), g.sim.stealth_light_mult[ps], 0.0001);
+    // Revertible: taking the armor off restores the perk-only leg.
+    try std.testing.expect(ecs.inventory.move(&g.sim, cl.slot, ecs.components.inv_equip_start, from, 1));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.95), g.sim.stealth_light_mult[ps], 0.0001);
+    // Bright: a directly-applied 100 refuses the LTE 65 armor gate while the
+    // night-gated (still night) perk row keeps folding.
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    _ = cl.cvars.apply("_lightlevel", .set, 100);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.95), g.sim.stealth_light_mult[ps], 0.0001);
+    // The broadcast mirrors the live pre-blend light x100 into `_lightlevel`
+    // (IL_00B9); at this midnight ambient it overwrites the 100 above with
+    // the dark value, which re-opens the armor gate. The mirror lags one
+    // broadcast (16 ticks); the re check uses a loose band since the ambient
+    // drifts slightly across the lag window.
+    try stepTicks(g, 20);
+    const expect_mirror = systems.stealthLightPreBlend(g.sim.ambient_light, g.sim.heldLightFor(ps), g.sim.player[ps].crouching) * 100.0;
+    try std.testing.expectApproxEqAbs(expect_mirror, cl.cvars.get("_lightlevel"), 2.0);
+}
+
+test "rogue helmet raises loot stage (LootStage passive 159)" {
+    // Stock `EntityPlayer.GetLootStage` multiplies the floored total by
+    // GetValue(159 LootStage) (IL_00E1). armorRogueHelmet carries an ungated
+    // tiered row (Q6 +.2); perkLuckyLooter level 5 folds +.25 on top.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.level = 10;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.sim.loot_stage_mult[ps], 0.0001);
+    try std.testing.expectEqual(@as(i32, 10), g.lootStageOf(cl.slot));
+    const helm = g.items.byName("armorRogueHelmet") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, helm.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == helm.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.2), g.sim.loot_stage_mult[ps], 0.0001);
+    try std.testing.expectEqual(@as(i32, 12), g.lootStageOf(cl.slot));
+    // Plus perkLuckyLooter 5 (+.25): 1.2 x 1.25 = 1.5, floor(10) x 1.5 = 15.
+    cl.skill_levels[0] = .{ .name = "perkLuckyLooter", .level = 5 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), g.sim.loot_stage_mult[ps], 0.0001);
+    try std.testing.expectEqual(@as(i32, 15), g.lootStageOf(cl.slot));
+}
+
+test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
+    // Stock `SpawnItem` scales the rolled count by GetValue(81 LootQuantity)
+    // over the spawned item's tags (IL_0040). buffRogueSetBonus carries
+    // tiered dukes rows (Equals N lowest quality -> +.05..+.3); with four
+    // Q1 rogue pieces the Equals-1 row folds, so a 20-dukes stack lands 21.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // No rows: the base count passes through.
+    try std.testing.expectEqual(@as(u16, 20), g.lootQtyScale(cl.slot, ps, "casinoCoin", "", 20));
+    // Four Q1 rogue pieces + the set bonus buff: Equals-1 row (+.05) folds
+    // over the spawned item's own "dukes" tags.
+    for ([_][]const u8{ "armorRogueHelmet", "armorRogueOutfit", "armorRogueGloves", "armorRogueBoots" }, 0..) |name, i| {
+        const def = g.items.byName(name) orelse return error.SkipZigTest;
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = 1 };
+    }
+    const bonus = g.buffs.indexOfName("buffRogueSetBonus") orelse return error.SkipZigTest;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = bonus,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    try std.testing.expectEqual(@as(u16, 21), g.lootQtyScale(cl.slot, ps, "casinoCoin", "", 20));
+    // An unrelated item's tags see no row: unchanged.
+    try std.testing.expectEqual(@as(u16, 20), g.lootQtyScale(cl.slot, ps, "resourceWood", "", 20));
+}
+
 test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
     // perkHardTarget's `GeneralDamageResist base_add level="1,5" value=".05,.25"`
     // sits in an effect_group gated `EntityHasMovementTag tags="walking,running"`.
@@ -4480,6 +4698,193 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     try std.testing.expectApproxEqAbs(@as(f32, 0.3), running.stamina_ot, 0.0001);
     const untagged = assets_progression.perkTotals(&g.progression_table, cl.skill_levels[0..cl.skill_level_n], .{}, &counts);
     try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
+}
+
+test "sprint drain consumes running-tagged StaminaChangeOT (perkRuleOneCardio)" {
+    // Rules floor is 12/s. Cardio L5 adds StaminaChangeOT perc_add 0.3 tags=running,
+    // so sprint drain becomes 12 - 0.3*stamina_max/100 per second. At max 150 that
+    // is 12 - 0.45 = 11.55/s. Idle must still ignore the tagged row (covered above).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkRuleOneCardio", .level = 5 };
+    cl.skill_level_n = 1;
+    try g.step();
+    const stam_max = g.sim.health[ps].stamina_max;
+    try std.testing.expect(stam_max > 0);
+    g.sim.health[ps].stamina = 100;
+    cl.sprint_speed = 5;
+    cl.sprint_stale_cd = 5.0;
+    cl.move_tag = .running;
+    const before = g.sim.health[ps].stamina;
+    g.tickSurvival(1.0);
+    const lost = before - g.sim.health[ps].stamina;
+    // 12 - 0.3 * stam_max / 100
+    const expected = 12.0 - 0.3 * stam_max / 100.0;
+    try std.testing.expectApproxEqAbs(expected, lost, 0.05);
+}
+
+test "walk regen consumes walking-tagged StaminaChangeOT (armorFarmerHelmet)" {
+    // Rules regen is 8/s. One medium armor piece adds StaminaChangeOT perc_add
+    // -.0281 tags=walking, so walk regen becomes 8 + (-.0281)*stamina_max/100.
+    // At max 150 that is 8 - 0.04215 = 7.95785/s. Idle (move_tag=.idle) must
+    // ignore the tagged row (same gate as the cardio idle test).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const helm = g.items.byName("armorFarmerHelmet").?;
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = helm.id, .count = 1, .quality = 1 };
+    try g.step();
+    // Spawn stamina_max is data-driven (often 100); fold against the live max.
+    const stam_max = g.sim.health[ps].stamina_max;
+    try std.testing.expect(stam_max > 0);
+    g.sim.health[ps].stamina = 50;
+    cl.sprint_speed = 0;
+    // Keep the stale timer from clearing move_tag mid-tick.
+    cl.sprint_stale_cd = 0;
+    cl.move_tag = .walking;
+    const before = g.sim.health[ps].stamina;
+    g.tickSurvival(1.0);
+    const gained = g.sim.health[ps].stamina - before;
+    // 8 + (-0.0281)*stam_max/100
+    const expected = 8.0 + (-0.0281) * stam_max / 100.0;
+    try std.testing.expectApproxEqAbs(expected, gained, 0.05);
+    // Idle must not apply the walking row.
+    g.sim.health[ps].stamina = 50;
+    cl.move_tag = .idle;
+    const before_idle = g.sim.health[ps].stamina;
+    g.tickSurvival(1.0);
+    const gained_idle = g.sim.health[ps].stamina - before_idle;
+    try std.testing.expectApproxEqAbs(@as(f32, 8.0), gained_idle, 0.05);
+}
+
+test "FoodChangeOT and WaterChangeOT join the survival totals" {
+    // UpdatePlayerFoodOT / UpdatePlayerWaterOT (IL=71): GetValue(115/123) * dt
+    // joins Stat.regenAmount; Stat.Tick adds it. Rules depletion is the floor;
+    // VM OT composes on top. Stock messmeup FoodChangeOT base_subtract 10 and
+    // buffBurningEnvironment WaterChangeOT base_subtract .3. use_buff needs the
+    // stock survival table (buffStatusCheck01), so keep game-dir buffs intact.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.sim.rules.progression.food_depletion_per_hour = 0;
+    g.sim.rules.progression.water_depletion_per_hour = 0;
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const food_id = g.buffs.indexOfName("messmeup") orelse return error.SkipZigTest;
+    const water_id = g.buffs.indexOfName("buffBurningEnvironment") orelse return error.SkipZigTest;
+    // Join/tickSurvival onSelfEnteredGame re-adds class buffs (NewbieCoat
+    // Food/WaterChangeOT +2). Wipe after arming entered_game_fired so the
+    // lifecycle does not put them back, then keep only the OT rows under test.
+    cl.entered_game_fired = true;
+    for (&g.sim.buffsMut(ps).slots) |*s| s.* = .{};
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = food_id,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = water_id,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    g.sim.health[ps].food = 50;
+    g.sim.health[ps].water = 50;
+    g.tickSurvival(1.0);
+    // messmeup Food/WaterChangeOT -10; BurningEnvironment WaterChangeOT -0.3
+    try std.testing.expectApproxEqAbs(@as(f32, 40), g.sim.health[ps].food, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 39.7), g.sim.health[ps].water, 0.05);
+}
+
+test "HungerMultiplier scales negative FoodChangeOT (loss sandbox modifier)" {
+    // `UpdatePlayerFoodOT` IL=71: a negative regenAmount is multiplied by
+    // `Stat.LossSandboxModifier`, which `UpdateSandboxOptions` IL=21 loads
+    // from option 161 HungerMultiplier. Water runs option 162 ThirstMultiplier.
+    // Triplets: [GFG]=161@6, [GGI]=162@8; the StaminaUsage set is
+    // {0,.25,.5,.75,1,1.25,1.5,1.75,2}, so index 6 ("G") = 1.5 and
+    // index 8 ("I") = 2.0. use_buff needs the stock survival table, so keep
+    // game-dir buffs intact and wipe only the player's BuffSet.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.sim.rules.progression.food_depletion_per_hour = 0;
+    g.sim.rules.progression.water_depletion_per_hour = 0;
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const food_id = g.buffs.indexOfName("messmeup") orelse return error.SkipZigTest;
+    cl.entered_game_fired = true;
+    for (&g.sim.buffsMut(ps).slots) |*s| s.* = .{};
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = food_id,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    // HungerMultiplier 1.5 on the -10 messmeup food OT; ThirstMultiplier 2.0
+    // on its -10 water OT.
+    g.sandbox_code = "AGFGGGI";
+    g.sim.health[ps].food = 50;
+    g.sim.health[ps].water = 50;
+    g.tickSurvival(1.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 35), g.sim.health[ps].food, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 30), g.sim.health[ps].water, 0.05);
 }
 
 test "the armor-set bonus is granted from xml when the full set is worn" {
@@ -4847,6 +5252,13 @@ test "a gated perk row stops folding when its requirement fails" {
     h.water = 0.4 * h.water_max;
     try g.step();
     try std.testing.expect(h.hp > 50);
+    // NewbieCoat lands via onSelfEnteredGame on that first step and carries
+    // ungated +2/s Food/Water/HealthChangeOT (duration 0,20); blank its slot
+    // now so the dehydrated settle and measured ticks below see only the rows
+    // under test.
+    if (g.buffs.indexOfName("buffNewbieCoat")) |nc| {
+        if (g.sim.buffsMut(ps).find(nc)) |slot| slot.* = .{};
+    }
 
     // Dehydrated (1% of max -> stage 3): the stage buffs go active during the
     // pass, so the negated HasBuff gate refuses the regen. Settle first: a stage
@@ -5162,6 +5574,13 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     h.max_hp = 100;
     const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
     const hungry03 = g.buffs.indexOfName("buffStatusHungry03").?;
+    // One step to let onSelfEnteredGame land NewbieCoat (ungated +2/s
+    // Food/WaterChangeOT, duration 0,20), then blank its slot so the settle
+    // below keeps the bars under the 2% stage threshold.
+    try g.step();
+    if (g.buffs.indexOfName("buffNewbieCoat")) |nc| {
+        if (g.sim.buffsMut(ps).find(nc)) |slot| slot.* = .{};
+    }
     // Stage 3 of both bars (<= 2% of max). The transition tick requests every
     // passing stage row (nothing is active yet), so the lower stages are marked
     // Remove on the next tick and reaped on the one after.

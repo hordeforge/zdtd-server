@@ -67,7 +67,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .y = w.transform[j].y,
             .z = w.transform[j].z,
             .crouching = w.player[j].crouching,
-            .light_level = stealthLightLevel(w.ambient_light, w.heldLightFor(j), w.player[j].crouching, w.rules.ai.stealth_light_passive, w.stealth[j].speed_average),
+            .light_level = stealthLightLevel(w.ambient_light, w.heldLightFor(j), w.player[j].crouching, w.stealth_light_mult[j], w.stealth[j].speed_average),
             .self_light = w.heldLightFor(j),
         };
         n += 1;
@@ -119,23 +119,32 @@ fn stealthLightAttackPercent(self_light: f32, passive: f32) f32 {
     return if (self_light < stealth_self_light_dark) passive else 1.0;
 }
 
-/// Stock `PlayerStealth.TickServer` lightLevel (IL=0131-014F): the stealth
-/// light byte consumed by both the NetPackageEntityStealth S2C (Setup IL=26
-/// conv.u1 of lightLevel) and the CanSeeStealth sight gate. Chain: light =
+/// Stock `PlayerStealth.TickServer` pre-blend light (IL_0078-00B9):
 /// GetStealthLightLevel (slice-1 ambient + the selfLight held-item blend,
 /// RE entity-ai.md: ratio = FastClamp(selfLight / (light + 0.05), 0.5, 3.2),
 /// light += selfLight x ratio; selfLight = the AlwaysActive held item's
 /// items.xml LightValue, Inventory.GetLightLevel IL=76), crouch ×0.6
-/// (IL_00A6), the speedAverage visibility scale (1 + speed×0.15, IL_00CD) is
-/// 0 for a standing player, then `lightLevel = clamp(light × (0.32 + 0.68 ×
-/// passive89) × 100, 0, 200)`. passive89 = rules.ai.stealth_light_passive.
-pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, passive: f32, speed_average: f32) f32 {
+/// (IL_00A6). Stock writes this x100 into the `_lightlevel` cvar (IL_00B9)
+/// before the speed scale and the passive blend below.
+pub fn stealthLightPreBlend(ambient_light: f32, self_light: f32, crouching: bool) f32 {
     var light = ambient_light;
     if (self_light > 0) {
         const ratio = std.math.clamp(self_light / (light + 0.05), 0.5, 3.2);
         light += self_light * ratio;
     }
     light *= if (crouching) stealth_crouch_light_scale else 1.0;
+    return light;
+}
+
+/// Stock `PlayerStealth.TickServer` lightLevel (IL=0131-014F): the stealth
+/// light byte consumed by both the NetPackageEntityStealth S2C (Setup IL=26
+/// conv.u1 of lightLevel) and the CanSeeStealth sight gate. Chain: the
+/// pre-blend light above, the speedAverage visibility scale (1 + speed×0.15,
+/// IL_00CD, 0 for a standing player), then `lightLevel = clamp(light ×
+/// (0.32 + 0.68 × passive89) × 100, 0, 200)`. passive89 = the cached
+/// LightMultiplier fold (1.0 offline).
+pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, passive: f32, speed_average: f32) f32 {
+    var light = stealthLightPreBlend(ambient_light, self_light, crouching);
     // IL_00CD-00E0: movement visibility `x (1 + speedAverage x 0.15)`.
     light *= 1.0 + speed_average * stealth_speed_visibility_scale;
     const folded = light * (stealth_light_passive_blend_a + stealth_light_passive_blend_b * passive) * 100.0;
@@ -1915,7 +1924,7 @@ const AiCtx = struct {
                     // always, a held light (torch/flashlight) raises it to 1,
                     // so the crouch range FastLerp(3, 15, t) stretches to the
                     // full 15.
-                    const lap = stealthLightAttackPercent(pl.self_light, ar.stealth_light_passive);
+                    const lap = stealthLightAttackPercent(pl.self_light, ctx.w.stealth_light_mult[pl.slot]);
                     const crouch_reach = ar.crouch_sleeper_detect_min +
                         (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
                     const wake_reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
@@ -2872,10 +2881,12 @@ fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
     }
     // A loud noise (volume >= 11) pauses the sleeper-volume decay window.
     if (volume >= r.stealth_loud_volume) st.sleeper_noise_wait_ticks = r.stealth_loud_wait_ticks;
-    // NotifyNoise curve: > 60 becomes 60 + (v-60)^1.4, then the Noise passive.
+    // NotifyNoise curve: > 60 becomes 60 + (v-60)^1.4, then the Noise passive
+    // (GetValue(88) off the victim's buffs/perks/worn items, cached per tick
+    // by the survival pass; the column falls back to the Rules floor offline).
     var eff = volume;
     if (volume > 60) eff = 60 + std.math.pow(f32, volume - 60, 1.4);
-    eff *= r.stealth_noise_passive;
+    eff *= w.stealth_noise_mult[s];
     st.sleeper_noise_volume += eff;
     if (st.sleeper_noise_volume >= r.stealth_sleeper_wake_volume) {
         st.sleeper_noise_volume = r.stealth_sleeper_wake_volume;
@@ -2932,7 +2943,7 @@ fn stealthTick(w: *World, s: Slot) void {
         wgt *= r.stealth_noise_decay;
     }
     const vol = std.math.pow(f32, sum * r.stealth_noise_curve_a, r.stealth_noise_curve_b) *
-        r.stealth_noise_scale * r.stealth_noise_passive;
+        r.stealth_noise_scale * w.stealth_noise_mult[s];
     st.noise_volume = vol;
     // Sleeper-volume decay: 2.5/tick once the loud-noise wait window elapses.
     if (st.sleeper_noise_wait_ticks > 0) {
@@ -7245,6 +7256,45 @@ test "stealth noise: crouch muffle scales the noise volume" {
     try std.testing.expect(crouched < standing);
     // Entry volume carries the muffle: 5 x 0.507.
     try std.testing.expectApproxEqAbs(@as(f32, 5 * 0.507), w.stealth[ps].noises[0].volume, 0.001);
+}
+
+test "stealth light: pre-blend feeds the _lightlevel cvar" {
+    // RE PlayerStealth TickServer IL_0078-00B9: ambient + held-light blend
+    // (ratio clamped 0.5..3.2), crouch x0.6, then `_lightlevel = light x 100`
+    // before the speed scale and passive blend.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), stealthLightPreBlend(0, 0, false), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), stealthLightPreBlend(0, 0, true), 0.0001);
+    // Torch .35 on dark 0.05: ratio .35/.1 = 3.5 -> clamped 3.2.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05 + 0.35 * 3.2), stealthLightPreBlend(0.05, 0.35, false), 0.0001);
+    // Crouch x0.6 on the blended value.
+    try std.testing.expectApproxEqAbs(@as(f32, (0.5 + 0.0) * 0.6), stealthLightPreBlend(0.5, 0, true), 0.0001);
+    // The full level still matches the old inline math at passive 1.
+    try std.testing.expectApproxEqAbs(stealthLightLevel(0.5, 0, false, 1.0, 0), (0.32 + 0.68) * 0.5 * 100.0, 0.001);
+}
+
+test "stealth noise: cached NoiseMultiplier scales both volumes" {
+    // RE PlayerStealth CalcVolume/NotifyNoise: each multiplies by GetValue(88
+    // NoiseMultiplier). The survival tick caches the buff/perk/item fold in
+    // stealth_noise_mult; the legs read the column, defaulting to the neutral
+    // base 1.0 offline.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Volume 20 >= the loud threshold (11), so the decay window pauses and the
+    // accumulated posts are exact on both runs (CalcVolume never decays).
+    w.pushStealthNoise(ps, 0, 70, 0, 20, 20, 1.0, 0);
+    systemStealth(&w);
+    const base_vol = w.stealth[ps].noise_volume;
+    const base_sleep = w.stealth[ps].sleeper_noise_volume;
+    try std.testing.expect(base_vol > 0);
+    try std.testing.expect(base_sleep > 0);
+    w.stealth[ps] = .{};
+    w.stealth_noise_mult[ps] = 0.5;
+    w.pushStealthNoise(ps, 0, 70, 0, 20, 20, 1.0, 0);
+    systemStealth(&w);
+    try std.testing.expectApproxEqAbs(base_vol * 0.5, w.stealth[ps].noise_volume, 0.001);
+    try std.testing.expectApproxEqAbs(base_sleep * 0.5, w.stealth[ps].sleeper_noise_volume, 0.001);
 }
 
 test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {

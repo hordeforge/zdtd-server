@@ -1701,6 +1701,12 @@ pub const Game = struct {
         return game_player.lootProbScale(self, peer_slot, ps, tags, base);
     }
 
+    /// Fold the opening player's `LootQuantity` passives onto a spawned
+    /// stack's count (stock `SpawnItem` -> GetValue(81, tags), truncated).
+    pub fn lootQtyScale(self: *Game, peer_slot: usize, ps: ecs.Slot, item_name: []const u8, entry_tags: []const u8, base: u16) u16 {
+        return game_player.lootQtyScale(self, peer_slot, ps, item_name, entry_tags, base);
+    }
+
     pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
         return game_player.addProgressionLevel(self, slot, name, delta);
     }

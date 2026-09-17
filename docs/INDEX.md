@@ -39,6 +39,9 @@ New to the project, or picking up work:
    method, gates, honesty rules; picked up by `~/review-prompts`).
 10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
+11. [AGENTS.md](AGENTS.md) the documentation standard (tier map, writing rules,
+   gates), and [subsystems/](subsystems/README.md) the per-subsystem reference
+   pages. Both are checked by `tools/check_docs.py` in `make lint`.
 
 ## Document series (PRD / RFC / ADR)
 
@@ -122,6 +125,21 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [SCALE.md](SCALE.md) | M11 single-node scale switches + planet-scale shard plan (parked until M11 numbers exist) |
+
+## Documentation standards
+
+Where each kind of fact lives, and the gates that keep the pages honest.
+
+| Doc | Role |
+|---|---|
+| [AGENTS.md](AGENTS.md) | **Documentation standard**: the tier map (one home per fact), writing rules, gate list, slop checklist |
+| [subsystems/README.md](subsystems/README.md) | One reference page per subsystem: type definitions, wire layouts, wiring, with checked `file:LINE` citations |
+| [glossary.md](glossary.md) | One canonical term per concept, linked to its owner page |
+| [testing.md](testing.md) | What each gate proves (unit, scenarios, loadgen, stock client, APM), and the evidence rules |
+| [cookbook/](cookbook/README.md) | Numbered how-tos: add a tunable, a stock package body, a C2S handler, a scenario, a core plugin, a doc page |
+| [catalogs/](catalogs/README.md) | Generated exhaustive tables: config keys, admin verbs, save formats, module graph |
+| [budgets.json](budgets.json) | Word ceilings for the standing docs and the checked trees, enforced by `tools/check_docs.py` |
+| [postmortem/](postmortem/README.md) | Dated incident records: what happened, why the gates passed, what catches it now |
 
 ## Review prompts and their findings
 

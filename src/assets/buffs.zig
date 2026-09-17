@@ -1355,6 +1355,22 @@ pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requir
     return out;
 }
 
+/// Named-passive fold over an entity's active buffs (same duration axis as
+/// `effectTotals`, chained over `base`). For multiplicative passives like
+/// NoiseMultiplier (passive 88) that live outside the additive tracked
+/// surface: `PlayerStealth.CalcVolume`/`NotifyNoise` multiply the volume by
+/// `GetValue(88)`.
+pub fn namedBuffFold(t: *const Table, set: *const components.BuffSet, name: []const u8, base: f32, ctx: requirements.Ctx, counts: *requirements.Counts) f32 {
+    var out = base;
+    for (&set.slots) |*slot| {
+        if (!slot.active) continue;
+        if (t.byId(slot.def_id)) |def| {
+            out = namedPassiveFold(name, def.passives, .{ .duration = slot.durationSeconds() }, ctx, out, counts);
+        }
+    }
+    return out;
+}
+
 /// Active survival-stage state: which buffStatusHungry/Thirsty stage is in
 /// effect, from buffStatusCheck01's StatComparePercCurrentToMax thresholds
 /// (fractions of max). 0 = none; 1/2/3 = the buffStatus*0{1,2,3} stage.

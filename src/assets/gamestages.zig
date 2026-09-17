@@ -192,12 +192,16 @@ pub const LootInputs = struct {
     biome_min: ?i32 = null,
     biome_max: ?i32 = null,
     global_modifier: f32 = 1,
+    /// `EntityPlayer.GetLootStage` multiplies the total by GetValue(159
+    /// LootStage) before flooring (IL_00E1). The survival tick folds the
+    /// buff/perk/item rows into the per-entity cache the caller passes here.
+    loot_mult: f32 = 1,
 };
 
 pub fn lootStage(in: LootInputs) i32 {
     const level: f32 = @floatFromInt(in.level);
-    const base = level * (1 + in.poi_tier_mod + in.biome_mod + in.container_mod) +
-        (in.poi_tier_bonus + in.biome_bonus + in.container_bonus);
+    const base = (level * (1 + in.poi_tier_mod + in.biome_mod + in.container_mod) +
+        (in.poi_tier_bonus + in.biome_bonus + in.container_bonus)) * in.loot_mult;
     if (!std.math.isFinite(base)) return 1;
     var stage = floorToI32(base);
     if (in.biome_min) |lo| stage = @max(stage, lo);

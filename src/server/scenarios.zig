@@ -12731,6 +12731,10 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, ca.entity_id, packages.cF_crouching)));
     const psa = g.sim.slotOfNetId(ca.entity_id) orelse return error.TestUnexpectedResult;
     try std.testing.expect(g.sim.player[psa].crouching);
+    // The crouch mirrors into the `_crouching` cvar the stealth-armor
+    // NoiseMultiplier rows gate on (stock sets it client-side; the server
+    // projects it from the flags word).
+    try std.testing.expectApproxEqAbs(@as(f32, 1), ca.cvars.get("_crouching"), 0.001);
 
     // A reports B as crouching: refused, B's state untouched.
     try std.testing.expect(!g.sim.player[psb].crouching);

@@ -197,6 +197,18 @@ pub const ProbScale = struct {
     scale: *const fn (?*anyopaque, tags: []const u8, base: f32) f32,
 };
 
+/// `SpawnItem`'s LootQuantity fold: the Game resolves the opening player's
+/// `LootQuantity` rows (passive 81) for the spawned item, returning the
+/// scaled count. Stock queries `GetValue(81, ..., itemTags|containerTags)`
+/// and truncates to int, clamped by the item MaxCount. The entry name rides
+/// along so the Game can union the spawned item def's own tags (e.g.
+/// casinoCoin's "dukes") with the entry's list; container tags are not
+/// carried (no stock LootQuantity row keys off them).
+pub const QtyScale = struct {
+    ctx: ?*anyopaque = null,
+    scale: *const fn (?*anyopaque, item_name: []const u8, entry_tags: []const u8, base: u16) u16,
+};
+
 pub const LootGateCtx = struct {
     biome_name: ?[]const u8 = null,
     player: ?requirements.Ctx = null,
@@ -206,6 +218,10 @@ pub const LootGateCtx = struct {
     /// `getProbability` -> `EffectManager.GetValue(79, ..., entry.tags)`, the
     /// player's LootProb passives; 128 stock rows). Null = no scaling.
     prob_scale: ?ProbScale = null,
+    /// Scales a spawned stack's count by the `LootQuantity` fold (stock
+    /// `SpawnItem` -> `GetValue(81, ...)` truncated to int). Null = no
+    /// scaling.
+    qty_scale: ?QtyScale = null,
     /// [0,1) value for this entry's `RandomRoll`; the roll path advances a
     /// deterministic per-entry stream into it.
     roll: f32 = 0,
@@ -498,6 +514,16 @@ pub const LootTable = struct {
         return @intCast(@min(total, std.math.maxInt(u16)));
     }
 
+    /// Scale a finalized stack count by the `LootQuantity` fold (stock
+    /// `SpawnItem`: `(int)GetValue(81, holdingItem, count, ...)`). The sink
+    /// resolves the player's rows; a 0 result drops the stack like stock's
+    /// `countToSpawn < 1` early-out (IL_0058).
+    fn qtyCount(self: *const LootTable, e: LootEntry, cnt: u16, ctx: LootGateCtx) u16 {
+        _ = self;
+        if (ctx.qty_scale) |qs| return qs.scale(qs.ctx, e.name, e.tags, cnt);
+        return cnt;
+    }
+
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32, ctx: LootGateCtx) bool {
         var p = self.entryProb(e, loot_stage);
         // The entry's own `tags=` are the query set for the player's LootProb
@@ -589,7 +615,7 @@ pub const LootTable = struct {
                     reportBuffs(gctx, e);
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
-                    const cnt = self.stageCount(self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult), e, loot_stage);
+                    const cnt = self.qtyCount(e, self.stageCount(self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult), e, loot_stage), ctx);
                     if (cnt == 0) continue; // disabled category spawns none
                     out[n] = .{
                         .item_name = e.name,
@@ -640,7 +666,7 @@ pub const LootTable = struct {
                 const cmax = if (picked.count_max >= cmin) picked.count_max else cmin;
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked, loot_stage);
+                const cnt = self.qtyCount(picked, self.stageCount(self.scaleCount(cnt0, true, mult), picked, loot_stage), ctx);
                 if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{
                     .item_name = picked.name,
@@ -721,7 +747,7 @@ pub const LootTable = struct {
                 // overflow; widen so the modulo never sees a wrapped zero.
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                const cnt = self.stageCount(self.scaleCount(cnt0, !cont.ignore_abundance, 1.0), picked_e, loot_stage);
+                const cnt = self.qtyCount(picked_e, self.stageCount(self.scaleCount(cnt0, !cont.ignore_abundance, 1.0), picked_e, loot_stage), ctx);
                 if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{
                     .item_name = picked_e.name,
@@ -775,7 +801,7 @@ pub const LootTable = struct {
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                     const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                     const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                    const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), e, loot_stage);
+                    const cnt = self.qtyCount(e, self.stageCount(self.scaleCount(cnt0, true, mult), e, loot_stage), ctx);
                     if (cnt == 0) continue; // disabled category spawns none
                     out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = e.random_durability, .mods = e.mods, .mod_chance = e.mod_chance };
                     an += 1;
@@ -832,7 +858,7 @@ pub const LootTable = struct {
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked_e, loot_stage);
+                const cnt = self.qtyCount(picked_e, self.stageCount(self.scaleCount(cnt0, true, mult), picked_e, loot_stage), ctx);
                 if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = picked_e.random_durability, .mods = picked_e.mods, .mod_chance = picked_e.mod_chance };
                 n += 1;
@@ -1654,6 +1680,44 @@ test "loot entry tags feed the LootProb scale" {
     fx.answer = 0;
     const none = count_tagged(&lt, sink, &stacks);
     try std.testing.expectEqual(@as(usize, 0), none);
+}
+
+test "qty_scale scales spawned counts and drops zeroed stacks" {
+    // `SpawnItem` applies `(int)GetValue(81 LootQuantity)` per spawned stack.
+    const src =
+        \\<lootcontainers>
+        \\<lootcontainer name="qtyc" size="6,1">
+        \\  <item name="tenThing" count="10,10"/>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    const Fx = struct {
+        mult: f32 = 1.0,
+        seen_name: []const u8 = "",
+        fn scale(ctx: ?*anyopaque, item_name: []const u8, entry_tags: []const u8, base: u16) u16 {
+            const f: *@This() = @ptrCast(@alignCast(ctx.?));
+            f.seen_name = item_name;
+            _ = entry_tags;
+            return @intFromFloat(@as(f32, @floatFromInt(base)) * f.mult);
+        }
+    };
+    var stacks: [4]Stack = undefined;
+    var fx: Fx = .{};
+    const sink = QtyScale{ .ctx = &fx, .scale = Fx.scale };
+    const n = lt.rollContainer("qtyc", 1, 7, &stacks, .{ .qty_scale = sink });
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("tenThing", fx.seen_name);
+    try std.testing.expectEqual(@as(u16, 10), stacks[0].count);
+    // Without a sink the count passes through untouched.
+    const m = lt.rollContainer("qtyc", 1, 7, &stacks, .{});
+    try std.testing.expectEqual(@as(usize, 1), m);
+    try std.testing.expectEqual(@as(u16, 10), stacks[0].count);
+    // A zeroed scale drops the stack (stock IL_0058 early-out).
+    fx.mult = 0;
+    const z = lt.rollContainer("qtyc", 1, 7, &stacks, .{ .qty_scale = sink });
+    try std.testing.expectEqual(@as(usize, 0), z);
 }
 
 test "random_durability marks the stack and the wear formula matches stock" {
