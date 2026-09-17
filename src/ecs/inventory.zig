@@ -144,8 +144,7 @@ pub fn generalDamageResist(w: *const World, ps: Slot) f32 {
 /// the equipped armor's summed PhysicalDamageResist percent at its quality
 /// (stock GetTotalPhysicalArmorRating sums passive 41 on the wearer;
 /// Equipment.CalcDamage reduces physical damage by rating/100, see
-/// combat-damage.md). The pieces-rate floor stands only when no XML row resolved
-/// (offline/builtin catalog).
+/// combat-damage.md).
 pub fn armorMitigation(w: *const World, peer: usize) f32 {
     const ps = w.playerByPeer(peer) orelse return 0;
     if (!w.mask[ps].inventory) return 0;
@@ -162,7 +161,7 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
         }
     }
     const item_mit = phys_pdr / 100.0;
-    const fallback = if (phys_pdr == 0) pieces * w.rules.combat.armor_mitigation_per_piece else 0;
+    const fallback = if (w.armor_pdr_fn == null) pieces * w.rules.combat.armor_mitigation_per_piece else 0;
     // The worn items' installed mods (EffectManager layer 13) join the same
     // rating: stock GetTotalPhysicalArmorRating sums passive 41 over the
     // items' effect layers, so modArmorPlatingBasic's +1 counts.
@@ -945,7 +944,7 @@ test "degradeUse counts uses upward from a pristine zero" {
     try std.testing.expect(!degradeUse(&w, 0, 9999, 1));
 }
 
-test "armorMitigation folds the equipped PDR percent; floor only when no XML row" {
+test "armorMitigation folds equipped PDR including zero; floor only without hook" {
     var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
@@ -965,6 +964,15 @@ test "armorMitigation folds the equipped PDR percent; floor only when no XML row
     // Buff-side resist joins (passive-41 sum on the wearer).
     w.buff_phys_resist[ps] = 5;
     try std.testing.expectApproxEqAbs(@as(f32, 0.13), armorMitigation(&w, 0), 0.001);
+    const Zero = struct {
+        fn pdr(_: ?*anyopaque, _: u16, _: u8) f32 {
+            return 0;
+        }
+    };
+    w.armor_pdr_fn = &Zero.pdr;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), armorMitigation(&w, 0), 0.001);
+    w.buff_phys_resist[ps] = 0;
+    try std.testing.expectEqual(@as(f32, 0), armorMitigation(&w, 0));
 }
 
 fn testPdr(_: ?*anyopaque, _: u16, _: u8) f32 {

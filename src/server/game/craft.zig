@@ -30,10 +30,11 @@ const game_social = @import("social.zig");
 /// ECS armor-PDR hook: the equipped item's PhysicalDamageResist percent at
 /// `quality` (1..6), evaluated from the items.xml quality curve (RE
 /// PassiveEffect.ModValue IL=796; GetTotalPhysicalArmorRating sums passive
-/// 41 on the wearer, combat-damage.md). 0 = the item carries no row, so the
-/// offline pieces-rate floor in armorMitigation stands.
+/// 41 on the wearer, combat-damage.md).
 pub fn armorPdr(ctx: ?*anyopaque, item_id: u16, quality: u8) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.source == .builtin and !g.stock_catalogs_requested)
+        return g.sim.rules.combat.armor_mitigation_per_piece * 100.0;
     if (g.items.byId(item_id)) |d| {
         if (d.phys_resist_n > 0) {
             const qmax = g.items.max_quality_tier;
@@ -787,6 +788,44 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
                 }
             }
         }
+    }
+}
+
+test "armorMitigation honors zero and missing XML resistance without offline floors" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    _ = g.sim.spawnPlayer(0, 70, 0, 0);
+    const ps = g.sim.playerByPeer(0).?;
+    g.sim.inventory[ps].slots[components.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    try std.testing.expectApproxEqAbs(g.sim.rules.combat.armor_mitigation_per_piece, invsys.armorMitigation(&g.sim, 0), 0.001);
+    g.stock_catalogs_requested = true;
+    try std.testing.expectEqual(@as(f32, 0), invsys.armorMitigation(&g.sim, 0));
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "items.xml", .data =
+        \\<items>
+        \\<item name="armorZero"><property name="EquipSlot" value="Head"/>
+        \\<effect_group><passive_effect name="PhysicalDamageResist" operation="base_add" value="0"/></effect_group></item>
+        \\<item name="armorMissing"><property name="EquipSlot" value="Head"/></item>
+        \\<item name="armorPositive"><property name="EquipSlot" value="Head"/>
+        \\<effect_group><passive_effect name="PhysicalDamageResist" operation="base_add" value="8"/></effect_group></item>
+        \\</items>
+    });
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{world_dir});
+    const loaded = try assets_items.loadFromPath(std.testing.allocator, path);
+    g.items.deinit();
+    g.items = loaded;
+    for ([_][]const u8{ "armorZero", "armorMissing", "armorPositive" }, [_]f32{ 0, 0, 0.08 }) |name, expected| {
+        const def = g.items.byName(name) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(itemIsArmor(g, def.id));
+        g.sim.inventory[ps].slots[components.inv_equip_start].item_id = def.id;
+        try std.testing.expectApproxEqAbs(expected, invsys.armorMitigation(&g.sim, 0), 0.001);
     }
 }
 
