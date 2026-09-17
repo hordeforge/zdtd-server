@@ -112,7 +112,7 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
     }
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
-        if (entry.kind != .file) continue;
+        if (try entryKind(dir, io, entry) != .file) continue;
         const name = try allocator.dupe(u8, entry.name);
         errdefer allocator.free(name);
         try names.append(allocator, name);
@@ -143,7 +143,7 @@ pub fn listDirNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]con
     }
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
-        if (entry.kind != .directory) continue;
+        if (try entryKind(dir, io, entry) != .directory) continue;
         const name = try allocator.dupe(u8, entry.name);
         errdefer allocator.free(name);
         try names.append(allocator, name);
@@ -239,6 +239,79 @@ pub fn readLinkAbsolute(absolute_path: []const u8, buf: []u8) ![]u8 {
     const io = threaded.io();
     const n = try std.Io.Dir.readLinkAbsolute(io, absolute_path, buf);
     return buf[0..n];
+}
+
+pub fn entryKind(dir: std.Io.Dir, io: std.Io, entry: std.Io.Dir.Entry) std.Io.Dir.StatFileError!std.Io.File.Kind {
+    if (entry.kind != .unknown) return entry.kind;
+    return (try dir.statFile(io, entry.name, .{ .follow_symlinks = false })).kind;
+}
+
+test "entryKind resolves unknown types without following symlinks" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "file", .data = "data" });
+    try tmp.dir.createDir(io, "dir", .default_dir);
+    try tmp.dir.symLink(io, "file", "file_link", .{});
+    try tmp.dir.symLink(io, "dir", "dir_link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "missing", "dangling", .{});
+
+    const cases = .{
+        .{ "file", std.Io.File.Kind.file },
+        .{ "dir", std.Io.File.Kind.directory },
+        .{ "file_link", std.Io.File.Kind.sym_link },
+        .{ "dir_link", std.Io.File.Kind.sym_link },
+        .{ "dangling", std.Io.File.Kind.sym_link },
+    };
+    inline for (cases) |case| {
+        try std.testing.expectEqual(case[1], try entryKind(tmp.dir, io, .{
+            .name = case[0],
+            .kind = .unknown,
+            .inode = 0,
+        }));
+    }
+    try std.testing.expectError(error.FileNotFound, entryKind(tmp.dir, io, .{
+        .name = "missing",
+        .kind = .unknown,
+        .inode = 0,
+    }));
+    try std.testing.expectEqual(.file, try entryKind(tmp.dir, io, .{
+        .name = "missing",
+        .kind = .file,
+        .inode = 0,
+    }));
+}
+
+test "directory listings sort names and exclude symlinks" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "z.xml", .data = "" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "a.xml", .data = "" });
+    try tmp.dir.createDir(io, "z_dir", .default_dir);
+    try tmp.dir.createDir(io, "a_dir", .default_dir);
+    try tmp.dir.symLink(io, "a.xml", "file_link", .{});
+    try tmp.dir.symLink(io, "a_dir", "dir_link", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "missing", "dangling", .{});
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = buf[0..try tmp.dir.realPath(io, &buf)];
+    const files = try listFileNames(a, path);
+    defer {
+        for (files) |name| a.free(name);
+        a.free(files);
+    }
+    const dirs = try listDirNames(a, path);
+    defer {
+        for (dirs) |name| a.free(name);
+        a.free(dirs);
+    }
+    try std.testing.expectEqual(@as(usize, 2), files.len);
+    try std.testing.expectEqualStrings("a.xml", files[0]);
+    try std.testing.expectEqualStrings("z.xml", files[1]);
+    try std.testing.expectEqual(@as(usize, 2), dirs.len);
+    try std.testing.expectEqualStrings("a_dir", dirs[0]);
+    try std.testing.expectEqualStrings("z_dir", dirs[1]);
 }
 
 test "write read roundtrip under cache dir" {

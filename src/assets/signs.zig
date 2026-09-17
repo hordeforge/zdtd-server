@@ -262,11 +262,12 @@ fn walkSigns(
         if (std.mem.eql(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "..")) continue;
         var child_buf: [2048]u8 = undefined;
         const child = std.fmt.bufPrint(&child_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
-        if (entry.kind == .directory) {
+        const kind = try io_fs.entryKind(dir, io, entry);
+        if (kind == .directory) {
             try walkSigns(gpa, arena, child, list);
             continue;
         }
-        if (entry.kind != .file) continue;
+        if (kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.name, "_signs.xml")) continue;
         const lib = entry.name[0 .. entry.name.len - "_signs.xml".len];
         try parseSignsFile(gpa, arena, child, lib, list);

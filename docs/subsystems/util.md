@@ -101,6 +101,8 @@ The materialize step is atomic, so a crash or full disk mid-write cannot corrupt
 
 The rest of the surface is deliberate and narrow: `mkdirPath` (`:66`), `listFileNames` and `listDirNames`, both sorted so filesystem readdir order cannot leak into deterministic behaviour (`:101`, `:120`, `:132`), `readFileAll`/`readFileInto` (`:160`, `:169`), `fileExists`, `fileMtimeNanos`, `dirExists` (`:178`, `:190`, `:201`), `deleteFile`, `removeDirTree`, `readLinkAbsolute` (`:211`, `:224`, `:236`). The one tick-path call is the stock `serveradmin.xml` hot reload, which polls `fileMtimeNanos` every 100 ticks and re-applies the XML only when the stamp moves (`src/server/game/tick.zig:1805`, `:1810`, `:1812`). Nothing else opens a file per tick.
 
+`entryKind` resolves unknown directory-entry types through directory-relative metadata without following symlinks (`src/util/io_fs.zig:244`). File/directory listings and prefab sign discovery use it so filesystems returning `DT_UNKNOWN` do not silently omit content; metadata errors propagate.
+
 `arena.zig` is the matching allocation helper for init and load work: a lazy per-table scratch arena created on first use and reused after (`src/util/arena.zig:1`). `newArenaHolder` heap-allocates and initializes one, and the caller still owns `errdefer { deinit; destroy }` (`src/util/arena.zig:6`); `ensureLazyArena` returns the existing allocator or creates one behind an optional pointer (`src/util/arena.zig:12`). This is the escape hatch that keeps hot paths free of the arena pattern: allocation is fine at init and load, and forbidden on the tick, packet, interest and chunk-stream paths (`AGENTS.md`, Memory).
 
 ## Optional range parallelism
