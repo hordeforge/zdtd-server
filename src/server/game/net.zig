@@ -180,6 +180,9 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
 /// callers own drop counters/logs and the packages_broadcast count (via
 /// count_broadcast).
 pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: u64, max_attempts: u32, count_broadcast: bool) !void {
+    const was_pumping = self.pumping;
+    self.pumping = true;
+    defer self.pumping = was_pumping;
     const retry_deadline: u64 = clock.monoNs() + budget_ns;
     const previous_send_deadline = peer.reliable_send_deadline_ns;
     peer.reliable_send_deadline_ns = retry_deadline;
@@ -579,6 +582,32 @@ test "the compressed set is exactly the stock get_Compress overrides we emit" {
         }
         try std.testing.expectEqual(expected, isCompressedPackage(n));
     }
+}
+
+test "reliable send pumping defers queued game payloads" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const peer = c.peer.?;
+    peer.pushExtra("queued game payload");
+    const packets_before = g.harness.counters.get(.net_packets_in);
+    g.sends_since_poll = 8;
+    try sendReliablePumped(g, peer, "test", "outbound", 0, 1, false);
+    try std.testing.expect(!g.pumping);
+    try std.testing.expectEqual(packets_before, g.harness.counters.get(.net_packets_in));
+    try std.testing.expectEqualStrings("queued game payload", peer.popExtra().?);
+
+    g.pumping = true;
+    try sendReliablePumped(g, peer, "test", "outbound", 0, 1, false);
+    try std.testing.expect(g.pumping);
 }
 
 test "chunk removal retries without forgetting the client chunk" {
