@@ -21,6 +21,8 @@ Target: **V3.2.0 b10** (Mono) wire, Zig **0.16+**, **20 TPS** (50 ms) tick. Vali
 
 Governs every rule below. When in doubt, these decide.
 
+Keep quality gates intact: fix failing code, not assertions, thresholds, allowlists, or coverage to obtain green checks. Change a gate only to implement an explicitly requested contract change, with evidence and regression coverage.
+
 1. **Clean-room.** Only stock client wire/sim. Never ship, embed, or depend on TFP DLLs, decompiled C#, or runtime assets. Stock content loads as data from operator install.
 2. **Stock wire/sim only.** No invented terrain, packages, FX, or journal blobs. One stock shape → one builder the client `Read`s.
 3. **Missing beats fake.** Prefer documented gaps over fabrication. A partial failing stock `Read` is worse than nothing.
@@ -159,7 +161,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 - Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`, `litenet`, `wire`, `assets`, `ecs`, `world`, `server`) and `wire/packages.zig` for stock bodies. Leaf files stay importable. Avoid cycles; world must not import wire (TE domain types in world, wire re-exports).
 - `src/server/c2s/` and `src/server/game/` are subfolders of `server`; every file there is aggregated via `src/server/root.zig` (lint recurses one level, so new helpers must be added there or tests silently drop).
 - `pub` only for intended API. Helpers file-private by default.
-- Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make check`) fails on forbidden `@import`. Adding one requires changing the lint and justifying the edge.
+- Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make check`) fails on forbidden `@import`. Fix imports to respect the boundary; change the gate only for an explicitly requested architecture contract change, with rationale and regression coverage.
 
 ## Docs: PRD / RFC / ADR series
 
