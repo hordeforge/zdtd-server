@@ -43,25 +43,11 @@ pub const XorShift32 = struct {
         return self.next() % bound;
     }
 
-    /// Draw in [0, 1): raw u32 step scaled by 2^32. Scaling by maxInt(u32)
-    /// instead maps the raw step 0xffffffff to exactly 1.0, breaking the
-    /// exclusive upper bound and letting jitter offsets hit the half-open
-    /// boundary. Rejected-step (Lemire) instead of modulo: xorshift32 with a
-    /// bound of 1 would burn a draw every call. Rejection is bounded in
-    /// practice by xorshift32's full period, not a proof; repeated max-step
-    /// draws reseed via a fold so the stream cannot stick at 0xffffffff.
+    /// Draw in [0, 1) from the upper 24 bits of one raw step.
     pub fn nextFloat(self: *XorShift32) f32 {
-        const scale: f32 = 1.0 / @as(f32, @floatFromInt(@as(u64, 1) << 32));
-        while (true) {
-            const raw = self.next();
-            if (raw != std.math.maxInt(u32)) {
-                return @as(f32, @floatFromInt(raw)) * scale;
-            }
-            // 0xffffffff has no preimage that survives the tests above, so
-            // fold it back in as a fresh seed (1 = current state, guaranteed
-            // live) and continue from the successor state.
-            self.state = xorshift32Step(xorshift32Step(self.state));
-        }
+        const fraction: u24 = @intCast(self.next() >> 8);
+        const scale: f32 = 1.0 / (@as(f32, std.math.maxInt(u24)) + 1.0);
+        return @as(f32, @floatFromInt(fraction)) * scale;
     }
 };
 
@@ -123,10 +109,23 @@ test "nextFloat stays in [0, 1) and is deterministic per stream" {
     }
 }
 
+test "nextFloat upper raw values stay below one with a single draw" {
+    const cases = [_]struct { seed: u32, raw: u32 }{
+        .{ .seed = 0xacd979ce, .raw = 0xfffffffe },
+        .{ .seed = 0x4a4d939f, .raw = 0xffffff80 },
+        .{ .seed = 0x5e6cfce7, .raw = 0xffffffff },
+    };
+    for (cases) |case| {
+        var raw_rng = XorShift32.init(case.seed);
+        try std.testing.expectEqual(case.raw, raw_rng.next());
+        var float_rng = XorShift32.init(case.seed);
+        const value = float_rng.nextFloat();
+        try std.testing.expect(value >= 0.0 and value < 1.0);
+        try std.testing.expectEqual(raw_rng.state, float_rng.state);
+    }
+}
+
 test "nextFloat never returns 1.0, the half-open boundary" {
-    // State 0xffffffff is the one raw step whose maxInt-scaled value was
-    // exactly 1.0 under the old divisor; the successor chain from it must
-    // still produce in-bounds draws, and a fold re-entry must terminate.
     var r = XorShift32.init(0xffffffff);
     var i: usize = 0;
     while (i < 64) : (i += 1) {
