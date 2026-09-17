@@ -636,9 +636,14 @@ pub fn savePlayers(self: *Game) !void {
             }
             if (rewritten) continue;
             if (old_version >= 12) {
-                // Current shape: carried byte-for-byte, then the v14 stats tail
-                // the older file did not carry (counters it never knew are 0).
-                try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                const inv_pos = rec_start + 1 + nl + 16;
+                const inv_n = old_recs[inv_pos];
+                const src_stride = zpvSlotStride(old_version);
+                const slots_end = inv_pos + 1 + inv_n * src_stride;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, src_stride);
+                try out.appendSlice(self.allocator, old_recs[slots_end..off]);
+                if (had_prog_tail and old_version < 13) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail and old_version < 14) {
                     try emitZpv14Stats(&out, self.allocator, null);
                 }
@@ -2286,6 +2291,42 @@ pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []cons
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
     return .{ .blob = try out.toOwnedSlice(allocator), .removed = removed };
+}
+
+test "player save upgrades offline v15 inventory slots" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = try playersPath(g, &path_buf);
+    var data: std.ArrayList(u8) = .empty;
+    defer data.deinit(std.testing.allocator);
+    try data.appendSlice(std.testing.allocator, "ZPVF\x01\x00\x00\x00");
+    try data.appendSlice(std.testing.allocator, "\x01a");
+    try data.appendNTimes(std.testing.allocator, 0, 16);
+    try data.append(std.testing.allocator, 1);
+    try data.appendSlice(std.testing.allocator, "\x01\x00\x02\x00");
+    try data.appendNTimes(std.testing.allocator, 0, 17);
+    try data.appendSlice(std.testing.allocator, "\x00\x00");
+    try std.testing.expectEqual(data.items.len - 8, try zpvRecordLen(data.items, 8, 15));
+    try io_fs.writeFile(path, data.items);
+    try savePlayers(g);
+    const saved = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(saved);
+    try std.testing.expectEqual(saved.len - 8, try zpvRecordLen(saved, 8, persist_version));
+    const inv_pos = 8 + 2 + 16;
+    try std.testing.expectEqualSlices(u8, data.items[inv_pos..][0..22], saved[inv_pos..][0..22]);
+    try std.testing.expectEqualSlices(u8, &([_]u8{0} ** 31), saved[inv_pos + 22 ..][0..31]);
+    try savePlayers(g);
+    const again = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(again);
+    try std.testing.expectEqualSlices(u8, saved, again);
 }
 
 test "player save preserves full inventory journal and buffs" {
