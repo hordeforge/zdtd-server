@@ -23,7 +23,7 @@ ZIG="${ZIG:-zig}"
 # running the build silently choose a different target ABI.
 RELEASE_TARGET="${RELEASE_TARGET:-x86_64-linux-gnu}"
 
-exec env LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0 "$ZIG" build \
+exec env LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" "$ZIG" build \
   -Doptimize=ReleaseSafe \
   -Dstrip=true \
   -Dtarget="$RELEASE_TARGET" \
