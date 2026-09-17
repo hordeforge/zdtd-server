@@ -1739,7 +1739,7 @@ fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
         const st: []const u8 = if (off) "disabled" else "enabled";
         const st_cls: []const u8 = if (off) "bad" else "ok";
         try w.print("</td><td data-label=\"State\"><span class=\"pill {s}\">{s}</span></td><td data-label=\"Action\">", .{ st_cls, st });
-        try w.writeAll("<form hx-post=\"/api/modlet\" hx-target=\"#modules\" hx-swap=\"innerHTML\">");
+        try w.writeAll("<form method=\"post\" action=\"/api/modlet\" hx-post=\"/api/modlet\" hx-target=\"#modules\" hx-swap=\"innerHTML\">");
         try w.writeAll("<input type=\"hidden\" name=\"csrf\" value=\"");
         try htmlEscapeAttr(&w, csrf);
         try w.writeAll("\"><input type=\"hidden\" name=\"name\" value=\"");
@@ -2348,6 +2348,7 @@ test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
     try testServeHttp(&s, "GET /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "UiMod") != null);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"disable\"") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "<form method=\"post\" action=\"/api/modlet\"") != null);
     // The action button carries the touch-target class.
     try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\">Disable<span class=\"sr-only\"> UiMod</span></button>") != null);
 
