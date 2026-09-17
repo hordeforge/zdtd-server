@@ -2158,8 +2158,7 @@ pub fn loadTraders(self: *Game) !void {
         else => return error.ReadFailed,
     };
     defer self.allocator.free(data);
-    if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
-    if (data[4] != 1 and data[4] != 2) return error.BadVersion;
+    _ = try ztrScanLen(data);
     const v2 = data[4] == 2;
     const count = std.mem.readInt(u16, data[5..7], .little);
     var o: usize = 7;

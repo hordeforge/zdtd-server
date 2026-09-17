@@ -18774,3 +18774,54 @@ test "scenario victim hit fires concussion counter" {
     try std.testing.expect(c.cvars.get("$concussionCounter") > 0);
     std.debug.print("PASS victim-hit: concussion counter {d}\n", .{c.cvars.get("$concussionCounter")});
 }
+
+test "scenario trader restore rejects incomplete snapshots without changing stock" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try game_mod.Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const id = g.sim.spawnTrader("snapshot-trader", 0, 70, 0, 0, 5000).?;
+    const ts = g.sim.slotOfNetId(id).?;
+    const stock = &g.sim.trader_stock[ts];
+    stock.wallet = 123;
+    stock.wallet_default = 456;
+    stock.reset_interval = 3;
+    stock.last_restock_day = 7;
+    stock.n = 0;
+    try g.saveTraders();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{dir});
+    const saved = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(saved);
+    const valid_count = std.mem.readInt(u16, saved[5..7], .little);
+    std.mem.writeInt(u16, saved[5..7], valid_count + 1, .little);
+    try io_fs.writeFile(path, saved);
+
+    stock.wallet = 900;
+    stock.wallet_default = 901;
+    stock.reset_interval = 5;
+    stock.last_restock_day = 10;
+    stock.n = 1;
+    stock.entries[0] = .{ .item = 2, .count = 17, .price = 23 };
+    const before = stock.*;
+    try std.testing.expectError(error.Truncated, persist.loadTraders(g));
+    try std.testing.expectEqualDeep(before, stock.*);
+
+    std.mem.writeInt(u16, saved[5..7], valid_count, .little);
+    try io_fs.writeFile(path, saved);
+    try persist.loadTraders(g);
+    try std.testing.expectEqual(@as(i32, 123), stock.wallet);
+    try std.testing.expectEqual(@as(i32, 456), stock.wallet_default);
+    try std.testing.expectEqual(@as(i32, 3), stock.reset_interval);
+    try std.testing.expectEqual(@as(u32, 7), stock.last_restock_day);
+    try std.testing.expectEqual(@as(usize, 0), stock.n);
+}
