@@ -301,31 +301,37 @@ pub fn setDisabled(allocator: std.mem.Allocator, name: []const u8, disable: bool
         }
     }
     if (!known) return false;
-    disabled_lock.lock();
-    if (disable) {
-        var present = false;
-        for (disabled.items) |d| {
-            if (std.ascii.eqlIgnoreCase(d, name)) {
-                present = true;
-                break;
+    {
+        // The mutex is not reentrant and `saveDisabled` locks it itself, so
+        // only the mutation runs under the lock; the scoped defer releases it
+        // on the error paths too (an OOM must not wedge the webui poller).
+        disabled_lock.lock();
+        defer disabled_lock.unlock();
+        if (disable) {
+            var present = false;
+            for (disabled.items) |d| {
+                if (std.ascii.eqlIgnoreCase(d, name)) {
+                    present = true;
+                    break;
+                }
             }
-        }
-        if (!present) {
-            const dup = try al.dupe(u8, name);
-            try disabled.append(al, dup);
-        }
-    } else {
-        var i: usize = 0;
-        while (i < disabled.items.len) {
-            if (std.ascii.eqlIgnoreCase(disabled.items[i], name)) {
-                al.free(disabled.items[i]);
-                _ = disabled.swapRemove(i);
-                continue;
+            if (!present) {
+                const dup = try al.dupe(u8, name);
+                errdefer al.free(dup);
+                try disabled.append(al, dup);
             }
-            i += 1;
+        } else {
+            var i: usize = 0;
+            while (i < disabled.items.len) {
+                if (std.ascii.eqlIgnoreCase(disabled.items[i], name)) {
+                    al.free(disabled.items[i]);
+                    _ = disabled.swapRemove(i);
+                    continue;
+                }
+                i += 1;
+            }
         }
     }
-    disabled_lock.unlock();
     try saveDisabled(allocator);
     return true;
 }
@@ -364,12 +370,12 @@ pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: 
 
     {
         disabled_lock.lock();
+        defer disabled_lock.unlock();
         freeStateLocked();
         state_alloc = allocator;
         if (state_path_in) |sp| {
             state_path = try allocator.dupe(u8, sp);
         }
-        disabled_lock.unlock();
     }
     loadDisabled(allocator, state_path orelse "");
 

@@ -154,9 +154,9 @@ lint: need-zig need-python3 lint-webui lint-html
 	  echo "zdtd: missing required tool: shellcheck; apt/brew install shellcheck" >&2; \
 	  exit 127; \
 	}
-	bash -n scripts/*.sh
+	for script in scripts/*.sh; do bash -n "$$script"; done
 	shellcheck scripts/*.sh
-	$(ZIG) fmt --check build.zig build.zig.zon src
+	$(ZIG) fmt --check build.zig build.zig.zon src mods plugins assets/fixtures
 	bash scripts/lint-architecture.sh
 	# Documentation gate: dead links, code citations in range, quoted Zig blocks
 	# that drifted from source, and the word ceilings in docs/budgets.json.
@@ -166,7 +166,7 @@ lint: need-zig need-python3 lint-webui lint-html
 	bash scripts/lint-plugins.sh
 
 fmt: need-zig
-	$(ZIG) fmt build.zig build.zig.zon src
+	$(ZIG) fmt build.zig build.zig.zon src mods plugins assets/fixtures
 
 # Pass ZIG explicitly: make variables are not exported to recipe environments,
 # so `make ZIG=/path/zig release` must validate the same compiler it builds with.
