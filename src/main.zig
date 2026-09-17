@@ -478,6 +478,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Stock serveradmin.xml sits next to serverconfig.xml (save root); fall
     // back to the config dir or game dir so an operator drop-in applies.
     var serveradmin_path: ?[]const u8 = null;
+    // Game dupes this into its own field and frees only that copy
+    // (game/init_world.zig, game/lifecycle.zig), so this one is ours to free.
+    defer if (serveradmin_path) |p| gpa.free(p);
     if (serverconfig_path) |scp| {
         if (std.fs.path.dirname(scp)) |dir| {
             var p: [std.fs.max_path_bytes]u8 = undefined;
@@ -687,6 +690,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .enemy_difficulty = cfg.enemy_difficulty,
         .loot_abundance = cfg.loot_abundance,
         .xp_multiplier = cfg.xp_multiplier,
+        .trader_item_abundance = cfg.trader_item_abundance,
+        .vending_item_abundance = cfg.vending_item_abundance,
         .block_damage_player = cfg.block_damage_player,
         .block_damage_ai = cfg.block_damage_ai,
         .block_damage_ai_bm = cfg.block_damage_ai_bm,
@@ -694,6 +699,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .max_spawned_animals = cfg.max_spawned_animals,
         .air_drop_frequency = cfg.air_drop_frequency,
         .drop_on_death = cfg.drop_on_death,
+        .build_create = cfg.build_create,
+        .camera_restriction_mode = cfg.camera_restriction_mode,
+        .air_drop_marker = cfg.air_drop_marker,
+        .drop_on_quit = cfg.drop_on_quit,
+        .biome_progression = cfg.biome_progression,
         .death_penalty = cfg.death_penalty,
         .land_claim_size = cfg.land_claim_size,
         .land_claim_online_durability_modifier = cfg.land_claim_online_durability_modifier,
@@ -870,6 +880,24 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
         if (tf.plugin.fuel) |fuel| init_opts.plugin_budget.fuel = fuel;
         if (tf.plugin.max_pages) |pages| init_opts.plugin_budget.max_memory_pages = pages;
+        // Queued-verb interception (ADR 0039): parse the operator policy here so
+        // a typo fails startup loudly instead of silently enforcing a different
+        // policy than the file says. The tables are fixed-size, so this
+        // allocates nothing and the Game copies them by value.
+        if (tf.plugin.deny) |list| {
+            var bad: []const u8 = "";
+            init_opts.plugin_policy_deny_n = @intCast(
+                plugin_mod.manifest.parsePolicyList(list, &init_opts.plugin_policy_deny, &bad) orelse
+                    fatal("[plugin] deny: bad policy entry '{s}' (expected module=verb,verb; known verbs: spawn, despawn, damage, say, glide, bot)", .{bad}),
+            );
+        }
+        if (tf.plugin.allow) |list| {
+            var bad: []const u8 = "";
+            init_opts.plugin_policy_allow_n = @intCast(
+                plugin_mod.manifest.parsePolicyList(list, &init_opts.plugin_policy_allow, &bad) orelse
+                    fatal("[plugin] allow: bad policy entry '{s}' (expected module=verb,verb; known verbs: spawn, despawn, damage, say, glide, bot)", .{bad}),
+            );
+        }
         // authority.mode is validated + canonicalised at parse (binder
         // enum_by_name), so this is a straight apply.
         if (tf.authority.mode) |mode_s| {

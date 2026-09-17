@@ -7,6 +7,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
+const ally_mod = @import("../ally.zig");
 const systems = @import("../../ecs/systems.zig");
 
 pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
@@ -132,6 +133,14 @@ pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: boo
         return;
     };
     try self.broadcastExcept("NetPackageAddRemoveBuff", b, except_slot);
+    // Every buff the server applies or drops passes through here - the C2S
+    // request, the tick expiry drain and the death clear on respawn all relay
+    // from this one function - so hooking it is what makes the observer see
+    // the whole set rather than the one path that happened to be wired.
+    // Wasm-first (AGENTS rule 29): reacting to a buff is behaviour, so it
+    // belongs on the plugin boundary rather than in a native special case.
+    self.plugins.buff(entity_id, buff_name, adding);
+    self.wasm_plugins.buff(entity_id, buff_name, adding);
 }
 
 pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
@@ -140,6 +149,16 @@ pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
         const ex = r.buff_expired[i];
         const def = self.buffs.byId(ex.def_id) orelse continue;
         try relayBuff(self, ex.entity_id, def.name, false, -1, null);
+        // onSelfBuffFinish (87 buffs / 120 rows: stat restores, cvar clears,
+        // cooldown Adds): stock fires it when the duration ends, after
+        // onSelfBuffRemove. Player victims evaluate with their live ctx so
+        // e.g. buffSpectersGrace clears the perkSpectersGrace recharge cvar
+        // and Spectral Grace reopens.
+        if (self.sim.slotOfNetId(ex.entity_id)) |ps| {
+            if (self.sim.mask[ps].player) {
+                self.fireBuffFinish(ps, ex.def_id);
+            }
+        }
     }
 }
 
@@ -311,6 +330,24 @@ pub fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
     for (p.members[0..p.n]) |m| {
         if (m == c.entity_id) continue;
         if (clientByEntityId(self, m)) |member| {
+            // The member's copy rides the OWNER's stock quest code and POI
+            // placement. Stock's shared-quest traffic is code-keyed on both
+            // ends (QuestJournal.GetSharedQuest / RemoveSharedQuestByOwner),
+            // and the code is what the share packet already told the member's
+            // client to use, so the server journal entry has to match it or
+            // the member's objective updates resolve nowhere (see
+            // systems.questAcceptWithCode).
+            if (self.sim.playerByPeer(member.slot)) |ms| {
+                if (self.sim.mask[ms].journal) {
+                    _ = systems.questAcceptWithCode(&self.sim, member.slot, def_id, q.quest_code, q.poi);
+                    for (&self.sim.journal[ms].slots) |*mslot| {
+                        if (mslot.active and mslot.quest_code == q.quest_code) {
+                            mslot.is_shared = true;
+                            break;
+                        }
+                    }
+                }
+            }
             if (member.peer) |mp| {
                 var qb: [256]u8 = undefined;
                 const body = packages.stock_quest.buildSharedQuestShare(&qb, .{
@@ -325,6 +362,40 @@ pub fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
                 };
             }
         }
+    }
+}
+
+/// Send the standing ally pairs to a joining peer. `AllyUpdateResponse` is the
+/// only thing that drives a client's AllyStore, and the server only sends one
+/// on a transition, so every pair formed before this connection - including
+/// every pair loaded from `allies.zal` at boot - is invisible to it: the social
+/// menu shows no allies and an ally-only waypoint invite arrives from a player
+/// the client does not believe it is allied with. Stock needs no such send
+/// because the whole registry rides the join snapshot
+/// (`PersistentPlayerList.NetworkCloneRelevantForPlayer`, RE
+/// server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
+///
+/// `AllyEvent.none` is the right event for a state sync: the enum is purely a
+/// notification of what just happened (RE parties-factions.md 5.1), and nothing
+/// happened here. Pending invites ride along with their stored status, so a
+/// player who was invited while away still sees the invite.
+pub fn sendAllySnapshot(self: *Game, peer: *ln_peer.Peer) !void {
+    for (&self.allies.entries) |*e| {
+        if (!e.used or e.status == .not_allied) continue;
+        const a = e.a.get() orelse continue;
+        const b = e.b.get() orelse continue;
+        const resp = packages.buildAllyResponseBody(
+            self.body_buf[9216..9728],
+            a,
+            b,
+            @intFromEnum(e.status),
+            @intFromEnum(ally_mod.Event.none),
+            @intFromEnum(ally_mod.Event.none),
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackageAllyResponse", resp);
     }
 }
 

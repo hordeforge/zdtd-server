@@ -9,12 +9,21 @@ const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const paths = @import("../assets/paths.zig");
 
+/// Offline biomemap id for pine_forest (stock V3.1 AssignIds pin). Used when
+/// biomes.xml is not loaded, never when the stock file resolved the id.
+pub const offline_default_biome_id: u8 = 3;
+
 /// RGB packed 0xRRGGBB → biomemap id. Loaded from biomes.xml; fallback for tests.
 pub const ColorTable = struct {
     /// sparse: we store pairs in parallel arrays (small N).
     colors: []const u32 = &.{},
     ids: []const u8 = &.{},
-    default_id: u8 = 3,
+    /// `<biomemap id="NN" name="X"/>` rows as parallel name/id arrays, so a
+    /// caller resolves the stock name (snow, desert, pine_forest) instead of
+    /// hardcoding the id the file assigns.
+    map_names: []const []const u8 = &.{},
+    map_ids: []const u8 = &.{},
+    default_id: u8 = offline_default_biome_id,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() ColorTable {
@@ -29,6 +38,15 @@ pub const ColorTable = struct {
             self.arena_ptr = null;
         }
         self.* = .{};
+    }
+
+    /// Biomemap id for a stock biome name from the file's `<biomemap>` rows
+    /// (null when the table is a fallback or the name is not a biomemap).
+    pub fn idForName(self: *const ColorTable, name: []const u8) ?u8 {
+        for (self.map_names, self.map_ids) |n, id| {
+            if (std.mem.eql(u8, n, name)) return id;
+        }
+        return null;
     }
 
     pub fn lookup(self: *const ColorTable, r: u8, g: u8, b: u8) u8 {
@@ -50,9 +68,45 @@ const fallback_colors = blk: {
     break :blk ColorTable{
         .colors = &[_]u32{ 0xFFFFFF, 0x004000, 0xFFE477, 0x0000FF, 0x001234, 0xFF0000, 0xFFA800, 0xBA00FF },
         .ids = &[_]u8{ 1, 3, 5, 6, 19, 7, 8, 9 },
-        .default_id = 3,
+        .default_id = offline_default_biome_id,
     };
 };
+
+/// Biome id for a stock biome name: the loaded `<biomemap>` row first, else the
+/// offline height-band pin. Callers key on names, never on literals.
+pub fn biomeIdForName(table: ?*const ColorTable, name: []const u8) u8 {
+    if (table) |t| {
+        if (t.idForName(name)) |id| return id;
+    }
+    return offlineBandId(name);
+}
+
+/// Offline biomemap id for the synthetic height-band biome choice (no
+/// biomes.xml loaded): stock V3.1 AssignIds pins (snow 1, desert 5, else
+/// pine_forest). Callers prefer the loaded `<biomemap>` name table first.
+pub fn offlineBandId(name: []const u8) u8 {
+    if (std.mem.eql(u8, name, "snow")) return 1;
+    if (std.mem.eql(u8, name, "desert")) return 5;
+    return offline_default_biome_id;
+}
+
+test "biomemap name table resolves stock ids" {
+    // The height-band and no-map paths key on stock biome names; the ids come
+    // from the file's `<biomemap id name>` rows (snow 01, wasteland 08, ...),
+    // never from literals in the consumer.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoadColorTable(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    try std.testing.expectEqual(@as(?u8, 1), t.idForName("snow"));
+    try std.testing.expectEqual(@as(?u8, 3), t.idForName("pine_forest"));
+    try std.testing.expectEqual(@as(?u8, 5), t.idForName("desert"));
+    try std.testing.expectEqual(@as(?u8, 8), t.idForName("wasteland"));
+    try std.testing.expectEqual(@as(?u8, 9), t.idForName("burnt_forest"));
+    try std.testing.expect(t.idForName("no_such_biome") == null);
+    // The helper falls back to the offline pins only without the table.
+    try std.testing.expectEqual(@as(u8, 5), biomeIdForName(&t, "desert"));
+    try std.testing.expectEqual(offlineBandId("snow"), biomeIdForName(null, "snow"));
+}
 
 fn parseHexColor(s: []const u8) ?u32 {
     var t = std.mem.trim(u8, s, " \t\"'");
@@ -128,10 +182,20 @@ pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTabl
     @memcpy(cslice, colors.items);
     const islice = try arena.alloc(u8, ids.items.len);
     @memcpy(islice, ids.items);
-    const def: u8 = name_to_id.get("pine_forest") orelse 3;
+    const names = try arena.alloc([]const u8, name_to_id.count());
+    const nids = try arena.alloc(u8, name_to_id.count());
+    var ni: usize = 0;
+    var nit = name_to_id.iterator();
+    while (nit.next()) |e| : (ni += 1) {
+        names[ni] = e.key_ptr.*;
+        nids[ni] = e.value_ptr.*;
+    }
+    const def: u8 = name_to_id.get("pine_forest") orelse offline_default_biome_id;
     return .{
         .colors = cslice,
         .ids = islice,
+        .map_names = names,
+        .map_ids = nids,
         .default_id = def,
         .arena_ptr = ap,
     };
@@ -181,7 +245,7 @@ pub const BiomeMap = struct {
 
     /// Dominant biomemap id over 16×16 chunk columns.
     pub fn chunkDominant(self: *const BiomeMap, cx: i32, cz: i32) u8 {
-        if (self.r.len == 0) return 3;
+        if (self.r.len == 0) return offline_default_biome_id;
         const base_x = cx * 16;
         const base_z = cz * 16;
         // CalcDominantBiome uses int[50]; only count valid ids.

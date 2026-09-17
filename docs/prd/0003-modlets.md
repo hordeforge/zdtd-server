@@ -260,6 +260,21 @@ Acceptance is per requirement; the whole feature is done only when §9 passes.
   A bundle-only mod that carries no XML patches is a valid install (no-op server
   side).
 
+### Operator enable/disable
+
+- **R13** An operator can enable or disable each installed modlet without
+  moving files: the webui Modules panel lists every scanned mod (name, version,
+  XML-only note for a code mod) with an enable/disable control, and the state is
+  persisted as a text file next to the world save (`modlets_disabled.txt`, one
+  `Name` per line, `#` comments, hand-editable). A disabled mod stays on the
+  roster (listed, with its `Config/` excluded from the patch list) so the choice
+  is visible and reversible; the change applies on the next start, because the
+  patched catalogs and the id mapping are resolved once at init (R7) and a
+  mid-run change would desync ids against the client. The route is the same
+  auth/CSRF-gated POST surface as the console command route; an unknown mod name
+  is refused, and a state write failure is reported rather than silently
+  ignored.
+
 ### Process and budget
 
 - **R12** All patch/compress/merge work is init/load-time (alloc allowed,
@@ -292,12 +307,66 @@ Resolved from RE or explicitly documented before the "compatible" claim:
   only? user-data too?) and the folder iteration order.
 - **G3** Per-mod patch-file order and per-file op order inside
   `LoadPatchStuff`/`PatchXml`; Localization.csv merge order.
+  **Resolved 2026-09-13:** `XmlPatcher.LoadAndPatchConfig` resolves a patch for
+  one config as `<mod>/Config/<configName>` (".xml" appended when the name does
+  not carry it) and calls `PatchXml` on that single file, so no directory
+  enumeration is involved and a config in a subdirectory
+  (`Config/XUi_InGame/windows.xml`) is patchable by relative path. zdtd applies
+  that file first, then keeps its per-file scan as a superset for mods whose
+  patch file is named differently (routed by xpath root). Localization.csv merge
+  remains unimplemented (R10).
 - **G4** `CsvOperationsByXPath` exact element/attribute grammar (`op` values,
-  `value` semantics, separator handling).
+  `value` semantics, separator handling). **Resolved 2026-09-13:** the
+  registered element name is `csv` (`XmlPatchMethodAttribute` blobs on
+  `XmlPatchMethods` are append/prepend/insertAfter/insertBefore/remove/set/
+  setattribute/removeattribute/csv/conditional/include), the patch element
+  carries `op="add|remove|set"` and `xpath` ends in `/@attr`; `add`/`remove`
+  edit the comma list, `set` replaces it. zdtd accepts `csv` (and keeps the
+  internal `csvoperations` spelling).
 - **G5** `Conditional` and `Include` exact element grammar (condition attribute
-  forms, nested container names).
+  forms, nested container names). **Resolved 2026-09-13:** `Conditional` picks
+  the first `<if cond="...">` that evaluates true else `<else>`, and patches
+  with that branch's children; the condition language is NCalc with helper
+  functions `mod_loaded`, `mod_version`, `game_version`, `version`. zdtd
+  evaluates `mod_loaded`/`mod_version` against the scanned mods and skips an
+  expression it cannot evaluate with a warning instead of refusing to boot.
+  `Include` reads `xpath` or `path` with the `@modfolder:` rewrite (G6).
 - **G6** `@modfolder:`/`@modfolder(Name):` token rewrite edge cases (quotes,
   subpaths).
+- **G9** Modded **block** ids. Stock assigns a block id to every `<block>` in
+  the patched `blocks.xml`, so a modlet that adds a block is usable on both
+  sides; zdtd's block id space is pinned from the stock AssignIds dump and its
+  block loader skips a name the dump does not carry, so a modlet-added block is
+  inert server-side (the item, recipe and loot parts of the same mod still
+  work, since the item id space is derived from the patched XML).
+  **Implemented 2026-09-13.** The loader keeps a name the dump lacks and assigns
+  it a leftover id: pinned ids from the dump mark the used set, then the
+  leftovers take the first free id - terrain-shaped blocks (`Shape="Terrain"`,
+  `BlockShape::IsTerrain`) from 0, the rest from 0xff - in document order, which
+  is what a modded client reproduces locally (the client recomputes the same
+  assignment for names the server's IdMapping does not carry). A stock install
+  is not a no-op: 11 blocks.xml names are outside the dump (the nine `*Shapes`
+  shape masters, `cntChickenCoop`, `oldWoodDoorNoHonk`) and take ids 255..268,
+  exactly as `assignLeftOverBlocks` gives them, pinned by a test against the
+  real file. Modded blocks still read generic HP/category (the AssignIds dump
+  supplies those properties), and the blocks IdMapping we ship stays
+  dump-derived, so a modded *client* relies on its own assignment agreeing -
+  which the shared algorithm makes it. The blocks IdMapping gap is the residual
+  here.
+  **Original pin:** `Block.assignIdsLinear`
+  copies `nameToBlock`'s values into a list and calls `assignLeftOverBlocks`,
+  which first honours `Block.fixedBlockIds` (name → pinned id) and then assigns
+  the remaining blocks out of a `MAX_BLOCKS` used-id array: **terrain-shaped**
+  blocks (`BlockShape.IsTerrain()`) take the first free ids scanning up from 0,
+  and the rest take free ids scanning up from **0xff** (255). `Block.list[id]`
+  is the reverse table and `Block.nameIdMapping` translates a saved id by name
+  on load. A faithful zdtd implementation therefore: after the patched
+  `blocks.xml` load, treat every name the dump already carries as pinned
+  (`usedIds`), then assign the leftovers in block-list (document) order with the
+  same terrain/non-terrain split, parsing the block's `Shape` property for the
+  terrain test. Verify against a client dump with one mod installed before
+  relying on it; the assignment is order-dependent, so the mod's appended blocks
+  must keep document order.
 - **G7** Frame `compressed` bit vs package `Compress` flag layering for
   ConfigFile (single vs double deflate), and zdtd's frame-writer requirements.
   Pin with a loadgen/golden byte test.

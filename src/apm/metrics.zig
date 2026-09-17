@@ -20,6 +20,9 @@ pub const CounterId = enum(u16) {
     net_send_errors,
     reliable_window_drops,
     persistence_errors,
+    /// A player record was written without a platform identity, so it stays
+    /// keyed on the login name (ADR 0038). Counted once per process.
+    identity_less_saves,
     stale_peers_reaped,
     stream_errors,
     /// Main loop fell behind the 50 ms tick budget (run path only).
@@ -55,6 +58,9 @@ pub const CounterId = enum(u16) {
     /// mapping is the top remaining wire item; counted so real client
     /// container traffic is visible).
     c2s_stock_invtx,
+    /// C2S sign-text TE writes applied and echoed (stock TEFeatureSignable
+    /// through NetPackageTileEntity).
+    c2s_te_sign_echo,
     /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
     c2s_rejects,
     /// Named C2S package with no handler arm (falls off handlePackage).
@@ -112,9 +118,39 @@ pub const CounterId = enum(u16) {
     /// passive-effects VM + triggered engine fold, bounded by the client
     /// table; watch with the 50 ms budget as player counts scale).
     survival_players,
-    /// Passive-effects VM recomputes (effectTotals + perkTotals folds) and
-    /// triggered-engine evaluations in the survival pass.
+    /// Passive-effects VM recomputes (the untagged stat folds, the
+    /// `coredamageresist` armor folds and the triggered engine) in the survival
+    /// pass: 1 + vm_recomputes_per_player per player per tick.
     vm_recomputes,
+    /// `<requirement>` gates resolved on tracked passive rows in the VM folds
+    /// (pass or fail). Rises with purchased levels and active buffs.
+    requirement_gates,
+    /// `<requirement>` gates refused because the kind, target or operand is not
+    /// implemented. Every one fails its gate closed, so a non-zero value is
+    /// measured vocabulary gap, not a silent pass.
+    requirement_unsupported,
+    /// Triggered-effect requests dropped because one buff's AddBuff /
+    /// RemoveBuff / ModifyStats outcome for a single event exceeded the
+    /// engine's bounded result array. Non-zero is data whose effect did not
+    /// run (sized above the stock maximum; a modlet can exceed it), not a
+    /// silent pass.
+    triggered_rows_dropped,
+    /// Applied plugin effects a withdrawal could not revert (`damage`, `say`,
+    /// `despawn`: already in the world or on the wire, see `ecs/command.zig`
+    /// `Inverse`). Counted once per withdrawn plugin so the residue of paper
+    /// 3.1's unchecked inverse witness is visible instead of assumed away;
+    /// `spawn_zombie` and `glide` are reverted and never counted.
+    plugin_effects_not_reverted,
+    /// Queued plugin commands dropped by the interception policy
+    /// (`[plugin] deny` in zdtd.toml or a module's own `manifest.toml` deny
+    /// list, paper 3.2.3). A denied verb never reaches the command buffer, so a
+    /// non-zero value is the operator's policy working, not a fault.
+    plugin_verbs_denied,
+    /// Deco chunks whose suppressing-POI footprint list hit the cache's rect
+    /// cap (`server/game/deco.zig` `SuppressCache`): world deco inside the
+    /// overflow POIs is NOT suppressed there, so a non-zero value is partial
+    /// suppression the operator can see rather than a silent truncation.
+    deco_suppress_saturated,
     _,
 };
 

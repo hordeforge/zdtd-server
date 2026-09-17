@@ -85,6 +85,16 @@ pub const PluginHost = struct {
         }
     }
 
+    /// Buff observer: fired for every buff applied or dropped, whatever caused
+    /// it. Pure observer, void: the buff is already applied and relayed.
+    pub fn buff(self: *PluginHost, entity: i32, name: []const u8, adding: bool) void {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_buff) |f| f(&self.view, entity, name, adding);
+        }
+    }
+
     /// Evidence observer (T21): the guard's evidence event, read-only. The
     /// host already applied the T20 severity ceiling; the guest return is
     /// discarded (never a gate).
@@ -309,7 +319,6 @@ pub const PluginHost = struct {
 };
 
 test "host registers sample and enables once" {
-    sample_hello.resetForTest();
     var h: PluginHost = .{};
     h.enableStaticDefaults();
     try std.testing.expectEqual(@as(usize, 1), h.count());
@@ -476,6 +485,43 @@ test "host stat-changed observer fires with the player snapshot" {
     try std.testing.expectEqual(@as(i32, 50), stat_last[1]);
     try std.testing.expectEqual(@as(i32, 40), stat_last[2]);
     try std.testing.expectEqual(@as(i32, 5), stat_last[5]);
+    h.shutdown();
+}
+
+// Test capture for the buff observer (module scope, same reason).
+var buff_last_entity: i32 = 0;
+var buff_last_name: [32]u8 = .{0} ** 32;
+var buff_last_name_len: usize = 0;
+var buff_last_adding: bool = false;
+var buff_calls: u32 = 0;
+
+test "host buff observer fires for both directions" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    buff_calls = 0;
+    const obs = api.PluginVTable{
+        .name = "buffobs",
+        .on_buff = struct {
+            fn f(_: *const api.Host, entity: i32, name: []const u8, adding: bool) void {
+                buff_last_entity = entity;
+                const n = @min(name.len, buff_last_name.len);
+                @memcpy(buff_last_name[0..n], name[0..n]);
+                buff_last_name_len = n;
+                buff_last_adding = adding;
+                buff_calls += 1;
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&obs));
+    h.enableAll();
+    h.buff(107, "buffShocked", true);
+    try std.testing.expectEqual(@as(i32, 107), buff_last_entity);
+    try std.testing.expectEqualStrings("buffShocked", buff_last_name[0..buff_last_name_len]);
+    try std.testing.expect(buff_last_adding);
+    // The removal direction is the one that matters: it is the half a plugin
+    // cannot infer, since nothing else announces that a buff ended.
+    h.buff(107, "buffShocked", false);
+    try std.testing.expect(!buff_last_adding);
+    try std.testing.expectEqual(@as(u32, 2), buff_calls);
     h.shutdown();
 }
 

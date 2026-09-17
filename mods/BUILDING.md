@@ -18,6 +18,12 @@ and leaves nothing else to do by hand. The committed `.wasm` files are build
 outputs checked in so operators do not need a Zig toolchain; after changing a
 plugin, run the script and commit both source and binary.
 
+`make lint` enforces this: `scripts/lint-plugins.sh` rebuilds every artifact
+into a scratch mirror and byte-compares it against what is committed, so a
+source edit that was never rebuilt fails the gate instead of shipping a stale
+binary. Run `scripts/build-plugins.sh --dest DIR` to produce the same mirror
+without touching the tree.
+
 ## Layout per plugin
 
 | File | Role |

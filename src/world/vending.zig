@@ -268,56 +268,62 @@ pub const VendingStore = struct {
             const stock_n = buf[o + 24];
             o += 25;
             if (o + @as(usize, stock_n) * 10 > len) return error.ReadFailed;
-            const v = self.getOrCreate(pos, block_id, trader_id) orelse {
-                o += @as(usize, stock_n) * 10;
-                continue;
-            };
-            v.available_money = money;
+            // A record can be dropped (table full), but every one of its bytes
+            // still has to be consumed: the stock rows AND the lock/owner/
+            // password/allowed/rental tail below. Skipping only the stock left
+            // the cursor mid-record and shifted every following machine.
+            const maybe_v = self.getOrCreate(pos, block_id, trader_id);
+            if (maybe_v) |v| v.available_money = money;
             var s: usize = 0;
             while (s < stock_n) : (s += 1) {
-                if (s < max_vending_stock) {
-                    v.stock[s] = .{
-                        .type_id = std.mem.readInt(i32, buf[o..][0..4], .little),
-                        .count = std.mem.readInt(i32, buf[o + 4 ..][0..4], .little),
-                        .quality = buf[o + 8],
-                        .markup = @bitCast(buf[o + 9]),
-                    };
+                if (maybe_v) |v| {
+                    if (s < max_vending_stock) {
+                        v.stock[s] = .{
+                            .type_id = std.mem.readInt(i32, buf[o..][0..4], .little),
+                            .count = std.mem.readInt(i32, buf[o + 4 ..][0..4], .little),
+                            .quality = buf[o + 8],
+                            .markup = @bitCast(buf[o + 9]),
+                        };
+                    }
                 }
                 o += 10;
             }
-            v.stock_n = @min(stock_n, max_vending_stock);
+            if (maybe_v) |v| v.stock_n = @min(stock_n, max_vending_stock);
             if (o + 1 > len) return error.ReadFailed;
-            v.is_locked = buf[o] != 0;
+            if (maybe_v) |v| v.is_locked = buf[o] != 0;
             o += 1;
-            if (!readUserRef(buf, &o, &v.owner)) return error.ReadFailed;
+            var owner_sink: UserRef = .{};
+            if (!readUserRef(buf, &o, if (maybe_v) |v| &v.owner else &owner_sink)) return error.ReadFailed;
             if (o + 1 + max_password_hash > len) return error.ReadFailed;
-            v.password_len = buf[o];
+            const raw_password_len = buf[o];
             // Same fail-closed rule as UserRef: password_len must fit the
             // fixed hash buffer the wire path slices (game.zig password_hash).
-            if (v.password_len > max_password_hash) return error.ReadFailed;
+            if (raw_password_len > max_password_hash) return error.ReadFailed;
             o += 1;
-            @memcpy(&v.password_hash, buf[o..][0..max_password_hash]);
+            if (maybe_v) |v| {
+                v.password_len = raw_password_len;
+                @memcpy(&v.password_hash, buf[o..][0..max_password_hash]);
+            }
             o += max_password_hash;
             if (o + 1 > len) return error.ReadFailed;
             // Same clamp rule as stock_n: the raw on-disk count drives how many
             // records are read off the wire (o must land past all of them), but
             // the stored count must never exceed the fixed array.
             const raw_allowed_n = buf[o];
-            v.allowed_n = @min(raw_allowed_n, max_allowed_users);
+            if (maybe_v) |v| v.allowed_n = @min(raw_allowed_n, max_allowed_users);
             o += 1;
             var ai: usize = 0;
             while (ai < raw_allowed_n) : (ai += 1) {
-                if (ai >= max_allowed_users) {
-                    var tmp: UserRef = .{};
-                    if (!readUserRef(buf, &o, &tmp)) return error.ReadFailed;
-                    continue;
-                }
-                if (!readUserRef(buf, &o, &v.allowed[ai])) return error.ReadFailed;
+                var tmp: UserRef = .{};
+                const dst = if (maybe_v) |v| (if (ai < max_allowed_users) &v.allowed[ai] else &tmp) else &tmp;
+                if (!readUserRef(buf, &o, dst)) return error.ReadFailed;
             }
             if (o + 13 > len) return error.ReadFailed;
-            v.rental_end_day = std.mem.readInt(i32, buf[o..][0..4], .little);
-            v.rentable = buf[o + 4] != 0;
-            v.next_auto_buy = std.mem.readInt(u64, buf[o + 5 ..][0..8], .little);
+            if (maybe_v) |v| {
+                v.rental_end_day = std.mem.readInt(i32, buf[o..][0..4], .little);
+                v.rentable = buf[o + 4] != 0;
+                v.next_auto_buy = std.mem.readInt(u64, buf[o + 5 ..][0..8], .little);
+            }
             o += 13;
         }
     }
@@ -398,4 +404,101 @@ test "vending store round-trips through the ZVNM1 save format" {
     try std.testing.expectEqual(@as(u64, 9876543210), a2.next_auto_buy);
     const b2 = st2.get(.{ .x = 9, .y = 0, .z = 0 }).?;
     try std.testing.expectEqual(@as(i32, 10), b2.trader_id);
+}
+
+test "a forged password length on disk is rejected, not stored" {
+    // password_len is a u8 off disk but password_hash is 64 bytes, and
+    // replicate_te slices `password_hash[0..password_len]` when it puts a
+    // vending machine on the wire. A value above the buffer would be an
+    // out-of-bounds slice driven by a save file. Nothing covered the guard:
+    // removing it left the suite green.
+    var st: VendingStore = .{};
+    const v = st.getOrCreate(.{ .x = 1, .y = 2, .z = 3 }, 100, 4).?;
+    v.password_len = 4;
+    @memcpy(v.password_hash[0..4], "h4sh");
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try st.save(dir);
+
+    var path: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path, "{s}/vending.zvn", .{dir});
+    const raw = try io_fs.readFileAll(std.testing.allocator, p);
+    defer std.testing.allocator.free(raw);
+
+    // The record's password length byte: header (6) + fixed head (25) + two
+    // stock rows are absent here (stock_n = 0), then the lock byte, the owner
+    // ref (82) and the length itself.
+    const pw_len_at: usize = 6 + 25 + 1 + 82;
+    try std.testing.expectEqual(@as(u8, 4), raw[pw_len_at]);
+
+    const forged = try std.testing.allocator.dupe(u8, raw);
+    defer std.testing.allocator.free(forged);
+    forged[pw_len_at] = max_password_hash + 1;
+
+    var st2: VendingStore = .{};
+    try std.testing.expectError(error.ReadFailed, st2.loadFromSlice(forged));
+
+    // The untouched buffer still loads, so the rejection is the length and not
+    // the offset being wrong.
+    var st3: VendingStore = .{};
+    try st3.loadFromSlice(raw);
+    try std.testing.expectEqual(@as(u8, 4), st3.get(.{ .x = 1, .y = 2, .z = 3 }).?.password_len);
+}
+
+test "a dropped ZVNM record does not desync the records after it" {
+    // getOrCreate returns null once the table holds max_vending machines. The
+    // loader must consume that record whole: the stock rows AND the lock,
+    // owner, password, allowed-user and rental tail. Skipping only the stock
+    // left the cursor mid-record and shifted every following machine.
+    var src: VendingStore = .{};
+    // First record gets a full tail so the skipped span is large and
+    // distinctive; the second carries values the assertions below pin.
+    const drop = src.getOrCreate(.{ .x = 1000, .y = 0, .z = 0 }, 1, 1).?;
+    drop.stock_n = 2;
+    drop.stock[0] = .{ .type_id = 111, .count = 9, .quality = 1, .markup = 0 };
+    drop.is_locked = true;
+    drop.owner.id_len = 5;
+    @memcpy(drop.owner.id[0..5], "gonzo");
+    drop.password_len = 3;
+    @memcpy(drop.password_hash[0..3], "abc");
+    drop.allowed_n = 2;
+    drop.rental_end_day = 42;
+    const keep = src.getOrCreate(.{ .x = 2000, .y = 0, .z = 0 }, 2, 7).?;
+    keep.available_money = 555;
+    keep.stock_n = 1;
+    keep.stock[0] = .{ .type_id = 222, .count = 4, .quality = 2, .markup = 1 };
+    keep.rental_end_day = 17;
+    keep.next_auto_buy = 99;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try src.save(dir);
+
+    // Load into a store that is full EXCEPT that the second record's position
+    // is already present: the first record on disk is dropped, and the second
+    // must still be parsed at the right offset and applied to that machine.
+    var dst: VendingStore = .{};
+    _ = dst.getOrCreate(.{ .x = 2000, .y = 0, .z = 0 }, 2, 7).?;
+    var i: usize = 0;
+    while (dst.count() < max_vending) : (i += 1) {
+        _ = dst.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 1, 1) orelse break;
+    }
+    try std.testing.expectEqual(max_vending, dst.count());
+    try std.testing.expect(dst.getOrCreate(.{ .x = 1000, .y = 0, .z = 0 }, 1, 1) == null);
+
+    try dst.load(dir);
+    // The kept record was read from the correct offset, not shifted by the
+    // dropped record's lock/owner/password/allowed/rental tail.
+    const k = dst.get(.{ .x = 2000, .y = 0, .z = 0 }).?;
+    try std.testing.expectEqual(@as(i32, 555), k.available_money);
+    try std.testing.expectEqual(@as(u8, 1), k.stock_n);
+    try std.testing.expectEqual(@as(i32, 222), k.stock[0].type_id);
+    try std.testing.expectEqual(@as(i32, 4), k.stock[0].count);
+    try std.testing.expectEqual(@as(i32, 17), k.rental_end_day);
+    try std.testing.expectEqual(@as(u64, 99), k.next_auto_buy);
 }

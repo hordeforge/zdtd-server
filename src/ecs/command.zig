@@ -29,6 +29,34 @@ pub const Op = union(enum) {
     glide: struct { net_id: NetId, on: bool },
 };
 
+/// What a queued verb can be undone by when its plugin is withdrawn. Paper 3.1
+/// (revertible effects): every effect a component makes carries an inverse the
+/// runtime holds, and paper 5.1.1 notes the runtime never verifies that
+/// witness - it is an obligation on the component author. This classification
+/// makes the obligation explicit and exhaustive over `Op`, so a new verb
+/// cannot be added without deciding its withdrawal story at compile time.
+pub const Inverse = enum {
+    /// The runtime holds an exact inverse and applies it on withdrawal:
+    /// `spawn_zombie` (the spawned entity is despawned) and `glide` (the
+    /// applied flap is cleared) both record enough to undo themselves.
+    revertible,
+    /// The effect is already in the world or on the wire and has no exact
+    /// inverse: `damage` (health already lost, kills already credited),
+    /// `say` (a broadcast cannot be unsaid) and `despawn` (the entity's prior
+    /// state is gone). These are counted as residue per source on withdrawal
+    /// instead of pretending to be revertible.
+    irrevocable,
+};
+
+/// The withdrawal story for one queued verb. The switch is exhaustive, so
+/// adding an `Op` variant fails the build until it is classified here.
+pub fn inverseOfOp(op: Op) Inverse {
+    return switch (op) {
+        .spawn_zombie, .glide => .revertible,
+        .despawn, .damage, .say => .irrevocable,
+    };
+}
+
 pub const DrainResult = struct {
     applied: u32 = 0,
     spawned: u32 = 0,
@@ -36,6 +64,15 @@ pub const DrainResult = struct {
     damaged: u32 = 0,
     said: u32 = 0,
     dropped_before: u32 = 0,
+    /// Entities the `despawn` verb destroyed, reported so the net layer can
+    /// send EntityRemove: the clients hold the model and nothing else will
+    /// mention this entity again. `slots` is the pre-destroy slot, which is
+    /// what `known_entities` is keyed on. Saturating like the corpse sweep's
+    /// report - past the cap the op still applies, so the cap is sized to the
+    /// command buffer rather than guessed.
+    despawned_ids: [max_commands]i32 = .{0} ** max_commands,
+    despawned_slots: [max_commands]u32 = .{0} ** max_commands,
+    despawned_n: u32 = 0,
 };
 
 pub const Buffer = struct {
@@ -55,6 +92,13 @@ pub const Buffer = struct {
     spawn_n: usize = 0,
     /// Ring-truncation counter (not cleared on drain).
     spawn_evicted: u32 = 0,
+    /// Applied non-invertible effects per source (`Inverse.irrevocable`): a
+    /// withdrawal cannot unmake them, so the count is handed to the owner to
+    /// report instead of being forgotten (the honest residue of paper 3.1's
+    /// unchecked witness). Indexed by the 1-based plugin src; sized by
+    /// `max_commands`, which is far above the plugin slot cap (8 today), and a
+    /// src outside it is ignored rather than aliased.
+    irrevocable_applied: [max_commands]u32 = .{0} ** max_commands,
     /// Lifetime drop counter (not cleared on drain).
     dropped: u32 = 0,
     /// Once: soft warning when n crosses warn_at.
@@ -129,6 +173,30 @@ pub const Buffer = struct {
         for (self.spawn_srcs[0..self.spawn_n]) |*s| {
             if (s.* > dropped) s.* -= 1;
         }
+        // Residue follows its source across compaction; the vacated end is
+        // zeroed so a plugin that later occupies that slot does not inherit it.
+        var i: usize = @intCast(dropped);
+        while (i + 1 < self.irrevocable_applied.len) : (i += 1) {
+            self.irrevocable_applied[i] = self.irrevocable_applied[i + 1];
+        }
+        self.irrevocable_applied[self.irrevocable_applied.len - 1] = 0;
+    }
+
+    /// Count one applied effect that has no inverse (`Inverse.irrevocable`) for
+    /// its source. Native ops (src 0) and srcs outside the table are ignored.
+    fn recordIrrevocable(self: *Buffer, src: i16, op: Op) void {
+        if (src <= 0 or src >= self.irrevocable_applied.len) return;
+        if (inverseOfOp(op) != .irrevocable) return;
+        self.irrevocable_applied[@intCast(src)] +%= 1;
+    }
+
+    /// Hand the owner how many applied effects of `src` could not be reverted,
+    /// and clear the count (the withdrawal reports its residue once).
+    pub fn takeIrrevocable(self: *Buffer, src: i16) u32 {
+        if (src <= 0 or src >= self.irrevocable_applied.len) return 0;
+        const n = self.irrevocable_applied[@intCast(src)];
+        self.irrevocable_applied[@intCast(src)] = 0;
+        return n;
     }
 
     pub fn clear(self: *Buffer) void {
@@ -155,11 +223,33 @@ pub const Buffer = struct {
         return self.n;
     }
 
+    /// Live-source gate for one op during the drain. `fn_` is asked with the
+    /// op's 1-based plugin src after every apply, so a module that disabled
+    /// itself while an earlier op was being applied (a verdict hook that
+    /// trapped) cannot keep executing the ops it queued before that.
+    pub const SrcGate = struct {
+        ctx: ?*anyopaque = null,
+        fn_: ?*const fn (?*anyopaque, i16) bool = null,
+
+        fn withdrew(self: SrcGate, src: i16) bool {
+            if (src == 0) return false; // native ops are never withdrawn
+            const f = self.fn_ orelse return false;
+            return f(self.ctx, src);
+        }
+    };
+
     /// Apply the ops queued at entry, then clear them; ops pushed during
     /// drain stay for the next tick. Safe to call with empty buffer.
     /// Profiling: ecs must not import apm (cycle). Callers may time around
     /// drain via apm sections; `applied` / Buffer.dropped counters suffice.
     pub fn drain(self: *Buffer, w: *World) DrainResult {
+        return self.drainWith(w, .{});
+    }
+
+    /// `drain` with a live per-op source gate (see SrcGate). An op whose source
+    /// withdrew during this same drain is skipped and counted as applied
+    /// nothing, exactly as if the pre-drain pass had dropped it.
+    pub fn drainWith(self: *Buffer, w: *World, gate: SrcGate) DrainResult {
         var r: DrainResult = .{ .dropped_before = self.dropped };
         // Snapshot the count: ops applied below can push more commands.
         // Those stay deferred to the next tick instead of running in this
@@ -167,7 +257,10 @@ pub const Buffer = struct {
         const count = self.n;
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            switch (self.ops[i]) {
+            if (gate.withdrew(self.srcs[i])) continue;
+            const op = self.ops[i];
+            const applied_before = r.applied;
+            switch (op) {
                 .spawn_zombie => |z| {
                     if (w.spawnZombie(z.x, z.y, z.z, z.hp)) |nid| {
                         self.recordSpawn(self.srcs[i], nid);
@@ -177,6 +270,11 @@ pub const Buffer = struct {
                 },
                 .despawn => |d| {
                     if (w.slotOfNetId(d.net_id)) |s| {
+                        if (r.despawned_n < r.despawned_ids.len) {
+                            r.despawned_ids[r.despawned_n] = d.net_id;
+                            r.despawned_slots[r.despawned_n] = s;
+                            r.despawned_n += 1;
+                        }
                         w.destroy(s);
                         r.despawned += 1;
                         r.applied += 1;
@@ -211,6 +309,8 @@ pub const Buffer = struct {
                     }
                 },
             }
+            // Only an op that actually applied can leave residue.
+            if (r.applied != applied_before) self.recordIrrevocable(self.srcs[i], op);
         }
         const leftover = self.n - count;
         if (leftover > 0) {
@@ -242,6 +342,171 @@ test "command buffer spawn damage despawn" {
     const dr2 = w.commands.drain(&w);
     try std.testing.expectEqual(@as(u32, 1), dr2.despawned);
     try std.testing.expect(w.slotOfNetId(zid) == null);
+}
+
+/// Test double for the mid-drain withdrawal case: `say` stands in for the op
+/// whose apply reaches a verdict hook, and flips the disabled flag the gate
+/// reads.
+const DrainGateCtx = struct {
+    withdrawn_src: i16 = 2,
+    disabled: bool = false,
+    said: u32 = 0,
+
+    fn say(ctx: ?*anyopaque, _: []const u8) void {
+        const c: *DrainGateCtx = @ptrCast(@alignCast(ctx.?));
+        c.said += 1;
+        // The verdict hook trapped on the first op this src produced.
+        c.disabled = true;
+    }
+
+    fn gate(ctx: ?*anyopaque, src: i16) bool {
+        const c: *const DrainGateCtx = @ptrCast(@alignCast(ctx.?));
+        return c.disabled and src == c.withdrawn_src;
+    }
+};
+
+test "a source that disables during the drain stops running its own later ops" {
+    // The mid-drain case the pre-drain pass cannot see (ADR 0030): the verdict
+    // reached from op 1 traps, so its module is withdrawn while ops 2 and 3
+    // (queued before the trap) are still in the snapshot being drained. The
+    // gate is asked per op, so only that module's later ops are withheld.
+    var ctx: DrainGateCtx = .{};
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    w.say_ctx = &ctx;
+    w.say_fn = &DrainGateCtx.say;
+    w.op_src_withdrawn_ctx = &ctx;
+    w.op_src_withdrawn_fn = &DrainGateCtx.gate;
+
+    try std.testing.expect(w.commands.pushSrc(2, .{ .say = .{ .text = undefined, .len = 0 } }));
+    try std.testing.expect(w.commands.pushSrc(2, .{ .say = .{ .text = undefined, .len = 0 } }));
+    try std.testing.expect(w.commands.pushSrc(3, .{ .say = .{ .text = undefined, .len = 0 } }));
+    const dr = w.drainCommands();
+    // src 2's first op ran and disabled it; its second op was withheld; src 3's
+    // op still ran, because the gate is per src and not a global stop. `said`
+    // counts applied ops, so it is 2 (src 2's first and src 3's), not 3.
+    try std.testing.expectEqual(@as(u32, 2), dr.said);
+    try std.testing.expectEqual(@as(u32, 2), ctx.said);
+}
+
+test "drainWith skips ops whose source withdrew, and nothing else" {
+    // Temporal composability (ADR 0030): a module can disable itself while an
+    // earlier op is being applied (a verdict hook that traps), and its
+    // remaining ops are already in the snapshot the drain is walking. The gate
+    // is asked per op, so exactly that src's ops are withheld while native
+    // (src 0) and other live sources still apply.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    var w2: World = .{};
+    defer w2.deinit();
+    try w2.ensureNetMap(std.testing.allocator);
+
+    const only_two = struct {
+        fn f(_: ?*anyopaque, src: i16) bool {
+            return src == 2;
+        }
+    }.f;
+
+    try std.testing.expect(w.commands.pushSrc(0, .{ .spawn_zombie = .{ .x = 1, .y = 70, .z = 1, .hp = 40 } }));
+    try std.testing.expect(w.commands.pushSrc(2, .{ .spawn_zombie = .{ .x = 4, .y = 70, .z = 4, .hp = 40 } }));
+    try std.testing.expect(w.commands.pushSrc(3, .{ .spawn_zombie = .{ .x = 7, .y = 70, .z = 7, .hp = 40 } }));
+    const gated = w.commands.drainWith(&w, .{ .fn_ = &only_two });
+    try std.testing.expectEqual(@as(u32, 2), gated.spawned);
+    try std.testing.expectEqual(@as(usize, 2), w.countKind(.zombie));
+
+    // src 0 (native) is never withdrawn even if the gate would say so.
+    const all_sources = struct {
+        fn f(_: ?*anyopaque, _: i16) bool {
+            return true;
+        }
+    }.f;
+    try std.testing.expect(w2.commands.pushSrc(0, .{ .spawn_zombie = .{ .x = 1, .y = 70, .z = 1, .hp = 40 } }));
+    _ = w2.commands.drainWith(&w2, .{ .fn_ = &all_sources });
+    try std.testing.expectEqual(@as(usize, 1), w2.countKind(.zombie));
+}
+
+/// Counts say broadcasts for the residue tests.
+const SayCounter = struct {
+    n: u32 = 0,
+
+    fn say(ctx: ?*anyopaque, _: []const u8) void {
+        const c: *SayCounter = @ptrCast(@alignCast(ctx.?));
+        c.n += 1;
+    }
+};
+
+test "the inverse classification is exhaustive and residue is counted per source" {
+    // Paper 3.1: every effect a component makes carries an inverse. A verb the
+    // runtime can undo is `revertible`; one whose effect is already in the
+    // world or on the wire (`damage`, `say`, `despawn`) is `irrevocable` and is
+    // counted per source so a withdrawal reports what it left behind instead of
+    // pretending. The `switch` in `inverseOfOp` has no `else`, so a new verb
+    // fails the build until it is classified here.
+    try std.testing.expectEqual(Inverse.revertible, inverseOfOp(.{ .spawn_zombie = .{ .x = 0, .y = 0, .z = 0, .hp = 1 } }));
+    try std.testing.expectEqual(Inverse.revertible, inverseOfOp(.{ .glide = .{ .net_id = 1, .on = true } }));
+    try std.testing.expectEqual(Inverse.irrevocable, inverseOfOp(.{ .despawn = .{ .net_id = 1 } }));
+    try std.testing.expectEqual(Inverse.irrevocable, inverseOfOp(.{ .damage = .{ .net_id = 1, .amount = 1 } }));
+    try std.testing.expectEqual(Inverse.irrevocable, inverseOfOp(.{ .say = .{ .text = undefined, .len = 0 } }));
+
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    var said: SayCounter = .{};
+    w.say_ctx = &said;
+    w.say_fn = &SayCounter.say;
+
+    const zid = w.spawnZombie(1, 70, 1, 40).?;
+    var text: [64]u8 = .{0} ** 64;
+    text[0] = 'h';
+    text[1] = 'i';
+    try std.testing.expect(w.commands.pushSrc(1, .{ .say = .{ .text = text, .len = 2 } }));
+    try std.testing.expect(w.commands.pushSrc(1, .{ .damage = .{ .net_id = zid, .amount = 1 } }));
+    try std.testing.expect(w.commands.pushSrc(1, .{ .despawn = .{ .net_id = zid } }));
+    // The one revertible verb this source applies: its inverse is the spawn
+    // ring, so it must NOT be counted as residue.
+    try std.testing.expect(w.commands.pushSrc(1, .{ .spawn_zombie = .{ .x = 2, .y = 70, .z = 2, .hp = 40 } }));
+    try std.testing.expect(w.commands.pushSrc(2, .{ .say = .{ .text = text, .len = 2 } }));
+    const dr = w.commands.drain(&w);
+    try std.testing.expectEqual(@as(u32, 5), dr.applied);
+    try std.testing.expectEqual(@as(u32, 2), said.n);
+
+    // Source 1 left three applied effects with no inverse (say, damage,
+    // despawn); source 2 left one. Native src 0 never accrues.
+    try std.testing.expectEqual(@as(u32, 3), w.commands.takeIrrevocable(1));
+    try std.testing.expectEqual(@as(u32, 1), w.commands.takeIrrevocable(2));
+    // Taking reports once: the count is cleared, and src 0 has none.
+    try std.testing.expectEqual(@as(u32, 0), w.commands.takeIrrevocable(1));
+    try std.testing.expectEqual(@as(u32, 0), w.commands.takeIrrevocable(0));
+    // The withdrawal hands back the one revertible spawn and finds no residue
+    // left to report.
+    var out: [max_commands]i32 = undefined;
+    try std.testing.expectEqual(@as(usize, 1), w.commands.dropFrom(1, &out));
+    try std.testing.expectEqual(@as(u32, 0), w.commands.takeIrrevocable(1));
+}
+
+test "residue follows its source across plugin slot compaction" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    var said: SayCounter = .{};
+    w.say_ctx = &said;
+    w.say_fn = &SayCounter.say;
+
+    var text: [64]u8 = .{0} ** 64;
+    text[0] = 'x';
+    text[1] = 'y';
+    try std.testing.expect(w.commands.pushSrc(3, .{ .say = .{ .text = text, .len = 2 } }));
+    _ = w.commands.drain(&w);
+    try std.testing.expectEqual(@as(u32, 1), said.n);
+
+    // Slot 1 is dropped, so slot 3's plugin compacts to src 2: its residue must
+    // move with it, and the vacated slot must not keep a count.
+    w.commands.shiftSrcsAfter(1);
+    try std.testing.expectEqual(@as(u32, 0), w.commands.takeIrrevocable(3));
+    try std.testing.expectEqual(@as(u32, 1), w.commands.takeIrrevocable(2));
+    try std.testing.expectEqual(@as(u32, 0), w.commands.takeIrrevocable(2));
 }
 
 test "command buffer drops at cap" {

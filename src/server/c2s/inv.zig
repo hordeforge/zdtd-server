@@ -20,10 +20,20 @@ const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
 const stock_te = packages.stock_te;
 const containers_mod = @import("../../world/containers.zig");
+const game_locks = @import("../game/locks.zig");
 const stabilityAfterSetBlock = game_mod.stabilityAfterSetBlock;
 const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
+const assets_progression = @import("../../assets/progression.zig");
+const game_craft = @import("../game/craft.zig");
+
+/// Sign-text echo range. Stock `NetPackageTileEntity::ProcessPackage` calls
+/// `SendPackage(..., pos = te.ToWorldCenterPos(), range = 192, exclude = false)`
+/// (NetPackageTileEntity.il.txt IL_00B4), so every spawned client inside 192 m
+/// gets the applied TE - the sender included, which is what clears its
+/// `lockHandleWaitingFor` and unblocks the sign UI.
+const sign_echo_range: f32 = 192;
 
 /// Server-authoritative mod attachment scrub (RE items.md CalcModSlotCount
 /// IL=29 + ItemClassModifier suitability): after an inventory write, a slot's
@@ -80,8 +90,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (body.len < 4) return true;
         const entity_id = std.mem.readInt(i32, body[0..4], .little);
         // Bounds rule 20: the id must name a real player entity, or a spoofed
-        // reload would fan out to every connected peer for free.
-        if (entity_id == 0 or self.sim.slotOfNetId(entity_id) == null) return true;
+        // reload would fan out to every connected peer for free. The body
+        // describes the sender's own weapon, so a foreign id is a claim on
+        // another player's animation, not a relay the server owes.
+        if (entity_id == 0 or entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (self.sim.slotOfNetId(entity_id) == null) return true;
         try self.broadcastExcept("NetPackageItemReload", body, c.slot);
         return true;
     }
@@ -159,6 +175,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const props = eatProps(self, e.id);
                     const r = invsys.applyEatProps(&self.sim, ps, props);
                     if (!r.ate) break;
+                    self.grantMagazineRead(c.slot, e.id);
                     ate_any = true;
                     units_left -= 1;
                 }
@@ -175,6 +192,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
+                        self.grantMagazineRead(c.slot, eid);
                         ate_any = true;
                         units_left -= 1;
                     }
@@ -194,6 +212,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
+                        self.grantMagazineRead(c.slot, eid);
                         ate_any = true;
                         units_left -= 1;
                     }
@@ -297,6 +316,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBag")) {
+        // Same container quarantine the TileEntity arm applies. Both write
+        // client-supplied item contents into a non-player entity (this one
+        // reaches loot bags and vehicle baskets), so a peer quarantined off
+        // the container surface could keep rewriting bags through here while
+        // its TE writes were denied.
+        if (self.quarantineDenies(c, .container)) return true;
         // Rate gate: a bag write mutates inventory and echoes to every other
         // peer; unthrottled it is the same broadcast-amplification hole as
         // the SetBlock relay.
@@ -321,10 +346,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const ps = self.sim.playerByPeer(c.slot) orelse return true;
             const pp = self.sim.transform[ps];
             const bp = self.sim.transform[si];
-            if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
-                self.harness.counters.inc(.bounds_rejects);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                pp.x,
+                pp.y,
+                pp.z,
+                bp.x,
+                bp.y,
+                bp.z,
+            )) return true;
             if (self.sim.mask[si].inventory) {
                 _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return true;
                 self.clampInventoryStacks(&self.sim.inventory[si]);
@@ -349,6 +382,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         .{};
                 }
                 v.basket_n = @intCast(parsed.n);
+                // Same stack clamp the player-inventory branch above applies,
+                // and the container / workstation TE bodies below. The basket
+                // is a client-writable InvSlot group like the rest, so an
+                // over-cap count here was the one way to write a stack past
+                // its items.xml Stacknumber and have it persist.
+                self.clampStackSlots(v.basket[0..v.basket_n]);
                 try self.broadcastExcept("NetPackageBag", body, c.slot);
             }
         } else return true;
@@ -376,6 +415,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var v_plat: [packages.platform_user.max_platform_len]u8 = undefined;
             var v_id: [packages.platform_user.max_id_len]u8 = undefined;
             var v_pw: [vending_mod.max_password_hash]u8 = undefined;
+            // parseVendingTeBody indexes this scratch by stock_te.max_vending_allowed
+            // while the store's own cap sizes it. The two are independent
+            // constants in different layers (world must not import wire), so
+            // tie them here rather than letting a bump on one side write past
+            // the end of the other's buffer.
+            comptime std.debug.assert(stock_te.max_vending_allowed == vending_mod.max_allowed_users);
             var v_allowed_plat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
             var v_allowed_id: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
             if (stock_te.parseVendingTeBody(body, &v_plat, &v_id, &v_pw, &v_allowed_plat, &v_allowed_id) catch |err| blk: {
@@ -386,10 +431,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }) |ve| {
                 const owner = self.sim.playerByPeer(c.slot) orelse return true;
                 const op = self.sim.transform[owner];
-                if (!self.withinEditReach(op.x, op.y, op.z, @floatFromInt(ve.world_x), @floatFromInt(ve.world_y), @floatFromInt(ve.world_z))) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    return true;
-                }
+                if (self.rejectIfBeyondEditRange(
+                    c,
+                    peer.local_id,
+                    c.entity_id,
+                    .container,
+                    op.x,
+                    op.y,
+                    op.z,
+                    @floatFromInt(ve.world_x),
+                    @floatFromInt(ve.world_y),
+                    @floatFromInt(ve.world_z),
+                )) return true;
                 const vm = self.vending.get(.{ .x = ve.world_x, .y = ve.world_y, .z = ve.world_z }) orelse return true;
                 // Owner-editable surface (lock / password / allowed users).
                 // Only the machine's owner may edit; ownership and the
@@ -410,6 +463,55 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     };
                 }
                 try replicate_te.sendVendingTe(self, peer, ve.world_x, ve.world_y, ve.world_z);
+                return true;
+            }
+        }
+        // Sign text (stock TEFeatureSignable). Sign data is not its own
+        // package: the client's TileEntity::setModified sends the composite TE
+        // body with a fresh handle and the server applies it to its own TE and
+        // rebroadcasts it verbatim (ProcessPackage never re-encodes, so the
+        // relayed bytes are the applied state). Bodies that also carry
+        // TEFeatureStorage (the writable crates) belong to the storage leg
+        // below, which owns their item list.
+        var sign_text: [stock_te.max_sign_text_bytes]u8 = undefined;
+        if (stock_te.parseSignableTeBody(body, &sign_text) catch |err| blk: {
+            if (err != error.NotSignableTe) self.harness.counters.inc(.c2s_malformed);
+            break :blk null;
+        }) |sign| {
+            if (sign.has_storage) {
+                // fall through to the storage branch
+            } else {
+                const owner = self.sim.playerByPeer(c.slot) orelse return true;
+                const op = self.sim.transform[owner];
+                if (self.rejectIfBeyondEditRange(
+                    c,
+                    peer.local_id,
+                    c.entity_id,
+                    .container,
+                    op.x,
+                    op.y,
+                    op.z,
+                    @floatFromInt(sign.world_x),
+                    @floatFromInt(sign.world_y),
+                    @floatFromInt(sign.world_z),
+                )) return true;
+                // Stock drops the package when the block at the addressed
+                // position no longer matches the claimed type; zdtd also
+                // requires the block to be one whose composite carries the
+                // signable module, so a forged body cannot write sign text
+                // into an unrelated block's TE slot.
+                if (sign.block_id <= 0 or sign.block_id > std.math.maxInt(u16)) return true;
+                const cur = self.world.blockWorld(sign.world_x, sign.world_y, sign.world_z) catch return true;
+                if (@as(i32, cur) != sign.block_id) return true;
+                const bdef = self.blocks.byId(@intCast(sign.block_id)) orelse return true;
+                if (!bdef.signable) return true;
+                // Keep the applied body so the chunk stream can replay it to a
+                // client that streams this area later (stock ships the TE with
+                // the chunk). A table-full or oversized body only loses the
+                // replay, never the echo.
+                _ = self.sign_texts.put(.{ .x = sign.world_x, .y = sign.world_y, .z = sign.world_z }, sign.block_id, body);
+                self.harness.counters.inc(.c2s_te_sign_echo);
+                try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(sign.world_x), @floatFromInt(sign.world_z), sign_echo_range);
                 return true;
             }
         }
@@ -455,8 +557,24 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // FetchFromContainer quests (stock's quest object observes the
             // container TE); advance fetch phases so they can reach turn-in.
             systems.questOnFetchItem(&self.sim, c.slot, 1);
-            // Echo stock TE to nearby clients.
-            try replicate_te.broadcastStorageTe(self, cont);
+            // Echo stock TE to nearby clients. Stock applies the client's whole
+            // composite to its own TE and resends it, so when the received body
+            // carries more than the storage module (a writable crate's sign text
+            // and lock state) the echo keeps those modules and swaps in the
+            // server's clamped storage module; if the module cannot be spliced
+            // in place the storage-only body stands, which the client's modern
+            // composite reader accepts.
+            if (stock_te.spliceStorageEcho(&self.body_buf, body, &parsed, cont, Game.resolveItemType, self)) |echo| {
+                try self.broadcastNear(
+                    "NetPackageTileEntity",
+                    echo,
+                    @floatFromInt(cont.pos.x),
+                    @floatFromInt(cont.pos.z),
+                    self.interest_range,
+                );
+            } else {
+                try replicate_te.broadcastStorageTe(self, cont);
+            }
             return true;
         } else |_| {}
         // Workstation TE (type 12 classic): apply arrays + queue into the
@@ -537,10 +655,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // could otherwise claim any output count or craft in
                         // zero time). Stock HandleRecipeQueue reads the Recipe
                         // object for both; the item restarts on the server time.
+                        if (assets_progression.unlockRequirement(&self.progression_table, rd.name)) |req| {
+                            if (self.skillLevelOf(c.slot, req[0]) < req[1]) {
+                                dst.* = .{};
+                                continue;
+                            }
+                        }
                         dst.* = q;
                         dst.output_count = rd.count;
-                        dst.one_item_craft_time = rd.craft_time;
-                        dst.craft_time_left = rd.craft_time;
+                        // Stock `Recipe::Init` (IL=79): an omitted craft_time
+                        // resolves through the item table, not the old 1 s
+                        // default (and never the client's spoofed time).
+                        dst.one_item_craft_time = game_craft.craftTimeFor(self, rd);
+                        dst.craft_time_left = dst.one_item_craft_time;
+                        dst.craft_exp_gain = if (rd.craft_exp_gain >= 0) rd.craft_exp_gain else 0;
                     }
                 } else {
                     @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
@@ -561,9 +689,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 st.melt_len = ws.melt_n;
                 st.is_burning = ws.is_burning;
                 st.burn_time_left = ws.burn_time_left;
-                // Fuel-module presence is block-derived (not on the wire):
-                // the craft queue waits for burning only on fuel stations.
+                // Fuel-/material-module presence is block-derived (not on the wire):
+                // the craft queue waits for burning only on fuel stations;
+                // material_input gates HandleMaterialInput (forge melt).
                 st.has_fuel_module = self.blocks.hasFuelModule(@intCast(ws.block_id));
+                st.has_material_input = self.blocks.hasMaterialInput(@intCast(ws.block_id));
                 st.is_player_placed = ws.is_player_placed;
                 st.block_id = ws.block_id;
                 st.geometry_known = true;
@@ -619,6 +749,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 );
                 if (trig.reset_trigger) _ = self.sim.power.resetTriggerAt(trig.world_x, trig.world_y, trig.world_z);
             }
+            // A motion sensor carries its TargetType bitmask (stock
+            // PowerTrigger.TargetType for TriggerType 3). The parser already
+            // read it and the handler dropped it, so the echo below reset the
+            // player's target selection to 0 the moment they set it.
+            if (trig.trigger_type == stock_te.trigger_type_motion) {
+                _ = self.sim.power.setTriggerTargetAt(
+                    trig.world_x,
+                    trig.world_y,
+                    trig.world_z,
+                    trig.target_type,
+                );
+            }
             self.sim.power.resolve();
             try replicate_te.broadcastPoweredTriggerTe(self, trig.world_x, trig.world_y, trig.world_z);
             return true;
@@ -648,6 +790,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.sim.playerByPeer(c.slot)) |ps| {
                 if (self.sim.mask[ps].inventory) {
                     var ok = true;
+                    // Stage into a copy and commit only on success. Stock
+                    // applies the whole InventoryTransaction and then checks
+                    // ValidateFinalHashes (InventoryManager
+                    // TransactionRequestServer IL=46); a failure there force-
+                    // unlocks and sends nothing, so a rejected transaction
+                    // never leaves half its ops applied. The SetAbsolute /
+                    // SetRelative arm used to write straight into the live
+                    // inventory, so an op that failed after an earlier one had
+                    // landed left those stacks applied, unclamped (the clamp
+                    // sits in the success branch) and unreplicated.
+                    var staged = self.sim.inventory[ps].slots;
                     for (stx.entries[0..stx.entry_n]) |*en| {
                         for (en.ops[0..en.op_n]) |op| {
                             switch (op.op) {
@@ -670,7 +823,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                         self.harness.counters.inc(.c2s_rejects);
                                         continue;
                                     }
-                                    self.sim.inventory[ps].slots[@intCast(op.index)] = slot;
+                                    staged[@intCast(op.index)] = slot;
                                 },
                                 2 => { // SetAll: replace the inventory array
                                     if (op.new_n > ecs.components.max_inv_slots) {
@@ -690,21 +843,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                         }
                                         slots[si] = slot;
                                     }
-                                    if (ok) {
-                                        @memcpy(&self.sim.inventory[ps].slots, &slots);
-                                    }
+                                    if (ok) staged = slots;
                                 },
                                 else => ok = false,
                             }
                         }
                     }
                     if (ok) {
+                        self.sim.inventory[ps].slots = staged;
                         self.clampInventoryStacks(&self.sim.inventory[ps]);
-                        self.sim.markDirty(ps, .{ .inv = true });
                         // Stock minimal ack: success true + count 0 (full
                         // stacks ride only for non-primary players).
                         var ack: [5]u8 = .{ 1, 0, 0, 0, 0 };
                         try self.sendGame(peer, "NetPackageInventoryTransactionResponse", &ack);
+                    } else {
+                        // Stock TransactionRequestServer (IL=46, RE
+                        // protocol-packages.md:1245): a failed apply logs and
+                        // calls LockManager.ForceUnlockByPlayer. The client's
+                        // window is showing a transaction the server refused,
+                        // so leaving the lock held keeps that window open over
+                        // a container whose contents no longer match, and pins
+                        // the channel against everyone else.
+                        self.harness.counters.inc(.c2s_rejects);
+                        self.releaseOtherLocksForPeer(c.slot, game_locks.keep_no_channel);
                     }
                 }
             }
@@ -712,9 +873,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const tx = packages.parseInvTxRequest(body) catch return true;
         var r: invsys.Result = .{};
+        var bag_pos: ?[3]i32 = null;
         // Captured before apply: a rejected place must refund what it consumed.
         const place_item_id: u16 = blk: {
-            if (tx.op != @intFromEnum(invsys.Op.place) or tx.a >= ecs.components.max_inv_slots) break :blk 0;
+            if (tx.op != @intFromEnum(invsys.Op.place) and tx.op != @intFromEnum(invsys.Op.use)) break :blk 0;
+            if (tx.a >= ecs.components.max_inv_slots) break :blk 0;
             const ps = self.sim.playerByPeer(c.slot) orelse break :blk 0;
             if (!self.sim.mask[ps].inventory) break :blk 0;
             break :blk self.sim.inventory[ps].slots[tx.a].item_id;
@@ -722,13 +885,54 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const ledger_before = self.sim.inv_ledger.total;
         if (tx.op == @intFromEnum(invsys.Op.craft)) {
             r = .{ .ok = self.tryCraft(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
+        } else if (tx.op == @intFromEnum(invsys.Op.scrap)) {
+            r = .{ .ok = self.tryScrap(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
         } else {
             const op: invsys.Op = if (tx.op <= @intFromEnum(invsys.Op.equip))
                 @enumFromInt(tx.op)
             else
                 .list;
+            // Per-surface quarantine, the same gate the Bag and TileEntity
+            // arms apply. This one packet reaches both surfaces: open / take /
+            // put mutate a container's contents, and place writes a world
+            // block. Ungated, a peer quarantined off either surface kept
+            // working through the transaction route while its direct packets
+            // were refused.
+            switch (op) {
+                .open, .take, .put => if (self.quarantineDenies(c, .container)) return true,
+                .place => if (self.quarantineDenies(c, .block)) return true,
+                else => {},
+            }
+            // The open bag's position, read while it still exists: a drain
+            // that empties it destroys the entity, and the marker is keyed by
+            // position.
+            if (op == .take) {
+                if (self.sim.playerByPeer(c.slot)) |tps| {
+                    const cid = self.sim.inventory[tps].open_container;
+                    if (cid > 0) {
+                        if (self.sim.slotOfNetId(cid)) |bs| {
+                            if (self.sim.mask[bs].transform) {
+                                const bt = self.sim.transform[bs];
+                                bag_pos = .{ @trunc(bt.x), @trunc(bt.y), @trunc(bt.z) };
+                            }
+                        }
+                    }
+                }
+            }
             // ItemActionEat: resolve food/water/hp from items.xml via eatProps.
             r = invsys.applyTransactionEx(&self.sim, c.slot, op, tx.a, tx.b, tx.qty, tx.entity_id, eatProps, self);
+        }
+        // Draining a death bag slot-by-slot destroys it the same way
+        // collecting the whole bag does, so the backpack marker must clear on
+        // both, or the map keeps a marker on a bag that no longer exists.
+        // The position has to be read before the drain: the entity is gone by
+        // the time `emptied_bag` reports it.
+        if (r.ok and r.emptied_bag > 0) {
+            if (bag_pos) |bp| {
+                if (c.removeBackpackAt(bp[0], bp[1], bp[2])) {
+                    self.broadcastPlayerBackpack(c) catch {};
+                }
+            }
         }
         if (r.ok and r.place_block != 0) {
             // Land claim is authoritative on every apply path (ADR 0004); the
@@ -789,6 +993,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // ItemActionEat.consume → EntityStatChanged food/water/health (stock path).
         if (r.ok and r.ate and c.entity_id > 0) {
+            self.grantMagazineRead(c.slot, place_item_id);
             try self.sendSurvivalStats(peer, c.entity_id, r.hp, r.max_hp, r.food, r.food_max, r.water, r.water_max);
         }
         return true;
@@ -804,9 +1009,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Serve TE container slots when Guid matches our deterministic pos-key.
         if (packages.parseInvDataRequestStock(body)) |req| {
             if (self.containers.getByGuid(&req.inventory_key)) |cont| {
-                // LootRespawnDays: a looted world container re-rolls here
-                // when its interval has elapsed (before the slots serve).
-                self.maybeRespawnContainer(cont);
+                // Stock LootManager.LootContainerOpened: an untouched world
+                // container rolls here with the opener's loot stage (the roll
+                // no longer happens at chunk load), and a looted one re-rolls
+                // once LootRespawnDays have elapsed.
+                self.ensureContainerLoot(cont, c.slot);
                 var slots: [containers_mod.max_container_slots]packages.stock_inv.StockSlot =
                     [_]packages.stock_inv.StockSlot{.{}} ** containers_mod.max_container_slots;
                 var si: usize = 0;

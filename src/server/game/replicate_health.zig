@@ -1,6 +1,7 @@
 //! Health replicate path - extracted verbatim from game.zig.
 //! Thin forwarder keeps callers unchanged.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -11,8 +12,15 @@ const interest = @import("../../ecs/interest.zig");
 /// Drain the hp dirty bit into stock EntityStatChanged(Health) packages.
 /// See game.zig replicatePlayerHealth for the full doc comment.
 pub fn replicatePlayerHealth(self: *Game) void {
-    var i: ecs.Slot = 0;
-    while (i < ecs.max_entities) : (i += 1) {
+    // Walk the dirty set rather than all `max_entities` slots: this runs every
+    // tick and only an hp-dirty entity can have an update, and every hp writer
+    // either funnels through markDirty or syncs explicitly (the WindowFull
+    // retry below). A snapshot, because the body destroys and re-marks
+    // entities on the death path while it walks.
+    var dirty_now = self.sim.dirty_bits;
+    var dirty_it = dirty_now.iterator(.{});
+    while (dirty_it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
         if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
         self.sim.dirty[i].hp = false;
         self.sim.syncDirtyBit(i);
@@ -23,12 +31,46 @@ pub fn replicatePlayerHealth(self: *Game) void {
             const owner_slot = self.sim.player[i].peer_slot;
             if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
                 const oc = &self.clients[@intCast(owner_slot)];
+                // Death ledger: stock EntityAlive.OnEntityDeath (IL=146) bumps
+                // the victim's Died through AddScore(1, 0, 0, -1, 0), and
+                // EntityNetworkStats.killed is filled from get_Died()
+                // (FillFromEntity IL=150). Count each corpse once.
+                if (!oc.death_counted) {
+                    oc.deaths += 1;
+                    oc.death_counted = true;
+                }
                 // AI-inflicted deaths land here (the C2S kill path bags its own
-                // victims and latches has_backpack, so a death is never bagged
-                // twice): DropOnDeath modes 1..3 drop the victim's real
+                // victims and latches `bagged_this_death`, so a death is never
+                // bagged twice): DropOnDeath modes 1..3 drop the victim's real
                 // inventory range as a bag at the death position.
-                if (!oc.has_backpack) self.spawnDeathBag(i);
+                if (!oc.bagged_this_death) self.spawnDeathBag(i);
                 if (oc.peer) |op| {
+                    // Stock EntityPlayer.HandleClientDeath (IL=71) switches on
+                    // GameStats DeathPenalty and runs the matching
+                    // game_on_death_* sequence. The runner applies the
+                    // ActionBaseTargetAction legs (RemoveDeathBuffs, honouring
+                    // the injured sequence's `exclude_tags="deathpenalty_injured"`)
+                    // and sends one ClientSequenceAction (12) response per
+                    // ActionBaseClientAction leg - AddXPDeficit among them,
+                    // which earns the deficit on the dead client.
+                    const seq_name = Game.deathSequenceName(self.death_penalty);
+                    if (seq_name) |sname| {
+                        if (!self.runGameEventSequence(oc.slot, sname)) {
+                            // Offline floor (no stock gameevents.xml): the two
+                            // sequences that declare AddXPDeficit still have to
+                            // drive the client's deficit, at stock's index 0.
+                            if (self.death_penalty == 1 or self.death_penalty == 2) {
+                                var key_buf: [64]u8 = undefined;
+                                if (std.fmt.bufPrint(&key_buf, "{s}0", .{sname})) |key| {
+                                    if (packages.buildGameEventSequenceAction(self.body_buf[200..456], sname, oc.entity_id, key)) |sdb| {
+                                        self.sendGame(op, "NetPackageGameEventResponse", sdb) catch {
+                                            self.harness.counters.inc(.net_send_errors);
+                                        };
+                                    } else |_| {}
+                                } else |_| {}
+                            }
+                        }
+                    }
                     const wsp = self.world.primarySpawn();
                     var entries: [2]packages.SpawnPointEntry = undefined;
                     var en: usize = 0;
@@ -63,6 +105,10 @@ pub fn replicatePlayerHealth(self: *Game) void {
         };
         self.harness.counters.inc(.packages_encoded);
         const tp = self.sim.transform[i];
+        // EntityStatChanged is latest-wins droppable under WindowFull. If any
+        // interested peer could not take the send, re-dirty so the next tick
+        // retries with the current HP instead of leaving the client stale.
+        var any_send_failed = false;
         for (&self.clients) |*cl| {
             if (!cl.joined or !cl.entered) continue;
             const peer = cl.peer orelse continue;
@@ -70,7 +116,12 @@ pub fn replicatePlayerHealth(self: *Game) void {
             if (!owner and !self.clientObserves(cl, tp.x, tp.z)) continue;
             self.sendGame(peer, "NetPackageEntityStatChanged", body) catch {
                 self.harness.counters.inc(.net_send_errors);
+                any_send_failed = true;
             };
+        }
+        if (any_send_failed) {
+            self.sim.dirty[i].hp = true;
+            self.sim.syncDirtyBit(i);
         }
     }
 }

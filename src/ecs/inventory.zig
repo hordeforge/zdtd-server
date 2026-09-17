@@ -24,6 +24,9 @@ pub const Op = enum(u8) {
     equip = 10, // move slot a → equip slot b (0..equip_count-1)
     /// Craft: a = recipe index (caller resolves), qty = output multiplier (min 1).
     craft = 11,
+    /// Scrap: a = bag slot, qty = input count (min 1). Resolved in Game via
+    /// GetScrapableRecipe (RE crafting-recipes.md IL=77).
+    scrap = 12,
 };
 
 pub const Result = struct {
@@ -46,6 +49,11 @@ pub const Result = struct {
     water_max: f32 = 100,
     hp: f32 = 0,
     max_hp: f32 = 100,
+    /// Net id of a loot bag this op emptied and destroyed (-1 = none). The
+    /// Game clears the owner's backpack marker on it: the ECS layer has no
+    /// Client, and a death bag drained slot-by-slot through `take` would
+    /// otherwise strand that marker on a bag that is already empty.
+    emptied_bag: i32 = -1,
 };
 
 /// Offline stack caps (no ItemTable). Delegates to `components.maxStackOffline`.
@@ -121,12 +129,22 @@ fn itemIsArmor(w: *const World, item_id: u16) bool {
     return isArmorOffline(item_id);
 }
 
+/// Stock `EntityAlive::DamageEntity` general leg (IL=236, PassiveEffects 40):
+/// `resist = min(1, GetValue(GeneralDamageResist, null, 0, this, null, empty))`
+/// of the incoming strength, for EVERY damage type. The value is the untagged
+/// buff+perk VM total the survival tick caches per entity slot, so a row this
+/// tick did not fold reads 0 (no resist). Negative totals are kept: stock does
+/// not clamp at 0, and a vulnerability row is meant to raise the damage taken.
+pub fn generalDamageResist(w: *const World, ps: Slot) f32 {
+    return @min(1.0, w.buff_general_resist[ps]);
+}
+
 /// Armor in equip slots reduces incoming damage (0..cap), plus the buff-side
 /// PhysicalDamageResist percent from the passive-effects VM. The item leg is
 /// the equipped armor's summed PhysicalDamageResist percent at its quality
 /// (stock GetTotalPhysicalArmorRating sums passive 41 on the wearer;
-/// Equipment.CalcDamage reduces physical damage by rating/100, combat-
-/// damage.md). The pieces-rate floor stands only when no XML row resolved
+/// Equipment.CalcDamage reduces physical damage by rating/100, see
+/// combat-damage.md). The pieces-rate floor stands only when no XML row resolved
 /// (offline/builtin catalog).
 pub fn armorMitigation(w: *const World, peer: usize) f32 {
     const ps = w.playerByPeer(peer) orelse return 0;
@@ -145,7 +163,11 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
     }
     const item_mit = phys_pdr / 100.0;
     const fallback = if (phys_pdr == 0) pieces * w.rules.combat.armor_mitigation_per_piece else 0;
-    return @min(w.rules.combat.armor_mitigation_cap, item_mit + fallback + w.buff_phys_resist[ps] / 100.0);
+    // The worn items' installed mods (EffectManager layer 13) join the same
+    // rating: stock GetTotalPhysicalArmorRating sums passive 41 over the
+    // items' effect layers, so modArmorPlatingBasic's +1 counts.
+    const mod_mit = w.item_mod_phys_resist[ps] / 100.0;
+    return @min(w.rules.combat.armor_mitigation_cap, item_mit + mod_mit + fallback + w.buff_phys_resist[ps] / 100.0);
 }
 
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
@@ -153,7 +175,6 @@ pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     if (!w.mask[ps].inventory) return false;
     const ok = w.inventory[ps].addItemStacked(item_id, count, w.maxStack(item_id));
     if (ok) {
-        markInv(w, ps);
         // Ledger delta is i16; clamp like the other recordInv callers (admin
         // give parses u16 counts up to 65535, which would trap the cast).
         recordInv(w, peer, item_id, @intCast(@min(count, std.math.maxInt(i16))), .give);
@@ -186,7 +207,6 @@ pub fn collectBagFull(w: *World, peer_slot: usize, bs: Slot) bool {
         const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
         recordInv(w, peer_slot, slot.item_id, d, .loot);
     }
-    markInv(w, ps);
     return true;
 }
 
@@ -194,7 +214,6 @@ pub fn setHolding(w: *World, peer: usize, slot: u16) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const ok = w.inventory[ps].setHolding(slot);
-    if (ok) markInv(w, ps);
     return ok;
 }
 
@@ -212,7 +231,6 @@ pub fn move(w: *World, peer: usize, from: u16, to: u16, qty: u16) bool {
     if (from >= c.inv_equip_start and dst.count > 0 and !itemIsArmor(w, dst.item_id)) return false;
     const ok = w.inventory[ps].moveSlot(from, to, qty, w.maxStack(item));
     if (ok) {
-        markInv(w, ps);
         const d: i16 = if (qty == 0) 0 else @intCast(@min(qty, std.math.maxInt(i16)));
         recordInv(w, peer, item, d, .tx);
     }
@@ -238,7 +256,6 @@ pub fn drop(w: *World, peer: usize, slot: u16, qty: u16) Result {
             w.inventory[bi].slots[0].meta = taken.meta;
         }
     }
-    markInv(w, ps);
     const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
     recordInv(w, peer, taken.item_id, d, .drop);
     return .{ .ok = true, .dropped_entity = bag };
@@ -268,10 +285,20 @@ pub fn use(w: *World, peer: usize, slot: u16) bool {
     return useEx(w, peer, slot, null, null).ok;
 }
 
-/// Reduce one inventory slot's remaining ItemValue.UseTimes (tool wear) and
-/// mark the inventory dirty so replication relays it. Clamps at 0; stock keeps
-/// the stack present at use_times 0 (broken, repairable) rather than removing
-/// it. The attack / dig call sites in Game.dealDamage consume this.
+/// Advance one inventory slot's ItemValue.UseTimes (tool wear) and mark the
+/// inventory dirty so replication relays it.
+///
+/// UseTimes counts uses *consumed*, upward from 0 on a fresh item: stock's
+/// `ItemValue.get_PercentUsesLeft` (IL=17, `ItemValue.il.txt:137`) is
+/// `1 - clamp01(UseTimes / MaxUseTimes)`, so 0 is pristine and MaxUseTimes is
+/// broken. This used to subtract toward 0 instead, which made it a permanent
+/// no-op: every item enters the world at 0 (`components.InvSlot.use_times`),
+/// so the decrement always took its clamp branch, `use_times` never changed,
+/// and the dirty mark never fired. Nothing wore down and
+/// `hooks.percentUsesLeft` read every tool as brand new.
+///
+/// Stock keeps the stack present at the broken point (repairable) rather than
+/// removing it. The attack / dig call sites in Game.dealDamage consume this.
 pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
@@ -286,8 +313,13 @@ pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
         if (d > 0) use_amount = d;
     }
     const before = s.use_times;
-    s.use_times = if (s.use_times > use_amount) s.use_times - use_amount else 0;
-    if (s.use_times != before) markInv(w, ps);
+    // Already broken: percentUsesLeft has hit 0, so the counter stops there
+    // rather than running up forever. Reusing that resolver keeps MaxUseTimes
+    // in one place (hooks.maxUseTimes, the quality-lerped DegradationMax).
+    if (w.percent_uses_left_fn) |f| {
+        if (f(w.percent_uses_left_ctx, s.item_id, s.quality, before) <= 0) return true;
+    }
+    s.use_times = before + use_amount;
     return true;
 }
 
@@ -300,13 +332,31 @@ pub fn armorMitigationVs(w: *const World, victim_peer: usize, attacker_slot: ?Sl
     var mit = armorMitigation(w, victim_peer);
     if (attacker_slot) |as| {
         if (w.mask[as].inventory and w.item_penetration_fn != null) {
-            const held = w.inventory[as].slots[w.inventory[as].holding];
+            // `heldItem()` guards the no-holding sentinel (0xFFFF, a legal
+            // state once the held slot empties); indexing `holding` directly
+            // panicked on a hit from a player who never selected a toolbelt slot.
+            const held = w.inventory[as].heldItem();
             const attacker_peer: ?usize = if (w.mask[as].player and w.player[as].peer_slot >= 0)
                 @intCast(w.player[as].peer_slot)
             else
                 null;
             const pen = w.item_penetration_fn.?(w.item_penetration_ctx, held.item_id, attacker_peer);
             if (pen < 0) mit *= 1.0 + pen;
+        }
+        // Foreign-gated armor rows (Preacher vs zombies): the piece's
+        // `target="other"` PDR joins the rating when the attacker matches.
+        // The hook returns the raw XML fraction (perc_add keeps fractions),
+        // unlike armorPdr's percent scale, so no /100 here.
+        // The Game hook resolves the attacker's tags from its slot.
+        if (w.armor_pdr_foreign_fn) |ff| {
+            const ps = w.playerByPeer(victim_peer) orelse return @max(0, mit);
+            var i: usize = c.inv_equip_start;
+            while (i < c.max_inv_slots) : (i += 1) {
+                const slot = w.inventory[ps].slots[i];
+                if (slot.count > 0 and itemIsArmor(w, slot.item_id)) {
+                    mit += ff(w.armor_pdr_foreign_ctx, slot.item_id, slot.quality, as);
+                }
+            }
         }
     }
     return @max(0, mit);
@@ -354,7 +404,6 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
         return .{};
     const iid = s.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-    markInv(w, ps);
     recordInv(w, peer, iid, -1, .eat);
     return applyEatProps(w, ps, props);
 }
@@ -367,19 +416,26 @@ pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
     // open another player's bag and take/put through it.
     if (w.mask[cs].player) return false;
     if (!w.mask[cs].loot_bag and !w.mask[cs].inventory) return false;
-    if (w.mask[ps].transform and w.mask[cs].transform) {
-        const dx = w.transform[ps].x - w.transform[cs].x;
-        const dy = w.transform[ps].y - w.transform[cs].y;
-        const dz = w.transform[ps].z - w.transform[cs].z;
-        // 3D reach (R7, [rules.world] container_open_range, default 8 blocks):
-        // XZ-only allowed remote open through floors/ceilings.
-        const range = w.rules.world.container_open_range;
-        if (dx * dx + dy * dy + dz * dz > range * range) return false;
-    }
+    if (!withinContainerReach(w, ps, cs)) return false;
     w.inventory[ps].open_container = container_net;
     if (w.mask[cs].loot_bag) w.loot_bag[cs].open = true;
-    markInv(w, ps);
     return true;
+}
+
+/// 3D reach between a player slot and a container slot
+/// ([rules.world] container_open_range, default 8 blocks). XZ-only would let a
+/// player reach through floors and ceilings.
+///
+/// Checked on open AND on every take/put: holding `open_container` is not a
+/// licence to keep looting after walking away, and a client controls when it
+/// sends the close. An entity with no transform (test fixtures) passes.
+fn withinContainerReach(w: *const World, ps: Slot, cs: Slot) bool {
+    if (!w.mask[ps].transform or !w.mask[cs].transform) return true;
+    const dx = w.transform[ps].x - w.transform[cs].x;
+    const dy = w.transform[ps].y - w.transform[cs].y;
+    const dz = w.transform[ps].z - w.transform[cs].z;
+    const range = w.rules.world.container_open_range;
+    return dx * dx + dy * dy + dz * dz <= range * range;
 }
 
 pub fn closeContainer(w: *World, peer: usize) void {
@@ -394,14 +450,18 @@ pub fn closeContainer(w: *World, peer: usize) void {
     w.inventory[ps].open_container = -1;
 }
 
-/// Take from open container slot into player inventory.
-pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool {
+/// Take from open container slot into player inventory. `out_emptied`, when
+/// given, receives the net id of a loot bag this take emptied and destroyed
+/// (left untouched otherwise): the Game clears the owner's backpack marker on
+/// it, since this layer has no Client.
+pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16, out_emptied: ?*i32) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const cid = w.inventory[ps].open_container;
     if (cid < 0) return false;
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
+    if (!withinContainerReach(w, ps, cs)) return false;
     if (cont_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[cs].holding;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
@@ -419,10 +479,10 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
         }
     }
     if (empty and w.mask[cs].loot_bag) {
+        if (out_emptied) |oe| oe.* = w.network_id[cs].id;
         w.inventory[ps].open_container = -1;
         w.destroy(cs);
     }
-    markInv(w, ps);
     const d: i16 = @intCast(@min(taken.count, std.math.maxInt(i16)));
     recordInv(w, peer, taken.item_id, d, .loot);
     return true;
@@ -435,6 +495,7 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
     if (cid < 0) return false;
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
+    if (!withinContainerReach(w, ps, cs)) return false;
     if (player_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(player_slot, if (qty == 0) w.inventory[ps].slots[player_slot].count else qty) orelse return false;
@@ -443,7 +504,6 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
         restoreTaken(&w.inventory[ps], player_slot, taken, holding_before);
         return false;
     }
-    markInv(w, ps);
     const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
     recordInv(w, peer, taken.item_id, d, .tx);
     return true;
@@ -476,7 +536,6 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
         if (fv > 0) {
             const iid = item.item_id;
             _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-            markInv(w, ps);
             recordInv(w, peer, iid, -1, .place);
             return .{
                 .ok = true,
@@ -495,7 +554,6 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
     if (block == 0) return .{};
     const iid = item.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-    markInv(w, ps);
     recordInv(w, peer, iid, -1, .place);
     return .{ .ok = true, .place_block = block, .place_x = x, .place_y = y, .place_z = z };
 }
@@ -528,7 +586,11 @@ pub fn applyTransactionEx(
             closeContainer(w, peer);
             break :blk .{ .ok = true };
         },
-        .take => .{ .ok = takeFromContainer(w, peer, a, qty) },
+        .take => blk: {
+            var emptied: i32 = -1;
+            const ok = takeFromContainer(w, peer, a, qty, &emptied);
+            break :blk .{ .ok = ok, .emptied_bag = emptied };
+        },
         .put => .{ .ok = putIntoContainer(w, peer, a, qty) },
         .equip => .{ .ok = equip(w, peer, a, b) },
         .place => blk: {
@@ -538,13 +600,10 @@ pub fn applyTransactionEx(
             const z: i32 = @as(i16, @bitCast(qty));
             break :blk placeBlock(w, peer, a, x, y, z);
         },
-        // Craft resolved in Game (needs recipes + item name map).
+        // Craft/scrap resolved in Game (needs recipes + item name map).
         .craft => .{ .ok = false },
+        .scrap => .{ .ok = false },
     };
-}
-
-fn markInv(w: *World, ps: Slot) void {
-    w.markDirty(ps, .{ .inv = true });
 }
 
 fn recordInv(w: *World, peer: usize, item_id: u16, delta: i16, cause: InvCause) void {
@@ -624,7 +683,7 @@ test "move and drop and use" {
         if (s.item_id == 2) food_after_drop += s.count;
     }
     try std.testing.expect(openContainer(&w, 0, r.dropped_entity));
-    try std.testing.expect(takeFromContainer(&w, 0, 0, 0));
+    try std.testing.expect(takeFromContainer(&w, 0, 0, 0, null));
     // Take-back restores the dropped unit into bag storage.
     var food_after_take: u16 = 0;
     for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
@@ -677,7 +736,7 @@ test "container take and put preserve quality and meta" {
     const cs = w.slotOfNetId(bag).?;
     w.inventory[cs].slots[1] = .{ .item_id = 11, .count = 1, .quality = 5, .meta = 42 };
     try std.testing.expect(openContainer(&w, 0, bag));
-    try std.testing.expect(takeFromContainer(&w, 0, 1, 1));
+    try std.testing.expect(takeFromContainer(&w, 0, 1, 1, null));
     var found: ?c.InvSlot = null;
     for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
         if (s.item_id == 11) found = s;
@@ -714,6 +773,10 @@ test "craft op reserved" {
     try std.testing.expectEqual(@as(u8, 11), @intFromEnum(Op.craft));
 }
 
+test "scrap op reserved" {
+    try std.testing.expectEqual(@as(u8, 12), @intFromEnum(Op.scrap));
+}
+
 test "place fuel item yields refuel_amount" {
     const WorldT = @import("world.zig").World;
     var w: WorldT = .{};
@@ -741,6 +804,25 @@ test "place fuel item yields refuel_amount" {
     try std.testing.expectEqual(@as(u16, 50), r.refuel_item_id);
     try std.testing.expectEqual(@as(u16, 0), r.place_block);
     try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[slot].count);
+}
+
+test "generalDamageResist clamps at 1 and keeps vulnerabilities" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    // No VM fold ran: no resist.
+    try std.testing.expectEqual(@as(f32, 0), generalDamageResist(&w, ps));
+    w.buff_general_resist[ps] = 0.25;
+    try std.testing.expectEqual(@as(f32, 0.25), generalDamageResist(&w, ps));
+    // Stock reads min(1, value), so a 200% row is full immunity.
+    w.buff_general_resist[ps] = 3;
+    try std.testing.expectEqual(@as(f32, 1), generalDamageResist(&w, ps));
+    // A negative total is a vulnerability and is NOT clamped (stock's
+    // accumulation lets it subtract from the resisted amount).
+    w.buff_general_resist[ps] = -0.5;
+    try std.testing.expectEqual(@as(f32, -0.5), generalDamageResist(&w, ps));
 }
 
 test "equip armor and place wood" {
@@ -808,7 +890,13 @@ test "resolved placeables map the stock Blockname through AssignIds" {
     );
 }
 
-test "degradeUse wears a tool down and clamps at zero" {
+fn testAllBroken(_: ?*anyopaque, _: u16, _: u8, use_times: f32) f32 {
+    // MaxUseTimes 100: pristine at 0, broken at 100 (stock get_PercentUsesLeft).
+    const frac = @min(@max(use_times / 100.0, 0.0), 1.0);
+    return 1 - frac;
+}
+
+test "degradeUse counts uses upward from a pristine zero" {
     const WorldT = @import("world.zig").World;
     var w: WorldT = .{};
     defer w.deinit();
@@ -823,17 +911,27 @@ test "degradeUse wears a tool down and clamps at zero" {
             break;
         }
     }
-    w.inventory[ps].slots[tool_slot].use_times = 100;
+    // A fresh item is pristine at 0. This is the case that mattered: the old
+    // code subtracted toward 0, so wear on a real (never-seeded) item was a
+    // no-op and the durability bar never moved.
+    try std.testing.expectEqual(@as(f32, 0), w.inventory[ps].slots[tool_slot].use_times);
+    w.percent_uses_left_fn = &testAllBroken;
     w.dirty[ps] = .{};
 
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 1));
-    try std.testing.expectEqual(@as(f32, 99), w.inventory[ps].slots[tool_slot].use_times);
-    try std.testing.expect(w.dirty[ps].inv);
+    try std.testing.expectEqual(@as(f32, 1), w.inventory[ps].slots[tool_slot].use_times);
 
-    // A big chunk clamps at 0 but keeps the stack present (broken, repairable).
+    // Wear accumulates rather than resetting.
+    try std.testing.expect(degradeUse(&w, 0, tool_slot, 4));
+    try std.testing.expectEqual(@as(f32, 5), w.inventory[ps].slots[tool_slot].use_times);
+
+    // At the broken point the counter stops and the stack stays present
+    // (broken, repairable) instead of running up forever.
+    w.inventory[ps].slots[tool_slot].use_times = 100;
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 500));
-    try std.testing.expectEqual(@as(f32, 0), w.inventory[ps].slots[tool_slot].use_times);
+    try std.testing.expectEqual(@as(f32, 100), w.inventory[ps].slots[tool_slot].use_times);
     try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[tool_slot].count);
+    w.percent_uses_left_fn = null;
 
     // Empty slots / bad indices are a no-op.
     var empty_slot: u16 = 0;
@@ -884,13 +982,13 @@ test "degradeUse wears the item's DegradationPerUse; armorMitigationVs applies h
     const tool = w.inventory[ps].slots.len - 1;
     w.inventory[ps].slots[tool] = .{ .item_id = 2, .count = 1, .use_times = 10 };
     try std.testing.expect(degradeUse(&w, 0, tool, 1));
-    try std.testing.expectApproxEqAbs(@as(f32, 9), w.inventory[ps].slots[tool].use_times, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 11), w.inventory[ps].slots[tool].use_times, 0.001);
     // Hooked: the item's DegradationPerUse (0.35) is the wear.
     w.item_degradation_fn = &testDegrad;
     w.item_degradation_ctx = null;
     w.inventory[ps].slots[tool].use_times = 10;
     try std.testing.expect(degradeUse(&w, 0, tool, 1));
-    try std.testing.expectApproxEqAbs(@as(f32, 9.65), w.inventory[ps].slots[tool].use_times, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.35), w.inventory[ps].slots[tool].use_times, 0.001);
     // Penetration: 0.2 mitigation vs a -0.5 held-item TargetArmor -> 0.1.
     w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
     w.armor_pdr_ctx = null;

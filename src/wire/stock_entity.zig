@@ -26,6 +26,9 @@ pub const class_zombie_joe = unity_hash.class_zombie_joe;
 pub const class_zombie_default = unity_hash.class_zombie_default;
 /// Dropped ground loot bag (EntityLootContainer subclass).
 pub const class_dropped_loot_container = unity_hash.class_dropped_loot_container;
+/// Player death backpack (EntityBackpack). Same mesh as the ground bag but the
+/// class stock's client spawns for `EntityPlayerLocal.dropBackpack`.
+pub const class_backpack = unity_hash.class_backpack;
 /// Named loot container entity class (prefab / TE-style loot).
 pub const class_entity_loot_container = unity_hash.class_entity_loot_container;
 /// Dropped-item entity (EntityItem). EntityClass.itemClass = hash("item"); the
@@ -93,11 +96,96 @@ pub const PlayerProfile = struct {
     mustache_name: []const u8 = "",
     chops_name: []const u8 = "",
     beard_name: []const u8 = "",
-    eye_color: []const u8 = "",
+    /// Stock's null substitute for this one field is "Blue01", not the empty
+    /// string every other name falls back to (PlayerProfile.Write IL_00AC).
+    eye_color: []const u8 = "Blue01",
 };
 
 /// Stock PlayerProfile v5 (RE: protocol.md §5 profile body).
 pub const player_profile_version: i32 = 5;
+
+/// Capacity of one profile name field. The stock archetype/race/hair/colour
+/// names are asset identifiers well under this (the longest shipped is 18);
+/// a longer string is treated as a malformed profile rather than truncated, so
+/// a fabricated appearance never reaches the wire.
+pub const profile_name_cap = 32;
+
+/// A `PlayerProfile` copied out of a packet buffer. The client sends its own
+/// profile in `NetPackageRequestToSpawnPlayer` (stock `PlayerProfile::Read`
+/// IL=59 behind `chunkViewDim:i16`, `NetPackageRequestToSpawnPlayer.il.txt`
+/// read IL=14), and stock stores it on the `EntityCreationData` it later writes
+/// back to that player (`GameManager::RequestToSpawnPlayer`,
+/// `GameManager.il.txt:4614-4617`) and to everyone who can see them. zdtd read
+/// only the dim and replaced the profile with a fabricated BaseMale, so every
+/// player appeared as the same default character. The receive buffers are
+/// transient, so the parsed names are copied into fixed storage here.
+pub const OwnedProfile = struct {
+    archetype: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    archetype_len: u8 = 0,
+    is_male: bool = true,
+    race_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    race_name_len: u8 = 0,
+    variant_number: u8 = 0,
+    hair_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_name_len: u8 = 0,
+    hair_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_color_len: u8 = 0,
+    mustache_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    mustache_name_len: u8 = 0,
+    chops_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    chops_name_len: u8 = 0,
+    beard_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    beard_name_len: u8 = 0,
+    eye_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    eye_color_len: u8 = 0,
+
+    /// Borrowed view of the owned names, for the writers that take slices.
+    /// The result points into `self`, so it must not outlive it.
+    pub fn view(self: *const OwnedProfile) PlayerProfile {
+        return .{
+            .archetype = self.archetype[0..self.archetype_len],
+            .is_male = self.is_male,
+            .race_name = self.race_name[0..self.race_name_len],
+            .variant_number = self.variant_number,
+            .hair_name = self.hair_name[0..self.hair_name_len],
+            .hair_color = self.hair_color[0..self.hair_color_len],
+            .mustache_name = self.mustache_name[0..self.mustache_name_len],
+            .chops_name = self.chops_name[0..self.chops_name_len],
+            .beard_name = self.beard_name[0..self.beard_name_len],
+            .eye_color = self.eye_color[0..self.eye_color_len],
+        };
+    }
+};
+
+fn copyName(dst: *[profile_name_cap]u8, src: []const u8) !u8 {
+    if (src.len > profile_name_cap) return error.ProfileNameTooLong;
+    @memcpy(dst[0..src.len], src);
+    return @intCast(src.len);
+}
+
+/// `PlayerProfile::Read` (IL=59) into owned storage. The version gates the
+/// optional tails: >1 hairName, >2 hairColor, >3 mustache/chops/beard, >4
+/// eyeColor; a version above the one this build writes is read with the v5
+/// shape and anything below 1 is rejected (stock's ctor defaults stand).
+pub fn readOwnedProfile(r: *binary.Reader) !OwnedProfile {
+    const version = try r.readI32();
+    if (version < 1) return error.UnsupportedProfileVersion;
+    var p: OwnedProfile = .{};
+    var buf: [profile_name_cap]u8 = undefined;
+    p.archetype_len = try copyName(&p.archetype, try r.readString(&buf));
+    p.is_male = try r.readBool();
+    p.race_name_len = try copyName(&p.race_name, try r.readString(&buf));
+    p.variant_number = try r.readByte();
+    if (version > 1) p.hair_name_len = try copyName(&p.hair_name, try r.readString(&buf));
+    if (version > 2) p.hair_color_len = try copyName(&p.hair_color, try r.readString(&buf));
+    if (version > 3) {
+        p.mustache_name_len = try copyName(&p.mustache_name, try r.readString(&buf));
+        p.chops_name_len = try copyName(&p.chops_name, try r.readString(&buf));
+        p.beard_name_len = try copyName(&p.beard_name, try r.readString(&buf));
+    }
+    if (version > 4) p.eye_color_len = try copyName(&p.eye_color, try r.readString(&buf));
+    return p;
+}
 
 /// Stock TraderData primary-inventory entry: ItemStack + runtime markup delta
 /// (i8; stock Increase +100 / Decrease -4) + AddedByPlayer. We have no per-item
@@ -119,6 +207,13 @@ pub const TraderDataReadEntry = struct {
     markup: i8 = 0,
 };
 
+/// Cap on the declared trader-stock entry count. Stock's TraderData::Read takes
+/// a plain i32 with no documented limit (IL 472732), so this bounds the work one
+/// body can demand rather than enforcing a stock rule; entries past the caller's
+/// storage are read and dropped either way. Set far above any real trader
+/// inventory so a legitimate body is never rejected.
+const max_trader_entries_declared: i32 = 4096;
+
 /// TraderData::Read (the mirror of writeTraderDataBody, stock IL 472732):
 /// trader id, last restock world time, FileVersion, primary inventory entries,
 /// tier groups (read + skipped), available money. `entries` is the caller's
@@ -131,7 +226,7 @@ pub fn readTraderDataBody(
     _ = try r.readU64(); // lastInventoryUpdate
     _ = try r.readByte(); // FileVersion
     const count = try r.readI32();
-    if (count < 0 or count > 4096) return error.EndOfStream;
+    if (count < 0 or count > max_trader_entries_declared) return error.EndOfStream;
     var n: usize = 0;
     var i: i32 = 0;
     while (i < count) : (i += 1) {
@@ -147,14 +242,19 @@ pub fn readTraderDataBody(
         }
         _ = try r.readBool(); // AddedByPlayer
     }
+    // TierItemGroups: u8 group count, then each group is a bare ItemStack
+    // array via GameUtils::ReadItemStack (u16 count + ItemStack per entry,
+    // GameUtils.il.txt:2131), not a named block. Stock traders.xml ships no
+    // <tier_items>, so a stock client always sends 0 here; the loop still has
+    // to consume a modded non-zero count in the right shape or the trailing
+    // AvailableMoney reads garbage.
+    // Read mirror of WriteInventoryData (TraderData.il.txt:436-458, :477).
     const tier_groups = try r.readByte();
     var tg: u8 = 0;
     while (tg < tier_groups) : (tg += 1) {
-        // TierItemGroup: name string + item count + item ids.
-        try r.skipString();
-        const item_count = try r.readByte();
-        var k: u8 = 0;
-        while (k < item_count) : (k += 1) _ = try r.readU16();
+        const item_count = try r.readU16();
+        var k: u16 = 0;
+        while (k < item_count) : (k += 1) _ = try stock_inv.readItemStack(r);
     }
     const money = try r.readI32();
     return .{ .trader_id = trader_id, .money = money, .n = n };
@@ -234,6 +334,16 @@ pub const FallingBlockInfo = struct { block: FallingBlock };
 /// length, which this API enforces by construction.
 pub const FallingBlocksInfo = struct { blocks: []const FallingBlock };
 
+/// PlayerProfile.Write (`il/full-v3.2.0/_global/PlayerProfile.il.txt`, IL=69):
+/// version i32 (literal 5) | `archetype` string | `isMale` bool | `raceName`
+/// string | `variantNumber` (an i32 field written as a byte) | `hairName` |
+/// `hairColor` | `mustacheName` | `chopsName` | `beardName` | `eyeColor`.
+///
+/// Stock substitutes a literal for a null string on the last six: empty for
+/// five of them and **"Blue01"** for `eyeColor` (IL_00AC). Zig has no null
+/// string, so an empty slice here is written as empty rather than substituted;
+/// the one caller that sends a profile sets `eye_color` explicitly
+/// (packages.zig), so the stock default is not silently dropped.
 pub fn writePlayerProfile(w: *binary.Writer, p: PlayerProfile) !void {
     try w.writeI32(player_profile_version);
     try w.writeString(p.archetype);
@@ -356,6 +466,9 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     try w.writeBool(opts.is_sleeper);
     try w.writeI32(-1); // spawnById
     try w.writeString(""); // spawnByName
+    // These two are one byte each and both zero, so no test can pin their
+    // order: the swap-mutation audit reports the pair as a survivor by
+    // construction. EntityCreationData.write holds the order, not a test.
     try w.writeBool(false); // spawnByAllowShare
     try w.writeByte(0); // headState
     try w.writeF32(1); // overrideSize
@@ -396,6 +509,26 @@ test "stock zombie spawn body non-empty" {
     try std.testing.expectEqual(@as(u8, 36), body[4]);
     try std.testing.expectEqual(class_zombie_default, std.mem.readInt(i32, body[5..9], .little));
     try std.testing.expectEqual(class_zombie_boe, class_zombie_default);
+
+    // ECD continues: id i32 | lifetime f32 | pos x,y,z | rot pitch,yaw,roll |
+    // onGround. Nothing read past the class, so every pair in that run of
+    // eight floats could swap unnoticed - and this is the body a client reads
+    // to place the entity, so a swap there spawns it somewhere else. lifetime
+    // is floatMax and the two unused rotation axes are 0, which the position
+    // and yaw values are chosen to differ from.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(i32, 200), std.mem.readInt(i32, body[9..13], .little));
+    try std.testing.expectEqual(std.math.floatMax(f32), f32At(body, 13)); // lifetime
+    try std.testing.expectEqual(@as(f32, -273), f32At(body, 17)); // x
+    try std.testing.expectEqual(@as(f32, 61), f32At(body, 21)); // y
+    try std.testing.expectEqual(@as(f32, 449), f32At(body, 25)); // z
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 29)); // rot pitch
+    try std.testing.expectEqual(@as(f32, 90), f32At(body, 33)); // rot yaw
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 37)); // rot roll
 }
 
 test "stock loot spawn embeds ECD bag" {
@@ -475,7 +608,21 @@ test "stock player spawn emits player branch (holdingItem, team, names, profile)
             .entity_name = "Bob",
             .skin_texture = "",
             .team_number = 3,
-            .profile = .{ .archetype = "arch", .is_male = true, .race_name = "race", .variant_number = 2 },
+            // Every string distinct: the profile carries no field names, so
+            // four empty strings in a row would let a reordering emit
+            // identical bytes and pass.
+            .profile = .{
+                .archetype = "arch",
+                .is_male = true,
+                .race_name = "race",
+                .variant_number = 2,
+                .hair_name = "hair",
+                .hair_color = "haircol",
+                .mustache_name = "must",
+                .chops_name = "chops",
+                .beard_name = "beard",
+                .eye_color = "Green02",
+            },
         },
     });
     try std.testing.expectEqual(class_player_male, std.mem.readInt(i32, body[5..9], .little));
@@ -490,6 +637,30 @@ test "stock player spawn emits player branch (holdingItem, team, names, profile)
     try std.testing.expectEqual(@as(u8, 1), body[80]); // playerProfile present
     // PlayerProfile.Write: i32 version = 5
     try std.testing.expectEqual(@as(i32, player_profile_version), std.mem.readInt(i32, body[81..85], .little));
+
+    // The profile is ten positional fields with no names on the wire, so read
+    // them back in order against PlayerProfile.Write (IL=69). Each test value
+    // is distinct, which a length or version assertion alone could not tell
+    // apart from a reordering.
+    var pr: binary.Reader = .{ .data = body[85..] };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("arch", try pr.readString(&s_buf)); // archetype
+    try std.testing.expectEqual(true, try pr.readBool()); // isMale
+    try std.testing.expectEqualStrings("race", try pr.readString(&s_buf)); // raceName
+    try std.testing.expectEqual(@as(u8, 2), try pr.readByte()); // variantNumber
+    try std.testing.expectEqualStrings("hair", try pr.readString(&s_buf)); // hairName
+    try std.testing.expectEqualStrings("haircol", try pr.readString(&s_buf)); // hairColor
+    try std.testing.expectEqualStrings("must", try pr.readString(&s_buf)); // mustacheName
+    try std.testing.expectEqualStrings("chops", try pr.readString(&s_buf)); // chopsName
+    try std.testing.expectEqualStrings("beard", try pr.readString(&s_buf)); // beardName
+    try std.testing.expectEqualStrings("Green02", try pr.readString(&s_buf)); // eyeColor
+
+    // The struct default for eyeColor is stock's null substitute "Blue01"
+    // (PlayerProfile.Write IL_00AC), not the empty string the other five names
+    // fall back to.
+    const default_profile: PlayerProfile = .{};
+    try std.testing.expectEqualStrings("Blue01", default_profile.eye_color);
+    try std.testing.expectEqualStrings("", default_profile.beard_name);
 }
 
 test "stock falling-tree spawn emits blockPos + fallTreeDir" {
@@ -500,14 +671,33 @@ test "stock falling-tree spawn emits blockPos + fallTreeDir" {
         .x = 3,
         .y = 65,
         .z = 4,
-        .falling_tree = .{ .block_x = 10, .block_y = 20, .block_z = 30, .dir_x = 1 },
+        // dir_y and dir_z used to sit at their 0 default, which left them
+        // interchangeable with each other on the wire.
+        .falling_tree = .{ .block_x = 10, .block_y = 20, .block_z = 30, .dir_x = 1, .dir_y = 2, .dir_z = 3 },
     });
     try std.testing.expectEqual(class_falling_tree, std.mem.readInt(i32, body[5..9], .little));
     // fallingTree branch starts right after spawnerSource at 73: Vector3i then Vector3
     try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[73..77], .little));
     try std.testing.expectEqual(@as(i32, 20), std.mem.readInt(i32, body[77..81], .little));
     try std.testing.expectEqual(@as(i32, 30), std.mem.readInt(i32, body[81..85], .little));
-    try std.testing.expectEqual(@as(f32, 1), @as(f32, @bitCast(std.mem.readInt(u32, body[85..89], .little))));
+    const dirAt = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 1), dirAt(body, 85));
+    try std.testing.expectEqual(@as(f32, 2), dirAt(body, 89));
+    try std.testing.expectEqual(@as(f32, 3), dirAt(body, 93));
+
+    // homePosition is the spawn x/y/z lossily cast to i32, and nothing read it
+    // back, so its three words could rotate among themselves. It sits just
+    // before homeRange (i16) and spawnerSource (u8), which end at the branch
+    // offset 73 the assertions above are anchored on: 73 - 1 - 2 - 12 = 58.
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, body[58..62], .little));
+    try std.testing.expectEqual(@as(i32, 65), std.mem.readInt(i32, body[62..66], .little));
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[66..70], .little));
+    try std.testing.expectEqual(@as(i16, -1), std.mem.readInt(i16, body[70..72], .little)); // homeRange
+    try std.testing.expectEqual(@as(u8, 0), body[72]); // spawnerSource Dynamic
 }
 
 test "class branches that need payload fail loudly instead of emitting a short body" {
@@ -667,6 +857,7 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
     try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // entityData length
     try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
     // TraderData::Write
+    const trader_data_start = r.pos;
     try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // trader id
     try std.testing.expectEqual(@as(u64, 0), try r.readU64()); // lastInventoryUpdate
     try std.testing.expectEqual(@as(u8, 2), try r.readByte()); // FileVersion
@@ -693,6 +884,20 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
     try std.testing.expectEqual(false, try r.readBool()); // isDancing
     try std.testing.expectEqual(@as(f32, 0), try r.readF32()); // stressAmount (v36 tail)
     try std.testing.expect(r.pos == body.len);
+
+    // The same bytes back through the reader. The walk above proves only the
+    // builder; nothing exercised readTraderDataBody, so swapping its TraderID
+    // with lastInventoryUpdate left the whole suite green while the parser
+    // disagreed with `TraderData::Write` (IL=15: Write(Int32) TraderID,
+    // Write(UInt64) lastInventoryUpdate, Write(Byte) FileVersion).
+    var tr: binary.Reader = .{ .data = body, .pos = trader_data_start };
+    var read_entries: [4]TraderDataReadEntry = undefined;
+    const td = try readTraderDataBody(&tr, read_entries[0..]);
+    try std.testing.expectEqual(@as(i32, 42), td.trader_id);
+    try std.testing.expectEqual(@as(i32, 5000), td.money);
+    try std.testing.expectEqual(@as(usize, 2), td.n);
+    try std.testing.expectEqual(entries[0].item.type_id, read_entries[0].item.type_id);
+    try std.testing.expectEqual(entries[1].markup, read_entries[1].markup);
 }
 
 /// NetPackageWorldSpawnPoints body: SpawnPointList (RE
@@ -711,6 +916,9 @@ pub const SpawnPointEntry = struct {
     active_in_game_mode: i32 = -1,
 };
 
+/// NetPackageWorldSpawnPoints (RE inventories/netpackage-bodies.md, write
+/// IL=8): one `spawnPoints` blob = SpawnPointList.Write (save version byte,
+/// count i32, then per point a SpawnPosition).
 pub fn buildWorldSpawnPointsBody(buf: []u8, points: []const SpawnPointEntry) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeByte(2); // SpawnPointList.CurrentSaveVersion (.cctor ldc.i4.2)

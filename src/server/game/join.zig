@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
+const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
 const assets_items = @import("../../assets/items.zig");
@@ -23,65 +24,6 @@ const stock_sign = packages.stock_sign;
 const deco = packages.stock_deco;
 
 // ---------------------------------------------------------------------------
-// Deco helpers required by sendDecoAroundSpawn (local copies so the extracted
-// function compiles without reaching into Game's private fns). Bodies verbatim.
-// ---------------------------------------------------------------------------
-
-/// `stock_deco` height callback over the live chunk store. Unreadable columns
-/// return 0, which the sampler skips (fail closed, no fabricated deco).
-fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
-    return g.world.heightWorld(wx, wz) catch 0;
-}
-
-/// `stock_deco` species callback: the biome under (wx,wz), then that biome's
-/// distant-decoration list from biomes.xml. Fail closed at every step, since
-/// a block id the client cannot resolve does not degrade, it throws inside the
-/// client world-load coroutine: `DecoManager.addLoadedDecoration` →
-/// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
-/// (asm.il 1262497), and `DecoChunk.UpdateModels` looks the model up by name,
-/// which is null for a null Block. Both leave the player stuck loading, which
-/// is worse than no trees.
-fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
-    // Proc worlds carry no biomemap: resolve the biome from the W3 proc biome
-    // field (the same field that drives the surface fill and the chunk wire
-    // biome), mapped through the biome_layers_table exactly like procBiomeAt.
-    const biome_id: u8 = if (g.world.terrain_source == .proc) blk: {
-        if (g.world.worldgen) |*wg| {
-            break :blk g.world.biome_layers_table.biomeIdAt(wg.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
-        }
-        break :blk 0;
-    } else if (g.world.biomes) |*bm| (bm.atWorld(wx, wz) orelse return .{}) else return .{};
-    // GAP 18: resolve the subbiome per cell (stock decorateChunkRandom ->
-    // GetBiomeOrSubAt). A subbiome hit samples its own list, where the
-    // tree probability mass lives; otherwise the biome's own list applies.
-    const subs = g.world.biome_layers_table.subBiomes(biome_id);
-    var set = g.world.biome_layers_table.decosFor(biome_id);
-    if (subs.len > 0) {
-        const si = subbiome_noise.subBiomeIdx(&g.sub_noise, subs, wx, wz);
-        if (si >= 0) set = subs[@intCast(si)].decos;
-    }
-    var out: packages.stock_deco.SpeciesList = .{};
-    for (set.slice()) |d| {
-        if (out.n >= packages.stock_deco.max_species) break;
-        out.items[out.n] = .{ .block_id = d.block_id, .prob = d.prob };
-        out.n += 1;
-    }
-    return out;
-}
-
-/// Deco species source is available: biome deco lists from biomes.xml, plus
-/// either the biomemap (baked worlds) or the W3 proc biome field (proc
-/// worlds carry no biomemap). Both are game-dir data; fail closed (a bare
-/// proc world without biomes.xml stays bald rather than sending block ids the
-/// client cannot resolve).
-fn decoAvailable(g: *const Game) bool {
-    if (!g.deco_trees or !g.world.biome_layers_table.hasDecos()) return false;
-    if (g.world.terrain_source == .proc) return g.world.worldgen != null;
-    return g.world.biomes != null;
-}
-
 /// Cell offsets per deco block id for one join burst. The AssignIds map is
 /// name-keyed, so resolving a block id back to its `MultiBlockDim` costs a
 /// scan of the whole dump; a burst places thousands of objects but draws them
@@ -156,7 +98,7 @@ pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamin
 /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
 /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
 pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-    if (!decoAvailable(self)) {
+    if (!game_deco.decoAvailable(self)) {
         // Empty firstPackage is still required: the `isDecorated` marking loop
         // sits inside the `loadedDecos != null` branch, so without it the
         // client keeps retrying local generation it cannot do.
@@ -184,8 +126,8 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
         .z1 = (t.pos.z + r + 1) * deco.chunk_side,
     };
     const sampler: deco.Sampler = .{
-        .height_at = decoHeightAt,
-        .species_at = decoSpeciesAt,
+        .height_at = game_deco.decoHeightAt,
+        .species_at = game_deco.decoSpeciesAt,
         .ctx = self,
     };
 
@@ -251,7 +193,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
 /// was not RE'd and is wrong). Mirrors like the join burst; the mirror and the
 /// client both dedupe, so overlapping the join window is harmless.
 pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
-    if (!decoAvailable(self)) return;
+    if (!game_deco.decoAvailable(self)) return;
     const dcx = deco.worldToDecoChunk(cx * deco.chunk_side);
     const dcz = deco.worldToDecoChunk(cz * deco.chunk_side);
     const key = packages.makeChunkKey(dcx, dcz);
@@ -265,8 +207,8 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
         .z1 = (dcz + 1) * deco.chunk_side,
     };
     const sampler: deco.Sampler = .{
-        .height_at = decoHeightAt,
-        .species_at = decoSpeciesAt,
+        .height_at = game_deco.decoHeightAt,
+        .species_at = game_deco.decoSpeciesAt,
         .ctx = self,
     };
     var chunk_objs: [deco.attempts_per_deco_chunk]deco.DecoObj = undefined;
@@ -329,30 +271,12 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
 }
 
 pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
-    var ti: ?ecs.Slot = prefer_slot;
-    if (ti == null) {
-        var i: ecs.Slot = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (self.sim.alive[i] and self.sim.mask[i].trader and self.sim.mask[i].trader_stock) {
-                ti = i;
-                break;
-            }
-        }
-    }
-    const s = ti orelse return;
-    if (!self.sim.mask[s].trader_stock) return;
-    const eid = self.sim.network_id[s].id;
-    // Stock TraderData with primary inventory from SoA stock table.
-    var entries: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
-    const n = self.stockEntries(s, &entries);
-    const body = try packages.buildTraderDataStock(
-        self.body_buf[0..4096],
-        eid,
-        eid, // trader id (stock TraderID is a traders.xml index; entity id is a safe placeholder)
-        self.traderMoney(s),
-        entries[0..n],
-    );
-    try self.sendGame(peer, "NetPackageTraderData", body);
+    // Stock never emits NetPackageTraderData ToClient (ProcessPackage is
+    // ToServer-only). Trader stock reaches the client via spawn ECD and
+    // EntityTraderLockContext on NetPackageLockResponse.
+    _ = self;
+    _ = peer;
+    _ = prefer_slot;
 }
 
 /// Stock NetPackageChunkClusterInfo, sent right after WorldInfo in the
@@ -530,6 +454,37 @@ pub fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, p
     }
 }
 
+/// Re-register the live air-drop crates for a joining player. Stock does this
+/// as its own join step (`AIDirectorAirDropComponent.RefreshCrates(entityId)`,
+/// step 11 of the join sequence, RE protocol.md:317) because the crate marker
+/// is a server push (RE map-objects.md:306), not client-derived like the quest
+/// and bedroll markers. zdtd sent it only at the moment of the drop, so a
+/// player who joined afterwards - or anyone at all after a restart, since the
+/// crate bag persists in `entities.zen` and the marker does not - saw no marker
+/// over a crate that was still sitting there full of loot.
+pub fn sendAirDropNavObjects(self: *Game, peer: *ln_peer.Peer) !void {
+    var i: ecs.Slot = 0;
+    while (i < ecs.max_entities) : (i += 1) {
+        if (!self.sim.alive[i] or self.sim.kind[i] != .loot_bag) continue;
+        if (!self.sim.mask[i].loot_bag or !self.sim.loot_bag[i].supply_crate) continue;
+        if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
+        const t = self.sim.transform[i];
+        const body = packages.buildNavObjectAdd(
+            self.body_buf[8192..8704],
+            "supply_drop",
+            "",
+            t.x,
+            t.y,
+            t.z,
+            @intCast(self.sim.network_id[i].id),
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackageNavObject", body);
+    }
+}
+
 /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
 /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
 pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
@@ -567,7 +522,8 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
             .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
                 var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                 const n = self.stockEntries(i, &ent_buf);
-                break :blk .{ .trader_id = nid, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
+                // TraderID indexes traders.xml; entity id leaves TraderInfo null.
+                break :blk .{ .trader_id = self.sim.trader_stock[i].trader_info_id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
             } else null,
         });
         try self.sendGame(peer, "NetPackageEntitySpawn", body);
@@ -613,9 +569,11 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
             .on_ground = true,
             .player = .{
                 .entity_name = owner.name[0..owner.name_len],
-                .holding_item = null,
+                .holding_item = self.playerHoldingStock(i),
                 .team_number = 0,
-                .profile = null,
+                // The profile that player presented at spawn, so the joining
+                // client renders the same character its owner does.
+                .profile = if (owner.profile_ok) owner.profile.view() else null,
             },
         });
         try self.sendGame(peer, "NetPackageEntitySpawn", body);
@@ -642,9 +600,12 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         .on_ground = true,
         .player = .{
             .entity_name = c.name[0..c.name_len],
-            .holding_item = null,
+            .holding_item = self.playerHoldingStock(js),
             .team_number = 0,
-            .profile = null,
+            // The profile the client presented at spawn, so every observer
+            // renders the same character the owner sees (stock carries the
+            // client's PlayerProfile on the broadcast ECD).
+            .profile = if (c.profile_ok) c.profile.view() else null,
         },
     });
     for (&self.clients, 0..) |*cl, ci| {
@@ -679,6 +640,13 @@ fn sendPlayerStatsTo(self: *Game, peer: *ln_peer.Peer, owner: *const Client, nid
         .level = owner.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(owner.skill_points, 65535)),
+        .deaths = owner.deaths,
+        .killed_zombies = owner.zombie_kills,
+        .killed_players = owner.player_kills,
+        .held_item = if (self.sim.playerByPeer(owner.slot)) |ops|
+            self.playerHoldingStock(ops)
+        else
+            null,
     })) |psb| {
         try self.sendGame(peer, "NetPackagePlayerStats", psb);
     } else |_| {}
@@ -732,24 +700,20 @@ pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
     // Compact NameIdMapping: only ECS builtins that resolved to stock types (fits 8 KiB body).
     // Full items.xml map is ~30–50 KiB uncompressed; stock client already has matching AssignIds
     // from the same Config when game-dir is shared.
-    var map_buf: [2048]u8 = undefined;
-    var w: wire_binary.Writer = .{ .buf = &map_buf };
-    try w.writeI32(1);
-    const count_pos = w.pos;
-    try w.writeI32(0);
-    var n: i32 = 0;
+    var rows: [12]packages.IdMappingEntry = undefined;
+    var n: usize = 0;
     var id: u16 = 1;
     while (id <= 12) : (id += 1) {
         const st = self.items.stockTypeFor(id);
         if (st == 0) continue;
         const name = assets_items.builtinStockName(id) orelse continue;
-        try w.writeI32(st);
-        try w.writeString(name);
+        rows[n] = .{ .id = st, .name = name };
         n += 1;
     }
-    std.mem.writeInt(i32, map_buf[count_pos..][0..4], n, .little);
     if (n == 0) return;
-    const body = packages.buildIdMappingBody(&self.body_buf, "items", w.written()) catch return;
+    var map_buf: [2048]u8 = undefined;
+    const payload = try packages.buildNameIdMappingPayload(&map_buf, rows[0..n]);
+    const body = packages.buildIdMappingBody(&self.body_buf, "items", payload) catch return;
     try self.sendGameCritical(peer, "NetPackageIdMapping", body);
 }
 
@@ -775,15 +739,16 @@ pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stac
             self,
         );
     } else {
-        // Empty ItemStack: entityId + u16 count=0 + holding index.
-        var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
-        try w.writeI32(c.entity_id);
-        try w.writeU16(0);
+        // Same body with an empty ItemStack. Built through the one encoder
+        // rather than open-coded here: a second hand-rolled copy of a stock
+        // layout is outside the reach of the wire audits, and this one had a
+        // swappable pair no test could see.
         const idx: u8 = if (self.sim.inventory[ps].holding < ecs.components.inv_toolbelt)
             @intCast(self.sim.inventory[ps].holding)
         else
             0;
-        try w.writeByte(idx);
+        var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
+        try packages.stock_inv.writeHoldingItem(&w, c.entity_id, .{}, idx);
         hb = w.written();
     }
     try self.sendGame(peer, "NetPackageHoldingItem", hb);

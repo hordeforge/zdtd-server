@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const assets_item_mods = @import("../../assets/item_modifiers.zig");
 
 pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
     const id = self.items.ecsIdByName(name);
@@ -19,7 +20,9 @@ pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         if (std.mem.eql(u8, name, "resourceScrapIron") or std.mem.eql(u8, name, "resourceScrapLead")) return 1;
         if (std.mem.eql(u8, name, "foodCanBeef")) return 2;
         if (std.mem.eql(u8, name, "resourceWood")) return 7;
-        if (std.mem.eql(u8, name, "casinoCoin")) return 6;
+        // Offline builtin id 6 = currency; name from traders.xml `currency_item`.
+        const coin = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
+        if (std.mem.eql(u8, name, coin)) return 6;
     }
     return 0;
 }
@@ -32,7 +35,7 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     if (!self.sim.mask[slot].inventory) return;
     self.sim.inventory[slot].clear();
     var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-    var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
+    var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks, .{});
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
     const sv = self.plugins.lootRoll(list_name, @intCast(n));
@@ -46,7 +49,102 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     while (i < n) : (i += 1) {
         const eid = ecsIdFromItemName(self, stacks[i].item_name);
         if (eid == 0) continue;
-        _ = self.sim.depositItem(slot, eid, stacks[i].count);
+        // Carry the rolled ItemValue fields, like the container fill: a death
+        // bag is a stock LootContainer roll, so quality and the
+        // random-durability wear belong on the deposited stack.
+        // Same `ItemClass.HasQuality` gate as the container fill (a tool with
+        // Stacknumber 500 still carries quality).
+        const q = if (self.items.byId(eid)) |d|
+            (if (d.has_quality) stacks[i].quality else 1)
+        else
+            stacks[i].quality;
+        const use_times: f32 = if (stacks[i].random_durability)
+            assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
+        else
+            0;
+        const has_mods = stacks[i].mods.len > 0 and stacks[i].mod_chance > 0;
+        const is_quality = if (self.items.byId(eid)) |d| d.has_quality else false;
+        if (!has_mods and !is_quality) {
+            _ = self.sim.depositItem(slot, eid, stacks[i].count);
+            continue;
+        }
+        // A value-carrying stack goes into a free bag slot so the mods can land
+        // on that same slot (the inventory was cleared above, so the first free
+        // index is deterministic).
+        const inv = &self.sim.inventory[slot];
+        var fi: usize = 0;
+        while (fi < ecs.components.inv_equip_start and inv.slots[fi].count != 0) : (fi += 1) {}
+        if (fi >= ecs.components.inv_equip_start) continue; // full: drop the stack
+        const rolled = self.rollItemStats(eid, q, loot_stage, seed ^ @as(u32, @intCast(i)));
+        inv.slots[fi] = .{
+            .item_id = eid,
+            .count = stacks[i].count,
+            .quality = q,
+            .use_times = use_times,
+            .stats = rolled.stats,
+            .stats_n = rolled.n,
+        };
+        if (has_mods) {
+            installLootMods(self, &inv.slots[fi], eid, stacks[i].mods, stacks[i].mod_chance, seed ^ @as(u32, @intCast(i)));
+        }
+    }
+}
+
+/// Pick the modifier a loot `mods=` name resolves to for one item: an exact mod
+/// name wins when it fits, else the first-fitting mod whose slot tag
+/// (`installable_tags`) or contributed tag (`modifier_tags`) carries the name -
+/// stock's `ItemValue.createDefaultModItems` picks with
+/// `GetDesiredItemModWithAnyTags(itemTags, none, tags)`. `pick` selects among
+/// the fitting candidates so a re-roll of the same seed is reproducible.
+fn lootModCandidate(mods: *const assets_item_mods.ModTable, name: []const u8, item_tags: []const u8, pick: u32) ?[]const u8 {
+    if (mods.byName(name)) |m| {
+        if (mods.isSuitable(m.name, item_tags)) return m.name;
+    }
+    var n: u32 = 0;
+    for (mods.defs) |m| {
+        if (!mods.isSuitable(m.name, item_tags)) continue;
+        if (assets_item_mods.ModTable.tagListContains(m.installable, name) or
+            assets_item_mods.ModTable.tagListContains(m.modifier, name)) n += 1;
+    }
+    if (n == 0) return null;
+    var idx = pick % n;
+    for (mods.defs) |m| {
+        if (!mods.isSuitable(m.name, item_tags)) continue;
+        if (!(assets_item_mods.ModTable.tagListContains(m.installable, name) or
+            assets_item_mods.ModTable.tagListContains(m.modifier, name))) continue;
+        if (idx == 0) return m.name;
+        idx -= 1;
+    }
+    return null;
+}
+
+/// Install a loot entry's `mods=` list on a spawned item. Stock's
+/// `ItemValue.createDefaultModItems` (IL=759): for each listed tag resolve a
+/// fitting modifier, install it when `RandomFloat() <= chance` and then halve
+/// the chance for the next (a failed roll does not halve), up to the item's
+/// ModSlots for its quality. Deterministic on the caller's per-stack stream.
+pub fn installLootMods(self: *Game, slot: *ecs.components.InvSlot, item_id: u16, mods_list: []const u8, chance0: f32, seed: u32) void {
+    if (mods_list.len == 0 or chance0 <= 0) return;
+    const def = self.items.byId(item_id) orelse return;
+    if (def.tags.len == 0) return;
+    const cap: u8 = @min(self.items.modSlotsFor(item_id, slot.quality), 4);
+    if (cap == 0) return;
+    var chance = chance0;
+    var stream = seed;
+    var it = std.mem.splitScalar(u8, mods_list, ',');
+    while (it.next()) |raw| {
+        if (slot.mod_n >= cap) break;
+        const name = std.mem.trim(u8, raw, " \t");
+        if (name.len == 0) continue;
+        stream = stream *% 1103515245 +% 12345;
+        const cand = lootModCandidate(&self.item_mods, name, def.tags, stream >> 8) orelse continue;
+        const roll = @as(f32, @floatFromInt(stream >> 8)) / 16777216.0;
+        if (roll > chance) continue;
+        const mid = self.items.ecsIdByName(cand);
+        if (mid == 0) continue;
+        slot.mods[slot.mod_n] = mid;
+        slot.mod_n += 1;
+        chance *= 0.5;
     }
 }
 
@@ -62,9 +160,16 @@ pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
             }
         }
     }
+    // Death backpacks and block spills share the mesh but not the class: stock
+    // spawns EntityBackpack ("Backpack") for the player death drop and
+    // EntityLootContainer ("DroppedLootContainer") for a container spill.
+    const bag_class: i32 = if (self.sim.loot_bag[bi].backpack)
+        packages.stock_entity.class_backpack
+    else
+        packages.stock_entity.class_dropped_loot_container;
     const spb = try packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
         .entity_id = net_id,
-        .entity_class = packages.stock_entity.class_dropped_loot_container,
+        .entity_class = bag_class,
         .x = self.sim.transform[bi].x,
         .y = self.sim.transform[bi].y,
         .z = self.sim.transform[bi].z,
@@ -73,6 +178,24 @@ pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
         .bag = if (bag_n > 0) bag_slots[0..bag_n] else null,
     });
     try self.broadcastNear("NetPackageEntitySpawn", spb, self.sim.transform[bi].x, self.sim.transform[bi].z, self.interest_range);
+}
+
+/// Take back a supply crate's two client-side markers. Stock b10 does both on
+/// crate death: EntitySupplyCrate.OnEntityDeath (IL=30) removes the map object
+/// and broadcasts NetPackageEntityMapMarkerRemove, and
+/// EntitySupplyCrate.OnEntityUnload (IL=17, reason Killed) calls
+/// AIDirectorAirDropComponent.RemoveSupplyCrate (IL=54), which broadcasts
+/// NetPackageNavObject in its remove form (client:
+/// NavObjectManager.UnRegisterNavObjectByEntityID). zdtd's collect path sent
+/// only the first marker package, and a damage-killed crate sent neither, so
+/// the marker outlived the loot.
+pub fn broadcastSupplyCrateMarkerRemove(self: *Game, crate_entity_id: i32) void {
+    if (packages.buildMapMarkerRemoveByEntity(self.body_buf[0..], crate_entity_id, .supply_drop)) |mb| {
+        self.broadcast("NetPackageEntityMapMarkerRemove", mb) catch {};
+    } else |_| {}
+    if (packages.buildNavObjectRemove(self.body_buf[0..], crate_entity_id)) |nb| {
+        self.broadcast("NetPackageNavObject", nb) catch {};
+    } else |_| {}
 }
 
 pub fn broadcastItemDropSpawn(self: *Game, net_id: i32, stack: packages.stock_inv.StockSlot, belongs_player_id: i32, client_entity_id: i32) !void {

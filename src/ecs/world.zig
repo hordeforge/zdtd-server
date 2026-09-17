@@ -27,6 +27,13 @@ pub const NetId = ent.NetId;
 pub const Kind = c.Kind;
 pub const Mask = c.Mask;
 
+/// Max rows in the configurable starter kit (`[sim] spawn_starter_kit`).
+pub const max_starter_kit = 12;
+/// One resolved starter-kit row: an ECS item id and a count. Game fills this
+/// from the operator spec after the item catalog loads (`item_id == 0` marks a
+/// name the catalog does not resolve, which spawnPlayer omits).
+pub const StarterKitEntry = struct { item_id: u16 = 0, count: u16 = 0 };
+
 /// A host-side bot's world presence as seen by the zombie AI (ADR 0026).
 /// Bots are NOT ECS entities; `bot_snap_fn` fills this from the BotManager.
 /// `net_id < 0` means "no bot" (empty result).
@@ -172,6 +179,11 @@ pub const EntityClass = struct {
     /// 0,0 = unset (no roll).
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
+    /// class's own rows (Extends-resolved). Applied only where the server
+    /// computes the damage (turrets, the deferred accumulator), never to a
+    /// C2S claim the client already scaled. 0 = no row.
+    phys_resist: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
@@ -184,6 +196,17 @@ pub const EntityClass = struct {
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
+    /// 0 = unset (the sense path falls back to sight_range). Negative stock
+    /// values (never target) stay negative so the gate keeps them denied.
+    target_player_see: f32 = 0,
+    target_player_hear: f32 = 0,
+    /// `SetAsTargetIfHurt class=` victim-class filter bits (see
+    /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
+    /// always-retarget path.
+    hurt_target_classes: u8 = 0,
+    /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only).
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = use the Rules floor.
     sight_light_min: f32 = 0,
@@ -219,8 +242,17 @@ pub const EntityClass = struct {
     /// resolvedAiAttacks): timid animals never attack even when a player is
     /// close. Defaults true (brainless classes keep the zombie behavior).
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits (0 = native table). See ClassId.ai_tasks.
+    ai_tasks: u16 = 0,
     /// entityclasses ExperienceGain kill XP; 0 = use the caller's flat floor.
     xp_gain: f32 = 0,
+    /// Dismember tuning (RE EntityAlive.CheckDismember / GetDismemberChance);
+    /// copied onto the entity's class_id at spawn. 0 = unset.
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    leg_cripple_scale: f32 = 0,
+    leg_crawler_threshold: f32 = 0,
 };
 
 pub const World = struct {
@@ -311,6 +343,18 @@ pub const World = struct {
     /// by the survival tick. Feeds armorMitigation like stock
     /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
     buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// Item-mod-side PhysicalDamageResist percent summed over the entity's
+    /// equipped items' installed modifiers (EffectManager layer 13) and
+    /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`
+    /// sums passive 41 over the worn items' effect layers, so a plating mod
+    /// (+1/+2) joins the same mitigation as the item's own row.
+    item_mod_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// Buff/perk-side GeneralDamageResist (passive 40) summed by the same
+    /// untagged VM fold and refreshed by the survival tick. Stock
+    /// `EntityAlive::DamageEntity` (IL=236) reads it with an empty tag set and
+    /// applies `min(1, value)` to EVERY incoming damage type, so it joins every
+    /// player-damage choke (AI melee, C2S claims, explosions, environmental DoT).
+    buff_general_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,
@@ -395,6 +439,12 @@ pub const World = struct {
     /// unblocked.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
+    /// Sight oracle (stock `Block.IsSeeThrough`): a cell blocks sight when its
+    /// Collide mask keeps the sight bit, and water always blocks. Wired from
+    /// the game; when absent, `losClear` falls back to `solid_fn`, which is the
+    /// pre-Collide behaviour.
+    sight_ctx: ?*anyopaque = null,
+    sight_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
     /// Falling-block landing callback (Fall-event debris drops): the ECS
     /// has no block/item tables, so the Game rolls the landed cells'
     /// `<drop event="Fall">` rows (systemFallingBlocks fires it at contact,
@@ -452,6 +502,14 @@ pub const World = struct {
     /// Optional item_id → max stack (items.xml Stacknumber). Null → builtin_defs.
     stack_ctx: ?*anyopaque = null,
     stack_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Operator starter kit (zdtd.toml `[sim] spawn_starter_kit`), resolved by
+    /// Game after the item catalog loads. `starter_kit_n == 0` means "not
+    /// configured": spawnPlayer then grants the built-in default kit below.
+    starter_kit: [max_starter_kit]StarterKitEntry = [_]StarterKitEntry{.{}} ** max_starter_kit,
+    starter_kit_n: u8 = 0,
+    /// traders.xml root `currency_item` (stock "casinoCoin"); default starter
+    /// kit coin row resolves this name. Empty → stock name.
+    currency_item: []const u8 = "",
     /// Optional item_id → held-item light (items.xml LightValue, 0 = none).
     /// Feeds the PlayerStealth selfLight blend (rule 15).
     held_light_ctx: ?*anyopaque = null,
@@ -464,6 +522,12 @@ pub const World = struct {
     /// 41 on the wearer). 0 = the item carries no row / not an armor item.
     armor_pdr_ctx: ?*anyopaque = null,
     armor_pdr_fn: ?*const fn (?*anyopaque, u16, u8) f32 = null,
+    /// Foreign-gated armor PDR (ctx, item_id, quality, attacker_slot): the
+    /// piece's `target="other"` PhysicalDamageResist rows (Preacher vs
+    /// zombies), evaluated where the attacker is known. Unset = no foreign
+    /// rows.
+    armor_pdr_foreign_ctx: ?*anyopaque = null,
+    armor_pdr_foreign_fn: ?*const fn (?*anyopaque, u16, u8, u16) f32 = null,
     /// Held-item DegradationPerUse (per-use durability wear) and TargetArmor
     /// (armor penetration fraction) lookups (Game wires from the items table;
     /// 0 = the item carries no row -> caller defaults).
@@ -489,6 +553,17 @@ pub const World = struct {
     /// unset = no plugins, today's behaviour exactly.
     player_damage_verdict_ctx: ?*anyopaque = null,
     player_damage_verdict_fn: ?*const fn (?*anyopaque, i32, f32) i32 = null,
+    /// Foreign-gated victim resist at damage time (ctx, victim_slot,
+    /// attacker_slot, max_entities = unset) -> resist fraction 0..1. Game wires this to the
+    /// Spectral Grace evaluation (victim perk rows gated on the attacker's
+    /// tags); unset = no foreign rows, today's behaviour exactly.
+    foreign_resist_ctx: ?*anyopaque = null,
+    foreign_resist_fn: ?*const fn (?*anyopaque, u16, u16) f32 = null,
+    /// Victim-side hit trigger (ctx, victim_slot, attacker_slot): Game wires
+    /// this to the `onOtherAttackedSelf` rows (concussion/fatigue counters,
+    /// PackMule display). Unset = no victim rows, today's behaviour exactly.
+    attacked_self_ctx: ?*anyopaque = null,
+    attacked_self_fn: ?*const fn (?*anyopaque, u16, u16) void = null,
     /// Server chat broadcast for plugin announcements (`zdtd.queue say`):
     /// (ctx, msg) -> void. Game wires this to the stock chat broadcast; unset
     /// = announcements are dropped (today's behaviour).
@@ -499,12 +574,29 @@ pub const World = struct {
     /// commands never execute (ADR 0030). Unset = drain as today.
     pre_drain_ctx: ?*anyopaque = null,
     pre_drain_fn: ?*const fn (?*anyopaque) void = null,
+    /// Is the source that queued an op (`src` = 1-based plugin slot) now
+    /// withdrawn? Asked once per op during the drain. A module can disable
+    /// itself *during* the drain (a `damage` op reaching an `on_entity_killed`
+    /// verdict that traps), and its remaining ops are already in the snapshot
+    /// the drain is walking, so the pre-drain pass alone cannot withdraw them.
+    /// Game wires this to the Wasm host; unset = no plugins, drain as today.
+    op_src_withdrawn_ctx: ?*anyopaque = null,
+    op_src_withdrawn_fn: ?*const fn (?*anyopaque, i16) bool = null,
     /// Pre-trade price verdict (on_trade_price): (ctx, player_net, item, unit)
     /// -> i32. <0 denies the trade, 0 keeps the price, >0 scales the unit
     /// price by percent. Game wires this to the plugin + wasm host; unset =
     /// no plugins, today's behaviour exactly.
     trade_price_verdict_ctx: ?*anyopaque = null,
     trade_price_verdict_fn: ?*const fn (?*anyopaque, i32, u16, u32) i32 = null,
+    /// Barter perk scales (RE XUiM_Trader GetBuyPrice IL=240 / GetSellPrice
+    /// IL=217): (ctx, client slot) -> multiplier. Buy pays
+    /// `unit - unit * BarteringBuying(148)`; sell gains
+    /// `unit + unit * BarteringSelling(149)`. Game wires these to the perk
+    /// fold; unset = no perks, today's behaviour exactly.
+    barter_buy_ctx: ?*anyopaque = null,
+    barter_buy_fn: ?*const fn (?*anyopaque, usize) f32 = null,
+    barter_sell_ctx: ?*anyopaque = null,
+    barter_sell_fn: ?*const fn (?*anyopaque, usize) f32 = null,
     /// Optional host-side bot snap for the zombie AI (ADR 0026). Bots are NOT
     /// ECS entities, so the AI asks the Game through this hook instead of a
     /// slot: `exact >= 0` resolves that one net id (any range - revenge);
@@ -582,6 +674,12 @@ pub const World = struct {
     /// Root traders.xml quality_mod lerp bounds (QL1 -> min, QL6 -> max),
     /// wired by the Game next to sell_price_fn for the non-stocked sell path.
     trader_quality_min_mod: f32 = 1,
+    /// Per-item `TraderQualityMod="min,max"` override (items.xml): stock's
+    /// GetBuyPrice/GetSellPrice lerp between the item's pair when the item
+    /// declares one, else the trader's. Game wires the items table; null (and
+    /// an item with no pair) keeps the trader's pair.
+    item_quality_mod_ctx: ?*anyopaque = null,
+    item_quality_mod_fn: ?*const fn (?*anyopaque, u16) ?[2]f32 = null,
     trader_quality_max_mod: f32 = 1,
     /// Stock ItemValue.PercentUsesLeft for a sold stack (RE
     /// ItemValue.get_PercentUsesLeft IL=17): the durability fraction the
@@ -768,24 +866,33 @@ pub const World = struct {
     /// clear IsBloodMoonDead and place at (x, y, z) with yaw 0. The single
     /// sanctioned respawn funnel: c2s/join RequestToSpawn must not write
     /// alive[]/health/transform raw (reviveSlot keeps the kind group in sync).
-    pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
-        if (slot >= max_entities or !self.mask[slot].kind) return;
+    /// `cleared` receives the buffs death removed, so the caller can relay them
+    /// (the ECS has no wire). Pass an empty slice when the removals are not
+    /// needed; they are cleared either way.
+    pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32, cleared: []buff.Removed) u8 {
+        if (slot >= max_entities or !self.mask[slot].kind) return 0;
         self.reviveSlot(slot);
-        if (self.mask[slot].buffs) _ = buff.clearOnDeath(&self.buffs[slot]);
+        var cleared_n: u8 = 0;
+        if (self.mask[slot].buffs) cleared_n = buff.clearOnDeath(&self.buffs[slot], cleared);
         var h = self.health[slot];
-        h.hp = 100;
-        h.max_hp = 100;
-        h.base_max_hp = 100;
-        // Keep food/water/stamina on respawn; stock does not zero them
-        // (the bug did `Health{hp=100,max=100}` which zeroed food=0/water=0).
-        if (h.food == 0 and h.food_max == 0) h.food_max = 100;
-        if (h.water == 0 and h.water_max == 0) h.water_max = 100;
-        if (h.stamina_max == 0) h.stamina_max = 100;
-        if (h.stamina == 0) h.stamina = h.stamina_max;
+        // Stock's respawn sequences restore the stats with
+        // `ModifyEntityStat <stat> SetMax` (gameevents.xml, run server side by
+        // game/game_events.zig), so this funnel only has to leave each stat at
+        // its own current maximum: the max fields are the entity's state
+        // (spawn max plus the survival pass's passive deltas). It used to
+        // hardcode hp/max/base_max = 100, which also dropped every HealthMax
+        // bonus a player had earned, and it left Food/Water untouched while the
+        // data says SetMax.
+        if (h.max_hp <= 0) h.max_hp = h.base_max_hp;
+        h.hp = h.max_hp;
+        h.food = h.food_max;
+        h.water = h.water_max;
+        h.stamina = h.stamina_max;
         self.health[slot] = h;
         if (self.mask[slot].player) self.player[slot].is_blood_moon_dead = false;
         self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
         self.markDirty(slot, .{ .pos = true, .hp = true });
+        return cleared_n;
     }
 
     /// Max A* replans admitted per tick. Each costs at most `path_max_expand`
@@ -842,7 +949,6 @@ pub const World = struct {
         duration_ticks: i32,
         muffled_when_crouched: f32,
         heat_map_strength: f32,
-        heat_map_time: f32,
     ) void {
         const n = @atomicRmw(usize, &self.stealth_noise_n, .Add, 1, .monotonic);
         if (n >= c.stealth_events_cap) return;
@@ -855,7 +961,6 @@ pub const World = struct {
             .duration_ticks = duration_ticks,
             .muffled_when_crouched = muffled_when_crouched,
             .heat_map_strength = heat_map_strength,
-            .heat_map_time = heat_map_time,
         };
     }
 
@@ -1043,7 +1148,7 @@ pub const World = struct {
         self.network_id[s] = .{ .id = nid, .gen = self.slot_gen[s] };
         self.kind[s] = kind;
         self.flags[s] = .{ .bits = c.flag_spawned };
-        self.dirty[s] = .{ .spawn = true, .pos = true };
+        self.dirty[s] = .{ .pos = true };
         self.dirty_bits.set(s);
         const cid: u16 = switch (kind) {
             .player => 0,
@@ -1062,6 +1167,8 @@ pub const World = struct {
             .loot_list = ct.loot_list,
             .drop_prob = ct.drop_prob,
             .time_stay = ct.time_stay,
+            .ai_attack = ct.ai_attack,
+            .ai_tasks = ct.ai_tasks,
             .explode_threshold = ct.explode_threshold,
             .explode_delay_s = ct.explode_delay_s,
             .explosion_radius = ct.explosion_radius,
@@ -1108,9 +1215,14 @@ pub const World = struct {
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].phys_resist = def.phys_resist;
             self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
+            self.class_id[s].hurt_target_classes = def.hurt_target_classes;
+            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
+            self.class_id[s].target_player_see = def.target_player_see;
+            self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
@@ -1119,6 +1231,7 @@ pub const World = struct {
             self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
+            self.class_id[s].ai_tasks = def.ai_tasks;
             self.class_id[s].xp_gain = def.xp_gain;
             self.class_id[s].explode_threshold = def.explode_threshold;
             self.class_id[s].explode_delay_s = def.explode_delay_s;
@@ -1129,6 +1242,12 @@ pub const World = struct {
             self.class_id[s].explosion_bonus_cat = def.explosion_bonus_cat;
             self.class_id[s].explosion_bonus_mult = def.explosion_bonus_mult;
             self.class_id[s].explosion_bonus_n = def.explosion_bonus_n;
+            self.class_id[s].dismember_head = def.dismember_head;
+            self.class_id[s].dismember_arms = def.dismember_arms;
+            self.class_id[s].dismember_legs = def.dismember_legs;
+            self.class_id[s].leg_cripple_scale = def.leg_cripple_scale;
+            self.class_id[s].leg_crawler_threshold = def.leg_crawler_threshold;
+            self.class_id[s].bonus_loot = false;
         }
         return id;
     }
@@ -1156,6 +1275,7 @@ pub const World = struct {
                 .hash = ct.hash,
                 .loot_list = ct.loot_list,
                 .ai_attack = ct.ai_attack,
+                .ai_tasks = ct.ai_tasks,
             };
         }
         return id;
@@ -1195,8 +1315,13 @@ pub const World = struct {
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
+            self.class_id[s].phys_resist = def.phys_resist;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
+            self.class_id[s].hurt_target_classes = def.hurt_target_classes;
+            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
+            self.class_id[s].target_player_see = def.target_player_see;
+            self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
@@ -1205,6 +1330,7 @@ pub const World = struct {
             self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
+            self.class_id[s].ai_tasks = def.ai_tasks;
             self.class_id[s].xp_gain = def.xp_gain;
         }
         return id;
@@ -1279,19 +1405,31 @@ pub const World = struct {
         self.health[s].food_max = 100;
         self.health[s].water = 100;
         self.health[s].water_max = 100;
-        // Starter kit by stock item name. Production resolves via item_id_fn
-        // (items.xml / AssignIds); missing names fail closed. Offline tests
+        // Starter kit. A configured `[sim] spawn_starter_kit` (resolved by Game
+        // into `starter_kit`) wins, with unknown names omitted; otherwise the
+        // built-in default kit resolves by stock item name through item_id_fn
+        // (items.xml / AssignIds), and missing names fail closed. Offline tests
         // without the hook keep the builtin ECS ids.
-        const starter = [_]struct { []const u8, u16, u16 }{
-            .{ "meleeToolRepairT0StoneAxe", 8, 1 },
-            .{ "foodCanBeef", 2, 5 },
-            .{ "resourceWood", 7, 20 },
-            .{ "casinoCoin", 6, 50 },
-        };
-        for (starter) |it| {
-            const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];
-            if (id == 0) continue;
-            _ = self.depositItem(s, id, it[2]);
+        if (self.starter_kit_n > 0) {
+            for (self.starter_kit[0..self.starter_kit_n]) |it| {
+                if (it.item_id == 0 or it.count == 0) continue;
+                _ = self.depositItem(s, it.item_id, it.count);
+            }
+        } else {
+            // Coin name from traders.xml `currency_item` (wired by Game); stock
+            // fallback keeps offline builtin id 6 when the hook is unset.
+            const coin = if (self.currency_item.len > 0) self.currency_item else "casinoCoin";
+            const starter = [_]struct { []const u8, u16, u16 }{
+                .{ "meleeToolRepairT0StoneAxe", 8, 1 },
+                .{ "foodCanBeef", 2, 5 },
+                .{ "resourceWood", 7, 20 },
+                .{ coin, 6, 50 },
+            };
+            for (starter) |it| {
+                const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];
+                if (id == 0) continue;
+                _ = self.depositItem(s, id, it[2]);
+            }
         }
 
         return self.network_id[s].id;
@@ -1316,6 +1454,129 @@ pub const World = struct {
     /// turret kills. Stock uses the world GameRandom; the net id is stable
     /// within a run, so the same inputs give the same outcomes. drop_prob is
     /// clamped to [0,1] at load; >= 1 always drops.
+    /// Stock `EntityAlive.CheckDismember` (IL=125) + `GetDismemberChance`
+    /// (IL=128), run on a zombie/animal hit with the claimed body part. Sets
+    /// the victim's crippled/crawler state and reports the wire bits for the
+    /// S2C damage body. Returns bit flags: 1 = dismember, 2 = crawler,
+    /// 4 = cripple.
+    ///
+    /// `weapon_chance` is the attacker's held-item DismemberChance passive
+    /// (144); `attacker_bonus` is the attacker's DismemberSelfChance (143)
+    /// perk/buff fold (the region multiplier is the base it adds onto).
+    /// `fatal` is the claimed fatal flag; killing blows (fatal or
+    /// strength >= current hp) get stock's pre-scale, glancing hits roll raw.
+    /// The roll is a deterministic per-hit draw seeded from the victim net
+    /// id and hp, the same policy as rollLootDrop below.
+    pub fn rollDismember(
+        self: *World,
+        victim: Slot,
+        body_part: i16,
+        amount: f32,
+        max_hp: f32,
+        weapon_chance: f32,
+        attacker_bonus: f32,
+        fatal: bool,
+    ) u8 {
+        if (!self.mask[victim].zombie_ai or !self.mask[victim].health) return 0;
+        const ai = &self.zombie_ai[victim];
+        const cls = if (self.mask[victim].class_id) &self.class_id[victim] else null;
+        const is_leg = (body_part & c.bodypart_leg_mask) != 0;
+        // Stock gates the leg path on the victim being alive and neither
+        // stunned nor sleeping (no stun model here, so alive + awake); a leg
+        // hit on a corpse or a sleeper only rolls the plain dismember chance.
+        const awake = !self.mask[victim].sleeper or self.sleeper[victim].awake;
+        const leg_path = is_leg and self.alive[victim] and awake;
+        const region = c.bodyPartRegion(body_part);
+        const mult: f32 = if (cls) |cl| switch (region) {
+            .head => if (cl.dismember_head > 0) cl.dismember_head else 1,
+            .arms => if (cl.dismember_arms > 0) cl.dismember_arms else 1,
+            .legs => if (cl.dismember_legs > 0) cl.dismember_legs else 1,
+            .other => 0,
+        } else 1;
+        // GetDamageFraction: damage / max HP.
+        const damage_per = if (max_hp > 0) amount / max_hp else 0;
+        // Deterministic per-hit draw: victim net id folded with hp, the same
+        // hash-roll policy as rollLootDrop below.
+        var h: u64 = @bitCast(@as(i64, self.network_id[victim].id));
+        h = h *% 1103515245 +% @as(u64, @bitCast(@as(i64, @trunc(self.health[victim].hp * 1000)))) +% 12345;
+        h = (h >> 16) ^ h;
+        const draw: f32 = @as(f32, @floatFromInt(h % 100000)) / 100000.0;
+        var out: u8 = 0;
+        // GetDismemberChance: weapon >= 100 skips the roll at flat 100, else
+        // weapon * damagePer * (region multiplier + attacker DismemberSelfChance
+        // (143) perk/buff bonuses), compared DIRECTLY against the 0..1 draw
+        // (bgt.un skips past when rand > chance - no /100 anywhere). The
+        // passive call takes the multiplier as its base and adds contributions
+        // on top, so with no perks the base IS the multiplier, not zero.
+        // damagePer is always 1.0 here: ProcessDamageResponse tucks
+        // `ldc.r4 1` into the call (the real fraction is recomputed inside
+        // the leg branch only). A machete (weapon 1) on a mult-1 region is
+        // therefore chance 1.0 - stock really does dismember nearly every
+        // such hit. (Corrected twice 2026-09-06: first the whole term was
+        // zeroed by a 0 bonus, then it was divided by 100 and shrunk to a 1%
+        // lottery. Both misread the same three IL lines.)
+        var chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * 1.0 * (mult + attacker_bonus);
+        // ProcessDamageResponse pre-scale on killing blows (fatal or strength
+        // >= current hp): head hits at fraction >= 0.2 get
+        // max(chance*0.5, 0.3), everything else max(chance*0.5, 0.5) - a floor
+        // under killing-blow dismember, not a nerf of the headline rate.
+        // Glancing (non-killing, non-fatal) hits roll the raw chance.
+        const killing = fatal or amount >= self.health[victim].hp;
+        if (killing and chance < 100) {
+            chance = World.dismemberPrescale(chance, body_part, damage_per);
+        }
+        if (chance > 0 and draw <= chance) {
+            out |= 1;
+            if (leg_path) {
+                ai.crawler = true;
+                out |= 2;
+                return out;
+            }
+            return out;
+        }
+        if (!leg_path) return out;
+        // LegCrawlerThreshold: damage fraction at/above it crawlers the zombie.
+        const threshold: f32 = if (cls) |cl| cl.leg_crawler_threshold else 0;
+        if (threshold > 0 and damage_per >= threshold) {
+            ai.crawler = true;
+            out |= 2;
+            return out;
+        }
+        // ShouldBeCrawler (BodyDamage state) has no model yet; without it a
+        // second leg hit re-checks the threshold rather than short-circuiting.
+        // LegCrippleScale: scaled = damagePer * scale must reach 0.05, then a
+        // second draw under it cripples - left leg unless already crippled
+        // (BodyDamage flag 4096), else right (8192). One crippled flag covers
+        // both here since the walk-slow does not distinguish sides yet.
+        const scale: f32 = if (cls) |cl| cl.leg_cripple_scale else 0;
+        if (scale <= 0) return out;
+        const scaled = damage_per * scale;
+        if (scaled < 0.05) return out;
+        if (ai.crippled) return out;
+        const left = (body_part & c.bodypart_left_leg_mask) != 0;
+        const right = (body_part & c.bodypart_right_leg_mask) != 0;
+        if (!left and !right) return out;
+        var h2: u64 = h *% 6364136223846793005 +% 1442695040888963407;
+        h2 = (h2 >> 16) ^ h2;
+        const draw2: f32 = @as(f32, @floatFromInt(h2 % 100000)) / 100000.0;
+        if (draw2 < scaled) {
+            ai.crippled = true;
+            out |= 4;
+        }
+        return out;
+    }
+
+    /// ProcessDamageResponse killing-blow pre-scale (IL_0118-0171): head hits
+    /// (bit 2) at damage fraction >= 0.2 get max(chance*0.5, 0.3), everything
+    /// else max(chance*0.5, 0.5). Pure so the floor table is unit-testable.
+    pub fn dismemberPrescale(chance: f32, body_part: i16, damage_per: f32) f32 {
+        const is_head = (body_part & 2) != 0;
+        if (is_head and damage_per >= 0.2) {
+            return @max(chance * 0.5, 0.3);
+        }
+        return @max(chance * 0.5, 0.5);
+    }
+
     pub fn rollLootDrop(self: *const World, net_id: i32, drop_prob: f32) bool {
         _ = self;
         if (drop_prob >= 1.0) return true;
@@ -1485,6 +1746,7 @@ pub const World = struct {
                 if (ts.max_distance > 0) t.range = ts.max_distance;
                 if (ts.entity_damage > 0) t.damage = ts.entity_damage;
                 if (ts.burst_fire_rate > 0) t.fire_interval = ts.burst_fire_rate;
+                if (ts.burst_rounds > 0) t.ammo = ts.burst_rounds;
             }
         }
         self.turret[s] = t;
@@ -1506,10 +1768,28 @@ pub const World = struct {
         /// award scales by this (ADR 0020 verdict convention; the <0 deny
         /// branch already consumed the hit above).
         kill_scale_pct: u32 = 100,
+        /// Damage actually dealt after the victim-side class legs
+        /// (`PhysicalDamageResist`, passive 41), which `amount` still includes.
+        /// The caller reports this on the wire: stock's
+        /// `EntityAlive.ProcessDamageResponse` carries the applied hit, not the
+        /// attacker's claim.
+        applied: f32 = 0,
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
         return self.damageFrom(net_id, amount, -1);
+    }
+
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent for one slot:
+    /// the value spawn copied onto the entity wins, else the fixed class_table
+    /// row. 0 = no resist. Callers gate the kinds they apply it to.
+    pub fn classPhysResist(self: *const World, s: Slot) f32 {
+        const per = self.class_id[s].phys_resist;
+        if (per > 0) return per;
+        if (!self.mask[s].class_id) return 0;
+        const cid = self.class_id[s].id;
+        if (cid >= self.class_table.len) return 0;
+        return self.class_table[cid].phys_resist;
     }
 
     /// Damage with the attacker's net id (-1 = unattributed). The attacker is
@@ -1541,7 +1821,22 @@ pub const World = struct {
         // Already dead (hp<=0): players stay in-world; a second hit must not
         // report killed again (double DropOnDeath bags / quest XP / loot).
         if (self.health[s].hp <= 0) return .{};
-        self.health[s].hp -= amount;
+        // Victim-side class legs, stock `EntityAlive.DamageEntity` order: the
+        // victim's own `PhysicalDamageResist` (passive 41) percentage, which
+        // entityclasses sets on the armoured zombies (soldier 50, demolition
+        // 60, swarm 20). One leg here covers every immediate server-computed
+        // hit - C2S claims, explosions (both the cop blast and the client
+        // ExplosionData path), bot fire, traps. The tick's deferred accumulator
+        // and the parallel turret tick apply their own (they never reach this
+        // function). Player victims carry 0 on every stock class and take the
+        // armour/EDR legs instead, so the gate matches the existing balance.
+        var applied = amount;
+        if (self.kind[s] != .player) {
+            const pr = self.classPhysResist(s);
+            if (pr > 0) applied = amount * (1.0 - @min(pr, 100.0) / 100.0);
+        }
+        if (!(applied > 0)) return .{};
+        self.health[s].hp -= applied;
         self.markDirty(s, .{ .hp = true });
         if (self.health[s].hp <= 0) {
             // Kill verdict (T15): a plugin may deny the death; the victim
@@ -1553,7 +1848,7 @@ pub const World = struct {
                 const v = vf(self.kill_verdict_ctx, self.kind[s], self.network_id[s].id, attacker_net_id);
                 if (v < 0) {
                     self.health[s].hp = 1;
-                    return .{};
+                    return .{ .applied = applied };
                 }
                 if (v > 0) kill_scale = @intCast(v);
             }
@@ -1574,10 +1869,12 @@ pub const World = struct {
                 // Stock EntityAlive timeStayAfterDeath default = 5 s (RE
                 // entity-ai.md; the XML values 30/300 flow via class_id.time_stay
                 // when the class declares the property). 5 s fallback, not 300/30.
-                const dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
+                // Horde kills gib 3x faster (SpawnZombie cuts the dwell /= 3).
+                var dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
                     self.class_id[s].time_stay
                 else
                     5.0;
+                if (self.mask[s].zombie_ai and self.zombie_ai[s].is_horde) dwell /= 3.0;
                 self.health[s].corpse_seconds = dwell;
                 // The corpse does not act: stop its AI and any chase.
                 if (self.mask[s].zombie_ai) {
@@ -1587,7 +1884,13 @@ pub const World = struct {
                 }
                 if (!self.rollLootDrop(nid, drop_prob)) {
                     // zPackReg is a 4% bag: most kills drop nothing, like stock.
-                    return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name, .kill_scale_pct = kill_scale };
+                    return .{
+                        .killed = true,
+                        .loot_bag_id = -1,
+                        .loot_list = loot_name,
+                        .kill_scale_pct = kill_scale,
+                        .applied = applied,
+                    };
                 }
                 const loot = self.spawnLootBag(x, y, z, 1, 5);
                 return .{
@@ -1595,6 +1898,7 @@ pub const World = struct {
                     .loot_bag_id = if (loot) |id| id else -1,
                     .loot_list = loot_name,
                     .kill_scale_pct = kill_scale,
+                    .applied = applied,
                 };
             }
             // Players stay in the world dead (stock death → respawn flow keeps
@@ -1609,10 +1913,10 @@ pub const World = struct {
                 }
                 self.reviveSlot(s); // no-op here (slot was never removed), but
                 // keeps every alive[] = true in the repo on one path.
-                return .{ .killed = true };
+                return .{ .killed = true, .applied = applied };
             }
             self.destroy(s);
-            return .{ .killed = true };
+            return .{ .killed = true, .applied = applied };
         }
         // Non-fatal zombie/animal hit: knock the victim away from the attacker
         // (melee/gun shove). Players are the client's own body (the client
@@ -1641,10 +1945,10 @@ pub const World = struct {
                     ai.kb_dx = kx;
                     ai.kb_dz = kz;
                 }
-                return .{ .knocked = true };
+                return .{ .knocked = true, .applied = applied };
             }
         }
-        return .{};
+        return .{ .applied = applied };
     }
 
     pub fn setPos(self: *World, net_id: NetId, x: f32, y: f32, z: f32, yaw: f32) void {
@@ -1660,7 +1964,13 @@ pub const World = struct {
 
     /// Corpse sweep: decrement dwell timers; destroy expired corpses. Returns
     /// the count written to `out`, which the caller broadcasts as EntityRemove.
-    pub fn sweepCorpses(self: *World, dt: f32, out: []NetId) usize {
+    /// `out_slots`, when given, receives the slot each reported corpse
+    /// occupied at the moment it was destroyed, parallel to `out`. The net
+    /// layer needs it to scope the EntityRemove to the peers that knew the
+    /// entity: after `destroy` the id no longer resolves to a slot, so the
+    /// caller cannot recover it. It must be at least as long as `out`.
+    pub fn sweepCorpses(self: *World, dt: f32, out: []NetId, out_slots: ?[]Slot) usize {
+        if (out_slots) |os| std.debug.assert(os.len >= out.len);
         var n: usize = 0;
         // O(live): only living slots can hold a corpse timer. destroy() of the
         // current slot is safe for the bitset iterator (the bit is already
@@ -1677,6 +1987,7 @@ pub const World = struct {
             self.health[s].corpse_seconds -= dt;
             if (self.health[s].corpse_seconds > 0) continue;
             out[n] = self.network_id[s].id;
+            if (out_slots) |os| os[n] = s;
             n += 1;
             self.destroy(s);
         }
@@ -1690,10 +2001,15 @@ pub const World = struct {
 
     /// Apply and clear the ops queued at entry; ops pushed during drain stay for the next tick.
     /// `pre_drain_fn` runs first (plugin withdrawal) so a disabled module's
-    /// still-pending commands are dropped before they apply.
+    /// still-pending commands are dropped before they apply. Ops whose source
+    /// withdrew *during* this drain (a verdict that trapped mid-apply) are
+    /// skipped as they are reached, which the pre-drain pass cannot see.
     pub fn drainCommands(self: *World) command.DrainResult {
         if (self.pre_drain_fn) |f| f(self.pre_drain_ctx);
-        return self.commands.drain(self);
+        return self.commands.drainWith(self, .{
+            .ctx = self.op_src_withdrawn_ctx,
+            .fn_ = self.op_src_withdrawn_fn,
+        });
     }
 
     pub fn netId(self: *const World, slot: Slot) NetId {
@@ -1710,9 +2026,6 @@ pub const World = struct {
         if (bits.rot) self.dirty[slot].rot = true;
         if (bits.flags) self.dirty[slot].flags = true;
         if (bits.hp) self.dirty[slot].hp = true;
-        if (bits.spawn) self.dirty[slot].spawn = true;
-        if (bits.remove) self.dirty[slot].remove = true;
-        if (bits.inv) self.dirty[slot].inv = true;
         if (bits.any()) self.dirty_bits.set(slot);
     }
 
@@ -1766,7 +2079,7 @@ test "ecs spawn player zombie damage" {
     try std.testing.expect(w.health[zs].hp <= 0);
     try std.testing.expect(w.health[zs].corpse_seconds > 0);
     var out: [2]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out, null));
     try std.testing.expect(w.slotOfNetId(z) == null);
 }
 
@@ -2071,7 +2384,7 @@ test "alive_bits and dirty_bits survive random spawn destroy churn" {
         switch (rnd.uintLessThan(u8, 4)) {
             0 => _ = w.spawnZombie(rnd.float(f32) * 100, 70, rnd.float(f32) * 100, 40),
             1 => w.destroy(rnd.uintLessThan(Slot, max_entities)),
-            2 => w.markDirty(rnd.uintLessThan(Slot, max_entities), .{ .pos = true, .inv = true }),
+            2 => w.markDirty(rnd.uintLessThan(Slot, max_entities), .{ .pos = true }),
             else => {
                 const s = rnd.uintLessThan(Slot, max_entities);
                 if (w.alive[s]) {
@@ -2100,7 +2413,7 @@ test "slot recycle does not inherit the previous tenant's dirty bit" {
     try w.ensureNetMap(std.testing.allocator);
     const id = w.spawnZombie(0, 70, 0, 40).?;
     const s = w.slotOfNetId(id).?;
-    w.markDirty(s, .{ .hp = true, .inv = true });
+    w.markDirty(s, .{ .hp = true });
     w.destroy(s);
     try std.testing.expect(!w.alive_bits.isSet(s));
     try std.testing.expect(!w.dirty_bits.isSet(s));
@@ -2113,7 +2426,7 @@ test "slot recycle does not inherit the previous tenant's dirty bit" {
     const s2 = w.slotOfNetId(id2).?;
     try std.testing.expectEqual(s, s2);
     try std.testing.expect(w.dirty_bits.isSet(s2));
-    try std.testing.expect(!w.dirty[s2].hp and !w.dirty[s2].inv);
+    try std.testing.expect(!w.dirty[s2].hp);
 }
 
 test "generation-counted handle invalidates after destroy" {
@@ -2172,9 +2485,9 @@ test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
     try std.testing.expect(w.alive[s]);
     // The sweep leaves the body until the dwell elapses, then destroys it.
     var out: [4]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(2, &out));
+    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(2, &out, null));
     try std.testing.expect(w.alive[s]);
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(10, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(10, &out, null));
     try std.testing.expectEqual(id, out[0]);
     try std.testing.expect(!w.alive[s]);
 }
@@ -2191,10 +2504,10 @@ test "sweepCorpses never destroys more than it reports" {
     // Buffer smaller than the expiring set: the overflow keeps its slot so the
     // caller never has to broadcast an EntityRemove it was not handed.
     var out: [2]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out, null));
     try std.testing.expectEqual(@as(u32, 3), w.countKind(.zombie));
-    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out, null));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out, null));
     try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
 }
 
@@ -2246,7 +2559,7 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     // component defaults.
     var w: World = .{};
     defer w.deinit();
-    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15 };
+    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15, .burst_rounds = 15 };
     w.turret_stats_fn = struct {
         fn f(ctx: ?*anyopaque) ?c.TurretBlockStats {
             const s: *c.TurretBlockStats = @ptrCast(@alignCast(ctx.?));
@@ -2259,6 +2572,9 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     try std.testing.expectEqual(@as(f32, 30), w.turret[s].range);
     try std.testing.expectEqual(@as(f32, 32), w.turret[s].damage);
     try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].fire_interval);
+    // BurstRoundCount is the magazine: it was parsed off blocks.xml and then
+    // dropped, so every turret held the 200-round component fallback.
+    try std.testing.expectEqual(@as(u16, 15), w.turret[s].ammo);
     // Without the hook the component defaults hold.
     var w2: World = .{};
     defer w2.deinit();
@@ -2266,6 +2582,7 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     const s2 = w2.slotOfNetId(id2).?;
     try std.testing.expectEqual(@as(f32, 24), w2.turret[s2].range);
     try std.testing.expectEqual(@as(f32, 12), w2.turret[s2].damage);
+    try std.testing.expectEqual(@as(u16, 200), w2.turret[s2].ammo);
 }
 
 test "spawnTurret honors a fail-closed turret_watts hook" {
@@ -2280,4 +2597,73 @@ test "spawnTurret honors a fail-closed turret_watts hook" {
     const s = w.slotOfNetId(id).?;
     const ni = w.power.indexOfId(w.turret[s].power_node).?;
     try std.testing.expectEqual(@as(f32, 0), w.power.nodes[ni].watts);
+}
+
+test "rollDismember sets the wire bits stock sets" {
+    // RE EntityAlive.CheckDismember (IL=125) / GetDismemberChance (IL=128):
+    // weapon >= 100 skips the roll at flat 100; a leg hit past the class
+    // threshold crawlers; a scaled leg hit cripples. Bits: 1 dismember,
+    // 2 crawler, 4 cripple.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100).?;
+    const s = w.slotOfNetId(z).?;
+    w.class_id[s].leg_crawler_threshold = 0.175;
+    w.class_id[s].leg_cripple_scale = 2;
+    w.class_id[s].dismember_head = 1;
+    w.class_id[s].dismember_arms = 1;
+    w.class_id[s].dismember_legs = 1;
+
+    // Flat-100 weapon on a head hit: dismember, no leg path.
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100, 0, false));
+    try std.testing.expect(!w.zombie_ai[s].crawler);
+
+    // Leg hit at 0.2 fraction past the 0.175 threshold: crawler.
+    const z2 = w.spawnZombie(10, 70, 0, 100).?;
+    const s2 = w.slotOfNetId(z2).?;
+    w.class_id[s2].leg_crawler_threshold = 0.175;
+    w.class_id[s2].leg_cripple_scale = 0;
+    w.class_id[s2].dismember_legs = 1;
+    const bits = w.rollDismember(s2, 256, 20, 100, 0, 0, false);
+    try std.testing.expect(bits & 2 != 0);
+    try std.testing.expect(w.zombie_ai[s2].crawler);
+
+    // Below the threshold with a live scale: cripple arm is reachable
+    // (scaled = fraction * scale >= 0.05 rolls the second draw).
+    const z3 = w.spawnZombie(20, 70, 0, 100).?;
+    const s3 = w.slotOfNetId(z3).?;
+    w.class_id[s3].leg_crawler_threshold = 0.9;
+    w.class_id[s3].leg_cripple_scale = 2;
+    w.class_id[s3].dismember_legs = 1;
+    const b3 = w.rollDismember(s3, 256, 20, 100, 0, 0, false);
+    // Either crippled or not (draw-dependent), but never crawler, and the
+    // bit agrees with the state.
+    try std.testing.expect(b3 & 2 == 0);
+    try std.testing.expect(!w.zombie_ai[s3].crawler);
+    try std.testing.expect((b3 & 4 != 0) == w.zombie_ai[s3].crippled);
+
+    // Non-leg, no-threshold, zero weapon: nothing.
+    const z4 = w.spawnZombie(30, 70, 0, 100).?;
+    const s4 = w.slotOfNetId(z4).?;
+    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0, 0, false));
+
+    // The product term decides with damagePer pinned at 1.0: weapon 1 on a
+    // mult-1 head is chance 1.0, so every draw dismembers. Glancing (50 <
+    // 100 hp, non-fatal) so the killing-blow prescale stays out of it. Zero
+    // the multiplier term and this fails - the flat-100 arm above cannot
+    // cover it.
+    const z5 = w.spawnZombie(40, 70, 0, 100).?;
+    const s5 = w.slotOfNetId(z5).?;
+    w.class_id[s5].dismember_head = 1;
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 50, 100, 1, 0, false));
+}
+
+test "dismemberPrescale matches the stock killing-blow floor table" {
+    // ProcessDamageResponse IL_0118-0171: head bit + fraction >= 0.2 gets
+    // max(c*0.5, 0.3), everything else max(c*0.5, 0.5).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(1.0, 2, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), World.dismemberPrescale(0.1, 2, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(0.1, 1, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(0.4, 2, 0.1), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), World.dismemberPrescale(5.0, 2, 0.9), 0.0001);
 }

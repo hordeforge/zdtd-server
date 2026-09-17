@@ -75,6 +75,18 @@ pub fn guidFromPos(pos: PosKey) [16]u8 {
     return g;
 }
 
+/// Inverse of `guidFromPos`: decode a container guid back to its position.
+/// Null when the tag bytes are not ours (a foreign/zero guid must not resolve
+/// to a bogus position).
+pub fn posFromGuid(guid: *const [16]u8) ?PosKey {
+    if (guid[12] != 'Z' or guid[13] != 'T' or guid[14] != 'E' or guid[15] != 1) return null;
+    return .{
+        .x = std.mem.readInt(i32, guid[0..4], .little),
+        .y = std.mem.readInt(i32, guid[4..8], .little),
+        .z = std.mem.readInt(i32, guid[8..12], .little),
+    };
+}
+
 pub const ContainerStore = struct {
     items: [max_containers]Container = undefined,
     /// Lookup key mirror of `items[i].pos`, written by getOrCreate. Only valid
@@ -154,14 +166,9 @@ pub const ContainerStore = struct {
     }
 
     pub fn getByGuid(self: *ContainerStore, guid: *const [16]u8) ?*Container {
-        var seen: usize = 0;
-        var i: usize = 0;
-        while (i < max_containers and seen < self.n) : (i += 1) {
-            if (!self.used[i]) continue;
-            seen += 1;
-            if (std.mem.eql(u8, &self.items[i].inv_guid, guid)) return &self.items[i];
-        }
-        return null;
+        // inv_guid is only ever guidFromPos(pos), so decode the position and
+        // reuse get()'s key-mirror scan instead of striding the ~500 B AoS.
+        return self.get(posFromGuid(guid) orelse return null);
     }
 
     pub fn remove(self: *ContainerStore, pos: PosKey) void {
@@ -219,7 +226,11 @@ pub const ContainerStore = struct {
         var count: u16 = 0;
         for (idxs[0..n_idx]) |ii| {
             const c = &self.items[ii];
-            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 > buf.len) break;
+            // Must cover everything the body below writes: header, slots,
+            // touched_day u32 AND the ZCT2 size_x/size_y pair. save_capacity
+            // budgets the full 404-byte record, so this never trips today, but
+            // a guard that under-counts what it guards is a latent overrun.
+            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 + 2 > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
             std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.pos.z, .little);
@@ -275,34 +286,53 @@ pub const ContainerStore = struct {
             const player = buf[o + 19] != 0;
             o += 20;
             if (o + @as(usize, slot_count) * 7 > len) return error.ReadFailed;
-            const c = self.getOrCreate(pos, slot_count, block_id) orelse {
-                o += @as(usize, slot_count) * 7;
-                continue;
-            };
-            c.touched = touched;
-            c.player_storage = player;
+            // A record can be dropped (table full of player storage), but it
+            // still has to be consumed whole: the slots AND the touched_day +
+            // size tail below. Skipping only the slots would leave the cursor
+            // on the tail and shift every following record.
+            const maybe_c = self.getOrCreate(pos, slot_count, block_id);
+            if (maybe_c) |c| {
+                c.touched = touched;
+                c.player_storage = player;
+            }
             var s: usize = 0;
             while (s < slot_count) : (s += 1) {
-                if (s < max_container_slots) {
-                    c.slots[s] = .{
-                        .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
-                        .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
-                        .quality = buf[o + 4],
-                        .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
-                    };
+                if (maybe_c) |c| {
+                    if (s < max_container_slots) {
+                        c.slots[s] = .{
+                            .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
+                            .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
+                            .quality = buf[o + 4],
+                            .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
+                        };
+                    }
                 }
                 o += 7;
             }
-            // touched_day appended after the slots in newer saves; older files
-            // end at the last slot and load touched_day as 0.
-            if (o + 4 <= len) {
-                c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
+            // touched_day appended after the slots in ZCT2; a ZCT1 record ends
+            // at the last slot and loads touched_day as 0.
+            //
+            // The magic decides this, not the remaining length. Keying it on
+            // `o + 4 <= len` only worked for a single-record ZCT1 file: with
+            // two or more, the bytes after the first record are the next
+            // record's position, so they were consumed as its touched_day and
+            // every later record shifted out of alignment and was lost.
+            //
+            // The same shape was checked elsewhere and is sound there: the
+            // player-save tails in `server/persist.zig` gate on the record's
+            // version and only use the length as a guard, and where that guard
+            // can fail the remaining bytes are too few for another record to
+            // follow. A new format version here must keep the version test.
+            if (with_size and o + 4 <= len) {
+                if (maybe_c) |c| c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
             }
             // ZCT2: size_x/size_y u8 each follow touched_day.
             if (with_size and o + 2 <= len) {
-                c.size_x = buf[o];
-                c.size_y = buf[o + 1];
+                if (maybe_c) |c| {
+                    c.size_x = buf[o];
+                    c.size_y = buf[o + 1];
+                }
                 o += 2;
             }
         }
@@ -329,14 +359,22 @@ test "container store saves past the old 256 cap (GAP 12)" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < 300) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = @intCast(i * 3) }, 8, 42).?;
         c.setSlot(0, .{ .item_id = 7, .count = 1, .quality = 1, .meta = 0 });
     }
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     var found: usize = 0;
     for (s2.used) |u| {
@@ -349,7 +387,12 @@ test "container store saves past the old 256 cap (GAP 12)" {
 }
 
 test "container store save load roundtrip" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 8, 42).?;
     c.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 2, .meta = 3 });
     var tmp = std.testing.tmpDir(.{});
@@ -357,7 +400,10 @@ test "container store save load roundtrip" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u16, 7), c2.slots[0].item_id);
@@ -367,7 +413,12 @@ test "container store save load roundtrip" {
 }
 
 test "container store ZCT2 persists the observed grid size" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 12, 42).?;
     c.size_x = 6;
     c.size_y = 2; // stock 6x2 wooden chest
@@ -376,16 +427,79 @@ test "container store ZCT2 persists the observed grid size" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u8, 6), c2.size_x);
     try std.testing.expectEqual(@as(u8, 2), c2.size_y);
 }
 
+test "a legacy ZCT1 file loads without the touched_day and size tail" {
+    // ZCT1 records end after the slots; ZCT2 appends touched_day u32 plus
+    // size_x/size_y. Nothing loaded a ZCT1 buffer, so reading one as ZCT2 -
+    // six bytes past the record taken as its tail - left the suite green while
+    // every later record shifted.
+    // Two records, so the first one's missing tail is followed by real bytes:
+    // with a single record the length guard hides the difference.
+    var buf: [6 + 2 * (20 + 2 * 7)]u8 = @splat(0);
+    @memcpy(buf[0..4], "ZCT1");
+    std.mem.writeInt(u16, buf[4..6], 2, .little); // two records
+    std.mem.writeInt(i32, buf[6..10], 5, .little); // x
+    std.mem.writeInt(i32, buf[10..14], 70, .little); // y
+    std.mem.writeInt(i32, buf[14..18], 6, .little); // z
+    std.mem.writeInt(i32, buf[18..22], 42, .little); // block_id
+    std.mem.writeInt(u16, buf[22..24], 2, .little); // slot_count
+    buf[24] = 1; // touched
+    buf[25] = 0; // player_storage
+    // Two 7-byte slots: item u16 | count u16 | quality u8 | meta u16.
+    std.mem.writeInt(u16, buf[26..28], 7, .little);
+    std.mem.writeInt(u16, buf[28..30], 3, .little);
+    buf[30] = 4;
+    std.mem.writeInt(u16, buf[31..33], 5, .little);
+
+    // Second record at a distinct position; reading a 6-byte tail for the
+    // first would consume its header and lose it.
+    const r2 = 6 + 20 + 2 * 7;
+    std.mem.writeInt(i32, buf[r2 .. r2 + 4][0..4], 9, .little); // x
+    std.mem.writeInt(i32, buf[r2 + 4 .. r2 + 8][0..4], 71, .little); // y
+    std.mem.writeInt(i32, buf[r2 + 8 .. r2 + 12][0..4], 10, .little); // z
+    std.mem.writeInt(i32, buf[r2 + 12 .. r2 + 16][0..4], 43, .little); // block_id
+    std.mem.writeInt(u16, buf[r2 + 16 .. r2 + 18][0..2], 2, .little); // slot_count
+
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
+    try s.loadFromSlice(&buf);
+    const c = s.get(.{ .x = 5, .y = 70, .z = 6 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 42), c.block_id);
+    try std.testing.expectEqual(@as(u16, 2), c.slot_count);
+    try std.testing.expect(c.touched);
+    try std.testing.expectEqual(@as(u16, 7), c.slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 3), c.slots[0].count);
+    // The grid is absent in v1 and loads as 0; the wire writer synthesizes it.
+    try std.testing.expectEqual(@as(u8, 0), c.size_x);
+    try std.testing.expectEqual(@as(u8, 0), c.size_y);
+
+    // The record after it is still found: a misread tail would have eaten its
+    // header and shifted everything that follows.
+    const c2 = s.get(.{ .x = 9, .y = 71, .z = 10 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 43), c2.block_id);
+}
+
 test "container save order is pos-sorted not slot-order" {
     // Reverse-insert so sparse slot indices disagree with world-pos order.
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     _ = s.getOrCreate(.{ .x = 9, .y = 70, .z = 0 }, 8, 1).?;
     _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
     var tmp = std.testing.tmpDir(.{});
@@ -404,7 +518,12 @@ test "container save order is pos-sorted not slot-order" {
 }
 
 test "container get or create" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 1, .y = 70, .z = 2 }, 8, 100).?;
     c.setSlot(0, .{ .item_id = 7, .count = 3, .quality = 1 });
     try std.testing.expectEqual(@as(u16, 7), s.get(.{ .x = 1, .y = 70, .z = 2 }).?.slots[0].item_id);
@@ -413,8 +532,32 @@ test "container get or create" {
     try std.testing.expect(s.getByGuid(&g) == c);
 }
 
+test "container guid decode rejects a foreign tag and round-trips" {
+    const pos = PosKey{ .x = -7, .y = 70, .z = 12345 };
+    const g = guidFromPos(pos);
+    const back = posFromGuid(&g).?;
+    try std.testing.expect(PosKey.eql(pos, back));
+    var foreign = g;
+    foreign[15] = 2; // wrong tag byte; must not decode to a position
+    try std.testing.expect(posFromGuid(&foreign) == null);
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
+    _ = s.getOrCreate(pos, 8, 100).?;
+    try std.testing.expect(s.getByGuid(&g) != null);
+    try std.testing.expect(s.getByGuid(&foreign) == null);
+}
+
 test "container persistence retains every full-capacity container" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < max_containers) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = 0 }, max_container_slots, 42).?;
@@ -425,12 +568,78 @@ test "container persistence retains every full-capacity container" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     try std.testing.expectEqual(max_containers, s2.n);
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
     try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);
     io_fs.deleteFile("./containers.zct");
+}
+
+test "a dropped ZCT2 record does not desync the records after it" {
+    // getOrCreate returns null when the table is full of player storage. The
+    // loader has to consume that record whole: its slots AND the touched_day +
+    // size tail. Skipping only the slots left the cursor on the tail bytes, so
+    // every following container parsed garbage.
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
+    var i: usize = 0;
+    while (i < max_containers) : (i += 1) {
+        const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;
+        c.player_storage = true; // nothing is evictable, so the next insert drops
+    }
+    try std.testing.expect(s.getOrCreate(.{ .x = 77_001, .y = 0, .z = 0 }, 8, 1) == null);
+
+    // Two ZCT2 records: one that will be dropped, then one whose position is
+    // already in the table (so it resolves) carrying a distinctive slot.
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    const a = std.testing.allocator;
+    const W = struct {
+        fn int(al: std.mem.Allocator, b: *std.ArrayList(u8), comptime T: type, v: T) !void {
+            var t: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+            std.mem.writeInt(T, &t, v, .little);
+            try b.appendSlice(al, &t);
+        }
+        /// pos xyz i32 | block i32 | slot_count u16 | touched u8 | player u8 |
+        /// slots | touched_day u32 | size_x u8 | size_y u8
+        fn rec(al: std.mem.Allocator, b: *std.ArrayList(u8), x: i32, item: u16, day: u32) !void {
+            try int(al, b, i32, x);
+            try int(al, b, i32, 0);
+            try int(al, b, i32, 0);
+            try int(al, b, i32, 42);
+            try int(al, b, u16, 1); // one slot
+            try b.append(al, 1); // touched
+            try b.append(al, 1); // player_storage
+            try int(al, b, u16, item);
+            try int(al, b, u16, 3); // count
+            try b.append(al, 1); // quality
+            try int(al, b, u16, 0); // meta
+            try int(al, b, u32, day);
+            try b.append(al, 6); // size_x
+            try b.append(al, 2); // size_y
+        }
+    };
+    try buf.appendSlice(a, "ZCT2");
+    try W.int(a, &buf, u16, 2);
+    try W.rec(a, &buf, 77_002, 111, 9); // no free slot -> dropped
+    try W.rec(a, &buf, 0, 222, 5); // existing pos -> must resolve
+
+    try s.loadFromSlice(buf.items);
+    // The second record was read at the right offset, not shifted by the
+    // dropped record's 6-byte tail.
+    const c = s.get(.{ .x = 0, .y = 0, .z = 0 }).?;
+    try std.testing.expectEqual(@as(u16, 222), c.slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 3), c.slots[0].count);
+    try std.testing.expectEqual(@as(u32, 5), c.touched_day);
+    try std.testing.expectEqual(@as(u8, 6), c.size_x);
 }
 
 test "container store evicts world containers before dropping (cap 4096)" {
@@ -439,7 +648,12 @@ test "container store evicts world containers before dropping (cap 4096)" {
     // table is full, getOrCreate reuses a WORLD container (player_storage =
     // false, regenerated deterministically on the next chunk scan) and never
     // evicts a player-placed chest.
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < max_containers) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;

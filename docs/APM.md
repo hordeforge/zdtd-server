@@ -53,11 +53,14 @@ flowchart LR
 `phase_rejects`, `ownership_rejects`, `bounds_rejects`, `movement_rejects`,
 `decode_rejects`, `reconnects`, `buff_rejects`, `inv_ledger_events`,
 `c2s_throttle`, `c2s_malformed`, `c2s_rejects`, `c2s_unhandled`,
-`c2s_version_rejects`, `c2s_stock_invtx`,
+`c2s_version_rejects`, `c2s_stock_invtx`, `c2s_te_sign_echo`,
 `evidence_events`, `guard_quarantines`, `guard_kicks`, `guard_would_kicks`,
 `quarantine_rejects`, `load_shed_drops`, `hard_ceiling_downgrades` (T20:
 client-informed `.hard` events downgraded to `.strong` at the authority ceiling),
-`survival_players`, `vm_recomputes`, `path_replans_denied`, …
+`survival_players`, `vm_recomputes`, `path_replans_denied`,
+`plugin_effects_not_reverted` (irrevocable effects a withdrawn plugin left),
+`plugin_verbs_denied` (queued commands the `[plugin] deny`/`allow` interception
+policy dropped, ADR 0039), …
 
 Privileged admin and player-console activity is counted by `admin_commands`
 and `player_console_commands`. Command audit logs contain the source and verb

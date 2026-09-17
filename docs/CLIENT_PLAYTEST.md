@@ -678,3 +678,139 @@ Conclusion: for the loadgen surface (challenge, ids, login, enter, spawn,
 movement, teleport), zdtd behaves like the stock dedicated server on the same
 workload. The full stock-client suite remains the visual oracle and is covered
 by the automated demo runs recorded in STATUS.
+
+## Modlet + join A/B vs the stock V3.2.0 dedicated server (2026-09-14)
+
+Run through the workspace sandbox (`7dtd-sandbox`), instance `ab-mods`
+(pristine steamcmd base, ports 27160..27164), with a real XML-only modlet set
+staged into `game/Mods`: 0-SCore, Blooms Family Farming, SphereII A Better
+Life, SphereII Challenges, SphereII Item Mod Degradation, SphereII Learn By
+Doing. Both legs use the same game dir, the same `Mods/`, and the same
+Navezgane world.
+
+**Mod loading.** Stock reports 7 loaded mods (the six above plus the
+code-only `TFP_Harmony`); zdtd reports six XML modlets, which is the same set
+minus the Harmony loader it deliberately does not host. Load order agrees:
+both sort by the `Mods/` folder name, so `0-SCore` first, then `Blooms`,
+then the `SphereII*` folders in byte order (`A Better Life`, `Challenges`,
+`Item Mod Degradation`, `Learn By Doing`).
+
+**Patch application.** Stock warns `XML patch ... did not apply` for exactly
+two rows: Blooms Family Farming's
+`/blocks/block[@name='cropsGrowingMaster']/property[@name='PlantGrowing.GrowthRate']`
+and Item Mod Degradation's
+`//item[@name='toolAnvil']/effect_group[@tiered='false']`. zdtd now logs the
+same two (the op that matches nothing used to be skipped in silence). zdtd
+also reports rows stock does not: Item Mod Degradation's
+`<ref_file snippet=...>` is a custom op registered by 0-SCore's DLL, which
+this server does not host, so the `<set>` ops that depend on the snippet it
+merges match nothing; and each catalog is loaded more than once (blocks.xml
+by the block, texture and maxdamage tables), so a warning can repeat.
+
+**Localization.** Stock logs `Loading localization from mod:` for all six
+modlets and sends the merged patch blob to each joining client. zdtd used to
+send nothing, so a stock client showed the mod's raw keys instead of its
+names; it now sends `NetPackageLocalization` at the same point in the
+enter-game sequence, and the loadgen sees it on both legs (zdtd 19010 bytes
+against stock's 19554). The patch set is the same 459 keys, so the remaining
+2.8% is text stock writes and this server does not; both deflate at level 3
+now (`DeflateOutputStream(_, 3)`).
+
+**Join path.** `7dtd-loadgen --join --host 127.0.0.1 --port <LiteNet> --count 1
+--no-spawn-zombies` against each leg, same client build:
+
+| Stage | Stock dedi | zdtd |
+|---|---|---|
+| PackageIdsReceived | `ver=V 3.2.0 (1.3.20.10) maps=224` | `ver=V 3.2.0 (1.3.20.10) maps=191` |
+| LoginAnswered | allowed=True dataLen=1686 | allowed=True dataLen=344 |
+| AuthState | nativeplatform, encryption, authenticated | confirmation echo only (EAC off) |
+| WorldInfo bodyLen | 362 first join / 476 after | 97 |
+| WorldSpawnPoints bodyLen | 213 | 213 |
+| GameStats bodyLen | 231 | 212 without `--serverconfig`, **231 with it** |
+| PlayerId bodyLen | 360 | 1512 |
+| Joined / spawn | entity set, `(256,72,256)` then world spawn | same |
+
+**Re-run 2026-09-14 (after the item-stat, craft-count, passive-curve, wandering-horde and blood-moon-stage changes)**, scripted as `scripts/ab-join-smoke.sh ab-mods <out> both` so the two legs are one command: both legs join, spawn and are driven by the same loadgen. Same stage table as above (`maps=224/191`, `LoginAnswered dataLen=1686/466`, `WorldInfo 590/97`, `WorldSpawnPoints 213/213`, `GameStats 231/231`, `Localization 19554/19010`, `PlayerId 360/1512`, spawn `(256,72,256)` via `PlayerId` on both).
+
+**Re-run 2026-09-15 (after the trader-abundance, quest-reward-stats, craft_time-sentinel, vehicle-speed, AITarget-sense, RandomRoll/PerksUnlocked, signs-tree and worldglobal-ambient changes)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged (`maps=224/191`, `GameStats 231/231`, `WorldSpawnPoints 213/213`, `Localization 19554/19010`, `WorldInfo 590/97`). None of the round 74-91 changes moved a join-stage byte, which is the expected result: they touch trader windows, reward rolls, craft timing, sense distances, requirement gates, sign payloads and night ambient, all post-join behavior.
+
+**Re-run 2026-09-15 (after the hurt-class revenge gate, hear-distance gate, `IsStatAtMax`/`InSafeZone` requirement gates, and sign batch/enum work)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged. None of the round 92-111 changes moved a join-stage byte, which is the expected result: they touch AI targeting, requirement gates, and sign payloads, all post-join behavior.
+
+**Re-run 2026-09-15 (after the Spectral Grace deflect, `onSelfBuffFinish` expiry, and Preacher foreign-PDR work)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged. None of the round 114-119 changes moved a join-stage byte, which is the expected result: they touch damage-time resist evaluation and buff expiry, all post-join behavior.
+
+`WorldInfo` moved from the 362 first recorded to 590 on this run: the sandbox instance's `userdata` has accumulated player saves from the earlier A/B runs, and the gap is entirely the persistent-player list stock writes and zdtd replaces with the empty form (presence byte `false`). That is the expected growth, not a regression, and it is why the zdtd body stays 97.
+
+The package-id count differs in *slots*, not names: stock sends a fixed array
+whose holes the client skips (the loadgen's own parse guards
+`!string.IsNullOrEmpty`), while zdtd sends a compact list. zdtd's 191 names
+cover every V3.2.0 `NetPackage*` type in the RE census (which lists 196 rows
+including the base/helper types) plus four the census predates
+(`NetPackageDroneDataSync`, `NetPackageDroneParticleEffect`, `NetPackageLight`,
+`NetPackageTreeFade`), and the same join resolves the same package ids by
+name on both legs. Index-for-index parity with stock is not required, because
+the client builds its table from the server's list.
+
+Method note: the zdtd leg must be given the same `--serverconfig` the stock
+instance runs with. Without it the sandbox-code and preset strings are empty
+and `GameStats` reads 212 bytes; with it the body is 231, byte-for-byte the
+stock length.
+
+`WorldInfo` (97 vs stock 362) is **shape-correct**, not truncated. Stock's
+tail is `worldHashesData` - a pre-serialized `count:i32 + count x (path:string,
+crc:u32)` block - followed by `worldDataSize:i64`. `NetPackageWorldInfo::write`
+IL=007D passes it to `BinaryWriter::Write(Byte[])`, but `PooledBinaryWriter::Write(Byte[])`
+(IL=14) writes the raw array straight to the stream, with **no** .NET 7-bit
+length prefix, so the client's `read` IL=006F sees the inner `count` first;
+an empty table is the legal `i32 0` form, which is what zdtd sends (it serves
+no world files - the client loads its own DTM/splat data). The 265 missing
+bytes are the CRC rows for a RWG map's raw world files, which a client only
+needs to *download* files it lacks. The other stock field here is the
+persistent-player list: stock writes presence `true` plus
+`PersistentPlayerList::Write`, zdtd writes presence `false`, and the client's
+`read` IL=0037 substitutes an empty `PersistentPlayerList` - legal, but it means
+the client's player list shows no offline owners, land claims or bedrolls.
+
+Two remaining size gaps are **not** fidelity bugs, and are documented here so
+they stop reading like one:
+
+- `LoginAnswered` (loadgen's stage name; the package is
+  `NetPackagePlayerLoginAnswer`) is measured on the **`data` string length**,
+  not the body: 1686 stock against 344 (466 in the run whose optional GSI keys
+  are set). Body is `dataLen + 8` on both legs because the trailing
+  `platformLobbyId` + two identity/token pairs are the headless default
+  (one `0x00` per null identity, `PlatformUserIdentifierExtensions::ToStream`).
+  `data` is `GameServerInfo::ToString(true)` - a flat `Key:Value;\r\n` table
+  (`GameServerInfo.il.txt:1198-1371`) filled by 79 `SetValue` calls, which zdtd
+  mirrors with 18 fixed + 7 optional keys. Nothing in join, spawn or the sim
+  reads those keys; the two the client gates on (`GameInfoBool` 9
+  `ModdedConfig` and 10 `RequiresMod`, `ConnectionManager.il.txt:167A-16C0`)
+  are absent and therefore read false, which is the permissive value. It is
+  server-browser/info display text - except for one latent difference: zdtd
+  never sets `ModdedConfig`, so a client can never hit stock's
+  `auth_moddedconfigdetected` disconnect on a config-modded server.
+- `PlayerId` (1512 vs 360) is zdtd sending a **usable** player file where stock
+  sends the fresh, empty one: `RequestToSpawnPlayer` leaves `ecd.entityClass`
+  0 and `bLoaded` false, so the stock client never calls
+  `PlayerDataFile::ToPlayer` and builds its own local player
+  (`GameManager.il.txt:4929-5003`). zdtd sends `bLoaded = true` with its
+  server-authoritative bag, toolbelt, starter quest and unlocked-recipe list so
+  the client adopts the server's state. The +1152 breaks down as
+  `unlockedRecipeList` +858 (41 `always_unlocked` rows), bag padding +90,
+  the ECD player branch +44, toolbelt +20, less the v37 ECD tail -24 and the v1
+  challenge journal -9, plus the starter quest entry. Matching stock's 360
+  exactly would flip the client to `RespawnType.NewGame` and discard that
+  restore, so it is a deliberate divergence: see
+  [DIVERGENCES.md](DIVERGENCES.md).
+
+## Reproducing
+
+```bash
+# stock leg (sandbox instance with the modlet set staged in game/Mods)
+7dtd-sandbox/scripts/sb create-server ab-mods && 7dtd-sandbox/scripts/sb launch-server ab-mods
+# zdtd leg (same game dir + Mods, its own world dir)
+zig-out/bin/zdtd --port 27160 --game-dir <instance>/game --mods-dir <instance>/game/Mods \
+  --world /tmp/zdtd_ab --world-name Navezgane
+# both legs
+dotnet 7dtd-loadgen/src/LoadGen/bin/Release/net8.0/7dtd-loadgen.dll \
+  --join --host 127.0.0.1 --port 27162 --count 1 --actions 3 --no-spawn-zombies
+```

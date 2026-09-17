@@ -130,7 +130,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // stays null and the deterministic fallback below applies.
                 self.harness.counters.inc(.c2s_malformed);
                 var r: wire_binary.Reader = .{ .data = body };
-                if (r.readString(c.name[0..])) |nm| {
+                if (r.readStringTruncating(c.name[0..])) |nm| {
                     c.name_len = sanitizePlayerName(c.name[0..], nm);
                 } else |_| {}
             }
@@ -206,6 +206,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
         try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
+        // Stock AuthFinalizer.Authorize (IL=10): the last authorizer step
+        // sends an empty AuthConfirmation, which the client echoes back
+        // (ProcessPackage IL_002E, SendToServer). The echo arm below already
+        // handles it; without the send the round-trip never starts.
+        // GetLength 9 is the base NetPackage header; the body is empty
+        // (read IL=1, write IL=4 both touch nothing past the base).
+        try self.sendGame(peer, "NetPackageAuthConfirmation", &.{});
         const surf0 = self.spawnSurface(sp.x, sp.z);
         const was_joined = c.joined;
         const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return true;
@@ -213,6 +220,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Restored claims keyed by this login name get their live owner
         // entity re-mapped here (entity ids are reassigned per session).
         self.reclaimForName(c.name[0..c.name_len], eid);
+        self.reclaimTurretsForName(c.name[0..c.name_len], c.slot);
         c.joined = true;
         c.view_radius = self.view_radius;
         // PlayerDataFile::CopyTo clamps a not-yet-set bornAt down to the
@@ -252,6 +260,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
         // 2014542), and stock sends the mapping at this same point.
         try self.sendBlockIdMapping(peer);
+        // Stock order: NetPackageLocalization (IL_0222) before
+        // SendXmlsToClient (IL_0242), so the client has the modlet names before
+        // it renders anything from the catalogs.
+        try self.sendLocalization(peer);
         try self.sendLocalConfigFiles(peer);
         const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
         try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
@@ -278,6 +290,48 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Client echoes empty AuthConfirmation; stock AuthFinalizer expects the round-trip.
         // Nothing to apply; acknowledge by no-op so the session stays live.
         std.debug.print("zdtd: AuthConfirmation body={d}\n", .{body.len});
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageWorldFolder")) {
+        // Stock ProcessPackage (IL=93) on the server branch calls
+        // StartSendingPacketsToClient. zdtd's flat/default worlds ship no
+        // world files (WorldInfo hashCount=0), but worldInfoCo still waits on
+        // WorldReceivedAndUncompressed after RequestWorld, so answer with one
+        // empty last-part that clears the wait (uncompressWorld count=0).
+        const part = try packages.buildEmptyWorldFolderTransfer(&self.body_buf);
+        try self.sendGameCritical(peer, "NetPackageWorldFolder", part);
+        std.debug.print("zdtd: WorldFolder empty transfer local_id={d} body={d}\n", .{ peer.local_id, part.len });
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackagePlayerSpawnedInWorld")) {
+        // The client echoes this after it finishes spawning locally (stock
+        // GameManager.RequestToSpawn -> SendToServer, direction 0 both ways).
+        // Stock's server ProcessPackage (IL=47) validates the claimed entity
+        // against the sender (ValidEntityIdForSender), runs
+        // PlayerSpawnedInWorld (SetAlive on died-respawns; vehicle/drone
+        // waypoints and the spawn mod-event for joins), then rebroadcasts the
+        // confirm to every other peer on channel 192 so tracking clients run
+        // their spawn handling. Apply the same: speaking for another entity
+        // is dropped and counted, and the rebroadcast carries the sender's
+        // verified entity id rather than echoing a forged one. The vehicle
+        // waypoint leg is covered separately (sendVehicleWaypoints ships them
+        // to the owner on join); drones have no zdtd surface yet.
+        const rep = packages.parseSpawnedBody(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (rep.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        for (&self.clients) |*cl| {
+            if (cl.slot == c.slot or !cl.joined) continue;
+            const op = cl.peer orelse continue;
+            self.sendGame(op, "NetPackagePlayerSpawnedInWorld", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: spawn confirm relay failed slot={d}: {s}\n", .{ cl.slot, @errorName(err) });
+            };
+        }
         return true;
     }
     // worldInfoCo: after configs, client RequestWorldSignDataFromServer and blocks until
@@ -355,6 +409,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Fallback spawn path when RequestToSpawnPlayer never arrives / fails parse.
         if (c.entity_id > 0) {
             c.view_radius = if (c.view_radius < 1) self.view_radius else c.view_radius;
+            // One deadline for the whole must-deliver bundle (same rule as the
+            // RequestToEnterGame path): without it every sendGameCritical in
+            // the bundle re-arms its own budget and a peer that stops ACKing
+            // costs the tick one full budget per critical package.
+            peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
+            defer peer.critical_budget_deadline_ns = 0;
             try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
             std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
         } else {
@@ -388,6 +448,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         } else |_| {
             c.view_radius = self.view_radius;
         }
+        // The client's own character profile rides the same body. Stock stores
+        // it on the ECD it writes back (GameManager::RequestToSpawnPlayer
+        // GameManager.il.txt:4614-4617) so the player sees their real
+        // appearance and everyone nearby sees it too; a malformed or absent
+        // profile keeps the previous/default one instead of failing the spawn.
+        if (packages.parseRequestToSpawnProfile(body)) |prof| {
+            c.profile = prof;
+            c.profile_ok = true;
+        } else |_| {}
         const surf = self.spawnSurface(sp.x, sp.z);
         if (c.entity_id <= 0) {
             c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return true;
@@ -411,12 +480,43 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const bed_surf = self.spawnSurface(rpx, rpz);
                 // Sanctioned respawn funnel: revive + heal + clear death
                 // buffs/IsBloodMoonDead + place + mark dirty in one call.
-                self.sim.respawnPlayer(
+                // The cleared death buffs have to reach the clients: stock's
+                // removals drain through the tick that emits the wire (RE
+                // buffs.md:194), so a silent clear leaves the icon on every
+                // HUD for the rest of the session.
+                var cleared: [ecs.components.max_buffs_per_entity]ecs.buff.Removed = undefined;
+                const cleared_n = self.sim.respawnPlayer(
                     si,
                     @floatFromInt(bed_surf.x),
                     @as(f32, @floatFromInt(bed_surf.y)) + 0.08,
                     @floatFromInt(bed_surf.z),
+                    cleared[0..],
                 );
+                for (cleared[0..@min(cleared_n, cleared.len)]) |rm| {
+                    const def = self.buffs.byId(rm.def_id) orelse continue;
+                    self.relayBuff(c.entity_id, def.name, false, -1, null) catch {};
+                }
+                // The DeathPenalty-selected respawn sequence adjusts what the
+                // funnel restored (game_on_respawn_injured halves Food/Water
+                // and may add buffInfectionCatch; the others SetMax, and
+                // _permanent also clears the biome badges and hazard timers).
+                // Data, not code: the client's own respawn flow asks the server
+                // for exactly this sequence (GameEventManager::HandleActionClient
+                // IL=416 forwards the request), and running it here covers the
+                // order where the request has not arrived yet.
+                if (Game.respawnSequenceName(self.death_penalty)) |seq_name| {
+                    _ = self.runGameEventSequence(c.slot, seq_name);
+                }
+                // Arm the next death. The guard exists so one death cannot
+                // produce two bags (the C2S kill path and the hp-replicate
+                // detector both see the same corpse); it used to ride
+                // `has_backpack`, which stays set until the bag is collected,
+                // so a player who died again before collecting dropped
+                // nothing at all and lost the inventory outright. The map
+                // marker keeps pointing at the uncollected bag, which is
+                // correct: it is still lying there.
+                c.bagged_this_death = false;
+                c.death_counted = false;
                 // Respawn confirm first (the client leaves the death screen
                 // and enters the spawned state), then position + HP so the
                 // post-respawn state cannot be discarded while still dead.
@@ -432,6 +532,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
                     try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                 } else |_| {}
+                // Redundant with the replicate pass by content (respawnPlayer
+                // marks hp dirty, so game/replicate_health.zig sends the same
+                // EntityStatChanged on the next tick), but not by timing: this
+                // one rides the respawn burst so the client's health bar is
+                // right the moment it regains control rather than up to a
+                // replicate interval later. Removing it alone keeps the
+                // hp-replication scenario green, which is why it reads as
+                // untested.
                 if (packages.buildEntityStatChangedBody(self.body_buf[512..640], c.entity_id, -1, .health, 100, 100, 0)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                 } else |_| {}
@@ -456,6 +564,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // Death-respawn already sent Spawned+stats; still re-send join bundle so the
         // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
+        // One deadline for the bundle, as in the RequestToEnterGame path.
+        peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
+        defer peer.critical_budget_deadline_ns = 0;
         try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
         return true;
     }

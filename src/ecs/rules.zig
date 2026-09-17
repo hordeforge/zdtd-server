@@ -94,9 +94,6 @@ pub const C2s = struct {
     /// Eat effect units applied per ItemActionEat C2S push (cap on multi-unit
     /// stack loss; the client normally pushes one unit per action).
     eat_units_per_push: u8 = 4,
-    /// Entities spawned per journal quest-summon C2S request (cap; the client
-    /// requests one summon per journal event).
-    quest_summon_per_request: u8 = 8,
 };
 
 /// Parachute glide (ADR 0037): while a player's glide flag is armed (plugin
@@ -548,8 +545,10 @@ pub const WorldGroup = struct {
 /// (`gameY = sea + elev_m`); the sea addition lives in the source.
 pub const Geometry = struct {
     /// Sea level in blocks (absolute game Y): the flat-world surface and the
-    /// baked-DTM out-of-bounds fallback. zdtd default 64 (stock 62.88 tracked
-    /// in the divergence register; RealEarth-style worlds set ~100).
+    /// baked-DTM out-of-bounds fallback. zdtd-owned default 64 (the flat world
+    /// is zdtd-generated; stock's `Block.cWaterLevel` 62.88 is the RWG water
+    /// table's business, `world/worldgen.zig water_surface_cell`);
+    /// RealEarth-style worlds set ~100.
     sea_level: f32 = 64,
     /// surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling).
     /// 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a
@@ -570,7 +569,7 @@ pub const Geometry = struct {
     pub fn project(self: Geometry, elev_m: f32, profile_max: u32) u32 {
         const v = self.height_offset + self.height_scale * elev_m;
         const c = @max(0.0, @min(v, @as(f32, @floatFromInt(self.ceiling(profile_max)))));
-        return @intFromFloat(c);
+        return @trunc(c);
     }
 
     /// Identity projection: skip the plane rewrite entirely.
@@ -663,7 +662,8 @@ pub const WorldgenGroup = struct {
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
 /// horde schedule (start tick + min/max gap in world ticks) and spawn
 /// distance/size, plus the chunk-heat spawner constants (heat threshold,
-/// check/cooldown cadence, scout distance/count, feral roll). Only constants
+/// check cadence, spawn chance, short/long cooldowns, scout distance/count).
+/// Only constants
 /// the code actually reads are surfaced (YAGNI; `heat_event_ticks` was doc-only
 /// until craft.zig started stamping it - it now is a rule). Provenance:
 /// PROVENANCE.md §3.7.
@@ -677,24 +677,30 @@ pub const Director = struct {
     wandering_spawn_dist: f32 = 92.0,
     heat_spawn_threshold: f32 = 25.0,
     heat_check_seconds: f32 = 5.0,
-    /// Region cooldown after a heat spawn. Stock `AIDirectorChunkData`
-    /// `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44,
-    /// aidirector.md verified literals; the long form is 1320 via SetLongDelay,
-    /// modelled here as the feral 2x roll). Was 120 before the A41 alignment.
+    /// `CheckToSpawn` (IL=46) spawn chance per threshold crossing: stock
+    /// `cSpawnChance = 0.2` (a GameRandom roll, playtest mode excluded). A
+    /// failed roll still stamps the short region cooldown and cools neighbours.
+    heat_spawn_chance: f32 = 0.2,
+    /// Region cooldown when `CheckToSpawn` does not spawn. Stock
+    /// `FindBestEventAndReset` (IL=44) stamps `cCooldownDelay = 240` s
+    /// (aidirector.md verified literals). Was 120 before the A41 alignment.
     heat_cooldown_seconds: f32 = 240.0,
-    /// Cooldown applied to the eight surrounding regions. Stock
-    /// `StartNeighborCooldown` sets 180 s (short) / 720 s (long) via FastMax
-    /// (aidirector.md verified literals). Was 60 before the A41 alignment.
+    /// Region cooldown when it does spawn: stock `SetLongDelay` (IL=4) hard-sets
+    /// `cCooldownLongDelay = 1320` s (22 min), replacing the 240 the reset
+    /// stamped. The short form was previously approximated as a feral 2x roll.
+    heat_long_cooldown_seconds: f32 = 1320.0,
+    /// Cooldown applied to the eight surrounding regions when the spawn roll
+    /// fails. Stock `StartNeighborCooldown(false)` sets `cCooldownNeighborDelay`
+    /// = 180 s via FastMax against the current value. Was 60 before the A41
+    /// alignment.
     heat_neighbor_cooldown_seconds: f32 = 180.0,
+    /// Neighbour cooldown when the spawn roll lands: stock
+    /// `StartCooldownOnNeighbors(true)` sets `cCooldownNeighborLongDelay` =
+    /// 720 s. A spawned region suppresses its neighbours for 12 real minutes.
+    heat_neighbor_long_cooldown_seconds: f32 = 720.0,
     heat_scout_dist: f32 = 10.0,
     /// Scouts spawned per heat event (sibling of heat_scout_dist).
     heat_scout_count: u32 = 2,
-    /// Feral roll chance per heat event (0.2 = one in five); doubles the
-    /// region cooldown when it lands. Now wired to the actual roll in
-    /// aidirector.zig (the old note said "doc-only until modelled" - it is).
-    heat_feral_chance: f32 = 0.2,
-    /// Cooldown multiplier applied when the feral roll lands.
-    heat_feral_cd_mult: f32 = 2.0,
     /// Heat-event duration (world ticks) stamped on heat sources (forge runs,
     /// campfire activity, ...) and by craft.zig notifyActivity.
     heat_event_ticks: f32 = 720.0,
@@ -770,6 +776,21 @@ pub const Power = struct {
     trigger_pulse_s: f32 = 0.5,
 };
 
+pub const Trader = struct {
+    /// Stock `TraderInfo.TraderMaxTier` (static, ctor default 6): the ceiling
+    /// the trader stock roll clamps rolled quality to. Stock exposes it as a
+    /// GameStats knob rather than a traders.xml attribute, so it lives here.
+    /// -1 disables the clamp; 0 stops quality items spawning at all, which is
+    /// the `SpawnItem` early return.
+    max_tier: i32 = 6,
+    /// Quality range a roll falls back to when the entry carries no
+    /// `quality` attribute. Stock parses those entries with minQuality =
+    /// maxQuality = -1 and `SpawnItem` substitutes 1..6 for a quality-bearing
+    /// item before applying the `max_tier` clamp.
+    default_quality_min: u8 = 1,
+    default_quality_max: u8 = 6,
+};
+
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -788,6 +809,7 @@ pub const Rules = struct {
     difficulty: Difficulty = .{},
     water: Water = .{},
     power: Power = .{},
+    trader: Trader = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -803,7 +825,6 @@ pub const CombatOverlay = struct {
 
 pub const C2sOverlay = struct {
     eat_units_per_push: ?u8 = null,
-    quest_summon_per_request: ?u8 = null,
 };
 
 pub const GlideOverlay = struct {
@@ -991,12 +1012,13 @@ pub const DirectorOverlay = struct {
     wandering_spawn_dist: ?f32 = null,
     heat_spawn_threshold: ?f32 = null,
     heat_check_seconds: ?f32 = null,
+    heat_spawn_chance: ?f32 = null,
     heat_cooldown_seconds: ?f32 = null,
+    heat_long_cooldown_seconds: ?f32 = null,
     heat_neighbor_cooldown_seconds: ?f32 = null,
+    heat_neighbor_long_cooldown_seconds: ?f32 = null,
     heat_scout_dist: ?f32 = null,
     heat_scout_count: ?u32 = null,
-    heat_feral_chance: ?f32 = null,
-    heat_feral_cd_mult: ?f32 = null,
     heat_event_ticks: ?f32 = null,
     enemy_spawn_ring_min: ?f32 = null,
     enemy_spawn_ring_max: ?f32 = null,
@@ -1049,6 +1071,12 @@ pub const PowerOverlay = struct {
     trigger_pulse_s: ?f32 = null,
 };
 
+pub const TraderOverlay = struct {
+    max_tier: ?i32 = null,
+    default_quality_min: ?u8 = null,
+    default_quality_max: ?u8 = null,
+};
+
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
@@ -1069,6 +1097,7 @@ pub const RulesOverlay = struct {
     difficulty: DifficultyOverlay = .{},
     water: WaterOverlay = .{},
     power: PowerOverlay = .{},
+    trader: TraderOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.

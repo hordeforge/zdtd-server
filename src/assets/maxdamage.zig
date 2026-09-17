@@ -53,8 +53,16 @@ pub const Table = struct {
     storage_names: std.StringHashMapUnmanaged(void) = .{},
     /// block name → blocks.xml LootList (the loot.xml container the block rolls).
     loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// block name → blocks.xml LootStageMod.
+    loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// block name → blocks.xml LootStageBonus.
+    loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{},
     /// AssignIds → LootList (filled from the dump/nim merge; arena values).
     loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
+    /// AssignIds → blocks.xml LootStageMod (container GetLootStage multiplier).
+    loot_stage_mod_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
+    /// AssignIds → blocks.xml LootStageBonus (container GetLootStage additive).
+    loot_stage_bonus_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
     /// block name → AssignIds runtime id (every dump row, not just MaxDamage hits).
     id_by_name: std.StringHashMapUnmanaged(u16) = .{},
     /// Reverse of `id_by_name`, written by the same merge. Without it `idName`
@@ -121,6 +129,10 @@ pub const Table = struct {
     /// blocks.xml ShowModelOnFall="false" names (default true per Block.il.txt
     /// 1876-18A2; only explicit false is stored).
     no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{},
+    /// `Shape == "DistantDecoTree"` names after Extends resolution: the shape
+    /// whose `BlockShape::Has45DegreeRotations` is true, which makes a random
+    /// placeholder rotation use stock's eight-way band.
+    shape45_names: std.StringHashMapUnmanaged(void) = .{},
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .{},
@@ -128,6 +140,31 @@ pub const Table = struct {
     /// materials.xml damage_category per material id (e.g. Mdirt → "earth").
     /// Explosion DamageBonus multipliers key on this (stock cop: earth → 0).
     material_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// materials.xml forge_category per material id (e.g. Mmetal → "iron").
+    /// Forge melt matches this (case-insensitive) against InputMaterials.
+    material_forge_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// materials.xml StabilitySupport per material id (23 stock rows, 19
+    /// false). BlocksFromXml IL_06DE-070F: a block whose resolved property
+    /// dictionary does not declare StabilitySupport takes the material's value.
+    material_stability_support: std.StringHashMapUnmanaged(bool) = .{},
+    /// Block names whose resolved property dictionary declares StabilitySupport
+    /// (so the material default must not override it).
+    stability_explicit: std.StringHashMapUnmanaged(void) = .{},
+    /// materials.xml explosionresistance per material id (24 stock rows, the
+    /// `(1 - resistance)` numerator of Explosion::AttackBlocks IL_03D0-040E).
+    material_explosion_resist: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml collidable per material id (4 stock rows false: Mair,
+    /// Mwater, Mhay). The block collision default when no Collide mask exists
+    /// (BlocksFromXml IL_04D5-04EB).
+    material_collidable: std.StringHashMapUnmanaged(bool) = .{},
+    /// materials.xml `CanDestroy` (only Mbedrock declares false). Stock only
+    /// consults it in `ItemActionAttack::Hit` IL_028A-029D, where it zeroes the
+    /// block-damage scalar; `MaterialBlock::.ctor` defaults it true.
+    material_can_destroy: std.StringHashMapUnmanaged(bool) = .{},
+    /// materials.xml movement_factor per material id (7 stock rows).
+    material_movement_factor: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml lightopacity per material id (18 stock rows).
+    material_light_opacity: std.StringHashMapUnmanaged(i32) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -140,6 +177,10 @@ pub const Table = struct {
             self.storage_names = .{};
             self.loot_list_by_name = .{};
             self.loot_list_by_id = .{};
+            self.loot_stage_mod_by_name = .{};
+            self.loot_stage_bonus_by_name = .{};
+            self.loot_stage_mod_by_id = .{};
+            self.loot_stage_bonus_by_id = .{};
             self.id_by_name = .{};
             self.name_by_id = .{};
             self.power_watts_by_name = .{};
@@ -151,6 +192,13 @@ pub const Table = struct {
             self.power_output_per_stack_by_name = .{};
             self.material_max = .{};
             self.material_exp = .{};
+            self.material_stability_support = .{};
+            self.stability_explicit = .{};
+            self.material_explosion_resist = .{};
+            self.material_collidable = .{};
+            self.material_can_destroy = .{};
+            self.material_movement_factor = .{};
+            self.material_light_opacity = .{};
             self.stage2_health = .{};
             self.block_material = .{};
             self.distant_deco = .{};
@@ -202,6 +250,16 @@ pub const Table = struct {
     /// at O(loot lists) hash probes per miss on the chunk-fill path.
     pub fn lootListFor(self: *const Table, block_id: u16) ?[]const u8 {
         return self.loot_list_by_id.get(block_id);
+    }
+
+    /// blocks.xml LootStageMod for a block id (0 when absent).
+    pub fn lootStageModFor(self: *const Table, block_id: u16) f32 {
+        return self.loot_stage_mod_by_id.get(block_id) orelse 0;
+    }
+
+    /// blocks.xml LootStageBonus for a block id (0 when absent).
+    pub fn lootStageBonusFor(self: *const Table, block_id: u16) f32 {
+        return self.loot_stage_bonus_by_id.get(block_id) orelse 0;
     }
 
     /// Runtime AssignIds id for a stock block name (from dump / .nim), else null.
@@ -284,6 +342,14 @@ pub const Table = struct {
         return !self.no_show_model_on_fall.contains(name);
     }
 
+    /// True when the block's resolved `Shape` is `DistantDecoTree`, the one
+    /// BlockShape with `Has45DegreeRotations` (BlockShapeDistantDecoTree IL=6).
+    /// A placeholder target on such a block rolls its random rotation off the
+    /// eight-way band (BlockPlaceholderMap IL_027D-02AD).
+    pub fn has45Rotations(self: *const Table, name: []const u8) bool {
+        return self.shape45_names.contains(name);
+    }
+
     /// Falling-block massKg for a block name (RE EntityFallingBlock IL=232-250):
     /// FastMin(MaterialBlock.Hardness * MaterialBlock.Mass, 10) * 8, resolving
     /// the block's blocks.xml Material ref into materials.xml Hardness/Mass.
@@ -298,6 +364,54 @@ pub const Table = struct {
         return clamped * falling_mass_scale;
     }
 
+    /// materials.xml Hardness for a block id (block → Material → Hardness),
+    /// 0 when unresolvable. Explosion::AttackBlocks divides the damage by it
+    /// (IL_03D9-040E) and EntityFallingBlock scales the crush mass by it.
+    pub fn hardnessFor(self: *const Table, block_id: u16) f32 {
+        const name = self.idName(block_id) orelse return 0;
+        const mat = self.block_material.get(name) orelse return 0;
+        return self.material_hardness.get(mat) orelse 0;
+    }
+
+    /// materials.xml `Hardness` for a block id, with the three states stock
+    /// distinguishes: null when the block or its material cannot be resolved
+    /// (builtin catalog / no blocks.xml `Material` row), the declared value
+    /// when it is, and 0 when the material exists without a `Hardness` row
+    /// (stock builds `DataItem<float>()` there, so `Block::GetHardness()` is 0
+    /// and `Explosion::AttackBlocks` takes the destroy-outright branch at
+    /// IL_0449). Only 108 of 166 stock materials declare it.
+    pub fn materialHardness(self: *const Table, block_id: u16) ?f32 {
+        const name = self.idName(block_id) orelse return null;
+        const mat = self.block_material.get(name) orelse return null;
+        if (self.material_hardness.get(mat)) |h| return h;
+        if (self.material_category.contains(mat)) return 0;
+        return null;
+    }
+
+    /// materials.xml explosionresistance for a block id (block → Material),
+    /// 0 when unresolvable (no resistance). Stock's Explosion::AttackBlocks
+    /// multiplies damage by `1 - resistance` (IL_03D0-0405).
+    pub fn explosionResistanceFor(self: *const Table, block_id: u16) f32 {
+        const name = self.idName(block_id) orelse return 0;
+        const mat = self.block_material.get(name) orelse return 0;
+        return self.material_explosion_resist.get(mat) orelse 0;
+    }
+
+    /// materials.xml `CanDestroy` for a block id (block → Material →
+    /// CanDestroy). True when the material is absent, the block is unknown or
+    /// the builtin table is in use: stock's MaterialBlock default is true, and
+    /// the only stock false row is Mbedrock. The damage paths fail closed on a
+    /// false value, which is stricter than stock's dedicated server (which
+    /// applies a forged NetPackageSetBlock verbatim) and matches what a stock
+    /// client can produce, since `ItemActionAttack::Hit`
+    /// (IL_028A-029D) zeroes the damage scalar first.
+    pub fn canDestroyFor(self: *const Table, block_id: u16) bool {
+        if (block_id == 0) return true;
+        const name = self.idName(block_id) orelse return true;
+        const mat = self.block_material.get(name) orelse return true;
+        return self.material_can_destroy.get(mat) orelse true;
+    }
+
     /// materials.xml damage_category for a block id (block → Material →
     /// damage_category, e.g. terrDirt → Mdirt → "earth"). Explosion
     /// DamageBonus multipliers key on the category. Null when unresolvable
@@ -306,6 +420,12 @@ pub const Table = struct {
         const name = self.idName(block_id) orelse return null;
         const mat = self.block_material.get(name) orelse return null;
         return self.material_category.get(mat);
+    }
+
+    /// materials.xml forge_category for a material id (e.g. Mmetal → "iron").
+    /// Empty when the material has no forge_category (not meltable/scrapable).
+    pub fn forgeCategoryForMaterial(self: *const Table, material_id: []const u8) []const u8 {
+        return self.material_forge_category.get(material_id) orelse "";
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -430,6 +550,12 @@ pub const Table = struct {
             if (self.loot_list_by_name.get(name)) |ll| {
                 try self.loot_list_by_id.put(arena, id, ll);
             }
+            if (self.loot_stage_mod_by_name.get(name)) |v| {
+                try self.loot_stage_mod_by_id.put(arena, id, v);
+            }
+            if (self.loot_stage_bonus_by_name.get(name)) |v| {
+                try self.loot_stage_bonus_by_id.put(arena, id, v);
+            }
         }
     }
 
@@ -481,6 +607,49 @@ pub const Table = struct {
                 const vv = try arena.dupe(u8, dc);
                 try self.material_category.put(arena, kn, vv);
             }
+            if (xml.propertyValue(body, "StabilitySupport")) |ss| {
+                if (parseBool(ss)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_stability_support.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "explosionresistance")) |er| {
+                if (xml.parseF32(er)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_explosion_resist.put(arena, kn, v);
+                }
+            }
+            if (xml.propertyValue(body, "collidable")) |cl| {
+                if (parseBool(cl)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_collidable.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "CanDestroy")) |cd| {
+                if (parseBool(cd)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_can_destroy.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "movement_factor")) |mf| {
+                if (xml.parseF32(mf)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_movement_factor.put(arena, kn, v);
+                }
+            }
+            if (xml.propertyValue(body, "lightopacity")) |lo| {
+                if (xml.parseI32Prefix(lo)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_light_opacity.put(arena, kn, v);
+                }
+            }
+            // Stock MaterialBlock.ForgeCategory (materials.xml forge_category):
+            // scrap melt matches this against workstation InputMaterials.
+            if (xml.propertyValue(body, "forge_category")) |fc| {
+                const kn = try arena.dupe(u8, mid);
+                const vv = try arena.dupe(u8, fc);
+                try self.material_forge_category.put(arena, kn, vv);
+            }
             i = body_end;
         }
     }
@@ -492,6 +661,18 @@ pub const Table = struct {
         while (it.next()) |e| {
             const bname = e.key_ptr.*;
             const mat = e.value_ptr.*;
+            // StabilitySupport defaults to the material's value when the
+            // block's resolved properties do not declare it (BlocksFromXml
+            // IL_06DE-070F). The material MaxDamage fill below must not gate
+            // it: a block whose MaxDamage resolved (own, Extends, or an
+            // earlier material fill) still takes the material support value
+            // unless it declared its own (Mcloth, Morganic and Mleather
+            // luggage/carcass rows carry no StabilitySupport of their own).
+            if (!self.stability_explicit.contains(bname)) {
+                if (self.material_stability_support.get(mat)) |sup| {
+                    if (!sup) try self.non_support.put(arena, bname, {});
+                }
+            }
             if (self.by_name.contains(bname)) continue;
             const mhp = self.material_max.get(mat) orelse continue;
             try self.by_name.put(arena, bname, mhp);
@@ -562,10 +743,19 @@ fn parseBool(s: []const u8) ?bool {
 /// Own (not inherited) deco facts for one `<block>`; null = "ask the parent".
 const DecoFacts = struct {
     extends: ?[]const u8 = null,
+    /// Extends `param1`: the property names this block does NOT inherit from
+    /// its parent (stock BlocksFromXml CreateProperties copies the parent's
+    /// resolved dictionary minus this list). 925 stock Extends rows carry it,
+    /// Class 107 times, DowngradeBlock 72, MultiBlockDim 33, MaxDamage 12.
+    extends_param1: []const u8 = "",
     distant: ?bool = null,
     dim: ?Dim = null,
     /// Direct blocks.xml LootList (resolved through Extends in a second pass).
     loot_list: ?[]const u8 = null,
+    /// Direct blocks.xml LootStageMod (resolved through Extends).
+    loot_stage_mod: ?f32 = null,
+    /// Direct blocks.xml LootStageBonus (resolved through Extends).
+    loot_stage_bonus: ?f32 = null,
     /// UpgradeBlock.ToBlock (resolved through Extends; stock upgrade chains
     /// inherit through the parent).
     upgrade_to: ?[]const u8 = null,
@@ -581,7 +771,65 @@ const DecoFacts = struct {
     /// default TRUE when the chain is exhausted - Block.il.txt 1876-18A2:
     /// absent property -> true, explicit false disables the falling model).
     show_model_on_fall: ?bool = null,
+    /// `Shape == "DistantDecoTree"`: the only BlockShape whose constructor
+    /// sets `BlockShape::Has45DegreeRotations` (BlockShapeDistantDecoTree
+    /// IL=6). A random placeholder rotation then rolls `RandomRange(8)` and
+    /// maps 4..7 to 24..27 instead of taking the four-way band
+    /// (BlockPlaceholderMap IL_027D-02AD). Resolved through Extends (treeMaster
+    /// declares the shape; every tree inherits it).
+    shape45: ?bool = null,
 };
+
+/// Resolve a per-block value through the Extends chain, honoring the `param1`
+/// exclusion list on each hop (stock BlocksFromXml CreateProperties: the child
+/// copies the parent's resolved property dictionary minus the names in its
+/// Extends param1). Own value wins; null = no ancestor declares it.
+fn resolveInherited(
+    comptime T: type,
+    map: *const std.StringHashMapUnmanaged(T),
+    facts: *const std.StringHashMapUnmanaged(DecoFacts),
+    name: []const u8,
+    prop: []const u8,
+    prop2: []const u8,
+) ?T {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        if (map.get(cur)) |v| return v;
+        const f = facts.get(cur) orelse return null;
+        const ext = f.extends orelse return null;
+        if (xml.tagListContains(f.extends_param1, prop) or
+            (prop2.len > 0 and xml.tagListContains(f.extends_param1, prop2))) return null;
+        cur = ext;
+    }
+    return null;
+}
+
+/// One field of the per-block turret stats through the Extends chain (the four
+/// properties have different names, so they inherit independently).
+fn resolveTurretField(
+    comptime field_name: []const u8,
+    map: *const std.StringHashMapUnmanaged(components.TurretBlockStats),
+    facts: *const std.StringHashMapUnmanaged(DecoFacts),
+    name: []const u8,
+    prop: []const u8,
+) ?@TypeOf(@field(components.TurretBlockStats{}, field_name)) {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        if (map.get(cur)) |ts| {
+            const v = @field(ts, field_name);
+            if (v != 0) return v;
+        }
+        const f = facts.get(cur) orelse return null;
+        const ext = f.extends orelse return null;
+        if (xml.tagListContains(f.extends_param1, prop)) return null;
+        cur = ext;
+    }
+    return null;
+}
 
 /// Resolve one block's inherited facts by walking `Extends`. Stock chains are
 /// two or three deep (treeOakSml01 → treeMaster); the hop cap only exists so a
@@ -593,14 +841,16 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
     var hops: usize = 0;
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse break;
-        if (out.distant == null) out.distant = f.distant;
-        if (out.dim == null) out.dim = f.dim;
-        if (out.stability_support == null) out.stability_support = f.stability_support;
-        if (out.stability_ignore == null) out.stability_ignore = f.stability_ignore;
-        if (out.show_model_on_fall == null) out.show_model_on_fall = f.show_model_on_fall;
+        const p1 = f.extends_param1;
+        if (out.distant == null and !xml.tagListContains(p1, "IsDistantDecoration")) out.distant = f.distant;
+        if (out.dim == null and !xml.tagListContains(p1, "MultiBlockDim")) out.dim = f.dim;
+        if (out.stability_support == null and !xml.tagListContains(p1, "StabilitySupport")) out.stability_support = f.stability_support;
+        if (out.stability_ignore == null and !xml.tagListContains(p1, "StabilityIgnore")) out.stability_ignore = f.stability_ignore;
+        if (out.show_model_on_fall == null and !xml.tagListContains(p1, "ShowModelOnFall")) out.show_model_on_fall = f.show_model_on_fall;
+        if (out.shape45 == null and !xml.tagListContains(p1, "Shape")) out.shape45 = f.shape45;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
-            out.show_model_on_fall != null) break;
+            out.show_model_on_fall != null and out.shape45 != null) break;
         cur = f.extends orelse break;
     }
     return out;
@@ -616,6 +866,33 @@ fn resolveLootList(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.loot_list) |ll| return ll;
+        if (xml.tagListContains(f.extends_param1, "LootList")) return null;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
+fn resolveLootStageMod(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?f32 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.loot_stage_mod) |v| return v;
+        if (xml.tagListContains(f.extends_param1, "LootStageMod")) return null;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
+fn resolveLootStageBonus(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?f32 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.loot_stage_bonus) |v| return v;
+        if (xml.tagListContains(f.extends_param1, "LootStageBonus")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -630,6 +907,7 @@ fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []c
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.upgrade_to) |tb| return tb;
+        if (xml.tagListContains(f.extends_param1, "UpgradeBlock")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -644,6 +922,7 @@ fn resolveDowngrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.downgrade_to) |db| return db;
+        if (xml.tagListContains(f.extends_param1, "DowngradeBlock")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -694,6 +973,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var by_name: std.StringHashMapUnmanaged(u16) = .{};
     var storage_names: std.StringHashMapUnmanaged(void) = .{};
     var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
+    var loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{};
     var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
@@ -742,9 +1023,20 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         var facts: DecoFacts = .{};
         if (xml.propertyValue(body, "Extends")) |ext| {
             facts.extends = try arena.dupe(u8, ext);
+            if (xml.propertyTagOffset(body, "Extends")) |tag| {
+                if (xml.attr(body, tag, "param1")) |p1| {
+                    facts.extends_param1 = try arena.dupe(u8, p1);
+                }
+            }
         }
         if (xml.propertyValue(body, "LootList")) |ll| {
             facts.loot_list = try arena.dupe(u8, ll);
+        }
+        if (xml.propertyValue(body, "LootStageMod")) |v| {
+            if (xml.parseF32(v)) |f| facts.loot_stage_mod = f;
+        }
+        if (xml.propertyValue(body, "LootStageBonus")) |v| {
+            if (xml.parseF32(v)) |f| facts.loot_stage_bonus = f;
         }
         const watts: ?f32 = if (xml.propertyValue(body, "MaxPower")) |mp|
             xml.parseF32(mp)
@@ -809,6 +1101,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "ShowModelOnFall")) |sm| {
             facts.show_model_on_fall = parseBool(sm);
         }
+        if (xml.propertyValue(body, "Shape")) |sh| {
+            facts.shape45 = std.ascii.eqlIgnoreCase(std.mem.trim(u8, sh, " \t"), "DistantDecoTree");
+        }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
         // upgrade path). ToBlock appears only inside that class.
@@ -828,11 +1123,80 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var distant_deco: std.StringHashMapUnmanaged(void) = .{};
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
     var non_support: std.StringHashMapUnmanaged(void) = .{};
+    var stability_explicit: std.StringHashMapUnmanaged(void) = .{};
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
+    var shape45_names: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
+    // Property inheritance through Extends (stock BlocksFromXml CreateProperties
+    // copies the parent's resolved dictionary minus the child's param1 list).
+    // MaxDamage is the headline case: 318 blocks declare it, 1449 inherit it,
+    // and the rest fall back to the material's MaxDamage (Block.il
+    // IL_136C-138E sets MaxDamage from blockMaterial first, then the property
+    // overrides). Material, Stage2Health, power and turret props inherit the
+    // same way and used to read the own body only.
+    var pit = own_facts.iterator();
+    while (pit.next()) |e| {
+        const nm = e.key_ptr.*;
+        if (!by_name.contains(nm)) {
+            if (resolveInherited(u16, &by_name, &own_facts, nm, "MaxDamage", "")) |v|
+                try by_name.put(arena, nm, v);
+        }
+        if (!stage2_map.contains(nm)) {
+            if (resolveInherited(u16, &stage2_map, &own_facts, nm, "Stage2Health", "")) |v|
+                try stage2_map.put(arena, nm, v);
+        }
+        if (!block_material.contains(nm)) {
+            if (resolveInherited([]const u8, &block_material, &own_facts, nm, "Material", "")) |v|
+                try block_material.put(arena, nm, v);
+        }
+        if (!power_watts_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_watts_by_name, &own_facts, nm, "MaxPower", "RequiredPower")) |v|
+                try power_watts_by_name.put(arena, nm, v);
+        }
+        if (!power_class_by_name.contains(nm)) {
+            if (resolveInherited([]const u8, &power_class_by_name, &own_facts, nm, "Class", "")) |v|
+                try power_class_by_name.put(arena, nm, v);
+        }
+        if (!power_max_fuel_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_max_fuel_by_name, &own_facts, nm, "MaxFuel", "")) |v|
+                try power_max_fuel_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_fuel_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_fuel_by_name, &own_facts, nm, "OutputPerFuel", "")) |v|
+                try power_output_per_fuel_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_charge_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_charge_by_name, &own_facts, nm, "OutputPerCharge", "")) |v|
+                try power_output_per_charge_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_stack_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_stack_by_name, &own_facts, nm, "OutputPerStack", "")) |v|
+                try power_output_per_stack_by_name.put(arena, nm, v);
+        }
+        var ts = turret_stats_by_name.get(nm) orelse components.TurretBlockStats{};
+        var ts_any = turret_stats_by_name.contains(nm);
+        if (resolveTurretField("max_distance", &turret_stats_by_name, &own_facts, nm, "MaxDistance")) |v| {
+            ts.max_distance = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("entity_damage", &turret_stats_by_name, &own_facts, nm, "EntityDamage")) |v| {
+            ts.entity_damage = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("burst_fire_rate", &turret_stats_by_name, &own_facts, nm, "BurstFireRate")) |v| {
+            ts.burst_fire_rate = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("burst_rounds", &turret_stats_by_name, &own_facts, nm, "BurstRoundCount")) |v| {
+            ts.burst_rounds = v;
+            ts_any = true;
+        }
+        if (ts_any) try turret_stats_by_name.put(arena, nm, ts);
+    }
+
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
         const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
@@ -840,11 +1204,21 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.dim) |d| {
             if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
         }
-        if (r.stability_support orelse true == false) try non_support.put(arena, e.key_ptr.*, {});
+        if (r.stability_support) |sv| {
+            try stability_explicit.put(arena, e.key_ptr.*, {});
+            if (!sv) try non_support.put(arena, e.key_ptr.*, {});
+        }
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
+        if (r.shape45 orelse false) try shape45_names.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
+        }
+        if (resolveLootStageMod(&own_facts, e.key_ptr.*)) |v| {
+            try loot_stage_mod_by_name.put(arena, e.key_ptr.*, v);
+        }
+        if (resolveLootStageBonus(&own_facts, e.key_ptr.*)) |v| {
+            try loot_stage_bonus_by_name.put(arena, e.key_ptr.*, v);
         }
         if (resolveUpgrade(&own_facts, e.key_ptr.*)) |tb| {
             try upgrade_to_names.put(arena, e.key_ptr.*, tb);
@@ -864,6 +1238,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .storage_ids = .{},
         .storage_names = storage_names,
         .loot_list_by_name = loot_list_by_name,
+        .loot_stage_mod_by_name = loot_stage_mod_by_name,
+        .loot_stage_bonus_by_name = loot_stage_bonus_by_name,
         .power_watts_by_name = power_watts_by_name,
         .turret_stats_by_name = turret_stats_by_name,
         .power_class_by_name = power_class_by_name,
@@ -877,8 +1253,10 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
         .non_support = non_support,
+        .stability_explicit = stability_explicit,
         .stability_ignore_names = stability_ignore_names,
         .no_show_model_on_fall = no_show_model_on_fall,
+        .shape45_names = shape45_names,
         .upgrade_to = upgrade_to_names,
         .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,
@@ -972,6 +1350,51 @@ test "blocks.xml LootList resolves per block after the AssignIds merge" {
     try std.testing.expect(t.downgradeTarget("cntWallSafeInsecure_Player") == null);
     // A normal upgradeable block has no downgrade path.
     try std.testing.expect(t.downgradeTarget("woodFrameBlock") == null);
+}
+
+test "blocks.xml Shape=DistantDecoTree resolves the 45 degree rotation band" {
+    // BlockShapeDistantDecoTree's constructor is the only place that sets
+    // BlockShape::Has45DegreeRotations (IL=6), and stock's treeMaster declares
+    // that shape, so every tree inherits it. The placeholder random-rotation
+    // band keys on this fact (BlockPlaceholderMap IL_027D-02AD).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    // Own Shape (treeMaster) and every Extends descendant.
+    try std.testing.expect(t.has45Rotations("treeMaster"));
+    try std.testing.expect(t.has45Rotations("treeOakSml01"));
+    try std.testing.expect(t.has45Rotations("treeDeadTree01"));
+    // A non-tree keeps the four-way band, and so does a block whose shape is
+    // the plain `DistantDeco` rather than the `...Tree` variant: only the Tree
+    // class sets the flag. 50 stock blocks inherit `DistantDecoTree`.
+    try std.testing.expect(!t.has45Rotations("terrStone"));
+    try std.testing.expect(!t.has45Rotations("plantShrub"));
+    try std.testing.expect(!t.has45Rotations("treeCactus01"));
+}
+
+test "blocks.xml properties inherit through Extends with param1 exclusions" {
+    // Stock BlocksFromXml CreateProperties copies the parent's resolved
+    // property dictionary minus the child's Extends param1 list. MaxDamage,
+    // Material and Stage2Health used to be read from the own body only:
+    // 318 blocks declare MaxDamage, 1449 inherit it, and 5693 blocks with
+    // neither rely on the Material default (Block.il IL_136C-138E).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    // Own value.
+    try std.testing.expectEqual(@as(u16, 5000), t.maxDamageByName("cntGunSafe").?);
+    // Inherited MaxDamage (cntGunSafeWhite declares no MaxDamage).
+    try std.testing.expectEqual(@as(u16, 5000), t.maxDamageByName("cntGunSafeWhite").?);
+    // Material inherits, which is what the material MaxDamage default keys on.
+    try std.testing.expectEqualStrings("Mstone", t.block_material.get("terrSandStone").?);
+    try std.testing.expectEqualStrings("Mdirt", t.block_material.get("terrTopSoil").?);
+    // Stage2Health inherits (278 derived door rows).
+    try std.testing.expectEqual(@as(u16, 1), t.stage2_health.get("ironDoorBrown").?);
+    // param1 excludes a property: this row opts out of cntFreezerMaster's 600.
+    try std.testing.expectEqual(@as(u16, 600), t.maxDamageByName("cntFreezerMaster").?);
+    try std.testing.expect(t.maxDamageByName("cntFreezerGroceriesMiddleFullClosed") == null);
 }
 
 test "deco facts follow Extends chains and fail closed" {
@@ -1180,6 +1603,38 @@ test "AssignIds rows are walkable for id negotiation" {
     try std.testing.expect(saw_oak);
 }
 
+test "material StabilitySupport and explosionresistance resolve per block" {
+    // BlocksFromXml IL_06DE-070F: a block whose resolved properties do not
+    // declare StabilitySupport takes MaterialBlock.StabilitySupport (23 stock
+    // material rows, 19 false). Explosion::AttackBlocks IL_03D0-040E scales
+    // blast damage by `1 - explosionresistance` and divides by Hardness.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    // Mtrash is StabilitySupport false and cntAmmoPileSmall declares nothing.
+    try std.testing.expect(!t.stabilitySupport("cntAmmoPileSmall"));
+    // The material fallback is not gated on the MaxDamage fill: cntLuggage
+    // declares own MaxDamage 50 on Mcloth (false) and goreBlockAnimal 100 on
+    // Morganic (false), so both are non-supporting despite resolving damage.
+    try std.testing.expect(!t.stabilitySupport("cntLuggageMediumOpen"));
+    try std.testing.expect(!t.stabilitySupport("goreBlockAnimal"));
+    // A material with no row keeps the stock default true (terrStone/Mstone).
+    try std.testing.expect(t.stabilitySupport("terrStone"));
+    // An explicit block property wins over the material (declared false here).
+    try std.testing.expect(!t.stabilitySupport("cntWoodenChestClosed"));
+    // Mconcrete explosionresistance 0.1 (terrAsphalt), MtrapSpikesIron 0.4.
+    if (t.idByName("terrAsphalt")) |aid| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.1), t.explosionResistanceFor(aid), 1e-6);
+        try std.testing.expect(t.hardnessFor(aid) > 0);
+    }
+    if (t.idByName("trapSpikesScrapIronMaster")) |sid| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.4), t.explosionResistanceFor(sid), 1e-6);
+    }
+    // A block with no material row for resistance reports 0 (no reduction).
+    try std.testing.expectEqual(@as(f32, 0), t.explosionResistanceFor(0));
+}
+
 test "materials.xml MaxDamage fills hayBaleSquare" {
     const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
@@ -1284,4 +1739,136 @@ test "Class=Sleeper resolves through Extends (infestedSleeper included)" {
     // The full stock set is 34 blocks (18 sleeper* + 16 infestedSleeper*),
     // per the RE count in world-generation.md.
     try std.testing.expectEqual(@as(usize, 34), t.sleeper_class_names.count());
+}
+
+test "MaxDamage falls back to the Extends-resolved material's own MaxDamage" {
+    // Stock BlocksFromXml CreateProperties copies the parent's resolved
+    // dictionary, and Block.il IL_136C-138E then sets MaxDamage from the
+    // block's material, so a block that declares neither MaxDamage nor Material
+    // takes both from its ancestor and the ancestor's material. 318 stock
+    // blocks declare MaxDamage and 1449 inherit it; 5782 inherit Material.
+    // terrSandStone (Extends terrStone -> Material Mstone, materials.xml
+    // MaxDamage 500) is the real-data case.
+    const blocks_src =
+        \\<blocks>
+        \\<block name="terrStone">
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrSandStone">
+        \\  <property name="Extends" value="terrStone" />
+        \\</block>
+        \\<block name="ownDamage">
+        \\  <property name="Extends" value="terrStone" />
+        \\  <property name="MaxDamage" value="42" />
+        \\</block>
+        \\<block name="noMaterial">
+        \\  <property name="MaxDamage" value="7" />
+        \\</block>
+        \\</blocks>
+    ;
+    const materials_src =
+        \\<materials>
+        \\<material id="Mstone">
+        \\  <property name="damage_category" value="stone" />
+        \\  <property name="MaxDamage" value="500" />
+        \\</material>
+        \\</materials>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_mhp.xml", .{dir});
+    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials.xml", .{dir});
+    try io_fs.writeFile(blocks_path, blocks_src);
+    try io_fs.writeFile(mats_path, materials_src);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, blocks_path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats_path);
+    // The fallback pass runs after the Extends pass, so the child's resolved
+    // Material is what it keys on.
+    try t.resolveMaterialMaxDamage(std.testing.allocator);
+    try std.testing.expectEqual(@as(u16, 500), t.maxDamageByName("terrSandStone").?);
+    // An own MaxDamage still wins over the material's.
+    try std.testing.expectEqual(@as(u16, 42), t.maxDamageByName("ownDamage").?);
+    // No material and no ancestor: keep the block's own value.
+    try std.testing.expectEqual(@as(u16, 7), t.maxDamageByName("noMaterial").?);
+}
+
+test "materials.xml CanDestroy gates block damage" {
+    // Stock MaterialBlock defaults CanDestroy to true and only Mbedrock
+    // declares false (materials.xml), where ItemActionAttack::Hit
+    // IL_028A-029D zeroes the block-damage scalar. The damage paths fail
+    // closed on it, so bedrock resists a forged NetPackageSetBlock.
+    const blocks_src =
+        \\<blocks>
+        \\<block name="terrBedrock">
+        \\  <property name="Material" value="Mbedrock" />
+        \\</block>
+        \\<block name="bedrockChild">
+        \\  <property name="Extends" value="terrBedrock" />
+        \\</block>
+        \\<block name="terrStone">
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\</blocks>
+    ;
+    const materials_src =
+        \\<materials>
+        \\<material id="Mbedrock">
+        \\  <property name="MaxDamage" value="50000" />
+        \\  <property name="CanDestroy" value="false" />
+        \\</material>
+        \\<material id="Mstone">
+        \\  <property name="MaxDamage" value="500" />
+        \\</material>
+        \\</materials>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_cd.xml", .{dir});
+    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials_cd.xml", .{dir});
+    try io_fs.writeFile(blocks_path, blocks_src);
+    try io_fs.writeFile(mats_path, materials_src);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, blocks_path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats_path);
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    const bed = t.idByName("terrBedrock") orelse return error.TestUnexpectedResult;
+    const stone = t.idByName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!t.canDestroyFor(bed));
+    // Extends carries the material, so the child resolves to the protected
+    // material too (the fixture name has no AssignIds id, so assert the
+    // resolved material rather than the id-keyed accessor).
+    try std.testing.expectEqualStrings("Mbedrock", t.block_material.get("bedrockChild").?);
+    // A material without the property keeps stock's true default.
+    try std.testing.expect(t.canDestroyFor(stone));
+    // Air and unknown ids fail open (stock's MaterialBlock default is true).
+    try std.testing.expect(t.canDestroyFor(0));
+    try std.testing.expect(t.canDestroyFor(60000));
+}
+
+test "stock materials.xml only bedrock refuses destruction" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const mats = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    if (!io_fs.fileExists(path) or !io_fs.fileExists(mats)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats);
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    const bed = t.idByName("terrBedrock") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!t.canDestroyFor(bed));
+    // Every other stock block resolves to the default.
+    const stone = t.idByName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(t.canDestroyFor(stone));
+    const chest = t.idByName("cntWoodenChestClosed") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(t.canDestroyFor(chest));
 }

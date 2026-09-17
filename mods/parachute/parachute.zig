@@ -33,9 +33,35 @@ var roster_gliding: [max_players]u8 = [_]u8{0} ** max_players;
 var cfg_deploy_vy: f32 = -6.0;
 var cfg_delay_ticks: u8 = 10;
 var cfg_require_worn: bool = true;
-var cfg_item_tag: []const u8 = "parachute";
 var cfg_announce: bool = true;
-var cfg_announce_text: []const u8 = "deployed their parachute";
+// Config strings are copied into static buffers, never kept as slices into the
+// caller's stack: on_enable parses out of a stack buffer that is gone by the
+// time a later tick reads the value.
+const cfg_str_max: usize = 96;
+var item_tag_buf: [cfg_str_max]u8 = undefined;
+var item_tag_len: usize = 0;
+var announce_text_buf: [cfg_str_max]u8 = undefined;
+var announce_text_len: usize = 0;
+
+/// Parsed and echoed in the enable banner only: the tag match itself happens
+/// host-side ([rules.glide] item_tag drives the `wearing_glider` sense bit),
+/// so the guest never gates on this value. Kept so a mismatch between the two
+/// configs is visible in the log.
+fn cfgItemTag() []const u8 {
+    return if (item_tag_len == 0) "parachute" else item_tag_buf[0..item_tag_len];
+}
+
+fn cfgAnnounceText() []const u8 {
+    return if (announce_text_len == 0) "deployed their parachute" else announce_text_buf[0..announce_text_len];
+}
+
+/// Copy a parsed config value into its static buffer; an over-long value keeps
+/// the default rather than truncating into a half word.
+fn setCfgStr(buf: []u8, len: *usize, val: []const u8) void {
+    if (val.len == 0 or val.len > buf.len) return;
+    @memcpy(buf[0..val.len], val);
+    len.* = val.len;
+}
 
 var sense_buf: [sense_cap]u8 = undefined;
 var out_buf: [common.out_cap]u8 = undefined;
@@ -77,7 +103,7 @@ fn say(player_name: []const u8) void {
         b[n] = ' ';
         n += 1;
     }
-    const txt = cfg_announce_text;
+    const txt = cfgAnnounceText();
     const take = @min(txt.len, common.out_cap - 1 - n);
     @memcpy(b[n..][0..take], txt[0..take]);
     n += take;
@@ -93,7 +119,13 @@ fn parseConfig(data: []const u8) void {
         if (line.len == 0 or line[0] == '#') continue;
         const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
         const key = std.mem.trim(u8, line[0..eq], " \t");
-        const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
+        // Same value handling as plugin_common.Config.value, which this
+        // duplicates to stay heap-free: drop a trailing comment, then strip
+        // surrounding quotes. The shipped config quotes its string values, so
+        // leaving the quotes in broadcast them verbatim.
+        var val = std.mem.trim(u8, line[eq + 1 ..], " \t");
+        if (std.mem.indexOfScalar(u8, val, '#')) |h| val = std.mem.trim(u8, val[0..h], " \t");
+        if (val.len >= 2 and val[0] == '"' and val[val.len - 1] == '"') val = val[1 .. val.len - 1];
         if (val.len == 0) continue;
         if (std.mem.eql(u8, key, "deploy_vy_threshold")) {
             cfg_deploy_vy = std.fmt.parseFloat(f32, val) catch continue;
@@ -102,13 +134,20 @@ fn parseConfig(data: []const u8) void {
         } else if (std.mem.eql(u8, key, "require_worn")) {
             cfg_require_worn = std.mem.eql(u8, val, "true") or std.mem.eql(u8, val, "1");
         } else if (std.mem.eql(u8, key, "item_tag")) {
-            cfg_item_tag = val;
+            setCfgStr(&item_tag_buf, &item_tag_len, val);
         } else if (std.mem.eql(u8, key, "announce_on_deploy")) {
             cfg_announce = std.mem.eql(u8, val, "true") or std.mem.eql(u8, val, "1");
         } else if (std.mem.eql(u8, key, "announce_text")) {
-            cfg_announce_text = val;
+            setCfgStr(&announce_text_buf, &announce_text_len, val);
         }
     }
+}
+
+// Declarative dependency spec (ADR 0030): absence is a load-time rejection
+// for a module that exports hooks. This one reads config, senses the player,
+// queues the glide verb and logs.
+comptime {
+    common.exportRequires("log,queue,sense,config,on_enable,on_tick,on_shutdown");
 }
 
 export fn on_enable() void {
@@ -117,9 +156,11 @@ export fn on_enable() void {
     if (n > 0) parseConfig(cfg_buf[0..@min(@as(usize, @intCast(n)), cfg_buf.len)]);
     var b: common.Buf = .{};
     b.put("parachute: config deploy_vy=");
-    b.putInt(@as(i32, @intFromFloat(cfg_deploy_vy)));
+    b.putInt(@as(i32, @trunc(cfg_deploy_vy)));
     b.put(" delay_ticks=");
     b.putInt(cfg_delay_ticks);
+    b.put(" item_tag=");
+    b.put(cfgItemTag());
     b.logLine(0);
 }
 

@@ -56,7 +56,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityCollect")) {
-        const bag = packages.parseCollectBody(body) catch return true;
+        const col = packages.parseCollectBody(body) catch return true;
+        const bag = col.entity_id;
+        // ValidEntityIdForSender(playerId): stock discards a collect whose
+        // claimed collector is not the sender (NetPackageEntityCollect
+        // ProcessPackage IL=51), so one client cannot collect a bag in another
+        // player's name.
+        if (col.player_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         // Transfer contents into server inv, then destroy. Wire order matches
         // stock: Collect (client OnCollect) then EntityRemove(Despawned).
         if (self.sim.slotOfNetId(bag)) |bs| {
@@ -65,10 +74,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (self.sim.playerByPeer(c.slot)) |ps| {
                     const pp = self.sim.transform[ps];
                     const bp = self.sim.transform[bs];
-                    if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
-                        self.harness.counters.inc(.bounds_rejects);
-                        return true;
-                    }
+                    if (self.rejectIfBeyondEditRange(
+                        c,
+                        peer.local_id,
+                        c.entity_id,
+                        .container,
+                        pp.x,
+                        pp.y,
+                        pp.z,
+                        bp.x,
+                        bp.y,
+                        bp.z,
+                    )) return true;
                     // Full deposit only: a partial one restores the player
                     // inventory and keeps the bag alive (ecs.inventory
                     // collectBagFull, the one transfer rule shared with
@@ -78,7 +95,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const bx = self.sim.transform[bs].x;
                 const by = self.sim.transform[bs].y;
                 const bz = self.sim.transform[bs].z;
+                // An air-drop crate carries server-pushed markers, so the
+                // server has to take them back: nothing on the client derives
+                // them from the entity going away. Stock b10 removes both the
+                // MapObject (EntitySupplyCrate.OnEntityDeath IL=30) and the
+                // NavObject (OnEntityUnload -> RemoveSupplyCrate IL=54). Read
+                // before destroy: the slot's components are gone afterwards.
+                const was_crate = self.sim.mask[bs].loot_bag and self.sim.loot_bag[bs].supply_crate;
                 if (self.sim.alive[bs]) self.sim.destroy(bs);
+                if (was_crate) self.broadcastSupplyCrateMarkerRemove(bag);
                 if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {
                     try self.broadcast("NetPackageEntityCollect", cb);
                 } else |_| {}
@@ -87,12 +112,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {}
                 // Collected the player's own death bag: clear the backpack
                 // marker and tell every client (RE EntityBackpack).
-                if (self.clients[c.slot].has_backpack and
-                    self.clients[c.slot].backpack_x == @as(i32, @trunc(bx)) and
-                    self.clients[c.slot].backpack_y == @as(i32, @trunc(by)) and
-                    self.clients[c.slot].backpack_z == @as(i32, @trunc(bz)))
-                {
-                    self.clients[c.slot].has_backpack = false;
+                if (self.clients[c.slot].removeBackpackAt(
+                    @trunc(bx),
+                    @trunc(by),
+                    @trunc(bz),
+                )) {
                     try self.broadcastPlayerBackpack(&self.clients[c.slot]);
                 }
             }
@@ -109,9 +133,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.ownership_rejects);
             return true;
         }
-        const dx = std.mem.readInt(i16, body[11..13], .little);
-        const dy = std.mem.readInt(i16, body[13..15], .little);
-        const dz = std.mem.readInt(i16, body[15..17], .little);
+        // The Rotation base this package extends is variable width: byte 4 is
+        // bUseQRotation, and it selects 3 x i16 euler (6 bytes) or a 4 x f32
+        // quaternion (16 bytes) before dPos begins (RE protocol-packages.md
+        // 5.5.3 / 5.5.4). Reading dPos at a fixed offset 11 decodes quaternion
+        // bytes as a movement delta whenever a client sets the flag.
+        const use_q = body[4] != 0;
+        const dpos_off: usize = if (use_q) 21 else 11;
+        if (body.len < dpos_off + 6 + 1 + 2) {
+            self.harness.counters.inc(.decode_rejects);
+            return true;
+        }
+        const dx = std.mem.readInt(i16, body[dpos_off..][0..2], .little);
+        const dy = std.mem.readInt(i16, body[dpos_off + 2 ..][0..2], .little);
+        const dz = std.mem.readInt(i16, body[dpos_off + 4 ..][0..2], .little);
         if (self.sim.slotOfNetId(eid)) |idx| {
             // RelPos delta scale (RE protocol-packages.md 5.5.4): dPos is the
             // client's movement delta encoded in 1/32-block i16 units.
@@ -158,8 +193,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.sim.player[idx].crouching = (f.flags & packages.cF_crouching) != 0;
             }
         }
-        // Fan-out to other peers (stock tracked-players path).
-        try self.broadcastExcept("NetPackageEntityAliveFlags", body, c.slot);
+        // Fan-out to other peers (stock tracked-players path). Re-encode from
+        // the parsed fields rather than relaying the raw body: stock writes
+        // exactly i32+u16 and its Process re-Setups from server state, so a
+        // peer that appends trailing bytes must not have them forwarded.
+        var flags_buf: [8]u8 = undefined;
+        const flags_body = packages.buildAliveFlagsBody(&flags_buf, f.entity_id, f.flags) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.broadcastExcept("NetPackageEntityAliveFlags", flags_body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntitySpeeds")) {
@@ -172,10 +215,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
-        // entity-ai.md SetMovementState); lapses on a stale timer.
+        // entity-ai.md SetMovementState); lapses on a stale timer. The same
+        // report carries the movement tag `EntityHasMovementTag` gates read
+        // (stock sets `CurrentMovementTag` from the move direction plus
+        // `bMovementRunning`, and `SetMovementState` derives its state from the
+        // same speeds).
         c.sprint_speed = sprintMagnitude(s.movement_state, s.speed_forward, s.speed_strafe);
+        c.move_tag = Client.MoveTag.fromMovementState(s.movement_state);
         c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
-        try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
+        // Re-encode rather than relay: stock's body is exactly 13 bytes, and
+        // the parser only requires a minimum, so a raw relay would forward a
+        // peer's trailing bytes to everyone.
+        var speeds_buf: [16]u8 = undefined;
+        const speeds_body = packages.buildEntitySpeedsBody(
+            &speeds_buf,
+            s.entity_id,
+            s.movement_state,
+            s.speed_forward,
+            s.speed_strafe,
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.broadcastExcept("NetPackageEntitySpeeds", speeds_body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
@@ -207,7 +269,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // gate checks all three axes: a Y-only clamp (fly attempt) must not
         // relay the raw teleport Y to peers either.
         if (env.x == p.x and env.y == p.y and env.z == p.z) {
-            try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
+            // Trim to the parsed body: the length is variable and anything a
+            // peer appends past it must not be relayed.
+            try self.broadcastExcept("NetPackageEntityTeleport", body[0..p.wire_len], c.slot);
         }
         return true;
     }

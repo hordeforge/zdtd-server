@@ -1,6 +1,7 @@
 //! Webui login form: show/hide the shared secret.
-//! Shared by login.html and login_failed.html (same markup, different error
-//! state). Compiled by scripts/build-webui-ts.sh and injected into both pages.
+//! Injected into login.html (plain and failure states share the markup; the
+//! banner and input attrs are server-rendered placeholders).
+//! Compiled by scripts/build-webui-ts.sh.
 
 const token = document.querySelector<HTMLInputElement>('#login-token');
 if (token === null) {

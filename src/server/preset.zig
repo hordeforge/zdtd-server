@@ -118,7 +118,7 @@ pub const default_pack_toml =
     \\name = "default"
     \\max_spawned_zombies = 64
     \\blood_moon_frequency = 7
-    \\enable_sample_plugin = true
+    \\enable_sample_plugin = false
 ;
 
 /// True when name is a single path segment: [A-Za-z0-9_]{1,64}, no dots/slashes.
@@ -211,7 +211,7 @@ test "parse default pack" {
     try std.testing.expectEqualStrings("default", p.name);
     try std.testing.expectEqual(@as(u16, 64), p.max_spawned_zombies.?);
     try std.testing.expectEqual(@as(u8, 7), p.blood_moon_frequency.?);
-    try std.testing.expectEqual(true, p.enable_sample_plugin.?);
+    try std.testing.expectEqual(false, p.enable_sample_plugin.?);
 }
 
 /// Mirror of the server init-options shape applyToInitOptions writes into.
@@ -340,6 +340,25 @@ test "moon_gravity mod preset pins the gravity overlay" {
     rules_mod.mergeOverlay(&r, &p.rules);
     try std.testing.expectEqual(@as(f32, -1.62), r.ai.gravity);
     try std.testing.expectEqual(@as(f32, -1.62), r.vehicle.gravity);
+}
+
+test "parachute mod preset binds and pins the glide overlay" {
+    // mods/parachute ships its [rules.glide] overlay self-contained. The
+    // resolver test only pins the preset_pack path; nothing bound the file
+    // against the rules schema, so a stale key here would surface at runtime
+    // load instead of in the suite (the gap the other two mod presets close).
+    if (!io_fs.fileExists("mods/parachute/preset.toml")) return error.SkipZigTest;
+    var p = try loadFromPath(std.testing.allocator, "mods/parachute/preset.toml");
+    defer p.deinit();
+    try std.testing.expectEqualStrings("parachute", p.name);
+    try std.testing.expectEqual(@as(?f32, 2.5), p.rules.glide.sink_vy_mps);
+    var r: rules_mod.Rules = .{};
+    rules_mod.mergeOverlay(&r, &p.rules);
+    try std.testing.expectEqual(@as(f32, 2.5), r.glide.sink_vy_mps);
+    // The guest's config.toml and this pack must name the same item: the host
+    // sets the sense wearing_glider bit from the rules value and the guest
+    // only mirrors it (mods/parachute/README.md).
+    try std.testing.expectEqualStrings("parachute", r.glide.item_tag);
 }
 
 test "loadByName rejects bad name" {

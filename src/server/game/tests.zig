@@ -13,26 +13,32 @@ const platform_user = @import("../../wire/platform_user.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
+const light_te_mod = @import("../../world/light_te.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const game_hooks = @import("../game/hooks.zig");
 const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
 const wire_frame = @import("../../wire/frame.zig");
+const wire_stock_buff = @import("../../wire/stock_buff.zig");
+const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
 const containers_mod = @import("../../world/containers.zig");
 const chunk_fill_mod = @import("../game/chunk_fill.zig");
 const c2s_misc = @import("../c2s/misc.zig");
+const plugin_mod = @import("../../plugin/root.zig");
 const plugin_api = @import("../../plugin/api.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const ecs_buff = @import("../../ecs/buff.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const requirements = @import("../../assets/requirements.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
+const game_craft = @import("../game/craft.zig");
 const parallel = @import("../../util/parallel.zig");
 const zpv2DropName = game.zpv2DropName;
 
@@ -220,9 +226,9 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    buf[o] = 3; // name_len "Ulf" (not the harness client: keeps the carry path live)
     o += 1;
-    @memcpy(buf[o..][0..3], "Bot");
+    @memcpy(buf[o..][0..3], "Ulf");
     o += 3;
     @memset(buf[o..][0..16], 0); // xyz + coins
     o += 16;
@@ -261,24 +267,18 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVG", data[0..4]);
     }
     {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        // Migrated hp = full: the player is alive and at the full-health mark
-        // the pre-ZPV8 code granted on relog.
-        try std.testing.expect(g.sim.alive[ps]);
-        // Migrated hp = -1 sentinel: the restore keeps the spawn path's full
-        // health (the pre-ZPV8 relog behavior), and the tail values land.
-        try std.testing.expectEqual(g.sim.health[ps].max_hp, g.sim.health[ps].hp);
-        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        // The record is carried, not rewritten (its name is not the harness
+        // client's), so the migrated tail is checked in the file: level 5 and
+        // the inserted full-hp sentinel, both at the v12 tail offsets.
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        const persist = @import("../persist.zig");
+        _ = try persist.zpvRecordLen(data, 8, 14);
+        const tail_at = 8 + 1 + 3 + 16 + 1 + 0 + 1 + 0 + 1; // name, pos, inv_n=0, jn=0, prog
+        try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[tail_at..][0..2], .little));
         std.debug.print("PASS zpv7->zpv8: carried tail gains full hp on save\n", .{});
     }
 }
@@ -420,6 +420,148 @@ test "players zpv12 round-trips item mods across restart" {
     }
 }
 
+test "players v14 record gains an absent identity section on save (ZPV15 migration)" {
+    // A v14 ('E') file has no identity section. The save must append the absent
+    // marker byte so the v15 record walk stays aligned, and the upgrade must not
+    // invent an identity the client never presented: a legacy row keeps matching
+    // by name until its owner logs in with a platform id.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const persist_mod = @import("../persist.zig");
+    var buf: [1024]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVE");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little); // record count
+    o += 4;
+    // Named after the harness client ("Bot"), which presents no platform id:
+    // this is the migration path where a legacy row is the only key it has.
+    const name = "Bot";
+    buf[o] = @intCast(name.len);
+    o += 1;
+    @memcpy(buf[o..][0..name.len], name);
+    o += name.len;
+    @memset(buf[o..][0..16], 0); // x,y,z f32s + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog 1
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 12345, .little); // xp
+    o += 8;
+    @memset(buf[o..][0..16], 0); // food/max/water/max
+    o += 16;
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 1.0)), .little); // hp (v8+)
+    o += 4;
+    @memset(buf[o..][0..8], 0); // born_world_time (v9+)
+    o += 8;
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present 0
+    o += 1;
+    @memset(buf[o..][0..5], 0); // ZPV11 skill tail: points + skill_n
+    o += 5;
+    buf[o] = 0; // ZPV13 backpacks
+    o += 1;
+    @memset(buf[o..][0..persist_mod.zpv_stats_tail_len], 0); // ZPV14 counters
+    o += persist_mod.zpv_stats_tail_len;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        // The legacy record restored by name, so level 5 came through.
+        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        try g.savePlayers();
+    }
+
+    const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("ZPVG", data[0..4]);
+    // The rewritten record walks cleanly under the v15 layout. The identity
+    // section is the absent marker because the harness client presented no
+    // platform id, so this row is still name-keyed (ADR 0038 notices it).
+    const rec_len = try persist_mod.zpvRecordLen(data, 8, persist_mod.persist_version);
+    try std.testing.expect(rec_len > 0 and rec_len < data.len);
+    const span = try persist_mod.zpvRecordSpan(data, 8, persist_mod.persist_version);
+    try std.testing.expect(span.identity_off != 0);
+    try std.testing.expectEqual(@as(u8, 0), data[span.identity_off]);
+}
+
+test "players restore matches on platform identity, not on a typed name (ZPV15)" {
+    // DIVERGENCES 1.6: saves were keyed by login name alone, so a client could
+    // load another player's inventory, level and XP by typing their name.
+    // Stock keys PlayerDataFile on PrimaryId.CombinedString (asm.il 1884842).
+    // This is the theft case: same name, different account.
+    const id_a: platform_user.Id = .{ .platform = "EOS", .id = "acct-a" };
+    const id_b: platform_user.Id = .{ .platform = "EOS", .id = "acct-b" };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_a);
+        try std.testing.expect(cl.puid_primary.get() != null);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        g.sim.inventory[ps] = .{};
+        g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1] =
+            .{ .item_id = 2, .count = 1, .quality = 4, .use_times = 7.5 };
+        cl.deaths = 4;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_b);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Same display name ("Bot"), different account: nothing restored.
+        try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].item_id);
+        try std.testing.expectEqual(@as(i32, 0), cl.deaths);
+        try g.savePlayers();
+    }
+
+    {
+        // The owner reconnects: its row is still there, under its identity.
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_a);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].item_id);
+        try std.testing.expectEqual(@as(f32, 7.5), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].use_times);
+        try std.testing.expectEqual(@as(i32, 4), cl.deaths);
+    }
+}
+
 test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" {
     // A v10 ('A') file has no skill tail; the save must append the empty
     // tail (skill_points 0, skill_n 0) so the v11 record walk stays aligned
@@ -480,12 +622,80 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     }
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'C'), data[3]);
-    // Record length via the v12 walker: name(7) + 16 + inv(1) + jn(1) +
+    try std.testing.expectEqual(@as(u8, 'G'), data[3]);
+    // Record length via the v14 walker: name(7) + 16 + inv(1) + jn(1) +
     // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
-    // bed(1) + skills(5) (the fixture has no inventory slots, so the ZPV12
-    // slot-record widening does not change the length).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5), game_mod.zpvRecordLen(data, 8, 12));
+    // bed(1) + skills(5) + backpacks(1, an empty marker list) + the v14
+    // counters(12) (the fixture has no inventory slots, so the ZPV12 slot
+    // widening changes nothing).
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1), game_mod.zpvRecordLen(data, 8, @import("../persist.zig").persist_version));
+}
+
+test "players zpv10 inventory slots widen to the ZPV12 stride" {
+    // The v10 fixture above carries no inventory, so the slot stride never
+    // enters its record walk - moving the v10 boundary in zpvSlotStride left
+    // the whole suite green. A v10 slot is 13 bytes (item, count, quality,
+    // meta, use_times, seed); v12 adds four mod ids, so a carried record grows
+    // by exactly that difference and keeps the slot's values.
+    const persist = @import("../persist.zig");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [256]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVA"); // v10
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    const name = "slotter";
+    buf[o] = @intCast(name.len);
+    o += 1;
+    @memcpy(buf[o..][0..name.len], name);
+    o += name.len;
+    @memset(buf[o..][0..16], 0); // x,y,z,coins
+    o += 16;
+    buf[o] = 1; // inv_n: one slot
+    o += 1;
+    // v10 slot: item u16 | count u16 | quality u8 | meta u16 | use_times f32 | seed u16
+    @memset(buf[o..][0..persist.zpvSlotStride(10)], 0);
+    std.mem.writeInt(u16, buf[o..][0..2], 42, .little);
+    std.mem.writeInt(u16, buf[o + 2 ..][0..2], 7, .little);
+    buf[o + 4] = 3;
+    std.mem.writeInt(u16, buf[o + 11 ..][0..2], 99, .little); // seed
+    o += persist.zpvSlotStride(10);
+    buf[o] = 0; // jn
+    o += 1;
+    // prog 0 ends the record: bed_present and the skill tail both live inside
+    // the prog==1 branch, so appending them here would be extra bytes.
+    buf[o] = 0;
+    o += 1;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try g.savePlayers();
+    }
+
+    const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqual(@as(u8, 'G'), data[3]); // carried to v16
+    // No prog tail on this fixture, so the ZPV13 marker list (which lives
+    // inside the prog block) adds nothing to the length.
+    const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(persist.persist_version) + 1 + 1;
+    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, persist.persist_version));
+    // The slot's leading fields survived the widening at their own offsets.
+    const slot_at = 8 + 1 + name.len + 16 + 1;
+    try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, data[slot_at..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
 }
 
 test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
@@ -503,9 +713,9 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    buf[o] = 3; // name_len "Ida" (not the harness client: keeps the carry path live)
     o += 1;
-    @memcpy(buf[o..][0..3], "Bot");
+    @memcpy(buf[o..][0..3], "Ida");
     o += 3;
     @memset(buf[o..][0..16], 0); // xyz + coins
     o += 16;
@@ -546,20 +756,20 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVG", data[0..4]);
     }
     {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        try std.testing.expectEqual(@as(u16, 5), cl.level);
-        // The v8 hp rides through the migration (0.4 > 0, applied).
-        try std.testing.expectEqual(@as(f32, 0.4), g.sim.health[ps].hp);
+        // Carried, not rewritten, so the migrated tail is read from the file:
+        // level 5 and the v8 hp (0.4) both survive, and the record still walks
+        // under the v12 layout with born_world_time inserted.
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        const persist = @import("../persist.zig");
+        _ = try persist.zpvRecordLen(data, 8, 14);
+        const tail_at = 8 + 1 + 3 + 16 + 1 + 1 + 1; // name, pos, inv_n=0, jn=0, prog
+        try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[tail_at..][0..2], .little));
+        const hp_at = tail_at + 2 + 8 + 16; // level, xp, four survival floats
+        try std.testing.expectEqual(@as(f32, 0.4), @as(f32, @bitCast(std.mem.readInt(u32, data[hp_at..][0..4], .little))));
         std.debug.print("PASS zpv8->zpv9: carried tail gains zero born time on save\n", .{});
     }
 }
@@ -579,9 +789,12 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    // Deliberately NOT "Bot", the harness client's name: a matching record is
+    // rewritten from live state, which is what made this fixture exercise the
+    // rewrite path instead of the v7 carry it is named for.
+    buf[o] = 3; // name_len "Ana"
     o += 1;
-    @memcpy(buf[o..][0..3], "Bot");
+    @memcpy(buf[o..][0..3], "Ana");
     o += 3;
     @memset(buf[o..][0..16], 0); // xyz + coins
     o += 16;
@@ -597,7 +810,12 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     o += 1;
     std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // meta
     o += 2;
-    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 10.0)), .little); // use_times
+    // 3.14159 rather than a round number on purpose: its little-endian bytes
+    // are D0 0F 49 40, none of them zero. A carry that walks the slot with the
+    // pre-v7 7-byte stride reads `jn` out of this field and gets 208 instead
+    // of 0, which the journal walk then rejects. With 10.0 (00 00 20 41) the
+    // misread lands on a zero byte and the whole disagreement stays invisible.
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 3.14159)), .little); // use_times
     o += 4;
     buf[o] = 0; // jn
     o += 1;
@@ -632,30 +850,24 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVG", data[0..4]);
     }
     {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        var found = false;
-        for (g.sim.inventory[ps].slots) |s| {
-            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
-        }
-        try std.testing.expect(found);
-        try std.testing.expectEqual(@as(u16, 5), cl.level);
-        // The v7 use_times rides through (10.0).
-        var ut: f32 = 0;
-        for (g.sim.inventory[ps].slots) |s| {
-            if (s.item_id == 7) ut = s.use_times;
-        }
-        try std.testing.expectEqual(@as(f32, 10.0), ut);
-        std.debug.print("PASS zpv7->zpv9: inventory + tail carried with hp/born inserted\n", .{});
+        // The carried record is not the harness client's, so verify it in the
+        // file: the slot must have widened to the v12 stride with its four
+        // fields intact, and the record must still walk cleanly.
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        const persist = @import("../persist.zig");
+        const slot_at = 8 + 1 + 3 + 16 + 1;
+        try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at..][0..2], .little));
+        try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
+        try std.testing.expectEqual(@as(u8, 4), data[slot_at + 4]);
+        try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[slot_at + 5 ..][0..2], .little));
+        try std.testing.expectEqual(@as(f32, 3.14159), @as(f32, @bitCast(std.mem.readInt(u32, data[slot_at + 7 ..][0..4], .little))));
+        // Walking the record with the v12 stride must land inside the file.
+        _ = try persist.zpvRecordLen(data, 8, 14);
+        std.debug.print("PASS zpv7->zpv12: carried slot widened to the current stride\n", .{});
     }
 }
 
@@ -674,9 +886,9 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    buf[o] = 3; // name_len "Eve" (not the harness client: keeps the carry path live)
     o += 1;
-    @memcpy(buf[o..][0..3], "Bot");
+    @memcpy(buf[o..][0..3], "Eve");
     o += 3;
     @memset(buf[o..][0..16], 0); // xyz + coins
     o += 16;
@@ -705,36 +917,28 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
             std.testing.allocator.destroy(g);
         }
         var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        // Restored from the v6 record: item 7, count 3, quality 4, meta 5.
-        var found = false;
-        for (&g.sim.inventory[ps].slots) |*s| {
-            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
-        }
-        try std.testing.expect(found);
+        _ = try g.attachJoinedClient(&capture);
         try g.savePlayers();
     }
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVG", data[0..4]);
     }
     {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        var found = false;
-        for (&g.sim.inventory[ps].slots) |*s| {
-            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
-        }
-        try std.testing.expect(found);
-        std.debug.print("PASS zpv6->zpv7: legacy 7-byte inventory slots widened on save\n", .{});
+        // Carried, not rewritten, so the widened slot is checked in the file:
+        // the four v6 fields keep their offsets and the record walks under the
+        // v12 stride.
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        const persist = @import("../persist.zig");
+        _ = try persist.zpvRecordLen(data, 8, 14);
+        const slot_at = 8 + 1 + 3 + 16 + 1;
+        try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at..][0..2], .little));
+        try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
+        try std.testing.expectEqual(@as(u8, 4), data[slot_at + 4]);
+        try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[slot_at + 5 ..][0..2], .little));
+        std.debug.print("PASS zpv6->zpv12: legacy 7-byte slot widened to the current stride\n", .{});
     }
 }
 
@@ -859,7 +1063,10 @@ test "players save keeps a joined-but-not-writable client record" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         g.sim.inventory[ps] = .{};
-        g.sim.inventory[ps].slots[3] = .{ .item_id = 9, .count = 7, .quality = 5, .meta = 1 };
+        // item 2 (resourceWood) stacks; item 9 is meleeClub, which caps at 1,
+        // so a count of 7 there was never a legal inventory and the load
+        // clamp now corrects it. The subject here is record carry-forward.
+        g.sim.inventory[ps].slots[3] = .{ .item_id = 2, .count = 7, .quality = 5, .meta = 1 };
         try g.savePlayers();
     }
 
@@ -890,7 +1097,7 @@ test "players save keeps a joined-but-not-writable client record" {
         var capture: ln_peer.Capture = .{};
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
-        try std.testing.expectEqual(@as(u16, 9), g.sim.inventory[ps].slots[3].item_id);
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[3].item_id);
         try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[3].count);
     }
 }
@@ -972,7 +1179,9 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    buf[o] = 3; // name_len "Bot": deliberately the harness client, so the
+    // record is rewritten from live state - this test is about the restore
+    // side resolving the v4 entry to a quest name, which only happens there.
     o += 1;
     @memcpy(buf[o..][0..3], "Bot");
     o += 3;
@@ -1022,7 +1231,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVG", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
@@ -1062,18 +1271,40 @@ test "land claim removed when keystone breaks and expires offline" {
     g.sim.director.clock.day = 30;
     g.registerClaim(250, 70, 250, cl.entity_id);
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking a non-keystone block does not remove the claim.
+    // Breaking a non-keystone block does not remove the claim, so it must not
+    // take a marker off the wire either.
+    cap.clear();
     g.removeClaimAt(249, 70, 250);
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking the keystone removes it (claim disappears with its block).
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) == null);
+    // Breaking the keystone removes it and takes the map marker off the wire
+    // (TEFeatureLandClaim.OnDestroy IL=28 broadcasts the remove-by-position
+    // form with EnumMapObjectType 15).
+    cap.clear();
     g.removeClaimAt(250, 70, 250);
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
-    // Expiry: an offline claim past the window is released on the day roll.
+    {
+        const rm = cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqual(packages.map_marker_remove_by_position, std.mem.readInt(i32, rm[0..4], .little));
+        try std.testing.expectEqual(@as(f32, 250), @as(f32, @bitCast(std.mem.readInt(u32, rm[4..8], .little))));
+        try std.testing.expectEqual(@as(f32, 70), @as(f32, @bitCast(std.mem.readInt(u32, rm[8..12], .little))));
+        try std.testing.expectEqual(@as(f32, 250), @as(f32, @bitCast(std.mem.readInt(u32, rm[12..16], .little))));
+        try std.testing.expectEqual(
+            @intFromEnum(packages.MapObjectType.land_claim),
+            std.mem.readInt(i32, rm[16..20], .little),
+        );
+    }
+    // Expiry: an offline claim past the window is released on the day roll,
+    // and every removal path (expiry here, keystone break above) takes the
+    // marker off the wire through the same hook.
     g.registerClaim(250, 70, 250, cl.entity_id);
     g.markClaimsForEntity(cl.entity_id, false);
     g.land_claims[0].owner_seen_day = g.sim.director.clock.day - 10;
+    cap.clear();
     g.expireClaims();
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) != null);
     // Expiry disabled (0) keeps even a very old offline claim.
     g.registerClaim(250, 70, 250, cl.entity_id);
     g.land_claim_expiry_days = 0;
@@ -1095,7 +1326,9 @@ test "land claim removed when keystone breaks and expires offline" {
     @memcpy(owner[0..on], g.land_claims[0].owner_name[0..on]);
     try std.testing.expectEqual(@as(u32, 0), g.dropClaimsForName("someone-else"));
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    cap.clear();
     try std.testing.expectEqual(@as(u32, 1), g.dropClaimsForName(owner[0..on]));
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) != null);
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
 }
 
@@ -1455,6 +1688,52 @@ test "world clock persists across a restart (BM calendar survives)" {
         try std.testing.expectEqual(@as(u32, 5), g.sim.director.clock.day);
         try std.testing.expectApproxEqAbs(@as(f32, 12.5), g.sim.director.clock.hours, 0.001);
     }
+
+    // The round trip covers the write side. restoreClock also has to survive a
+    // corrupt or older file without taking the server down, and none of those
+    // paths had a test: it keeps whatever the fresh roll produced instead.
+    {
+        var path_buf: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/clock.zcl", .{dir});
+
+        // Shorter than the 12-byte ZCL1 head: rejected, clock left untouched.
+        try io_fs.writeFile(p, "ZCL2\x00\x00");
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // A fresh world starts at day 1; the truncated file must not have
+        // moved it, and must not have panicked getting there.
+        try std.testing.expectEqual(@as(u32, 1), g.sim.director.clock.day);
+    }
+
+    {
+        // A ZCL1 file restores the world time only. Written at full ZCL2 length
+        // with a nonzero tail on purpose: the loader must gate the blood-moon
+        // fields on the magic, not on the byte count, or it reads a ZCL1 tail
+        // that was never a schedule. bm_freq 0 is what a fresh clock has, so a
+        // magic-blind read would show up as 0xEEEEEEEE here.
+        var path_buf: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/clock.zcl", .{dir});
+        var zcl1: [28]u8 = @splat(0xEE);
+        @memcpy(zcl1[0..4], "ZCL1");
+        // Day 3 = (3 - 1) * 24000 world-time units.
+        std.mem.writeInt(u64, zcl1[4..12], 2 * 24000, .little);
+        try io_fs.writeFile(p, &zcl1);
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expectEqual(@as(u32, 3), g.sim.director.clock.day);
+        // The 0xEE tail must not have been read as a blood-moon schedule.
+        try std.testing.expect(g.sim.director.clock.bm_freq != 0xEEEEEEEE);
+    }
 }
 
 test "setgamepref applies runtime GameStats prefs and broadcasts" {
@@ -1601,6 +1880,59 @@ test "parallel solid/water probes share one world without corruption" {
     try std.testing.expectEqual(s0, g.sim.solid_fn.?(g, 3, 61, 3));
 }
 
+test "deco suppression follows the prefab AllowDecorations property" {
+    // V3.2.0 changelog-3.2.0 §4.5: world (biome) decorations are suppressed
+    // inside a POI footprint unless the prefab sets AllowDecorations="true".
+    // The sampler's per-deco-chunk cache is built from the real Navezgane
+    // decoration list, so this exercises the data path, not a fixture.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map_dir = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map_dir)) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir, .map_dir = map_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    // One pass over the shipped decorations: the first non-part POI that did
+    // not opt into decorations gives a deterministic point inside a suppressed
+    // footprint, and the map must also ship at least one opted-in prefab so the
+    // gate is not trivially all-true.
+    var inside: ?struct { x: i32, z: i32 } = null;
+    var allowed_found = false;
+    var suppressed_found = false;
+    for (pf.items, 0..) |d, i| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const qd = pf.questData(d.name) orelse continue;
+        if (qd.allow_decorations) {
+            allowed_found = true;
+            continue;
+        }
+        suppressed_found = true;
+        if (inside != null) continue;
+        const b = pf.boundsXZ(i);
+        if (b.x1 - b.x0 < 4 or b.z1 - b.z0 < 4) continue;
+        inside = .{ .x = @divTrunc(b.x0 + b.x1, 2), .z = @divTrunc(b.z0 + b.z1, 2) };
+    }
+    try std.testing.expect(suppressed_found);
+    try std.testing.expect(allowed_found);
+    const c0 = inside orelse return error.SkipZigTest;
+    const deco_shard = @import("deco.zig");
+    try std.testing.expect(deco_shard.decoSuppressedAt(g, c0.x, c0.z));
+    // The species sampler turns a suppressed cell into no deco at all: the
+    // client must not receive a block id it would try to model inside the POI.
+    try std.testing.expectEqual(@as(usize, 0), Game.decoSpeciesAt(g, c0.x, c0.z).n);
+    // Far from every footprint nothing is suppressed.
+    try std.testing.expect(!deco_shard.decoSuppressedAt(g, c0.x + 4000, c0.z + 4000));
+}
+
 test "deco burst is biome driven and mirrors into the block store" {
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
         .enable_sample_plugin = false,
@@ -1743,10 +2075,13 @@ test "power visuals rewrite block meta once per state change" {
         packages.blockMeta(raw),
     );
 
-    // Nothing flipped: the second pass must not touch the block or emit a packet.
+    // Nothing flipped: the second pass must not touch the block or emit a
+    // packet. blockRawAt falls back to the chunk raw plane on a mirror miss
+    // (see game/world.zig), so the observable is the absence of meta bits, not
+    // a zero raw.
     g.clearBlockRaw(8, 70, 8);
     replicate_te.broadcastPowerVisuals(g);
-    try std.testing.expectEqual(@as(u32, 0), g.blockRawAt(8, 70, 8));
+    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
 
     // Losing power is an edge, so it writes meta 0 again.
     g.sim.power.nodes[ni].powered = false;
@@ -2029,17 +2364,18 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     var cap: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(cl.slot).?;
-    // Pin the game-hour length so one tickSurvival(30.0) call is exactly one
-    // in-game hour regardless of the default day-length config.
-    g.sim.director.clock.seconds_per_hour = 30;
+    // Pin the clock rate so one tickSurvival(1.0) call is exactly one in-game
+    // hour regardless of the default day-length config (1000 world ticks per
+    // in-game hour, stock TimeOfDayIncPerSec rate).
+    g.sim.director.clock.time_of_day_inc_per_sec = 1000;
     g.sim.health[ps].food = 100;
     g.sim.health[ps].water = 100;
     g.sim.health[ps].hp = 100;
     const st_id = packages.idOf("NetPackageEntityStatChanged").?;
 
-    // One in-game hour (default seconds_per_hour = 30): food -2, water -2.5.
+    // One in-game hour: food -2, water -2.5.
     cap.clear();
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].food < 100);
     try std.testing.expect(g.sim.health[ps].water < 100);
     try std.testing.expect(cap.findPkgId(st_id) != null); // S2C sync fired
@@ -2048,21 +2384,21 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     g.sim.health[ps].food = 0;
     g.sim.health[ps].water = 100;
     const hp_before = g.sim.health[ps].hp;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].hp < hp_before);
 
     // Well-fed regen: fed + hydrated restores hp (10/game-hour), capped.
     g.sim.health[ps].hp = 50;
     g.sim.health[ps].food = 90;
     g.sim.health[ps].water = 90;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].hp > 50);
     try std.testing.expect(g.sim.health[ps].hp <= g.sim.health[ps].max_hp);
 
     // Clamp at zero: depletion never goes negative.
     g.sim.health[ps].food = 0.5;
     g.sim.health[ps].water = 0.5;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].food == 0);
     try std.testing.expect(g.sim.health[ps].water == 0);
 
@@ -2081,6 +2417,37 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     g.tickSurvival(0.2);
     try std.testing.expect(g.sim.health[ps].stamina > st_before);
     try std.testing.expect(g.sim.health[ps].stamina <= g.sim.health[ps].stamina_max);
+}
+
+test "survival: zero decay rates do not disable the rest of the pass" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.director.clock.time_of_day_inc_per_sec = 1000;
+    // presets/builder.toml zeroes both rates; only the two decay writes may be
+    // skipped then (the old early return also skipped stamina, drowning,
+    // radiation and the buff lifecycle).
+    g.sim.rules.progression.food_depletion_per_hour = 0;
+    g.sim.rules.progression.water_depletion_per_hour = 0;
+    g.sim.health[ps].food = 100;
+    g.sim.health[ps].water = 100;
+    g.sim.health[ps].stamina = 50;
+    cl.sprint_speed = 5;
+    cl.sprint_stale_cd = 5.0;
+    g.tickSurvival(0.2);
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food);
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].water);
+    // Sprint drain lives in the same pass and must still run.
+    try std.testing.expect(g.sim.health[ps].stamina < 50);
 }
 
 test "compressible packages send deflated frames the parser can read back" {
@@ -2272,8 +2639,70 @@ test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     blocks[8 + 8 * 16 + 70 * 256] = gen_id;
     blocks[10 + 8 * 16 + 70 * 256] = cons_id;
     g.scanChunkPower(ch, 0, 0);
-    try std.testing.expect(g.sim.power.indexOfPosition(8, 70, 8) != null);
-    try std.testing.expect(g.sim.power.indexOfPosition(10, 70, 8) != null);
+    // Presence alone is a weak check: a rebuild that registered every power
+    // block as the same node kind, or dropped the watts, would still put a
+    // node at both cells. Assert what the scan is actually for - the class and
+    // rating each block id resolves to through the registry.
+    const gi = g.sim.power.indexOfPosition(8, 70, 8) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(ecs.electric.NodeKind.generator, g.sim.power.nodes[gi].kind);
+    try std.testing.expectApproxEqAbs(@as(f32, 1000), g.sim.power.nodes[gi].watts, 0.01);
+
+    const ci = g.sim.power.indexOfPosition(10, 70, 8) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(ecs.electric.NodeKind.battery, g.sim.power.nodes[ci].kind);
+
+    // A cell with no power block must not gain a node.
+    try std.testing.expect(g.sim.power.indexOfPosition(9, 70, 8) == null);
+}
+
+test "a latched switch comes back on after a restart, not off" {
+    // The grid is runtime state rebuilt from the block plane, and the rebuild
+    // ran applyToNode, which latches a switch off because that is right for a
+    // freshly placed one. A switch read off disk is not freshly placed: the
+    // player's latch is in the block meta the SetBlock path wrote and the ZCH3
+    // plane kept. Every restart therefore switched every powered base off
+    // while the clients still rendered the switches as on.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const SwitchStub = struct {
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "switch")) return 20003;
+            return null;
+        }
+        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "switch")) return 0;
+            return null;
+        }
+    };
+    var stub: SwitchStub = .{};
+    try stub.power_class_by_name.put(std.testing.allocator, "switch", "Switch");
+    defer stub.power_class_by_name.deinit(std.testing.allocator);
+    g.power_registry = ecs.powerblocks.Registry.build(&stub);
+    const switch_id: u16 = 20003;
+
+    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+    const blocks = ch.blocks.?;
+    // Two switches off the same plane: one saved latched on, one off. Both
+    // must come back the way the meta records them, so a scan that simply
+    // forced one value would fail on the other.
+    blocks[4 + 4 * 16 + 70 * 256] = packages.withBlockMeta(@as(u32, switch_id), packages.block_meta_on);
+    blocks[6 + 4 * 16 + 70 * 256] = packages.withBlockMeta(@as(u32, switch_id), 0);
+    g.scanChunkPower(ch, 0, 0);
+
+    const on_i = g.sim.power.indexOfPosition(4, 70, 4) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.nodes[on_i].is_switch);
+    try std.testing.expect(g.sim.power.nodes[on_i].on);
+
+    const off_i = g.sim.power.indexOfPosition(6, 70, 4) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.nodes[off_i].is_switch);
+    try std.testing.expect(!g.sim.power.nodes[off_i].on);
 }
 
 test "trader POIs spawn their NPC classes on a stock map" {
@@ -2307,8 +2736,15 @@ test "POI reset restores baked blocks over player edits" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
-    io_fs.mkdirPath(".zdtd_cfg_cache");
-    var g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_reset", 0, .{
+    // Own throwaway world dir: a `.zdtd_cfg_cache/poi_reset` world left by an
+    // older run of this test is painted by a previous code generation, so the
+    // reset would compare against stale baked blocks (AGENTS: tests never
+    // write into the repo).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var g = try Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
         .map_dir = map,
         .game_dir = game_dir,
     });
@@ -2351,6 +2787,31 @@ test "POI reset restores baked blocks over player edits" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(t[0], t[1], t[2]));
     g.resetPoiBlocks(t[0], t[2]);
     try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
+
+    // The stores keyed by position are not part of the block plane, so a
+    // reset that only repaints blocks leaves the previous occupant's tile
+    // entity behind: a power node with no block still feeding the grid, a
+    // container still holding its slots under whatever the POI bakes there.
+    // Clear the block first so the reset actually rewrites this cell, then
+    // plant both stores. Planting them before the break would let the break's
+    // own spill consume them, and the reset would find nothing to displace.
+    try g.setBlock(t[0], t[1], t[2], 0);
+    _ = g.sim.power.addNodeAt(.generator, t[0], t[1], t[2], 1000);
+    try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) != null);
+    const cpos = containers_mod.PosKey{ .x = t[0], .y = t[1], .z = t[2] };
+    const cont = g.containers.getOrCreate(cpos, 8, orig) orelse return error.TestUnexpectedResult;
+    cont.slots[0] = .{ .item_id = 7, .count = 5, .quality = 1 };
+    try std.testing.expect(g.containers.get(cpos) != null);
+
+    const bags_before = g.sim.countKind(.loot_bag);
+    g.resetPoiBlocks(t[0], t[2]);
+    try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
+    try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) == null);
+    try std.testing.expect(g.containers.get(cpos) == null);
+    // The reset restores the POI to its authored state; it does not mine it
+    // out. Spilling the displaced contents would let a player farm a POI by
+    // re-taking the quest that resets it.
+    try std.testing.expectEqual(bags_before, g.sim.countKind(.loot_bag));
 }
 
 test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
@@ -2962,7 +3423,10 @@ test "particle effects relay to all clients except the causing owner; stealth is
     try w.writeByte(255);
     try w.writeString("Sounds/blood");
     try w.writeString("");
-    try w.writeF32(1);
+    try w.writeF32(1); // volumeScale
+    // ParticleEffect::Write tail, ahead of the package's own fields.
+    try w.writeI32(0); // parentEntityId
+    try w.writeByte(0); // attachment
     try w.writeI32(ca.entity_id);
     try w.writeBool(true);
     try w.writeBool(false);
@@ -3225,23 +3689,25 @@ test "quest objective events mirror to party members" {
     const cb = try g.attachJoinedClient(&cap_b);
     try std.testing.expect(g.parties.acceptInvite(ca.entity_id, cb.entity_id) != null);
 
-    // A reports treasure_complete for quest 42; the server mirrors it to the
-    // party member B (stock ProcessPackage party fan-out).
+    // Stock re-broadcasts only case 0 (treasure_radius_break) and case 2
+    // (block_activated) to the party; case 1 (treasure_complete) is
+    // server-local (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180
+    // calls FinishTreasureQuest and does not fan out).
+    const ou_id = packages.idOf("NetPackageQuestObjectiveUpdate").?;
+    var frame_buf: [128]u8 = undefined;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // block_activated: mirrored to the party member B.
     var body: [64]u8 = undefined;
     var w: wire_binary.Writer = .{ .buf = &body };
     try w.writeI32(ca.entity_id);
     try w.writeI32(42);
-    try w.writeByte(1); // TreasureComplete
+    try w.writeByte(2); // BlockActivated
     try w.writeI32(10);
     try w.writeI32(70);
     try w.writeI32(20);
-    var frame_buf: [128]u8 = undefined;
-    const framed = try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w.written());
     cap_b.clear();
-    try g.injectFramed(ca, framed);
-
-    const ou_id = packages.idOf("NetPackageQuestObjectiveUpdate").?;
-    var pkgs: [8]wire_frame.Package = undefined;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w.written()));
     var b_got = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
         const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
@@ -3250,6 +3716,44 @@ test "quest objective events mirror to party members" {
         }
     }
     try std.testing.expect(b_got);
+
+    // treasure_complete: server-local, so B gets no QuestObjectiveUpdate.
+    var body2: [64]u8 = undefined;
+    var w2: wire_binary.Writer = .{ .buf = &body2 };
+    try w2.writeI32(ca.entity_id);
+    try w2.writeI32(42);
+    try w2.writeByte(1); // TreasureComplete
+    try w2.writeI32(10);
+    try w2.writeI32(70);
+    try w2.writeI32(20);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w2.written()));
+    var leaked = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ou_id) leaked = true;
+        }
+    }
+    try std.testing.expect(!leaked);
+
+    // treasure_radius_break: the relay is rebuilt with blockPos zeroed, the
+    // way stock's 3-arg Setup does (case 2 above keeps the raw position).
+    var body3: [64]u8 = undefined;
+    var w3: wire_binary.Writer = .{ .buf = &body3 };
+    try w3.writeI32(ca.entity_id);
+    try w3.writeI32(42);
+    try w3.writeByte(0); // TreasureRadiusBreak
+    try w3.writeI32(10);
+    try w3.writeI32(70);
+    try w3.writeI32(20);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w3.written()));
+    const rq = cap_b.findPkgId(ou_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), rq[8]); // eventType
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[9..13], .little)); // blockPos x zeroed
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[13..17], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[17..21], .little));
 }
 
 test "poi lockout reports bedroll and land claim homes" {
@@ -3486,9 +3990,12 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     try std.testing.expectEqual(@as(u16, 1), cl.level);
 
     const body_of = struct {
-        fn build(skill: []const u8, level: i32) [64]u8 {
+        // Inherited NetPackageEntitySetSkillLevelClient body: the entity id
+        // leads, ahead of the skill name and level.
+        fn build(entity_id: i32, skill: []const u8, level: i32) [64]u8 {
             var b: [64]u8 = undefined;
             var w = wire_binary.Writer{ .buf = &b };
+            w.writeI32(entity_id) catch {};
             w.writeString(skill) catch {};
             w.writeI32(level) catch {};
             return b;
@@ -3496,13 +4003,13 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     };
 
     // Denied: the purchase is refused, no SP spent, no level granted.
-    var body = body_of.build("perkForbidden", 1);
+    var body = body_of.build(cl.entity_id, "perkForbidden", 1);
     _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
     try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(cl.slot, "perkForbidden"));
     try std.testing.expectEqual(@as(u32, 10), cl.skill_points);
 
     // Scaled 200%: catalog cost 1 becomes 2, spent from the balance.
-    body = body_of.build("perkLightEater", 1);
+    body = body_of.build(cl.entity_id, "perkLightEater", 1);
     _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(cl.slot, "perkLightEater"));
     try std.testing.expectEqual(@as(u32, 8), cl.skill_points);
@@ -3688,9 +4195,212 @@ test "restored buffs re-apply through the effects VM (recompute-from-set)" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         // The restored buff folds through the VM without any re-apply pass.
-        const totals = assets_buffs.effectTotals(&g.buffs, &g.sim.buffs[ps]);
+        var req_counts: requirements.Counts = .{};
+        const totals = assets_buffs.effectTotals(&g.buffs, &g.sim.buffs[ps], .{}, &req_counts);
         try std.testing.expectApproxEqAbs(@as(f32, 2), totals.hp_ot, 0.0001);
     }
+}
+
+test "EntityTagCompare resolves the player-only burning rows from stock buffs.xml" {
+    // buffBurningFlamingArrow ships both halves of the pair: the player half is
+    // `passive_effect HealthChangeOT base_subtract 4,12.3,15` gated
+    // `EntityTagCompare tags="player"`, and a non-player half gated by the `!`
+    // twin. Before the gate kind existed both were refused (fail closed, counted
+    // in requirement_unsupported), so this buff dealt no health damage at all.
+    // The entity class `Tags` (entityclasses.xml, inherited through `extends`)
+    // now decide it and the tick feeds them through Ctx.entity_tags.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const def_id = g.buffs.indexOfName("buffBurningFlamingArrow") orelse return error.SkipZigTest;
+    const def = g.buffs.byId(def_id).?;
+    // Data level: the player tag set folds the row (duration 0 is the curve's
+    // first anchor, value 4), the zombie set folds the `!` twin (same value),
+    // and a caller with no tag set refuses instead of assuming one.
+    var pc: requirements.Counts = .{};
+    const player = assets_buffs.trackedDeltas(&def, 0, .{ .entity_tags = "entity,player,human" }, &pc);
+    try std.testing.expectApproxEqAbs(@as(f32, -4), player.hp_ot, 0.001);
+    try std.testing.expectEqual(@as(u32, 0), pc.unsupported);
+    var zc: requirements.Counts = .{};
+    const zomb = assets_buffs.trackedDeltas(&def, 0, .{ .entity_tags = "entity,zombie,walker" }, &zc);
+    try std.testing.expectApproxEqAbs(@as(f32, -4), zomb.hp_ot, 0.001);
+    try std.testing.expectEqual(@as(u32, 0), zc.unsupported);
+    var nc: requirements.Counts = .{};
+    const none = assets_buffs.trackedDeltas(&def, 0, .{}, &nc);
+    try std.testing.expectEqual(@as(f32, 0), none.hp_ot);
+    try std.testing.expect(nc.unsupported > 0);
+    // The loader keeps the class Tags the gate reads.
+    const pdef = g.entities.byHash(packages.stock_entity.class_player_male) orelse return error.SkipZigTest;
+    try std.testing.expect(std.mem.find(u8, pdef.tags, "player") != null);
+    // Tick level: the live player's class Tags reach the VM, so the burning row
+    // lands and the player loses health on the survival pass.
+    g.sim.health[ps].hp = 90;
+    g.sim.health[ps].max_hp = 100;
+    g.sim.health[ps].base_max_hp = 100;
+    g.sim.health[ps].food = 100;
+    g.sim.health[ps].water = 100;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = def_id,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    const before = g.sim.health[ps].hp;
+    try g.step();
+    try std.testing.expect(g.sim.health[ps].hp < before);
+}
+
+test "equipped item passives fold into the survival VM (stock data)" {
+    // Stock `EffectManager.GetValue` layers 7/8 fold the holding item and the
+    // equipment items alongside buffs and perks. Asserting on stock items.xml:
+    // armorAthleticOutfit HealthMax "2,4,6,8,10,20" (Q6 = +20) and
+    // armorEnforcerOutfit's flat GeneralDamageResist 0.05. Before this the item
+    // rows were parsed for the resist curves only, so armor gave no max stats.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    const slotOfItem = struct {
+        fn f(g_: *Game, ps_: ecs.Slot, id: u16) u16 {
+            for (g_.sim.inventory[ps_].slots, 0..) |s, i| {
+                if (s.item_id == id) return @intCast(i);
+            }
+            return 0;
+        }
+    }.f;
+    const outfit = g.items.byName("armorAthleticOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, outfit.id, 1));
+    var from = slotOfItem(g, ps, outfit.id);
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 120), g.sim.health[ps].max_hp, 0.001);
+    // Revertible: moving the piece out of the slot restores the base max on the
+    // next recompute (no inverse bookkeeping).
+    var free: u16 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start], 0..) |s, i| {
+        if (s.count == 0) {
+            free = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(ecs.inventory.move(&g.sim, cl.slot, ecs.components.inv_equip_start, free, 1));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // A second piece's flat GeneralDamageResist reaches the damage cache. Its
+    // row is gated `ProgressionLevel perkEnforcerApparel Equals 1`, so the item
+    // fold also proves item gates evaluate against the player's ledger.
+    const enforcer = g.items.byName("armorEnforcerOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, enforcer.id, 1));
+    from = slotOfItem(g, ps, enforcer.id);
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 1));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_general_resist[ps], 0.0001);
+    cl.skill_levels[0] = .{ .name = "perkEnforcerApparel", .level = 1 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), g.sim.buff_general_resist[ps], 0.0001);
+}
+
+test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
+    // perkHardTarget's `GeneralDamageResist base_add level="1,5" value=".05,.25"`
+    // sits in an effect_group gated `EntityHasMovementTag tags="walking,running"`.
+    // The survival tick feeds the client's reported movement state as the
+    // CurrentMovementTag set, so the row folds while walking or running and
+    // drops at idle, which is not in the row's tag list.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkHardTarget", .level = 5 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+    cl.move_tag = .running;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    cl.move_tag = .walking;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    cl.move_tag = .idle;
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+}
+
+test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
+    // perkPainTolerance's untagged `GeneralDamageResist base_add level="1,5"
+    // value=".05,.25"` row is passive 40, which EntityAlive::DamageEntity reads
+    // with an empty tag set. The survival tick's untagged VM fold now caches it
+    // per entity so every player-damage choke consumes it; before this the row
+    // folded into a TrackedDeltas field nothing read.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+    cl.skill_levels[0] = .{ .name = "perkPainTolerance", .level = 5 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    // Revertible like the rest of the VM: dropping the perk clears it.
+    cl.skill_level_n = 0;
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
 }
 
 test "perk max-stat deltas recompute max_hp revertibly" {
@@ -3728,10 +4438,12 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
 }
 
-test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
-    // perkRuleOneCardio: StaminaChangeOT .1,.2,.3,.3,.3 + StaminaMax 25,50
-    // (explicit 5-level anchors). At level 5 the max recomputes to 150 and
-    // the idle regen gains 0.3 x 150 / 100 = 0.45/s over the 8/s base.
+test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applies" {
+    // perkRuleOneCardio: StaminaChangeOT .1,.2,.3,.3,.3 tags="running,swimmingRun"
+    // + StaminaMax 25,50 (explicit 5-level anchors). At level 5 the max
+    // recomputes to 150. The tagged row is a sprint modifier: an untagged query
+    // never matches it (PassiveEffect::hasMatchingTag IL=53), so idle regen is
+    // the plain 8/s and the row no longer inflates it.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -3759,12 +4471,721 @@ test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
     const before = g.sim.health[ps].stamina;
     try g.step();
     const gained = g.sim.health[ps].stamina - before;
-    // dt at 20 TPS = 0.05 s: (8 + 0.45) x 0.05 = 0.4225 per tick.
-    try std.testing.expect(gained > 0.4 and gained < 0.45);
+    // dt at 20 TPS = 0.05 s: 8 x 0.05 = 0.4 per tick, with no tagged bonus.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), gained, 0.01);
+    // The same rows DO fold when the query carries their tag: the tagged fold
+    // is what the sprint leg will consume.
+    var counts: requirements.Counts = .{};
+    const running = assets_progression.perkTotals(&g.progression_table, cl.skill_levels[0..cl.skill_level_n], .{ .tags = "running" }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), running.stamina_ot, 0.0001);
+    const untagged = assets_progression.perkTotals(&g.progression_table, cl.skill_levels[0..cl.skill_level_n], .{}, &counts);
+    try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
 }
 
-test "breaking a container spills its pre-filled contents" {
-    // 449 LootList blocks are CompositeTileEntity containers; their contents
+test "the armor-set bonus is granted from xml when the full set is worn" {
+    // buffBikerSetBonus is never added by name anywhere in zdtd: it comes from
+    // buffStatusCheck02's onSelfBuffUpdate AddBuff row, gated
+    // `ArmorGroupCount group_name="groupBiker" Equals 4` + `!HasBuff`, and is
+    // revoked by the LTE 3 row. The tier value is the buff's own
+    // PhysicalDamageResist row gated on ArmorGroupLowestQuality. All of it is
+    // data: items.xml ArmorGroup, buffs.xml rows.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const bonus = g.buffs.indexOfName("buffBikerSetBonus").?;
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
+    // Full set at qualities 5/4/4/3: count 4, lowest 3 (slot order must not
+    // decide the minimum).
+    const pieces = [_]struct { name: []const u8, quality: u8 }{
+        .{ .name = "armorBikerHelmet", .quality = 5 },
+        .{ .name = "armorBikerOutfit", .quality = 4 },
+        .{ .name = "armorBikerGloves", .quality = 4 },
+        .{ .name = "armorBikerBoots", .quality = 3 },
+    };
+    for (pieces, 0..) |pc, i| {
+        const def = g.items.byName(pc.name).?;
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = pc.quality };
+    }
+    try stepTicks(g, 46);
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) != null);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), g.sim.buff_phys_resist[ps], 0.001);
+    // Losing one piece fires the LTE 3 RemoveBuff row. Stock marks the buff
+    // Remove and the buff tick deletes it on the following tick, so the same
+    // tick's armor fold still sees it.
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 3] = .{};
+    // The revoke row fires on the status buff's own update rate, and the buff
+    // tick reaps a flagged instance on the following tick, so step until it is
+    // gone and record that it was flagged on the way.
+    var saw_flag = false;
+    var wait: usize = 0;
+    while (wait < 60) : (wait += 1) {
+        try g.step();
+        const inst = g.sim.buffs[ps].find(bonus) orelse break;
+        if (inst.flags.remove) saw_flag = true;
+    }
+    try std.testing.expect(saw_flag);
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
+    // The client sees exactly one removal: the flagged buff is relayed by the
+    // expiry drain, not by the row that flagged it (relaying both would send a
+    // second NetPackageAddRemoveBuff for the same buff).
+    var removes: u32 = 0;
+    const ar_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    for (capture.slots[0..capture.n]) |sl| {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ar_id) continue;
+            var nb: [128]u8 = undefined;
+            const v = wire_stock_buff.parseAddRemoveBuff(p.body, &nb) catch continue;
+            if (!v.adding and std.mem.eql(u8, v.name, "buffBikerSetBonus")) removes += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), removes);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+    // A different set's pieces do not grant the biker bonus.
+    const nomad = g.items.byName("armorNomadHelmet").?;
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = nomad.id, .count = 1, .quality = 3 };
+    try stepTicks(g, 46);
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
+}
+
+test "the survival pass reads the held item's tags for HoldingItemHasTags" {
+    // The tick fills the ctx from the held toolbelt slot, so a row gated
+    // HoldingItemHasTags (IL=37) folds only while a matching item is in hand.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const reqs = [_]requirements.Requirement{.{
+        .kind = .holding_item_has_tags,
+        .name = "HoldingItemHasTags",
+        .list = "perkDeadEye",
+    }};
+    const perks = [_]assets_progression.PerkDef{.{
+        .name = "perkHoldTest",
+        .max_level = 1,
+        .passives = &.{.{ .name = "HealthMax", .op = .base_add, .value = 50, .reqs = &reqs }},
+    }};
+    g.progression_table.perks = &perks;
+    cl.skill_levels[0] = .{ .name = "perkHoldTest", .level = 1 };
+    cl.skill_level_n = 1;
+    g.sim.health[ps].base_max_hp = 100;
+    // Empty hand: the gate refuses.
+    g.sim.inventory[ps].holding = ecs.components.inv_no_holding;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // A hunting rifle carries perkDeadEye in its Tags property.
+    const rifle = g.items.byName("gunRifleT1HuntingRifle").?;
+    g.sim.inventory[ps].holding = 0;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = rifle.id, .count = 1 };
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+}
+
+test "the survival pass resolves a sandbox-gated row from the server code" {
+    // The tick decodes Game.sandbox_code once and hands the groups to the
+    // requirement ctx, so SandboxOptionBool (IL=18) reads the operator's
+    // setting. A hand-built perk row with a literal value makes the gate
+    // visible in max_hp, unlike buffStatusCheck01's @cvar rows.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const reqs = [_]requirements.Requirement{.{
+        .kind = .sandbox_option_bool,
+        .name = "SandboxOptionBool",
+        .arg = "PlayerLevelBonusApplied",
+    }};
+    const perks = [_]assets_progression.PerkDef{.{
+        .name = "perkSandboxTest",
+        .max_level = 1,
+        .passives = &.{.{ .name = "HealthMax", .op = .base_add, .value = 50, .reqs = &reqs }},
+    }};
+    g.progression_table.perks = &perks;
+    cl.skill_levels[0] = .{ .name = "perkSandboxTest", .level = 1 };
+    cl.skill_level_n = 1;
+    g.sim.health[ps].base_max_hp = 100;
+    // "AALA" = option AL (id 11 = PlayerLevelBonusApplied) at index A (No):
+    // the gated row refuses, so only the 100 base max remains. The explicit
+    // polarities are pinned here rather than the no-code default because
+    // buffStatusCheck01's cvar updates are stateful across ticks; the census
+    // default itself is pinned in the sandbox/buffs/requirements tests.
+    g.sandbox_code = "AALA";
+    try stepTicks(g, 46);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // "AALB" (Yes) lets the row apply: 150 = base 100 + the synthetic 50.
+    g.sandbox_code = "AALB";
+    g.sim.health[ps].base_max_hp = 100;
+    try stepTicks(g, 46);
+    // 150 = base 100 + the synthetic perk's 50, with the level bonus at zero.
+    // Accounted row by row now that `value="@cvar"` operands are live:
+    // buffStatusCheck01 adds buffLevelUpTracking (`PlayerLevel GT
+    // @$LastPlayerLevel`, 1 > 0), whose update row sets `$LastPlayerLevel` to 1
+    // and then closes its own guard; check01's update sets
+    // `$PlayerLevelBonus = @$LastPlayerLevel` (1) and its `PlayerLevel LT 2` row
+    // subtracts 1, so `HealthMax base_add @$PlayerLevelBonus` contributes 0. The
+    // -1 this scenario used to see came from the operand being a constant 0,
+    // which kept `$LastPlayerLevel` at 0 forever.
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+}
+
+test "crafting tier follows the stock crafting-skill rows" {
+    // Recipe.GetCraftingTier (IL=22): base 1 folded with the player's crafting
+    // skill rows whose tags match the recipe's tag set (which includes the
+    // recipe name), at the skill's purchased level. craftingRepairTools'
+    // claw-hammer row is base_add 1,2,3,4,5,5 at levels 8,12,16,20,25,50.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const recipe = g.recipes.byName("meleeToolRepairT1ClawHammer") orelse return error.SkipZigTest;
+    // No skill points: the row's curve is outside its level window, so the
+    // tier stays at the base 1.
+    try std.testing.expectEqual(@as(u8, 1), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // Level 16 lands inside the 12..16 segment (value 3): base 1 + 3 = 4.
+    cl.skill_levels[0] = .{ .name = "craftingRepairTools", .level = 16 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(u8, 4), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // Level 50 is the last anchor (value 5): base 1 + 5 = 6, the quality cap.
+    cl.skill_levels[0].level = 50;
+    try std.testing.expectEqual(@as(u8, 6), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // A recipe whose tag set matches no Skill/Perk CraftingTier row stays at 1.
+    const stone = g.recipes.byName("resourceWood") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(u8, 1), game_craft.craftingTierFor(g, cl.slot, stone));
+}
+
+test "crafting consumes tier-scaled ingredients and yields a tier-quality item" {
+    // Recipe.CanCraft: with UseIngredientModifier the required count is the
+    // recipe's CraftingIngredientCount at the crafting tier, so armorPrimitive
+    // Helmet's base 5 fibers/wood becomes 15 at tier 3 (row level 2,3,4,5,6 =
+    // +5,+10,+15,+20,+30). The crafted item then carries the tier as quality.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const recipe = g.recipes.byName("armorPrimitiveHelmet") orelse return error.SkipZigTest;
+    const ridx: u16 = blk: {
+        for (g.recipes.defs, 0..) |d, i| {
+            if (std.mem.eql(u8, d.name, recipe.name)) break :blk @intCast(i);
+        }
+        return error.SkipZigTest;
+    };
+    // craftingArmor level 4: the primitive row lands on value 2 (tier 3).
+    cl.skill_levels[0] = .{ .name = "craftingArmor", .level = 4 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(u8, 3), game_craft.craftingTierFor(g, cl.slot, recipe));
+
+    const out_id = g.ecsIdFromItemName("armorPrimitiveHelmet");
+    const fibers = g.ecsIdFromItemName("resourceYuccaFibers");
+    const wood = g.ecsIdFromItemName("resourceWood");
+    const cloth = g.ecsIdFromItemName("resourceCloth");
+    const tape = g.ecsIdFromItemName("resourceDuctTape");
+    // 14 fibers is one short of the tier-3 requirement.
+    try std.testing.expect(g.sim.depositItem(ps, fibers, 14));
+    try std.testing.expect(g.sim.depositItem(ps, wood, 15));
+    try std.testing.expect(g.sim.depositItem(ps, cloth, 1));
+    try std.testing.expect(g.sim.depositItem(ps, tape, 1));
+    try std.testing.expect(!g.tryCraft(cl.slot, ridx, 1));
+    try std.testing.expect(g.sim.depositItem(ps, fibers, 1));
+    try std.testing.expect(g.tryCraft(cl.slot, ridx, 1));
+
+    var found_quality: u8 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start]) |sl| {
+        if (sl.item_id == out_id and sl.count > 0) found_quality = sl.quality;
+    }
+    try std.testing.expectEqual(@as(u8, 3), found_quality);
+}
+
+test "the survival pass folds the armor query into buff_phys_resist" {
+    // god carries an untagged PhysicalDamageResist 200 row and a
+    // coredamageresist-tagged one. Equipment::GetTotalPhysicalArmorRating
+    // (IL=887) queries passive 41 with that tag, so the per-tick cache the
+    // armor fold fills is 400. Before the tag split it was the untagged 200.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const god = g.buffs.indexOfName("god").?;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = god,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 400), g.sim.buff_phys_resist[ps], 0.001);
+}
+
+/// Zero every active buff's elapsed counter so a measured tick sees fresh
+/// buffs (duration-anchored rows are time-scaled).
+/// Advance `n` ticks. The buff lifecycle events are rate-driven now (stock runs
+/// `onSelfBuffUpdate` on the buff's own `<update_rate>`, seconds * 20 ticks:
+/// check01 40, check02 44), so a scenario that expects a check buff's rows to
+/// have run must wait out that rate rather than assume one tick.
+fn stepTicks(g: *Game, n: usize) !void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) try g.step();
+}
+
+fn resetBuffAges(set: *ecs.components.BuffSet) void {
+    for (&set.slots) |*slot| {
+        if (slot.active) slot.duration_ticks = 0;
+    }
+}
+
+test "a gated perk row stops folding when its requirement fails" {
+    // perkHealingFactor's HealthChangeOT row is gated
+    // `!HasBuff buffStatusHungry03,buffStatusThirsty03` (progression.xml). The
+    // survival pass resolves that gate against the live BuffSet, so a starving
+    // or dehydrated player must not get the regen. Before the requirement
+    // evaluator existed the row folded unconditionally.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const h = &g.sim.health[ps];
+    h.base_max_hp = 100;
+    h.max_hp = 100;
+    cl.skill_levels[0] = .{ .name = "perkHealingFactor", .level = 5 };
+    cl.skill_level_n = 1;
+    // Stage 1 of both bars (40% of max): neither starving nor well fed, so the
+    // perk's HealthChangeOT is the only positive HP term.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.4 * h.water_max;
+    try g.step();
+    try std.testing.expect(h.hp > 50);
+
+    // Dehydrated (1% of max -> stage 3): the stage buffs go active during the
+    // pass, so the negated HasBuff gate refuses the regen. Settle first: a stage
+    // change marks the stale buff Remove and the buff tick reaps it on the next
+    // tick, and the stage rows are themselves gated on not already carrying a
+    // stage buff, so the two measured ticks must start from the same settled set
+    // with the same buff ages.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try stepTicks(g, 46);
+    const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
+
+    resetBuffAges(g.sim.buffsMut(ps));
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try g.step();
+    const with_perk = h.hp;
+
+    // The same dehydrated tick with the perk removed: an identical result is the
+    // proof the gated row contributed nothing.
+    resetBuffAges(g.sim.buffsMut(ps));
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    cl.skill_level_n = 0;
+    try g.step();
+    try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
+}
+
+test "every active buff fires its onSelfBuffStart rows once" {
+    // buffShocked's onSelfBuffStart rows write $buffShockedDamage (the row that
+    // matches its gates) and $buffShockedDisplay. Before the lifecycle sweep only
+    // buffStatusCheck01/02 were driven at all, so no other buff's start rows ran.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const shocked = g.buffs.indexOfName("buffShocked") orelse return error.SkipZigTest;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("$buffShockedDamage"), 0.001);
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = shocked,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    try g.step();
+    // The ungated `set -5` row applies at the default state.
+    try std.testing.expectApproxEqAbs(@as(f32, -5), cl.cvars.get("$buffShockedDamage"), 0.001);
+    // Fired once, not every tick: a second pass leaves the value alone.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, -5), cl.cvars.get("$buffShockedDamage"), 0.001);
+}
+
+test "the armour status buffs gate on the worn-armour rating" {
+    // check01's buffStatusArmorLow/High/Broken rows read
+    // `StatCompareCurrent stat="Armor"`, which resolves since the rating reached
+    // the gate ctx. A bare player (rating 0) is "broken armour": the LTE 0.1 row
+    // applies, the 0.25/0.75 ones do not.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const broken = g.buffs.indexOfName("buffStatusArmorBroken") orelse return error.SkipZigTest;
+    const low = g.buffs.indexOfName("buffStatusArmorLow") orelse return error.SkipZigTest;
+    try stepTicks(g, 46);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+    try std.testing.expect(g.sim.buffs[ps].find(broken) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(low) == null);
+}
+
+test "an entity can hold a full stock buff set, not just eight" {
+    // The stage machine alone needs the six hunger/thirst stages plus the level
+    // tracker, and a real player also carries the check buffs, an injury and a
+    // weather buff. At the old cap of 8 the thirst stages (added last) fell off
+    // the end of the fixed set and were re-added every tick.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const names = [_][]const u8{
+        "buffStatusHungry01",  "buffStatusHungry02",        "buffStatusHungry03",
+        "buffStatusThirsty01", "buffStatusThirsty02",       "buffStatusThirsty03",
+        "buffLevelUpTracking", "buffBiomeProgressionCheck", "buffCheckScreenEffects",
+        "buffSmellCheck",
+    };
+    for (names) |n| {
+        const id = g.buffs.indexOfName(n) orelse return error.SkipZigTest;
+        _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+            .def_id = id,
+            .duration = 0,
+            .stack_type = ecs_buff.StackType.ignore,
+            .update_rate_ticks = 20,
+            .remove_on_death = false,
+        }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    }
+    for (names) |n| {
+        const id = g.buffs.indexOfName(n).?;
+        try std.testing.expect(g.sim.buffs[ps].find(id) != null);
+    }
+    try std.testing.expectEqual(@as(u8, names.len), g.sim.buffs[ps].count());
+}
+
+test "the entity class Buffs list parses from entityclasses.xml" {
+    // entityclasses.xml playerMale `Buffs="buffStatusCheck01,buffStatusCheck02"`.
+    // The parsed list is the input stock applies to the class when it enters the
+    // game; activating it in the server (and the survival dynamics that shift
+    // with check01's own passives folding) is the next step, not this one.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const pdef = g.entities.byHash(assets_unity_hash.class_player_male) orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(usize, 2), pdef.buffs.len);
+    try std.testing.expectEqualStrings("buffStatusCheck01", pdef.buffs[0]);
+    try std.testing.expectEqualStrings("buffStatusCheck02", pdef.buffs[1]);
+    // Every name resolves in the buff catalog (fail closed otherwise).
+    for (pdef.buffs) |b| try std.testing.expect(g.buffs.indexOfName(b) != null);
+    // The class list is applied when the player enters the game, so both check
+    // buffs are active from the first survival pass (their own passives then
+    // fold and the client is told about them).
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (pdef.buffs) |b| {
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName(b).?) == null);
+    }
+    try g.step();
+    for (pdef.buffs) |b| {
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName(b).?) != null);
+    }
+}
+
+test "the armor-perk chain derives its CVars from the worn items" {
+    // buffStatusCheck02's light-armor chain, all data: `WornItems tags="lightArmor"
+    // Equals N` picks `.ArmorLightWorn`, `ProgressionLevel perkLightArmor` picks
+    // `.ArmorLightLevel`, and `.ArmorLightTotal` is `set @.ArmorLightLevel` then
+    // `multiply @.ArmorLightWorn`. Before WornItems existed the first row refused
+    // closed, so the whole chain (and the `PhysicalDamageResist = @.ArmorLightTotal`
+    // passive it feeds) read 0.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 1 };
+    cl.skill_level_n = 1;
+    // Four light-armor pieces (items.xml Tags carry `lightArmor`).
+    const pieces = [_][]const u8{ "armorPrimitiveHelmet", "armorPrimitiveOutfit", "armorPrimitiveGloves", "armorPrimitiveBoots" };
+    for (pieces, 0..) |name, i| {
+        const def = g.items.byName(name).?;
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = 1 };
+    }
+    try stepTicks(g, 46);
+    // level 1 * 4 worn pieces.
+    try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightWorn"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".ArmorLightLevel"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightTotal"), 0.001);
+    // buffStatusCheck02 is an active buff now (entity class Buffs=), so its own
+    // `PhysicalDamageResist base_add @.ArmorLightTotal` row folds: the armour
+    // rating gains exactly the derived total.
+    const with_perk_resist = g.sim.buff_phys_resist[ps];
+    try std.testing.expect(with_perk_resist >= 4);
+    // Without the perk the effect_group gate refuses the chain and the
+    // "remove if not in use" group drops the total.
+    cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 0 };
+    try stepTicks(g, 46);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".ArmorLightTotal"), 0.001);
+    try std.testing.expectApproxEqAbs(with_perk_resist - 4, g.sim.buff_phys_resist[ps], 0.001);
+}
+
+test "the check buffs' entered-game rows set their CVars and add their buffs" {
+    // buffStatusCheck01 carries the entered-game rows: stock writes the hazard
+    // durations as CVars and adds buffBiomeProgressionCheck/buffCheckScreenEffects.
+    // zdtd fires the event once per client session now; before this the CVar
+    // store did not exist and onSelfEnteredGame never ran.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const prog = g.buffs.indexOfName("buffBiomeProgressionCheck") orelse return error.SkipZigTest;
+    try std.testing.expect(g.sim.buffs[ps].find(prog) == null);
+    try std.testing.expect(!cl.entered_game_fired);
+    try g.step();
+    try std.testing.expect(cl.entered_game_fired);
+    // Values are the stock XML's (buffs.xml onSelfEnteredGame rows).
+    try std.testing.expectApproxEqAbs(@as(f32, 25200), cl.cvars.get("$infectionMaxDuration"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3600), cl.cvars.get("$dysenteryMaxDuration"), 0.001);
+    try std.testing.expect(g.sim.buffs[ps].find(prog) != null);
+    // The add is relayed so the client sees the same buff set.
+    const ar_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    var saw_progression = false;
+    for (capture.slots[0..capture.n]) |sl| {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ar_id) continue;
+            var nb: [128]u8 = undefined;
+            const v = wire_stock_buff.parseAddRemoveBuff(p.body, &nb) catch continue;
+            if (v.adding and std.mem.eql(u8, v.name, "buffBiomeProgressionCheck")) saw_progression = true;
+        }
+    }
+    try std.testing.expect(saw_progression);
+    // Fired once: a second pass leaves the same values.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 25200), cl.cvars.get("$infectionMaxDuration"), 0.001);
+}
+
+test "the survival stage buff tracks the thresholds and clears on recovery" {
+    // buffStatusCheck01's stage rows are gated on their own stage buff
+    // (`!HasBuff buffStatusThirsty03,...`), so the active stage cannot be read
+    // back out of the row requests: it comes from the thresholds in buffs.xml
+    // (buffs.survival). Starving and dehydrated to stage 3 must leave exactly the
+    // stage-3 buffs, and eating/drinking back to full must drop them again
+    // (stock clears the stages from the healing buffs' onSelfBuffStart rows;
+    // zdtd drives the same removal from the thresholds).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const h = &g.sim.health[ps];
+    h.base_max_hp = 100;
+    h.max_hp = 100;
+    const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
+    const hungry03 = g.buffs.indexOfName("buffStatusHungry03").?;
+    // Stage 3 of both bars (<= 2% of max). The transition tick requests every
+    // passing stage row (nothing is active yet), so the lower stages are marked
+    // Remove on the next tick and reaped on the one after.
+    h.food = 0.01 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try stepTicks(g, 46);
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(hungry03) != null);
+    // The lower stages must not survive the transition.
+    for ([_][]const u8{
+        "buffStatusThirsty01", "buffStatusThirsty02",
+        "buffStatusHungry01",  "buffStatusHungry02",
+    }) |name| {
+        const id = g.buffs.indexOfName(name).?;
+        try std.testing.expect(g.sim.buffs[ps].find(id) == null);
+    }
+    h.food = h.food_max;
+    h.water = h.water_max;
+    try stepTicks(g, 46);
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) == null);
+    try std.testing.expect(g.sim.buffs[ps].find(hungry03) == null);
+}
+
+test "breaking a container spills its pre-filled contents" { // 449 LootList blocks are CompositeTileEntity containers; their contents
     // live in the sim container store and must drop on break (the eviction
     // path spilled them; the break path dropped nothing).
     var tmp = std.testing.tmpDir(.{});
@@ -3792,4 +5213,1191 @@ test "breaking a container spills its pre-filled contents" {
         }
     }
     try std.testing.expect(found);
+}
+
+test "the three client-sent reports the server must not apply are handled and dropped" {
+    // Recovered 2026-09-06 by scanning the v3.2.0 IL for every NetPackage type
+    // that reaches ConnectionManager::SendToServer: 98 names, three of which
+    // had no C2S arm at all while GAP_ANALYSIS claimed they did. Each one is a
+    // report of state zdtd owns, so the handler must consume it (no unhandled
+    // count) and change nothing (DIVERGENCES 1.15 to 1.17).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+
+    g.sim.health[ps].hp = 42;
+    g.clients[ca.slot].xp = 555;
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    var frame_buf: [128]u8 = undefined;
+
+    // 1.15 EntityStatChanged: the stock 21-byte body claiming full health for
+    // the sender's own entity. Applying it would be a self-heal.
+    var stat_body: [21]u8 = undefined;
+    const stat = try packages.buildEntityStatChangedBody(
+        &stat_body,
+        ca.entity_id,
+        -1,
+        .health,
+        100,
+        100,
+        0,
+    );
+    try std.testing.expectEqual(@as(usize, 21), stat.len);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityStatChanged", stat));
+    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].hp);
+
+    // 1.17 SharedPartyKill: a forwarded party kill worth 100000 xp. Applying it
+    // would mint xp for a kill the server never saw.
+    var kill_body: [16]u8 = undefined;
+    const kill = try packages.stock_party.buildSharedKillBody(&kill_body, .{
+        .entity_type = 1,
+        .xp = 100000,
+        .entity_id = 900,
+        .killer_id = ca.entity_id,
+    });
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSharedPartyKill", kill));
+    try std.testing.expectEqual(@as(u64, 555), g.clients[ca.slot].xp);
+
+    // 1.16 GameEventResponse: responseType 11 is the one arm a stock client
+    // sends (BlockGameEvent block damage). zdtd keeps no event-sequence state.
+    var ev_body: [8]u8 = undefined;
+    @memset(&ev_body, 0);
+    ev_body[0] = 11;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageGameEventResponse", &ev_body));
+
+    // All three reached a handler: none of them raised the unhandled counter.
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+
+    // Truncated bodies are rejected as malformed, not trusted or trapped on.
+    const malformed_before = g.harness.counters.get(.c2s_malformed);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityStatChanged", stat[0..20]));
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSharedPartyKill", kill[0..15]));
+    try std.testing.expect(g.harness.counters.get(.c2s_malformed) >= malformed_before + 2);
+    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].hp);
+}
+
+test "the laser sight relays to other players but not back to the sender" {
+    // Stock NetPackagePlayerLaserSight ProcessPackage (IL=70): the server
+    // re-sends the body to every client except the sender's own entity, so a
+    // player sees a mate's laser dot. Filed as Twitch integration in
+    // GAP_ANALYSIS until 2026-09-06, which is why it went unimplemented.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    const ls_id = packages.idOf("NetPackagePlayerLaserSight").?;
+    var frame_buf: [128]u8 = undefined;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // entityId i32 | active bool | position Vector3 = 17 bytes (read IL=16).
+    var body: [17]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeI32(ca.entity_id);
+    try w.writeBool(true);
+    try w.writeF32(10.5);
+    try w.writeF32(64);
+    try w.writeF32(-3.25);
+    try std.testing.expectEqual(@as(usize, 17), w.written().len);
+
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackagePlayerLaserSight", w.written()));
+
+    var a_got = false;
+    var b_body: ?[]const u8 = null;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ls_id) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ls_id) b_body = p.body;
+        }
+    }
+    // No self-echo (AGENTS rule 19), and the mate gets the body verbatim.
+    try std.testing.expect(!a_got);
+    const relayed = b_body orelse return error.TestUnexpectedResult;
+    const parsed = try packages.parseLaserSight(relayed);
+    try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
+    try std.testing.expect(parsed.active);
+    try std.testing.expectEqual(@as(f32, 10.5), parsed.x);
+    try std.testing.expectEqual(@as(f32, -3.25), parsed.z);
+
+    // Claiming another player's entity is an ownership reject, not a relay:
+    // without the check a peer could paint a dot on anyone.
+    var spoof: [17]u8 = undefined;
+    var sw: wire_binary.Writer = .{ .buf = &spoof };
+    try sw.writeI32(ca.entity_id + 1000);
+    try sw.writeBool(true);
+    try sw.writeF32(1);
+    try sw.writeF32(2);
+    try sw.writeF32(3);
+    cap_b.clear();
+    const rejects_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackagePlayerLaserSight", sw.written()));
+    try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.ownership_rejects));
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != ls_id);
+        }
+    }
+}
+
+test "a fresh login sends the empty AuthConfirmation for the client to echo" {
+    // Stock AuthFinalizer.Authorize (IL=10) sends an empty AuthConfirmation
+    // as the last authorizer step; the client echoes it (ProcessPackage
+    // IL_002E) and the server's ReplyReceived completes auth. The echo arm
+    // existed without the send, so the round-trip never started.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const ac_id = packages.idOf("NetPackageAuthConfirmation") orelse
+        return error.TestUnexpectedResult;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap.slots[0..cap.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ac_id) continue;
+            // Empty body: read IL=1 touches nothing past the base header.
+            try std.testing.expectEqual(@as(usize, 0), p.body.len);
+            saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+}
+
+test "an owner receives their parked vehicles as a waypoint list" {
+    // Stock VehicleManager.UpdateVehicleWaypointsForPlayer (IL=69): the
+    // server ships the owner's (entityId, pos) vehicle pairs as
+    // NetPackageEntityWaypointList with listType Vehicle (0) so their map
+    // shows where they parked. Unowned vehicles are nobody's waypoints.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+    const wl_id = packages.idOf("NetPackageEntityWaypointList") orelse
+        return error.TestUnexpectedResult;
+
+    const v = g.sim.spawnVehicleEx(.minibike, 256, 70, 260, 500, 12, 1).?;
+    const vs = g.sim.slotOfNetId(v).?;
+    g.sim.vehicle[vs].owner_slot = @intCast(ca.slot);
+    const u = g.sim.spawnVehicleEx(.minibike, 300, 70, 300, 500, 12, 1).?;
+    _ = u; // unowned: must not appear in anyone's list
+
+    cap_a.clear();
+    cap_b.clear();
+    try g.sendVehicleWaypoints(ca.peer.?, ca.slot);
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != wl_id) continue;
+            // listType i16 Vehicle=0, count i32, then (id i32, 3xf32).
+            try std.testing.expect(p.body.len >= 6);
+            try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, p.body[0..2], .little));
+            try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, p.body[2..6], .little));
+            try std.testing.expectEqual(v, std.mem.readInt(i32, p.body[6..10], .little));
+            // The position follows the id, x/y/z in order. Only the id was
+            // asserted, so the wire-order audit found x, y and z
+            // interchangeable: a reorder would have parked a remote player's
+            // map marker at the wrong coordinates with the suite green. Read
+            // the sim's value so the assertion survives any spawn snapping.
+            const vpos = g.sim.transform[vs];
+            try std.testing.expectEqual(vpos.x, @as(f32, @bitCast(std.mem.readInt(u32, p.body[10..14], .little))));
+            try std.testing.expectEqual(vpos.y, @as(f32, @bitCast(std.mem.readInt(u32, p.body[14..18], .little))));
+            try std.testing.expectEqual(vpos.z, @as(f32, @bitCast(std.mem.readInt(u32, p.body[18..22], .little))));
+            saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+    // The other client gets nothing from this send.
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != wl_id);
+        }
+    }
+}
+
+test "a generator's remaining fuel survives a restart instead of refilling" {
+    // The grid rebuilds from the block plane, and applyToNode sets a
+    // generator's tank to max_fuel because that is right for a freshly placed
+    // one. Nothing carried the burnt-down level across, so every restart was a
+    // free refuel, and a trigger's delay/duration and a motion sensor's
+    // TargetType came back at their defaults the same way. None of those has a
+    // block-meta home (the switch latch does), so they ride their own
+    // entities.zen record, queued at load and applied when the chunk scan
+    // rebuilds the node.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const PowerStub = struct {
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 20001;
+            return null;
+        }
+        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
+            return null;
+        }
+        pub fn maxFuelByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
+            return null;
+        }
+        pub fn outputPerFuelByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 10;
+            return null;
+        }
+    };
+    const persist = @import("../persist.zig");
+    const gen_id: u16 = 20001;
+    const gx: i32 = 8;
+    const gy: i32 = 70;
+    const gz: i32 = 8;
+    const burnt_to: f32 = 250;
+
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var stub: PowerStub = .{};
+        try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+        defer stub.power_class_by_name.deinit(std.testing.allocator);
+        g.power_registry = ecs.powerblocks.Registry.build(&stub);
+
+        const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+        const blocks = ch.blocks.?;
+        blocks[@intCast(gx + gz * 16 + gy * 256)] = gen_id;
+        g.scanChunkPower(ch, 0, 0);
+        const ni = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+        // A fresh scan fills the tank; run it down as play would.
+        try std.testing.expectApproxEqAbs(@as(f32, 1000), g.sim.power.nodes[ni].fuel_or_energy, 0.01);
+        g.sim.power.nodes[ni].fuel_or_energy = burnt_to;
+        g.sim.power.nodes[ni].delay_idx = 3;
+        g.sim.power.nodes[ni].duration_idx = 2;
+        g.sim.power.nodes[ni].target_type = 8;
+        try persist.saveEntities(g);
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var stub: PowerStub = .{};
+        try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+        defer stub.power_class_by_name.deinit(std.testing.allocator);
+        g.power_registry = ecs.powerblocks.Registry.build(&stub);
+
+        try persist.loadEntities(g);
+        // Queued, not applied: no chunk has been scanned, so the node this
+        // record names does not exist yet.
+        try std.testing.expect(g.sim.power.pending_state_n > 0);
+        try std.testing.expect(g.sim.power.indexOfPosition(gx, gy, gz) == null);
+
+        const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+        const blocks = ch.blocks.?;
+        blocks[@intCast(gx + gz * 16 + gy * 256)] = gen_id;
+        g.scanChunkPower(ch, 0, 0);
+
+        const ni = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(burnt_to, g.sim.power.nodes[ni].fuel_or_energy, 0.01);
+        try std.testing.expectEqual(@as(u8, 3), g.sim.power.nodes[ni].delay_idx);
+        try std.testing.expectEqual(@as(u8, 2), g.sim.power.nodes[ni].duration_idx);
+        try std.testing.expectEqual(@as(i32, 8), g.sim.power.nodes[ni].target_type);
+        // Applied records are dropped, so a second scan cannot re-apply stale
+        // state over what the sim has done since.
+        try std.testing.expectEqual(@as(usize, 0), g.sim.power.pending_state_n);
+    }
+}
+
+test "a destroyed authored light does not come back on the next TE scan" {
+    // Lights are rebuilt from prefab TE data on the chunk scan, and
+    // `te_scanned` is per-session. So a lamp a player destroyed cleared its
+    // store entry, and the next restart re-scanned the prefab and put it
+    // straight back on a cell that is now air - the chunk stream then shipped
+    // a light for a block nobody can see.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/light_rescan", 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    // Find a chunk whose scan produces at least one light.
+    var found: ?struct { cx: i32, cz: i32, x: i32, y: i32, z: i32 } = null;
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    for (pf.items) |d| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const cx = @divFloor(d.x, 16);
+        const cz = @divFloor(d.z, 16);
+        const ch = g.world.getOrCreate(.{ .x = cx, .z = cz }) catch continue;
+        g.ensurePrefabStorageInChunk(ch, cx, cz);
+        var li: usize = 0;
+        while (li < light_te_mod.max_lights) : (li += 1) {
+            if (!g.light_te.used[li]) continue;
+            const l = &g.light_te.items[li];
+            if (@divFloor(l.x, 16) != cx or @divFloor(l.z, 16) != cz) continue;
+            found = .{ .cx = cx, .cz = cz, .x = l.x, .y = l.y, .z = l.z };
+            break;
+        }
+        if (found != null) break;
+    }
+    const f = found orelse return error.SkipZigTest;
+    const lpos = light_te_mod.PosKey{ .x = f.x, .y = f.y, .z = f.z };
+    try std.testing.expect(g.light_te.get(lpos) != null);
+
+    // Destroy the lamp the way any removal path does, then force a re-scan
+    // the way a restart does (te_scanned is runtime state).
+    try g.world.setBlockWorld(f.x, f.y, f.z, 0);
+    g.noteBlockRemoved(f.x, f.y, f.z, 0);
+    try std.testing.expect(g.light_te.get(lpos) == null);
+
+    const ch2 = try g.world.getOrCreate(.{ .x = f.cx, .z = f.cz });
+    ch2.te_scanned = false;
+    g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
+    try std.testing.expect(g.light_te.get(lpos) == null);
+}
+
+test "a mined-out prefab container does not come back on the next TE scan" {
+    // Same shape as the light case: prefab containers are rebuilt from TE data
+    // by the chunk scan, `te_scanned` is per-session, and the branch created
+    // one even when the cell held no block (falling back to the seed-chest id).
+    // So every prefab chest a player mined out returned on the next restart,
+    // with a fresh loot roll. The seed chest has its own placement in
+    // init_world and does not need that fallback.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/cont_rescan", 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    // Find a chunk whose scan produces a prefab container, rather than
+    // assuming a particular POI holds one.
+    var found: ?struct { cx: i32, cz: i32, pos: containers_mod.PosKey } = null;
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    for (pf.items) |d| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const cx = @divFloor(d.x, 16);
+        const cz = @divFloor(d.z, 16);
+        const ch = g.world.getOrCreate(.{ .x = cx, .z = cz }) catch continue;
+        g.ensurePrefabStorageInChunk(ch, cx, cz);
+        var ci: usize = 0;
+        while (ci < containers_mod.max_containers) : (ci += 1) {
+            if (!g.containers.used[ci]) continue;
+            const cont = &g.containers.items[ci];
+            if (cont.player_storage) continue;
+            if (@divFloor(cont.pos.x, 16) != cx or @divFloor(cont.pos.z, 16) != cz) continue;
+            found = .{ .cx = cx, .cz = cz, .pos = cont.pos };
+            break;
+        }
+        if (found != null) break;
+    }
+    const f = found orelse return error.SkipZigTest;
+    try std.testing.expect(g.containers.get(f.pos) != null);
+
+    // Mine it out through the shared removal hook, then force the re-scan a
+    // restart performs.
+    try g.world.setBlockWorld(f.pos.x, f.pos.y, f.pos.z, 0);
+    g.noteBlockRemoved(f.pos.x, f.pos.y, f.pos.z, 0);
+    try std.testing.expect(g.containers.get(f.pos) == null);
+
+    const ch2 = try g.world.getOrCreate(.{ .x = f.cx, .z = f.cz });
+    ch2.te_scanned = false;
+    g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
+    try std.testing.expect(g.containers.get(f.pos) == null);
+}
+
+test "a POI reset discards container contents instead of spilling them" {
+    // Stock's reset regenerates the chunk back to its prefab state (RE
+    // server-browser-prefabs.md 3.2 ResetBlocksAndRebuild), which discards
+    // what was there. Once noteBlockRemoved gained the ground spill, the reset
+    // inherited it and started dropping every displaced container as a bag -
+    // so a player could farm a POI by re-taking the quest that resets it.
+    // This covers the helper offline; "POI reset restores baked blocks over
+    // player edits" covers the reset call site, but needs a stock install.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    const cx: i32 = 300;
+    const cy: i32 = 70;
+    const cz: i32 = 300;
+    const seedContainer = struct {
+        fn call(gm: *Game, x: i32, y: i32, z: i32) !void {
+            const cont = gm.containers.getOrCreate(.{ .x = x, .y = y, .z = z }, 8, 1) orelse
+                return error.TestUnexpectedResult;
+            cont.slots[0] = .{ .item_id = 7, .count = 9, .quality = 1 };
+        }
+    }.call;
+
+    // A reset displaces the container: the entry goes, the contents do not
+    // reach the ground.
+    try seedContainer(g, cx, cy, cz);
+    const bags_before_reset = g.sim.countKind(.loot_bag);
+    g.noteBlockRemovedEx(cx, cy, cz, 1, false);
+    try std.testing.expect(g.containers.get(.{ .x = cx, .y = cy, .z = cz }) == null);
+    try std.testing.expectEqual(bags_before_reset, g.sim.countKind(.loot_bag));
+
+    // A removal at the same cell still spills, so the two are genuinely
+    // different rather than the spill having been dropped everywhere.
+    try seedContainer(g, cx, cy, cz);
+    const bags_before_break = g.sim.countKind(.loot_bag);
+    g.noteBlockRemoved(cx, cy, cz, 1);
+    try std.testing.expect(g.containers.get(.{ .x = cx, .y = cy, .z = cz }) == null);
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_break);
+}
+
+test "queued-verb policy: a denied verb is dropped before the command buffer" {
+    // Interception (paper 3.2.3 / ADR 0039): the effective per-module policy is
+    // checked at the `zdtd.queue` boundary, so a denied verb never reaches the
+    // ECS buffer or the host `bot` family. Operator denies add over the module's
+    // own declaration and operator allows clear it (right-biased merge).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const wasm_host = @import("wasm_host.zig");
+    g.wasm_plugins.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{"assets/fixtures/plugin_hello.wasm"},
+        &g.wasm_ctx,
+        .{},
+    );
+    defer g.wasm_plugins.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
+
+    const say_bit = plugin_mod.manifest.QueueVerb.say.bit();
+    // The operator list names the module by its wasm stem here (`plugin_hello`
+    // for assets/fixtures/plugin_hello.wasm); applyPluginPolicy matches the
+    // manifest name, the stem or the directory, and logs the effective policy.
+    const deny = [_]plugin_mod.manifest.PolicyEntry{.{ .module = "plugin_hello", .mask = say_bit }};
+    wasm_host.applyPluginPolicy(g, &deny, &.{});
+    try std.testing.expectEqual(say_bit, g.wasm_plugins.slots[0].denied);
+
+    const before = g.sim.commands.n;
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "say denied hello");
+    try std.testing.expectEqual(before, g.sim.commands.n);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
+
+    // A verb the policy allows still reaches the buffer.
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "spawn 1 2 3 10");
+    try std.testing.expectEqual(before + 1, g.sim.commands.n);
+
+    // Native source 0 is not a policy subject.
+    wasm_host.wasmQueue(&g.wasm_ctx, 0, "say native hello");
+    try std.testing.expectEqual(before + 2, g.sim.commands.n);
+
+    // Operator allow clears the module's own deny.
+    g.wasm_plugins.slots[0].op_allow = say_bit;
+    g.wasm_plugins.slots[0].refreshDenied();
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "say allowed hello");
+    try std.testing.expectEqual(before + 3, g.sim.commands.n);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
+
+    // `spawn` also covers `bot spawn` (review F10): both create an entity, so
+    // a policy that forbids entity creation cannot be bypassed through the bot
+    // family. Other bot sub-verbs stay behind the `bot` verb alone.
+    const spawn_bit = plugin_mod.manifest.QueueVerb.spawn.bit();
+    g.wasm_plugins.slots[0].op_allow = 0;
+    g.wasm_plugins.slots[0].module_deny = spawn_bit;
+    g.wasm_plugins.slots[0].refreshDenied();
+    const bots_before = g.bots.n;
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot spawn 5 5");
+    try std.testing.expectEqual(@as(u64, 2), g.harness.counters.get(.plugin_verbs_denied));
+    try std.testing.expectEqual(bots_before, g.bots.n);
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot count");
+    try std.testing.expectEqual(@as(u64, 2), g.harness.counters.get(.plugin_verbs_denied));
+}
+
+test "starter_zombies gates the near-spawn demo hostiles" {
+    // `[sim] starter_zombies`: the demo seeds (2 zombies + sleeper + animal)
+    // are a zdtd convenience; stock spawns them lazily through the AIDirector
+    // (docs/DIVERGENCES.md). The switch must leave the world genuinely empty
+    // when off and keep the demo world populated when on (default).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const off_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "off" });
+    defer std.testing.allocator.free(off_dir);
+    io_fs.mkdirPath(off_dir);
+    const g_off = try Game.createWithOptions(std.testing.allocator, off_dir, 0, .{ .starter_zombies = false });
+    defer {
+        g_off.deinit();
+        std.testing.allocator.destroy(g_off);
+    }
+    try std.testing.expectEqual(@as(u32, 0), g_off.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 0), g_off.sim.countKind(.animal));
+
+    const on_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "on" });
+    defer std.testing.allocator.free(on_dir);
+    io_fs.mkdirPath(on_dir);
+    const g_on = try Game.create(std.testing.allocator, on_dir, 0);
+    defer {
+        g_on.deinit();
+        std.testing.allocator.destroy(g_on);
+    }
+    try std.testing.expectEqual(@as(u32, 3), g_on.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 1), g_on.sim.countKind(.animal));
+
+    // `[sim] demo_seed = false` takes the whole near-spawn demo set with it:
+    // the trader, the minibike, the seed chest and the demo turret, not just
+    // the hostiles. docs/DIVERGENCES.md 6.2 documents the pair.
+    const none_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "none" });
+    defer std.testing.allocator.free(none_dir);
+    io_fs.mkdirPath(none_dir);
+    const g_none = try Game.createWithOptions(std.testing.allocator, none_dir, 0, .{ .demo_seed = false });
+    defer {
+        g_none.deinit();
+        std.testing.allocator.destroy(g_none);
+    }
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.animal));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.trader));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.vehicle));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.turret));
+    // The default world seeds all four kinds, so the switch is not vacuous.
+    try std.testing.expect(g_on.sim.countKind(.trader) > 0);
+    try std.testing.expect(g_on.sim.countKind(.vehicle) > 0);
+    try std.testing.expect(g_on.sim.countKind(.turret) > 0);
+}
+
+test "spawn_starter_kit config replaces the built-in kit and fails closed" {
+    // `[sim] spawn_starter_kit` is server policy (ADR 0010): stock defines its
+    // kit in code, so zdtd makes it config. A configured spec resolves names
+    // through items.xml, omits unknown names, and clamps counts to
+    // Stacknumber; an absent spec keeps the historical four-row default.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const kit_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "kit" });
+    defer std.testing.allocator.free(kit_dir);
+    io_fs.mkdirPath(kit_dir);
+    const g = try Game.createWithOptions(std.testing.allocator, kit_dir, 0, .{
+        .spawn_starter_kit = " foodCanBeef:2 , noSuchItem:3, resourceWood:9999 ",
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const beef = g.items.ecsIdByName("foodCanBeef");
+    const wood = g.items.ecsIdByName("resourceWood");
+    const coin = g.items.ecsIdByName("casinoCoin");
+    try std.testing.expect(beef != 0 and wood != 0 and coin != 0);
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectEqual(@as(u32, 2), g.sim.inventory[ps].countItem(beef));
+    // The unknown row is omitted rather than falling back to the default kit.
+    try std.testing.expectEqual(@as(u32, 0), g.sim.inventory[ps].countItem(coin));
+    const wood_n = g.sim.inventory[ps].countItem(wood);
+    try std.testing.expect(wood_n > 0);
+    try std.testing.expect(wood_n <= @as(u32, g.sim.maxStack(wood)));
+
+    const def_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "default" });
+    defer std.testing.allocator.free(def_dir);
+    io_fs.mkdirPath(def_dir);
+    const g2 = try Game.create(std.testing.allocator, def_dir, 0);
+    defer {
+        g2.deinit();
+        std.testing.allocator.destroy(g2);
+    }
+    var cap2: ln_peer.Capture = .{};
+    const cl2 = try g2.attachJoinedClient(&cap2);
+    const ps2 = g2.sim.playerByPeer(cl2.slot).?;
+    try std.testing.expectEqual(@as(u32, 5), g2.sim.inventory[ps2].countItem(beef));
+    try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
+}
+
+test "loot prob passives scale tagged entries (stock perkDeadEye)" {
+    // progression.xml's perkDeadEye carries
+    // `<passive_effect name="LootProb" operation="perc_add" level="1,5"
+    // value="2,10" tags="rifleSkill"/>` and the same for `ammo762mm`. The loot
+    // fold answers a tagged entry's probabilty from the opener's purchased
+    // perk rows, so a Dead Eye 5 player sees +10% on rifle-tagged loot and an
+    // unrelated tag is untouched.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Fresh character: every tag folds to the base.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "ammo762mm", 0.5), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-4);
+
+    // Dead Eye 5: `perc_add 10` on the rifle/ammo762mm rows.
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkDeadEye", 5));
+    const rifle = g.lootProbScale(cl.slot, ps, "ammo762mm", 0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.55), rifle, 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.55), g.lootProbScale(cl.slot, ps, "rifleSkill", 0.5), 1e-3);
+    // An untagged query never sees a tagged row.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-4);
+
+    // Equipped-item rows fold at their quality tier: armorFarmerHelmet carries
+    // `LootProb perc_add 2,4,6,8,10,20 tier=1..6 tags="seedSkill"`.
+    const helmet = g.items.ecsIdByName("armorFarmerHelmet");
+    if (helmet != 0) {
+        const esi: usize = @import("../../ecs/components.zig").inv_equip_start;
+        g.sim.inventory[ps].slots[esi] = .{ .item_id = helmet, .count = 1, .quality = 6 };
+        try std.testing.expectApproxEqAbs(@as(f32, 0.6), g.lootProbScale(cl.slot, ps, "seedSkill", 0.5), 1e-3);
+        g.sim.inventory[ps].slots[esi].quality = 1;
+        try std.testing.expectApproxEqAbs(@as(f32, 0.51), g.lootProbScale(cl.slot, ps, "seedSkill", 0.5), 1e-3);
+        // An unrelated query still ignores the helmet row (shotgunSkill has no
+        // LootProb row on any worn item or purchased perk here).
+        try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-3);
+        g.sim.inventory[ps].slots[esi] = .{};
+    }
+}
+
+test "loot entry mods install on the spawned gun" {
+    // Stock `ItemValue.createDefaultModItems` (IL=759): a looted item's `mods=`
+    // list names slot tags (`barrelAttachments`) or contributed tags (`scope`);
+    // each resolves to a fitting modifier, installs when the roll passes
+    // `mod_chance`, and halves the chance after every install. The 5 stock gun
+    // entries use 0.5 / 1. The modifiers are item classes in the same id space
+    // as items.xml (`ItemTable.addItemClasses`), so the installed id resolves
+    // back to the modifier catalog and encodes on the wire.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const pistol = g.items.ecsIdByName("gunHandgunT1Pistol");
+    const sniper = g.items.ecsIdByName("gunRifleT3SniperRifle");
+    if (pistol == 0 or sniper == 0) return error.SkipZigTest;
+    // The modifier rows are item classes: their ECS id resolves and maps to an
+    // absolute stock type past ItemsStartHere (the client's item id space).
+    const barrel_mod = g.items.ecsIdByName("modGunBarrelExtender");
+    try std.testing.expect(barrel_mod != 0);
+    try std.testing.expect(g.items.stockTypeFor(barrel_mod) > @import("../../assets/items.zig").items_start_here);
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="gunCrate" count="all">
+        \\  <item name="gunHandgunT1Pistol" mods="barrelAttachments" mod_chance="1"/>
+        \\  <item name="gunRifleT3SniperRifle" mods="scope" mod_chance="1"/>
+        \\  <item name="gunHandgunT1Pistol" mods="barrelAttachments" mod_chance="0"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const cont = g.containers.getOrCreate(.{ .x = 7, .y = 70, .z = 7 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "gunCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+
+    const ModTable = @import("../../assets/item_modifiers.zig").ModTable;
+    // 1) The barrel-tag row installed a fitting barrel mod.
+    try std.testing.expectEqual(pistol, cont.slots[0].item_id);
+    try std.testing.expect(cont.slots[0].mod_n >= 1);
+    const bar_def = g.items.byId(cont.slots[0].mods[0]).?;
+    const bar_m = g.item_mods.byName(bar_def.name).?;
+    try std.testing.expect(ModTable.tagListContains(bar_m.installable, "barrelAttachments") or
+        ModTable.tagListContains(bar_m.modifier, "barrelAttachments"));
+    // 2) The `scope` tag matches a mod's contributed tags.
+    try std.testing.expectEqual(sniper, cont.slots[1].item_id);
+    try std.testing.expect(cont.slots[1].mod_n >= 1);
+    const sc_def = g.items.byId(cont.slots[1].mods[0]).?;
+    const sc_m = g.item_mods.byName(sc_def.name).?;
+    try std.testing.expect(ModTable.tagListContains(sc_m.modifier, "scope") or
+        ModTable.tagListContains(sc_m.installable, "scope"));
+    // 3) mod_chance 0 installs nothing.
+    try std.testing.expectEqual(pistol, cont.slots[2].item_id);
+    try std.testing.expectEqual(@as(u8, 0), cont.slots[2].mod_n);
+}
+
+test "loot bag fill carries the rolled quality, stackables stay quality 1" {
+    // A death/airdrop bag is a stock LootContainer roll, so the rolled quality
+    // (and random-durability wear) belongs on the deposited stack; a stackable
+    // keeps quality 1 like every other deposit path.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const axe = g.items.ecsIdByName("meleeToolRepairT0StoneAxe");
+    const coin = g.items.ecsIdByName("casinoCoin");
+    if (axe == 0 or coin == 0) return error.SkipZigTest;
+    // The quality gate is HasQuality, not stack size: the axe has quality with
+    // Stacknumber 500, the coin is a stackable without quality.
+    if (!g.items.byId(axe).?.has_quality or g.items.byId(coin).?.has_quality) return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="bagGroup" count="all">
+        \\  <item name="meleeToolRepairT0StoneAxe" quality="6"/>
+        \\  <item name="casinoCoin" count="5" quality="3"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    const bag = g.sim.spawnLootBag(1, 70, 1, coin, 1).?;
+    g.fillLootBagFromTable(bag, "bagGroup", 7, 1);
+    const bs = g.sim.slotOfNetId(bag).?;
+    var saw_axe = false;
+    var saw_coin = false;
+    for (g.sim.inventory[bs].slots) |sl| {
+        if (sl.item_id == axe) {
+            try std.testing.expectEqual(@as(u8, 6), sl.quality);
+            saw_axe = true;
+        }
+        if (sl.item_id == coin and sl.count > 1) {
+            try std.testing.expectEqual(@as(u8, 1), sl.quality);
+            saw_coin = true;
+        }
+    }
+    try std.testing.expect(saw_axe and saw_coin);
+}
+
+test "container loot starts a random-durability item worn" {
+    // Stock LootContainer: when `random_durability="true"` and the item has a
+    // MaxUseTimes, UseTimes = (int)(max * RandomRange(0.2, 0.8)); otherwise 0.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const axe = g.items.ecsIdByName("meleeToolRepairT0StoneAxe");
+    if (axe == 0) return error.SkipZigTest;
+    const max_use = g.itemMaxUseTimes(axe, 1);
+    if (max_use == 0) return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="duraCrate" count="all">
+        \\  <item name="meleeToolRepairT0StoneAxe" random_durability="true"/>
+        \\  <item name="meleeToolRepairT0StoneAxe" random_durability="false"/>
+        \\  <item name="meleeToolRepairT0StoneAxe" quality="6"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const cont = g.containers.getOrCreate(.{ .x = 6, .y = 70, .z = 6 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "duraCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+    try std.testing.expect(cont.slots[0].item_id == axe and cont.slots[1].item_id == axe);
+    const lo: f32 = @as(f32, @floatFromInt(max_use)) * 0.15; // truncation margin
+    const hi: f32 = @as(f32, @floatFromInt(max_use)) * 0.85;
+    try std.testing.expect(cont.slots[0].use_times >= lo and cont.slots[0].use_times <= hi);
+    try std.testing.expectEqual(@as(f32, 0), cont.slots[1].use_times);
+    // A tool carries quality despite Stacknumber 500 (`ItemClass.HasQuality`),
+    // which the old `stack == 1` heuristic dropped.
+    try std.testing.expectEqual(@as(u8, 6), cont.slots[2].quality);
+}
+
+test "container loot applies entry buffs to the opener" {
+    // Stock collects a spawned entry's `buffs=` during the roll and applies the
+    // list to the opener after it (LootContainer.ExecuteBuffActions ->
+    // Buffs.AddBuff). The fill path routes the entry's list through a sink into
+    // the catalog add, which is what makes a bookworm success chime reach the
+    // client. An unknown name fails closed (stock ships one typo'd row).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const buff_id = g.buffs.indexOfName("buffPerkBookwormSuccess") orelse return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="buffCrate" count="all">
+        \\  <item name="foodCanBeef" buffs="buffPerkBookwormSuccess"/>
+        \\  <item name="resourceWood" buffs="noSuchBuffAtAll"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.sim.buffs[ps].find(buff_id) == null);
+
+    const cont = g.containers.getOrCreate(.{ .x = 5, .y = 70, .z = 5 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "buffCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+    // The known buff landed; the typo'd name resolves to no catalog row, so the
+    // sink's add failed closed and nothing was added for it.
+    try std.testing.expect(g.sim.buffs[ps].find(buff_id) != null);
+    try std.testing.expect(g.buffs.indexOfName("noSuchBuffAtAll") == null);
+}
+
+test "progression update rows write $perkBookwormChance (stock data)" {
+    // The other half of the loot RandomRoll gates: progression.xml's
+    // `perkIntellectMastery` rows fire on `onSelfProgressionUpdate` and set
+    // `$perkBookwormChance` to 25 at level >= 2, 0 at <= 1. The purchase and
+    // add level paths both run them, so the cvar tracks the perk.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    // Fresh character: no cvar, so the 63 loot RandomRoll rows read 0.
+    try std.testing.expectEqual(@as(f32, 0), cl.cvars.get("$perkBookwormChance"));
+
+    // Reaching Intellect Mastery 2 sets the chance to 25.
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkIntellectMastery", 2));
+    try std.testing.expectEqual(@as(f32, 25), cl.cvars.get("$perkBookwormChance"));
+
+    // The second row clears it at level <= 1. Purchases only ever go one level
+    // up (skillCostOf refuses a downgrade), so prove it on a second character
+    // buying level 1 from scratch: the row fires with level 1 and writes 0.
+    var cap2: ln_peer.Capture = .{};
+    const cl2 = try g.attachJoinedClient(&cap2);
+    cl2.skill_points = 100;
+    // The stock purchase gate: perk level 1 needs attIntellect >= 6 (level 3
+    // needs 8, so set 8 to allow buying up for the flag assertion below).
+    cl2.skill_levels[0] = .{ .name = "attIntellect", .level = 8 };
+    cl2.skill_level_n = 1;
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 1));
+    try std.testing.expectEqual(@as(f32, 0), cl2.cvars.get("$perkBookwormChance"));
+    // The purchase also fires `onPerkLevelChanged`: the point-chance flag
+    // needs Intellect Mastery 3, so level 1 leaves it unset...
+    try std.testing.expectEqual(@as(f32, 0), cl2.cvars.get("$pointChanceFlag"));
+    // ...and buying up to 3 runs the one-shot latch (flag 1, chances,
+    // flag +1): the flag ends at 2 and the point chance at 50.
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 2));
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 3));
+    try std.testing.expectEqual(@as(f32, 2), cl2.cvars.get("$pointChanceFlag"));
+    try std.testing.expectEqual(@as(f32, 50), cl2.cvars.get("$perkIntellectMasteryPointChance"));
+}
+
+test "loot requirement gates read the opener's progression on the fill path" {
+    // Deterministic synthetic table (no game dir): a Progression-gated entry
+    // must roll only when the fill path can build the opener's requirements.Ctx
+    // from their ledger. `casinoCoin` resolves through the offline builtin map,
+    // so the assertion is about the gate, not the catalog.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Swap the (empty, offline) loot table for a synthetic one.
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="gateGroup" count="all">
+        \\  <item name="foodCanBeef"/>
+        \\  <item name="casinoCoin" count="10">
+        \\    <requirement class="Progression" name="perkTreasureHunter" operation="GTE" value="4"/>
+        \\  </item>
+        \\  <item name="resourceWood">
+        \\    <requirement class="SandboxOption" option="HarvestingOutput" operation="EQ" value="0"/>
+        \\  </item>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const coin = g.items.ecsIdByName("casinoCoin");
+    try std.testing.expect(coin != 0);
+    const Count = struct {
+        fn of(cont: *const @TypeOf(g.containers.items[0]), id: u16) u32 {
+            var n: u32 = 0;
+            for (cont.slots[0..cont.slot_count]) |sl| {
+                if (sl.item_id == id) n += sl.count;
+            }
+            return n;
+        }
+    };
+
+    // Unqualified: the gated row is omitted, the ungated one still rolls, so a
+    // zero result cannot pass by having rolled nothing at all.
+    cl.skill_levels[0] = .{ .name = "perkTreasureHunter", .level = 3 };
+    cl.skill_level_n = 1;
+    const a = g.containers.getOrCreate(.{ .x = 1, .y = 70, .z = 1 }, 8, 0).?;
+    a.player_storage = false;
+    a.loot_list = "gateGroup";
+    a.touched = false;
+    g.ensureContainerLoot(a, cl.slot);
+    try std.testing.expectEqual(@as(u32, 0), Count.of(a, coin));
+    var saw_food = false;
+    for (a.slots[0..a.slot_count]) |sl| {
+        if (sl.item_id != 0) saw_food = true;
+    }
+    try std.testing.expect(saw_food);
+
+    // Qualified (GTE 4 is inclusive): the gated row rolls.
+    cl.skill_levels[0] = .{ .name = "perkTreasureHunter", .level = 4 };
+    const b = g.containers.getOrCreate(.{ .x = 2, .y = 70, .z = 1 }, 8, 0).?;
+    b.player_storage = false;
+    b.loot_list = "gateGroup";
+    b.touched = false;
+    g.ensureContainerLoot(b, cl.slot);
+    try std.testing.expect(Count.of(b, coin) > 0);
+
+    // No opener: the gate cannot be answered, so it refuses.
+    const c = g.containers.getOrCreate(.{ .x = 3, .y = 70, .z = 1 }, 8, 0).?;
+    c.player_storage = false;
+    c.loot_list = "gateGroup";
+    c.touched = false;
+    g.fillContainerFromLoot(c, "gateGroup", 7, 1, -1);
+    try std.testing.expectEqual(@as(u32, 0), Count.of(c, coin));
+
+    // A SandboxOption gate reads the server's decoded sandbox code. Default
+    // code: HarvestingOutput is 1.0, so the `EQ 0` row stays out. `ADYA` sets
+    // option 102 (HarvestingOutput) to value index 0 = 0.0, so it rolls.
+    const wood = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood != 0);
+    const CountOne = struct {
+        fn of(cont: *const @TypeOf(g.containers.items[0]), id: u16) u32 {
+            var n: u32 = 0;
+            for (cont.slots[0..cont.slot_count]) |sl| {
+                if (sl.item_id == id) n += sl.count;
+            }
+            return n;
+        }
+    };
+    try std.testing.expectEqual(@as(u32, 0), CountOne.of(a, wood));
+    g.sandbox_code = "ADYA";
+    const d = g.containers.getOrCreate(.{ .x = 4, .y = 70, .z = 1 }, 8, 0).?;
+    d.player_storage = false;
+    d.loot_list = "gateGroup";
+    d.touched = false;
+    g.ensureContainerLoot(d, cl.slot);
+    try std.testing.expect(CountOne.of(d, wood) > 0);
+}
+
+test "equipped item mods fold their passives (layer 13, stock data)" {
+    // EffectManager.GetValue layer 13 applies a modifier item's effect rows
+    // alongside the item's own. Before this only the attachment tags were
+    // parsed, so a modded armour piece defended no better than a bare one:
+    // modArmorInsulatedLiner's `ElementalDamageResist +1 tags=heat,electrical`
+    // and modRadiationReady's `+50% tags=radiation` did nothing server-side.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot) orelse return error.TestUnexpectedResult;
+
+    const helmet = g.items.byName("armorPrimitiveHelmet") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, helmet.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == helmet.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    const eq: usize = ecs.components.inv_equip_start;
+
+    const heat_before = g.elementalDamageResist(ps, "heat");
+    try std.testing.expect(heat_before > 0.08); // the helmet's own 8..12.3 curve
+    try std.testing.expect(g.elementalDamageResist(ps, "radiation") < 0.01);
+
+    // The insulated liner's flat +1 heat/electrical joins the same tagged fold.
+    const liner = g.items.ecsIdByName("modArmorInsulatedLiner");
+    if (liner == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[0] = liner;
+    g.sim.inventory[ps].slots[eq].mod_n = 1;
+    try std.testing.expectApproxEqAbs(heat_before + 0.01, g.elementalDamageResist(ps, "heat"), 0.005);
+    try std.testing.expect(g.elementalDamageResist(ps, "cold") < 0.02); // tag-scoped
+
+    // Radiation Ready is a percentage row, still scoped to its own tag.
+    const rad = g.items.ecsIdByName("modRadiationReady");
+    if (rad == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[1] = rad;
+    g.sim.inventory[ps].slots[eq].mod_n = 2;
+    try std.testing.expect(g.elementalDamageResist(ps, "radiation") > 0.4);
+    try std.testing.expect(g.elementalDamageResist(ps, "heat") < heat_before + 0.02);
+
+    // Removing the mods drops their rows on the next read (no sticky state).
+    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mod_n = 0;
+    try std.testing.expectApproxEqAbs(heat_before, g.elementalDamageResist(ps, "heat"), 0.005);
+
+    // A plating mod's PhysicalDamageResist joins the armour rating through the
+    // survival tick's column (stock GetTotalPhysicalArmorRating walks the worn
+    // items' effect layers), while the same mod on the *held* item does not:
+    // the holding slot is not armour.
+    try g.step();
+    const pdr_before = ecs.inventory.armorMitigation(&g.sim, cl.slot);
+    const plate = g.items.ecsIdByName("modArmorPlatingBasic");
+    if (plate == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[0] = plate;
+    g.sim.inventory[ps].slots[eq].mod_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(pdr_before + 0.01, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
+
+    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mod_n = 0;
+    const held_slot = g.sim.inventory[ps].holding;
+    if (held_slot < ecs.components.inv_toolbelt) {
+        g.sim.inventory[ps].slots[held_slot].item_id = helmet.id;
+        g.sim.inventory[ps].slots[held_slot].count = 1;
+        g.sim.inventory[ps].slots[held_slot].mods[0] = plate;
+        g.sim.inventory[ps].slots[held_slot].mod_n = 1;
+        try g.step();
+        try std.testing.expectApproxEqAbs(pdr_before, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
+    }
 }

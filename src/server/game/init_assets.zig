@@ -14,6 +14,9 @@ const util_log = @import("../../util/log.zig");
 const assets_quests = @import("../../assets/quests.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
+const assets_sandbox = @import("../../assets/sandbox.zig");
+const assets_placeholders = @import("../../assets/blockplaceholders.zig");
+const assets_localization = @import("../../assets/localization.zig");
 const assets_signs = @import("../../assets/signs.zig");
 const assets_item_modifiers = @import("../../assets/item_modifiers.zig");
 const assets_entities = @import("../../assets/entities.zig");
@@ -23,23 +26,38 @@ const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_maxdamage = @import("../../assets/maxdamage.zig");
 const assets_noise = @import("../../assets/noise.zig");
+const assets_gameevents = @import("../../assets/gameevents.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const assets_painting = @import("../../assets/painting.zig");
 const assets_spawning = @import("../../assets/spawning.zig");
+const assets_worldglobal = @import("../../assets/worldglobal.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_vehicles = @import("../../assets/vehicles.zig");
 const assets_storage_pairs = @import("../../assets/storage_pairs.zig");
 const ecs = @import("../../ecs/root.zig");
+/// Stock TimeOfDayIncPerSec (= 24000 / (DayNightLength * 60)) is defined once,
+/// on the clock that runs at that rate; the weather scheduler is handed the
+/// same value here.
+const ecs_aidirector = @import("../../ecs/aidirector.zig");
 
 /// Report a catalog load failure and fall back to the builtin table.
 /// `tryLoad` returns null for "stock file absent" and an error for a real
 /// parse/IO failure, so a bare `catch null` hides the second case: the server
 /// then runs forever on builtin defaults while the operator believes the stock
 /// XML is loaded. Mirrors the blocks/items loaders above.
+/// Items-table lookup for `assets_vehicles.Table.resolveMaxHp`: the item's
+/// `DegradationMax` (0 when the name is unknown, which keeps the floor).
+fn vehicleItemDegradation(ctx: ?*anyopaque, name: []const u8) ?u32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byName(name) orelse return null;
+    if (d.degradation_max == 0) return null;
+    return d.degradation_max;
+}
+
 fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result)).error_union.payload {
     return result catch |err| {
         util_log.err("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
@@ -76,7 +94,16 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     else
         null;
     if (mods_root) |root| {
-        const mod_dirs = modlets.install(allocator, root) catch |err| {
+        // Operator enable/disable state next to the world save (webui toggles
+        // and hand edits); a disabled mod is listed but its patches do not
+        // apply, so a restart is required to change the catalogue.
+        var state_buf: [2048]u8 = undefined;
+        const modlet_state: ?[]const u8 = std.fmt.bufPrint(
+            &state_buf,
+            "{s}/{s}",
+            .{ self.world.world_dir, modlets.state_file_name },
+        ) catch null;
+        const mod_dirs = modlets.install(allocator, root, modlet_state) catch |err| {
             util_log.err("zdtd: mods scan '{s}' failed: {s}\n", .{ root, @errorName(err) });
             return err;
         };
@@ -85,7 +112,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             return err;
         };
         manifest_tail = merged_mod_dirs.items.len;
-        util_log.info("zdtd: modlets config dirs={d}\n", .{mod_dirs.len});
+        util_log.info("zdtd: modlets enabled={d} disabled={d} state={s}\n", .{
+            mod_dirs.len,
+            modlets.disabledCount(),
+            modlet_state orelse "(none)",
+        });
     }
     if (opts.plugin_plan) |plan| {
         for (plan.config_dirs) |dir| {
@@ -115,7 +146,17 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // Patched-config S2C cache (PRD R8): deflate the same merged bytes the
     // catalogs use, once, for join-phase NetPackageConfigFile sends.
     try @import("config_files.zig").buildCache(allocator, opts.game_dir, opts.config_dir);
-    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, opts.quest_policy) catch |err| blk: {
+    // Traders before quests: wallet credit sums reward Item rows matching
+    // traders.xml root `currency_item` (stock casinoCoin).
+    if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
+        self.traders.deinit();
+        self.traders = tt;
+    }
+    // Default starter-kit coin + quest reward_coin share traders.xml currency.
+    if (self.traders.currency_item.len > 0) self.sim.currency_item = self.traders.currency_item;
+    var quest_policy = opts.quest_policy;
+    if (self.traders.currency_item.len > 0) quest_policy.currency_item = self.traders.currency_item;
+    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, quest_policy) catch |err| blk: {
         util_log.err("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |cat| {
@@ -157,6 +198,13 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // Empty without a game-dir: sounds relay with no AI noise (data-gated,
     // matching stock with no data - the table comes from the game's own
     // Data/Config/sounds.xml, never hardcoded values in code).
+    // gameevents.xml action sequences (death/respawn stat restore). Data, not
+    // code: the respawn funnel used to hardcode hp = 100.
+    if (logged("gameevents.xml sequences", assets_gameevents.tryLoad(allocator, opts.game_dir, opts.config_dir))) |gt| {
+        self.gameevents.deinit();
+        self.gameevents = gt;
+        util_log.info("zdtd: gameevents.xml sequences={d}\n", .{self.gameevents.sequences.len});
+    }
     if (logged("sounds.xml noise table", assets_noise.tryLoad(allocator, opts.game_dir, opts.config_dir))) |nt| {
         self.noise_table.deinit();
         self.noise_table = nt;
@@ -202,14 +250,54 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
                 return self_t.t.idByName(name);
             }
+            /// `BlockShape::Has45DegreeRotations` after Extends resolution: the
+            /// shape fact a random placeholder rotation keys on.
+            fn shape45(ctx: ?*anyopaque, name: []const u8) bool {
+                const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+                return self_t.t.has45Rotations(name);
+            }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
+        // blockplaceholders.xml: the prefab paint pass resolves these names per
+        // cell (BlockPlaceholderMap::Replace). Loaded before the first prefab so
+        // the remap can record the placeholder slots; the sandbox gate is a
+        // per-run constant from the decoded server code.
+        if (logged("blockplaceholders.xml", assets_placeholders.tryLoad(allocator, opts.game_dir, opts.config_dir, .{
+            .id_by_name = IdCtx.lookup,
+            .id_ctx = &id_ctx,
+            .shape45_by_name = IdCtx.shape45,
+            .shape45_ctx = &id_ctx,
+            .sandbox_code = self.sandbox_code,
+        }))) |pt| {
+            self.placeholder_table.deinit();
+            self.placeholder_table = pt;
+            self.placeholders_loaded = self.placeholder_table.placeholders.len > 0;
+            if (self.world.prefabs) |*pf| pf.setPlaceholders(&self.placeholder_table);
+            util_log.info("zdtd: blockplaceholders placeholders={d}\n", .{self.placeholder_table.placeholders.len});
+        }
+        // Config/Localization.csv: the base header plus the cells the modlets
+        // write, merged in mod order like stock's ModManager.LoadLocalizations.
+        // Null when no modlet patches localization (then nothing is sent).
+        if (assets_localization.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
+            util_log.err("zdtd: localization merge failed: {s}\n", .{@errorName(err)});
+            break :blk null;
+        }) |lt| {
+            self.localization.deinit();
+            self.localization = lt;
+            util_log.info("zdtd: localization patched keys={d} columns={d}\n", .{ lt.entries.len, lt.header_n });
+        }
         if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch |err| blk: {
             util_log.err("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});
             break :blk null;
         }) |bt| {
             self.blocks.deinit();
             self.blocks = bt;
+            // Stock `BlocksFromXml` IL_04D5-04EB: a block with no declared
+            // `Collide` mask takes its material's default
+            // (`blockMaterial.IsCollidable ? 255 : 0`), so the 4 stock
+            // non-collidable materials (Mair/Mwater/Mtallgrass/Mweb) stop
+            // colliding instead of keeping the 255 absent default.
+            self.blocks.applyMaterialCollideDefaults(self.maxdamage.material_collidable);
             util_log.info("zdtd: blocks defs={d}\n", .{self.blocks.defs.len});
         }
     }
@@ -234,6 +322,43 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     if (logged("item_modifiers.xml", assets_item_modifiers.tryLoad(allocator, opts.game_dir, opts.config_dir))) |mt| {
         self.item_mods = mt;
         util_log.info("zdtd: item_modifiers entries={d}\n", .{self.item_mods.defs.len});
+        // Modifiers are item classes in the same id space as items.xml rows
+        // (stock loads items then item_modifiers and assigns leftover ids in
+        // that order). Register them so a mod's ItemValue resolves both ways
+        // and the join IdMapping carries it; see ItemTable.addItemClasses.
+        if (self.item_mods.defs.len > 0) {
+            const classes = try allocator.alloc(@import("../../assets/items.zig").ItemTable.ItemClassStub, self.item_mods.defs.len);
+            defer allocator.free(classes);
+            for (self.item_mods.defs, 0..) |md, i| {
+                classes[i] = .{
+                    .name = md.name,
+                    .econ = md.econ,
+                    .stack = md.stack,
+                    .has_quality = md.has_quality,
+                };
+            }
+            try self.items.addItemClasses(classes);
+            util_log.info("zdtd: item classes={d} (mods +{d}) stock_types={d}\n", .{
+                self.items.defs.len, self.item_mods.defs.len, self.items.stock_names.len,
+            });
+        }
+    }
+    // Sandbox `MaxStackSize` (option 163 `StackSizeMultiplier`, default 1.0):
+    // stock pushes the decoded value into `ItemClass.MaxStackSizeModifier`
+    // (SandboxOptionManager IL_0466-0470) and `get_MaxCount` scales every
+    // stackable non-quality Stacknumber by it, clamped at 30000. An option the
+    // decoded code does not carry keeps the stock default.
+    if (assets_sandbox.optionByName("StackSizeMultiplier")) |o| {
+        var groups: [assets_sandbox.max_groups]assets_sandbox.Group = undefined;
+        const n = assets_sandbox.decode(self.sandbox_code, &groups);
+        var mult: f32 = o.default_f;
+        for (groups[0..n]) |g| {
+            if (g.option_id != o.id) continue;
+            if (assets_sandbox.findSet(o.set_name)) |set| mult = assets_sandbox.valueF(o, set, g.index);
+            break;
+        }
+        self.items.setStackSizeModifier(mult);
+        if (mult != 1) util_log.info("zdtd: sandbox MaxStackSize multiplier={d:.2}\n", .{mult});
     }
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
@@ -258,11 +383,16 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .wander_speed_night = zdef.wander_speed_night,
             .move_speed_rand_min = zdef.move_speed_rand_min,
             .move_speed_rand_max = zdef.move_speed_rand_max,
+            .phys_resist = zdef.phys_resist,
             .attack_damage = self.handItemDamage(zdef.hand_item),
             .block_chew = self.handItemBlockChew(zdef.hand_item),
             .melee_range = self.handItemRange(zdef.hand_item),
             .time_stay = zdef.time_stay,
             .sight_range = zdef.sight_range,
+            .hurt_target_classes = zdef.hurt_target_classes,
+            .block_if_alert_only = zdef.block_if_alert_only,
+            .target_player_see = zdef.target_player_see,
+            .target_player_hear = zdef.target_player_hear,
             .sight_light_min = zdef.sight_light_min,
             .sight_light_max = zdef.sight_light_max,
             .sleeper_wake_near_min = zdef.sleeper_wake_near_min,
@@ -273,6 +403,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .explode_threshold = zdef.explode_threshold,
             .explode_delay_s = zdef.explode_delay_s,
             .ai_attack = zdef.ai_attack,
+            .ai_tasks = zdef.ai_tasks,
             .is_enemy = zdef.is_enemy,
             .xp_gain = zdef.xp_gain,
         });
@@ -293,6 +424,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .attack_damage = self.handItemDamage(adef.hand_item),
             .time_stay = adef.time_stay,
             .sight_range = adef.sight_range,
+            .hurt_target_classes = adef.hurt_target_classes,
+            .block_if_alert_only = adef.block_if_alert_only,
+            .target_player_see = adef.target_player_see,
+            .target_player_hear = adef.target_player_hear,
             .sight_light_min = adef.sight_light_min,
             .sight_light_max = adef.sight_light_max,
             .sleeper_wake_near_min = adef.sleeper_wake_near_min,
@@ -301,6 +436,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .sleeper_wake_far_max = adef.sleeper_wake_far_max,
             .view_angle_deg = adef.view_angle_deg,
             .ai_attack = adef.ai_attack,
+            .ai_tasks = adef.ai_tasks,
             .is_enemy = adef.is_enemy,
             .xp_gain = adef.xp_gain,
         });
@@ -363,6 +499,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .melee_range = self.handItemRange(def.hand_item),
                 .time_stay = def.time_stay,
                 .sight_range = def.sight_range,
+                .hurt_target_classes = def.hurt_target_classes,
+                .block_if_alert_only = def.block_if_alert_only,
+                .target_player_see = def.target_player_see,
+                .target_player_hear = def.target_player_hear,
                 .sight_light_min = def.sight_light_min,
                 .sight_light_max = def.sight_light_max,
                 .sleeper_wake_near_min = def.sleeper_wake_near_min,
@@ -371,6 +511,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .sleeper_wake_far_max = def.sleeper_wake_far_max,
                 .view_angle_deg = def.view_angle_deg,
                 .ai_attack = def.ai_attack,
+                .ai_tasks = def.ai_tasks,
                 .is_enemy = def.is_enemy,
                 .xp_gain = def.xp_gain,
                 .explode_threshold = def.explode_threshold,
@@ -409,10 +550,6 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
         );
     }
-    if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
-        self.traders.deinit();
-        self.traders = tt;
-    }
     if (try assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
         self.npc.deinit();
         self.npc = nt;
@@ -426,6 +563,13 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.painting.deinit();
         self.painting = pt;
         util_log.info("zdtd: painting entries={d}\n", .{self.painting.n});
+    }
+    // worldglobal.xml ambient scales (the night floor for the stealth/AI
+    // ambient leg); absent without a game dir, in which case the stock
+    // defaults baked into the table apply.
+    if (logged("worldglobal.xml", assets_worldglobal.tryLoad(allocator, opts.game_dir, opts.config_dir))) |wt| {
+        self.worldglobal.deinit();
+        self.worldglobal = wt;
     }
     if (logged("spawning.xml", assets_spawning.tryLoad(allocator, opts.game_dir, opts.config_dir))) |st| {
         self.spawning.deinit();
@@ -458,6 +602,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     if (logged("vehicles.xml", assets_vehicles.tryLoad(allocator, opts.game_dir, opts.config_dir))) |vt| {
         self.vehicles.deinit();
         self.vehicles = vt;
+        // Vehicle health is not a vehicles.xml attribute: stock takes it from
+        // the placeable item's DegradationMax (Vehicle::SetItemValue IL=65 ->
+        // ItemValue::get_MaxUseTimesBase IL=25). Resolve it now that both
+        // tables are loaded, so every later reader (spawn, restore, admin) sees
+        // the stock value instead of the 200/250/300 literal.
+        self.vehicles.resolveMaxHp(&vehicleItemDegradation, self);
         util_log.info("zdtd: vehicles defs={d}\n", .{self.vehicles.defs.len});
     }
     if (logged("blocks.xml storage pairs", assets_storage_pairs.tryLoad(allocator, opts.game_dir, opts.config_dir))) |sp| {
@@ -513,10 +663,23 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // is not preloaded into the fixed class_table (A35).
         self.sim.director.class_resolve_ctx = self;
         self.sim.director.class_resolve_fn = &Game.resolveSpawnClass;
+        // Ground permission for a spawn (Chunk::CanMobsSpawnAtPos): blocks.xml
+        // CanMobsSpawnOn + the Collide movement bit.
+        self.sim.director.mob_spawn_ok_ctx = self;
+        self.sim.director.mob_spawn_ok_fn = &game_hooks.blockMobSpawnGround;
+        // Per-item trader quality price pair (items.xml TraderQualityMod).
+        self.sim.item_quality_mod_ctx = self;
+        self.sim.item_quality_mod_fn = &game_hooks.itemQualityMod;
         self.sim.director.stage_group_ctx = self;
         self.sim.director.stage_group_fn = &Game.pickStageGroup;
+        self.sim.director.stage_group_at_ctx = self;
+        self.sim.director.stage_group_at_fn = &Game.pickStageGroupAt;
+        self.sim.director.stage_around_ctx = self;
+        self.sim.director.stage_around_fn = &Game.pickStageAround;
         self.sim.director.spawner_group_ctx = self;
         self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
+        self.sim.director.spawner_wave_ctx = self;
+        self.sim.director.spawner_wave_fn = &Game.pickSpawnerWave;
         // Plugin kill verdict (T15): routes the sim's death decision to the
         // Wasm host (on_player_death for players, on_entity_killed for the
         // rest). Unset hook = no plugins = today's behaviour.
@@ -527,6 +690,15 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // attacker unknown. Unset hook = no plugins = today's behaviour.
         self.sim.player_damage_verdict_ctx = self;
         self.sim.player_damage_verdict_fn = &game_mod.playerDamageVerdict;
+        // Foreign-gated victim resist for the ECS damage path (Spectral
+        // Grace): the accumulator's attacker slot resolves the `other`
+        // filter. Unset hook = no foreign rows.
+        self.sim.foreign_resist_ctx = self;
+        self.sim.foreign_resist_fn = &game_mod.foreignResistHook;
+        // Victim-side hit trigger for the ECS damage path: the accumulator's
+        // attacker slot fires the victim's `onOtherAttackedSelf` rows.
+        self.sim.attacked_self_ctx = self;
+        self.sim.attacked_self_fn = &game_mod.attackedSelfHook;
         // `zdtd.queue say` announcements: routed to the stock chat broadcast
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;
@@ -536,6 +708,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // queued ops applied this tick.
         self.sim.pre_drain_ctx = self;
         self.sim.pre_drain_fn = &game_mod.withdrawDisabled;
+        // ...and again per op during the drain: a module can disable itself
+        // *while* an op is being applied (a `damage` op reaching an
+        // `on_entity_killed` verdict that traps), and its remaining ops are
+        // already in the snapshot the drain is walking.
+        self.sim.op_src_withdrawn_ctx = self;
+        self.sim.op_src_withdrawn_fn = &game_mod.opSrcWithdrawn;
         // Pre-trade price verdict (on_trade_price): routes the sim buy price
         // to the plugin + wasm host. Unset hook = no plugins.
         self.sim.trade_price_verdict_ctx = self;
@@ -604,8 +782,9 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             // Weather groups must come from the same effective biomes.xml we
             // serve, since groupIndex is a document ordinal in that file.
             // Frequency and countdown divisor read the very GameStats values
-            // the client is told, so server sim and client display agree.
-            const gs_defaults: packages.GameStatsValues = .{};
+            // the client is told, so server sim and client display agree. The
+            // rate is the stock integer expression over DayNightLength, the
+            // same function the WorldClock runs on (no second formula).
             self.world.weather.initFrom(&self.world.biome_layers_table, .{
                 .seed = opts.worldgen_seed orelse util_sim.default_seed,
                 .day_night_length = opts.day_night_length,
@@ -613,7 +792,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 // scheduler divides by (0 disables storms). Mirrors the
                 // GameStats wire value so client and server agree.
                 .storm_frequency = @as(f32, @floatFromInt(self.storm_frequency)) / 100.0,
-                .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
+                .time_of_day_inc_per_sec = ecs_aidirector.timeOfDayIncPerSec(opts.day_night_length),
                 // [sim] storm_bm_push_ticks: storms pushed past a horde night.
                 .blood_moon_storm_push = opts.storm_bm_push_ticks,
             });

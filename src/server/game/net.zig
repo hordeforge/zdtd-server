@@ -22,6 +22,7 @@ const ln_packet = @import("../../litenet/packet.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
+const ecs = @import("../../ecs/root.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -43,15 +44,47 @@ pub fn isUnreliablePackage(pkg_name: []const u8) bool {
     return false;
 }
 
+/// Stock `get_Compress() == true` (RE network.md: 8 packages, all IL=2). Six
+/// zdtd emits are listed; DynamicClientArrive and DynamicMesh stay out (no
+/// S2C body builder yet). MapChunks is sent via trySendCompressed from
+/// map.zig and must stay in this set so sendGameBudget also deflates it.
+pub fn isCompressedPackage(pkg_name: []const u8) bool {
+    const names = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageSignDataResponse",
+        "NetPackageIdMapping",
+        "NetPackageConfigFile",
+        "NetPackagePOIMetadataResponse",
+        "NetPackageMapChunks",
+    };
+    for (names) |n| {
+        if (std.mem.eql(u8, pkg_name, n)) return true;
+    }
+    return false;
+}
+
 pub fn isDroppablePackage(pkg_name: []const u8) bool {
+    // Latest-wins / replaceable under WindowFull. EntityStatChanged stays
+    // ReliableOrdered (stock get_ReliableDelivery=true) but a newer value
+    // supersedes a stalled one, so hard-failing the send only stalls combat
+    // UI while the reliable window is full (playtest: n=1 then n=100 drops).
     const names = [_][]const u8{
         "NetPackageChunk",
         "NetPackageChunkRemove",
         "NetPackageDecoResetWorldChunk",
         "NetPackageEntityPosAndRot",
         "NetPackageEntitySpeeds",
+        "NetPackageEntityStatChanged",
         "NetPackageVehiclePositions",
         "NetPackageWorldTime",
+        // SignDataResponse rides the compressed path (isCompressedPackage)
+        // and its MIDDLE batches go out through plain sendGame. A full window
+        // there used to hard-error out of sendSignDataBatches, so the loop
+        // never reached the final batch and the client sat on "Starting Game"
+        // (blocks worldInfoCo until isLastBatch=true). Dropping a middle batch
+        // loses that batch's signs; the final batch is critical and still
+        // must deliver.
+        "NetPackageSignDataResponse",
     };
     for (names) |n| {
         if (std.mem.eql(u8, pkg_name, n)) return true;
@@ -79,16 +112,11 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // and friends): Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
     // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
     // 3.2.0 set swaps POIAround for POIMetadataResponse, changelog-3.2.0
-    // §3.5). The five zdtd emits today are deflated here (the rest are not
-    // yet sent - S2C coverage row).
+    // §3.5). Six zdtd emits are deflated here (isCompressedPackage); the
+    // two without S2C builders (DynamicClientArrive, DynamicMesh) stay out.
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
-    if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or
-        std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse") or
-        std.mem.eql(u8, pkg_name, "NetPackageIdMapping") or
-        std.mem.eql(u8, pkg_name, "NetPackageConfigFile") or
-        std.mem.eql(u8, pkg_name, "NetPackagePOIMetadataResponse"))
-    {
+    if (isCompressedPackage(pkg_name)) {
         if (try @import("send_extra.zig").sendCompressed(self, peer, pkg_name, body, budget_ns, critical)) return;
     }
     const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
@@ -101,7 +129,9 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
         return err;
     };
     if (isUnreliablePackage(pkg_name)) {
-        if (framed.len <= ln_packet.max_single_user) {
+        // Peer-aware limit: a frame between the negotiated MTU and the compile
+        // cap must fall through to the reliable path, not Overflow and drop.
+        if (framed.len <= peer.singleUserLimit()) {
             peer.sendUnreliable(&self.net.sock, framed) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 return err;
@@ -145,11 +175,13 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
 
 /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
 /// rules so broadcast and sendGameBudget share the same behaviour.
-/// `budget_ns==null` is reserved for callers that already impose an outer
-/// deadline. Returns error.WindowFull on exhaustion; callers own drop counters/logs and the
-/// packages_broadcast count (via count_broadcast).
-pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
-    const retry_deadline: u64 = if (budget_ns) |b| clock.monoNs() + b else 0;
+/// `budget_ns` is always a real deadline: it is the only cap the fragment retry
+/// checks (`peer.reliable_send_deadline_ns`), so a "no deadline" caller would
+/// be bounded by `max_attempts` alone. Returns error.WindowFull on exhaustion;
+/// callers own drop counters/logs and the packages_broadcast count (via
+/// count_broadcast).
+pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: u64, max_attempts: u32, count_broadcast: bool) !void {
+    const retry_deadline: u64 = clock.monoNs() + budget_ns;
     const previous_send_deadline = peer.reliable_send_deadline_ns;
     peer.reliable_send_deadline_ns = retry_deadline;
     defer peer.reliable_send_deadline_ns = previous_send_deadline;
@@ -161,7 +193,7 @@ pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, frame
                     self.harness.counters.inc(.net_send_errors);
                 };
                 self.pollNetOnce();
-                if (budget_ns != null and clock.monoNs() >= retry_deadline) break;
+                if (clock.monoNs() >= retry_deadline) break;
                 if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                 continue;
             },
@@ -180,7 +212,7 @@ pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, frame
 }
 
 pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-    if (framed.len > ln_packet.max_single_user) {
+    if (framed.len > peer.singleUserLimit()) {
         sendFramedDroppable(self, peer, framed);
         return;
     }
@@ -218,9 +250,42 @@ pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
     try broadcastExcept(self, name, body, null);
 }
 
+/// Send an entity-scoped package only to peers that already know `slot`.
+/// Stock's equivalent is `NetEntityDistributionEntry::SendToPlayers`, which
+/// walks `trackedPlayers` rather than every client. It matters for
+/// `NetPackageEntityRemove`: the stock client logs
+/// `NetPackageEntityRemove entity {0} missing` (ProcessPackage IL=24) when it
+/// is told to remove something it never spawned, so a global broadcast writes
+/// an error line into every distant player's log.
+///
+/// `slot` must still be live in `known_entities` terms; callers that have
+/// already destroyed the entity should send before destroying it.
+pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs.Slot) !void {
+    for (&self.clients) |*c| {
+        const p = c.peer orelse continue;
+        if (!c.joined) continue;
+        if (!c.known_entities.isSet(slot)) continue;
+        self.sendGame(p, name, body) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            std.debug.print("zdtd: send {s} failed: {s}\n", .{ name, @errorName(err) });
+        };
+    }
+}
+
+/// `broadcastNear` that also skips one client slot. Stock's audio relay
+/// rebuilds the package per in-range peer and never echoes it to the sender,
+/// who already played the sound locally.
+pub fn broadcastNearExcept(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: usize) !void {
+    return broadcastNearImpl(self, name, body, wx, wz, range_blocks, skip_slot);
+}
+
 /// World-position broadcast: only clients whose player is within
 /// `range_blocks` of (wx,wz).
 pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
+    return broadcastNearImpl(self, name, body, wx, wz, range_blocks, null);
+}
+
+fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: ?usize) !void {
     const framed = packages.framed(&self.send_buf, name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
         const n = self.harness.counters.get(.encode_errors);
@@ -233,6 +298,9 @@ pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, w
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
+        if (skip_slot) |s| {
+            if (c.slot == s) continue;
+        }
         if (self.sim.playerByPeer(c.slot)) |ps| {
             const dx = self.sim.transform[ps].x - wx;
             const dz = self.sim.transform[ps].z - wz;
@@ -273,7 +341,7 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
         const p = c.peer orelse continue;
         if (!c.joined) continue;
         if (except_slot) |ex| if (c.slot == ex) continue;
-        if (isUnreliablePackage(name) and framed.len <= ln_packet.max_single_user) {
+        if (isUnreliablePackage(name) and framed.len <= p.singleUserLimit()) {
             p.sendUnreliable(&self.net.sock, framed) catch {
                 self.harness.counters.inc(.net_send_errors);
                 continue;
@@ -406,6 +474,9 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
             var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
             defer threaded.deinit();
             threaded.io().random(&c.challenge);
+            // Auth-state StartTime: the sweep reaps peers that never echo
+            // past MaxDurationInAuthState (10 s).
+            c.challenge_ns = clock.monoNs();
             return c;
         }
     }
@@ -448,5 +519,65 @@ pub fn unbanIp(self: *Game, ip: u32) void {
             return;
         }
         i += 1;
+    }
+}
+
+test "the unreliable set is exactly the stock ReliableDelivery overrides" {
+    // `NetPackage::get_ReliableDelivery` returns 1 and five packages override
+    // it to 0 (`get_ReliableDelivery() IL=2` -> ldc.i4.0). Nothing pinned the
+    // list: dropping a name from it left the whole suite green while that
+    // package moved onto the 64-slot reliable window stock keeps it off.
+    const unreliable = [_][]const u8{
+        "NetPackageEntityPosAndRot",
+        "NetPackageEntityRelPosAndRot",
+        "NetPackageEntityRotation",
+        "NetPackageEntitySpeeds",
+        "NetPackageEntityStatsBuff",
+    };
+    for (unreliable) |n| try std.testing.expect(isUnreliablePackage(n));
+
+    // And nothing else: walking the advertised table is what catches a name
+    // added here without an IL override behind it.
+    for (packages.default_mappings) |n| {
+        var expected = false;
+        for (unreliable) |u| {
+            if (std.mem.eql(u8, n, u)) expected = true;
+        }
+        try std.testing.expectEqual(expected, isUnreliablePackage(n));
+    }
+}
+
+test "the compressed set is exactly the stock get_Compress overrides we emit" {
+    // Stock deflates 8 packages (RE network.md "Compression via get_Compress()
+    // == true", all IL=2). Six of them zdtd emits (MapChunks via map.zig
+    // trySendCompressed; the rest via sendGameBudget). Nothing walked the
+    // advertised table against that list, which is the check that caught the
+    // channel set carrying a stale POIAround override: a name added here
+    // without an IL override behind it would deflate a body a stock client
+    // reads uncompressed.
+    const compressed = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageSignDataResponse",
+        "NetPackageIdMapping",
+        "NetPackageConfigFile",
+        "NetPackagePOIMetadataResponse",
+        "NetPackageMapChunks",
+    };
+    for (compressed) |n| try std.testing.expect(isCompressedPackage(n));
+
+    // The two stock-compressed names zdtd does not emit stay out: adding one
+    // here without a send site would claim coverage the server does not have.
+    const not_emitted = [_][]const u8{
+        "NetPackageDynamicClientArrive",
+        "NetPackageDynamicMesh",
+    };
+    for (not_emitted) |n| try std.testing.expect(!isCompressedPackage(n));
+
+    for (packages.default_mappings) |n| {
+        var expected = false;
+        for (compressed) |c| {
+            if (std.mem.eql(u8, n, c)) expected = true;
+        }
+        try std.testing.expectEqual(expected, isCompressedPackage(n));
     }
 }

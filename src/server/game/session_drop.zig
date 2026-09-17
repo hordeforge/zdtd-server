@@ -5,6 +5,8 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
+const ecs = @import("../../ecs/world.zig");
+const persist = @import("../persist.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -14,6 +16,16 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     if (self.clients[slot].joined and self.clients[slot].entity_id > 0) {
         self.plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
         self.wasm_plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
+    }
+    // Persist before anything here starts tearing the session down: this
+    // function ends at `clients[slot] = .{}`, which drops the in-memory record
+    // (bag markers, bedroll, skills) that the ZPV write reads from. The reap
+    // and quit paths save before calling in, but the admin kick and ban paths
+    // did not, so kicking a player discarded whatever they had done since the
+    // last autosave. Saving here instead of at each call site means a new
+    // caller cannot forget. Pre-join peers have no entity and nothing to save.
+    if (self.clients[slot].entity_id > 0) {
+        self.savePlayers() catch |e| persist.logPersistErr(self, "save players on drop", e);
     }
     if (self.clients[slot].peer) |p| p.alive = false;
     self.unseatRider(self.clients[slot].entity_id) catch |err| {
@@ -67,6 +79,16 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // joins. Plugin leave already ran above; destroy itself has no side hooks.
     if (self.sim.playerByPeer(slot)) |ps| {
         self.sim.destroy(ps);
+    }
+    // Turrets hold the owning client slot, and slots are recycled, so a
+    // turret still naming this one would pay its trap kills to whoever joins
+    // next. The owner name stays: it is what the login re-map matches on.
+    var ti: usize = 0;
+    while (ti < ecs.max_entities) : (ti += 1) {
+        if (!self.sim.alive[ti] or self.sim.kind[ti] != .turret) continue;
+        if (self.sim.turret[ti].owner_slot == @as(i16, @intCast(slot))) {
+            self.sim.turret[ti].owner_slot = -1;
+        }
     }
     self.clients[slot] = .{};
     self.refreshInfoPlayers();

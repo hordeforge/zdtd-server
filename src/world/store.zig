@@ -515,6 +515,17 @@ pub const max_step_up: i32 = 1;
 /// Deepest single-move drop a body takes voluntarily.
 pub const max_drop: i32 = 3;
 
+/// Biome name at a world position for the blockplaceholders biome gate
+/// (stock compares the target's `biome` with `WorldBiomes.GetBiome(...)`'s
+/// name, case-insensitively). Unknown biome answers "" so a biome-gated target
+/// is skipped rather than guessed at.
+fn biomeNameAt(ctx: ?*anyopaque, wx: i32, wz: i32) []const u8 {
+    const w: *const World = @ptrCast(@alignCast(ctx.?));
+    const bm = w.biomes orelse return "";
+    const id = bm.atWorld(wx, wz) orelse return "";
+    return w.biome_layers_table.names[id] orelse "";
+}
+
 pub const World = struct {
     // Pointer-stable chunk store (GAP "Chunk pointer stability", 2026-08-29
     // PARTIAL): the map holds *Chunk (one allocation per chunk) instead of
@@ -562,6 +573,22 @@ pub const World = struct {
     /// door block, so `isSolidWorld` treats an open door as passable.
     door_id_ctx: ?*anyopaque = null,
     door_id_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// `blocks.xml` Collide verb oracles (Game wires the blocks table, world
+    /// must stay table-free). `movement_solid_fn` is stock
+    /// `Block.IsCollideMovement`; `sight_block_fn` is the `IsCollideSight` half
+    /// of `Block.IsSeeThrough`. Absent = the pre-parse behaviour (every non-air
+    /// non-water block blocks movement and sight).
+    movement_solid_ctx: ?*anyopaque = null,
+    movement_solid_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    sight_block_ctx: ?*anyopaque = null,
+    sight_block_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// Water-fill notifier: called per cell the leveler fills so the Game can
+    /// broadcast the change. The chunk `dirty` flag only drives persistence,
+    /// so without this a pour is saved but never sent, and a client sees the
+    /// basin stay dry until the chunk is re-streamed. Keeps the store
+    /// wire-free (world must not import wire).
+    water_fill_ctx: ?*anyopaque = null,
+    water_fill_fn: ?*const fn (?*anyopaque, i32, i32, i32, u16) void = null,
     /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
     terrain_ids: TerrainIds = .{},
     /// Hand chunk writes to the background flusher ([perf] async_chunk_flush).
@@ -703,7 +730,7 @@ pub const World = struct {
     /// u8 fallback height for baked-DTM out-of-bounds samples (geometry sea).
     fn fallbackSeaU8(geo: rules_mod.Geometry) u8 {
         const s = @max(0.0, @min(geo.sea_level, 255.0));
-        return @intFromFloat(s);
+        return @trunc(s);
     }
 
     /// Rewrite a filled height plane through the geometry projection. Non-stock
@@ -887,7 +914,7 @@ pub const World = struct {
                         // water_surface_cell) does not apply to it.
                         wg.fillHeights(pos.x, pos.z, &c.heights);
                         projectPlane(&c.heights, geo, profile_max);
-                        const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
+                        const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else biomes_mod.offline_default_biome_id;
                         const stack = self.biome_layers_table.stackFor(biome_id);
                         try c.ensureBlocksWithStack(self.allocator, stack);
                     }
@@ -902,7 +929,7 @@ pub const World = struct {
                     @memset(&c.heights, @intCast(geo.project(geo.sea_level, profile_max)));
                 }
                 // Terrain columns from biomes.xml layers (before POI paint / disk load).
-                const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
+                const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else biomes_mod.offline_default_biome_id;
                 const stack = self.biome_layers_table.stackFor(biome_id);
                 try c.ensureBlocksWithStack(self.allocator, stack);
                 if (self.prefabs) |*pf| {
@@ -956,7 +983,20 @@ pub const World = struct {
                         }
                     };
                     var terr_ctx: TerrainCtx = .{ .c = c, .base_x = pos.x * 16, .base_z = pos.z * 16 };
-                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, PaintCtx.put, &pc);
+                    // blockplaceholders: the world side owns the biome table and
+                    // the map seed, so it builds the resolution context itself
+                    // (Game does the same for the POI-reset paint path).
+                    var ph_here: tts.PlaceholderCtx = undefined;
+                    const ph_arg: ?*const tts.PlaceholderCtx = if (pf.placeholders) |tbl| blk: {
+                        ph_here = .{
+                            .table = tbl,
+                            .world_seed = @truncate(@as(i64, @bitCast(if (self.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed))),
+                            .biome_name = biomeNameAt,
+                            .biome_ctx = self,
+                        };
+                        break :blk &ph_here;
+                    } else null;
+                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, ph_arg, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
                             "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",
@@ -1100,6 +1140,34 @@ pub const World = struct {
                 return (@as(u8, @intCast((raw >> 22) & 15)) & 2) == 0;
             }
         }
+        // Stock `Block.IsCollideMovement` (Block.il IL=90): the movement bit of
+        // the block's Collide mask. 66 stock rows clear it (grass, plants,
+        // cobwebs, campfires, trash piles, spikes, barbed wire, quest markers),
+        // so those stop blocking movement; a block with no Collide property
+        // keeps the all-bits default, i.e. today's behaviour.
+        if (self.movement_solid_fn) |f| return f(self.movement_solid_ctx, id);
+        return true;
+    }
+
+    /// Stock `Block.IsSeeThrough` (Block.il IL=61): sight is blocked when the
+    /// block's shape carries the sight collide bit, and WATER ALWAYS BLOCKS
+    /// SIGHT (`IsSeeThrough` returns true only when the bit is clear and the
+    /// cell is not water). Air never blocks; an open door is passable like the
+    /// movement predicate. A chunk-probe failure fails OPEN (clear), matching
+    /// the bot LOS contract that a border probe must not silence a bot.
+    pub fn sightBlockedWorld(self: *World, x: i32, y: i32, z: i32) bool {
+        const raw = self.rawWorld(x, y, z) catch return false;
+        const id: u16 = tts.typeId(raw);
+        if (id == self.terrain_ids.air) return false;
+        if (id == self.terrain_ids.water) return true;
+        if (self.door_id_fn) |f| {
+            if (f(self.door_id_ctx, id)) {
+                return (@as(u8, @intCast((raw >> 22) & 15)) & 2) != 0;
+            }
+        }
+        // Only 53 stock Collide rows keep the sight bit, so most containers and
+        // glass become see-through once this runs.
+        if (self.sight_block_fn) |f| return f(self.sight_block_ctx, id);
         return true;
     }
 
@@ -1137,6 +1205,16 @@ pub const World = struct {
 
     /// One edit: find the water surface from the edit cell and its 5
     /// neighbors, then flood-fill the connected air basin up to that surface.
+    /// Fill one cell with water and tell the Game so it can broadcast. The
+    /// chunk `dirty` flag is persistence-only, so the notify is what makes a
+    /// pour visible to an already-joined client.
+    fn fillWaterCell(self: *World, x: i32, y: i32, z: i32, water_id: u16) !void {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        try c.setBlockRaw(self.allocator, t.lx, y, t.lz, water_id);
+        if (self.water_fill_fn) |f| f(self.water_fill_ctx, x, y, z, water_id);
+    }
+
     fn pourAt(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize, puddle: usize) u32 {
         // Placed water cascades (stock WaterSimulationNative gravity flow,
         // bounded): the column of air below fills down to the first solid,
@@ -1171,8 +1249,7 @@ pub const World = struct {
             if (c.y < 0 or c.y >= self.yDim()) continue;
             if (c.y > surface) continue;
             if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue; // water or solid: stop
-            const t = worldToChunk(c.x, c.z);
-            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            self.fillWaterCell(c.x, c.y, c.z, water_id) catch continue;
             filled += 1;
             if (sp + 6 <= stack.len) {
                 stack[sp] = .{ .x = c.x + 1, .y = c.y, .z = c.z };
@@ -1199,8 +1276,7 @@ pub const World = struct {
         var y: i32 = ey - 1;
         while (y >= 0 and filled < spread) : (y -= 1) {
             if (self.blockWorld(ex, y, ez) catch 0 != air_id) break;
-            const t = worldToChunk(ex, ez);
-            (self.getOrCreate(t.pos) catch break).setBlockRaw(self.allocator, t.lx, y, t.lz, water_id) catch break;
+            self.fillWaterCell(ex, y, ez, water_id) catch break;
             filled += 1;
         }
         const bottom = y + 1; // lowest filled cell (or ey when the column was blocked)
@@ -1223,8 +1299,7 @@ pub const World = struct {
             const c = stack[sp];
             if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue;
             if (self.blockWorld(c.x, c.y - 1, c.z) catch 0 == air_id) continue; // floating: no spread
-            const t = worldToChunk(c.x, c.z);
-            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            self.fillWaterCell(c.x, c.y, c.z, water_id) catch continue;
             filled += 1;
             pu += 1;
             if (sp + 4 <= stack.len) {
@@ -1283,7 +1358,9 @@ pub const World = struct {
             const plane_cells: usize = @intCast(16 * saved_y * 16);
             const dset: usize = (plane_cells + 7) / 8;
             var required: usize = hdr_len + 256; // heights plane
-            if (data[3] == '3' and has_blocks) required += plane_cells * @sizeOf(u32);
+            // Same rule as loadChunk: the block plane is written for ZCH3 and
+            // ZCH4; only the legacy ZCH2 type-only format lacks it.
+            if (data[3] != '2' and has_blocks) required += plane_cells * @sizeOf(u32);
             if (has_textures) required += plane_cells * @sizeOf(u64);
             if (has_densities) required += plane_cells + dset;
             if (data.len < required) return error.ReadFailed;
@@ -1458,18 +1535,27 @@ pub const World = struct {
                 if (saved_y != c.y_dim) return error.ReadFailed;
             }
             var required: usize = hdr_len + c.heights.len;
-            if (data[3] == '3' and has_blocks) required += c.planeCells() * @sizeOf(u32);
+            // encodeChunk writes the u32 block plane whenever has_blocks is
+            // set, for ZCH3 and ZCH4 alike, so both must be accounted for here
+            // and read back below. ZCH2 is the u16 type-only legacy format
+            // that genuinely has no plane.
+            if (data[3] != '2' and has_blocks) required += c.planeCells() * @sizeOf(u32);
             if (has_textures) required += c.planeCells() * @sizeOf(u64);
             if (has_densities) required += c.planeCells() + c.densSetBytes();
             if (has_damages) required += c.planeCells() * @sizeOf(u16);
             // Validate the complete record before mutating the resident chunk.
             // A torn save must regenerate, never leave a half-loaded plane that
             // suppresses terrain materialization.
+            //
+            // `validateChunkBytes` computes the same requirement, but it is not
+            // on this path: `loadChunk` reads the file and validates here, and
+            // the standalone validator only runs from the fuzzer and one
+            // scenario. This check is the one that actually guards a load.
             if (data.len < required) return error.ReadFailed;
             @memcpy(&c.heights, data[hdr_len..][0..c.heights.len]);
             var o: usize = hdr_len + c.heights.len;
             if (has_blocks) {
-                if (data[3] == '3') {
+                if (data[3] != '2') {
                     // Raw alloc only: the memcpy below fully initializes the
                     // plane, so ensureBlocks' terrain generation would be waste.
                     if (c.blocks == null) {
@@ -2013,8 +2099,23 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
     try std.testing.expectEqual(@as(u16, sea_level), direct.heightAt(0, 0));
 
-    @memcpy(torn[0..4], "NOPE");
+    // A record whose header is coherent but whose declared block plane is
+    // absent must fail inside loadChunk, before anything is copied into the
+    // resident chunk. The cases above reach loadChunk with no plane declared,
+    // so the length check there was never the one that rejected them; the
+    // standalone validateChunkBytes is not on this path at all.
+    @memcpy(torn[0..4], "ZCH3");
     std.mem.writeInt(i32, torn[4..8], 0, .little);
+    torn[12] = 1; // block plane declared, 262144 bytes short
+    try io_fs.writeFile(path, &torn);
+    var short = Chunk.generateFlat(.{ .x = 0, .z = 0 });
+    const before = short.heightAt(0, 0);
+    try std.testing.expectError(error.ReadFailed, w.loadChunk(&short));
+    try std.testing.expectEqual(before, short.heightAt(0, 0)); // untouched
+    try std.testing.expect(short.blocks == null);
+
+    @memcpy(torn[0..4], "NOPE");
+    torn[12] = 0;
     try io_fs.writeFile(path, &torn);
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
 }
@@ -2367,6 +2468,44 @@ test "water leveling: digging beside a lake pours the connected basin to its sur
     try std.testing.expect((try w.blockWorld(4, 63, 0)) != block_water);
 }
 
+test "water leveling notifies every filled cell so the Game can broadcast" {
+    // The chunk dirty flag only drives persistence, so without this notify a
+    // pour was saved but never sent and a joined client kept seeing the dry
+    // basin until the chunk was re-streamed.
+    const Sink = struct {
+        var n: u32 = 0;
+        var last_id: u16 = 0;
+        fn onFill(_: ?*anyopaque, _: i32, _: i32, _: i32, id: u16) void {
+            n += 1;
+            last_id = id;
+        }
+    };
+    Sink.n = 0;
+    Sink.last_id = 0;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.water_fill_fn = &Sink.onFill;
+
+    carveAirColumn(&w, 0, 51, 62) catch return;
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = 51;
+    while (y <= 62) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, 0, y, 0, block_water);
+    }
+    for (1..8) |x| try carveAirColumn(&w, @intCast(x), 51, 62);
+    try w.setBlockWorld(1, 51, 0, block_air);
+    const filled = w.levelWaterTick(4, 128, 8);
+    // One notify per filled cell, carrying the water id the client renders.
+    try std.testing.expectEqual(filled, Sink.n);
+    try std.testing.expect(filled > 0);
+    try std.testing.expectEqual(block_water, Sink.last_id);
+}
+
 test "water leveling: a deep dig not connected to water stays dry" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -2482,4 +2621,75 @@ test "chunk pointers stay valid across map resizes (pointer-stable store)" {
     const mid_h = mid.heightAt(0, 0);
     _ = try w.getOrCreate(.{ .x = 42, .z = 0 });
     try std.testing.expectEqual(mid_h, mid.heightAt(0, 0));
+}
+
+test "Collide verbs decide movement and sight" {
+    // Stock `Block.IsCollideMovement` (movement bit) gates movement and
+    // `Block.IsSeeThrough` (sight bit) gates sight; water always blocks sight.
+    // 66 of the 418 stock Collide rows clear the movement bit (grass, plants,
+    // cobwebs, campfires, spikes, barbed wire) and 365 clear the sight bit
+    // (containers, most glass), so both predicates matter.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+
+    const Ids = struct {
+        const plant: u16 = 501; // Collide "melee,bullet,arrow,rocket": no movement, no sight
+        const glass: u16 = 502; // "movement,melee,bullet,arrow,rocket": movement, no sight
+        const wall: u16 = 503; // all six bits
+        const unknown: u16 = 504; // not in the table
+    };
+    const Table = struct {
+        fn movement(_: ?*anyopaque, id: u16) bool {
+            return switch (id) {
+                Ids.plant => false,
+                Ids.glass, Ids.wall => true,
+                else => true, // unknown id keeps the pre-parse behaviour
+            };
+        }
+        fn sight(_: ?*anyopaque, id: u16) bool {
+            return switch (id) {
+                Ids.plant, Ids.glass => false,
+                Ids.wall => true,
+                else => true,
+            };
+        }
+    };
+    w.movement_solid_ctx = null;
+    w.movement_solid_fn = &Table.movement;
+    w.sight_block_ctx = null;
+    w.sight_block_fn = &Table.sight;
+
+    try w.setBlockWorld(3, 70, 3, Ids.plant);
+    try w.setBlockWorld(4, 70, 3, Ids.glass);
+    try w.setBlockWorld(5, 70, 3, Ids.wall);
+    try w.setBlockWorld(6, 70, 3, Ids.unknown);
+
+    // Movement: the plant stops blocking, glass and the wall do.
+    try std.testing.expect(!try w.isSolidWorld(3, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(4, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(5, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(6, 70, 3));
+
+    // Sight: only the wall blocks (glass and the plant are see-through).
+    try std.testing.expect(!w.sightBlockedWorld(3, 70, 3));
+    try std.testing.expect(!w.sightBlockedWorld(4, 70, 3));
+    try std.testing.expect(w.sightBlockedWorld(5, 70, 3));
+    try std.testing.expect(w.sightBlockedWorld(6, 70, 3));
+    // Air never blocks sight, and water always does (IsSeeThrough returns true
+    // only when the sight bit is clear AND the cell is not water).
+    try std.testing.expect(!w.sightBlockedWorld(3, 71, 3));
+    try w.setBlockWorld(3, 71, 3, w.terrain_ids.water);
+    try std.testing.expect(w.sightBlockedWorld(3, 71, 3));
+
+    // With no oracle the pre-parse behaviour stands: every non-air, non-water
+    // block blocks both verbs.
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    try w2.setBlockWorld(3, 70, 3, Ids.plant);
+    try std.testing.expect(try w2.isSolidWorld(3, 70, 3));
+    try std.testing.expect(w2.sightBlockedWorld(3, 70, 3));
 }

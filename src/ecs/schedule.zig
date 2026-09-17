@@ -4,6 +4,7 @@
 const World = @import("world.zig").World;
 const systems = @import("systems.zig");
 const buff = @import("buff.zig");
+const command = @import("command.zig");
 
 /// Named tick phases (document order = run order).
 pub const Phase = enum(u8) {
@@ -38,7 +39,18 @@ pub const TickResult = struct {
     loot_bag_ids: [16]i32 = .{0} ** 16,
     loot_n: u8 = 0,
     despawned_ids: [8]i32 = .{0} ** 8,
+    /// Slot each despawned mob held when it was destroyed, parallel to
+    /// `despawned_ids`. The net layer scopes the EntityRemove by it; the id
+    /// no longer resolves once the sweep has destroyed the entity.
+    despawned_slots: [8]u16 = .{0} ** 8,
     despawned_n: u8 = 0,
+    /// Entities the plugin `despawn` verb destroyed this tick, reported
+    /// separately from the far-despawn sweep above because they come from the
+    /// command drain rather than a system. Same contract: the net layer owes
+    /// each one an EntityRemove scoped by the pre-destroy slot.
+    cmd_despawned_ids: [command.max_commands]i32 = .{0} ** command.max_commands,
+    cmd_despawned_slots: [command.max_commands]u32 = .{0} ** command.max_commands,
+    cmd_despawned_n: u32 = 0,
     /// Buffs that ended this tick; the net layer relays each as an
     /// AddRemoveBuff with adding=false so observers drop the icon.
     buff_expired: [16]buff.Expiry = [_]buff.Expiry{.{}} ** 16,
@@ -98,7 +110,8 @@ pub fn run(w: *World, dt: f32) TickResult {
     const tk = if (on.turrets) systems.systemTurrets(w, dt) else systems.TurretTick{};
 
     var de_ids: [8]i32 = .{0} ** 8;
-    const de_n = if (on.despawn) systems.systemDespawnFar(w, de_ids[0..]) else 0;
+    var de_slots: [8]u16 = .{0} ** 8;
+    const de_n = if (on.despawn) systems.systemDespawnFar(w, de_ids[0..], de_slots[0..]) else 0;
 
     // Deferred ops from systems/plugins: apply after sim mutations settle.
     // Drain clears the buffer (frame leftover). apm: commands_applied counter
@@ -123,6 +136,10 @@ pub fn run(w: *World, dt: f32) TickResult {
     @memcpy(out.owner_slots[0..tk.killed_n], tk.owner_slots[0..tk.killed_n]);
     @memcpy(out.loot_bag_ids[0..tk.loot_n], tk.loot_bag_ids[0..tk.loot_n]);
     @memcpy(out.despawned_ids[0..de_n], de_ids[0..de_n]);
+    @memcpy(out.despawned_slots[0..de_n], de_slots[0..de_n]);
+    out.cmd_despawned_n = cmd.despawned_n;
+    @memcpy(out.cmd_despawned_ids[0..cmd.despawned_n], cmd.despawned_ids[0..cmd.despawned_n]);
+    @memcpy(out.cmd_despawned_slots[0..cmd.despawned_n], cmd.despawned_slots[0..cmd.despawned_n]);
     return out;
 }
 

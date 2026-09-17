@@ -41,6 +41,9 @@ const store = @import("world/store.zig");
 const vending = @import("world/vending.zig");
 const path_mod = @import("ecs/path.zig");
 const weather = @import("world/weather.zig");
+const ally = @import("server/ally.zig");
+const sleepers = @import("world/sleepers.zig");
+const io_fs = @import("util/io_fs.zig");
 
 const packet_corpus = [_][]const u8{
     "",
@@ -149,7 +152,8 @@ const package_corpus = [_][]const u8{
     &.{ 0, 0, 0 },
     &.{ 1, 0xff, 0xff, 0xff, 0xff },
     &.{ 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-    // legacy set-block 14-byte form
+    // 14-byte set-block body: the length a removed legacy branch keyed on, and
+    // one a stock identity plus a zero count reaches on its own
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
     // stock set-block: no user | count=1 | pos ref | entity | flags | raw | dmg | local
     &.{ 0, 1, 0, 1, 10, 0, 0, 0, 61, 0, 0, 0, 0x90, 1, 0, 0, 106, 0, 0, 0, 1, 13, 0, 0, 0, 0, 0, 106, 0, 0, 0 },
@@ -241,6 +245,14 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(count <= changes.len);
     } else |_| {}
     _ = packages.parseSetBlockBody(input) catch null;
+    var water_changes: [32]packages.WaterSetChange = undefined;
+    if (packages.parseWaterSet(input, &water_changes)) |got| {
+        try std.testing.expect(got.n <= water_changes.len);
+    } else |_| {}
+    _ = packages.parseQuestTreasurePoint(input) catch null;
+    _ = packages.parseAnimationData(input) catch null;
+    var audio_name: [128]u8 = undefined;
+    _ = packages.parseAudioPlay(input, &audio_name) catch null;
     _ = packages.parseLockRequest(input) catch null;
     if (packages.parseStockChat(input)) |chat| {
         try std.testing.expect(chat.msg.len <= input.len);
@@ -256,12 +268,34 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseDamageHead(input) catch null;
     _ = packages.parseChunkBody(input) catch null;
     _ = packages.parseRequestToSpawnPlayer(input) catch null;
-    _ = packages.parseInventoryBodyNative(input) catch null;
     _ = packages.parseInvTxRequest(input) catch null;
     _ = packages.parseInvDataRequest(input) catch null;
     _ = packages.parseInvDataRequestStock(input) catch null;
     _ = packages.parseChunkRemoveBody(input) catch null;
     _ = packages.parseCollectBody(input) catch null;
+    // Remaining C2S-reachable parsers. Every one of these is fed straight from
+    // a client packet, so each belongs here; they were the tail left out when
+    // the list was written.
+    _ = packages.parseParticleEffectInvoke(input) catch null;
+    _ = packages.parseItemReload(input) catch null;
+    _ = packages.parseSetBlockTexture(input) catch null;
+    _ = packages.parseWaypointInvite(input) catch null;
+    _ = packages.parseStockInvTx(input) catch null;
+    _ = packages.parseRagdollInvoke(input) catch null;
+    {
+        var plat_buf: [packages.platform_user.max_platform_len]u8 = undefined;
+        var id_buf: [packages.platform_user.max_id_len]u8 = undefined;
+        var sent: ?packages.platform_user.Id = null;
+        _ = packages.parsePickupBlockBody(input, &plat_buf, &id_buf, &sent) catch null;
+    }
+    {
+        // parseBagSlots writes into the caller's array; the returned count must
+        // never exceed it, same invariant as parseBagBody below.
+        var slots: [8]stock_inv.StockSlot = undefined;
+        if (stock_inv.parseBagSlots(input, &slots)) |n| {
+            try std.testing.expect(n <= slots.len);
+        } else |_| {}
+    }
     // The standalone bag body (NetPackageBag) and the positional-audio relay
     // parser are remote surfaces; assert the parsed bag count never exceeds
     // the caller's slot array.
@@ -1273,6 +1307,69 @@ fn fuzzVendingStore(_: void, smith: *std.testing.Smith) !void {
     }
 }
 
+const zws_corpus = [_][]const u8{
+    "",
+    "ZWS1",
+    // empty store: magic + count 0
+    &([_]u8{ 'Z', 'W', 'S', '1', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'Z', 'W', 'S', '0', 0, 0 }),
+    // claimed huge count, truncated
+    &([_]u8{ 'Z', 'W', 'S', '1', 0xff, 0xff }),
+    // one record header claiming every group length is 0xff (past its array),
+    // truncated right after: the length bytes must be rejected before use.
+    &([_]u8{ 'Z', 'W', 'S', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0 } ++
+        [_]u8{ 0xff, 0xff, 0xff, 0xff, 0, 0, 0xff, 0xff }),
+};
+
+test "fuzz workstation store ZWS1 loader" {
+    // Note on reach: a persisted record is ~2.8 KiB, and every seed below is
+    // short or malformed, so a default (non `--fuzz`) run rejects at the
+    // header and never executes the craft-complete assertions in the target.
+    // They are there for real fuzzing runs, which mutate toward valid records;
+    // the unit test in world/workstations.zig is what pins that rejection
+    // deterministically.
+    try std.testing.fuzz({}, fuzzWorkstationStore, .{ .corpus = &zws_corpus });
+}
+
+fn fuzzWorkstationStore(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // Store is large (256 stations); keep off the fuzz stack.
+    const s = try std.testing.allocator.create(workstations.WorkstationStore);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.loadFromSlice(storage[0..len]) catch return;
+    // The replicate path slices these fixed arrays by the stored lengths
+    // (server/replicate_te.zig `w.fuel[0..w.fuel_len]`), so any accepted
+    // record must keep every length inside its array.
+    for (&s.items) |w| {
+        try std.testing.expect(w.fuel_len <= w.fuel.len);
+        try std.testing.expect(w.input_len <= w.input.len);
+        try std.testing.expect(w.tools_len <= w.tools.len);
+        try std.testing.expect(w.output_len <= w.output.len);
+        try std.testing.expect(w.queue_len <= w.queue.len);
+        try std.testing.expect(w.melt_len <= w.melt.len);
+        try std.testing.expect(w.last_input_blob_len <= w.last_input.len);
+        // recipeName()/scrappedName() slice their fixed arrays by these
+        // lengths and the result is written to the wire (stock_te.zig
+        // writeString), so an accepted over-cap length would disclose
+        // adjacent struct memory to a client.
+        try std.testing.expect(w.craft_complete_n <= w.craft_complete.len);
+        for (w.craft_complete[0..w.craft_complete_n]) |cc| {
+            try std.testing.expect(cc.recipe_name_len <= cc.recipe_name.len);
+            try std.testing.expect(cc.scrapped_len <= cc.scrapped.len);
+            try std.testing.expect(cc.recipeName().len <= workstations.craft_name_max);
+            try std.testing.expect(cc.scrappedName().len <= workstations.craft_name_max);
+        }
+        for (w.queue[0..w.queue_len]) |q| {
+            try std.testing.expect(q.recipeBlob().len <= workstations.recipe_blob_max);
+        }
+    }
+}
+
 const png_sig = [_]u8{ 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
 // 1x1 RGB white pixel; IDAT is a stored deflate block. Parser skips chunk CRCs.
 const png_ihdr_1x1 = [_]u8{ 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0, 0, 0, 0 };
@@ -1662,7 +1759,7 @@ fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
     var stacks: [loot.max_roll_stacks]loot.Stack = undefined;
     var ci: usize = 0;
     while (ci < n_rolls) : (ci += 1) {
-        const n = t.rollContainer(t.containers[ci].name, smith.value(i32), smith.value(u32), &stacks);
+        const n = t.rollContainer(t.containers[ci].name, smith.value(i32), smith.value(u32), &stacks, .{});
         try std.testing.expect(n <= stacks.len);
         for (stacks[0..n]) |st| {
             try std.testing.expect(st.count >= 1);
@@ -1792,4 +1889,201 @@ fn fuzzWeatherDecode(_: void, smith: *std.testing.Smith) !void {
         // Corrupt input must not half-apply (manager.n stays from initFrom).
         try std.testing.expectEqual(n_before, m.n);
     }
+}
+
+const ally_corpus = [_][]const u8{
+    "",
+    "ZAL1",
+    // magic + count 0 (an empty, valid store)
+    &([_]u8{ 'Z', 'A', 'L', '1', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'Z', 'A', 'L', '0', 0, 0 }),
+    // exactly the 6-byte header with a claimed record: truncated body
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 }),
+    // claimed huge count, nothing behind it
+    &([_]u8{ 'Z', 'A', 'L', '1', 0xff, 0xff }),
+    // one well-formed record whose trailing status byte is out of range: the
+    // Status enum is exhaustive, so this must be rejected before @enumFromInt
+    // (that ordering was a real panic, fixed 2026-09-01).
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ [_]u8{ 2, '1', '2' } ++
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ [_]u8{ 2, '3', '4' } ++
+        [_]u8{0xff}),
+    // over-long platform/id length prefixes (readLenStr bounds)
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'x'} ** 8),
+};
+
+test "fuzz allies.zal loader" {
+    // Drive the corpus deterministically first. `smith.slice` fills the buffer
+    // with fuzzer data, so in a default (non `--fuzz`) build the seeds below are
+    // never actually parsed - the same reach limitation noted on the ZWS1
+    // target. Feeding them straight to the loader makes the interesting shapes
+    // (out-of-range status byte, over-long length prefixes, truncated bodies)
+    // part of every `zig build fuzz`, not just a real fuzzing session.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+    for (ally_corpus) |seed| {
+        try io_fs.writeFile(path, seed);
+        const s = try std.testing.allocator.create(ally.Store);
+        defer std.testing.allocator.destroy(s);
+        s.* = .{};
+        s.load(dir, std.testing.allocator) catch continue;
+        try std.testing.expect(s.count() <= ally.max_pairs);
+    }
+    try std.testing.fuzz({}, fuzzAllyStore, .{ .corpus = &ally_corpus });
+}
+
+fn fuzzAllyStore(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [2048]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+
+    // The loader reads a file, so stage the bytes in a self-cleaning tmp dir
+    // (tests never write into the repo).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+    try io_fs.writeFile(path, storage[0..len]);
+
+    const s = try std.testing.allocator.create(ally.Store);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.load(dir, std.testing.allocator) catch return;
+    // Any accepted store must stay inside its fixed array: count() walks the
+    // used entries and the admin/webui paths slice the identity buffers by
+    // their stored lengths.
+    try std.testing.expect(s.count() <= ally.max_pairs);
+}
+
+const ztr_corpus = [_][]const u8{
+    "",
+    "ZTR1",
+    // magic + version + count 0 (empty, valid)
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 0, 0 }),
+    // wrong magic / wrong version
+    &([_]u8{ 'Z', 'T', 'R', '0', 1, 0, 0 }),
+    &([_]u8{ 'Z', 'T', 'R', '1', 9, 0, 0 }),
+    // claimed count with nothing behind it
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 0xff, 0xff }),
+    // one record, name "a", zero stock entries: the minimal well-formed shape
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+    // one record claiming a stock count past max_stock (must BadRecord, not
+    // walk off the end)
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0xff}),
+    // two records where the first has one entry: the shape that desynced when
+    // a skipped trader failed to consume its entries (fixed 2026-09-01).
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 2, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{1} ++
+        [_]u8{ 1, 'x' } ++ [_]u8{0} ** 8 ++
+        [_]u8{ 1, 'b' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+    // record header claiming a 0xff-byte trader name with a short body
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'n'} ** 8),
+};
+
+test "fuzz traders.zst record walk" {
+    // Deterministic corpus pass first: smith.slice overwrites the buffer with
+    // fuzzer data, so in a default build the seeds above would never be parsed.
+    for (ztr_corpus) |seed| {
+        const end = persist.ztrScanLen(seed) catch continue;
+        try std.testing.expect(end <= seed.len);
+    }
+    try std.testing.fuzz({}, fuzzTraderSave, .{ .corpus = &ztr_corpus });
+}
+
+fn fuzzTraderSave(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    // An accepted blob must land inside the buffer. A walk that runs past the
+    // end is exactly the desync class: the loader would then read the next
+    // record's bytes as this one's tail.
+    const end = persist.ztrScanLen(input) catch return;
+    try std.testing.expect(end <= input.len);
+}
+
+const sleeper_corpus = [_][]const u8{
+    "",
+    "ZSCL1",
+    // exactly 8 bytes: one short of the 9-byte header. The old guard used
+    // `< 8` and then sliced raw[5..9], a bounds panic (fixed 2026-09-01).
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0 }),
+    // full header, zero records
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'X', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    // claimed huge count with no records behind it
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
+    // one record short by a byte (23 of the 24 a record needs)
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 23),
+    // one well-formed record of all-zero floats
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 24),
+    // one record of 0xff floats: NaN/huge extents through the AABB compare
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+    // triggered-store magic, same shapes
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+};
+
+test "fuzz sleepers cleared/triggered loaders" {
+    // Deterministic corpus pass: smith.slice overwrites the buffer, so the
+    // seeds above would otherwise never be parsed in a default build.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    for (sleeper_corpus) |seed| {
+        try sleeperLoadBoth(dir, seed);
+    }
+    try std.testing.fuzz({}, fuzzSleeperStores, .{ .corpus = &sleeper_corpus });
+}
+
+/// Write `bytes` as both sleeper save files and load them into a fresh store.
+/// Both loaders return void (a corrupt file means "keep the fresh state"), so
+/// the property under test is that neither traps, over-reads, or leaves the
+/// volume array inconsistent.
+fn sleeperLoadBoth(dir: []const u8, bytes: []const u8) !void {
+    var vols = [_]sleepers.Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var sleeper_store: sleepers.Store = .{ .volumes = &vols };
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const cleared = try std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{dir});
+    try io_fs.writeFile(cleared, bytes);
+    sleeper_store.loadCleared(std.testing.allocator, dir);
+
+    var path_buf2: [std.fs.max_path_bytes]u8 = undefined;
+    const triggered = try std.fmt.bufPrint(&path_buf2, "{s}/sleepers_triggered.zst", .{dir});
+    try io_fs.writeFile(triggered, bytes);
+    sleeper_store.loadTriggered(std.testing.allocator, dir);
+
+    // A cleared volume is always also triggered (loadCleared latches both), so
+    // a load that set quest_cleared without triggered would be inconsistent
+    // state reaching the sim.
+    for (sleeper_store.volumes) |v| {
+        if (v.quest_cleared) try std.testing.expect(v.triggered);
+    }
+}
+
+fn fuzzSleeperStores(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [1024]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try sleeperLoadBoth(dir, storage[0..len]);
 }

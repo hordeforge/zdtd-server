@@ -28,7 +28,9 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 # Emit one classic script .js per source into $tmp (tsconfig: module none).
-bunx -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --outDir "$tmp"
+# --bun: the package shebang is `#!/usr/bin/env node`; bun honours it by
+# default, so a broken host node breaks the build. Run it under bun.
+bunx --bun -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --outDir "$tmp"
 
 python3 - "$tmp" "$dest" <<'PY'
 import pathlib
@@ -37,7 +39,7 @@ import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 
-# Compiled file per marker name; login.html and login_failed.html share login.js.
+# Compiled file per marker name; the login marker takes login.js.
 MARKER_JS = {
     "login": "login.js",
     "lockout": "lockout.js",

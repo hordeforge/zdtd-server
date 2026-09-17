@@ -11,6 +11,7 @@ pub const log = @import("log.zig");
 pub const parallel = @import("parallel.zig");
 pub const clock = @import("clock.zig");
 pub const rng = @import("rng.zig");
+pub const game_random = @import("game_random.zig");
 pub const secret = @import("secret.zig");
 pub const sim = @import("sim.zig");
 pub const sys_metrics = @import("sys_metrics.zig");
@@ -24,6 +25,7 @@ test {
     _ = parallel;
     _ = clock;
     _ = rng;
+    _ = game_random;
     _ = secret;
     _ = sim;
     _ = sys_metrics;

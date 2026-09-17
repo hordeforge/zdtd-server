@@ -34,6 +34,9 @@ pub fn isChallenge(data: []const u8) bool {
     return protocol.challengeEchoValid(data);
 }
 
+/// Connect-challenge echo, **not a stock NetPackage body**: this is the LiteNet
+/// connect-request payload the server echoes back, carried by the transport
+/// rather than by the package registry (RE protocol-frames.md).
 pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
     out.*[0] = challenge_marker;
     @memcpy(out.*[1..17], &guid);
@@ -92,7 +95,9 @@ fn parsePackageStream(payload: []const u8, count: u16, out: []Package) usize {
     return n;
 }
 
-/// Parse channel-prefixed game message into packages.
+/// Parse a channel-prefixed game message into packages. This is the channel
+/// envelope, **not a NetPackage body**: channel u8 | payloadSize i32 |
+/// compressed u8 | encrypted u8 | count u16, then the packages themselves.
 /// Supports stock uncompressed and deflate-compressed (Noemax) envelopes.
 /// Encrypted payloads are still rejected.
 /// Not reentrant for compressed envelopes: nested calls that need inflate
@@ -149,6 +154,14 @@ pub const DeflateFramer = struct {
     comp: flate.Compress,
 
     /// Window the deflate matcher needs; callers own the storage.
+    ///
+    /// This is 64 KiB while stock's `DeflateOutputStream` is constructed with
+    /// 32768 (`NetConnectionSteam.il.txt` IL_00E1), which looks like a wire
+    /// divergence and is not: `flate.max_window_len` is `history_len * 2`
+    /// because the buffer holds lookahead as well as history, and
+    /// `Compress.drain` preserves exactly `flate.history_len` = 32768 across a
+    /// rebase. The back-reference distance a client must resolve is therefore
+    /// the same 32 KiB stock emits; only zdtd's buffer is larger.
     pub const window_len: usize = flate.max_window_len;
 
     pub fn begin(
@@ -241,6 +254,49 @@ test "frame roundtrip pos body size" {
     try std.testing.expectEqual(@as(usize, 30), pkgs[0].body.len);
 }
 
+test "channel envelope matches the documented byte offsets" {
+    // A roundtrip cannot see this: builder and parser can shift a header field
+    // together and still agree. RE protocol.md §3 pins the offsets - channel:u8
+    // | payloadSize:i32 (bytes AFTER this header) | compressed:u8 |
+    // encrypted:u8 | pkgCount:u16, then per package contentLen:i32 covering
+    // only (pkgId + body), pkgId:u16, body.
+    const body: [10]u8 = @splat(0xEE);
+    // 99 is the fixture id lint-wire allows in this file; the id is arbitrary
+    // here, only its position in the frame is under test.
+    const fixture_id: u16 = 99;
+    var frame_buf: [64]u8 = undefined;
+    const framed = try framePackage(&frame_buf, 1, 99, &body);
+
+    try std.testing.expectEqual(@as(u8, 1), framed[0]); // channel
+    try std.testing.expectEqual(@as(u8, 0), framed[5]); // compressed
+    try std.testing.expectEqual(@as(u8, 0), framed[6]); // encrypted
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, framed[7..9], .little));
+
+    // payloadSize counts everything after the 9-byte header, and the frame is
+    // exactly that long. Asserting both is what catches an off-by-one-field
+    // reading of "payload size".
+    const payload_size = std.mem.readInt(i32, framed[1..5], .little);
+    try std.testing.expectEqual(@as(i32, 4 + 2 + body.len), payload_size);
+    try std.testing.expectEqual(envelope_len + @as(usize, @intCast(payload_size)), framed.len);
+
+    // contentLen covers pkgId + body only, not itself.
+    try std.testing.expectEqual(@as(i32, 2 + body.len), std.mem.readInt(i32, framed[9..13], .little));
+    try std.testing.expectEqual(fixture_id, std.mem.readInt(u16, framed[13..15], .little));
+    try std.testing.expectEqualSlices(u8, &body, framed[15..]);
+
+    // The deflate framer writes the same header; its payloadSize is likewise
+    // the byte count after the header, measured post-compression.
+    var zwindow: [DeflateFramer.window_len]u8 = undefined;
+    var zout: [256]u8 = undefined;
+    var fr: DeflateFramer = undefined;
+    try fr.begin(&zout, &zwindow, 1, fixture_id, body.len);
+    try fr.writer().writeAll(&body);
+    const zipped = try fr.finish();
+    try std.testing.expectEqual(@as(u8, 1), zipped[5]); // compressed flag set
+    const zsize = std.mem.readInt(i32, zipped[1..5], .little);
+    try std.testing.expectEqual(envelope_len + @as(usize, @intCast(zsize)), zipped.len);
+}
+
 test "DeflateFramer roundtrips through the inbound parser" {
     var window: [DeflateFramer.window_len]u8 = undefined;
     var out: [8192]u8 = undefined;
@@ -289,6 +345,42 @@ test "DeflateFramer keeps a body far larger than the frame buffer" {
     i = 0;
     while (i < body_len) : (i += 1) {
         try std.testing.expectEqual(bodyByte(i), pkgs[0].body[i]);
+    }
+}
+
+test "deflate back-references stay inside the stock 32 KiB history" {
+    // Stock builds its DeflateOutputStream with a 32768 window
+    // (`NetConnectionSteam.il.txt` IL_00E1), so a match reaching further back
+    // would be a distance the client cannot resolve. zdtd's window buffer is
+    // twice that, which is a buffer-size difference and not a wire one:
+    // `flate.max_window_len` is `history_len * 2` to hold lookahead beside
+    // history. Pin the number that actually bounds the emitted distances.
+    try std.testing.expectEqual(@as(usize, 32768), flate.history_len);
+    try std.testing.expectEqual(flate.history_len * 2, DeflateFramer.window_len);
+
+    // A body whose only long match is further back than 32 KiB: identical
+    // marker runs at 0 and at 48 KiB, noise between. It has to round-trip
+    // whatever the matcher decides, which is the property that matters.
+    var window: [DeflateFramer.window_len]u8 = undefined;
+    const gap: usize = 48 * 1024;
+    const body_len: usize = gap + 4096;
+    var out: [128 * 1024]u8 = undefined;
+    var fr: DeflateFramer = undefined;
+    try fr.begin(&out, &window, 0, 77, body_len);
+    var i: usize = 0;
+    while (i < body_len) : (i += 1) {
+        const b: u8 = if (i < 4096 or i >= gap) 0xAB else bodyByte(i);
+        try fr.writer().writeByte(b);
+    }
+    const framed = try fr.finish();
+
+    var pkgs: [2]Package = undefined;
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(framed, &pkgs));
+    try std.testing.expectEqual(body_len, pkgs[0].body.len);
+    i = 0;
+    while (i < body_len) : (i += 1) {
+        const want: u8 = if (i < 4096 or i >= gap) 0xAB else bodyByte(i);
+        try std.testing.expectEqual(want, pkgs[0].body[i]);
     }
 }
 

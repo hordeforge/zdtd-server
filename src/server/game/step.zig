@@ -103,6 +103,25 @@ pub fn step(self: *Game) !void {
             self.harness.counters.add(.terrain_snap_chunks, covered);
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
+        // The blood-moon freeze reads this one (stock InitParty IL_0006
+        // freezes the weighted party level, not the high-water mark).
+        self.sim.director.party_stage_weighted = self.partyWeightedGameStage();
+        // Nightly bonus-loot cadence (stock SetPartyLevel, pushed at the
+        // InitParty freeze): resolve max(stageSpawnMax / LootBonusMaxCount,
+        // LootBonusEvery) + LootBonusScale from the gamestage table against
+        // the frozen stage, so the horde counter below runs the XML values.
+        // The freeze-once gate lives in the director; re-push here is cheap
+        // (two table lookups) and covers a ladder that loads mid-night.
+        // The wandering pair refreshes the same way every tick (stock reads
+        // the GameStageDefinition statics at spawn time).
+        if (self.sim.director.bloodmoon_active and self.sim.director.bm_stage_frozen != 0) {
+            self.pushBloodMoonBonus(self.sim.director.bm_stage_frozen);
+        }
+        {
+            const cfg = self.gamestages.config;
+            if (cfg.loot_wandering_bonus_every > 0) self.sim.director.wander_bonus_every = @intCast(cfg.loot_wandering_bonus_every);
+            if (cfg.loot_wandering_bonus_scale > 0) self.sim.director.wander_bonus_scale = cfg.loot_wandering_bonus_scale;
+        }
         // Day/night ambient (world/sky.zig slice 1): one value per tick from
         // the world clock + its dawn/dusk boundary (WorldClock dawn/dusk =
         // stock GameUtils::CalcDuskDawnHours(DayLightLength)) feeds the sim's
@@ -114,7 +133,12 @@ pub fn step(self: *Game) !void {
         // 2026-08-27): the night ambient folds the 7-phase moon brightness
         // (GetMoonAmbientScale); day ambient is unchanged.
         const moon = sky.moonBrightness(clk.worldTimeBits() / sky.day_ticks);
-        self.sim.ambient_light = sky.ambientLuma(day_pct) * sky.moonAmbientScale(moon, day_pct);
+        // worldglobal.xml night floor: the day curve is 0 at ~1:00 by
+        // construction, but stock's `<environment>` night scales keep the
+        // total above 0 (sky .7, ground .05, equator .45). Floor before the
+        // moon fold so moonless nights still read above 0.
+        const luma = @max(sky.ambientLuma(day_pct), self.worldglobal.nightFloor());
+        self.sim.ambient_light = luma * sky.moonAmbientScale(moon, day_pct);
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
         // before systems.tickAll consumes the noise ring.
@@ -132,8 +156,9 @@ pub fn step(self: *Game) !void {
         // whose AABB contains them (post-tick: the points landed mid-tick).
         self.triggerSleeperVolumesByStealthNoise();
         // Water leveling: pour basins opened by this tick's block edits (dig
-        // beside a lake, placed water). Budgeted per tick; the fills mark
-        // chunks dirty and the chunk stream broadcasts them.
+        // beside a lake, placed water). Budgeted per tick; each filled cell
+        // goes out as a SetBlock through the store's water_fill hook (the
+        // chunk dirty flag is persistence-only and does not re-send).
         _ = self.world.levelWaterTick(
             self.sim.rules.water.edits_per_tick,
             self.sim.rules.water.spread_cap,
@@ -154,6 +179,10 @@ pub fn step(self: *Game) !void {
         // Cosmetic head-aim (RE EntityAlive.SetLookPosition): broadcast
         // EntityLookAt to tracking players when a zombie's look target moves.
         self.tickEntityLookAt();
+        // Attack target (RE EntityAlive.SetAttackTarget IL=70 and the
+        // OnUpdateLive expiry clear): publish NetPackageSetAttackTarget on
+        // change so remote clients know what a zombie is chasing.
+        self.tickAttackTarget();
         // Stealth meters (RE PlayerStealth.TickServer S2C): broadcast
         // NetPackageEntityStealth for each player every 16 ticks on change.
         self.tickStealthBroadcast();
@@ -181,7 +210,14 @@ pub fn step(self: *Game) !void {
                 if ((b.distraction_tags & 1) == 0 or b.distraction_eat_ticks > 0) continue;
                 const lid = self.sim.network_id[bs].id;
                 if (packages.buildRemoveBodyReason(&self.body_buf, lid, .despawned)) |rm| {
-                    self.broadcast("NetPackageEntityRemove", rm) catch {};
+                    // Only the peers that were told about this bag. Stock's
+                    // NetEntityDistributionEntry::SendToPlayers walks
+                    // trackedPlayers, and the client logs
+                    // "NetPackageEntityRemove entity {0} missing"
+                    // (ProcessPackage IL=24) when asked to remove something it
+                    // never spawned. Sent before destroy, while the slot is
+                    // still the one known_entities refers to.
+                    self.broadcastKnown("NetPackageEntityRemove", rm, bs) catch {};
                 } else |_| {}
                 self.sim.destroy(bs);
             }
@@ -233,11 +269,14 @@ pub fn step(self: *Game) !void {
         self.reapStaleLocks();
         {
             var corpses: [16]ecs.entity.NetId = undefined;
-            const nc = self.sim.sweepCorpses(dt, &corpses);
+            var corpse_slots: [16]ecs.Slot = undefined;
+            const nc = self.sim.sweepCorpses(dt, &corpses, &corpse_slots);
             var ci: usize = 0;
             while (ci < nc) : (ci += 1) {
                 const rm = packages.buildRemoveBody(&self.body_buf, corpses[ci]) catch continue;
-                self.broadcast("NetPackageEntityRemove", rm) catch continue;
+                // The sweep destroyed the entity, so the id no longer resolves;
+                // scope by the slot it reported (stock: trackedPlayers).
+                self.broadcastKnown("NetPackageEntityRemove", rm, corpse_slots[ci]) catch continue;
             }
         }
         self.tickTraderAreas();
@@ -261,24 +300,33 @@ pub fn step(self: *Game) !void {
                 // ItemActionAttack.Hit / ProjectileMoveScript.checkCollision scale a
                 // turret/trap kill's XP by PassiveEffects.ElectricalTrapXP rather than
                 // paying full credit like a direct player kill; stock's own default is
-                // 0 (buffs.xml), unlocked only by perkAdvancedEngineering. zdtd has no
-                // perk levels yet (docs/adr/0023-perk-attribute-system.md), so
-                // trap_kill_xp_frac is a flat floor rather than a per-player lookup.
+                // 0 (buffs.xml), unlocked only by perkAdvancedEngineering
+                // (base_set 0.15..0.75 by level). The owner's perk fold wins when
+                // nonzero; otherwise the operator floor trap_kill_xp_frac stands
+                // (a zdtd-native kindness - stock pays 0 without the perk).
                 const trap_xp = self.xpGainFor(r.killed_ids[tk]);
+                const trap_frac: f32 = blk: {
+                    const perk = self.namedPassiveFold(osz, null, "ElectricalTrapXP");
+                    if (perk > 0) break :blk perk;
+                    break :blk @max(0, self.sim.rules.progression.trap_kill_xp_frac);
+                };
                 // Guard the float->int cast: a negative or huge
                 // trap_kill_xp_frac (config) traps @trunc into u64.
-                const trap_scaled_f = @as(f32, @floatFromInt(trap_xp)) *
-                    @max(0, self.sim.rules.progression.trap_kill_xp_frac);
+                const trap_scaled_f = @as(f32, @floatFromInt(trap_xp)) * trap_frac;
                 const trap_xp_scaled: u64 = if (!std.math.isFinite(trap_scaled_f))
                     0
                 else
                     @min(@as(u64, @trunc(trap_scaled_f)), std.math.maxInt(i32));
-                self.killXpAward(osz, trap_xp_scaled, 100, true); // trap kills carry no verdict scale, no party share (V3.2.0 §4.3)
+                self.killXpAward(osz, trap_xp_scaled, 100, true, r.killed_ids[tk]); // trap kills carry no verdict scale, no party share (V3.2.0 §4.3)
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
+                    // Both counters ride one body (RE protocol-packages.md 27);
+                    // filling only zombie_kills would default playerKills to 0
+                    // and contradict the PvP count this client already has.
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
                         .entity_id = oc.entity_id,
                         .zombie_kills = oc.zombie_kills,
+                        .player_kills = oc.player_kills,
                     })) |ab| {
                         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
                             self.harness.counters.inc(.net_send_errors);
@@ -292,14 +340,34 @@ pub fn step(self: *Game) !void {
             const kid = r.killed_ids[ki];
             if (kid <= 0) continue;
             const rm = try packages.buildRemoveBody(&self.body_buf, kid);
-            try self.broadcast("NetPackageEntityRemove", rm);
+            // A turret kill sets hp 0 and a corpse timer without destroying,
+            // so the id still resolves and the remove can be scoped to the
+            // peers that knew it. A slot that has already gone falls back to
+            // the broadcast rather than telling nobody.
+            if (self.sim.slotOfNetId(kid)) |ks| {
+                try self.broadcastKnown("NetPackageEntityRemove", rm, ks);
+            } else {
+                try self.broadcast("NetPackageEntityRemove", rm);
+            }
         }
         var di: u8 = 0;
         while (di < r.despawned_n) : (di += 1) {
             const did = r.despawned_ids[di];
             if (did <= 0) continue;
             const rm = try packages.buildRemoveBodyReason(&self.body_buf, did, .despawned);
-            try self.broadcast("NetPackageEntityRemove", rm);
+            // Destroyed by the sweep, so scope by the reported slot.
+            try self.broadcastKnown("NetPackageEntityRemove", rm, r.despawned_slots[di]);
+        }
+        // The plugin `despawn` verb destroys through the command drain, which
+        // is not a system, so its removals ride their own list. Without this
+        // the entity vanished server-side and stood on every client's map for
+        // the rest of the session.
+        var ci: u32 = 0;
+        while (ci < r.cmd_despawned_n) : (ci += 1) {
+            const cid = r.cmd_despawned_ids[ci];
+            if (cid <= 0) continue;
+            const rm = try packages.buildRemoveBodyReason(&self.body_buf, cid, .despawned);
+            try self.broadcastKnown("NetPackageEntityRemove", rm, @intCast(r.cmd_despawned_slots[ci]));
         }
         if (r.buff_expired_n > 0) try self.broadcastBuffExpiries(&r);
         var li: u8 = 0;
@@ -351,7 +419,12 @@ pub fn step(self: *Game) !void {
         while (ci < cn) : (ci += 1) {
             const cq = self.sim.completed_quests_ring[ci];
             if (cq.slot >= self.sim.player.len) continue;
-            const peer: usize = @intCast(self.sim.player[cq.slot].peer_slot);
+            // peer_slot is i32 and defaults to -1 (no peer): check the sign
+            // before the cast, since @intCast traps on a negative and the
+            // range check below would never run.
+            const peer_i = self.sim.player[cq.slot].peer_slot;
+            if (peer_i < 0) continue;
+            const peer: usize = @intCast(peer_i);
             if (peer >= self.clients.len) continue;
             const d = self.sim.catalog.byId(cq.def_id) orelse continue;
             const sv = self.plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
@@ -390,7 +463,7 @@ pub fn step(self: *Game) !void {
                 switch (spec.kind) {
                     .item => {
                         const eid = self.items.ecsIdByName(spec.item_name);
-                        if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
+                        if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(scaled, 65535)));
                     },
                     .loot_item => {
                         // A LootItem reward id is a stock item name OR a loot
@@ -408,15 +481,15 @@ pub fn step(self: *Game) !void {
                             // loot-economy.md 8.4, progression.md
                             // GetTraderStage IL=46); the tier mod comes from
                             // the traders.xml root quest_tier_mod.
-                            const n = self.loot.rollGroupPicks(spec.item_name, self.questRewardStage(d, peer), seed, want, spec.is_fixed, &stacks);
+                            const n = self.loot.rollGroupPicks(spec.item_name, self.questRewardStage(d, peer), seed, want, spec.is_fixed, &stacks, .{});
                             var si: usize = 0;
                             while (si < n) : (si += 1) {
                                 const eid = self.items.ecsIdByName(stacks[si].item_name);
-                                if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(stacks[si].count, 65535)));
+                                if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(stacks[si].count, 65535)));
                             }
                         } else {
                             const eid = self.items.ecsIdByName(spec.item_name);
-                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
+                            if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(scaled, 65535)));
                         }
                     },
                     .exp => self.awardXp(peer, scaled),
@@ -432,6 +505,16 @@ pub fn step(self: *Game) !void {
                     else => {},
                 }
             }
+            // Tier-completion chain (stock
+            // QuestEventManager.HandleNewCompletedQuest): finishing a quest of
+            // tier N+1 unlocks the tier-N completion quest from the catalog's
+            // tier_rewards list, so the tier ladder (and its reward bundles)
+            // advances without the validating quest carrying a Quest reward.
+            // The completed quest's own difficulty tier is the trigger, not
+            // the tier of any chained quest it granted above. `questAccept`
+            // takes the client peer slot (not the sim slot), like the
+            // completion ring's own entries.
+            grantTierReward(self, peer, d.difficulty_tier);
         }
         self.sim.completed_quests_n = 0;
     }
@@ -446,6 +529,7 @@ pub fn step(self: *Game) !void {
             self.world.saveAll() catch |e| game_mod.logPersistErr(self, "save world", e);
         }
         self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
+        self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
         self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
         self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
@@ -520,6 +604,50 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     return @max(1, @as(i32, @floor(base)));
 }
 
+/// Grant one quest-reward item stack with its stock stat roll (stock
+/// `ItemClass::CreateItemStacks` IL_0099 calls `AddGSStats` on every reward
+/// stack). Fixed-item rewards create quality-1 items (the name-filter range
+/// defaults to 1..6, unfiltered to 1), so the roll is quality 1 at stage
+/// (quality-1)*20 = 0; an item with no `<stats>` rows grants stat-free, and
+/// the deterministic seed (clock ^ quest def) matches the group-pick stream
+/// beside it. Deposits through `addSlotStacked` so the stats ride the slot
+/// instead of being dropped by the stat-less `give` path.
+fn giveRewardItem(self: *Game, peer: usize, quest_def_id: u16, item_id: u16, count: u16) void {
+    const rolled = self.rollItemStats(item_id, 1, 0, @truncate(self.sim.director.clock.worldTimeBits() ^ @as(u64, @intCast(quest_def_id))));
+    const ps = self.sim.playerByPeer(peer) orelse return;
+    if (!self.sim.mask[ps].inventory) return;
+    const ok = self.sim.inventory[ps].addSlotStacked(.{
+        .item_id = item_id,
+        .count = count,
+        .quality = 1,
+        .stats = rolled.stats,
+        .stats_n = rolled.n,
+    }, self.sim.maxStack(item_id));
+    // The ledger delta is i16; clamp like `give` (reward counts are u16).
+    if (ok) {
+        const p: u16 = if (peer > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer);
+        self.sim.inv_ledger.record(p, item_id, @intCast(@min(count, std.math.maxInt(i16))), .give);
+    }
+}
+
+/// Grant the `quest_tierNcomplete` quest whose tier the just-finished quest
+/// unlocked (stock `QuestEventManager.HandleNewCompletedQuest` walks the
+/// parsed `questTierRewards` list and `QuestTierReward.GiveRewards` grants the
+/// quest). The list is document order with the tier-N row at index N-2 (stock
+/// tiers start at 2), so the lookup is one index read; an out-of-range tier or
+/// an unresolvable id (0) accepts nothing (fail closed).
+fn grantTierReward(self: *Game, peer_slot: usize, completed_tier: u8) void {
+    if (completed_tier < 2) return;
+    const idx: usize = @as(usize, completed_tier) - 2;
+    const list = self.sim.catalog.tier_rewards;
+    if (idx >= list.len) return;
+    const def_id = list[idx];
+    if (def_id == 0) return;
+    if (self.sim.catalog.byId(def_id)) |qd| {
+        _ = systems.questAccept(&self.sim, peer_slot, qd.id);
+    }
+}
+
 /// Withdraw every plugin that disabled itself (trap / fuel) whose pending
 /// effects have not yet been dropped. Called immediately before drain
 /// (World.pre_drain_fn) and after onTick so a broken module's queued ops
@@ -537,8 +665,26 @@ pub fn withdrawDisabledPlugins(self: *Game) void {
 pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     var spawn_out: [ecs.command.max_commands]i32 = undefined;
     const sn = self.sim.commands.dropFrom(src, &spawn_out);
+    // Applied effects with no inverse (damage/say/despawn) cannot be reverted,
+    // so report the residue once instead of forgetting it: paper 3.1's witness
+    // is an author obligation the runtime never verifies, and `ecs/command.zig`
+    // `Inverse` is the checked classification behind this count.
+    const residue = self.sim.commands.takeIrrevocable(src);
+    if (residue > 0) self.harness.counters.add(.plugin_effects_not_reverted, residue);
     for (spawn_out[0..sn]) |id| {
-        if (self.sim.slotOfNetId(id)) |es| self.sim.destroy(es);
+        if (self.sim.slotOfNetId(id)) |es| {
+            // Tell the clients before destroying: they hold the model, and
+            // nothing else will ever mention this entity again. Sent while the
+            // slot is still the one `known_entities` refers to, and scoped to
+            // the peers that were told about it - stock logs "EntityRemove
+            // entity {0} missing" for an id a client never spawned.
+            if (packages.buildRemoveBodyReason(&self.body_buf, id, .despawned)) |rm| {
+                self.broadcastKnown("NetPackageEntityRemove", rm, es) catch {};
+            } else |_| {
+                self.harness.counters.inc(.encode_errors);
+            }
+            self.sim.destroy(es);
+        }
     }
     // Applied glide flags (ADR 0037) attributed to this src: a withdrawn
     // module must not leave the player envelope-exempt (paper 3.1).

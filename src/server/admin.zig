@@ -234,6 +234,15 @@ pub const Server = struct {
         self.fails[i] = 0;
     }
 
+    /// True when a session's receive buffer is full and still holds no newline.
+    /// pollLine only ever appends into the remaining space, so such a slot can
+    /// never make progress: the next read would get a zero-length destination
+    /// forever. Dropping it is the anti-flood property - a peer cannot hold an
+    /// admin slot open by never terminating a line.
+    pub fn recvBufferWedged(pending: []const u8) bool {
+        return pending.len == max_cmd and std.mem.findScalar(u8, pending, '\n') == null;
+    }
+
     /// Non-blocking: accept new sessions, then read one line from any session.
     /// Sessions stay open across commands (telnet-style); replies go to the
     /// session that sent the line.
@@ -243,7 +252,7 @@ pub const Server = struct {
         for (&self.sessions, 0..) |*s, i| {
             if (s.* < 0) continue;
             const pending = self.recv_lens[i];
-            if (pending == max_cmd) {
+            if (recvBufferWedged(self.recv_bufs[i][0..pending])) {
                 self.dropSession(i);
                 continue;
             }
@@ -1197,6 +1206,27 @@ test "too many failed logins closes the session" {
     try std.testing.expectEqual(@as(u8, 0), s.fails[1]);
     // fail_block_minutes=0: no process-wide lockout window.
     try std.testing.expectEqual(@as(u64, 0), s.login_lock_until_ns);
+}
+
+test "a full receive buffer with no newline is wedged" {
+    // The decision pollLine makes, tested directly: a full buffer with no
+    // newline can never make progress, so the session is dropped. Testing the
+    // predicate rather than pollLine is deliberate - pollLine returns early
+    // without a live listener, so a test that called it would pass whether or
+    // not the guard existed.
+    var full: [max_cmd]u8 = @splat('a');
+    try std.testing.expect(Server.recvBufferWedged(&full));
+
+    // A full buffer that does hold a newline is a complete command, not a
+    // wedge: it must be parsed, not dropped.
+    var full_with_nl: [max_cmd]u8 = @splat('a');
+    full_with_nl[max_cmd - 1] = '\n';
+    try std.testing.expect(!Server.recvBufferWedged(&full_with_nl));
+
+    // Anything short of full still has room to receive the terminator.
+    var partial: [max_cmd - 1]u8 = @splat('a');
+    try std.testing.expect(!Server.recvBufferWedged(&partial));
+    try std.testing.expect(!Server.recvBufferWedged(""));
 }
 
 test "fail limit arms process-wide login lockout" {

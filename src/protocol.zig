@@ -35,8 +35,8 @@ pub const content_len_entity_rel_pos_and_rot_no_q: usize = 22;
 /// client mod (RealEarth-style engine expand: stock clients cannot read it).
 /// XZ (`ChunkAreaDim`) never expands; only the column height grows.
 ///
-/// One source of truth: only `y_dim` is stored; `layers`, `c_max_height` and
-/// `plane_cells` derive from it, so a profile cannot disagree with itself.
+/// One source of truth: only `y_dim` is stored; `layers`, `cMaxHeight` and
+/// `planeCells` derive from it, so a profile cannot disagree with itself.
 /// The block-plane index stride is the fixed `ChunkAreaDim` 256 in every
 /// dialect (`x + z*16 + y*256`); only the cell count grows with the height.
 pub const WireProfile = struct {
@@ -50,18 +50,18 @@ pub const WireProfile = struct {
         return self.y_dim / self.layer_height;
     }
     /// ChunkBlockYPow = log2(y_dim) (8 stock, 14 expanded). Validated at load.
-    pub fn y_pow(self: WireProfile) u8 {
+    pub fn yPow(self: WireProfile) u8 {
         return @intCast(@ctz(self.y_dim));
     }
     /// cMaxHeight = y_dim - 1 (255 stock, 16383 expanded).
-    pub fn c_max_height(self: WireProfile) u32 {
+    pub fn cMaxHeight(self: WireProfile) u32 {
         return self.y_dim - 1;
     }
     /// Dense block-plane cell count: ChunkAreaDim × y_dim = 256 × y_dim
     /// (65536 stock, 131072 at 512). The plane INDEX stride is the fixed
     /// ChunkAreaDim 256 (`x + z*16 + y*256`) in every dialect - only the cell
     /// count and the layer band count grow with the column height.
-    pub fn plane_cells(self: WireProfile) u32 {
+    pub fn planeCells(self: WireProfile) u32 {
         return 256 * self.y_dim;
     }
     /// Stock dialect: today's byte-pinned format.
@@ -72,8 +72,8 @@ pub const WireProfile = struct {
     pub fn validate(self: WireProfile) bool {
         if (self.y_dim < 256 or self.y_dim & (self.y_dim - 1) != 0) return false;
         if (self.layer_height == 0 or self.y_dim % self.layer_height != 0) return false;
-        const expected_pow: u32 = @as(u32, 1) << @as(u5, @intCast(self.y_pow()));
-        return expected_pow == self.y_dim and self.y_dim == self.c_max_height() + 1;
+        const expected_pow: u32 = @as(u32, 1) << @as(u5, @intCast(self.yPow()));
+        return expected_pow == self.y_dim and self.y_dim == self.cMaxHeight() + 1;
     }
 };
 
@@ -104,7 +104,7 @@ test "known wire profiles resolve and validate" {
     const t = profileForName("tall-512").?;
     try std.testing.expect(t.validate());
     try std.testing.expectEqual(@as(u32, 128), t.layers());
-    try std.testing.expectEqual(@as(u32, 256 * 512), t.plane_cells());
+    try std.testing.expectEqual(@as(u32, 256 * 512), t.planeCells());
     try std.testing.expect(profileForName("bogus") == null);
 }
 
@@ -112,18 +112,18 @@ test "WireProfile stock derives the RE constants" {
     try std.testing.expect(stock_profile.validate());
     try std.testing.expect(stock_profile.isStock());
     try std.testing.expectEqual(@as(u32, 64), stock_profile.layers());
-    try std.testing.expectEqual(@as(u8, 8), stock_profile.y_pow());
-    try std.testing.expectEqual(@as(u32, 255), stock_profile.c_max_height());
-    try std.testing.expectEqual(@as(u32, 65536), stock_profile.plane_cells());
+    try std.testing.expectEqual(@as(u8, 8), stock_profile.yPow());
+    try std.testing.expectEqual(@as(u32, 255), stock_profile.cMaxHeight());
+    try std.testing.expectEqual(@as(u32, 65536), stock_profile.planeCells());
 
     // Expanded (RealEarth-style): 16384 / 8 / 4096 layers; the plane grows
     // 256 × y_dim while the index stride stays the fixed ChunkAreaDim 256.
     const tall: WireProfile = .{ .y_dim = 16384 };
     try std.testing.expect(tall.validate());
     try std.testing.expectEqual(@as(u32, 4096), tall.layers());
-    try std.testing.expectEqual(@as(u8, 14), tall.y_pow());
-    try std.testing.expectEqual(@as(u32, 16383), tall.c_max_height());
-    try std.testing.expectEqual(@as(u32, 256 * 16384), tall.plane_cells());
+    try std.testing.expectEqual(@as(u8, 14), tall.yPow());
+    try std.testing.expectEqual(@as(u32, 16383), tall.cMaxHeight());
+    try std.testing.expectEqual(@as(u32, 256 * 16384), tall.planeCells());
     try std.testing.expect(!tall.isStock());
 
     // Invalid profiles are rejected.
@@ -147,4 +147,68 @@ test "challengeEchoValid" {
     try std.testing.expect(challengeEchoValid(&pkt));
     pkt[0] = 0;
     try std.testing.expect(!challengeEchoValid(&pkt));
+}
+
+/// `EnumDamageTypes` (V3.2.0 b9, `il/full-v3.2.0/_global/EnumDamageTypes.il.txt`
+/// field order; the wire byte in `NetPackageDamageEntity` is this ordinal:
+/// protocol.md §6.5 "3 Bashing, 16 Suffocation (drown), 26 Suicide").
+pub const damage_type_names = [_][]const u8{
+    "none",      "piercing",   "slashing",    "bashing",       "crushing",    "corrosive",
+    "heat",      "cold",       "radiation",   "toxic",         "electrical",  "disease",
+    "infection", "starvation", "dehydration", "falling",       "suffocation", "bloodloss",
+    "sprain",    "break",      "stun",        "concuss",       "knockout",    "blackout",
+    "knockdown", "barbedwire", "suicide",     "vehicleinside", "weather",     "special",
+};
+
+/// Stock `Equipment.physicalDamageTypes`
+/// (`Equipment::.cctor` IL=11: `Parse("piercing,bashing,slashing,crushing,none,corrosive")`).
+/// Those are ordinals 0 (none) and 1..5, so the test is `dtype <= 5`; every
+/// other `EnumDamageTypes` member is non-physical and takes
+/// `ElementalDamageResist` in `Equipment.CalcDamage` (IL=83) instead of the
+/// physical armor rating.
+pub const max_physical_damage_type: u8 = 5;
+
+/// True when `dtype` is in stock's `physicalDamageTypes` set (the armor-rating
+/// branch of `Equipment.CalcDamage`). An out-of-range byte is treated as
+/// non-physical: the enum's upper bound is the fallback, never a silent
+/// physical classification.
+pub fn damageTypeIsPhysical(dtype: u8) bool {
+    return dtype <= max_physical_damage_type;
+}
+
+/// `DamageSource::AffectedByArmor()` (IL=5) is `damageSource ==
+/// EnumDamageSource.External` (0): armour - the physical rating *and* passive
+/// 43 ElementalDamageResist - applies only to External hits. Internal (1)
+/// damage (starvation, dehydration, blood loss, the vehicle-inside hazard the
+/// RE records as `DamageSource(Internal, VehicleInside)`) bypasses armour
+/// entirely; `EntityAlive::DamageEntity`'s passive-40 GeneralDamageResist step
+/// runs before this and still applies.
+pub fn damageSourceAffectedByArmor(source: u8) bool {
+    return source == 0;
+}
+
+/// The FastTags name for a wire damage type, used as the query tag set for
+/// passive 43 and for logs. Out-of-range bytes return "" (no tag match).
+pub fn damageTypeName(dtype: u8) []const u8 {
+    if (dtype >= damage_type_names.len) return "";
+    return damage_type_names[dtype];
+}
+
+test "damage types: stock physical set and wire names" {
+    // Equipment::.cctor: piercing, bashing, slashing, crushing, none, corrosive.
+    try std.testing.expect(damageTypeIsPhysical(0)); // none
+    try std.testing.expect(damageTypeIsPhysical(3)); // bashing
+    try std.testing.expect(damageTypeIsPhysical(5)); // corrosive
+    try std.testing.expect(!damageTypeIsPhysical(6)); // heat
+    try std.testing.expect(!damageTypeIsPhysical(16)); // suffocation (drown)
+    try std.testing.expect(!damageTypeIsPhysical(26)); // suicide
+    try std.testing.expect(!damageTypeIsPhysical(255)); // out of range -> elemental
+    try std.testing.expectEqualStrings("bashing", damageTypeName(3));
+    try std.testing.expectEqualStrings("suffocation", damageTypeName(16));
+    try std.testing.expectEqualStrings("heat", damageTypeName(6));
+    try std.testing.expectEqualStrings("", damageTypeName(200));
+    // DamageSource::AffectedByArmor IL=5: External (0) only.
+    try std.testing.expect(damageSourceAffectedByArmor(0));
+    try std.testing.expect(!damageSourceAffectedByArmor(1));
+    try std.testing.expect(!damageSourceAffectedByArmor(2));
 }

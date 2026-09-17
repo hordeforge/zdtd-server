@@ -16,6 +16,7 @@
 //! ids; `prefabs.Index` remaps them by name (Prefab::loadIdMapping).
 
 const std = @import("std");
+const assets_placeholders = @import("../assets/blockplaceholders.zig");
 const io_fs = @import("../util/io_fs.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 
@@ -84,6 +85,10 @@ pub const TtsBlocks = struct {
     /// types.len when the channel was decoded, else empty. Cells with mass > 0
     /// are authored water (POI pools, flooded basements, water towers).
     water: []u16 = &.{},
+    /// Per-cell blockplaceholders index + 1 (0 = the cell is a normal block).
+    /// Filled by the prefab id remap from the placeholder table, consumed by
+    /// the paint path, which resolves the target at the cell's world position.
+    placeholders: []u16 = &.{},
     /// Prefab TE list (local coords). Payloads owned by same allocator.
     tile_entities: []TeEntry = &.{},
     allocator: std.mem.Allocator,
@@ -98,6 +103,7 @@ pub const TtsBlocks = struct {
         if (self.damage.len != 0) self.allocator.free(self.damage);
         if (self.textures.len != 0) self.allocator.free(self.textures);
         if (self.water.len != 0) self.allocator.free(self.water);
+        if (self.placeholders.len != 0) self.allocator.free(self.placeholders);
         self.* = undefined;
     }
 
@@ -393,6 +399,17 @@ pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, r
 /// world terrain" placeholders. Stamping filler paints grey marching-cubes clay.
 /// Full BlockValue.rawData (type + rotation + meta) is stamped so shape meshes
 /// face the correct way and take TTS paint textures.
+/// What the paint pass needs to resolve a blockplaceholders cell: the table,
+/// the world seed (`Utils.RandomFromSeedOnPos` folds it into the per-cell
+/// stream) and the biome name at a position (stock compares it with the
+/// target's `biome` case-insensitively).
+pub const PlaceholderCtx = struct {
+    table: *const @import("../assets/blockplaceholders.zig").Table,
+    world_seed: i32,
+    biome_name: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) []const u8,
+    biome_ctx: ?*anyopaque = null,
+};
+
 pub fn paintDecoration(
     tts: *const TtsBlocks,
     origin_x: i32,
@@ -409,6 +426,9 @@ pub fn paintDecoration(
     /// terrain). Null = skip the filler cells (offline tests).
     terrain_id: ?*const fn (?*anyopaque, i32, i32, i32) u16,
     terrain_ctx: ?*anyopaque,
+    /// blockplaceholders resolution (null = a placeholder cell keeps the id the
+    /// remap left, which is the table's first target).
+    ph: ?*const PlaceholderCtx,
     set_block: SetBlockFn,
     ctx: ?*anyopaque,
 ) void {
@@ -429,7 +449,26 @@ pub fn paintDecoration(
             set_block(ctx, wx, wy, wz, water_id, 0, null, 0);
             continue;
         }
-        const raw = tts.types[@intCast(i)];
+        var raw = tts.types[@intCast(i)];
+        // blockplaceholders substitution: the cell's authored name is a
+        // placeholder, so the target is rolled from its list at this world
+        // position (stock BlockPlaceholderMap::Replace IL=185). The remapped
+        // type is only a stand-in for consumers that never reach this pass.
+        if (tts.placeholders.len > @as(usize, @intCast(i))) {
+            const phi = tts.placeholders[@intCast(i)];
+            if (phi != 0) {
+                if (ph) |p| {
+                    const biome = p.biome_name(p.biome_ctx, wx, wz);
+                    if (p.table.resolve(phi - 1, wx, wy, wz, p.world_seed, biome)) |rep| {
+                        raw = if (rep.block_id == 0) 0 else (raw & ~type_mask) | rep.block_id;
+                        if (rep.rotation) |rot_i| {
+                            raw = (raw & ~(rotation_mask << rotation_shift)) |
+                                (@as(u32, rot_i) << rotation_shift);
+                        }
+                    }
+                }
+            }
+        }
         if (raw == 0) continue;
         const typ: u16 = typeId(raw);
         if (typ == filler_id or typ == filler_adaptive_id) {
@@ -639,7 +678,7 @@ test "prefab water channel decodes and paints water blocks" {
         }
     };
     var p: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 240, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Paint.put, &p);
+    paintDecoration(&t, 100, 60, 100, 0, 240, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, Paint.put, &p);
     try std.testing.expectEqual(@as(usize, 1), p.blocks);
     const wcell = p.water.?;
     try std.testing.expectEqual(@as(i32, 101), wcell.wx);
@@ -648,7 +687,7 @@ test "prefab water channel decodes and paints water blocks" {
 
     // water_id 0 fails closed: no water painted.
     var p0: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Paint.put, &p0);
+    paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, Paint.put, &p0);
     try std.testing.expectEqual(@as(usize, 0), p0.blocks);
 }
 
@@ -688,7 +727,7 @@ test "paintDecoration carries authored damage to the set callback" {
         }
     };
     var cap = Capture{};
-    paintDecoration(&t, 10, 50, 20, 0, 0, 0, 0, null, null, Capture.put, &cap);
+    paintDecoration(&t, 10, 50, 20, 0, 0, 0, 0, null, null, null, Capture.put, &cap);
     try std.testing.expectEqual(@as(usize, 3), cap.n); // air cell skipped
     try std.testing.expectEqual(@as(i32, 10), cap.hits[0].wx);
     try std.testing.expectEqual(@as(i32, 50), cap.hits[0].wy);
@@ -699,4 +738,127 @@ test "paintDecoration carries authored damage to the set callback" {
     try std.testing.expectEqual(@as(i32, 11), cap.hits[2].wx); // cell 3 at (1,0,1)
     try std.testing.expectEqual(@as(i32, 50), cap.hits[2].wy);
     try std.testing.expectEqual(@as(i32, 21), cap.hits[2].wz);
+}
+
+test "a tile entity position outside the prefab is dropped, not cast" {
+    // Persistency stores the tile entity's chunk-local position as three i32,
+    // but TeEntry keeps it as i16. A prefab claiming a position outside the
+    // prefab bounds (here past i16 range entirely) must fall back to the zero
+    // origin; casting it straight over panics on an authored or corrupt .tts.
+    var buf: [200]u8 = undefined;
+    var pos: usize = 0;
+    @memcpy(buf[0..4], "tts\x00");
+    pos = 4;
+    std.mem.writeInt(u32, buf[pos..][0..4], 19, .little);
+    pos += 4;
+    std.mem.writeInt(i16, buf[pos..][0..2], 1, .little);
+    std.mem.writeInt(i16, buf[pos + 2 ..][0..2], 1, .little);
+    std.mem.writeInt(i16, buf[pos + 4 ..][0..2], 1, .little);
+    pos += 6;
+    const count: usize = 1;
+    @memset(buf[pos .. pos + count * 4], 0); // blocks: air
+    pos += count * 4;
+    @memset(buf[pos .. pos + count], 0); // density
+    pos += count;
+    @memset(buf[pos .. pos + count * 2], 0); // damage
+    pos += count * 2;
+    std.mem.writeInt(i32, buf[pos..][0..4], 0, .little); // texture bitstream: empty
+    pos += 4;
+    // Tile entity section: i16 count, then (i16 payloadLen | u8 type | payload).
+    std.mem.writeInt(i16, buf[pos..][0..2], 1, .little);
+    pos += 2;
+    std.mem.writeInt(i16, buf[pos..][0..2], 14, .little);
+    pos += 2;
+    buf[pos] = 0;
+    pos += 1;
+    std.mem.writeInt(u16, buf[pos..][0..2], 1, .little); // TileEntity.read version
+    std.mem.writeInt(i32, buf[pos + 2 ..][0..4], 100000, .little); // x past i16
+    std.mem.writeInt(i32, buf[pos + 6 ..][0..4], 0, .little);
+    std.mem.writeInt(i32, buf[pos + 10 ..][0..4], 0, .little);
+    pos += 14;
+
+    var t = try parseBlocks(std.testing.allocator, buf[0..pos]);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(usize, 1), t.tile_entities.len);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].lx);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].ly);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].lz);
+}
+
+test "a placeholder cell resolves to its target at the cell's position" {
+    // The paint pass is where blockplaceholders substitution happens: the
+    // remap leaves the table's first target as a stand-in and records the
+    // placeholder index per cell, and the paint pass replaces the type with the
+    // target rolled for that world position (stock BlockPlaceholderMap::Replace
+    // IL=185 with the biome name and the per-cell seeded stream).
+    const src =
+        \\<blockplaceholders>
+        \\  <placeholder name="helper">
+        \\    <block name="targetA" biome="pine_forest"/>
+        \\  </placeholder>
+        \\  <placeholder name="anyBiome">
+        \\    <block name="targetB"/>
+        \\  </placeholder>
+        \\</blockplaceholders>
+    ;
+    const path = ".zdtd_test_tts_placeholders.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+    const Fx = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "targetA")) return 300;
+            if (std.mem.eql(u8, name, "targetB")) return 301;
+            return null;
+        }
+    };
+    var table = try assets_placeholders.loadFromPath(std.testing.allocator, path, .{ .id_by_name = Fx.id });
+    defer table.deinit();
+
+    const Cap = struct {
+        name: []const u8 = "",
+        raw: u32 = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
+            _ = .{ wx, wy, wz, tex, dens, dmg };
+            const c: *@This() = @ptrCast(@alignCast(ctx.?));
+            c.raw = raw;
+        }
+        fn biome(ctx: ?*anyopaque, wx: i32, wz: i32) []const u8 {
+            _ = .{ wx, wz };
+            const c: *const @This() = @ptrCast(@alignCast(ctx.?));
+            return c.name;
+        }
+    };
+    var cap: Cap = .{ .name = "pine_forest" };
+    var pctx = PlaceholderCtx{
+        .table = &table,
+        .world_seed = 7,
+        .biome_name = Cap.biome,
+        .biome_ctx = &cap,
+    };
+    var types = [_]u32{99};
+    var slots = [_]u16{1};
+    const tb: TtsBlocks = .{
+        .sx = 1,
+        .sy = 1,
+        .sz = 1,
+        .types = &types,
+        .placeholders = &slots,
+        .allocator = std.testing.allocator,
+    };
+    paintDecoration(&tb, 0, 0, 0, 0, 0, 0, 0, null, null, &pctx, Cap.put, &cap);
+    try std.testing.expectEqual(@as(u16, 300), typeId(cap.raw));
+
+    // A different biome skips the biome-gated target: the cell keeps the
+    // stand-in rather than a block that does not belong there.
+    cap = .{ .name = "snow" };
+    cap.raw = 0;
+    types[0] = 99;
+    paintDecoration(&tb, 0, 0, 0, 0, 0, 0, 0, null, null, &pctx, Cap.put, &cap);
+    try std.testing.expectEqual(@as(u16, 99), typeId(cap.raw));
+
+    // Without a context (no catalog) the stand-in stands.
+    cap = .{ .name = "pine_forest" };
+    cap.raw = 0;
+    paintDecoration(&tb, 0, 0, 0, 0, 0, 0, 0, null, null, null, Cap.put, &cap);
+    try std.testing.expectEqual(@as(u16, 99), typeId(cap.raw));
 }

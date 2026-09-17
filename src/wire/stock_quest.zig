@@ -18,14 +18,22 @@ pub const position_data_location: u8 = 1;
 pub const position_data_poi_position: u8 = 2;
 pub const position_data_poi_size: u8 = 3;
 
-/// Stock objective Write path (from Assembly-CSharp BaseObjective / overrides).
+/// Stock objective Write path. Exactly four BaseObjective subclasses override
+/// Write (every `kind base=BaseObjective` / `base=Objective*` type in
+/// `il/full-v3.2.0/_global` was checked); the rest inherit the base shape.
 pub const ObjectiveWriteKind = enum(u8) {
-    /// BaseObjective.Write: FileVersion u8 + CurrentValue u8.
+    /// BaseObjective.Write: FileVersion u8 + CurrentValue u8 (BaseObjective.il.txt:542).
     base = 0,
-    /// ObjectiveTreasureChest.Write: destroyCount i32 + CurrentRadius i32 (no base call).
+    /// ObjectiveTreasureChest.Write: destroyCount i32 + CurrentRadius i32, no
+    /// base call (ObjectiveTreasureChest.il.txt:2592).
     treasure_chest = 1,
-    /// ObjectivePOIStayWithin.Write: empty.
+    /// ObjectivePOIStayWithin.Write and ObjectiveStayWithin.Write are both a
+    /// bare `ret` (ObjectivePOIStayWithin.il.txt:100, ObjectiveStayWithin.il.txt:136).
     empty = 2,
+    /// ObjectiveTime.Write: `(UInt16)currentTime`, no base call
+    /// (ObjectiveTime.il.txt:126); Read casts it back to the currentTime float
+    /// and pins currentValue to 1 (:115).
+    time = 3,
 };
 
 pub const QuestState = enum(u8) {
@@ -45,14 +53,24 @@ pub const RewardWire = struct {
     item: stock_inv.StockSlot = .{},
 };
 
+/// Quest-area bounding box sent when no POI selector answered, so there is no
+/// real prefab bbox to report. zdtd-owned: the true value is the selected
+/// POI's own size, which fills these fields whenever a selector hits. It only
+/// shapes the client's quest-area marker; sim containment reads the POI rect
+/// in `ecs/components.PoiRect`, never these, so a fallback here cannot widen
+/// a StayWithin zone.
+pub const default_quest_size_x: f32 = 50;
+pub const default_quest_size_y: f32 = 20;
+pub const default_quest_size_z: f32 = 50;
+
 pub const QuestPacketEntry = struct {
     quest_id: []const u8,
     loc_x: f32 = 0,
     loc_y: f32 = 70,
     loc_z: f32 = 0,
-    size_x: f32 = 50,
-    size_y: f32 = 20,
-    size_z: f32 = 50,
+    size_x: f32 = default_quest_size_x,
+    size_y: f32 = default_quest_size_y,
+    size_z: f32 = default_quest_size_z,
     poi_name: []const u8 = "",
     trader_x: f32 = 0,
     trader_y: f32 = 70,
@@ -126,7 +144,8 @@ pub fn writeQuestPacketEntry(w: *binary.Writer, e: QuestPacketEntry) !void {
     try w.writeF32(e.trader_z);
 }
 
-/// FetchList: npc | player | et=0 | tier | count | entries...
+/// NetPackageNPCQuestList FetchList (RE): npc i32 | player i32 | eventType u8
+/// (0 = fetch) | tier i32 | entry count i32 | count x QuestPacketEntry.
 pub fn buildNpcQuestListFetch(
     buf: []u8,
     npc_entity_id: i32,
@@ -157,7 +176,9 @@ pub fn writeStockQuest(w: *binary.Writer, q: StockQuestWrite) !void {
         try w.writeI32(q.quest_code);
     }
     // Objectives size marker (UInt16) + virtual BaseObjective.Write per entry.
-    // IL: most types = FileVersion + CurrentValue; TreasureChest = 2×i32; StayWithin = empty.
+    // A kind mismatch desyncs the whole list: the client sizes the block from
+    // the marker and Quest.Read clears every objective when ValidateSizeMarker
+    // rejects it (Quest.il.txt:3454-3470).
     {
         const m = try reserveU16(w);
         var i: u8 = 0;
@@ -181,6 +202,10 @@ pub fn writeStockQuest(w: *binary.Writer, q: StockQuestWrite) !void {
                     try w.writeI32(0); // CurrentRadius
                 },
                 .empty => {},
+                // currentTime seconds; the client casts it straight back to
+                // its float field, so the progress value rides here, not in a
+                // CurrentValue byte.
+                .time => try w.writeU16(val),
             }
         }
         finalizeU16(w, m);
@@ -234,14 +259,20 @@ pub fn writeQuestJournal(w: *binary.Writer, quests: []const StockQuestWrite) !vo
 
 test "npc quest list fetch with one entry" {
     var buf: [256]u8 = undefined;
+    // Distinct values throughout: the entry is positional, and six f32 in a
+    // row is exactly where a swapped pair hides. size_* used to be left at 0,
+    // which made every swap among loc_z, size_x, size_y and size_z invisible.
     const entries = [_]QuestPacketEntry{.{
         .quest_id = "tier1_clear",
         .loc_x = 10,
         .loc_y = 70,
         .loc_z = 20,
+        .size_x = 31,
+        .size_y = 32,
+        .size_z = 33,
         .poi_name = "test_poi",
         .trader_x = 1,
-        .trader_y = 70,
+        .trader_y = 71,
         .trader_z = 2,
     }};
     const body = try buildNpcQuestListFetch(&buf, 50, 106, 1, entries[0..]);
@@ -252,6 +283,26 @@ test "npc quest list fetch with one entry" {
     try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[13..17], .little));
     // quest id string 7bit-len
     try std.testing.expectEqual(@as(u8, 11), body[17]); // "tier1_clear".len
+
+    // The entry continues with loc x/y/z then size x/y/z as f32, and nothing
+    // read them back: a swap anywhere in that run rode out silently.
+    const loc = 18 + "tier1_clear".len;
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 10), f32At(body, loc));
+    try std.testing.expectEqual(@as(f32, 70), f32At(body, loc + 4));
+    try std.testing.expectEqual(@as(f32, 20), f32At(body, loc + 8));
+    try std.testing.expectEqual(@as(f32, 31), f32At(body, loc + 12));
+    try std.testing.expectEqual(@as(f32, 32), f32At(body, loc + 16));
+    try std.testing.expectEqual(@as(f32, 33), f32At(body, loc + 20));
+    // poiName string, then the trader position triple.
+    const trader = loc + 24 + 1 + "test_poi".len;
+    try std.testing.expectEqual(@as(f32, 1), f32At(body, trader));
+    try std.testing.expectEqual(@as(f32, 71), f32At(body, trader + 4));
+    try std.testing.expectEqual(@as(f32, 2), f32At(body, trader + 8));
 }
 
 // --- NetPackageSharedQuest (party share / force-add journal on client) ---
@@ -271,9 +322,9 @@ pub const SharedQuestShare = struct {
     pos_x: f32 = 0,
     pos_y: f32 = 70,
     pos_z: f32 = 0,
-    size_x: f32 = 50,
-    size_y: f32 = 20,
-    size_z: f32 = 50,
+    size_x: f32 = default_quest_size_x,
+    size_y: f32 = default_quest_size_y,
+    size_z: f32 = default_quest_size_z,
     return_x: f32 = 0,
     return_y: f32 = 70,
     return_z: f32 = 0,
@@ -281,7 +332,9 @@ pub const SharedQuestShare = struct {
     shared_with_entity_id: i32 = -1,
 };
 
-/// ShareQuest (event 0) body for S2C / echo.
+/// NetPackageSharedQuest, ShareQuest (event 0) body for S2C / echo. RE
+/// inventories/netpackage-bodies.md write IL=8: one `sharedQuestData` blob,
+/// laid out by the SharedQuestData.write fields written below.
 pub fn buildSharedQuestShare(buf: []u8, q: SharedQuestShare) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(q.shared_by_entity_id);
@@ -318,13 +371,22 @@ pub const SharedQuestHead = struct {
     }
 };
 
-/// Parse C2S SharedQuest head (enough for server accept/remove).
+/// Read side of NetPackageSharedQuest, whose body is one SharedQuestData (RE
+/// inventories/netpackage-bodies.md, write IL=63): `sharedByEntityID` i32 |
+/// `questEvent` u8 | `questCode` i32 | `questID` string | `poiName` string |
+/// `position`, `size`, `returnPos` (three Vector3 = 36 bytes) | `questGiverID`
+/// i32 | `sharedWithEntityID` i32. The three trailing fields the RE table lists
+/// after that are the conditional branch of the same write, not a fixed tail.
+///
+/// Only the fields the server acts on come back: the POI name and the three
+/// vectors are skipped by width, since the shared quest is resolved from
+/// `questID` against the server's own catalog rather than from the client's
+/// description of it.
 pub fn parseSharedQuestHead(body: []const u8) !SharedQuestHead {
     if (body.len < 5) return error.EndOfStream;
     const by = std.mem.readInt(i32, body[0..4], .little);
     const et_raw = body[4];
-    if (et_raw > 3) return error.InvalidEvent;
-    const et: SharedQuestEvent = @enumFromInt(et_raw);
+    const et = std.enums.fromInt(SharedQuestEvent, et_raw) orelse return error.InvalidEvent;
     var head: SharedQuestHead = .{ .shared_by_entity_id = by, .event = et };
     if (et == .share_quest) {
         if (body.len < 9) return error.EndOfStream;
@@ -436,7 +498,7 @@ pub fn parseQuestEventHead(body: []const u8) !QuestEventHead {
     const py = try r.readF32();
     const pz = try r.readF32();
     const et_raw = try r.readByte();
-    if (et_raw > @intFromEnum(QuestEventType.reset_trader_quests)) return error.InvalidEvent;
+    const et = std.enums.fromInt(QuestEventType, et_raw) orelse return error.InvalidEvent;
     try r.skipString(); // questTags (FastTags.ToString; empty set is "")
     const quest_code = try r.readI32();
     var head: QuestEventHead = .{
@@ -444,7 +506,7 @@ pub fn parseQuestEventHead(body: []const u8) !QuestEventHead {
         .px = px,
         .py = py,
         .pz = pz,
-        .event = @enumFromInt(et_raw),
+        .event = et,
         .quest_code = quest_code,
     };
     try readQuestEventTail(&r, &head);
@@ -518,8 +580,53 @@ test "quest event rejects unknown event and truncation" {
     try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0 .. body.len - 1]));
     try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0..4]));
     var bad = buf;
-    bad[16] = 17; // eventType byte, one past ResetTraderQuests
+    // eventType byte, one past the highest declared variant. Derived, not a
+    // literal: a new variant must not silently turn this into a legal value.
+    const past_last = std.enums.values(QuestEventType).len;
+    bad[16] = @intCast(past_last);
     try std.testing.expectError(error.InvalidEvent, parseQuestEventHead(bad[0..body.len]));
+}
+
+test "every declared quest event variant parses" {
+    // The eventType guards derive their bound from the enum, so adding a
+    // variant must not make a legal stock ordinal parse as InvalidEvent.
+    // This is the regression the old hand-synced numeric guards invited.
+    // Built by hand, not via buildQuestEvent: that builder refuses the three
+    // list-tail variants the server never originates, which would leave the
+    // ordinals they occupy untested on the parse side.
+    for (std.enums.values(QuestEventType)) |ev| {
+        var buf: [64]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &buf };
+        try w.writeI32(1);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeByte(@intFromEnum(ev));
+        try w.writeString("");
+        try w.writeI32(5);
+        try w.writeU64(0); // widest fixed tail; ignored by variants without one
+        const head = parseQuestEventHead(w.written()) catch |e| switch (e) {
+            // Variants with a list tail need their own payload. The ordinal was
+            // already accepted by the time the tail is read, which is what this
+            // test is about; a rejected ordinal surfaces as InvalidEvent.
+            error.EndOfStream => continue,
+            else => return e,
+        };
+        try std.testing.expectEqual(ev, head.event);
+    }
+}
+
+test "every declared shared quest event variant parses" {
+    for (std.enums.values(SharedQuestEvent)) |ev| {
+        var body: [9]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 7, .little);
+        body[4] = @intFromEnum(ev);
+        const head = parseSharedQuestHead(&body) catch |e| switch (e) {
+            error.EndOfStream => continue,
+            else => return e,
+        };
+        try std.testing.expectEqual(ev, head.event);
+    }
 }
 
 test "quest event list tails are bounds checked" {
@@ -552,10 +659,23 @@ test "quest event list tails are bounds checked" {
 
 test "shared quest share layout" {
     var buf: [256]u8 = undefined;
+    // The nine position floats used to be left at their 0 default, so any
+    // swap among them emitted identical bytes. Distinct values make the run
+    // of pos / size / return triples observable.
     const body = try buildSharedQuestShare(&buf, .{
         .shared_by_entity_id = 106,
         .quest_code = 7,
         .quest_id = "tier1_clear",
+        .poi_name = "poi",
+        .pos_x = 11,
+        .pos_y = 12,
+        .pos_z = 13,
+        .size_x = 21,
+        .size_y = 22,
+        .size_z = 23,
+        .return_x = 31,
+        .return_y = 32,
+        .return_z = 33,
         .shared_with_entity_id = 106,
     });
     try std.testing.expect(body.len > 20);
@@ -565,6 +685,16 @@ test "shared quest share layout" {
     try std.testing.expectEqual(@as(i32, 7), head.quest_code);
     try std.testing.expectEqualStrings("tier1_clear", head.questId());
     try std.testing.expectEqual(@as(i32, 106), head.shared_with_entity_id);
+
+    // parseSharedQuestHead skips the three triples by width, so read them
+    // here: sharedBy i32 | event u8 | questCode i32 | questID | poiName, then
+    // pos, size and return as Vector3 each.
+    var r: binary.Reader = .{ .data = body[9..] }; // past sharedBy, event, code
+    var s_buf: [64]u8 = undefined;
+    _ = try r.readString(&s_buf); // questID
+    _ = try r.readString(&s_buf); // poiName
+    const want = [_]f32{ 11, 12, 13, 21, 22, 23, 31, 32, 33 };
+    for (want) |v| try std.testing.expectEqual(v, try r.readF32());
 }
 
 test "shared quest rejects truncated share body" {
@@ -586,11 +716,20 @@ test "stock quest journal one in-progress" {
         .{}, // Exp: index only
         .{ .has_item_stack = true, .item = .{ .type_id = 0, .count = 0 } }, // Item: empty stack ok
     };
+    // Distinct values per field. The defaults leave quest_version at 1 next to
+    // quest_file_version 8, and shared_owner_id and quest_giver_id both at -1,
+    // so a swap between neighbours emitted identical bytes and no test could
+    // see it.
     const q = StockQuestWrite{
         .id = "quest_whiteRiverCitizen1",
+        .quest_version = 3,
+        .shared_owner_id = 41,
+        .quest_giver_id = 42,
+        .tracked = true,
+        .current_phase = 2,
         .quest_code = 1,
         .objective_count = 2,
-        .first_objective_value = 0,
+        .first_objective_value = 6,
         .rewards = rewards[0..],
     };
     try writeQuestJournal(&w, &[_]StockQuestWrite{q});
@@ -603,6 +742,26 @@ test "stock quest journal one in-progress" {
     const outer = std.mem.readInt(u16, out[5..7], .little);
     try std.testing.expect(outer > 10);
     try std.testing.expectEqual(@as(usize, 5 + outer + 1), out.len);
+
+    // Quest.Write body after the outer marker: the id string, then the header
+    // bytes. Nothing read these back, so five adjacent pairs among them could
+    // swap unnoticed (the mutation audit reported exactly that run).
+    var qr: binary.Reader = .{ .data = out[7..] };
+    var id_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("quest_whiteRiverCitizen1", try qr.readString(&id_buf));
+    try std.testing.expectEqual(@as(u8, 3), try qr.readByte()); // quest_version
+    try std.testing.expectEqual(quest_file_version, try qr.readByte()); // file version
+    try std.testing.expectEqual(@intFromEnum(QuestState.in_progress), try qr.readByte());
+    try std.testing.expectEqual(@as(i32, 41), try qr.readI32()); // sharedOwnerID
+    try std.testing.expectEqual(@as(i32, 42), try qr.readI32()); // questGiverID
+    // InProgress tail: tracked bool, currentPhase byte, questCode i32.
+    try std.testing.expectEqual(true, try qr.readBool());
+    try std.testing.expectEqual(@as(u8, 2), try qr.readByte());
+    try std.testing.expectEqual(@as(i32, 1), try qr.readI32());
+    // Objectives: u16 size marker, then FileVersion + CurrentValue per entry.
+    _ = try qr.readU16();
+    try std.testing.expectEqual(objective_file_version, try qr.readByte());
+    try std.testing.expectEqual(@as(u8, 6), try qr.readByte()); // first_objective_value
 }
 
 test "position data entries cost 13 bytes each" {
@@ -633,6 +792,19 @@ test "position data entries cost 13 bytes each" {
     const out = w_poi.written();
     const tail_after_rally: usize = 2 + 4 + 1 + 4;
     try std.testing.expectEqual(@as(u8, 1), out[out.len - tail_after_rally - 1]);
+
+    // Each entry is a kind byte plus a Vector3, and only the total size was
+    // asserted: x, y and z could rotate among themselves and 13 bytes still
+    // held. The entries sit directly before rallyActivated and its tail.
+    const entries_len = 3 * 13;
+    const first = out.len - tail_after_rally - 1 - entries_len;
+    var pr: binary.Reader = .{ .data = out[first..] };
+    for (pos) |want| {
+        try std.testing.expectEqual(want.kind, try pr.readByte());
+        try std.testing.expectEqual(want.x, try pr.readF32());
+        try std.testing.expectEqual(want.y, try pr.readF32());
+        try std.testing.expectEqual(want.z, try pr.readF32());
+    }
 }
 
 test "treasure chest objective write is 8 bytes not base" {
@@ -668,4 +840,38 @@ test "treasure chest objective write is 8 bytes not base" {
     try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, tc[head..][0..2], .little));
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 2 ..][0..4], .little)); // destroyCount
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 6 ..][0..4], .little)); // CurrentRadius
+}
+
+test "empty and time objective writes carry their own body size" {
+    // ObjectiveStayWithin / ObjectivePOIStayWithin Write nothing; ObjectiveTime
+    // writes a bare UInt16. Neither calls base, so neither emits FileVersion.
+    var buf_empty: [128]u8 = undefined;
+    var buf_time: [128]u8 = undefined;
+    var w_empty: binary.Writer = .{ .buf = &buf_empty };
+    var w_time: binary.Writer = .{ .buf = &buf_time };
+    const kinds_empty = [_]ObjectiveWriteKind{.empty};
+    const kinds_time = [_]ObjectiveWriteKind{.time};
+    const values = [_]u8{47};
+    const q_empty = StockQuestWrite{
+        .id = "intro_buried_supplies",
+        .state = .in_progress,
+        .tracked = true,
+        .current_phase = 1,
+        .quest_code = 9,
+        .objective_count = 1,
+        .objective_values = values[0..],
+        .objective_kinds = kinds_empty[0..],
+    };
+    var q_time = q_empty;
+    q_time.objective_kinds = kinds_time[0..];
+    try writeStockQuest(&w_empty, q_empty);
+    try writeStockQuest(&w_time, q_time);
+    const e = w_empty.written();
+    const t = w_time.written();
+    const id_prefix: usize = 1 + "intro_buried_supplies".len;
+    const head: usize = id_prefix + 1 + 1 + 1 + 4 + 4 + 1 + 1 + 4;
+    // FinalizeSizeMarker counts the u16 itself: empty body = 2, time body = 4.
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, e[head..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 4), std.mem.readInt(u16, t[head..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 47), std.mem.readInt(u16, t[head + 2 ..][0..2], .little));
 }

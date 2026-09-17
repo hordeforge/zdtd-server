@@ -1,7 +1,7 @@
 # Decoration suppression (AllowDecorations) - Product Requirements (PRD 0007)
 
 **Number:** PRD 0007
-**Status:** draft
+**Status:** implemented 2026-09-12
 
 ## 1. Background and problem
 
@@ -51,6 +51,8 @@ See [RFC 0007](0007-deco-suppression.md).
 ## 6. Requirements traceability
 
 G1 -> RFC 0007 §4; G2 -> RFC 0007 §4; G3 -> RFC 0007 §4.
+
+**Status:** implemented 2026-09-12 (see [RFC 0007 §6](0007-deco-suppression.md) for the realization; the acceptance criteria below are met, with the lazy per-deco-chunk build in place of the eager map).
 
 ## 7. Open questions
 

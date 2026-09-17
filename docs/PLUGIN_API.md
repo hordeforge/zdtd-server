@@ -35,16 +35,25 @@ A native ABI could promise neither.
 | Perk verdict (ADR 0033) | `on_perk_spend(player, skill, level, cost)`: `<0` deny the purchase, `0` keep, `>0` scales the skill-point cost by percent; first non-zero wins |
 | GameEvent verdict (ADR 0035) | `on_game_event(player, event, target, var_count)`: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock IL=211 sender/party gate lands native before the verdict |
 | Stat observer (ADR 0034) | `on_stat_changed(player, hp, food, water, stamina, level, xp)`: pure observer fired when the survival pass or an XP award changed a tracked stat; void, no verdict |
+| Buff observer | `on_buff(entity, name, adding)`: pure observer fired for every buff applied or dropped, whatever caused it (C2S request, tick expiry, death clear on respawn). Hooked at `relayBuff`, the one function every buff move already passes through, so a plugin sees the whole set rather than one wired path. Void, no verdict: the buff is applied and relayed before the hook runs |
 | Player lifecycle observers | `on_player_join(peer_slot, entity_id)` / `on_player_leave(peer_slot, entity_id)`: void observers at join and disconnect |
 | Trader observer | `on_trader_event(player, trader_entity, kind)`: void observer on trade open / sell / buy |
 | Quest accept verdict | `on_quest_accept(player, def_id)`: first non-zero wins (deny / keep / scale) |
-| MCP frame handler (ADR 0031) | Wasm `on_mcp_frame(frame_ptr, frame_len, out_ptr, out_cap) -> i32`: the host routes one MCP JSON-RPC frame to the first module exporting it (mcpFrameThunk); protocol logic lives in the guest, the transport owns HTTP; guest scratch + fuel budgets apply (docs/rfc/0002-mcp-server-design.md) |
+| MCP frame handler (ADR 0031) | Wasm `on_mcp_frame(frame_ptr, frame_len, out_ptr, out_cap) -> i32`: the host routes one MCP JSON-RPC frame to the first *live* module exporting it (`WasmHost.routeMcpFrame`; the Game thunk is a thin adapter). A module that is disabled or trapped, has no memory, or exhausted scratch returns null from the call and the router falls through to the next exporter, so one trapped module cannot drop the frame for a healthy one; protocol logic lives in the guest, the transport owns HTTP; guest scratch + fuel budgets apply (docs/rfc/0002-mcp-server-design.md) |
 | Admin commands from plugins | Wasm `on_admin_command(ptr,len,out_ptr,out_cap)->i32` and static `on_admin_command(cmd,out)`; first handler that returns >0 bytes wins; falls through to core `unknown` if none handle it (admin TCP auth still gates `runAdminLine`) |
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
 | Self-contained config (2026-08-29) | `config.toml` inside the mod folder, served to the guest verbatim via `zdtd.config(out_ptr, out_cap) -> i32` (0 = none; host never parses it); declared via `_zdtd_requires "config"`; reference plugin `core_pricegate` reads `price_percent` from its own config.toml |
 | Module tiers + discovery (PRD 0005 / ADR 0032) | **implemented**: `manifest.toml` manifests, `mods/*/manifest.toml` scan, `[mods] disabled`/`blacklist`, five exclusive core override points, `override = <name>` replacement, conflict detection at load (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`, `WasmHost.loadResolved`) |
+| Declarative capability spec (ADR 0030, tightened 2026-09-11) | `_zdtd_requires()` is validated at load against the hook vocabulary and the host import table. A discovered mod that exports a hook and declares nothing is rejected (`error.RequiresUnmet`) instead of loading unvalidated; a module with no hook exports may omit it. The raw load path (in-repo fixtures, legacy `[plugin] modules`) stays permissive because `--export-all` fixtures export symbols they never meant to claim |
+| Contract version export (ADR 0030, 2026-09-12) | Optional `_zdtd_api() -> i32` returns the contract version the guest was built against. The host reads it once at load: newer than `api.plugin_api_version` is refused fail-closed through the `_zdtd_requires` channel (the reason names both versions), older is accepted with a log, absent keeps the permissive path. `mods/plugin_common.zig` exports it, and the host test "shipped core plugins declare the host contract version" loads the shipped set and asserts the guest/host constants match |
+| Reload preserves config (2026-09-11) | `plugin reload` re-instantiates in place and keeps the module's `tier`, `display` and `config.toml` bytes, so a reloaded module still answers `zdtd.config`; before this the config was silently dropped and the module reverted to compiled defaults while `on_enable` reported success |
+| Reload reconciles point claims (2026-09-12) | `plugin reload` also re-reads the module's `manifest.toml` (`WasmHost.reconcileClaims`): a `points` claim the replacement dropped is released and one it added is installed, under the same rule as the boot install (a missing hook, or a point another live module holds, is refused with a log). A legacy `[plugin] modules` path is never reconciled, so a manifest beside it can neither mint nor drop a claim |
+| Mid-drain withdrawal (ADR 0030) | The pre-drain pass runs once before the ops apply, so it cannot see a module that disables itself *while* an op is being applied (a `damage` op reaching an `on_entity_killed` verdict that traps): its remaining ops are already in the snapshot the drain walks. `World.drainCommands` now passes a per-op source gate (`Buffer.drainWith` + `WasmHost.srcWithdrawn`) that withholds an op whose src trapped earlier in the same drain, while native (src 0) and other live sources still apply. A trap is latched as `disabled` by the hook call, so the gate sees it without waiting for the withdrawal pass |
+| Effect withdrawal (ADR 0030) | A disabled/trapped module's still-pending `zdtd.queue` effects are dropped before the drain and its applied spawns are despawned (`withdrawPluginSrc`); per-plugin glide flags are cleared and `BotManager.dropFrom` runs. `bot` verbs execute at queue time inside `BotManager.handleCommand` rather than through the command buffer, so their attribution is carried by the verbs themselves: `bot spawn` records the issuing src, `bot remove all` removes only that src's bots, and `bot count` sets a floor that counts, trims and replaces only that src's bots. `dropFrom(src)` therefore restores the exact pre-command state for the removal and floor legs. Known residual: `bot move/look/shoot` mutate an existing bot immediately (the shoot leg applies damage), so a withdrawal cannot undo a hit already applied |
+| Queued-verb interception (ADR 0039, 2026-09-12) | A module declares verbs it will not queue with `manifest.toml deny = "say,damage"`; the operator's `zdtd.toml [plugin] deny`/`allow` are `module=verb,verb` lists merged right-biased over it (`(module | operator deny) & ~operator allow`). Enforced at the `zdtd.queue` boundary before the ECS buffer and the host `bot` family; drops are counted in `plugin_verbs_denied`. Known verbs: `spawn`, `despawn`, `damage`, `say`, `glide`, `bot` |
+| Exclusive point claims (ADR 0032) | A claim routes the point to its claimant alone. The resolver rejects duplicate claims but never reads the wasm, so `WasmHost.loadResolved` also checks that the claimant exports the hook its point maps to; a claim without it (for example `loot.roll` with no `on_loot_roll`) is refused with a log line and the point keeps the ordinary composition path, instead of silently dropping that verdict for every other plugin and the native path |
 
 The static host stays because scenarios need to drive hooks without standing up
 a Wasm runtime in the test path. It is not a way to ship a plugin and is not
@@ -185,7 +194,7 @@ build too, not a defect in zwasm.
 | Deny > invent | Plugins can veto/adjust validated requests; they cannot invent world blobs |
 | Ordered, explicit | Fixed hook order; no access-set auto-scheduler |
 | Fail isolate | Hook error → disable that registration; process stays up when practical |
-| Versioned | `plugin_api_version` names the guest contract: exported hook names plus the host import table |
+| Versioned | `plugin_api_version` names the guest contract: exported hook names plus the host import table. A guest declares the version it was built against with the optional `_zdtd_api() -> i32` export (every Zig guest built on `mods/plugin_common.zig` does); the host refuses a newer declaration, accepts and logs an older one, and keeps the permissive path when the export is absent |
 
 ## Lifecycle
 
@@ -213,9 +222,10 @@ Guests: each `.wasm` is instantiated once, its exported hooks registered, and
 every call runs under the fuel and memory budget described above. No raw `*Game`
 crosses, and no package bytes can be injected (ADR 0010, ADR 0020).
 
-The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`)
-runs the same hook order without a runtime, so scenarios can assert hook
-behaviour directly. It is test scaffolding, not a shipping format.
+The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`,
+default false) runs the same hook order without a runtime, so scenarios can
+assert hook behaviour directly. It is test scaffolding, not a shipping format,
+and the shipped presets leave it off (ADR 0020 decision 2).
 
 ## Host surface (narrow)
 
@@ -352,7 +362,8 @@ never races plugin writes.
 
 Plugins are compiled in and registered at runtime via `PluginHost.register`
 (`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
-InitOption, not a build option. Public facade: `src/plugin/root.zig`.
+InitOption (default false, test scaffolding), not a build option. Public
+facade: `src/plugin/root.zig`.
 
 ### v2 (shipped first cut): Wasm runtime
 

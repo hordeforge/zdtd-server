@@ -34,8 +34,11 @@ pub const Config = struct {
     difficulty_bonus: f32 = 1,
     starting_weight: f32 = 1,
     diminishing_returns: f32 = 0.5,
-    /// Blood-moon / wandering-horde loot drop bonus counters. Parsed and exposed
-    /// but not yet consumed: zdtd has no per-horde kill counter to apply them to.
+    /// Blood-moon / wandering-horde loot drop bonus counters (gamestages.xml
+    /// config block; stock values 12 / 30 / 25x and 3 / 15x). The Game pushes
+    /// them into the director with the nightly stage freeze
+    /// (pushBloodMoonBonus); the wandering pair is read off the table the
+    /// same way at spawn time.
     loot_bonus_every: i32 = 0,
     loot_bonus_max_count: i32 = 0,
     loot_bonus_scale: f32 = 0,
@@ -505,6 +508,15 @@ test "death pushes bornAt forward or snaps it to now" {
     try std.testing.expectEqual(@as(u16, 0), daysAlive(ticks_per_day, snapped, 60));
     // Never underflows when bornAt is already ahead of the clock.
     try std.testing.expectEqual(@as(u64, 5), bornAtAfterDeath(cfg, 5, 9));
+}
+
+test "lootStage clamps biome_min/max" {
+    // Unset clamps: level 5 → stage 5
+    try std.testing.expectEqual(@as(i32, 5), lootStage(.{ .level = 5 }));
+    // Min raises floor
+    try std.testing.expectEqual(@as(i32, 10), lootStage(.{ .level = 5, .biome_min = 10 }));
+    // Max caps ceiling
+    try std.testing.expectEqual(@as(i32, 3), lootStage(.{ .level = 5, .biome_max = 3 }));
 }
 
 test "lootStage is level driven with clamps" {

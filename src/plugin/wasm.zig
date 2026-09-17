@@ -10,6 +10,7 @@
 const std = @import("std");
 const zwasm = @import("zwasm");
 const io_fs = @import("../util/io_fs.zig");
+const api = @import("api.zig");
 const manifest = @import("manifest.zig");
 const resolver = @import("resolver.zig");
 
@@ -40,6 +41,7 @@ pub const Hook = enum(u8) {
     on_stat_changed = 20,
     on_game_event = 21,
     on_evidence = 22,
+    on_buff = 23,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
@@ -47,7 +49,7 @@ pub const Hook = enum(u8) {
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
-        "on_stat_changed",  "on_game_event",    "on_evidence",
+        "on_stat_changed",  "on_game_event",    "on_evidence",      "on_buff",
     };
 };
 
@@ -98,6 +100,12 @@ pub const HostCtx = struct {
     /// Owner state (a *Game in the server); cast by the callbacks the owner
     /// installs. Keeps this layer free of a Game dependency.
     data: ?*anyopaque = null,
+    /// Set by the loader for the duration of a discovered-mod load: a mod's
+    /// manifest is a claim about its capabilities, so `_zdtd_requires` presence
+    /// is fail-closed for it. False on the raw load path (in-repo test
+    /// fixtures, legacy `[plugin] modules`), where `--export-all` fixtures
+    /// would otherwise be refused for exporting hooks they never meant to claim.
+    require_declaration: bool = false,
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,
     /// `src` is the 1-based wasm slot the queued command came from (0 = not
@@ -131,6 +139,10 @@ pub const LoadError = error{
     ImportForbidden,
     InstantiateFailed,
     OutOfMemory,
+    /// The loader required a `_zdtd_requires` declaration and the module did
+    /// not provide one it can honour (absent while exporting hooks, unknown
+    /// capability, or a declared hook it does not export).
+    RequiresUnmet,
 };
 
 /// A loaded plugin: one instance, its hook presence flags, and a disabled bit.
@@ -151,11 +163,19 @@ pub const Plugin = struct {
     /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
     /// which fall back to the path in `name`).
     display: []const u8 = "",
+    /// This slot was loaded from a `manifest.toml` (loadResolved). `reload`
+    /// preserves it so the module's declaration can be re-read: a legacy
+    /// `[plugin] modules` path has no manifest to reconcile and must not pick
+    /// up claims from a manifest.toml that happens to sit beside it.
+    manifest_loaded: bool = false,
     /// Self-contained default config (the mod's config.toml, raw text; "" when
     /// absent). Served to the guest via the zdtd.config import; owned here.
     config_bytes: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
+    /// Set on the host (not the slot) for the duration of a discovered-mod
+    /// load: probeRequires runs inside Plugin.load, before the slot exists.
+    require_declaration: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
     /// Declarative dependency check (paper: reactive coeffects): `_zdtd_requires`
     /// returns a comma-separated list of capabilities (hook names + host verbs
@@ -164,6 +184,19 @@ pub const Plugin = struct {
     requires_failed: bool = false,
     requires_err: [128]u8 = undefined,
     requires_err_len: usize = 0,
+    /// Guest contract version from the optional `_zdtd_api` export (paper 6.6).
+    /// Null = the module declares none (the permissive legacy path).
+    api_version: ?u32 = null,
+    /// Verb mask this module's own `manifest.toml deny` declares.
+    module_deny: manifest.QueueVerbMask = 0,
+    /// Operator verb policy from `[plugin] deny` / `allow` (right-biased over
+    /// the module declaration, paper 3.2.3 / ADR 0039). Preserved across a
+    /// reload like tier/display, since the operator config does not change.
+    op_deny: manifest.QueueVerbMask = 0,
+    op_allow: manifest.QueueVerbMask = 0,
+    /// Effective policy the queue boundary checks: `(module | operator deny)`
+    /// minus the operator's explicit allows. Recomputed by `refreshDenied`.
+    denied: manifest.QueueVerbMask = 0,
     /// Guest offset and size of the host's scratch region for the request/reply
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
@@ -184,24 +217,37 @@ pub const Plugin = struct {
         ctx: *HostCtx,
         budget: Budget,
     ) LoadError!Plugin {
+        // `adopted` lets the declaration failure below release the fully
+        // constructed Plugin with the same code the success path uses at
+        // shutdown. While it is false the guard errdefers own their own pieces
+        // and Plugin.deinit (which also destroys the engine) must not run, or
+        // the engine would be freed twice.
+        var adopted = false;
         const engine_ptr = allocator.create(zwasm.Engine) catch return error.OutOfMemory;
-        errdefer allocator.destroy(engine_ptr);
+        errdefer if (!adopted) allocator.destroy(engine_ptr);
         engine_ptr.* = zwasm.Engine.init(allocator, .{}) catch return error.OutOfMemory;
-        errdefer engine_ptr.deinit();
+        errdefer if (!adopted) engine_ptr.deinit();
         var module = engine_ptr.compile(wasm_bytes) catch return error.ParseFailed;
-        errdefer module.deinit();
+        errdefer if (!adopted) module.deinit();
         var linker = engine_ptr.linker();
-        errdefer linker.deinit();
+        errdefer if (!adopted) linker.deinit();
         defineImports(&linker, ctx) catch return error.ImportForbidden;
+        // A zero fuel or page budget traps (or OOMs) the module on its first
+        // call, so every plugin would disable immediately. Config clamps this
+        // at bind, but load is also reachable from tests and the raw path, so
+        // normalize here too: the floor is fail-loud at instantiate, not a
+        // silent mass-disable one tick later.
+        const fuel = if (budget.fuel == 0) 1 else budget.fuel;
+        const pages = if (budget.max_memory_pages == 0) 1 else budget.max_memory_pages;
         var instance = linker.instantiate(&module, .{
-            .fuel = .{ .limited = budget.fuel },
-            .max_memory_pages = .{ .limited = budget.max_memory_pages },
+            .fuel = .{ .limited = fuel },
+            .max_memory_pages = .{ .limited = pages },
         }) catch |err| {
             std.debug.print("zdtd: wasm instantiate failed: {s}\n", .{@errorName(err)});
             return error.InstantiateFailed;
         };
-        errdefer instance.deinit();
-        var p = Plugin{
+        errdefer if (!adopted) instance.deinit();
+        var p: Plugin = .{
             .allocator = allocator,
             .engine = engine_ptr,
             .module = module,
@@ -210,7 +256,16 @@ pub const Plugin = struct {
             .name = allocator.dupe(u8, name) catch return error.OutOfMemory,
         };
         p.probeHooks();
-        p.probeRequires();
+        p.probeRequires(ctx.require_declaration, ctx);
+        p.probeApiVersion();
+        if (ctx.require_declaration and p.requires_failed) {
+            // Fail closed at the load boundary: the caller wanted a declared
+            // contract and this module does not have one (or declared names it
+            // cannot honour). The message is already set for the caller to log.
+            adopted = true;
+            p.deinit();
+            return error.RequiresUnmet;
+        }
         return p;
     }
 
@@ -227,6 +282,14 @@ pub const Plugin = struct {
         self.* = undefined;
     }
 
+    /// Recompute the effective queued-verb policy. Paper 3.2.3 interception is
+    /// a right-biased merge: the enclosing (operator) context is applied last,
+    /// so its denies add to the module's own declaration and its allows clear a
+    /// verb the module denied.
+    pub fn refreshDenied(self: *Plugin) void {
+        self.denied = (self.module_deny | self.op_deny) & ~self.op_allow;
+    }
+
     /// A hook is present when the module exports it. Missing exports are
     /// ordinary (a module registers only the hooks it needs).
     fn probeHooks(self: *Plugin) void {
@@ -235,7 +298,17 @@ pub const Plugin = struct {
         }
     }
 
-    fn isHostVerb(cap: []const u8) bool {
+    /// Is `cap` a host verb this context can actually serve? The mandatory
+    /// verbs (`log`/`tick`/`queue` and the JSON helpers) are always installed;
+    /// `sense` and `query` are optional callbacks, so a module that declares
+    /// one against an owner that never wired it would pass validation and then
+    /// silently read 0 bytes forever. That is the same never-fire shape the
+    /// capability check exists to prevent, so the two optional verbs are
+    /// accepted only when their callback is present. `ctx` is null only in
+    /// unit tests that build a Plugin without a host.
+    fn isHostVerb(cap: []const u8, ctx: ?*HostCtx) bool {
+        if (std.mem.eql(u8, cap, "sense")) return ctx != null and ctx.?.sense_fn != null;
+        if (std.mem.eql(u8, cap, "query")) return ctx != null and ctx.?.query_fn != null;
         for (host_verbs) |v| {
             if (std.mem.eql(u8, cap, v)) return true;
         }
@@ -246,8 +319,29 @@ pub const Plugin = struct {
     /// guest memory). Every name must be a hook the module exports or a host
     /// verb it imports; anything else fails the load with the offending name.
     /// Coeffect fail-closed: a typo'd hook never silently never-fires.
-    fn probeRequires(self: *Plugin) void {
-        if (self.instance.exportFuncSig("_zdtd_requires") == null) return;
+    fn probeRequires(self: *Plugin, require_declaration: bool, ctx: *HostCtx) void {
+        if (self.instance.exportFuncSig("_zdtd_requires") == null) {
+            // A discovered mod must declare its contract; the raw load path
+            // does not, because its callers are the in-repo test harness (the
+            // C fixtures export every symbol via --export-all, so "exports a
+            // hook" is not evidence of intent there) and the legacy
+            // `[plugin] modules` list. `require_declaration` is set by
+            // loadResolved for discovered manifests only.
+            //
+            // The hole this closes: nothing validated the hook names a mod
+            // believes it registered, so a typo was a silent never-fire. A mod
+            // that exports no hook at all is left alone - it has nothing to
+            // declare.
+            if (require_declaration) {
+                for (self.hook_present) |present| {
+                    if (present) {
+                        self.requiresFailed("exports hooks but has no _zdtd_requires");
+                        return;
+                    }
+                }
+            }
+            return;
+        }
         const ret64 = self.instance.call(fn () i64, "_zdtd_requires", .{}) catch {
             self.requiresFailed("_zdtd_requires trapped");
             return;
@@ -272,7 +366,7 @@ pub const Plugin = struct {
         while (it.next()) |raw| {
             const cap = std.mem.trim(u8, raw, " \t\r\n");
             if (cap.len == 0) continue;
-            if (isHostVerb(cap)) continue;
+            if (isHostVerb(cap, ctx)) continue;
             var found = false;
             for (Hook.names, 0..) |hname, i| {
                 if (std.mem.eql(u8, cap, hname)) {
@@ -293,6 +387,37 @@ pub const Plugin = struct {
 
     fn requiresFailed(self: *Plugin, why: []const u8) void {
         self.requiresFailed2("", why, "");
+    }
+
+    /// Paper 6.6 (review F6): the dependency link is a name set, so it cannot
+    /// see a semantic change between two contract versions that still share the
+    /// hook vocabulary. A module may declare the version it was built against
+    /// with an optional `_zdtd_api() -> i32` export: a version newer than this
+    /// host is refused fail-closed (the same channel as an unmet
+    /// `_zdtd_requires`), an older one is accepted and logged, and a module
+    /// without the export keeps the permissive path (the shipped C fixtures and
+    /// any pre-versioning module), which is recorded in PLUGIN_API.md.
+    fn probeApiVersion(self: *Plugin) void {
+        if (self.instance.exportFuncSig("_zdtd_api") == null) return;
+        const ver: u32 = @bitCast(self.instance.call(fn () i32, "_zdtd_api", .{}) catch {
+            self.requiresFailed("_zdtd_api trapped");
+            return;
+        });
+        self.api_version = ver;
+        if (ver > api.plugin_api_version) {
+            var buf: [96]u8 = undefined;
+            const msg = std.fmt.bufPrint(
+                &buf,
+                "declares plugin API v{d}; this host is v{d}",
+                .{ ver, api.plugin_api_version },
+            ) catch "declares a newer plugin API version";
+            self.requiresFailed(msg);
+        } else if (ver < api.plugin_api_version) {
+            std.debug.print(
+                "zdtd: plugin '{s}' declares plugin API v{d}, host v{d}; accepted as older\n",
+                .{ self.name, ver, api.plugin_api_version },
+            );
+        }
     }
 
     fn requiresFailed2(self: *Plugin, pre: []const u8, mid: []const u8, post: []const u8) void {
@@ -489,6 +614,30 @@ pub const Plugin = struct {
         self.instance.call(fn (i32, i32, i32, i32, i32, i32, i32) void, "on_stat_changed", .{ player, hp, food, water, stamina, level, xp }) catch |err| {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_stat_changed disabled: {s}\n", .{ self.name, @errorName(err) });
+        };
+    }
+
+    /// on_buff(entity: i32, name_ptr: i32, name_len: i32, adding: i32) -
+    /// observer. Fires for every buff the server applies or drops, whatever
+    /// caused it: a C2S request, the tick expiry drain, or the death clear on
+    /// respawn. The buff name is copied into the guest's scratch (the stable
+    /// key; the numeric def_id is a per-load catalog index and must not cross
+    /// the boundary). Pure observer - the sim stays the authority, and the
+    /// return is discarded, so a plugin cannot veto a buff the server has
+    /// already applied and relayed.
+    pub fn callBuff(self: *Plugin, entity: i32, name: []const u8, adding: bool) void {
+        if (self.disabled) return;
+        if (!self.hook_present[@intFromEnum(Hook.on_buff)]) return;
+        const mem = self.instance.memory() orelse return;
+        const off = self.reserveScratch(mem, name.len) orelse return;
+        @memcpy(mem.slice()[off..][0..name.len], name);
+        self.instance.call(
+            fn (i32, i32, i32, i32) void,
+            "on_buff",
+            .{ entity, @intCast(off), @intCast(name.len), @intFromBool(adding) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_buff disabled: {s}\n", .{ self.name, @errorName(err) });
         };
     }
 
@@ -794,13 +943,39 @@ pub const Plugin = struct {
     }
 };
 
-pub const max_wasm_plugins: usize = 8;
+/// Fixed-table capacity for loaded .wasm plugins. A ceiling, not a policy: the
+/// slot table is inline in the host, so every slot costs a Plugin header even
+/// when empty. It was 8 while the shipped tree already carries 14 modules (12
+/// core plugins plus the mcp/parachute addons), so a full `[plugin] modules`
+/// list silently lost modules at the cap; 32 leaves headroom and the
+/// `shipped core plugins declare the host contract version` test asserts the
+/// shipped set still fits. Past the ceiling the loader logs and skips (fail
+/// closed on composition, never a partial or fake module).
+pub const max_wasm_plugins: usize = 32;
 /// Ceiling on one module's bytes at load time (operator-supplied path).
 const max_wasm_module_bytes: usize = 16 * 1024 * 1024;
 
 /// Fixed-table host for loaded .wasm plugins: ordered enable/tick/join/shutdown,
 /// same hook order as the static host. Load happens once at init (allocation is
 /// allowed there); the tick path only calls hooks, which are already budgeted.
+/// Index of `name` in the fixed hook table, or `Hook.names.len` when the name
+/// is not a hook (callers must fail closed on that).
+fn hookIndex(name: []const u8) usize {
+    for (Hook.names, 0..) |hname, i| {
+        if (std.mem.eql(u8, hname, name)) return i;
+    }
+    return Hook.names.len;
+}
+
+/// A manifest's `deny` list as a verb mask. The resolver validated it at load,
+/// so a parse failure here is unreachable; it still fails closed (every verb
+/// denied) rather than open, since this is a module's own restriction.
+fn moduleDenyMask(list: ?[]const u8) manifest.QueueVerbMask {
+    const s = list orelse return 0;
+    var bad: []const u8 = "";
+    return manifest.queueVerbMask(s, &bad) orelse (@as(manifest.QueueVerbMask, 1) << manifest.QueueVerb.count) - 1;
+}
+
 pub const WasmHost = struct {
     slots: [max_wasm_plugins]Plugin = undefined,
     n: usize = 0,
@@ -830,6 +1005,12 @@ pub const WasmHost = struct {
         self.allocator = allocator;
         self.ctx = ctx;
         self.budget = budget;
+        // Plan index -> loaded slot. The two differ whenever a module is
+        // skipped (unloadable, or the plugin cap), and `point_claims` is keyed
+        // by PLAN index. Binding a claim by plan index would name whichever
+        // module happened to land in that slot (whose hook_present may pass),
+        // or a slot >= self.n that claimSlot voids forever.
+        var slot_of_plan: [max_wasm_plugins]u8 = .{no_claim} ** max_wasm_plugins;
         for (plan.modules) |rm| {
             if (self.n >= max_wasm_plugins) {
                 std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
@@ -845,12 +1026,27 @@ pub const WasmHost = struct {
             else
                 rm.manifest.wasm.?;
             defer if (rm.manifest.dir.len > 0) allocator.free(full_path);
-            self.loadInto(self.n, full_path) catch |err| {
+            // A discovered mod's manifest is a claim about capabilities, so its
+            // `_zdtd_requires` presence is fail-closed (ADR 0030). The flag is
+            // set on the host because the probe runs inside Plugin.load, before
+            // the slot is installed; restore it so the raw load path (test
+            // fixtures, legacy `[plugin] modules`) keeps its permissive rule.
+            const prev_require = ctx.require_declaration;
+            ctx.require_declaration = true;
+            const load_res = self.loadInto(self.n, full_path);
+            ctx.require_declaration = prev_require;
+            load_res catch |err| {
                 std.debug.print("zdtd: mod '{s}' load failed: {s}\n", .{ rm.manifest.name.?, @errorName(err) });
                 continue;
             };
             self.slots[self.n].tier = rm.tier;
             self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
+            // This slot came from a `manifest.toml`, so `reload` re-reads that
+            // declaration (paper 5.2.1) instead of treating the module as a
+            // legacy path with no points to reconcile.
+            self.slots[self.n].manifest_loaded = true;
+            self.slots[self.n].module_deny = moduleDenyMask(rm.manifest.deny);
+            self.slots[self.n].refreshDenied();
             if (rm.manifest.config.len > 0) {
                 self.slots[self.n].config_bytes = allocator.dupe(u8, rm.manifest.config) catch "";
             } else if (rm.manifest.dir.len == 0) {
@@ -873,6 +1069,10 @@ pub const WasmHost = struct {
                     }
                 }
             }
+            // `rm.slot` is the resolver's final slot index, which is also where
+            // this module lands when every earlier module loaded; record where
+            // it actually landed instead.
+            if (rm.slot < slot_of_plan.len) slot_of_plan[rm.slot] = @intCast(self.n);
             self.n += 1;
             const tier_s = switch (rm.tier) {
                 .core => "core",
@@ -886,11 +1086,36 @@ pub const WasmHost = struct {
             }
         }
         // Install exclusive point claims (load-fixed table; no per-tick cost).
+        // A claim routes the point to its claimant ALONE, so an installed claim
+        // whose module never exported the mapped hook would silently drop that
+        // point for every other plugin and for the native path. The resolver
+        // cannot see exports (it never reads the wasm), so the check is here:
+        // a claimant that does not export its hook keeps the claim off the
+        // table and reaches the ordinary composition loop instead, which
+        // degrades exactly the way an unloaded claimant does.
         self.claims = .{no_claim} ** manifest.OverridePoint.count;
         var it = plan.point_claims.iterator();
         while (it.next()) |entry| {
-            const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
-            self.claims[@intFromEnum(point)] = @intCast(entry.value_ptr.*);
+            const point = manifest.OverridePoint.parsePoint(entry.key_ptr.*) orelse continue;
+            // point_claims is keyed by PLAN index; translate to the loaded slot.
+            const plan_slot: usize = @intCast(entry.value_ptr.*);
+            if (plan_slot >= slot_of_plan.len) continue;
+            const slot: usize = slot_of_plan[plan_slot];
+            if (slot == no_claim) {
+                std.debug.print(
+                    "zdtd: claim on {s} names a module that did not load; claim refused\n",
+                    .{manifest.OverridePoint.wire(point)},
+                );
+                continue;
+            }
+            if (slot < self.n and !self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
+                    .{ self.slots[slot].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                );
+                continue;
+            }
+            self.claims[@intFromEnum(point)] = @intCast(slot);
         }
     }
 
@@ -965,6 +1190,25 @@ pub const WasmHost = struct {
             self.allocator.dupe(u8, self.slots[idx].display) catch ""
         else
             "";
+        const manifest_loaded = self.slots[idx].manifest_loaded;
+        // `config.toml` bytes are loaded by loadResolved/loadAll, not by
+        // loadInto, so a reload that only preserved tier/display silently
+        // dropped them: every module with a config reverts to its compiled
+        // defaults on `plugin reload` while on_enable still reports success
+        // (zdtd.config then returns 0 bytes). Copy them here for the same
+        // reason as the display name, and with the same ownership rule - the
+        // frame owns the copy until the reload succeeds, and frees it on the
+        // failure path. A manifest-backed slot re-reads `config.toml` from
+        // disk instead (review F11), so its copy starts empty.
+        const config_copy = if (!manifest_loaded and self.slots[idx].config_bytes.len > 0)
+            self.allocator.dupe(u8, self.slots[idx].config_bytes) catch ""
+        else
+            "";
+        // The operator's interception policy is config-derived, not part of the
+        // module, so a reload keeps it (paper 3.2.3 right-bias must not wash out
+        // on HMR). `refreshDenied` recombines it with the fresh declaration.
+        const op_deny = self.slots[idx].op_deny;
+        const op_allow = self.slots[idx].op_allow;
         _ = self.slots[idx].callHook(.on_shutdown);
         // Withdraw after on_shutdown and before deinit: shutdown may queue
         // (or spawn bots) that a pre-reload withdraw would miss, and those
@@ -977,19 +1221,136 @@ pub const WasmHost = struct {
             ctx.rt_slot[idx] = null;
             ctx.plugin_slot[idx] = null;
         }
+        // A manifest-backed module declares its capabilities, so HMR holds the
+        // same fail-closed rule as boot: a module swapped on disk to drop
+        // `_zdtd_requires` must not load here and then be refused on restart
+        // (review F8; the boot path sets the same flag in loadResolved).
+        const prev_require = if (self.ctx) |ctx| ctx.require_declaration else false;
+        if (manifest_loaded) {
+            if (self.ctx) |ctx| ctx.require_declaration = true;
+        }
+        defer {
+            if (self.ctx) |ctx| ctx.require_declaration = prev_require;
+        }
         self.loadInto(idx, path_owned) catch |err| {
             std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
             // The disposed slot cannot stay inside 0..n (hooks and deinit
             // would run on undefined memory): drop it from the active range.
             self.dropDisposedSlot(idx);
             if (display_copy.len > 0) self.allocator.free(display_copy);
+            if (config_copy.len > 0) self.allocator.free(config_copy);
             return false;
         };
         self.slots[idx].tier = tier;
         self.slots[idx].display = display_copy;
+        self.slots[idx].config_bytes = config_copy;
+        self.slots[idx].manifest_loaded = manifest_loaded;
+        self.slots[idx].op_deny = op_deny;
+        self.slots[idx].op_allow = op_allow;
+        // Re-read the on-disk declaration before it goes live: a replaced
+        // module may have dropped or added a `points` claim or edited its
+        // `config.toml` (reviews F11 and the claim reconciliation below), and
+        // the install-time table is load-fixed (paper 5.2.1/5.2.2).
+        if (manifest_loaded) {
+            self.rereadConfig(idx, path_owned);
+            self.reconcileClaims(idx, path_owned);
+        }
+        self.slots[idx].refreshDenied();
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
+    }
+
+    /// Re-read `<mod dir>/config.toml` into slot `idx` (review F11). HMR
+    /// reloads a manifest-backed module's declaration, so an edited config
+    /// must not keep the pre-reload copy. Missing, oversized or unreadable
+    /// fails closed to no config, the same rule `loadResolved` applies.
+    fn rereadConfig(self: *WasmHost, idx: usize, path: []const u8) void {
+        const dir = std.fs.path.dirname(path) orelse {
+            self.setSlotConfig(idx, "");
+            return;
+        };
+        var m = manifest.bindManifest(self.allocator, dir) catch |err| {
+            std.debug.print(
+                "zdtd: mod '{s}' config re-read failed ({s}); config kept\n",
+                .{ self.slots[idx].display, @errorName(err) },
+            );
+            return;
+        };
+        defer manifest.free(self.allocator, &m);
+        self.setSlotConfig(idx, m.config);
+    }
+
+    /// Replace slot `idx`'s owned config bytes ("" = none). Frees the previous
+    /// allocation, so every caller hands over a slice it does not own.
+    fn setSlotConfig(self: *WasmHost, idx: usize, bytes: []const u8) void {
+        if (self.slots[idx].config_bytes.len > 0) self.allocator.free(self.slots[idx].config_bytes);
+        self.slots[idx].config_bytes = if (bytes.len > 0)
+            (self.allocator.dupe(u8, bytes) catch "")
+        else
+            "";
+    }
+
+    /// Re-install slot `idx`'s exclusive point claims from its on-disk
+    /// `manifest.toml`. `loadResolved` builds the claim table once at boot, so
+    /// without this a reloaded module keeps exclusivity its replacement no
+    /// longer declares, and one that adds a claim never gets it. The slot's
+    /// existing claims are released first: the declaration on disk is the only
+    /// source of truth. A claim whose hook the module does not export, or whose
+    /// point another live module already holds, is refused with a log - the same
+    /// fail-closed rule the boot install applies. No manifest on disk means no
+    /// claims (a legacy `[plugin] modules` path).
+    fn reconcileClaims(self: *WasmHost, idx: usize, path: []const u8) void {
+        // The on-disk declaration is the source of the module's point claims
+        // AND of its queued-verb deny list. Read it first and change state only
+        // on success: a vanished manifest means "no claims, no module deny",
+        // but an unreadable or invalid one must not silently release
+        // exclusivity or lift the deny list the module booted with (review F9;
+        // a later restart re-reads it with validate()).
+        const dir = std.fs.path.dirname(path) orelse {
+            for (&self.claims) |*c| {
+                if (c.* == idx) c.* = no_claim;
+            }
+            self.slots[idx].module_deny = 0;
+            self.slots[idx].refreshDenied();
+            return;
+        };
+        var m = manifest.bindManifest(self.allocator, dir) catch |err| {
+            std.debug.print(
+                "zdtd: mod '{s}' manifest re-read failed ({s}); deny list kept\n",
+                .{ self.slots[idx].display, @errorName(err) },
+            );
+            return;
+        };
+        defer manifest.free(self.allocator, &m);
+        for (&self.claims) |*c| {
+            if (c.* == idx) c.* = no_claim;
+        }
+        self.slots[idx].module_deny = moduleDenyMask(m.deny);
+        defer self.slots[idx].refreshDenied();
+        const pts = m.points orelse return;
+        var it = std.mem.splitScalar(u8, pts, ',');
+        while (it.next()) |raw| {
+            const name = std.mem.trim(u8, raw, " \t");
+            if (name.len == 0) continue;
+            const point = manifest.OverridePoint.parsePoint(name) orelse continue; // validate() rejected unknown names
+            const pi = @intFromEnum(point);
+            if (!self.slots[idx].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
+                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                );
+                continue;
+            }
+            if (self.claims[pi] != no_claim and self.claims[pi] != idx) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but slot {d} already holds it; claim refused\n",
+                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), self.claims[pi] },
+                );
+                continue;
+            }
+            self.claims[pi] = @intCast(idx);
+        }
     }
 
     /// Remove an already-disposed (deinit'd) slot from the active range:
@@ -1105,11 +1466,29 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// The exclusive claimant for `point`, or null when the claim is not
+    /// currently provided. A binding is available to its dependents only while
+    /// the fiber that installed it is ACTIVE (paper 5.1.2), and a claimant that
+    /// trapped or ran out of fuel has stopped providing even though the claim
+    /// table still names it: routing to it would answer `verdict_keep` for
+    /// every caller, which for a gate point silently lifts the very check the
+    /// claim exists to serve (a user-tier claimant that crashes would disable
+    /// the core gate it overrode). The same check catches a reloaded module
+    /// that no longer exports the point's hook, since a module that cannot
+    /// answer must not hold the point for everyone else.
+    pub fn claimSlot(self: *const WasmHost, point: manifest.OverridePoint) ?usize {
+        const c = self.claims[@intFromEnum(point)];
+        if (c == no_claim or c >= self.n) return null;
+        const slot: usize = c;
+        if (self.slots[slot].disabled) return null;
+        if (!self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) return null;
+        return slot;
+    }
+
     /// Player-damage verdict; point `damage.player_scale` is exclusive when
     /// claimed: only the claimant is consulted and its verdict is final.
     pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.damage_player_scale)];
-        if (c != no_claim and c < self.n) return self.slots[c].callPlayerDamage(attacker, victim, amount);
+        if (self.claimSlot(.damage_player_scale)) |c| return self.slots[c].callPlayerDamage(attacker, victim, amount);
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
             if (v != verdict_keep) return v;
@@ -1142,6 +1521,12 @@ pub const WasmHost = struct {
         for (0..self.n) |i| self.slots[i].callStatChanged(player, hp, food, water, stamina, level, xp);
     }
 
+    /// Buff observer: notify every plugin exporting on_buff. Read-only, so
+    /// every slot is called and no return is collected.
+    pub fn buff(self: *WasmHost, entity: i32, name: []const u8, adding: bool) void {
+        for (0..self.n) |i| self.slots[i].callBuff(entity, name, adding);
+    }
+
     /// Evidence observer (T21): notify every plugin exporting on_evidence.
     /// Read-only - the guard already applied the T20 ceiling and the guest's
     /// return is discarded (host authority).
@@ -1159,8 +1544,7 @@ pub const WasmHost = struct {
 
     /// Craft-request verdict; point `craft.request` is exclusive when claimed.
     pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.craft_request)];
-        if (c != no_claim and c < self.n) return self.slots[c].callCraftRequest(player, recipe_name, times);
+        if (self.claimSlot(.craft_request)) |c| return self.slots[c].callCraftRequest(player, recipe_name, times);
         for (0..self.n) |i| {
             const v = self.slots[i].callCraftRequest(player, recipe_name, times);
             if (v != verdict_keep) return v;
@@ -1170,8 +1554,7 @@ pub const WasmHost = struct {
 
     /// Loot-roll verdict; point `loot.roll` is exclusive when claimed.
     pub fn lootRoll(self: *WasmHost, list_name: []const u8, rolled: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.loot_roll)];
-        if (c != no_claim and c < self.n) return self.slots[c].callLootRoll(list_name, rolled);
+        if (self.claimSlot(.loot_roll)) |c| return self.slots[c].callLootRoll(list_name, rolled);
         for (0..self.n) |i| {
             const v = self.slots[i].callLootRoll(list_name, rolled);
             if (v != verdict_keep) return v;
@@ -1190,8 +1573,7 @@ pub const WasmHost = struct {
     /// Pre-trade price verdict: point `trade.price` is exclusive when claimed;
     /// 0 keeps the stock price.
     pub fn tradePrice(self: *WasmHost, player: i32, item: i32, unit_price: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.trade_price)];
-        if (c != no_claim and c < self.n) return self.slots[c].callTradePrice(player, item, unit_price);
+        if (self.claimSlot(.trade_price)) |c| return self.slots[c].callTradePrice(player, item, unit_price);
         for (0..self.n) |i| {
             const v = self.slots[i].callTradePrice(player, item, unit_price);
             if (v != verdict_keep) return v;
@@ -1201,8 +1583,7 @@ pub const WasmHost = struct {
 
     /// Quest-complete verdict; point `quest.payout` is exclusive when claimed.
     pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.quest_payout)];
-        if (c != no_claim and c < self.n) return self.slots[c].callQuestComplete(player, quest_def);
+        if (self.claimSlot(.quest_payout)) |c| return self.slots[c].callQuestComplete(player, quest_def);
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestComplete(player, quest_def);
             if (v != verdict_keep) return v;
@@ -1258,6 +1639,39 @@ pub const WasmHost = struct {
 
     pub fn count(self: *const WasmHost) usize {
         return self.n;
+    }
+
+    /// Route one MCP JSON-RPC frame to the first LIVE exporter of
+    /// `on_mcp_frame` and return the response bytes it wrote (0 = no module
+    /// answered). `callMcpFrame` returns null for a module that is disabled,
+    /// has no memory, exhausted scratch, or trapped (which latches it
+    /// disabled); the first `hook_present` match used to end the search there,
+    /// so a trapped module dropped the frame even when a later one could
+    /// answer. A withdrawn module is already skipped by every other hook and
+    /// must not own this one either.
+    pub fn routeMcpFrame(self: *WasmHost, frame: []const u8, out: []u8) usize {
+        for (self.slots[0..self.n]) |*p| {
+            // A trapped module must not own the frame even though
+            // callMcpFrame would also refuse it: the skip belongs at the
+            // routing decision, not one layer down.
+            if (p.disabled) continue;
+            if (!p.hook_present[@intFromEnum(Hook.on_mcp_frame)]) continue;
+            const rep = p.callMcpFrame(frame, out) orelse continue;
+            return rep.len;
+        }
+        return 0;
+    }
+
+    /// Is the 1-based plugin slot `src` withdrawn (disabled or trapped)?
+    /// `World.drainCommands` asks this once per queued op so a module that
+    /// disables itself while an earlier op is being applied (an
+    /// `on_entity_killed` verdict that traps) cannot keep executing the ops it
+    /// queued before that. src 0 (native) is never withdrawn.
+    pub fn srcWithdrawn(self: *const WasmHost, src: i16) bool {
+        if (src <= 0) return false;
+        const idx: usize = @intCast(src - 1);
+        if (idx >= self.n) return false;
+        return self.slots[idx].disabled;
     }
 
     pub fn disabledCount(self: *const WasmHost) usize {
@@ -1934,6 +2348,136 @@ test "_zdtd_requires validates declarative dependencies at load" {
     try std.testing.expectEqual(@as(usize, 0), bad.n);
 }
 
+test "the guest contract version is read and a newer one is refused" {
+    // Paper 6.6 (review F6): a name set cannot see a semantic change between
+    // two versions that share the hook vocabulary, so a guest may declare the
+    // version it was built against with `_zdtd_api() -> i32`. Newer than the
+    // host fails closed through the `_zdtd_requires` channel; older is
+    // accepted; absent keeps the permissive legacy path.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // (module (func (export "_zdtd_api") (result i32) i32.const N))
+    const V = struct {
+        fn bytes(comptime ver: u8) [42]u8 {
+            return .{
+                0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+                0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+                0x02, 0x01, 0x00, 0x07, 0x0d, 0x01, 0x09, '_',
+                'z',  'd',  't',  'd',  '_',  'a',  'p',  'i',
+                0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+                ver,  0x0b,
+            };
+        }
+    };
+    // The C fixtures and every pre-versioning module export nothing: no
+    // declared version, still loaded.
+    const plain = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x0b, 0x01, 0x07, 'o',  'n',
+        '_',  't',  'i',  'c',  'k',  0x00, 0x00, 0x0a,
+        0x04, 0x01, 0x02, 0x00, 0x0b,
+    };
+    var p_plain = try Plugin.load(std.testing.allocator, "plain.wasm", &plain, &ctx, .{});
+    defer p_plain.deinit();
+    try std.testing.expectEqual(@as(?u32, null), p_plain.api_version);
+    try std.testing.expect(!p_plain.requires_failed);
+
+    const cur = V.bytes(@intCast(api.plugin_api_version));
+    var p_cur = try Plugin.load(std.testing.allocator, "cur.wasm", &cur, &ctx, .{});
+    defer p_cur.deinit();
+    try std.testing.expectEqual(@as(?u32, api.plugin_api_version), p_cur.api_version);
+    try std.testing.expect(!p_cur.requires_failed);
+
+    const next = V.bytes(@intCast(api.plugin_api_version + 1));
+    var p_next = try Plugin.load(std.testing.allocator, "next.wasm", &next, &ctx, .{});
+    defer p_next.deinit();
+    try std.testing.expect(p_next.requires_failed);
+    try std.testing.expectEqual(@as(?u32, api.plugin_api_version + 1), p_next.api_version);
+    // The reason names both versions for the operator log.
+    try std.testing.expect(std.mem.find(u8, p_next.requires_err[0..p_next.requires_err_len], "plugin API v") != null);
+    try std.testing.expect(std.mem.find(u8, p_next.requires_err[0..p_next.requires_err_len], "this host is v") != null);
+    // loadAll is the shipping path: a newer guest is skipped, not loaded.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const cur_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "cur.wasm" });
+    defer std.testing.allocator.free(cur_path);
+    const next_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "next.wasm" });
+    defer std.testing.allocator.free(next_path);
+    try io_fs.writeFile(cur_path, &cur);
+    try io_fs.writeFile(next_path, &next);
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadAll(std.testing.allocator, &[_][]const u8{ cur_path, next_path }, &ctx, .{});
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+}
+
+test "shipped core plugins declare the host contract version" {
+    // The guest constant lives in `mods/plugin_common.zig` (wasm32-freestanding
+    // cannot import the host's api.zig), so this test is the drift gate: bump
+    // one side without the other and every shipped plugin fails to load or
+    // stops matching.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            _ = out;
+            return 0;
+        }
+        fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
+            _ = req;
+            _ = out;
+            return 0;
+        }
+    };
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+        .query_fn = &Cap.queryFn,
+    };
+    const modules = [_][]const u8{
+        "plugins/core_announce/core_announce.wasm",
+        "plugins/core_killfeed/core_killfeed.wasm",
+        "plugins/core_damagegate/core_damagegate.wasm",
+        "plugins/core_pricegate/core_pricegate.wasm",
+        "plugins/core_rewardgate/core_rewardgate.wasm",
+        "plugins/core_lootgate/core_lootgate.wasm",
+        "plugins/core_tradefeed/core_tradefeed.wasm",
+        "plugins/core_pvp/core_pvp.wasm",
+        "plugins/core_questgate/core_questgate.wasm",
+        "plugins/core_craftgate/core_craftgate.wasm",
+        "plugins/core_adminverbs/core_adminverbs.wasm",
+        "plugins/core_perkgate/core_perkgate.wasm",
+        "mods/mcp/mcp.wasm",
+        "mods/parachute/parachute.wasm",
+    };
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadAll(std.testing.allocator, &modules, &ctx, .{});
+    // The shipped set must fit the host table, or the default composition
+    // silently loses modules at the cap.
+    try std.testing.expect(modules.len <= max_wasm_plugins);
+    // Every module loaded: a plugin declaring a newer version than the host
+    // would have been skipped by loadAll, so the count is part of the gate.
+    try std.testing.expectEqual(@as(usize, modules.len), host.n);
+    for (0..host.n) |i| {
+        try std.testing.expectEqual(@as(?u32, api.plugin_api_version), host.slots[i].api_version);
+    }
+}
+
 test "plugin reload disposes and reinstantiates the module in place" {
     // HMR (paper): dispose the old fiber (on_shutdown + deinit), reload the
     // module from disk into the same slot, and re-activate (on_enable). The
@@ -1987,6 +2531,139 @@ test "plugin reload keeps a heap-owned display name valid" {
     // fails this test under std.testing.allocator.
 }
 
+test "plugin reload keeps the module's config bytes" {
+    // Regression (composability audit 2026-09-11): config.toml bytes are loaded
+    // by loadResolved/loadAll, not by loadInto, so reload's "preserve tier and
+    // display" left config_bytes empty. Every module with a config silently
+    // reverted to its compiled defaults on `plugin reload` while on_enable
+    // still logged "enabled", and the zdtd.config import then returned 0 bytes.
+    // The wasm.zig reload tests all load through loadAll, where config_bytes is
+    // already "", which is exactly why none of them caught it.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    // A manifest-style config owned by the slot (the shape loadResolved leaves).
+    const cfg_text = "tradefeed_prefix = \"sold\"\n";
+    host.slots[0].config_bytes = try std.testing.allocator.dupe(u8, cfg_text);
+    const path = host.slots[0].name;
+    try std.testing.expect(host.reload(0, path));
+    // Readable after the reload, and the old copy was freed by deinit (a leak
+    // or double free fails this test under std.testing.allocator).
+    try std.testing.expectEqualStrings(cfg_text, host.slots[0].config_bytes);
+}
+
+/// Minimal declaring module for the manifest-backed reload tests: exports
+/// on_tick plus a valid `_zdtd_requires` ("log"), which the reviewed F8 rule
+/// requires of a module loaded from a manifest.
+const declaring_test_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
+    0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x1c, 0x02, 0x07,
+    0x6f, 0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00, 0x00, 0x0e, 0x5f, 0x7a, 0x64, 0x74, 0x64, 0x5f,
+    0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x73, 0x00, 0x01, 0x0a, 0x0d, 0x02, 0x02, 0x00, 0x0b,
+    0x08, 0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, 0x0b, 0x09, 0x01, 0x00, 0x41, 0x00, 0x0b,
+    0x03, 0x6c, 0x6f, 0x67,
+};
+
+test "plugin reload re-reads config.toml for a manifest-backed module" {
+    // F11 (plugin-composability review 2026-09-12): a manifest-backed reload
+    // re-reads manifest.toml but kept the pre-reload config_bytes, so an
+    // edited config.toml was never seen until a restart. The config is now
+    // re-read with the declaration; a missing file fails closed to none.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    defer a.free(wasm_path);
+    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    defer a.free(man_path);
+    const cfg_path = try std.fs.path.join(a, &.{ dir, "config.toml" });
+    defer a.free(cfg_path);
+    try io_fs.writeFile(wasm_path, &declaring_test_wasm);
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+    try io_fs.writeFile(cfg_path, "announce = \"one\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm_path);
+    host.n = 1;
+    host.slots[0].manifest_loaded = true;
+    host.slots[0].display = try a.dupe(u8, "m");
+    host.slots[0].config_bytes = try a.dupe(u8, "announce = \"one\"\n");
+
+    try io_fs.writeFile(cfg_path, "announce = \"two\"\n");
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqualStrings("announce = \"two\"\n", host.slots[0].config_bytes);
+
+    // The file is gone: the reload fails closed to no config.
+    io_fs.deleteFile(cfg_path);
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(usize, 0), host.slots[0].config_bytes.len);
+}
+
+test "a discovered mod must declare _zdtd_requires" {
+    // Composability audit 2026-09-11: probeRequires returned early when the
+    // export was absent, so a mod that exported hooks but declared nothing had
+    // its hook names validated by nobody - a typo'd hook was a silent
+    // never-fire. The presence rule is now fail-closed for a discovered mod
+    // (its manifest is a capability claim) while the raw load path stays
+    // permissive, because the in-repo C fixtures export every symbol through
+    // --export-all and so "exports a hook" is not evidence of intent there.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // Hand-built module exporting only `on_tick` and declaring nothing: type
+    // ()->(), one function of that type, the export, an empty body.
+    const undeclared = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+        0x03, 0x02, 0x01, 0x00, // function: one of type 0
+        0x07, 0x0b, 0x01, 0x07, 'o', 'n', '_', 't', 'i', 'c', 'k', // export "on_tick"
+        0x00, 0x00,
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: empty body
+    };
+    // Same bytes on the raw path (no manifest claim) load: the rule is about a
+    // discovered mod's declaration, not about the module shape.
+    var p = try Plugin.load(std.testing.allocator, "undeclared.wasm", &undeclared, &ctx, .{});
+    defer p.deinit();
+    try std.testing.expect(p.hook_present[@intFromEnum(Hook.on_tick)]);
+    try std.testing.expect(!p.requires_failed);
+    // A discovered mod (manifest = capability claim) with the same export and
+    // no declaration is refused at the load boundary.
+    ctx.require_declaration = true;
+    try std.testing.expectError(
+        error.RequiresUnmet,
+        Plugin.load(std.testing.allocator, "undeclared.wasm", &undeclared, &ctx, .{}),
+    );
+    ctx.require_declaration = false;
+}
+
 test "plugin reload failure frees the display copy and reports false" {
     // The failed-reload branch must not leave a disposed slot inside 0..n:
     // hooks/deinit would run on undefined memory on the next tick or at
@@ -2027,6 +2704,223 @@ test "plugin reload failure frees the display copy and reports false" {
     try std.testing.expectEqual(no_claim, host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
 }
 
+test "reload reconciles the module's manifest point claims" {
+    // Paper 5.2.1/5.2.2: a reload reconciles the declarative configuration, not
+    // just the code. The claim table is built once by loadResolved, so before
+    // this a module replaced on disk kept exclusivity its new manifest had
+    // dropped (its hook was still exported, so nothing else caught it) and one
+    // that added a claim never got it.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // Hand-built modules: one exports the loot.roll hook, one exports only
+    // on_tick, so the hook-present refusal is observable.
+    const with_hook = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
+        0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x21, 0x02, 0x0c,
+        0x6f, 0x6e, 0x5f, 0x6c, 0x6f, 0x6f, 0x74, 0x5f, 0x72, 0x6f, 0x6c, 0x6c, 0x00, 0x00, 0x0e, 0x5f,
+        0x7a, 0x64, 0x74, 0x64, 0x5f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x73, 0x00, 0x01, 0x0a,
+        0x0d, 0x02, 0x02, 0x00, 0x0b, 0x08, 0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, 0x0b, 0x09,
+        0x01, 0x00, 0x41, 0x00, 0x0b, 0x03, 0x6c, 0x6f, 0x67,
+    };
+    const without_hook = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
+        0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x1c, 0x02, 0x07,
+        0x6f, 0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00, 0x00, 0x0e, 0x5f, 0x7a, 0x64, 0x74, 0x64, 0x5f,
+        0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x73, 0x00, 0x01, 0x0a, 0x0d, 0x02, 0x02, 0x00, 0x0b,
+        0x08, 0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, 0x0b, 0x09, 0x01, 0x00, 0x41, 0x00, 0x0b,
+        0x03, 0x6c, 0x6f, 0x67,
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+
+    // m0 and m1 both export loot.roll; m2 does not.
+    const wasm0 = try std.fs.path.join(a, &.{ dir, "m0", "m.wasm" });
+    defer a.free(wasm0);
+    const wasm1 = try std.fs.path.join(a, &.{ dir, "m1", "m.wasm" });
+    defer a.free(wasm1);
+    const wasm2 = try std.fs.path.join(a, &.{ dir, "m2", "m.wasm" });
+    defer a.free(wasm2);
+    const man0 = try std.fs.path.join(a, &.{ dir, "m0", "manifest.toml" });
+    defer a.free(man0);
+    const man1 = try std.fs.path.join(a, &.{ dir, "m1", "manifest.toml" });
+    defer a.free(man1);
+    const man2 = try std.fs.path.join(a, &.{ dir, "m2", "manifest.toml" });
+    defer a.free(man2);
+    try io_fs.writeFile(wasm0, &with_hook);
+    try io_fs.writeFile(wasm1, &with_hook);
+    try io_fs.writeFile(wasm2, &without_hook);
+    try io_fs.writeFile(man0, "name = \"m0\"\nwasm = \"m.wasm\"\npoints = \"loot.roll\"\n");
+    try io_fs.writeFile(man1, "name = \"m1\"\nwasm = \"m.wasm\"\npoints = \"loot.roll\"\n");
+    try io_fs.writeFile(man2, "name = \"m2\"\nwasm = \"m.wasm\"\npoints = \"craft.request\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm0);
+    try host.loadInto(1, wasm1);
+    try host.loadInto(2, wasm2);
+    host.n = 3;
+    for (0..3) |i| {
+        host.slots[i].manifest_loaded = true;
+        host.slots[i].display = try a.dupe(u8, if (i == 0) "m0" else if (i == 1) "m1" else "m2");
+    }
+
+    const loot = @intFromEnum(manifest.OverridePoint.loot_roll);
+    const craft = @intFromEnum(manifest.OverridePoint.craft_request);
+
+    // The declaration installs the claim (boot did this via the resolver).
+    host.reconcileClaims(0, wasm0);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+
+    // A second claimant with the hook exported is refused: the point is
+    // exclusive, and a reload must not steal it from a live module.
+    host.reconcileClaims(1, wasm1);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+
+    // The replaced module drops its claim on disk: reload re-reads the
+    // manifest and releases it instead of holding exclusivity forever.
+    try io_fs.writeFile(man0, "name = \"m0\"\nwasm = \"m.wasm\"\n");
+    try std.testing.expect(host.reload(0, wasm0));
+    try std.testing.expectEqual(no_claim, host.claims[loot]);
+    // ... and the freed point goes to the other module's declaration.
+    host.reconcileClaims(1, wasm1);
+    try std.testing.expectEqual(@as(u8, 1), host.claims[loot]);
+
+    // A claim whose hook the module does not export is refused (fail closed,
+    // like the boot install), and the point stays free.
+    host.reconcileClaims(2, wasm2);
+    try std.testing.expectEqual(no_claim, host.claims[craft]);
+
+    // A legacy `[plugin] modules` path has no manifest to reconcile, so a
+    // manifest.toml that happens to sit beside it must not mint or drop claims.
+    host.claims[craft] = 2;
+    host.slots[2].manifest_loaded = false;
+    try std.testing.expect(host.reload(2, wasm2));
+    try std.testing.expectEqual(@as(u8, 2), host.claims[craft]);
+}
+
+test "point claims bind to the loaded slot, not the plan index" {
+    // F7 (plugin-composability review 2026-09-12): a module the loader skips
+    // (missing file, cap) shifts every later module down, while point_claims
+    // stays keyed by the resolver's plan slot. Binding by plan slot named
+    // whichever module landed there (whose hook_present may pass), or a slot
+    // >= self.n that claimSlot voids forever.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const gone_dir = try std.fs.path.join(a, &.{ dir, "gone" });
+    defer a.free(gone_dir);
+    io_fs.mkdirPath(gone_dir);
+
+    // The second module is the shipped override fixture: it exports
+    // on_loot_roll and a valid _zdtd_requires, so loadResolved accepts it.
+    var modules = [_]resolver.ResolvedModule{
+        .{ .manifest = .{ .name = "gone", .dir = gone_dir, .wasm = "absent.wasm" }, .tier = .user, .slot = 0 },
+        .{ .manifest = .{ .name = "gate", .dir = "assets/fixtures", .wasm = "plugin_override.wasm" }, .tier = .user, .slot = 1 },
+    };
+    var plan: resolver.ResolvedResult = .{ .modules = &modules, .point_claims = .{}, .name_to_slot = .{}, .synthetic = &.{} };
+    defer plan.point_claims.deinit(a);
+    defer plan.name_to_slot.deinit(a);
+    try plan.point_claims.put(a, "loot.roll", 1);
+
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadResolved(a, &plan, &ctx, .{});
+    // The first module is skipped, so the claimant lands in slot 0 and its
+    // claim must follow it there.
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    try std.testing.expectEqualStrings("gate", host.slots[0].display);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
+}
+
+test "queued-verb policy: module deny, operator right-bias, reload" {
+    // Paper 3.2.3 interception (ADR 0039): a module declares verbs it will not
+    // queue, the operator context is merged last (denies add, allows clear),
+    // and a reload re-reads the declaration while keeping the operator's masks.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    const plain = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
+        0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x1c, 0x02, 0x07,
+        0x6f, 0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00, 0x00, 0x0e, 0x5f, 0x7a, 0x64, 0x74, 0x64, 0x5f,
+        0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x73, 0x00, 0x01, 0x0a, 0x0d, 0x02, 0x02, 0x00, 0x0b,
+        0x08, 0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, 0x0b, 0x09, 0x01, 0x00, 0x41, 0x00, 0x0b,
+        0x03, 0x6c, 0x6f, 0x67,
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    defer a.free(wasm_path);
+    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    defer a.free(man_path);
+    try io_fs.writeFile(wasm_path, &plain);
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\ndeny = \"say\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm_path);
+    host.n = 1;
+    host.slots[0].manifest_loaded = true;
+    host.slots[0].display = try a.dupe(u8, "m");
+    host.reconcileClaims(0, wasm_path);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
+
+    // Operator right-bias: a deny adds damage, an allow clears the module's say.
+    host.slots[0].op_deny = manifest.QueueVerb.damage.bit();
+    host.slots[0].op_allow = manifest.QueueVerb.say.bit();
+    host.slots[0].refreshDenied();
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
+
+    // Reload re-reads the declaration (say dropped) and keeps the operator
+    // masks, so only the operator's damage deny remains.
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(manifest.QueueVerbMask, 0), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].op_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].op_allow);
+
+    // A legacy path (no manifest) keeps the operator policy across a reload.
+    host.slots[0].manifest_loaded = false;
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(manifest.QueueVerbMask, 0), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
+}
+
 test "findByName matches display name and wasm stem suffix" {
     const Cap = struct {
         fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
@@ -2061,12 +2955,32 @@ test "findByName matches display name and wasm stem suffix" {
 
 test "host_verbs is the _zdtd_requires vocabulary for host imports" {
     try std.testing.expectEqual(@as(usize, 10), host_verbs.len);
-    try std.testing.expect(Plugin.isHostVerb("log"));
-    try std.testing.expect(Plugin.isHostVerb("json_obj"));
-    try std.testing.expect(Plugin.isHostVerb("config"));
-    try std.testing.expect(!Plugin.isHostVerb("on_tick"));
-    try std.testing.expect(!Plugin.isHostVerb("bot"));
+    var ctx = HostCtx{ .log_fn = undefined, .tick_fn = undefined, .queue_fn = undefined };
+    try std.testing.expect(Plugin.isHostVerb("log", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("json_obj", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("config", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("on_tick", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("bot", &ctx));
+    // sense/query are optional callbacks: declaring one against an owner that
+    // never wired it would validate and then silently read 0 bytes, so the
+    // capability is only accepted when the callback exists.
+    try std.testing.expect(!Plugin.isHostVerb("sense", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("query", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("sense", null));
+    ctx.sense_fn = &TestSense.sense;
+    ctx.query_fn = &TestSense.query;
+    try std.testing.expect(Plugin.isHostVerb("sense", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("query", &ctx));
 }
+
+const TestSense = struct {
+    fn sense(_: *HostCtx, _: []u8) usize {
+        return 0;
+    }
+    fn query(_: *HostCtx, _: []const u8, _: []u8) usize {
+        return 0;
+    }
+};
 
 test "Hook.names is the _zdtd_requires vocabulary for hooks" {
     try std.testing.expectEqual(@typeInfo(Hook).@"enum".fields.len, Hook.names.len);
@@ -2198,6 +3112,10 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             std.mem.writeInt(i32, r[8..12], c, .little);
             std.mem.writeInt(u32, r[12..16], @bitCast(amount), .little);
         }
+        fn queryFn(_: *HostCtx, _: []const u8, _: []u8) usize {
+            return 0;
+        }
+
         fn senseFn(_: *HostCtx, out: []u8) usize {
             // header: magic 'ZBS4' (24 bytes: magic, count, tick, self,
             // world_time, blood_moon), records at base 24.
@@ -2256,6 +3174,11 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
         .tick_fn = &Cap.tickFn,
         .queue_fn = &Cap.queueFn,
         .sense_fn = &Cap.senseFn,
+        // The bot declares `sense,query,...` in its _zdtd_requires, and a
+        // declared optional capability is only accepted when the owner wired
+        // it (otherwise the guest would read 0 bytes forever). This test drives
+        // the sense path, so query answers nothing but must exist.
+        .query_fn = &Cap.queryFn,
     };
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"mods/fps_bot/fps_bot.wasm"}, &ctx, .{});
@@ -2773,4 +3696,96 @@ test "parachute.wasm deploys glide on a falling worn player and clears on landin
         if (std.mem.eql(u8, c[0..Cap.queued_len[0]], "glide 2000 0")) saw_clear = true;
     }
     try std.testing.expect(saw_clear);
+}
+
+test "parachute.wasm announce text survives on_enable's stack frame" {
+    // The guest parses config out of a stack buffer in on_enable; keeping the
+    // value as a slice into that buffer meant a later tick's announcement read
+    // a dead frame. The text must still be intact when the deploy fires, which
+    // is several hook calls after on_enable returned.
+    const announce = "rode the silk down";
+    const Cap = struct {
+        var queued: [8][64]u8 = undefined;
+        var queued_len: [8]usize = undefined;
+        var queued_n: usize = 0;
+        var vy: f32 = 0;
+
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n >= queued.len) return;
+            const n = @min(cmd.len, queued[queued_n].len);
+            @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_len[queued_n] = n;
+            queued_n += 1;
+        }
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            if (out.len < 24 + 40) return 0;
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
+            std.mem.writeInt(u32, out[4..8], 1, .little); // count
+            std.mem.writeInt(u32, out[8..12], 1, .little); // tick
+            std.mem.writeInt(i32, out[12..16], -1, .little); // self
+            std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
+            const r = out[24..64];
+            @memset(r, 0);
+            std.mem.writeInt(i32, r[0..4], 2000, .little);
+            r[6] = 1; // alive
+            std.mem.writeInt(u32, r[28..32], @bitCast(vy), .little);
+            r[36] = 1; // wearing_glider
+            return 24 + 40;
+        }
+    };
+    Cap.queued_n = 0;
+    Cap.vy = 0;
+
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/parachute/parachute.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    // Config must be in place before on_enable: that is the call whose stack
+    // frame used to back the stored slice. The value is quoted and carries a
+    // trailing comment, exactly as plugin_common.Config handles it, so the
+    // guest's hand-rolled parser must strip both.
+    host.slots[0].config_bytes = "announce_text = \"" ++ announce ++ "\"  # trailing comment\n";
+    defer host.slots[0].config_bytes = "";
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+
+    Cap.vy = -12.0;
+    var t: usize = 0;
+    while (t < 12) : (t += 1) host.onTick();
+
+    var saw_announce = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, i| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[i]], announce)) saw_announce = true;
+    }
+    try std.testing.expect(saw_announce);
+
+    // Now the real shipped config.toml, not a synthetic string: its values are
+    // quoted, and a parser that does not strip the quotes broadcasts them.
+    const shipped = try io_fs.readFileAll(std.testing.allocator, "mods/parachute/config.toml");
+    defer std.testing.allocator.free(shipped);
+    host.slots[0].config_bytes = shipped;
+    _ = host.slots[0].callHook(.on_enable);
+    // Land first: the roster still has this player gliding from the phase
+    // above, and the deploy announcement only fires on the 0 -> 1 edge.
+    Cap.vy = 0.0;
+    host.onTick();
+    Cap.queued_n = 0;
+    Cap.vy = -12.0;
+    t = 0;
+    while (t < 12) : (t += 1) host.onTick();
+    var saw_shipped = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, i| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[i]], "deployed their parachute")) saw_shipped = true;
+    }
+    try std.testing.expect(saw_shipped);
 }

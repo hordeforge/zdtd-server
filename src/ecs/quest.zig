@@ -171,6 +171,9 @@ pub const QuestPolicy = struct {
     /// GetRandomPOINearTrader distance bands (blocks; stock 500/1500 m).
     trader_band_1: f32 = 500,
     trader_band_2: f32 = 1500,
+    /// Item name whose `<reward type="Item" id=…>` rows credit the wallet
+    /// (traders.xml root `currency_item`; stock "casinoCoin"). Empty → stock name.
+    currency_item: []const u8 = "",
 };
 
 /// Objective `type=` -> phase-kind mapping, config rows first (zdtd.toml /
@@ -364,13 +367,14 @@ pub const FlatObjective = struct {
     poi_gated: bool = false,
 };
 
-/// Objective Write subclass (Quest.Write CreateQuest): BaseObjective writes
-/// FileVersion + CurrentValue, ObjectiveTreasureChest writes destroyCount +
-/// CurrentRadius (no base call), ObjectivePOIStayWithin writes nothing extra.
+/// Objective Write subclass (Quest.Write CreateQuest). Stock has exactly four
+/// BaseObjective subclasses that override Write; every other type keeps the
+/// base shape. See the wire enum in wire/stock_quest.zig for the byte layouts.
 pub const ObjectiveWireKind = enum(u8) {
     base = 0,
     treasure_chest = 1,
     empty = 2,
+    time = 3,
 };
 
 pub const max_reward_flags: usize = 16;
@@ -461,6 +465,11 @@ pub const Catalog = struct {
     starter_name: []const u8 = "clear_the_noise",
     max_tier: u8 = 0,
     quests_per_tier: u8 = 0,
+    /// `<quest_tier_reward tier="N">` quest ids, resolved to catalog def ids
+    /// in document order (stock `QuestEventManager.questTierRewards`, fired
+    /// by `HandleNewCompletedQuest` when a completion raises the faction
+    /// tier). Missing quests resolve to 0 and never fire (fail closed).
+    tier_rewards: []const u16 = &.{},
     source: CatalogSource = .builtin,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     source_path: []const u8 = "",
@@ -483,6 +492,10 @@ pub const Catalog = struct {
     }
 
     pub fn deinit(self: *Catalog) void {
+        if (self.source == .builtin) {
+            // Builtin defs are static: no arena to free, no fields to clear.
+            return;
+        }
         if (self.arena_ptr) |ap| {
             const child = ap.child_allocator;
             ap.deinit();

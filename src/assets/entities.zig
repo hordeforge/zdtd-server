@@ -7,6 +7,9 @@ const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed entity classes, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock entityclasses.xml
+/// defines **293**, so this holds stock plus a substantial modlet set.
 pub const max_entities_defs: usize = 512;
 
 /// Stock `<property class="Explosion">` blast params (RE entity-ai.md §9.x):
@@ -30,6 +33,12 @@ pub const EntityDef = struct {
     name: []const u8 = "",
     /// Unity Mono string.GetHashCode (EntityClass.list key).
     hash: i32 = 0,
+    /// The class `Tags` property (`EntityClass::PropTags`, read from the
+    /// resolved DynamicProperties at EntityClass.il IL_111F). Inherited through
+    /// `extends` exactly like `EntityClass::CopyFrom` IL=171, which copies the
+    /// parent's property map. Read by `EntityTagCompare` (requirements.zig) and
+    /// by `inferKind` below.
+    tags: []const u8 = "",
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Loot.xml container name for the death bag (LootDropEntityClass resolved
@@ -46,6 +55,9 @@ pub const EntityDef = struct {
     /// false only for classes whose task list exists without one (timid
     /// animals), true otherwise so brainless classes keep the zombie default.
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits. 0 = no XML list (native table).
+    /// Bit 15 (`ai_task_list_set`) means a list was parsed.
+    ai_tasks: u16 = 0,
     /// entityclasses MoveSpeedAggro max = night chase speed (m/s scale); the
     /// stock XML comment on the prop ("min/max (like day or night)") pins the
     /// split, matching GetMoveSpeedAggro dark → aggroMax (passive 134). 0 =
@@ -77,6 +89,31 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` player entry (type, hearDistMax,
+    /// seeDistMax triples; `EAISetNearestEntityAsTarget` targetClasses parse
+    /// IL). hear 0 reads 50 stock-side; see 0 = unset here (the sense path
+    /// falls back to sight_range). 0,0 = no player entry parsed.
+    target_player_hear: f32 = 0,
+    target_player_see: f32 = 0,
+    /// `SetAsTargetIfHurt class=` victim-class filter (comma names;
+    /// `EAISetAsTargetIfHurt` SetData IL splits on comma). Bit 0 = a
+    /// class-filtered entry exists, bit 1 = EntityPlayer named, bit 2 =
+    /// EntityBandit named, bit 3 = EntityEnemyAnimal named. 0 = no
+    /// SetAsTargetIfHurt entry (bare entries without class= keep the legacy
+    /// always-retarget path); nonzero with bit 0 set gates revenge on the
+    /// named classes.
+    hurt_target_classes: u8 = 0,
+    /// `BlockIf` target-list condition (`EAIBlockIf` SetData IL: `data=`
+    /// "condition=<type> <op> <value>" triples stepped by 3, `eType` =
+    /// None/Alert/Investigate, `eOp` = None/e/ne). Only the alert arm has a
+    /// sim state (`ai.alert`); an investigate arm has no model (zdtd
+    /// investigate spots are one-shot paths, not latched positions), so a
+    /// class whose BlockIf names only investigate reads as unset (0). Bit 0 =
+    /// a BlockIf entry exists, bit 1 = its conditions gate sense acquisition
+    /// while the entity is unalerted (the stock row is `alert e 0` on the
+    /// hostile-animal template: the executing BlockIf holds MutexBits=1 over
+    /// SetNearestEntityAsTarget). 0 = no BlockIf entry.
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock zombieTemplateMale
     /// "-2,150": "how well lit you have to be for the zombie to see you at
     /// min,max range"; the EntityClass cctor default is 30/100). The pair
@@ -103,9 +140,39 @@ pub const EntityDef = struct {
     /// entityclasses ExplodeDelay seconds (Demolition prime-to-explode
     /// delay). 0.5 stock default when unset.
     explode_delay_s: f32 = 0.5,
+    /// entityclasses DismemberMultiplierHead/Arms/Legs (stock per-template
+    /// values, e.g. feral .7, radiated .4; the EntityClass cctor default is 1
+    /// for all three, RE EntityClass Init IL=0xBBF/0xBE0/0xC01). They scale the
+    /// dismember chance per body region in EntityAlive.GetDismemberChance.
+    /// 0 = unset (class inherits the template through resolveProp; a literal
+    /// stock 0 would also read as unset, which matches the cctor).
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    /// entityclasses LegCrippleScale (stock zombieTemplate 2): "scales chance
+    /// to cripple (percent of health that a hit does is the chance)". The
+    /// struct default 0 matches stock's implicit default (no ParseFloat
+    /// fallback in EntityClass Init), so 0 = unset.
+    leg_cripple_scale: f32 = 0,
+    /// entityclasses LegCrawlerThreshold (stock zombieTemplate 0, "at like
+    /// .175 nearly every zombie knocked down from a leg hit turns into a
+    /// crawler"): damage fraction above which a leg hit crawlers the zombie.
+    /// 0 = unset, same implicit default as stock.
+    leg_crawler_threshold: f32 = 0,
     /// <property class="Explosion"> blast params (radius/damages/bonuses),
     /// Extends-resolved per field. Unset fields stay 0 -> Rules floor.
     explosion: ExplosionDef = .{},
+    /// entityclasses `Buffs="a,b"`: buffs stock applies to every instance of the
+    /// class when it enters the game (`EntityClass` ctor + the class's
+    /// onSelfEnteredGame rows). The player class carries the status checks.
+    buffs: []const []const u8 = &.{},
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent: the stock
+    /// armoured classes (zombieSoldier 50, zombieDemolition 60, the swarms 20)
+    /// take that much less damage from every source. Applied where the SERVER
+    /// computes the damage (turret fire and the deferred accumulator); a C2S
+    /// claim already carries the client's own resist-adjusted strength, so the
+    /// claim path must not reduce it again. 0 = no row (unarmoured).
+    phys_resist: f32 = 0,
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -129,6 +196,16 @@ pub const EntityTable = struct {
 
     pub fn builtin() EntityTable {
         return .{ .defs = &builtin_defs, .source = .builtin };
+    }
+
+    /// The class whose Unity name hash matches (the PlayerId/EntityClass wire
+    /// keys are these hashes; see unity_hash.zig).
+    pub fn byHash(self: *const EntityTable, hash: i32) ?EntityDef {
+        if (hash == 0) return null;
+        for (self.defs) |d| {
+            if (d.hash == hash) return d;
+        }
+        return null;
     }
 
     pub fn byName(self: *const EntityTable, name: []const u8) ?EntityDef {
@@ -174,6 +251,9 @@ pub const builtin_defs = [_]EntityDef{
     .{
         .name = "playerMale",
         .hash = unity_hash.class_player_male,
+        // Stock entityclasses.xml playerMale `Tags` (the builtin catalog is the
+        // no-game-dir floor; the XML value wins when data loads).
+        .tags = "entity,player,human",
         .max_hp = 100,
         .kind = .player,
         .spawnable = false,
@@ -182,6 +262,7 @@ pub const builtin_defs = [_]EntityDef{
     .{
         .name = "zombieBoe",
         .hash = unity_hash.class_zombie_boe,
+        .tags = "entity,zombie,walker",
         .max_hp = 40,
         .kind = .zombie,
         .loot_list = "EntityLootContainerRegular",
@@ -317,39 +398,346 @@ fn parseBoolLoose(s: []const u8) bool {
     return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "True") or std.mem.eql(u8, s, "1");
 }
 
-/// Stock AITask-* task names that make an entity attack. V3.1.0 b14
-/// entityclasses.xml ships only ApproachAndAttackTarget (the AI task enum's
-/// attack-capable task; every hostile animal and zombie template carries it,
-/// timid animals never do). A new attack task name lands here as RE evidence,
-/// not in per-class data.
-const attack_task_names = [_][]const u8{"ApproachAndAttackTarget"};
+/// First token of one AITask list entry (pipe form carries `class=` / `data=`
+/// after the name). Empty / Leap / RangedAttackTarget stay unmapped: Leap is
+/// cosmetic on the mountain lion; RangedAttackTarget has no native task yet.
+fn taskNameToId(name: []const u8) ?components.TaskId {
+    if (std.mem.eql(u8, name, "BreakBlock")) return .break_block;
+    if (std.mem.eql(u8, name, "DestroyArea")) return .destroy_area;
+    if (std.mem.eql(u8, name, "ApproachAndAttackTarget")) return .approach_attack;
+    if (std.mem.eql(u8, name, "Territorial")) return .territorial;
+    if (std.mem.eql(u8, name, "ApproachDistraction")) return .approach_distraction;
+    if (std.mem.eql(u8, name, "ApproachSpot")) return .approach_spot;
+    if (std.mem.eql(u8, name, "RunawayWhenHurt")) return .runaway;
+    if (std.mem.eql(u8, name, "RunawayFromEntity")) return .runaway;
+    if (std.mem.eql(u8, name, "Look")) return .look;
+    if (std.mem.eql(u8, name, "Wander")) return .wander;
+    return null;
+}
 
-/// Does the class's inherited AITask-* list contain an attack task? Walks the
-/// extends chain like resolveProp. A class with no AITask-* at all reports
-/// true (the sim drives those with the zombie brain and they keep attacking);
-/// a class whose list exists without an attack task (timid animal template)
-/// reports false, so it never picks approach_attack.
-fn resolvedAiAttacks(
+fn orTaskName(mask: *u16, raw: []const u8) void {
+    var tok = raw;
+    while (tok.len > 0 and std.ascii.isWhitespace(tok[0])) tok = tok[1..];
+    while (tok.len > 0 and std.ascii.isWhitespace(tok[tok.len - 1])) tok = tok[0 .. tok.len - 1];
+    if (tok.len == 0) return;
+    var name = tok;
+    if (std.mem.findScalar(u8, tok, ' ')) |sp| name = tok[0..sp];
+    if (std.mem.findScalar(u8, name, '|')) |bar| name = name[0..bar];
+    if (name.len == 0) return;
+    if (taskNameToId(name)) |id| {
+        mask.* |= components.aiTaskBit(id);
+    }
+}
+
+/// One parsed `SetNearestEntityAsTarget class=` player triple (hear/see
+/// distances in metres; hear 0 reads 50 stock-side per the targetClasses
+/// parse IL, see 0 = unset).
+pub const TargetPlayerSense = struct {
+    hear: f32 = 0,
+    see: f32 = 0,
+};
+
+/// Walk the Extends chain like resolveProp. `AITarget` pipe blobs and
+/// numbered `AITarget-N` props both count; a child pipe blob replaces the
+/// parent list, numbered keys merge unless the child also ships a pipe blob
+/// (same rule as resolvedAiTasks). Returns the first EntityPlayer triple
+/// found walking from the child up, or null when no entry names the player.
+fn resolvedTargetPlayerSense(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
-) bool {
-    var has_any_task = false;
+) ?TargetPlayerSense {
     var cur: ?[]const u8 = name;
     var depth: u8 = 0;
     while (cur) |cn| : (depth += 1) {
         if (depth > 24) break;
         const rc = classes.get(cn) orelse break;
+        var numbered: ?TargetPlayerSense = null;
         var it = rc.props.iterator();
         while (it.next()) |e| {
-            if (!std.mem.startsWith(u8, e.key_ptr.*, "AITask-")) continue;
-            has_any_task = true;
-            for (attack_task_names) |att| {
-                if (std.mem.eql(u8, e.value_ptr.*, att)) return true;
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (cut >= rest.len) {
+                    if (parseTargetPlayerEntry(entry)) |s| {
+                        if (is_pipe) return s;
+                        if (numbered == null) numbered = s;
+                    }
+                    break;
+                }
+                if (parseTargetPlayerEntry(entry)) |s| {
+                    if (is_pipe) return s;
+                    if (numbered == null) numbered = s;
+                }
+                rest = rest[cut + 1 ..];
             }
+            if (is_pipe) {
+                // A child pipe blob replaces the parent list: a pipe with no
+                // player entry stops the walk (same rule as resolvedAiTasks).
+                return numbered;
+            }
+        }
+        if (numbered) |s| return s;
+        cur = rc.extends;
+    }
+    return null;
+}
+
+/// Parse one `SetNearestEntityAsTarget class=...` entry for its EntityPlayer
+/// triple. Grammar (targetClasses parse IL): comma-separated
+/// `type,hear,see` triples stepped by 3; the player triple's hear 0 reads 50
+/// stock-side. Null unless the entry names the player type.
+fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "SetNearestEntityAsTarget")) return null;
+    const marker = "class=";
+    const ci = std.mem.find(u8, data, marker) orelse return null;
+    const list = data[ci + marker.len ..];
+    var parts: [64][]const u8 = undefined;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |p| {
+        if (n >= parts.len) break;
+        parts[n] = std.mem.trim(u8, p, " \t");
+        n += 1;
+    }
+    var i: usize = 0;
+    while (i + 2 < n + 1 and i < n) : (i += 3) {
+        if (!std.mem.eql(u8, parts[i], "EntityPlayer")) continue;
+        const hear: f32 = if (i + 1 < n) std.fmt.parseFloat(f32, parts[i + 1]) catch 0 else 0;
+        const see: f32 = if (i + 2 < n) std.fmt.parseFloat(f32, parts[i + 2]) catch 0 else 0;
+        return .{ .hear = if (hear == 0) 50 else hear, .see = see };
+    }
+    return null;
+}
+
+/// Parse one `SetAsTargetIfHurt class=...` entry into the victim-class bit
+/// set (bit 0 = filtered entry exists, bit 1 = EntityPlayer, bit 2 =
+/// EntityBandit, bit 3 = EntityEnemyAnimal; `EAISetAsTargetIfHurt` SetData IL
+/// splits `class` on comma). A bare entry (no class=) returns 0, keeping the
+/// legacy always-retarget path. Null unless the entry is SetAsTargetIfHurt.
+fn parseHurtTargetClasses(entry: []const u8) ?u8 {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "SetAsTargetIfHurt")) return null;
+    const marker = "class=";
+    const ci = std.mem.find(u8, data, marker) orelse return 0;
+    var bits: u8 = 1;
+    var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
+    while (it.next()) |p| {
+        const c = std.mem.trim(u8, p, " \t");
+        if (std.mem.eql(u8, c, "EntityPlayer")) bits |= 2;
+        if (std.mem.eql(u8, c, "EntityBandit")) bits |= 4;
+        if (std.mem.eql(u8, c, "EntityEnemyAnimal")) bits |= 8;
+    }
+    return bits;
+}
+
+/// Parse one `BlockIf` entry's `data=` condition list into the alert-gate
+/// bits (bit 0 = a BlockIf entry exists, bit 1 = an alert arm that gates
+/// sense acquisition while unalerted). Grammar (`EAIBlockIf` SetData IL):
+/// "condition=<type> <op> <value>" triples stepped by 3, whitespace split;
+/// `eType` = None/Alert/Investigate, `eOp` = None/e/ne (eOp None warns
+/// stock-side and never matches). Only the alert arm maps to sim state
+/// (`ai.alert`); investigate has no latched model here (spots are one-shot
+/// paths), so an investigate-only entry returns bit 0 alone, which the sense
+/// gate reads as unset. Null unless the entry is BlockIf. A BlockIf without
+/// `data=` returns bit 0 alone (stock parses zero conditions, so
+/// CanExecute never fires and nothing is blocked).
+fn parseBlockIfAlert(entry: []const u8) ?u8 {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "BlockIf")) return null;
+    const marker = "condition=";
+    const ci = std.mem.find(u8, data, marker) orelse return 1;
+    var bits: u8 = 1;
+    // Whitespace-split tokens after `condition=`; a trailing `data=` key on a
+    // numbered prop (e.g. AITarget-2's own key) never appears here because the
+    // entry is already cut at the pipe.
+    var toks: [16][]const u8 = undefined;
+    var n: usize = 0;
+    var it = std.mem.splitAny(u8, data[ci + marker.len ..], " \t");
+    while (it.next()) |p| {
+        const tok = std.mem.trim(u8, p, " \t");
+        if (tok.len == 0) continue;
+        if (n >= toks.len) break;
+        toks[n] = tok;
+        n += 1;
+    }
+    var i: usize = 0;
+    while (i + 2 < n + 1 and i < n) : (i += 3) {
+        // The stock row is `alert e 0`: unalerted evaluates true, so the
+        // executing BlockIf holds the target mutex over sense acquisition.
+        // Any alert arm (e or ne, any value) marks the class gated; the gate
+        // itself only models the stock row's unalerted shape.
+        if (std.mem.eql(u8, toks[i], "alert")) bits |= 2;
+    }
+    return bits;
+}
+
+/// Same Extends walk as resolvedTargetPlayerSense, but for the BlockIf
+/// alert gate: the first BlockIf entry walking from the child up wins (a
+/// child list without one falls through to the parent template, matching
+/// the pipe/numbered merge rule of the sense resolvers above).
+fn resolvedBlockIfAlert(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) u8 {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: u8 = 0;
+        var saw_numbered = false;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (parseBlockIfAlert(entry)) |b| {
+                    if (b != 0) {
+                        if (is_pipe) return b;
+                        numbered = b;
+                        saw_numbered = true;
+                    }
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered;
+        }
+        if (saw_numbered) return numbered;
+        cur = rc.extends;
+    }
+    return 0;
+}
+
+/// Same Extends walk as resolvedTargetPlayerSense, but for the hurt-task
+/// class filter: the first class-filtered entry walking from the child up
+/// wins; a bare entry (or none) returns 0.
+fn resolvedHurtTargetClasses(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) u8 {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: u8 = 0;
+        var saw_numbered = false;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (parseHurtTargetClasses(entry)) |b| {
+                    if (b != 0) {
+                        if (is_pipe) return b;
+                        numbered = b;
+                        saw_numbered = true;
+                    }
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered;
+        }
+        if (saw_numbered) return numbered;
+        cur = rc.extends;
+    }
+    return 0;
+}
+fn resolvedAiTasks(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) u16 {
+    var mask: u16 = 0;
+    var saw_list = false;
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: u16 = 0;
+        var numbered_n: u8 = 0;
+        var pipe: u16 = 0;
+        var has_pipe = false;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            if (std.mem.eql(u8, key, "AITask")) {
+                has_pipe = true;
+                var rest = val;
+                while (rest.len > 0) {
+                    const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                    orTaskName(&pipe, rest[0..cut]);
+                    if (cut >= rest.len) break;
+                    rest = rest[cut + 1 ..];
+                }
+                continue;
+            }
+            if (!std.mem.startsWith(u8, key, "AITask-")) continue;
+            numbered_n += 1;
+            orTaskName(&numbered, val);
+        }
+        if (has_pipe) {
+            mask = pipe;
+            saw_list = true;
+            break;
+        }
+        if (numbered_n > 0) {
+            mask |= numbered;
+            saw_list = true;
         }
         cur = rc.extends;
     }
-    return !has_any_task;
+    if (!saw_list) return 0;
+    return mask | components.ai_task_list_set;
+}
+
+/// Does the class's inherited AITask list contain an attack task? Pipe
+/// `AITask` (zombieTemplateMale) and numbered `AITask-N` (animals) both count.
+/// No list at all reports true so brainless classes keep the zombie default.
+fn resolvedAiAttacks(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) bool {
+    const tasks = resolvedAiTasks(classes, name);
+    if (tasks & components.ai_task_list_set == 0) return true;
+    return components.aiTaskAllowed(tasks, .approach_attack);
 }
 
 fn inferKind(name: []const u8, tags: []const u8, is_animal: bool) components.Kind {
@@ -466,15 +854,40 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.attr(body, ptag, "value")) |pval| {
                 const keep = if (is_passive) blk: {
                     const op = xml.attr(body, ptag, "operation") orelse "";
-                    // HealthMax base_set is the HP source; anything else that
-                    // reaches this map is ignored by the resolvers below.
+                    // HealthMax base_set is the HP source. PhysicalDamageResist
+                    // (passive 41, the armoured-class rows) is kept as a
+                    // percentage; anything else that reaches this map is
+                    // ignored by the resolvers below.
+                    if (std.mem.eql(u8, pname, "PhysicalDamageResist")) {
+                        // Only the untagged class rows are modelled. Stock also
+                        // ships two tag-gated rows per insect/bee swarm
+                        // (`tags="ranged"` 99, and the inverted 75) which need
+                        // a damage-type query at the hit; applying one of them
+                        // to every source would over-resist, so a tagged row is
+                        // skipped (the swarm then takes full damage, the
+                        // documented residual rather than a guessed number).
+                        const row_tags = xml.attr(body, ptag, "tags") orelse "";
+                        break :blk std.mem.eql(u8, op, "base_set") and row_tags.len == 0;
+                    }
                     break :blk std.mem.eql(u8, pname, "HealthMax") and
                         std.mem.eql(u8, op, "base_set");
                 } else true;
                 if (keep) {
                     // last wins
                     const kn = try arena.dupe(u8, pname);
-                    const vv = try arena.dupe(u8, pval);
+                    // Numbered AITarget-N props carry the task's SetData on a
+                    // separate `data=` attribute (stock
+                    // `<property name="AITarget-2" value="BlockIf"
+                    // data="condition=alert e 0"/>`); the pipe `AITarget` blob
+                    // inlines it instead. Append it so the entry resolvers see
+                    // the same "Name key=val" text either way. Other resolvers
+                    // match on the entry name, so the suffix is inert for them.
+                    const vv = if (!is_passive and
+                        (std.mem.eql(u8, pname, "AITarget") or std.mem.startsWith(u8, pname, "AITarget-")) and
+                        (xml.attr(body, ptag, "data") != null))
+                        try std.fmt.allocPrint(arena, "{s} {s}", .{ pval, xml.attr(body, ptag, "data").? })
+                    else
+                        try arena.dupe(u8, pval);
                     try props.put(allocator, kn, vv);
                 }
             }
@@ -532,7 +945,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
+        const ai_tasks = resolvedAiTasks(&classes, name);
         const ai_attack = resolvedAiAttacks(&classes, name);
+        const target_sense = resolvedTargetPlayerSense(&classes, name);
+        const hurt_classes = resolvedHurtTargetClasses(&classes, name);
+        const block_if = resolvedBlockIfAlert(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
@@ -565,6 +982,22 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             const bag_list = resolveProp(&classes, bag_class, "LootList", 0);
             if (bag_list) |bl| {
                 if (bl.len > 0) loot = bl;
+            }
+        }
+        // entityclasses `Buffs="a,b"`: the class-level buff list. Names are
+        // resolved against the buff catalog by the caller (fail closed: an
+        // unknown name is skipped there).
+        var class_buffs: []const []const u8 = &.{};
+        if (resolveProp(&classes, name, "Buffs", 0)) |bl| {
+            if (bl.len > 0) class_buffs = try nameList(arena, bl);
+        }
+        // PhysicalDamageResist (passive 41): a percentage, resolved through
+        // Extends like the other class props. Bounded 0..100 (a negative or
+        // >100 resist would heal or negate the entity).
+        var phys_resist: f32 = 0;
+        if (resolveProp(&classes, name, "PhysicalDamageResist", 0)) |pr| {
+            if (xml.parseF32(pr)) |f| {
+                if (f >= 0 and f <= 100) phys_resist = f;
             }
         }
         var drop_prob: f32 = 1.0;
@@ -687,6 +1120,42 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 }
             }
         }
+        // Dismember / crawler tuning (RE EntityAlive.CheckDismember IL=125 and
+        // GetDismemberChance IL=128, EntityClass Init IL=0xB83+): the three
+        // multipliers default to 1 in the stock cctor, so a parsed positive
+        // value is stored and 0 stays "unset" (the effective 1 lands when the
+        // roll reads the template-resolved value). The leg pair has no cctor
+        // fallback, so 0 is the true stock default there too.
+        var dis_head: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierHead", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_head = f;
+            }
+        }
+        var dis_arms: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierArms", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_arms = f;
+            }
+        }
+        var dis_legs: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierLegs", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_legs = f;
+            }
+        }
+        var cripple_scale: f32 = 0;
+        if (resolveProp(&classes, name, "LegCrippleScale", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) cripple_scale = f;
+            }
+        }
+        var crawler_threshold: f32 = 0;
+        if (resolveProp(&classes, name, "LegCrawlerThreshold", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 1) crawler_threshold = f;
+            }
+        }
         var time_stay: f32 = 0;
         if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
             if (xml.parseF32(ts)) |f| {
@@ -713,6 +1182,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         try list.append(allocator, .{
             .name = name,
             .hash = unity_hash.unityStringHash(name),
+            .tags = if (tags.len > 0) try arena.dupe(u8, tags) else "",
             .max_hp = max_hp,
             .kind = kind,
             .loot_list = loot,
@@ -720,6 +1190,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .spawnable = spawnable,
             .is_enemy = is_enemy,
             .ai_attack = ai_attack,
+            .ai_tasks = ai_tasks,
+            .target_player_hear = if (target_sense) |s| s.hear else 0,
+            .target_player_see = if (target_sense) |s| s.see else 0,
+            .hurt_target_classes = hurt_classes,
+            .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
             .wander_speed = wander,
@@ -737,8 +1212,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,
+            .dismember_head = dis_head,
+            .dismember_arms = dis_arms,
+            .dismember_legs = dis_legs,
+            .leg_cripple_scale = cripple_scale,
+            .leg_crawler_threshold = crawler_threshold,
             .explosion = expl orelse .{},
+            .buffs = class_buffs,
             .xp_gain = xp_gain,
+            .phys_resist = phys_resist,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
     }
@@ -758,6 +1240,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         .arena_ptr = arena_holder,
         .source = .xml,
     };
+}
+
+/// One comma list into an arena-owned slice of trimmed names.
+fn nameList(arena: std.mem.Allocator, value: []const u8) ![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    defer out.deinit(arena);
+    var it = std.mem.splitScalar(u8, value, ',');
+    while (it.next()) |seg| {
+        const n = std.mem.trim(u8, seg, " \t");
+        if (n.len == 0) continue;
+        try out.append(arena, try arena.dupe(u8, n));
+    }
+    return out.toOwnedSlice(arena);
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?EntityTable {
@@ -798,9 +1293,35 @@ test "load stock entityclasses when present" {
     defer t.deinit();
     try std.testing.expect(t.defs.len > 100);
     const boe = t.byName("zombieBoe") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(unity_hash.class_zombie_boe, boe.hash);
     try std.testing.expect(boe.spawnable);
     try std.testing.expectEqual(components.Kind.zombie, boe.kind);
+    // AITarget player sense (EAISetNearestEntityAsTarget targetClasses):
+    // zombieBoe inherits the template's `EntityPlayer,0,0` triple: hear 0
+    // reads 50 stock-side, see 0 = unset (the sense path falls back to
+    // SightRange). animalDireWolf declares `EntityPlayer,28,20`.
+    try std.testing.expectEqual(@as(f32, 50), boe.target_player_hear);
+    try std.testing.expectEqual(@as(f32, 0), boe.target_player_see);
+    const dwolf = t.byName("animalDireWolf") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 28), dwolf.target_player_hear);
+    try std.testing.expectEqual(@as(f32, 20), dwolf.target_player_see);
+    // SetAsTargetIfHurt class filter (EAISetAsTargetIfHurt SetData IL):
+    // zombieTemplateMale names player+bandit+enemyAnimal (bits 0+1+2+3);
+    // animalDireWolf inherits the template's filter through Extends.
+    const tm = t.byName("zombieTemplateMale") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 15), tm.hurt_target_classes);
+    try std.testing.expectEqual(@as(u8, 15), boe.hurt_target_classes);
+    try std.testing.expectEqual(@as(u8, 15), dwolf.hurt_target_classes);
+    // BlockIf alert gate (EAIBlockIf SetData IL): the hostile-animal template
+    // ships `condition=alert e 0` on AITarget-2 (bits 0+1); the zombie template
+    // has no BlockIf row, and the dire wolf inherits the hostile gate.
+    const hostile = t.byName("animalTemplateHostile") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 3), hostile.block_if_alert_only);
+    try std.testing.expectEqual(@as(u8, 0), tm.block_if_alert_only);
+    // The dire wolf ships its own pipe AITarget blob (hurt + blocking +
+    // corpse + sense, no BlockIf), which replaces the template list; the
+    // plain wolf keeps numbered props and inherits the hostile gate.
+    try std.testing.expectEqual(@as(u8, 0), dwolf.block_if_alert_only);
+    try std.testing.expectEqual(@as(u8, 3), (t.byName("animalWolf") orelse return error.TestExpectedEqual).block_if_alert_only);
     // LootDropEntityClass "EntityLootContainerRegular" resolves one hop through
     // that class's LootList to the real loot.xml container.
     try std.testing.expectEqualStrings("zPackReg", boe.loot_list);
@@ -841,6 +1362,17 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
     try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
     try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
+    // PhysicalDamageResist (passive 41): the armoured classes carry an
+    // untagged base_set percentage (soldier 50, demolition 60, biker/utility
+    // worker 20); a plain zombie has none, and demolition's own row wins over
+    // the soldier it extends. The tag-gated swarm rows (ranged 99 / inverted
+    // 75) are deliberately not folded into one number.
+    try std.testing.expectEqual(@as(f32, 50.0), (t.byName("zombieSoldier") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 60.0), (t.byName("zombieDemolition") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 20.0), (t.byName("zombieBiker") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 0.0), boe.phys_resist);
+    try std.testing.expectEqual(@as(f32, 0.0), (t.byName("animalInsectSwarm") orelse return error.TestExpectedEqual).phys_resist);
+
     // MoveSpeedRand (entity-ai.md 3318-3320): the template's "-.2, .25".
     try std.testing.expectEqual(@as(f32, -0.2), boe.move_speed_rand_min);
     try std.testing.expectEqual(@as(f32, 0.25), boe.move_speed_rand_max);
@@ -875,6 +1407,22 @@ test "load stock entityclasses when present" {
     const boar = t.byName("animalBoar").?;
     try std.testing.expect(boar.ai_attack);
     try std.testing.expect(boe.ai_attack); // zombieTemplate has the attack task
+    // Pipe `AITask` on zombieTemplateMale (BreakBlock|DestroyArea|Territorial|...):
+    // the numbered-only walker used to miss it, so every zombie ran the shared table.
+    const set = components.ai_task_list_set;
+    try std.testing.expect(boe.ai_tasks & set != 0);
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .territorial));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .approach_distraction));
+    const rancher = t.byName("zombieRancher").?;
+    try std.testing.expect(rancher.ai_tasks & set != 0);
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .territorial));
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(rancher.ai_tasks, .approach_attack));
+    try std.testing.expect(stag2.ai_tasks & set != 0);
+    try std.testing.expect(components.aiTaskAllowed(stag2.ai_tasks, .runaway));
+    try std.testing.expect(!components.aiTaskAllowed(stag2.ai_tasks, .approach_attack));
+    try std.testing.expect(!components.aiTaskAllowed(stag2.ai_tasks, .break_block));
 }
 
 test "day/night speeds parse from entityclasses XML" {
@@ -982,6 +1530,56 @@ test "AITask attack gating parses from entityclasses XML" {
     try std.testing.expect(!t.byName("animalDeer").?.ai_attack); // inherited timid list
     try std.testing.expect(t.byName("animalWolf").?.ai_attack); // hostile template
     try std.testing.expect(t.byName("mysteryNoTasks").?.ai_attack); // no list -> default
+    try std.testing.expectEqual(@as(u16, 0), t.byName("mysteryNoTasks").?.ai_tasks);
+    const deer = t.byName("animalDeer").?;
+    try std.testing.expect(deer.ai_tasks & components.ai_task_list_set != 0);
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .runaway));
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .look));
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .wander));
+    try std.testing.expect(!components.aiTaskAllowed(deer.ai_tasks, .approach_attack));
+}
+
+test "pipe AITask blob replaces parent list and numbered keys merge" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_pipe.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="zombieTemplateMale">
+        \\    <property name="AITask" value="
+        \\    BreakBlock|
+        \\    DestroyArea|
+        \\    Territorial|
+        \\    ApproachAndAttackTarget class=EntityPlayer,0|
+        \\    Wander|
+        \\    "/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieBoe" extends="zombieTemplateMale">
+        \\    <property name="MaxHealth" value="150"/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieRancher" extends="zombieTemplateMale">
+        \\    <property name="AITask" value="
+        \\    BreakBlock|
+        \\    ApproachAndAttackTarget class=EntityPlayer,0|
+        \\    Wander|
+        \\    "/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const boe = t.byName("zombieBoe").?;
+    try std.testing.expect(boe.ai_attack);
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .territorial));
+    const rancher = t.byName("zombieRancher").?;
+    try std.testing.expect(rancher.ai_attack);
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .territorial));
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(rancher.ai_tasks, .break_block));
 }
 
 test "stock Demolition Explosion class parses (zombieFatCop tiers)" {
@@ -1076,4 +1674,81 @@ test "Explosion class resolves per field through Extends with DamageBonus" {
     try std.testing.expectEqual(@as(f32, 0), plain.explode_threshold);
     try std.testing.expectEqual(@as(f32, 0), plain.explosion.radius_blocks);
     try std.testing.expectEqual(@as(f32, 0), plain.explosion.block_damage);
+}
+
+test "stock dismember and leg tuning parses (template, feral, radiated)" {
+    // Ground truth = the live stock file: zombieTemplateMale ships
+    // DismemberMultiplier 1/1/1, LegCrippleScale 2, LegCrawlerThreshold 0;
+    // the feral tier overrides the multipliers to .7 and the radiated tier
+    // to .4, inheriting the leg pair through Extends.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const template = t.byName("zombieTemplateMale") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_head);
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), template.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0), template.leg_crawler_threshold);
+    const feral = t.byName("zombieBoeFeral") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), feral.leg_cripple_scale);
+    const radiated = t.byName("zombieBoeRadiated") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_legs);
+}
+
+test "dismember tuning resolves through Extends in an offline file" {
+    // A base template ships the leg pair; the tier overrides only the
+    // multipliers, so the leg values must inherit, not reset to 0.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec3.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="ZombieBase">
+        \\    <property name="MaxHealth" value="100"/>
+        \\    <property name="DismemberMultiplierHead" value="1"/>
+        \\    <property name="DismemberMultiplierArms" value="1"/>
+        \\    <property name="DismemberMultiplierLegs" value="1"/>
+        \\    <property name="LegCrippleScale" value="2"/>
+        \\    <property name="LegCrawlerThreshold" value="0.175"/>
+        \\  </entity_class>
+        \\  <entity_class name="bareWalker">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieTier" extends="ZombieBase">
+        \\    <property name="DismemberMultiplierHead" value=".7"/>
+        \\    <property name="DismemberMultiplierArms" value=".7"/>
+        \\    <property name="DismemberMultiplierLegs" value=".7"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const base = t.byName("ZombieBase").?;
+    try std.testing.expectEqual(@as(f32, 1), base.dismember_head);
+    try std.testing.expectEqual(@as(f32, 2), base.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0.175), base.leg_crawler_threshold);
+    const tier = t.byName("zombieTier").?;
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), tier.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0.175), tier.leg_crawler_threshold);
+    // A class with no dismember props at all reads 0 on every field: the
+    // parse must not supply a value the stock file did not carry.
+    const bare = t.byName("bareWalker").?;
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 0), bare.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0), bare.leg_crawler_threshold);
 }

@@ -18,7 +18,8 @@ const vending_mod = @import("../../world/vending.zig");
 /// the "rewrite any trader from anywhere" vector without affecting a
 /// legitimate trade. Reach is `[sim] trader_use_range` (Game.trade_use_range).
 pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
-    const stock = self.sim.trader_stock[s];
+    // Pointer, not a copy: ~540 B per call on the trader-open path.
+    const stock = &self.sim.trader_stock[s];
     var n: usize = 0;
     var e: usize = 0;
     while (e < stock.n and n < out.len) : (e += 1) {
@@ -26,9 +27,23 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
         if (ent.count == 0) continue;
         const type_id: i32 = Game.resolveItemType(self, ent.item);
         out[n] = .{
-            .item = .{ .type_id = type_id, .count = if (ent.count > 0) ent.count else 1, .quality = ent.quality },
+            .item = .{
+                .type_id = type_id,
+                .count = if (ent.count > 0) ent.count else 1,
+                .quality = ent.quality,
+            },
             .markup = ent.markup,
         };
+        // The stocked stat roll rides the ItemValue blob (stock's TraderData
+        // entries are full ItemStacks, and `AddGSStats` ran at fill time).
+        // Same field triple as `copyStatsToWire`; the two structs are
+        // distinct types with identical layout.
+        const k = @min(ent.stats_n, out[n].item.stats.len);
+        var i: usize = 0;
+        while (i < k) : (i += 1) {
+            out[n].item.stats[i] = .{ .effect = ent.stats[i].effect, .slot_a = ent.stats[i].slot_a, .slot_b = ent.stats[i].slot_b };
+        }
+        out[n].item.stats_n = @intCast(k);
         n += 1;
     }
     return n;
@@ -36,7 +51,29 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
 
 pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
     const t = packages.parseTraderTrade(body) catch return;
+    // Same reach gate as the TraderData echo below: the client can only open
+    // the trade window by activating the NPC in use range, so a trade naming
+    // a trader across the map is not a legitimate one. Without this a peer
+    // could buy and sell against every trader on the map from spawn.
+    if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
+        if (!self.sim.mask[ts].transform) return;
+        const tp = self.sim.transform[ts];
+        if (!inTradeReach(self, c, tp.x, tp.y, tp.z)) {
+            self.harness.counters.inc(.bounds_rejects);
+            return;
+        }
+    } else return;
     if (t.side == 1) {
+        // items.xml SellableToTrader (ItemClass ParseBool, default true): the
+        // client greys its Sell button for these and stock's ItemActionEntrySell
+        // refuses, so a request that names one is not a legitimate sell.
+        // Unknown ids fall through to systems.trade, which rejects them.
+        if (self.items.byId(t.item)) |def| {
+            if (!def.sellable_to_trader) {
+                self.harness.counters.inc(.bounds_rejects);
+                return;
+            }
+        }
         if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
             const info_id = self.sim.trader_stock[ts].trader_info_id;
             if (info_id != 0) {
@@ -184,9 +221,11 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
     try replicate_te.broadcastVendingTe(self, td.te_x, td.te_y, td.te_z);
 }
 
-/// Squared-distance reach gate for trade echoes: the sender's player must be
-/// within trade_use_range of the target (see trade_use_range above).
-fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
+/// Squared-distance reach gate for every trader interaction: the sender's
+/// player must be within trade_use_range of the target (see trade_use_range
+/// above). Shared by the trade, the TraderData echo, and the quest-giving
+/// open path, so one config key governs all three.
+pub fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
     const ps = self.sim.playerByPeer(c.slot) orelse return false;
     const p = self.sim.transform[ps];
     const dx = p.x - bx;

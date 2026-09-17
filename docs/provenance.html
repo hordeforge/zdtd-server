@@ -21,6 +21,29 @@ table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}th,td{text-alig
 td{font-family:var(--mono);font-variant-numeric:tabular-nums}.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .pbar{display:inline-block;width:4.5rem;height:0.55rem;border-radius:3px;background:var(--sunken);vertical-align:middle;overflow:hidden;margin-right:0.4rem}.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:3px}
+/* Defrag map: the whole scored surface at a glance, one cell per feature. */
+.defrag{display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin:0 0 0.8rem}
+@media(max-width:60rem){.defrag{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:36rem){.defrag{grid-template-columns:1fr}}
+.mapcat{display:flex;flex-direction:column;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}
+.mapcat:hover,.mapcat:focus-visible{border-color:var(--edge)}
+.mapcat.on{border-color:var(--acc)}
+/* Categories with open work keep a warm edge so the eye lands on them first. */
+.mapcat:not(.clean){border-color:var(--warn)}
+.maphead{display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-bottom:0.4rem}
+.mapname{font-family:var(--sans);font-size:var(--fs-sm)}
+.badge{font-family:var(--mono);font-size:var(--fs-micro);color:var(--bg);background:var(--warn);border-radius:999px;padding:0.05rem 0.45rem;white-space:nowrap}
+.badge.done{color:var(--muted);background:transparent;border:1px solid var(--line)}
+.mapfoot{font-family:var(--mono);font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums;margin-top:0.4rem}
+.cells{display:flex;flex-wrap:wrap;gap:2px;align-content:flex-start;flex:1}
+.cell{width:0.55rem;height:0.55rem;border-radius:1px;background:var(--ok)}
+/* Open work is outlined and lifted, not just a different hue: three amber
+   squares among ~300 green ones vanish on hue alone, and are gone entirely
+   for red/green colour vision deficiency. */
+.cell.PARTIAL,.cell.MISSING{width:0.8rem;height:0.8rem;border-radius:2px;margin:-0.125rem 0;box-shadow:0 0 0 2px var(--sunken),0 0 0 3px currentColor}
+.cell.PARTIAL{background:var(--warn);color:var(--warn)}
+.cell.MISSING{background:var(--err);color:var(--err)}
+@media(forced-colors:active){.cell{outline:1px solid CanvasText;outline-offset:-1px}.cell.PARTIAL,.cell.MISSING{outline:2px solid Highlight}}
 .toolbar{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0 0 0.6rem}
 .toolbar input[type=search]{flex:1;min-width:12rem;background:var(--sunken);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:0.4rem 0.6rem;font:inherit}
 .chips{display:flex;gap:0.35rem;flex-wrap:wrap}
@@ -49,7 +72,18 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <main id="main-content">
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
-<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">294</b> WORKS / <b class="num">1</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">295</b> scored features = <b>99%</b> fully ported, <b>100%</b> at least partial (recounted from the live GAP_ANALYSIS markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">298</b> WORKS / <b class="num">2</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">300</b> scored features = <b>99%</b> fully ported, <b>100%</b> at least partial (recounted from the live GAP_ANALYSIS markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<div class="defrag">
+<button class="mapcat" data-name="Player progression" aria-label="Player progression: 27 of 28 features ported, 1 partial, 0 missing"><span class="maphead"><span class="mapname">Player progression</span><span class="badge">1 open</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell PARTIAL"></i></span><span class="mapfoot">96% · 28 features</span></button>
+<button class="mapcat" data-name="World systems" aria-label="World systems: 46 of 47 features ported, 1 partial, 0 missing"><span class="maphead"><span class="mapname">World systems</span><span class="badge">1 open</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell PARTIAL"></i></span><span class="mapfoot">97% · 47 features</span></button>
+<button class="mapcat clean" data-name="Blood moon" aria-label="Blood moon: 25 of 25 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Blood moon</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 25 features</span></button>
+<button class="mapcat clean" data-name="Entities and AI" aria-label="Entities and AI: 40 of 40 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Entities and AI</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 40 features</span></button>
+<button class="mapcat clean" data-name="Items, crafting, loot" aria-label="Items, crafting, loot: 28 of 28 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Items, crafting, loot</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 28 features</span></button>
+<button class="mapcat clean" data-name="Net and ops" aria-label="Net and ops: 48 of 48 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Net and ops</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 48 features</span></button>
+<button class="mapcat clean" data-name="POIs and prefabs" aria-label="POIs and prefabs: 30 of 30 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">POIs and prefabs</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 30 features</span></button>
+<button class="mapcat clean" data-name="Quests" aria-label="Quests: 34 of 34 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Quests</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 34 features</span></button>
+<button class="mapcat clean" data-name="Traders" aria-label="Traders: 20 of 20 features ported, 0 partial, 0 missing"><span class="maphead"><span class="mapname">Traders</span><span class="badge done">done</span></span><span class="cells"><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i><i class="cell WORKS"></i></span><span class="mapfoot">100% · 20 features</span></button>
+</div>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
@@ -75,7 +109,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Objective `phase` resolution (attribute and nested `&lt;property&gt;`)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest template inheritance (`template=` plus `&lt;variable&gt;`)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Objective type to executable phase kind mapping</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Requirement elements and quest_criteria / offer_criteria</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Requirement elements and quest_criteria / offer_criteria</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest `&lt;action&gt;` elements</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Objective `value` / `count` / `item_count` to required count</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Phase graph construction</td></tr>
@@ -103,6 +137,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Starter quest granted at join</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest journal persistence (players.zsv ZPV5)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest NavObject markers</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Air-drop crate NavObject markers</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL → CLOSED (2026-08-07)</td><td>Client-known-name gate before writing a quest to the wire</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Fuzz coverage of the quest surface</td></tr>
 </tbody></table></div></td></tr>
@@ -116,7 +151,11 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Trader entity replicated to the stock client</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>TraderData carried in EntityCreationData</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>TraderData on the real trader-open path (LockRequest channel 1)</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>NetPackageTraderData S2C snapshot</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>NetPackageTraderData S2C snapshot</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>LockRequest gates 1, 2 and 4</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Inventory keep-open refreshes the lock window</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Force-unlock: re-lock, failed transaction, disconnect</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Force-unlock on disconnect</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>TraderData v2 body encoding</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>C2S NetPackageTraderData handling</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>traders.xml trader_item_group parsing with nested group refs</td></tr>
@@ -127,16 +166,16 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Buy/sell pricing from items.xml EconomicValue</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Trade execution</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Trader wallet / AvailableMoney</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Haggling / barter perks</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Haggling / barter perks</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">N/A (parity)</td><td>Trader tiers / TierItemGroups / traderstage_templates</td></tr>
-<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Per-entry Markup (demand model)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Per-entry Markup (vending-UI state, not demand)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Restock timer</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Open hours and the closed-door behaviour</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>TraderArea replication (NetPackageWorldAreas)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Vending machines</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest offering via NetPackageNPCQuestList</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest turn-in / phase advance on trader open</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Trader dialog window, greeting, voice, radial commands</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Trader dialog window, greeting, voice, radial commands</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Currency item and wallet/inventory reconciliation</td></tr>
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Blood moon" tabindex="0" aria-expanded="false">
@@ -157,15 +196,15 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">N/A (parity)</td><td>NetPackageHordeEvent</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon weather override</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Horde spawn composition</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Escalation by gamestage</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Escalation by gamestage</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>BloodMoonEnemyCount semantics</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Alive-zombie budget during a blood moon</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Spawn placement and spawn direction rotation</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon party grouping (multiplayer)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon zombie strength</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon end and despawn at dawn</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Blood-moon bonus loot bags</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Blood-moon corpse decay / chunk pinning</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon bonus loot bags</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon corpse decay / chunk pinning</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Blood-moon schedule persistence across restart</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Console/admin visibility of the blood moon</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>settime command arity</td></tr>
@@ -238,7 +277,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Sleeper wake condition</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>EAITaskList priority + MutexBits selection loop</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>EAI task coverage</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Per-class AITask/AITarget lists from entityclasses.xml</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Per-class AITask/AITarget lists from entityclasses.xml</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Timid animals run the zombie task table</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Target sensing</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Grid A* pathfinding</td></tr>
@@ -267,7 +306,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Spawn placement validity</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Quest-driven enemy spawn</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Admin / console entity spawn and kill</td></tr>
-<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Parallel AI execution and LOD</td></tr>
+<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>Parallel AI execution and LOD</td></tr>
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Items, crafting, loot" tabindex="0" aria-expanded="false">
 <th scope="row">Items, crafting, loot</th>
@@ -283,7 +322,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Item modifiers (mods) and cosmetics</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Item durability (ItemValue.UseTimes)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Item quality tier</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Repair (item repair queue / RepairItem)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Repair (item repair queue / RepairItem)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Block upgrade path (hammer upgrade)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>recipes.xml load</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Server craft execution</td></tr>
@@ -292,8 +331,8 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Workstation TE (type 12) C2S parse and S2C echo</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Workstation craft tick</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Workstation fuel burn rate</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Workstation input consumption and forge melt simulation</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Workstation recipe validation against recipes.xml</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Workstation input consumption and forge melt simulation</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Workstation recipe validation against recipes.xml</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">FIXED (2026-08-08)</td><td>Non-fuel workstations (workbench, cement mixer, table saw)</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">PERSISTED (2026-08-08), cap 256</td><td>Workstation persistence and capacity</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>loot.xml parse</td></tr>
@@ -309,27 +348,28 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Loot respawn and destroy_on_close</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Container capacity limits</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Player inventory persistence of item state</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Scrapping (material_based recipes / CraftCompleteData.scrapped)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Scrapping (GetScrapableRecipe / InvTx scrap)</td></tr>
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Player progression" tabindex="0" aria-expanded="false">
 <th scope="row">Player progression</th>
-<td><span class="pbar" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" style="--p:100%"><span class="sr-only">100% ported</span></span> 100%</td>
-<td class="num">23</td><td class="num">0</td><td class="num">0</td>
+<td><span class="pbar" role="progressbar" aria-valuenow="96" aria-valuemin="0" aria-valuemax="100" style="--p:96%"><span class="sr-only">96% ported</span></span> 96%</td>
+<td class="num">27</td><td class="num">1</td><td class="num">0</td>
 <td>Level, XP, survival stats and active buffs survive a restart (ZPV3 buffs + ZPV11 skill tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; biome + quest stage modifiers feed gameStageOf; server-validated perk spend (SetSkillLevelServer, parent/cost/max gates) with level-scaled perk passives through the passive VM; the PlayerStats S2C blob and EntityAddExpClient pushes ride the server ledger; the on_perk_spend verdict (ADR 0033) gates spending</td><td>A: progression.xml, buffs.xml · R: progression.md, entity-stats.md, save-persistence.md · Z: ZPV3/ZPV11 persist, survival knobs</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">Player progression GAP features</caption><tbody>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>progression.xml `&lt;level&gt;` curve parse</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Server-side XP ledger and level-up loop</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Kill / death counters persist across a restart</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>XP curve numeric parity with stock</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>XPMultiplier server option</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>XP from non-kill sources</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Skill points granted per level</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>XP from non-kill sources</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Skill points granted per level</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Client to server XP sync (EntityAddExpServer, EntityAddScoreServer)</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Client to server progression blob (NetPackagePlayerStats)</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Perk purchase / spend skill points</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Perk / attribute passive effects applied to gameplay</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Crafting skills / magazines / recipe unlock by progression</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Gamestage (level plus days survived driving spawn difficulty)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Perk purchase / spend skill points</td></tr>
+<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>Perk / attribute passive effects applied to gameplay</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Crafting skills / magazines / recipe unlock by progression</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Gamestage (level plus days survived driving spawn difficulty)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Buff runtime: apply, tick, expire, stack</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>NetPackageAddRemoveBuff relay and emission</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>NetPackageEntityStatsBuff</td></tr>
@@ -342,11 +382,11 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Death detection and the dead-player entity</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Respawn: heal, teleport, PlayerSpawnedInWorld(died), re-bundle</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Respawn zeroes food and water</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Bedroll / spawn point selection on respawn</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Bedroll / spawn point selection on respawn</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>DropOnDeath backpack</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>DeathPenalty server option</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>XP deficit death penalty on the server</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Death / kill counters</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>XP deficit death penalty on the server</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Death / kill counters</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>players.zsv persistence: name, position, coins, inventory, journal</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Progression persistence across restart or relog</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Buff persistence across restart</td></tr>
@@ -356,7 +396,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="cat" data-name="World systems" tabindex="0" aria-expanded="false">
 <th scope="row">World systems</th>
 <td><span class="pbar" role="progressbar" aria-valuenow="97" aria-valuemin="0" aria-valuemax="100" style="--p:97%"><span class="sr-only">97% ported</span></span> 97%</td>
-<td class="num">45</td><td class="num">1</td><td class="num">0</td>
+<td class="num">46</td><td class="num">1</td><td class="num">0</td>
 <td>Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; stream budget covers the full stock view (25x25); land-claim Count/DeadZone enforced</td><td>A: biomes.xml + biome_layers, blocks.xml, spawning.xml · R: chunk-providers.md, light-mesh-water.md, entity-ai.md · Z: stability plane, ZCH3 store, leveler, falling groups</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">World systems GAP features</caption><tbody>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)</td></tr>
@@ -379,7 +419,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Join-time deco burst (NetPackageDecoUpdate) plus world mirror</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Deco density (biomes.xml probabilities)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Deco rotation</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Deco ore-noise gate (CheckOreNoiseAt)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Deco ore-noise gate (CheckOreNoiseAt)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>type=&quot;prefab&quot; decorations</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Deco multiblock mirroring</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Weather state machine (clear / stormbuild / storm, per biome)</td></tr>
@@ -400,14 +440,14 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Player block damage (C2S SetBlock, BlockDamagePlayer, break)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Block repair (ItemActionRepair)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Block upgrade (frame to reinforced)</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Block downgrade on destroy (Stage2Health)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Block downgrade on destroy (Stage2Health)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Zombie block damage</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Block max HP from blocks.xml MaxDamage</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Explosion block damage</td></tr>
-<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim keystone registration, edit deny, durability modifier</td></tr>
+<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>Land claim keystone registration, edit deny, durability modifier</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim removal when the keystone is destroyed</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim persistence</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Land claim replication to the client (lpBlocks)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim replication to the client (lpBlocks)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Land claim owner_online tracking</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Chunk / block persistence across restart</td></tr>
@@ -416,10 +456,10 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="cat" data-name="Net and ops" tabindex="0" aria-expanded="false">
 <th scope="row">Net and ops</th>
 <td><span class="pbar" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" style="--p:100%"><span class="sr-only">100% ported</span></span> 100%</td>
-<td class="num">49</td><td class="num">0</td><td class="num">0</td>
+<td class="num">48</td><td class="num">0</td><td class="num">0</td>
 <td>Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible); Net and ops 48/48</td><td>A: serveradmin.xml, ConfigFile lists · R: protocol.md, protocol-packages.md, network.md · Z: LiteNet, admin TCP, GSI, webui</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">Net and ops GAP features</caption><tbody>
-<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>PackageIds name table (189 stock names, exact set)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>PackageIds name table (191 stock names, exact set)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>PackageIds id 0 reserved for NetPackagePackageIds</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>NetPackagePackageIds body encoding</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Unknown-name safety in the PackageIds map</td></tr>
@@ -437,7 +477,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>LiteNet ConnectRequest / ConnectAccept, protocol id 13</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>ServerPassword as LiteNet connect key</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Pre-auth challenge handshake</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Auth-state timeout (half-open connection reaping)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Auth-state timeout (half-open connection reaping)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Connect rate limiting</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>NetPackagePlayerLogin body parsing</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived: EAC-off)</td><td>EAC enforcement</td></tr>
@@ -565,6 +605,29 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
     });
     cat.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); cat.click(); }
+    });
+  });
+
+  // Defrag map: a tile drills into its category. Clearing the text filter
+  // first means a tile always lands on its rows even when a filter is active.
+  Array.prototype.slice.call(document.querySelectorAll(".mapcat")).forEach(function (tile) {
+    tile.addEventListener("click", function () {
+      var name = tile.dataset.name;
+      var target = null;
+      cats.forEach(function (cat) { if (cat.dataset.name === name) { target = cat; } });
+      if (!target) { return; }
+      filter.value = "";
+      cats.forEach(function (cat) {
+        var want = cat === target;
+        cat.classList.toggle("open", want);
+        cat.setAttribute("aria-expanded", want ? "true" : "false");
+      });
+      Array.prototype.slice.call(document.querySelectorAll(".mapcat")).forEach(function (t) {
+        t.classList.toggle("on", t === tile);
+      });
+      apply();
+      target.scrollIntoView({block: "center"});
+      target.focus();
     });
   });
 

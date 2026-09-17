@@ -1,8 +1,11 @@
 //! Lock helpers extracted from game.zig - pack/unpack + slot bookkeeping.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
+const packages = @import("../../wire/packages.zig");
+const clock = @import("../../util/clock.zig");
 
 pub fn packLockPos(x: i32, y: i32, z: i32) u64 {
     const ux: u64 = @as(u32, @bitCast(x));
@@ -44,9 +47,89 @@ pub fn clearLockSlot(self: *Game, ch: usize) void {
     self.lock_pos_key[ch] = 0;
 }
 
+/// `keep_ch` value meaning "release every channel this peer holds". Any index
+/// past the table is out of range by construction, but naming it keeps the
+/// intent at the call site instead of an unexplained `lock_channel.len`.
+pub const keep_no_channel: usize = std.math.maxInt(usize);
+
+/// Release the locks this peer holds on channels other than `keep_ch`, and tell
+/// it. Stock's `LockRequestServer` gate 1 (IL=239, RE
+/// dedicated-leftovers.md:134) force-unlocks a player's existing entry before
+/// granting a new one, so a player holds one container at a time. The unlock
+/// goes to the requesting peer (its UI still has the old window open); the
+/// other clients learn the channel is free from the grant they are about to
+/// see, and stock's own reply on this path is to the acting player.
+pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) void {
+    const ps: i32 = @intCast(peer_slot);
+    const peer = self.clients[peer_slot].peer orelse {
+        for (&self.lock_channel, 0..) |*h, i| {
+            if (i != keep_ch and h.* == ps) self.clearLockSlot(i);
+        }
+        return;
+    };
+    for (&self.lock_channel, 0..) |*h, i| {
+        if (i == keep_ch or h.* != ps) continue;
+        self.clearLockSlot(i);
+        const body = packages.buildLockResponseForceUnlock(&self.body_buf, @intCast(i)) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        self.sendGame(peer, "NetPackageLockResponse", body) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
+    }
+}
+
+/// True when `peer_slot` holds any lock channel. Stock's LockRequestServer
+/// gate 1 (IL=239, LockManager.il.txt) treats *any* existing entry for the
+/// player as invalid state, not just the requested channel.
+pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
+    const ps: i32 = @intCast(peer_slot);
+    for (self.lock_channel) |h| if (h == ps) return true;
+    return false;
+}
+
+/// Refresh the stale window for every channel `peer_slot` holds. Stock's
+/// `LockManager.ProcessKeepOpen` (IL=31) stamps `keepOpenTimes[player] = UtcNow`
+/// when the player holds a lock, and `LockManager.Update` (IL=128) later force-
+/// unlocks a stamp older than 10s. The stock client sends
+/// `NetPackageInventoryKeepOpen` from its own `LockManager.Update` every 2.5s
+/// while a window is open (client branch, IL_0182), so a live lock is never
+/// reaped. The packet carries no state (read IL=1); it only refreshes the
+/// server's timer, which is why handling it is not a trust-boundary change.
+pub fn refreshLocksForPeer(self: *Game, peer_slot: usize) void {
+    const ps: i32 = @intCast(peer_slot);
+    const now = clock.monoNs();
+    for (self.lock_channel, 0..) |h, i| {
+        if (h == ps) self.lock_granted_ns[i] = now;
+    }
+}
+
+/// Force-unlock every channel `peer_slot` holds and tell that peer. Stock calls
+/// this from LockRequestServer gate 1 and then **returns**: the IL after
+/// `ForceUnlockByPlayer` is `ret` (IL_0067), so the new request is refused and
+/// nothing is granted. The prose in dedicated-leftovers.md:134 said "then
+/// continue"; the IL says otherwise.
+pub fn releaseAllLocksForPeer(self: *Game, peer_slot: usize) void {
+    self.releaseOtherLocksForPeer(peer_slot, keep_no_channel);
+}
+
+/// Release every lock held by a departing peer and tell the others. Clearing
+/// server-side alone lets the next player open the container, but the clients
+/// that watched it get locked are never told it opened again: stock sends the
+/// force-unlock from `ForceUnlockByPlayer` (IL=11) on exactly this path (RE
+/// dedicated-leftovers.md:167). The holder's own peer is gone, so this goes to
+/// everyone else; `locking = false` routes the client to `UnlockResponse`,
+/// which reads only success/errorMsg/isForceUnlocked and never the targets.
 pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
     const ps: i32 = @intCast(peer_slot);
     for (&self.lock_channel, 0..) |*h, i| {
-        if (h.* == ps) self.clearLockSlot(i);
+        if (h.* != ps) continue;
+        self.clearLockSlot(i);
+        const body = packages.buildLockResponseForceUnlock(&self.body_buf, @intCast(i)) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        self.broadcastExcept("NetPackageLockResponse", body, peer_slot) catch {};
     }
 }

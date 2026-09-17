@@ -23,6 +23,9 @@ pub const Stream = struct {
     stream_radius_max: ?i32 = null,
     chunk_stream_period_ticks: ?u64 = null,
     motion_replicate_period_ticks: ?u64 = null,
+    /// PosAndRot heartbeat cadence for entities with no dirty motion bit
+    /// (game.zig default_pos_heartbeat_period_ticks).
+    pos_heartbeat_period_ticks: ?u64 = null,
     /// WorldTime broadcast cadence (game.zig default_world_time_send_ticks).
     world_time_send_ticks: ?u64 = null,
     /// Vehicle position broadcast cadence (game.zig default_vehicle_pos_send_ticks).
@@ -95,6 +98,20 @@ pub const Perf = struct {
 
 /// Sim policy that is not stock serverconfig and not stock game data.
 pub const Sim = struct {
+    /// Seed the near-spawn demo hostiles (2 zombies, a sleeper, an animal) at
+    /// world init. Default true; false matches stock's lazy AIDirector
+    /// spawning (the divergence is recorded in docs/DIVERGENCES.md).
+    starter_zombies: ?bool = null,
+    /// Fresh-player starter kit (server policy, not stock data: stock defines
+    /// its kit in code). Rows are `name` or `name:count`, comma-separated,
+    /// resolved through items.xml once at create. Unknown names are omitted
+    /// (fail closed); counts clamp to the item's Stacknumber.
+    spawn_starter_kit: ?[]const u8 = null,
+    /// Seed the near-spawn demo set on a fresh world: Trader Jen, the minibike,
+    /// the seed chest and the demo turret (hostiles are `starter_zombies`).
+    /// Default true; false leaves a fresh world to the lazy stock systems
+    /// (docs/DIVERGENCES.md 6.2).
+    demo_seed: ?bool = null,
     /// Trader AvailableMoney display pool (no stock key: stock Traders.xml has
     /// no wallet property; AvailableMoney is engine-managed per-day).
     trader_wallet_dukes: ?i32 = null,
@@ -197,6 +214,15 @@ pub const Plugin = struct {
     fuel: ?u64 = null,
     /// Max linear-memory pages per module instance (default 1024).
     max_pages: ?u64 = null,
+    /// Per-module queued-verb interception (paper 3.2.3, ADR 0039):
+    /// `module=verb,verb; module2=verb` entries naming commands a module may
+    /// NOT issue. Applied over the module's own `manifest.toml deny` list.
+    /// Known verbs: spawn, despawn, damage, say, glide, bot.
+    deny: ?[]const u8 = null,
+    /// `module=verb` entries that re-allow a verb a module's manifest denies
+    /// (the operator context is right-biased per verb, so it can both tighten
+    /// and relax a module's own declaration). Same syntax as `deny`.
+    allow: ?[]const u8 = null,
 };
 
 /// `[mods]` config section (PRD 0005): module tiers and override.
@@ -360,6 +386,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.stream_radius_max) |v| opts.chunk_stream_radius_max = v;
     if (f.stream.chunk_stream_period_ticks) |v| opts.chunk_stream_period_ticks = v;
     if (f.stream.motion_replicate_period_ticks) |v| opts.motion_replicate_period_ticks = v;
+    if (f.stream.pos_heartbeat_period_ticks) |v| opts.pos_heartbeat_period_ticks = v;
     if (f.stream.world_time_send_ticks) |v| opts.world_time_send_ticks = v;
     if (f.stream.vehicle_pos_send_ticks) |v| opts.vehicle_pos_send_ticks = v;
     if (f.stream.spawn_area_radius_max) |v| opts.spawn_area_radius_max = v;
@@ -409,6 +436,15 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
+    if (f.sim.starter_zombies) |v| {
+        if (@hasField(@TypeOf(opts.*), "starter_zombies")) opts.starter_zombies = v;
+    }
+    if (f.sim.spawn_starter_kit) |v| {
+        if (@hasField(@TypeOf(opts.*), "spawn_starter_kit")) opts.spawn_starter_kit = v;
+    }
+    if (f.sim.demo_seed) |v| {
+        if (@hasField(@TypeOf(opts.*), "demo_seed")) opts.demo_seed = v;
+    }
     if (f.sim.trader_wallet_dukes) |v| opts.trader_wallet_dukes = v;
     if (f.sim.min_chat_gap_ns) |v| opts.min_chat_gap_ns = v;
     if (f.sim.inv_bucket_cap) |v| opts.inv_bucket_cap = v;
@@ -506,6 +542,10 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.motion_replicate_period_ticks == 0) {
         util_log.warn("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
         opts.motion_replicate_period_ticks = 1;
+    }
+    if (opts.pos_heartbeat_period_ticks == 0) {
+        util_log.warn("zdtd: pos_heartbeat_period_ticks=0 invalid; using 1\n", .{});
+        opts.pos_heartbeat_period_ticks = 1;
     }
     if (opts.world_time_send_ticks == 0) {
         util_log.warn("zdtd: world_time_send_ticks=0 invalid; using 1\n", .{});
@@ -647,6 +687,7 @@ test "parse stream and authority" {
         \\stream_radius_min = 5
         \\world_time_send_ticks = 40
         \\vehicle_pos_send_ticks = 7
+        \\pos_heartbeat_period_ticks = 3
         \\[authority]
         \\interest_range_blocks = 120.5
         \\peer_stale_ms = 4000
@@ -666,6 +707,9 @@ test "parse stream and authority" {
         \\deco_mirror = no
         \\block_id_mapping = false
         \\[sim]
+        \\starter_zombies = false
+        \\spawn_starter_kit = "foodCanBeef:5,resourceWood:20"
+        \\demo_seed = false
         \\te_scan_block_cap = 16
         \\te_scan_te_cap = 24
         \\workstation_crafts_per_tick = 8
@@ -678,6 +722,8 @@ test "parse stream and authority" {
         \\modules = "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm"
         \\fuel = 25000000
         \\max_pages = 128
+        \\deny = "core_lootgate=damage,say; core_pvp=say"
+        \\allow = "core_announce=say"
     ;
     var f = try parse(std.testing.allocator, src);
     defer f.deinit();
@@ -685,6 +731,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(i32, 5), f.stream.stream_radius_min.?);
     try std.testing.expectEqual(@as(u64, 40), f.stream.world_time_send_ticks.?);
     try std.testing.expectEqual(@as(u64, 7), f.stream.vehicle_pos_send_ticks.?);
+    try std.testing.expectEqual(@as(u64, 3), f.stream.pos_heartbeat_period_ticks.?);
     try std.testing.expectApproxEqAbs(@as(f32, 120.5), f.authority.interest_range_blocks.?, 0.01);
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
@@ -697,6 +744,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u64, 20), f.authority.guard_kick_delay_ticks.?);
     try std.testing.expectEqual(@as(u64, 80), f.authority.guard_shed_hold_ticks.?);
     try std.testing.expectEqual(@as(u32, 1200), f.authority.guard_weak_break_rate.?);
+    try std.testing.expectEqual(false, f.sim.starter_zombies.?);
     try std.testing.expectEqual(@as(u32, 16), f.sim.te_scan_block_cap.?);
     try std.testing.expectEqual(@as(u32, 24), f.sim.te_scan_te_cap.?);
     try std.testing.expectEqual(@as(u16, 8), f.sim.workstation_crafts_per_tick.?);
@@ -713,6 +761,12 @@ test "parse stream and authority" {
     );
     try std.testing.expectEqual(@as(u64, 25_000_000), f.plugin.fuel.?);
     try std.testing.expectEqual(@as(u64, 128), f.plugin.max_pages.?);
+    // Interception policy lists ride as scalars (the binder has no arrays).
+    try std.testing.expectEqualStrings("core_lootgate=damage,say; core_pvp=say", f.plugin.deny.?);
+    try std.testing.expectEqualStrings("core_announce=say", f.plugin.allow.?);
+    // Starter kit + demo seed swim with the other [sim] scalars.
+    try std.testing.expectEqualStrings("foodCanBeef:5,resourceWood:20", f.sim.spawn_starter_kit.?);
+    try std.testing.expectEqual(false, f.sim.demo_seed.?);
 }
 
 test "parse rules overlay sections" {
@@ -781,6 +835,7 @@ const TestOpts = struct {
     chunk_stream_radius_max: i32 = 9,
     chunk_stream_period_ticks: u64 = 5,
     motion_replicate_period_ticks: u64 = 2,
+    pos_heartbeat_period_ticks: u64 = 5,
     world_time_send_ticks: u64 = 20,
     vehicle_pos_send_ticks: u64 = 5,
     sleeper_tick_ticks: u64 = 10,

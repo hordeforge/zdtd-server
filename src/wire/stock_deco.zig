@@ -163,7 +163,13 @@ pub const Species = struct {
     prob: f32,
 };
 
-pub const max_species: usize = 12;
+/// Wire-side capacity for a biome's distant-deco list. Must not be smaller than
+/// `assets/biome_layers.max_deco_per_biome`, which caps the same list on the
+/// load side and carries the measurement justifying 16 (pine_forest's "Dense
+/// large trees" subbiome has 14 surviving rows). The two are separate constants
+/// because `wire` must not import `assets`; the server-side fill asserts they
+/// agree.
+pub const max_species: usize = 16;
 
 /// A biome's distant-decoration list, in XML order. The sampler walks it last to
 /// first, exactly like `decorateChunkRandom` walks `m_DistantDecoBlocks`
@@ -639,7 +645,11 @@ test "deco plant/tree runtime block ids" {
     try std.testing.expectEqual(@as(u32, 24651), tree_winter_evergreen);
 }
 
-/// WorldChunkCache.MakeChunkKey(x, z). Canonical definition; packages.makeChunkKey aliases this.
+/// WorldChunkCache.MakeChunkKey(x, z); packages.makeChunkKey aliases this.
+/// Empirical, not IL-cited: the method is called from the dumps but its body
+/// is in none of them, so this shift/mask is what a stock client accepts on
+/// Chunk / ChunkRemove / DecoResetWorldChunk rather than a read layout.
+/// docs/wire/WIRE_CHUNK.md "ChunkRemove" records what that evidence is worth.
 pub fn makeChunkKey(cx: i32, cz: i32) i64 {
     const x = @as(i64, cx) & 0xFFFFFF;
     const z = @as(i64, cz) & 0xFFFFFF;

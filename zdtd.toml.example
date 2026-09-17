@@ -14,6 +14,9 @@ stream_radius_min = 7
 stream_radius_max = 9
 # chunk_stream_period_ticks = 5
 # motion_replicate_period_ticks = 2
+# PosAndRot heartbeat for entities with no dirty motion bit (paired with
+# motion_replicate_period_ticks; the effective interval is their LCM).
+# pos_heartbeat_period_ticks = 5
 # world_time_send_ticks = 20
 # vehicle_pos_send_ticks = 5
 # sleeper_tick_ticks = 10
@@ -31,6 +34,9 @@ max_edit_range_blocks = 96.0
 # Vertical envelope (rejects Y-only teleports the horizontal clamp cannot see).
 # max_vertical_speed_mps = 25.0
 max_claimed_damage = 200
+# Cap on a claimed sound's volume scale (multiplies the sounds.xml noise volume
+# before it reaches the AI noise model). Legit clients send ~1.
+# max_claimed_noise_scale = 8.0
 peer_stale_ms = 3000
 # Join rate-limit gap per IP (stock paces ~500 ms/IP; loopback is exempt).
 # join_rate_limit_ms = 500
@@ -72,6 +78,17 @@ block_id_mapping = true
 
 # Sim policy that is not stock serverconfig and not stock game data.
 [sim]
+# Fresh-player starter kit (server policy: stock defines its kit in code).
+# Rows are `name` or `name:count`, comma-separated, resolved through items.xml;
+# unknown names are omitted (fail closed) and counts clamp to Stacknumber.
+# Unset keeps the built-in kit: meleeToolRepairT0StoneAxe:1, foodCanBeef:5,
+# resourceWood:20, casinoCoin:50.
+# spawn_starter_kit = "meleeToolRepairT0StoneAxe:1,foodCanBeef:5,resourceWood:20,casinoCoin:50"
+# Near-spawn demo set on a fresh world: Trader Jen, the minibike, the seed chest,
+# the demo turret and (with starter_zombies) the demo hostiles. false leaves a
+# fresh world to the lazy stock systems (docs/DIVERGENCES.md 6.2).
+# demo_seed = true
+# starter_zombies = true
 # Trader AvailableMoney display pool. Stock Traders.xml has no wallet key
 # (AvailableMoney is engine-managed per-day); zdtd has no trader economy, so
 # trade() credits the player wallet directly and this is a display value.

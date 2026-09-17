@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const chunk_fill = @import("../game/chunk_fill.zig");
+const game_world = @import("../game/world.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -12,6 +13,7 @@ const platform_user = packages.platform_user;
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const protocol = @import("../../protocol.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
 
@@ -21,8 +23,20 @@ const replicate_te = @import("../replicate_te.zig");
 /// carve the whole map or damage every loaded entity.
 const max_claimed_explosion_radius: f32 = 6.0;
 
+/// Bound on the `PassThroughDamage` downgrade-chain walk. Stock recurses the
+/// whole damage handler with no cap; a modded chain cannot spin the tick here.
+const max_passthrough_depth: usize = 8;
+
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
+        // Divergence (DIVERGENCES 3): stock consumes this package server-side
+        // (`ProcessPackage` -> `Block::HandleTrigger` -> `TriggerManager::
+        // TriggerBlocks`, Block.il.txt IL=41) and forwards nothing. zdtd has
+        // no trigger-volume sim and rebroadcasts instead; receiving clients
+        // ignore it, because their ProcessPackage reads
+        // `Sender.bAttachedToEntity` and `Sender` is only set server-side.
+        // Drop the broadcast once the trigger sim lands.
+        //
         // Same rate gate as SetBlock: unthrottled would let a spam loop fan
         // this broadcast out to every nearby peer for free (bandwidth DoS).
         if (!self.takeBlockToken(c)) {
@@ -31,6 +45,68 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         try self.broadcastNear("NetPackageBlockTrigger", body, self.sim.transform[ps].x, self.sim.transform[ps].z, self.interest_range);
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageWaterSet")) {
+        // Stock water edits (jar fill/empty, the water-cube tool) originate on
+        // the acting client: ProcessPackage relays to every other peer and
+        // then applies (NetPackageWaterSet.il.txt:163). Dropping it left the
+        // change local to the sender and lost on relog.
+        if (self.quarantineDenies(c, .block)) return true;
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var changes: [32]packages.WaterSetChange = undefined;
+        const got = packages.parseWaterSet(body, changes[0..]) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (got.n == 0) return true;
+        const editor = self.sim.playerByPeer(c.slot) orelse return true;
+        const editor_ent = self.sim.network_id[editor].id;
+        if (got.sender != editor_ent) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        const ep = self.sim.transform[editor];
+        var accepted: [32]packages.WaterSetChange = undefined;
+        var an: usize = 0;
+        var wi: usize = 0;
+        while (wi < got.n) : (wi += 1) {
+            const ch = changes[wi];
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                editor_ent,
+                .block,
+                ep.x,
+                ep.y,
+                ep.z,
+                @floatFromInt(ch.x),
+                @floatFromInt(ch.y),
+                @floatFromInt(ch.z),
+            )) continue;
+            if (self.claimCovering(ch.x, ch.z)) |claim| {
+                if (claim.owner_entity != editor_ent) continue;
+            }
+            // Mass 0 empties the cell, anything else fills it. zdtd models
+            // water as a block id, so the edit rides the normal block path
+            // and persists with the chunk.
+            const id: u16 = if (ch.mass == 0) self.world.terrain_ids.air else self.world.terrain_ids.water;
+            self.world.setBlockWorld(ch.x, ch.y, ch.z, id) catch continue;
+            accepted[an] = ch;
+            an += 1;
+        }
+        if (an == 0) return true;
+        // Relay only what the server accepted, never the raw body: stock
+        // excludes the sender, who already applied it locally.
+        var relay_buf: [4 + 2 + 32 * 14]u8 = undefined;
+        const relay = packages.buildWaterSetBody(&relay_buf, editor_ent, accepted[0..an]) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.broadcastExcept("NetPackageWaterSet", relay, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSetBlock")) {
@@ -55,9 +131,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         var i: usize = 0;
         while (i < n) : (i += 1) {
             const b = changes[i];
-            if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, editor_ent, .bounds, .strong, .block, 0, self.max_edit_range);
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                editor_ent,
+                .block,
+                ep.x,
+                ep.y,
+                ep.z,
+                @floatFromInt(b.x),
+                @floatFromInt(b.y),
+                @floatFromInt(b.z),
+            )) {
                 const rejects = self.harness.counters.get(.bounds_rejects);
                 if (rejects == 1 or rejects % 100 == 0) {
                     std.debug.print("zdtd: SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z });
@@ -112,10 +197,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         if (self.blocks.byId(cur_id)) |bd| {
                             if (bd.harvest_drops.len > 0) count = harvested;
                         }
-                        if (count > 0) self.awardXp(c.slot, hxp *| count);
+                        if (count > 0) self.awardXpTagged(c.slot, hxp *| count, "Harvesting");
                     }
-                    // A broken container spills its pre-filled contents.
-                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                 }
             } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                 const wire_abs = b.damage;
@@ -131,6 +214,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else if (wire_abs < cur_dmg) {
                     abs = wire_abs;
                 }
+                // materials.xml CanDestroy=false (Mbedrock): the stock client
+                // never sends damage for it (`ItemActionAttack::Hit`
+                // IL_028A-029D zeroes the scalar), so a request that does is a
+                // forged edit. Drop this block's entry and keep the rest of the
+                // batch.
+                if (!self.maxdamage.canDestroyFor(base_cur)) continue;
                 var max_hp = self.maxDamageForBlock(base_cur);
                 if (self.claimCovering(b.x, b.z)) |claim| {
                     if (claim.owner_entity == editor_ent) {
@@ -147,9 +236,57 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (down_raw != 0) {
                         place_id = world_store.typeId(down_raw);
                         out_dmg = 0;
+                        // The block did not break (no harvest, no claim
+                        // removal), but it was replaced, so a container or
+                        // vending entry keyed to the old one must not survive
+                        // under its downgrade. The power node is handled by
+                        // the place_id != cur_id swap check further down.
+                        self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.sign_texts.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.light_te.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.workstations.removeAt(b.x, b.y, b.z);
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
                         place_down_raw = down_raw;
+                        // Stock Block.OnBlockDamaged IL_0384-03AE: with
+                        // PassThroughDamage the leftover damage
+                        // (claimed - max_hp) hits the replacement block at the
+                        // same cell, recursively down the downgrade chain
+                        // (102 stock rows: doors, gates, hatches, the vehicle
+                        // and wood/steel masters). The walk is bounded;
+                        // stock's own recursion is not. Only the swap chain is
+                        // walked here: stock re-runs the whole damage handler,
+                        // so its intermediate stages also roll harvest drops
+                        // and XP, which this arm does not.
+                        if (self.blocks.passThrough(base_cur)) {
+                            var left: u32 = abs - max_hp;
+                            var cur_down: u32 = down_raw;
+                            var depth: usize = 0;
+                            while (cur_down != 0 and left > 0 and depth < max_passthrough_depth) : (depth += 1) {
+                                const nid = world_store.typeId(cur_down);
+                                const nmax: u32 = self.maxDamageForBlock(nid);
+                                if (nmax == 0 or !self.blocks.passThrough(nid)) break;
+                                if (left < nmax) {
+                                    self.setBlockHp(b.x, b.y, b.z, @intCast(@min(left, std.math.maxInt(u16)))) catch break;
+                                    break;
+                                }
+                                left -= nmax;
+                                const next = self.downgradeBreakRaw(b.x, b.y, b.z, nid);
+                                if (next == 0) {
+                                    // The chain ends: the last stage is gone.
+                                    place_id = 0;
+                                    place_down_raw = 0;
+                                    out_dmg = 0;
+                                    break;
+                                }
+                                self.clearBlockHp(b.x, b.y, b.z);
+                                self.clearBlockRaw(b.x, b.y, b.z);
+                                place_id = world_store.typeId(next);
+                                place_down_raw = next;
+                                cur_down = next;
+                            }
+                        }
                     } else {
                         self.noteBlockBreak(c);
                         self.removeClaimAt(b.x, b.y, b.z);
@@ -164,10 +301,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             if (self.blocks.byId(base_cur)) |bd| {
                                 if (bd.harvest_drops.len > 0) count = harvested;
                             }
-                            if (count > 0) self.awardXp(c.slot, hxp *| count);
+                            if (count > 0) self.awardXpTagged(c.slot, hxp *| count, "Harvesting");
                         }
-                        // A broken container spills its pre-filled contents.
-                        chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                         place_id = 0;
                         out_dmg = 0;
                         self.clearBlockHp(b.x, b.y, b.z);
@@ -240,21 +375,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             else
                 place_id;
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
-            if (place_id != 0 and self.blocks.isVending(place_id)) {
-                _ = self.vending.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, place_id, self.blocks.traderId(place_id));
-            } else if (place_id == 0) {
+            if (place_id != cur_id) {
+                // Replacing one block with another displaces the old one just
+                // as removing it would, then the new one claims what its own
+                // type owns. Only clearing on place_id == 0 caught removals
+                // and missed every swap.
+                if (self.sim.power.removeAt(b.x, b.y, b.z)) self.sim.power.resolve();
                 self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
             }
-            if (place_id != 0) {
-                if (self.power_registry.lookup(place_id)) |pn| {
-                    if (self.sim.power.addNodeAt(pn.kind, b.x, b.y, b.z, pn.watts)) |nid| {
-                        if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
-                    }
-                    self.sim.power.resolve();
-                }
-            } else if (self.sim.power.removeAt(b.x, b.y, b.z)) {
-                self.sim.power.resolve();
-            }
+            self.noteBlockAdded(b.x, b.y, b.z, place_id);
             if (place_id != 0 and b.raw != 0 and place_down_raw == 0) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);
             } else if (place_id == 0) {
@@ -272,6 +401,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             } else if (self.storagePairId(place_id) == null) {
                 self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                self.sign_texts.remove(.{ .x = b.x, .y = b.y, .z = b.z });
             }
             if (mutated) {
                 const stored_raw = self.blockRawAt(b.x, b.y, b.z);
@@ -337,10 +467,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // still enforces reach and claims so a spoofed pickup cannot delete
         // distant or claimed blocks).
         const ep = self.sim.transform[ps];
-        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(pk.x), @floatFromInt(pk.y), @floatFromInt(pk.z))) {
-            self.harness.counters.inc(.bounds_rejects);
-            return true;
-        }
+        if (self.rejectIfBeyondEditRange(
+            c,
+            peer.local_id,
+            editor_ent,
+            .block,
+            ep.x,
+            ep.y,
+            ep.z,
+            @floatFromInt(pk.x),
+            @floatFromInt(pk.y),
+            @floatFromInt(pk.z),
+        )) return true;
         if (self.claimCovering(pk.x, pk.z)) |claim| {
             if (claim.owner_entity != editor_ent) {
                 self.harness.counters.inc(.ownership_rejects);
@@ -359,9 +497,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.blocks.pickupSource(cur_id)) |src_name| {
             repl_raw = self.maxdamage.idByName(src_name) orelse 0;
         }
-        // 3) Broadcast the replacement to observers (stock SetBlocksRPC
-        //    carries a BlockChangeInfo; the SetBlock S2C body is the same
-        //    shape the client Reads for every server block change).
+        // 3) Apply it to the world, then broadcast (stock SetBlocksRPC carries
+        //    a BlockChangeInfo; the SetBlock S2C body is the same shape the
+        //    client Reads for every server block change). The write has to
+        //    happen here: stock replicates the pickup rather than simulating
+        //    it client-side (RE blocks.md "Server authority"), so a broadcast
+        //    without a world write leaves the block standing on the server.
+        //    The picked block is gone for the client until the next chunk
+        //    load puts it back, and it still blocks placement and pathing.
+        try self.world.setBlockRawWorld(pk.x, pk.y, pk.z, repl_raw);
+        self.clearBlockHp(pk.x, pk.y, pk.z);
+        if (repl_raw == 0) {
+            self.noteBlockRemoved(pk.x, pk.y, pk.z, cur_id);
+            self.removeClaimAt(pk.x, pk.y, pk.z);
+        }
         if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], pk.x, pk.y, pk.z, repl_raw, 0, editor_ent, editor_ent)) |sb| {
             try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
         } else |_| {}
@@ -396,10 +545,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         const ep = self.sim.transform[ps];
-        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(st.x), @floatFromInt(st.y), @floatFromInt(st.z))) {
-            self.harness.counters.inc(.bounds_rejects);
-            return true;
-        }
+        if (self.rejectIfBeyondEditRange(
+            c,
+            peer.local_id,
+            editor_ent,
+            .block,
+            ep.x,
+            ep.y,
+            ep.z,
+            @floatFromInt(st.x),
+            @floatFromInt(st.y),
+            @floatFromInt(st.z),
+        )) return true;
         if (self.claimCovering(st.x, st.z)) |claim| {
             if (claim.owner_entity != editor_ent) {
                 self.harness.counters.inc(.ownership_rejects);
@@ -485,9 +642,26 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (wy <= 0) continue;
                     const cur = self.world.blockWorld(wx, wy, wz) catch continue;
                     if (cur == 0 or cur == world_store.block_bedrock) continue;
-                    self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                    const sb = packages.buildSetBlockBody(self.body_buf[0..64], wx, wy, wz, 0) catch continue;
-                    self.broadcastNear("NetPackageSetBlock", sb, ex.wx, ex.wz, self.interest_range) catch {};
+                    // Stock Explosion::AttackBlocks, not "delete everything in
+                    // the sphere": the claimed ExplosionData.BlockDamage is the
+                    // power, the block's material decides whether it breaks
+                    // (hardness and explosionresistance), and a block can come
+                    // out merely damaged. Every block the blast destroyed is
+                    // re-read below because a downgrade swap also changes the
+                    // cell.
+                    const blast_falloff = game_world.blastFalloff(
+                        wx,
+                        wy,
+                        wz,
+                        ex.wx,
+                        ex.wy,
+                        ex.wz,
+                        @floatFromInt(rad),
+                    );
+                    const blast_attacker: i32 = if (c.entity_id > 0) c.entity_id else -1;
+                    if (!self.blastBlock(wx, wy, wz, cur, @floatFromInt(ex.block_damage), blast_falloff, 1.0, blast_attacker)) continue;
+                    const after = self.world.blockWorld(wx, wy, wz) catch continue;
+                    if (after != 0) continue; // damaged or downgraded, not destroyed
                     // Destroy-event drops (RE Block.DropItemsOnEvent IL=246 +
                     // GameManager.ExplodeGroupFrameUpdate IL=145): the
                     // destroyed block's `<drop event="Destroy">` rows roll at
@@ -523,14 +697,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (fall <= 0) continue;
             var amount = e_dmg * fall;
             if (self.sim.mask[es].player and self.sim.player[es].peer_slot >= 0) {
+                // GeneralDamageResist (passive 40) covers every damage type, so
+                // it joins the blast before the physical armor leg (stock
+                // EntityAlive::DamageEntity order).
+                amount *= 1.0 - invsys.generalDamageResist(&self.sim, es);
                 const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
                 if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
-                if (victim_slot != c.slot) {
-                    // Armor mitigation, less the blaster's held-item TargetArmor
-                    // penetration (RE GetTotalPhysicalArmorRating IL=47).
-                    const mit = invsys.armorMitigationVs(&self.sim, victim_slot, self.sim.playerByPeer(c.slot));
-                    amount *= (1.0 - mit);
-                }
+                // Explosion.AttackEntites builds the DamageSource External
+                // (IL_0499), so DamageSource::AffectedByArmor (IL=5) holds for
+                // every victim including the blaster, and the blast's stock
+                // Heat type (ExplosionData default 6) takes passive 43
+                // ElementalDamageResist rather than the physical armor rating
+                // (Equipment.CalcDamage IL=83).
+                amount *= (1.0 - self.elementalDamageResist(es, protocol.damageTypeName(6)));
                 // Wasm-first (AGENTS rule 29): the on_player_damage verdict
                 // applies to explosion damage too (attacker = the blaster), so
                 // a module scales/denies PvP and self-damage from explosives
@@ -540,14 +719,39 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (amount <= 0) continue;
             }
             const dmg = self.sim.damageFrom(nid, amount, if (c.entity_id > 0) c.entity_id else -1);
+            // Same S2C hit fan-out as the direct-damage path (ProcessDamageResponse
+            // IL=86): the blast victim's trackers see the applied hit. Source
+            // External (Explosion.AttackEntites IL_0499) and the stock
+            // ExplosionData.DamageType default Heat (ExplosionData cctor
+            // ldc.i4.6; the initiate body carries no damage type).
+            {
+                // The applied hit, not the claim: the server's post-resist
+                // value, which for a non-player victim now includes its class
+                // PhysicalDamageResist leg (stock ProcessDamageResponse).
+                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, dmg.applied))), 65535));
+                const atk = if (c.entity_id > 0) c.entity_id else -1;
+                if (packages.buildDamageBody(self.body_buf[288..544], nid, 0, 6, applied, dmg.killed, atk)) |db| {
+                    self.broadcastNear("NetPackageDamageEntity", db, t.x, t.z, self.interest_range) catch {};
+                } else |_| {}
+            }
             if (dmg.killed and !self.sim.mask[es].player) {
                 // Victim position for ClearSleepers POI gating (es is the
                 // victim's sim slot).
                 systems.questOnZombieKilled(&self.sim, c.slot, self.sim.transform[es].x, self.sim.transform[es].z);
-                self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct, false);
+                self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct, false, nid);
+                // Stock GameManager.AwardKill: tell the killer's client so its
+                // local EntityKill event fires (kill challenges hang off it).
+                self.awardKillNotify(c.slot, nid);
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
                 if (c.peer) |kpeer| {
-                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{ .entity_id = c.entity_id, .zombie_kills = c.zombie_kills })) |ab| {
+                    // Both counters ride one body (RE protocol-packages.md 27);
+                    // filling only zombie_kills would send a stale 0 for the
+                    // other and contradict what this client was already told.
+                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{
+                        .entity_id = c.entity_id,
+                        .zombie_kills = c.zombie_kills,
+                        .player_kills = c.player_kills,
+                    })) |ab| {
                         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
                             self.harness.counters.inc(.net_send_errors);
                         };
@@ -564,15 +768,36 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        try self.broadcastExcept("NetPackageItemActionEffects", body, c.slot);
+        // GameManager.ItemActionEffectsServer (IL=87,
+        // il/full-v3.2.0/_global/GameManager.il.txt:8348) rebroadcasts with
+        // _allButAttachedToEntityId = the firing entity, so stock skips the
+        // shooter's own client, not "whoever sent the packet". Those agree
+        // only when the id is the sender's own. Re-encoding is unnecessary
+        // here (the parse consumes the whole body or fails), but the relay
+        // still forwards body[0..wire_len] so appended bytes never fan out.
+        const fx = packages.parseItemActionEffects(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (fx.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        try self.broadcastExcept("NetPackageItemActionEffects", body[0..fx.wire_len], c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageCloseAllWindows")) {
-        if (!self.takeInvToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        try self.broadcastExcept("NetPackageCloseAllWindows", body, c.slot);
+        // Stock declares this ToClient (`get_PackageDirection` IL=2 returns 2,
+        // NetPackageDirection.ToClient) and its ProcessPackage returns
+        // immediately when `ConnectionManager.IsServer`: the body is a
+        // `_playerIdToClose` the receiving client uses to close its own modal
+        // windows. A dedicated server neither receives nor forwards it.
+        //
+        // zdtd used to relay it to every other peer, which let any client
+        // close every other player's open UI. Accept and drop instead: the
+        // package is legal to arrive (a client may send it) but has no
+        // server-side effect, exactly as stock has none.
+        self.harness.counters.inc(.ownership_rejects);
         return true;
     }
     return false;

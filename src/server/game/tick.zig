@@ -12,13 +12,561 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
+const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const requirements = @import("../../assets/requirements.zig");
+const sandbox = @import("../../assets/sandbox.zig");
+const hooks = @import("hooks.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
 const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
+const inventory = @import("../../ecs/inventory.zig");
+const assets_items = @import("../../assets/items.zig");
+const protocol = @import("../../protocol.zig");
+
+/// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
+/// table (`EntityBuffs::HasBuff` is case-insensitive). Living here keeps
+/// `assets/requirements.zig` free of a dependency on the buffs asset module,
+/// which imports it for `Passive.reqs`.
+const BuffNameLookup = struct {
+    table: *const assets_buffs.Table,
+
+    fn resolve(ctx: *const anyopaque, name: []const u8) ?u16 {
+        const self: *const BuffNameLookup = @ptrCast(@alignCast(ctx));
+        return self.table.indexOfName(name);
+    }
+};
+
+/// The tag `Equipment::GetTotalPhysicalArmorRating` (IL=887) adds to its
+/// passive-41 query; the attacking item's own tags ride the per-hit path.
+const armor_query_tags = "coredamageresist";
+
+/// The stock base max for Food/Water/Stamina (`EntityStats` seeds all three to
+/// 100 and the VM folds its `*Max` deltas onto that base). Named so the
+/// StatCompare gates' `Stat::Max` operand and the max recompute below cannot
+/// drift apart.
+const base_consumable_stat_max: f32 = 100;
+
+/// Shared requirement-gate ctx assembly (ADR 0023 §2): the live player state
+/// a `<requirement>` reads. One builder for the per-tick fold, the finish
+/// trigger, and the damage-time fold, so a new gate input lands everywhere
+/// at once instead of drifting across three copies (the attached_to_entity
+/// drift of 2026-09-15). Scratch buffers live in the struct; `sink`/`names`
+/// borrow from it, so the built Ctx is valid while the builder is alive.
+pub const PlayerCtx = struct {
+    buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined,
+    buff_lookup: BuffNameLookup = .{ .table = undefined },
+    buff_names: requirements.BuffNames = undefined,
+    armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined,
+    worn_tags_buf: [ecs.components.inv_equip_count][]const u8 = undefined,
+    sink_impl: BuffSink = undefined,
+
+    pub fn init(self: *PlayerCtx, game: *Game, c: *Client, ps: ecs.Slot) void {
+        self.buff_lookup = .{ .table = &game.buffs };
+        self.buff_names = .{ .ctx = &self.buff_lookup, .resolve = BuffNameLookup.resolve };
+        self.sink_impl = .{ .game = game, .entity_id = c.entity_id, .ps = ps };
+    }
+
+    pub fn build(
+        self: *PlayerCtx,
+        game: *Game,
+        c: *Client,
+        ps: ecs.Slot,
+        h: *const ecs.components.Health,
+        sandbox_groups: []const sandbox.Group,
+    ) requirements.Ctx {
+        return .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .alive = game.sim.alive[ps],
+            .is_male = blk: {
+                const class_hash = if (game.sim.mask[ps].class_id and game.sim.class_id[ps].hash != 0)
+                    game.sim.class_id[ps].hash
+                else
+                    assets_unity_hash.class_player_male;
+                break :blk class_hash != assets_unity_hash.class_player_female;
+            },
+            .is_corpse = h.corpse_seconds > 0,
+            .is_sleeping = game.sim.mask[ps].sleeper and !game.sim.sleeper[ps].awake,
+            // Dedicated server: never EntityPlayerLocal (RE IsLocalPlayer IL=23).
+            .is_local_player = false,
+            // Dedicated server: never EntityPlayerLocal.bFirstPersonView (RE IsFPV IL=34).
+            .is_fpv = false,
+            // Dedicated server: never EntityPlayerLocal.shelterPercent (RE IsSheltered IL=24).
+            .is_sheltered = false,
+            // Dedicated server: never Unity EModelSDCS (RE IsSDCS IL=27).
+            .is_sdcs = false,
+            // Dedicated server: never IsFriendOfLocalPlayer (RE IsAlly IL=36).
+            .is_ally = false,
+            // No Entity.IsInElevator tracked yet (RE IsOnLadder IL=19).
+            .is_on_ladder = false,
+            // Dedicated server: never Unity RootTransform/tempPrefab_* (RE HasAttachedPrefab IL=53).
+            .has_attached_prefab = false,
+            // Dedicated server: never Unity particle FX (RE HasParticle IL=23).
+            .has_particle = false,
+            // Stock IsLookingAtBlock IL=8 stub always returns true after base check.
+            .is_looking_at_block = true,
+            // Stock IsLookingAtEntity inherits IsLookingAtBlock stub → always true.
+            .is_looking_at_entity = true,
+            // AmountEnclosed not tracked yet (RE IsIndoors IL=25) → 0 → false.
+            .is_indoors = false,
+            // Seated in a vehicle (`Entity::AttachedToEntity`): scan the
+            // vehicle seats for this entity id.
+            .attached_to_entity = isSeated(&game.sim, c.entity_id),
+            .biome_id = game.biomeIdAt(@trunc(game.sim.transform[ps].x), @trunc(game.sim.transform[ps].z)),
+            .active_buffs = activeBuffIds(&game.sim.buffs[ps], &self.buff_ids),
+            .buff_names = &self.buff_names,
+            .held_tags = heldItemTags(game, ps),
+            .holding_item_broken = holdingItemBroken(game, ps),
+            .sandbox_groups = sandbox_groups,
+            .game_stat_biome_progression = game.gameStatsValues().biome_progression,
+            .armor_groups = armorGroups(game, ps, &self.armor_group_buf),
+            .cvars = &c.cvars,
+            // Per-event roll seed for `RandomRoll seed_type="Random"`
+            // (stock seeds a fresh GameRandom from MinEventParams.Seed):
+            // entity id mixed with the tick, deterministic per sim.
+            .roll_seed = @as(u32, @bitCast(c.entity_id)) *% 0x9E3779B9 +% @as(u32, @truncate(game.tick_n)),
+            // Skill children for `PerksUnlocked` (progression table
+            // parent_attr): the sum reads purchased perk levels by name.
+            .skill_children_ctx = &game.progression_table,
+            .skill_children_total = struct {
+                fn f(holder: *const anyopaque, skill: []const u8, levels: []const requirements.NameLevel) u16 {
+                    const t: *const assets_progression.Table = @ptrCast(@alignCast(holder));
+                    var total: u16 = 0;
+                    for (t.perks) |p| {
+                        if (!std.mem.eql(u8, p.parent_attr, skill)) continue;
+                        for (levels) |l| {
+                            if (std.mem.eql(u8, l.name, p.name)) {
+                                total += l.level;
+                                break;
+                            }
+                        }
+                    }
+                    return total;
+                }
+            }.f,
+            // The armour rating the previous tick's coredamageresist fold
+            // produced (see requirements.Ctx.armor_rating).
+            .armor_rating = game.sim.buff_phys_resist[ps],
+            .live_buff = &self.sink_impl,
+            .buff_active = BuffSink.has,
+            .sink = .{ .ctx = &self.sink_impl, .add_buff = BuffSink.add, .remove_buff = BuffSink.remove },
+            .worn_items = wornItemTags(game, ps, &self.worn_tags_buf),
+            .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
+            .hp_max = h.max_hp,
+            // `Stat::Max` is the pre-modifier base (`base_max_hp`); the VM
+            // recomputes the modified max one line below every tick.
+            .hp_base_max = h.base_max_hp,
+            .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
+            .stamina_max = h.stamina_max,
+            .stamina_base_max = base_consumable_stat_max,
+            .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
+            .food_max = h.food_max,
+            .food_base_max = base_consumable_stat_max,
+            .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
+            .water_max = h.water_max,
+            .water_base_max = base_consumable_stat_max,
+            // The sim clock's own day/night split (`World.IsDaytime`).
+            .is_night = game.sim.director.clock.isNight(),
+            .is_day = !game.sim.director.clock.isNight(),
+            .is_blood_moon = game.sim.director.clock.isBloodMoonNight(),
+            .day_number = game.sim.director.clock.day,
+            .time_of_day_ticks = @intFromFloat(@trunc(game.sim.director.clock.hours * 1000.0)),
+            // The entity's class Tags (`entityclasses.xml`), read by
+            // EntityTagCompare for the default self target.
+            .entity_tags = entityClassTags(game, ps),
+            // CurrentMovementTag (`EntityHasMovementTag`): the client's
+            // reported movement state folded to idle/walking/running.
+            .movement_tags = c.move_tag.name(),
+        };
+    }
+};
+
+/// The entity's own class `Tags` for `EntityTagCompare` (entityclasses.xml
+/// `Tags` resolved through `extends`). The slot's class hash is the same one
+/// the PlayerId wire carries; a slot without a class falls back to the player
+/// class. Null = no catalog carries the class, which the gate refuses
+/// (fail closed, counted) rather than silently treating the entity as
+/// untagged.
+fn entityClassTags(self: *Game, ps: ecs.Slot) ?[]const u8 {
+    const hash = if (self.sim.class_id[ps].hash != 0)
+        self.sim.class_id[ps].hash
+    else
+        assets_unity_hash.class_player_male;
+    const def = self.entities.byHash(hash) orelse return null;
+    return def.tags;
+}
+
+/// Add and remove the catalog buffs a triggered row asked for, relaying each
+/// change to observers (the same contract as syncStageBuffs). Bounded by the
+/// result's fixed arrays; an unknown name is skipped (fail closed).
+fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult, instigator_id: i32) void {
+    for (res.remove_buffs[0..res.remove_n]) |name| {
+        const def_id = self.buffs.indexOfName(name) orelse continue;
+        const set = self.sim.buffsMut(ps);
+        // Flag only: the buff tick reaps it next tick and the expiry drain
+        // relays the removal once (relaying here too would send the stock
+        // client a second NetPackageAddRemoveBuff for the same buff).
+        _ = ecs.buff.remove(set, def_id);
+    }
+    for (res.add_buffs[0..res.add_n]) |name| {
+        _ = addCatalogBuff(self, entity_id, ps, name, instigator_id);
+    }
+}
+
+/// The live half of the triggered engine: applies a row's AddBuff/RemoveBuff as
+/// the row passes and answers HasBuff against the current set, so a later row's
+/// gate sees an earlier row's add (stock's ordering).
+const BuffSink = struct {
+    game: *Game,
+    entity_id: i32,
+    ps: ecs.Slot,
+
+    fn add(ctx: *const anyopaque, name: []const u8) void {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        applyCommaBuffs(s.game, s.entity_id, s.ps, name);
+    }
+
+    fn remove(ctx: *const anyopaque, name: []const u8) void {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        var it = std.mem.splitScalar(u8, name, ',');
+        while (it.next()) |seg| {
+            const n = std.mem.trim(u8, seg, " \t");
+            if (n.len == 0) continue;
+            const def_id = s.game.buffs.indexOfName(n) orelse continue;
+            _ = ecs.buff.remove(s.game.sim.buffsMut(s.ps), def_id);
+        }
+    }
+
+    fn has(ctx: *const anyopaque, name: []const u8) bool {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        const def_id = s.game.buffs.indexOfName(name) orelse return false;
+        return s.game.sim.buffs[s.ps].find(def_id) != null;
+    }
+};
+
+/// Apply a (possibly comma-separated) AddBuff `buff=` list: stock splits on
+/// comma (MinEventActionBuffModifierBase ParseXmlAttribute IL splits char
+/// 44); each name resolves alone so a renamed modlet buff fails closed
+/// without dropping its siblings.
+pub fn applyCommaBuffs(game: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) void {
+    var it = std.mem.splitScalar(u8, name, ',');
+    while (it.next()) |seg| {
+        const n = std.mem.trim(u8, seg, " \t");
+        if (n.len == 0) continue;
+        _ = addCatalogBuff(game, entity_id, ps, n, entity_id);
+    }
+}
+
+/// Add one catalog buff to the entity's set unless it is already active, and
+/// relay the add. Returns whether it was added. Unknown names are skipped (fail
+/// closed), like every other data-bound lookup.
+/// Add a buff by catalog name to a player's sim slot and relay it (the loot
+/// `buffs=` sink and the class-buff path share this).
+/// Skill ledger for a living player entity (Physician `target=instigator`).
+/// Null when the entity is not a joined client.
+fn skillLevelsForEntity(self: *Game, entity_id: i32) ?[]const requirements.NameLevel {
+    if (entity_id < 0) return null;
+    for (&self.clients) |*c| {
+        if (!c.joined or c.entity_id != entity_id) continue;
+        return c.skill_levels[0..c.skill_level_n];
+    }
+    return null;
+}
+
+/// Skill ledger for a sim slot (ProgressionLevel target=other on damage).
+fn skillLevelsForSlot(self: *Game, ps: ecs.Slot) ?[]const requirements.NameLevel {
+    if (!self.sim.mask[ps].network_id) return null;
+    return skillLevelsForEntity(self, self.sim.network_id[ps].id);
+}
+
+pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
+    const def_id = self.buffs.indexOfName(name) orelse return false;
+    const def = self.buffs.byId(def_id) orelse return false;
+    const set = self.sim.buffsMut(ps);
+    // Stock fires `onSelfBuffStack` when AddBuff lands on an instance that
+    // is already active (42 buffs / 93 rows, mostly ModifyCVar chains like
+    // harvest bonus). The stack rows evaluate with the live ctx so their
+    // cvar writes land.
+    if (set.find(def_id) != null) {
+        self.fireBuffStack(ps, def_id);
+        return false;
+    }
+    // Physician heal buffs: ProgressionLevel target=instigator reads the
+    // healer's ledger via BuffInstance.instigator_id (default -1 = none).
+    _ = ecs.buff.add(set, .{
+        .def_id = def_id,
+        .duration = def.duration,
+        .stack_type = def.stack_type,
+        .update_rate_ticks = def.update_rate_ticks,
+        .remove_on_death = def.remove_on_death,
+    }, ecs.buff.duration_from_class, instigator_id, 0, 0, 0);
+    game_social.relayBuff(self, entity_id, def.name, true, instigator_id, null) catch {};
+    return true;
+}
+
+/// Fire a buff's `onSelfBuffStack` rows when AddBuff lands on an active
+/// instance. Shares the PlayerCtx builder; cvar rows apply through the ctx
+/// store, AddBuff/RemoveBuff through the sink.
+pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
+    fireBuffEvent(self, ps, def_id, .stack, null);
+}
+
+/// Fire a victim buff's `onOtherAttackedSelf` rows when another entity lands
+/// a hit (concussion/fatigue counters, PackMule display buff). The attacker's
+/// tags ride `other_tags` so victim rows can filter on them.
+pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part: i16) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.other_tags = entityClassTags(self, attacker);
+    // ProgressionLevel target=other reads the attacker's perk ledger.
+    ctx.other_levels = skillLevelsForSlot(self, attacker);
+    // IsAlive target=other reads the attacker's alive bit.
+    ctx.other_alive = self.sim.alive[attacker];
+    // HasBuff target=other reads the attacker's live buff set.
+    var other_sink: BuffSink = .{
+        .game = self,
+        .entity_id = if (self.sim.mask[attacker].network_id) self.sim.network_id[attacker].id else -1,
+        .ps = attacker,
+    };
+    ctx.other_live_buff = &other_sink;
+    // IsCorpse / IsSleeping target=other (corpseRemoval / NightStalker).
+    ctx.other_is_corpse = if (self.sim.mask[attacker].health) self.sim.health[attacker].corpse_seconds > 0 else false;
+    ctx.other_is_sleeping = self.sim.mask[attacker].sleeper and !self.sim.sleeper[attacker].awake;
+    // HitLocation (IL=27) reads params.DamageResponse.HitBodyPart.
+    ctx.hit_body_part = body_part;
+    // IsInstigator IL=17: Self is the victim, Instigator is the attacker → false.
+    ctx.is_instigator = false;
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .other_attacked_self, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// Attacker-side hit trigger: fires the attacker's `onSelfAttackedOther`
+/// buff + progression rows with `params.DamageResponse.HitBodyPart` so
+/// HitLocation gates (headshot/leg procs) evaluate. Victim tags ride
+/// `other_tags`. ponytail: items.xml AttackedOther rows stay unparsed until
+/// the item triggered surface lands; progression + buff catalogs cover the
+/// stock HitLocation gates that matter for perk behaviour.
+pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.other_tags = entityClassTags(self, victim);
+    // ProgressionLevel target=other reads the victim's perk ledger.
+    ctx.other_levels = skillLevelsForSlot(self, victim);
+    // IsAlive target=other reads the victim's alive bit.
+    ctx.other_alive = self.sim.alive[victim];
+    // HasBuff target=other reads the victim's live buff set.
+    var other_sink: BuffSink = .{
+        .game = self,
+        .entity_id = if (self.sim.mask[victim].network_id) self.sim.network_id[victim].id else -1,
+        .ps = victim,
+    };
+    ctx.other_live_buff = &other_sink;
+    // IsCorpse / IsSleeping target=other (corpseRemoval / NightStalker).
+    ctx.other_is_corpse = if (self.sim.mask[victim].health) self.sim.health[victim].corpse_seconds > 0 else false;
+    ctx.other_is_sleeping = self.sim.mask[victim].sleeper and !self.sim.sleeper[victim].awake;
+    ctx.hit_body_part = body_part;
+    // IsInstigator IL=17: Self is the attacker == Instigator → true.
+    ctx.is_instigator = true;
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .self_attacked_other, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    // Progression AttackedOther rows (HitLocation-gated perk procs).
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        const rows = progressionTriggeredRows(self, sl.name);
+        if (rows.len == 0) continue;
+        const res = assets_buffs.evaluateRows(rows, .self_attacked_other, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// A progression value's `triggered_effect` rows (attributes + perks).
+fn progressionTriggeredRows(self: *const Game, name: []const u8) []const assets_buffs.Triggered {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.triggered;
+    }
+    for (self.progression_table.perks) |perk| {
+        if (std.mem.eql(u8, perk.name, name)) return perk.triggered;
+    }
+    return &.{};
+}
+
+fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    if (other) |o| ctx.other_tags = entityClassTags(self, o);
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, event, ctx, &req_counts);
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+}
+
+/// Fire a buff's `onSelfBuffFinish` rows at expiry (stock: after
+/// onSelfBuffRemove). Shares the PlayerCtx builder with the survival fold;
+/// cvar rows apply through the ctx store, AddBuff/RemoveBuff through the
+/// sink.
+pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
+    fireBuffEvent(self, ps, def_id, .finish, null);
+}
+
+/// One entry per worn equipment item: its `Tags` property (comma list), the
+/// input `WornItems` (IL=54) counts. Empty tags are kept as an empty entry so
+/// the slot count matches `Equipment::GetSlotCount` semantics, but no tag can
+/// match it.
+fn wornItemTags(self: *const Game, ps: ecs.Slot, out: *[ecs.components.inv_equip_count][]const u8) []const []const u8 {
+    if (!self.sim.mask[ps].inventory) return out[0..0];
+    const inv = &self.sim.inventory[ps];
+    var n: usize = 0;
+    var i: usize = ecs.components.inv_equip_start;
+    const end = @min(i + ecs.components.inv_equip_count, inv.slots.len);
+    while (i < end) : (i += 1) {
+        const sl = inv.slots[i];
+        if (sl.count == 0 or sl.item_id == 0) continue;
+        const def = self.items.byId(sl.item_id) orelse continue;
+        out[n] = def.tags;
+        n += 1;
+    }
+    return out[0..n];
+}
+
+/// Worn armor groups and their lowest worn quality, into `out`; returns the
+/// used prefix. `Equipment::ResetArmorGroups` (IL=51) walks the equipment slots,
+/// keeps each `ItemClassArmor` item's `ArmorGroup` names and tracks the minimum
+/// quality per group, so a group that is not worn is absent (the lookup then
+/// reads 0). Bounded by the group count stock can reach (<= 12 worn items).
+fn armorGroups(self: *const Game, ps: ecs.Slot, out: []requirements.ArmorGroup) []const requirements.ArmorGroup {
+    if (!self.sim.mask[ps].inventory) return out[0..0];
+    const inv = &self.sim.inventory[ps];
+    var n: usize = 0;
+    var i: usize = ecs.components.inv_equip_start;
+    const end = @min(i + ecs.components.inv_equip_count, inv.slots.len);
+    while (i < end) : (i += 1) {
+        const s = inv.slots[i];
+        if (s.count == 0 or s.item_id == 0) continue;
+        const def = self.items.byId(s.item_id) orelse continue;
+        if (def.armor_group.len == 0) continue;
+        var it = std.mem.splitScalar(u8, def.armor_group, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            var hit = false;
+            for (out[0..n]) |*g| {
+                if (!std.mem.eql(u8, g.name, name)) continue;
+                if (s.quality < g.quality) g.quality = s.quality;
+                g.count +|= 1;
+                hit = true;
+                break;
+            }
+            if (hit) continue;
+            if (n >= out.len) return out[0..n];
+            out[n] = .{ .name = name, .quality = s.quality, .count = 1 };
+            n += 1;
+        }
+    }
+    return out[0..n];
+}
+
+/// The held item's `Tags` property, or "" for an empty hand.
+/// `HoldingItemHasTags::IsValid` (IL=37) reads
+/// `Inventory.get_holdingItem().HasAnyTags/HasAllTags`, and an empty hand
+/// matches no tag.
+fn heldItemTags(self: *const Game, ps: ecs.Slot) []const u8 {
+    if (!self.sim.mask[ps].inventory) return "";
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return "";
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return "";
+    const def = self.items.byId(s.item_id) orelse return "";
+    return def.tags;
+}
+
+/// Held ItemValue brokenness for `HoldingItemBroken`: PercentUsesLeft == 0
+/// (`UseTimes >= MaxUseTimes`). Empty hand / unknown item / no durability → false.
+fn holdingItemBroken(self: *const Game, ps: ecs.Slot) bool {
+    if (!self.sim.mask[ps].inventory) return false;
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return false;
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return false;
+    const def = self.items.byId(s.item_id) orelse return false;
+    const max_use = hooks.maxUseTimes(def, s.quality);
+    if (max_use == 0) return false;
+    return s.use_times >= @as(f32, @floatFromInt(max_use));
+}
+
+/// Whether the entity rides in any vehicle seat (`Entity::AttachedToEntity`
+/// for `IsAttachedToEntity`; stock attaches on EntityVehicle). Linear scan
+/// over live vehicles; seated players are rare and the fold runs per player.
+pub fn isSeated(sim: *const ecs.World, entity_id: i32) bool {
+    var it = sim.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
+        if (!sim.mask[i].vehicle) continue;
+        for (sim.vehicle[i].seats[0..sim.vehicle[i].usableSeats()]) |rider| {
+            if (rider == entity_id) return true;
+        }
+    }
+    return false;
+}
+
+/// Passive-effects VM recomputes per player per tick: the untagged stats query
+/// and the `coredamageresist` armor query, each over the buff and perk legs.
+const vm_recomputes_per_player = 4;
+
+/// Active buff def ids in `set`, into `out`; returns the used prefix. Bounded
+/// by the fixed `BuffSet` slot count, so no allocation.
+fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16 {
+    var n: usize = 0;
+    for (&set.slots) |*s| {
+        if (!s.active) continue;
+        if (n >= out.len) break;
+        out[n] = s.def_id;
+        n += 1;
+    }
+    return out[0..n];
+}
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time. Base drain is engine-driven
@@ -27,8 +575,196 @@ const io_fs = @import("../../util/io_fs.zig");
 /// carries them: `buffs.survival()` resolves the stage thresholds, the
 /// starvation HP loss and the stamina penalty. Runs after tickAll so the world
 /// clock already advanced.
-pub fn tickSurvival(self: *Game, dt: f32) void {
-    // APM (P4b): the per-player effects pass (passive-effects VM + triggered
+/// `Equipment.CalcDamage` (IL=83, combat-damage.md §2.1) non-physical leg:
+/// stock queries `EffectManager.GetValue(43 ElementalDamageResist,
+/// itemValue: null, entity: the victim, tags: damageTypeTag)`, so an armor row
+/// tagged `heat,electrical` resists heat and electric but not cold, while the
+/// untagged jitter rows resist every non-physical type. zdtd folds the same
+/// rows the tick VM folds (equipped items, buffs, perks) on the damage event,
+/// with the damage type as the ctx tag set. Returns the 0..1 fraction; the
+/// caller scales `1 - fraction` like stock's
+/// `FastMax(0, damage * (1 - value/100))`.
+///
+/// The ctx here is deliberately the event's own: it carries the live survival
+/// state, class tags, clock and cvar/level ledger but not the tick fold's
+/// equipment/sandbox snapshots, so a row gated on something only the tick fold
+/// answers is refused (counted unsupported) rather than answered wrongly.
+/// Every stock passive-43 row is requirement-free (only `tags`/`tier`), so the
+/// fold is exact for stock data.
+/// One item's tracked deltas: its own `<passive_effect>` rows plus each
+/// installed mod's rows (`EffectManager.GetValue` layer 13: a modifier item's
+/// effects apply alongside the item's own, at the mod's tier). Stock's
+/// server-relevant modifier rows (armour resistances, max stats,
+/// HealthChangeOT) are flat, so folding them on the item's quality axis is
+/// exact; a tiered modifier row would need the mod's own quality, which the
+/// wire ItemValue carries but zdtd does not store yet (recorded residual), so
+/// those rows are approximated at the item's quality like the rest.
+/// Attacker-side rows (`EntityDamage` and friends) are not consumed here: the
+/// client's damage packet already carries the finished number.
+fn itemTrackedDeltas(
+    self: *Game,
+    def: *const assets_items.ItemDef,
+    mods: [4]u16,
+    mod_qualities: [4]u8,
+    quality: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) assets_buffs.TrackedDeltas {
+    const axis = itemQualityAxis(self, quality);
+    // ItemHasTags / RequirementItemTier / RequirementItemModTier read params.ItemValue.
+    var item_ctx = ctx;
+    item_ctx.item_tags = def.tags;
+    item_ctx.item_quality = quality;
+    var mod_buf: [4]requirements.NameLevel = undefined;
+    item_ctx.item_mods = fillItemMods(self, mods, mod_qualities, &mod_buf);
+    return assets_buffs.deltasPlus(
+        assets_buffs.trackedDeltasAt(def.passives, axis, item_ctx, counts),
+        modTrackedDeltas(self, mods, mod_qualities, quality, item_ctx, counts, null),
+    );
+}
+
+/// Build the RequirementItemModTier ledger from installed mod ids + qualities.
+fn fillItemMods(
+    self: *const Game,
+    mods: [4]u16,
+    mod_qualities: [4]u8,
+    buf: *[4]requirements.NameLevel,
+) []const requirements.NameLevel {
+    var n: usize = 0;
+    for (mods, 0..) |mod_id, i| {
+        if (mod_id == 0 or n >= buf.len) continue;
+        const modef = self.items.byId(mod_id) orelse continue;
+        const q = if (mod_qualities[i] == 0) @as(u8, 1) else mod_qualities[i];
+        buf[n] = .{ .name = modef.name, .level = q };
+        n += 1;
+    }
+    return buf[0..n];
+}
+
+/// The installed mods' rows alone (`EffectManager.GetValue` layer 13). The
+/// mod-side PhysicalDamageResist is returned through `phys_out` when the caller
+/// consumes it (the per-tick fold stores it for `armorMitigation`, since stock
+/// `GetTotalPhysicalArmorRating` sums the worn items' effect layers); the
+/// mod-side ElementalDamageResist is dropped because the tagged EDR query owns
+/// it. A null `phys_out` keeps both in the returned deltas (the EDR caller).
+fn modTrackedDeltas(
+    self: *Game,
+    mods: [4]u16,
+    mod_qualities: [4]u8,
+    quality: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+    phys_out: ?*f32,
+) assets_buffs.TrackedDeltas {
+    const axis = itemQualityAxis(self, quality);
+    var out: assets_buffs.TrackedDeltas = .{};
+    for (mods, 0..) |mod_id, i| {
+        if (mod_id == 0) continue;
+        const modef = self.items.byId(mod_id) orelse continue;
+        const md = self.item_mods.byName(modef.name) orelse continue;
+        if (md.passives.len == 0) continue;
+        // ItemHasTags / RequirementItemTier / RequirementItemModTier on mod
+        // rows read the mod ItemValue (class tags + its own Quality).
+        var mod_ctx = ctx;
+        mod_ctx.item_tags = modef.tags;
+        const mq = if (mod_qualities[i] == 0) @as(u8, 1) else mod_qualities[i];
+        mod_ctx.item_quality = mq;
+        const one = [_]requirements.NameLevel{.{ .name = modef.name, .level = mq }};
+        mod_ctx.item_mods = &one;
+        var m = assets_buffs.trackedDeltasAt(md.passives, axis, mod_ctx, counts);
+        if (phys_out) |mp| {
+            mp.* += m.phys_resist;
+            m.phys_resist = 0;
+            m.elem_resist = 0;
+        }
+        out = assets_buffs.deltasPlus(out, m);
+    }
+    return out;
+}
+
+fn itemQualityAxis(self: *const Game, quality: u8) assets_buffs.Axis {
+    const qmax = self.items.max_quality_tier;
+    return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
+}
+
+pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
+    if (damage_tag.len == 0) return 0;
+    if (!self.sim.mask[ps].inventory or !self.sim.mask[ps].health) return 0;
+    const h = &self.sim.health[ps];
+    const peer_slot = self.sim.player[ps].peer_slot;
+    const c: ?*Client = if (peer_slot >= 0 and @as(usize, @intCast(peer_slot)) < self.clients.len)
+        &self.clients[@intCast(peer_slot)]
+    else
+        null;
+    var pctx: PlayerCtx = .{};
+    var counts: requirements.Counts = .{};
+    var total: f32 = 0;
+    if (c) |cc| {
+        pctx.init(self, cc, ps);
+        var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+        const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+        var ctx = pctx.build(self, cc, ps, h, sandbox_groups);
+        // The tagged EDR query owns this fold: rows match the damage type's
+        // tag, not the caller's tag set.
+        ctx.tags = damage_tag;
+        var i: usize = ecs.components.inv_equip_start;
+        while (i < ecs.components.max_inv_slots) : (i += 1) {
+            const slot = self.sim.inventory[ps].slots[i];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            total += itemTrackedDeltas(self, &def, slot.mods, slot.mod_qualities, slot.quality, ctx, &counts).elem_resist;
+        }
+        total += assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, &counts).elem_resist;
+        total += assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).elem_resist;
+    }
+    self.harness.counters.add(.requirement_gates, counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, counts.unsupported);
+    // Stock FastMax(0, ...) floors at zero and the fraction can exceed 1 only
+    // with modded rows; clamp so the caller's `1 - fraction` cannot go negative.
+    return std.math.clamp(total / 100.0, 0, 1);
+}
+
+/// Foreign-gated GeneralDamageResist at damage time: the victim's perk rows
+/// whose gates name the attacker (`target="other"`, e.g. Spectral Grace's
+/// zombie/animal filter) evaluate here, where the attacker is known. The
+/// per-tick fold refuses those rows (no other in scope), so a passing row
+/// lands only on this hit. Returns the resist fraction (Grace = 1).
+/// `other_tags` overrides the attacker-slot lookup (the accumulator passes
+/// the slot; the hook resolves tags itself, so this form is for callers that
+/// already hold the tag string).
+pub fn foreignGatedResist(self: *Game, victim: ecs.Slot, attacker: ecs.Slot) f32 {
+    return foreignGatedResistTags(self, victim, entityClassTags(self, attacker) orelse "");
+}
+
+/// Tag-string form of foreignGatedResist: an empty tag string matches nothing
+/// (refuses the foreign rows, like a missing other).
+pub fn foreignGatedResistTags(self: *Game, victim: ecs.Slot, other_tags: []const u8) f32 {
+    if (!self.sim.mask[victim].health) return 0;
+    const h = &self.sim.health[victim];
+    const peer_slot = self.sim.player[victim].peer_slot;
+    const c: ?*Client = if (peer_slot >= 0 and @as(usize, @intCast(peer_slot)) < self.clients.len)
+        &self.clients[@intCast(peer_slot)]
+    else
+        null;
+    var pctx: PlayerCtx = .{};
+    // Offline victim (no client): the perk ledger is empty, so only the
+    // buff leg could contribute; build the ctx without client state.
+    var counts: requirements.Counts = .{};
+    if (c) |cc| {
+        pctx.init(self, cc, victim);
+        var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+        const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+        var ctx = pctx.build(self, cc, victim, h, sandbox_groups);
+        ctx.other_tags = if (other_tags.len > 0) other_tags else null;
+        const total = assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).general_resist;
+        self.harness.counters.add(.requirement_gates, counts.resolved);
+        self.harness.counters.add(.requirement_unsupported, counts.unsupported);
+        return std.math.clamp(total, 0, 1);
+    }
+    return 0;
+}
+
+pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player effects pass (passive-effects VM + triggered
     // engine + stat application) is bounded by the client table; the section
     // timer + survival_players/vm_recomputes counters keep it inside the
     // 50 ms budget as player counts scale.
@@ -37,11 +773,21 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     const prog = self.sim.rules.progression;
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
-    const check01_id = assets_buffs.survivalCheckId(&self.buffs);
-    if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
-    if (self.sim.director.clock.seconds_per_hour <= 0) return;
-    const game_hours = dt / self.sim.director.clock.seconds_per_hour;
+    // Zero depletion rates disable ONLY the two food/water decay writes. This
+    // used to return early, which also skipped drowning, radiation, the
+    // stamina/well-fed folds and the whole buff lifecycle (including the
+    // player class buffs fired by onSelfEnteredGame) whenever a preset turned
+    // survival decay off, e.g. presets/builder.toml.
+    const decay_on = prog.food_depletion_per_hour > 0 or prog.water_depletion_per_hour > 0;
+    const game_hours = self.sim.director.clock.hoursFor(dt);
     const secs = dt;
+    // Sandbox gates: decode the server's code once per tick rather than per
+    // requirement (SandboxOptionBool reads it through SandboxOptionManager).
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    // Active def ids snapshotted for the lifecycle sweep (a row may add buffs).
+    var life_buf: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    var life_ids_n: usize = 0;
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -49,7 +795,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         var h = &self.sim.health[ps];
         if (h.max_hp <= 0) continue;
         self.harness.counters.inc(.survival_players);
-        if (use_buff) self.harness.counters.add(.vm_recomputes, 3); // engine + effectTotals + perkTotals
+        // engine + the two stat folds + the two coredamageresist armor folds
+        if (use_buff) self.harness.counters.add(.vm_recomputes, 1 + vm_recomputes_per_player);
         // Drowning: stock drains the client's local O2 bar first, then the
         // server is authoritative for the hp loss. The head block being water
         // is the depth gate (a submerged body at y <= water surface).
@@ -65,7 +812,15 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     // Wasm-first (AGENTS rule 29): environmental damage passes
                     // the on_player_damage verdict with attacker -1, so a
                     // module scales/denies drowning like any other player hit.
-                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.drowning_damage_per_second * c.drown_accum);
+                    // GeneralDamageResist (passive 40) covers every damage type.
+                    // This leg models stock's Internal self-damage (a client
+                    // drown report carries damageSource 1), and
+                    // DamageSource::AffectedByArmor (IL=5) keeps the armour
+                    // branch - passive 41 and passive 43 alike - for External
+                    // hits only, so no EDR term here.
+                    const raw = prog.drowning_damage_per_second * c.drown_accum *
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.drown_accum = 0;
                 }
@@ -80,8 +835,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning above.
-                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.radiation_damage_per_second * c.radiation_accum);
+                    // like drowning above: GDR only, since this is Internal
+                    // self-damage and the armour branch is External-only
+                    // (DamageSource::AffectedByArmor IL=5).
+                    const raw = prog.radiation_damage_per_second * c.radiation_accum *
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.radiation_accum = 0;
                 }
@@ -95,8 +854,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         const food_max_was = h.food_max;
         const water_max_was = h.water_max;
         const stamina_max_was = h.stamina_max;
-        h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
-        h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+        if (decay_on) {
+            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
+            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+        }
         // Well-fed regen and starvation: when buffs.xml is present the
         // thresholds are fractions of max (StatComparePercCurrentToMax); otherwise
         // fall back to Rules. The Rules well_fed_threshold is an absolute that
@@ -113,40 +874,188 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // total. Revertible: removing a stage buff recomputes the deltas
             // without it (additive deltas, recompute-from-set).
             //
-            // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate
-            // AddBuff rows, gated by StatComparePercCurrentToMax (fractions of
-            // max), select the wanted stage buffs - the data replaces the
-            // hand-rolled survivalStages selector.
-            const cid = check01_id orelse continue;
-            const check_res = assets_buffs.evaluateTriggered(&self.buffs, cid, .update, .{
-                .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
-                .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
-            });
-            const wanted = check_res.add_buffs[0..check_res.add_n];
-            syncStageBuffs(self, c.entity_id, ps, wanted);
-            const stages = assets_buffs.stagesFromWanted(wanted);
-            const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps]);
-            // Perk leg (level-scaled): purchased attribute/perk passives fold
-            // through the same VM surface, revertible by recompute-from-set.
-            const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n]);
+            // Requirement-gate context (ADR 0023 §2): the shared PlayerCtx
+            // builder, so the tick fold reads the same gates as the
+            // finish/damage paths.
+            var pctx: PlayerCtx = .{};
+            pctx.init(self, c, ps);
+            var req_ctx = pctx.build(self, c, ps, h, sandbox_groups);
+            var req_counts: requirements.Counts = .{};
+            // Buff lifecycle events, driven from the active set rather than by
+            // id (stock fires them from AddBuff / the entered-game path /
+            // RemoveBuff):
+            //   onSelfEnteredGame  once per instance, when the player enters
+            //   onSelfBuffStart    once per instance, right after it is added
+            //   onSelfBuffRemove   when the buff is flagged for removal
+            // Bounded: a snapshot of the active def ids, so a row that adds a
+            // buff cannot re-enter this loop.
+            if (!c.entered_game_fired) {
+                c.entered_game_fired = true;
+                // entityclasses `Buffs=`: the class-level buff list stock
+                // applies to every instance as it enters the game (the player
+                // class carries buffStatusCheck01/02). Data-bound: the class
+                // comes from the same Unity hash the PlayerId wire carries.
+                if (self.entities.byHash(assets_unity_hash.class_player_male)) |pdef| {
+                    for (pdef.buffs) |bname| _ = addCatalogBuff(self, c.entity_id, ps, bname, c.entity_id);
+                }
+                life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+                for (life_buf[0..life_ids_n]) |id| {
+                    const slot = self.sim.buffs[ps].find(id) orelse continue;
+                    if (slot.flags.entered_game_fired) continue;
+                    slot.flags.entered_game_fired = true;
+                    const eg = assets_buffs.evaluateTriggered(&self.buffs, id, .entered_game, req_ctx, &req_counts);
+                    if (eg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg.truncated);
+                    applyTriggeredBuffs(self, c.entity_id, ps, &eg, c.entity_id);
+                }
+            }
+            // onSelfBuffStart / onSelfBuffRemove for every active buff, now that
+            // the engine applies add/remove requests as the rows pass (so a
+            // stage's start rows see the other stages and the highest wins).
+            life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+            for (life_buf[0..life_ids_n]) |id| {
+                const slot = self.sim.buffs[ps].find(id) orelse continue;
+                if (!slot.flags.start_fired) {
+                    slot.flags.start_fired = true;
+                    // Physician heal buffs: ProgressionLevel target=instigator
+                    // reads the healer's perk ledger (BuffInstance.instigator_id).
+                    req_ctx.instigator_levels = skillLevelsForEntity(self, slot.instigator_id);
+                    const st = assets_buffs.evaluateTriggered(&self.buffs, id, .start, req_ctx, &req_counts);
+                    req_ctx.instigator_levels = null;
+                    if (st.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, st.truncated);
+                    // AddHealth (ModifyStats Health add) on onSelfBuffStart.
+                    hp_delta += assets_buffs.healthAddDelta(&st);
+                    continue;
+                }
+                if (slot.flags.remove) {
+                    const rm = assets_buffs.evaluateTriggered(&self.buffs, id, .remove, req_ctx, &req_counts);
+                    if (rm.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, rm.truncated);
+                }
+            }
+            // onSelfBuffUpdate for every active buff, due on the buff's own
+            // update rate (`<update_rate>` is seconds * 20 ticks; buff.tick
+            // resets update_ticks on the due tick). A row's AddBuff/RemoveBuff
+            // lands through the sink as it passes.
+            life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+            for (life_buf[0..life_ids_n]) |id| {
+                const slot = self.sim.buffs[ps].find(id) orelse continue;
+                if (slot.flags.remove or slot.flags.paused) continue;
+                if (!slot.flags.started or slot.update_ticks != 0) continue;
+                // Physician heal buffs: ProgressionLevel target=instigator on update too.
+                req_ctx.instigator_levels = skillLevelsForEntity(self, slot.instigator_id);
+                const up = assets_buffs.evaluateTriggered(&self.buffs, id, .update, req_ctx, &req_counts);
+                req_ctx.instigator_levels = null;
+                if (up.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, up.truncated);
+                // AddHealth (ModifyStats Health add) on onSelfBuffUpdate; subtract
+                // rows stay on the stage3 per-second path below.
+                hp_delta += assets_buffs.healthAddDelta(&up);
+            }
+            // Survival stage state: the thresholds decide which stage stays; the
+            // engine's own rows brought them in above, so this only reaps.
+            syncStageBuffs(self, c.entity_id, ps, assets_buffs.survivalStages(sv, h));
+            // Two queries, like stock: the max-stat/change-over-time consumers
+            // call EffectManager.GetValue with no tags, and
+            // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41
+            // with `coredamageresist`. A tagged row only joins the query whose
+            // tag set carries its tag (PassiveEffect::hasMatchingTag IL=53), so
+            // the `running`/`walking` StaminaChangeOT rows no longer land in the
+            // idle aggregate.
+            const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], req_ctx, &req_counts);
+            // Perk leg (level-scaled): purchased attribute/perk/book passives
+            // fold through the same VM surface, revertible by
+            // recompute-from-set and gated per row by its requirements.
+            const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n], req_ctx, &req_counts);
+            const armor_ctx = blk: {
+                var ctx_armor = req_ctx;
+                ctx_armor.tags = armor_query_tags;
+                break :blk ctx_armor;
+            };
+            const vm_armor = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], armor_ctx, &req_counts);
+            const pvm_armor = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n], armor_ctx, &req_counts);
+            self.harness.counters.add(.requirement_gates, req_counts.resolved);
+            self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
             // Armor: buff + perk PhysicalDamageResist join the mitigation like
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
-            self.sim.buff_phys_resist[ps] = vm.phys_resist + pvm.phys_resist;
-            // Perk/buff max-stat deltas: unconditional recompute from the
+            // The attacking item's tags are per-hit and stay with `item_mit`.
+            self.sim.buff_phys_resist[ps] = vm_armor.phys_resist + pvm_armor.phys_resist;
+            // Equipped and held item passives (stock `EffectManager.GetValue`
+            // layers 7/8: `Inventory.ModifyValue` for the holding item, then the
+            // equipment `ModifyValue` pass). Each item's rows evaluate at its own
+            // quality tier, with `Ctx.item_equipped` answering `IsEquipped`
+            // (true for an equipment slot, false for the hand - `Equipment::
+            // GetItems` does not include the holding slot).
+            var ivm: assets_buffs.TrackedDeltas = .{};
+            {
+                var item_ctx = req_ctx;
+                var mod_phys: f32 = 0;
+                const held = self.sim.inventory[ps].heldItem();
+                if (held.count > 0) {
+                    item_ctx.item_equipped = false;
+                    item_ctx.item_active = (held.flags & 1) != 0;
+                    if (self.items.byId(held.item_id)) |def| {
+                        // ItemHasTags / RequirementItemTier / RequirementItemModTier
+                        // read params.ItemValue (tags, quality, Modifications).
+                        item_ctx.item_tags = def.tags;
+                        item_ctx.item_quality = held.quality;
+                        var held_mod_buf: [4]requirements.NameLevel = undefined;
+                        item_ctx.item_mods = fillItemMods(self, held.mods, held.mod_qualities, &held_mod_buf);
+                        ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, held.quality), item_ctx, &req_counts));
+                        // The holding item's mod rows fold for their stats, but
+                        // its physical resist is not armour: stock
+                        // GetTotalPhysicalArmorRating walks the Equipment slots
+                        // only, so a held weapon's plating mod does not mitigate
+                        // incoming hits. `null` keeps the value out of the
+                        // armour column and `ivm.phys_resist` is zeroed below.
+                        ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, held.mods, held.mod_qualities, held.quality, item_ctx, &req_counts, null));
+                    }
+                }
+                item_ctx.item_equipped = true;
+                var esi: usize = ecs.components.inv_equip_start;
+                while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+                    const slot = self.sim.inventory[ps].slots[esi];
+                    if (slot.count == 0) continue;
+                    const def = self.items.byId(slot.item_id) orelse continue;
+                    item_ctx.item_tags = def.tags;
+                    item_ctx.item_quality = slot.quality;
+                    var slot_mod_buf: [4]requirements.NameLevel = undefined;
+                    item_ctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &slot_mod_buf);
+                    item_ctx.item_active = (slot.flags & 1) != 0;
+                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, slot.quality), item_ctx, &req_counts));
+                    ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, slot.mods, slot.mod_qualities, slot.quality, item_ctx, &req_counts, &mod_phys));
+                }
+                // The item's own resist rows stay owned by the items.xml
+                // quality-curve path (`armor_pdr_fn` -> armorMitigation) and the
+                // tagged EDR query, so folding them here too would double-count;
+                // the mod side is consumed (mod_phys below, EDR in the event
+                // fold), which is why the mod helper strips those two fields.
+                ivm.phys_resist = 0;
+                ivm.elem_resist = 0;
+                self.sim.item_mod_phys_resist[ps] = mod_phys;
+            }
+            // GeneralDamageResist (passive 40) is read UNTAGGED at the damage
+            // choke (EntityAlive::DamageEntity reads it with an empty tag set),
+            // so it comes off the plain fold and joins every player hit. Items
+            // contribute through the same cache (`armorEnforcerOutfit` +0.05).
+            self.sim.buff_general_resist[ps] = vm.general_resist + pvm.general_resist + ivm.general_resist;
+            // Perk/buff/item max-stat deltas: unconditional recompute from the
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
-            const mhp = vm.hp_max + pvm.hp_max;
-            h.max_hp = @max(1, h.base_max_hp + mhp);
+            const mhp = vm.hp_max + pvm.hp_max + ivm.hp_max;
+            // Injury caps (`HealthMaxBlockage` abrasion/sprain/break rows):
+            // the folded cvar value is subtracted from the max, never added.
+            const hblock = vm.hp_block + pvm.hp_block + ivm.hp_block;
+            h.max_hp = @max(1, h.base_max_hp + mhp - hblock);
             if (h.hp > h.max_hp) {
                 h.hp = h.max_hp;
                 self.sim.markDirty(ps, .{ .hp = true });
             }
-            const mfood = vm.food_max + pvm.food_max;
+            const mfood = vm.food_max + pvm.food_max + ivm.food_max;
             h.food_max = @max(1, 100 + mfood);
-            const mwater = vm.water_max + pvm.water_max;
+            const mwater = vm.water_max + pvm.water_max + ivm.water_max;
             h.water_max = @max(1, 100 + mwater);
-            const mstam = vm.stamina_max + pvm.stamina_max;
-            h.stamina_max = @max(1, 100 + mstam);
+            const mstam = vm.stamina_max + pvm.stamina_max + ivm.stamina_max;
+            const sblock = vm.stamina_block + pvm.stamina_block + ivm.stamina_block;
+            h.stamina_max = @max(1, 100 + mstam - sblock);
+            const stages = assets_buffs.survivalStages(sv, h);
             const starving = stages.hungry == 3;
             const dehydrated = stages.thirsty == 3;
             if (starving or dehydrated) {
@@ -156,8 +1065,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 const per_s = assets_buffs.stage3HpLossPerSecond(&self.buffs, stages);
                 if (per_s > 0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning/radiation above.
-                    hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, per_s * secs);
+                    // like drowning/radiation above. GDR covers it too.
+                    const raw = per_s * secs * (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                 }
             } else if (sv.hungry_frac[0] > 0 and sv.thirsty_frac[0] > 0) {
                 if (h.food >= sv.hungry_frac[0] * h.food_max and h.water >= sv.thirsty_frac[0] * h.water_max) {
@@ -166,17 +1076,17 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
-            // Perk/buff HealthChangeOT: stock applies the OT rate per second
+            // Perk/buff/item HealthChangeOT: stock applies the OT rate per second
             // (perkHealingFactor .011..16, well-rested regen), composing with
             // the starvation/regen branches above.
-            const hp_ot = vm.hp_ot + pvm.hp_ot;
+            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot;
             if (hp_ot != 0) hp_delta += hp_ot * secs;
-            // Stamina OT consumer (perk/buff StaminaChangeOT): the VM's
+            // Stamina OT consumer (perk/buff/item StaminaChangeOT): the VM's
             // perc fraction of max per second joins the idle regen (stock
             // applies the buff's OT continuously; perkRuleOneCardio .1..3
             // adds a regen bonus, the stage-3 starvation buff drains while
             // idle too). The sprint branch keeps the stage-3 penalty.
-            stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot) * h.stamina_max / 100.0;
+            stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot + ivm.stamina_ot) * h.stamina_max / 100.0;
             // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
             // buffStatusHungry03 while its stage holds. The gate moved from
             // "food/water <= 0" to "stage-3 buff active" (the stock 2%
@@ -187,8 +1097,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         } else {
             if (h.food <= 0 or h.water <= 0) {
                 // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
-                // drowning/radiation above.
-                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.starvation_damage_per_hour * game_hours);
+                // drowning/radiation above. GDR covers it too.
+                const raw = prog.starvation_damage_per_hour * game_hours *
+                    (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
@@ -202,7 +1114,13 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.stamina_max != stamina_max_was;
         if (c.sprint_stale_cd > 0) {
             c.sprint_stale_cd -= dt;
-            if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
+            if (c.sprint_stale_cd <= 0) {
+                c.sprint_speed = 0;
+                // The movement tag lapses with the same report: a client that
+                // stopped sending speeds stops claiming to be moving, so a
+                // walking/running gate does not stay open on stale input.
+                c.move_tag = .idle;
+            }
         }
         const stamina_was = h.stamina;
         if (c.sprint_speed > 0) {
@@ -260,46 +1178,28 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
 /// stock client shows the same HUD state. Revertible: a stage change removes
 /// the stale buff (flagged; the buff tick relays the removal) and the VM
 /// recomputes its deltas without it. No-op when the stages already match.
-fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, wanted: []const []const u8) void {
+fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, keep: assets_buffs.SurvivalStages) void {
+    _ = entity_id;
     const set = self.sim.buffsMut(ps);
-    var remove_ids: [4]u16 = undefined;
+    var remove_ids: [assets_buffs.max_triggered_removes]u16 = undefined;
     var n_rem: usize = 0;
     for (&set.slots) |*slot| {
         if (!slot.active) continue;
         const def = self.buffs.byId(slot.def_id) orelse continue;
-        const is_hungry = std.mem.startsWith(u8, def.name, "buffStatusHungry");
-        const is_thirsty = std.mem.startsWith(u8, def.name, "buffStatusThirsty");
-        if (!is_hungry and !is_thirsty) continue;
-        var is_wanted = false;
-        for (wanted) |w| {
-            if (std.mem.eql(u8, w, def.name)) {
-                is_wanted = true;
-                break;
-            }
-        }
-        if (!is_wanted and n_rem < remove_ids.len) {
+        const stage = assets_buffs.stageOfBuffName(def.name) orelse continue;
+        if (!std.mem.startsWith(u8, def.name, "buffStatusHungry") and
+            !std.mem.startsWith(u8, def.name, "buffStatusThirsty")) continue;
+        // Only the threshold-selected stage stays; anything lower or higher is a
+        // stale stage.
+        const keep_stage = if (std.mem.startsWith(u8, def.name, "buffStatusThirsty")) keep.thirsty else keep.hungry;
+        if (stage == keep_stage) continue;
+        if (n_rem < remove_ids.len) {
             remove_ids[n_rem] = slot.def_id;
             n_rem += 1;
         }
     }
     for (remove_ids[0..n_rem]) |id| {
         _ = ecs.buff.remove(set, id);
-    }
-    // The engine may select several stage buffs at once (boundary fractions
-    // pass two hungry + two thirsty rows); each is added unless already
-    // active (buff.zig stacking keeps repeats idempotent).
-    for (wanted) |name| {
-        const def_id = self.buffs.indexOfName(name) orelse continue;
-        if (set.find(def_id) != null) continue;
-        const def = self.buffs.byId(def_id) orelse continue;
-        _ = ecs.buff.add(set, .{
-            .def_id = def_id,
-            .duration = def.duration,
-            .stack_type = def.stack_type,
-            .update_rate_ticks = def.update_rate_ticks,
-            .remove_on_death = def.remove_on_death,
-        }, ecs.buff.duration_from_class, -1, 0, 0, 0);
-        game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
     }
 }
 
@@ -402,6 +1302,7 @@ pub fn tickAirDrop(self: *Game) void {
             // name needed). entity_id ties the marker to the bag so a future
             // NetPackageEntityMapMarkerRemove on crate death has something to
             // reference; not implemented yet, so the marker outlives the loot.
+            if (self.sim.slotOfNetId(bag_nid)) |bi| self.sim.loot_bag[bi].supply_crate = true;
             if (packages.buildNavObjectAdd(self.body_buf[8192..8704], "supply_drop", "", t.x, t.y + 2, t.z, @intCast(bag_nid))) |nb| {
                 self.broadcast("NetPackageNavObject", nb) catch {};
             } else |_| {}
@@ -490,7 +1391,14 @@ pub fn tickZombieBlockDamage(self: *Game) void {
             // DowngradeBlock turns into it instead of breaking.
             const down_raw = self.downgradeBreakRaw(bx, by, bz, id);
             if (down_raw != 0) {
+                // The downgrade replaces the block, so the old one is gone
+                // even though the cell stays occupied: its node, container
+                // and vending entry go with it, same as a break.
+                self.noteBlockRemoved(bx, by, bz, id);
                 _ = self.world.setBlockRawWorld(bx, by, bz, down_raw) catch continue;
+                // ...and the block it turned into claims what its own type
+                // owns: a downgrade that lands a powered block needs a node.
+                self.noteBlockAdded(bx, by, bz, world_store.typeId(down_raw));
                 self.clearBlockHp(bx, by, bz);
                 self.clearBlockRaw(bx, by, bz);
                 if (packages.buildSetBlockBodyRaw(&self.body_buf, bx, by, bz, down_raw, 0, -1, -1)) |sb| {
@@ -524,6 +1432,10 @@ pub fn reapStaleLocks(self: *Game) void {
 pub fn reapStalePeers(self: *Game) void {
     const now = clock.monoNs();
     const stale_ns: u64 = self.peer_stale_ms *| 1_000_000;
+    // Stock MaxDurationInAuthState (10 s): the auth sweep runs off the
+    // challenge issue time, not RX silence, so a peer that keeps the socket
+    // warm with junk but never echoes is still reaped.
+    const auth_ns: u64 = game_mod.default_auth_state_ms *| 1_000_000;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!p.alive) {
@@ -543,6 +1455,26 @@ pub fn reapStalePeers(self: *Game) void {
             continue;
         }
         if (p.last_recv_ns == 0) continue;
+        // Auth-state age (stock MaxDurationInAuthState): a peer that never
+        // echoed the challenge is reaped past the age cap even when it keeps
+        // receiving (RX silence alone never fires: last_recv_ns updates on
+        // every datagram, including junk). Authenticated peers have
+        // challenge_ns == 0 and skip this arm.
+        if (c.challenge_ns != 0 and now -% c.challenge_ns > auth_ns) {
+            self.harness.counters.inc(.stale_peers_reaped);
+            std.debug.print(
+                "zdtd: peer reaped in-auth local_id={d} slot={d} age_ms={d}\n",
+                .{ p.local_id, c.slot, (now -% c.challenge_ns) / 1_000_000 },
+            );
+            p.alive = false;
+            p.authenticated = false;
+            for (&p.pending) |*slot| slot.used = false;
+            p.local_window_start = p.local_seq;
+            self.clearLocksForPeer(c.slot);
+            c.* = .{};
+            self.refreshInfoPlayers();
+            continue;
+        }
         if (now -% p.last_recv_ns > stale_ns) {
             self.harness.counters.inc(.stale_peers_reaped);
             std.debug.print(
@@ -617,7 +1549,11 @@ pub fn drainDigRequests(self: *Game) void {
             // DowngradeBlock turns into it instead of breaking.
             const down_raw = self.downgradeBreakRaw(d.x, d.y, d.z, id);
             if (down_raw != 0) {
+                // Same as the damage-break downgrade above: the old block is
+                // displaced, so its side state goes with it.
+                self.noteBlockRemoved(d.x, d.y, d.z, id);
                 _ = self.world.setBlockRawWorld(d.x, d.y, d.z, down_raw) catch continue;
+                self.noteBlockAdded(d.x, d.y, d.z, world_store.typeId(down_raw));
                 self.clearBlockHp(d.x, d.y, d.z);
                 self.clearBlockRaw(d.x, d.y, d.z);
                 self.sim.zombie_ai[d.slot].digging = false;
@@ -717,6 +1653,47 @@ pub fn tickEntityLookAt(self: *Game) void {
         st.sent = true;
         if (packages.buildEntityLookAtBody(&self.body_buf, self.sim.network_id[s].id, lx, ly, lz)) |body| {
             self.broadcastNear("NetPackageEntityLookAt", body, self.sim.transform[s].x, self.sim.transform[s].z, self.interest_range) catch {};
+        } else |_| {}
+    }
+}
+
+/// NetPackageSetAttackTarget S2C. Stock fans this out from every server-side
+/// attack-target change: `EntityAlive::SetAttackTarget` (IL=70) sends
+/// `Setup(entityId, target ? target.entityId : -1)`, and the expiry path in
+/// `OnUpdateLive` (IL=363) sends `Setup(entityId, -1)` when attackTargetTime
+/// runs out. The client stores it as `attackTargetClient`, which is what
+/// `GetAttackTargetLocal` returns for a remote entity (the drone beam and the
+/// DynamicMusic threat level read it).
+///
+/// zdtd picks targets in the sim (`ai.target_id`) and never published them, so
+/// remote clients saw every zombie as untargeted. This is the edge detector:
+/// stock's per-change sends become a per-tick diff against the last published
+/// value, which is the same traffic without mirroring stock's call sites.
+pub fn tickAttackTarget(self: *Game) void {
+    for (self.sim.kind_groups.slice(.zombie)) |s| {
+        if (!self.sim.alive[s] or !self.sim.mask[s].network_id or !self.sim.mask[s].zombie_ai) continue;
+        if (!self.sim.mask[s].transform) continue;
+        // A sleeping sleeper has no live target to advertise, and waking is
+        // its own package (drainSleeperWakeups).
+        if (self.sim.mask[s].sleeper and !self.sim.sleeper[s].awake) continue;
+        const st = &self.attack_target_sent[s];
+        // Slot recycled onto a new entity: the previous occupant's last-sent
+        // target must not gate this one's first send (spawnBase bumped gen).
+        if (st.gen != self.sim.network_id[s].gen) st.* = .{ .gen = self.sim.network_id[s].gen };
+        // Stock's wire value: -1 when there is no target, and equally when the
+        // target is gone, since a dead entity is not a target any more.
+        var want: i32 = -1;
+        const tid = self.sim.zombie_ai[s].target_id;
+        if (tid >= 0) {
+            if (self.sim.slotOfNetId(tid)) |t| {
+                if (self.sim.alive[t]) want = tid;
+            }
+        }
+        if (st.sent and st.id == want) continue;
+        st.id = want;
+        st.sent = true;
+        if (packages.buildSetAttackTargetBody(&self.body_buf, self.sim.network_id[s].id, want)) |body| {
+            self.broadcastNear("NetPackageSetAttackTarget", body, self.sim.transform[s].x, self.sim.transform[s].z, self.interest_range) catch {};
         } else |_| {}
     }
 }

@@ -4,78 +4,84 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>/* zdtd-tokens */
 :root{
-  color-scheme:dark;
-  --bg:#050507;
-  --bg2:#0a0a0c;
-  --panel:#111113;
-  --panel2:#17171a;
-  --inset:#080809;
-  --well:#070708;
-  --line:#1e1e21;
-  --line2:#27272a;
-  --edge:#333338;
-  --fg:#ededed;
-  --muted:#9a9aa0;
-  --muted2:#6f6f77;
-  --muted3:#52525b;
-  --acc:#ededed;
-  --acc2:#d4d4d8;
-  --acc-soft:rgba(237,237,237,.07);
-  --acc-ghost:rgba(237,237,237,.035);
-  --acc-ring:rgba(237,237,237,.14);
-  --ok:#22c55e;
-  --ok-soft:rgba(34,197,94,.08);
-  --warn:#eab308;
-  --warn-soft:rgba(234,179,8,.10);
-  --err:#ef4444;
-  --err-soft:rgba(239,68,68,.07);
-  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Berkeley Mono","JetBrains Mono",monospace;
-  --r:0px;
-  --r2:2px;
+  color-scheme:light;
+  --bg:#f7f5f0;
+  --bg2:#efece4;
+  --panel:#fffdf8;
+  --panel2:#efece4;
+  --inset:#efece4;
+  --well:#fffdf8;
+  --line:#e2ddd0;
+  --line2:#cfc8b6;
+  --edge:#5f686f;
+  --fg:#1a1d21;
+  --muted:#4d545c;
+  --muted2:#5f686f;
+  --acc:#0f5c37;
+  --acc-ink:#0c4a2d;
+  --acc-soft:#dcefe1;
+  --acc-ghost:rgba(15,92,55,.06);
+  --acc-ring:rgba(15,92,55,.28);
+  --ok:#0f5c37;
+  --ok-soft:#dcefe1;
+  --warn:#6b4a00;
+  --warn-soft:#f2dbaa;
+  --err:#8a2318;
+  --err-border:#d59f96;
+  --err-ink:#3d0d07;
+  --err-field:rgba(138,35,24,.45);
+  --err-soft:#f5c9c2;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --r:10px;
+  --r-ctl:9px;
+  --shadow:0 1px 2px rgba(26,29,33,.06),0 8px 24px -12px rgba(26,29,33,.18);
 }
 /* /zdtd-tokens */
 *{box-sizing:border-box}
 html{scrollbar-gutter:stable}
-body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items:center;padding:clamp(1rem,4vw,2rem);line-height:1.5;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
-a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line2)}
-a:hover{border-bottom-color:var(--fg)}
-code{font-family:var(--mono);font-size:0.74em;background:var(--inset);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:0;color:var(--muted)}
-main{width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:0;padding:1.2rem 1.25rem 1rem}
-.meta{color:var(--muted2);font-family:var(--mono);font-size:0.62rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
-.lead{color:var(--muted);font-size:0.82rem;margin:0 0 1rem;line-height:1.5}
-label{display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;color:var(--muted);margin:1rem 0 0.3rem}
+body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items:center;padding:clamp(1rem,4vw,2rem);line-height:1.6;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
+a{color:var(--acc-ink);text-decoration:underline;text-decoration-color:rgba(15,92,55,.35);text-underline-offset:2px}
+a:hover{color:var(--acc-ink)}
+code{font-family:var(--mono);font-size:0.82em;background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
+main{width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.5rem 1.5rem 1.25rem}
+.meta{color:var(--muted);font-family:var(--sans);font-size:0.78rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
+.lead{color:var(--muted);font-size:1rem;margin:0 0 1rem;line-height:1.6}
+label{display:block;font-family:var(--sans);font-size:0.9rem;font-weight:600;color:var(--fg);margin:1.1rem 0 0.45rem}
 .secret-row{display:flex;align-items:stretch;gap:0.35rem}
 .secret-row input{flex:1;min-width:0}
-input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:34px;padding:0.35rem 0.55rem;border:1px solid var(--line2);border-radius:0;background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.84rem}
-input[type=password]:focus,input[type=text]:focus{outline:none;border-color:var(--edge);background:var(--inset)}
-input[aria-invalid=true]{border-color:rgba(239,68,68,.45);box-shadow:0 0 0 2px var(--err-soft)}
-button{appearance:none;min-height:34px;min-width:5rem;padding:0.35rem 0.85rem;border:1px solid var(--fg);border-radius:0;background:var(--fg);color:var(--bg);font-family:var(--mono);font-weight:700;font-size:0.72rem;letter-spacing:0.03em;cursor:pointer}
-button:hover{background:#fff;border-color:#fff}
+input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.65rem 0.8rem;border:1.5px solid var(--line2);border-radius:var(--r-ctl);background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.95rem}
+input[type=password]:focus,input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
+input[data-invalid=true]{border-color:var(--err-field);box-shadow:0 0 0 2px var(--err-soft)}
+button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:0.9rem;cursor:pointer}
+button:hover{background:var(--acc-ink)}
 button:active{transform:translateY(1px)}
-.secret-row button{margin-top:0;min-width:3.8rem;min-height:34px;background:transparent;color:var(--muted);border-color:var(--line2);font-weight:600;font-size:0.68rem}
-.secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--panel2)}
+.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--r-ctl);font-weight:600;font-size:0.85rem;font-family:var(--sans)}
+.secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
 .secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
-.hint{color:var(--muted2);font-size:0.70rem;margin:0.75rem 0 0;line-height:1.5}
+.hint{color:var(--muted);font-size:0.85rem;margin:0.75rem 0 0;line-height:1.6}
 .hint + .hint{margin-top:0.25rem}
-.err{margin:0 0 0.85rem;padding:0.5rem 0.6rem;border-radius:0;background:var(--err-soft);border:1px solid rgba(239,68,68,.18);color:#f0a0a2;font-family:var(--mono);font-size:0.74rem;line-height:1.4}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
-@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:GrayText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
+.err{margin:0 0 0.85rem;padding:0.9rem 1rem;border-radius:var(--r);background:var(--err-soft);border:1px solid var(--err-border);color:var(--err-ink);font-family:var(--sans);font-size:0.9rem;line-height:1.5}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.brand{margin:0;font-family:var(--sans);font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;color:var(--fg)}
+.signin{margin-top:0.65rem;width:100%}
+@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 </style></head>
-<body><main><p style="margin:0;font-family:var(--mono);font-size:0.70rem;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;color:var(--fg)">zdtd</p><p class="meta">operator console · sign in</p>
-<p class="lead">Sign in with the webui shared secret to set a session cookie.</p>
+<body><main><p class="brand">zdtd</p><p class="meta">operator console · sign in</p>
+__ZDTD_LOGIN_BANNER__
 <form method="post" action="/login">
 <label for="login-token">Shared secret</label>
-<div class="secret-row"><input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-describedby="login-help" autofocus><button type="button" id="toggle-secret" aria-controls="login-token" aria-pressed="false">Show</button></div>
-<button type="submit" style="margin-top:0.65rem;width:100%">Sign in</button>
+<div class="secret-row"><input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" data-invalid="__ZDTD_LOGIN_INVALID__" aria-describedby="__ZDTD_LOGIN_DESCRIBEDBY__" autofocus><button type="button" id="toggle-secret" aria-controls="login-token" aria-pressed="false">Show</button></div>
+<button type="submit" class="signin">Sign in</button>
 </form>
 <p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:login */
 "use strict";
 //! Webui login form: show/hide the shared secret.
-//! Shared by login.html and login_failed.html (same markup, different error
-//! state). Compiled by scripts/build-webui-ts.sh and injected into both pages.
+//! Injected into login.html (plain and failure states share the markup; the
+//! banner and input attrs are server-rendered placeholders).
+//! Compiled by scripts/build-webui-ts.sh.
 const token = document.querySelector('#login-token');
 if (token === null) {
     throw new Error('webui: missing element #login-token');

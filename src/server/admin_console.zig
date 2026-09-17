@@ -443,7 +443,10 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
     const cz = std.math.clamp(z, -max_c, max_c);
     self.sim.transform[ps] = .{ .x = cx, .y = cy, .z = cz, .yaw = 0 };
     if (self.sim.mask[ps].player) {
-        self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), cx, cy, cz);
+        // peer_slot is i32 and defaults to -1; resetMoveEnvelopePeer bounds the
+        // slot, but only after this cast, and @intCast traps on a negative.
+        const peer_i = self.sim.player[ps].peer_slot;
+        if (peer_i >= 0) self.resetMoveEnvelopePeer(@intCast(peer_i), cx, cy, cz);
     }
     const entity_id = self.sim.netId(ps);
     const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch return;
@@ -756,9 +759,7 @@ pub fn replyGamePrefs(self: *Game, filter: []const u8) void {
     self.gamePref(filter, "GameName", "{s}", .{self.world_name});
     self.gamePref(filter, "ViewRadius", "{d}", .{self.view_radius});
     self.gamePref(filter, "GameDifficulty", "{d}", .{self.sim.director.difficulty});
-    self.gamePref(filter, "DayNightLength", "{d}", .{
-        @as(u32, @round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0)),
-    });
+    self.gamePref(filter, "DayNightLength", "{d}", .{self.sim.director.clock.day_night_length});
     self.gamePref(filter, "TelnetPort", "{d}", .{self.admin.port});
 }
 
@@ -790,6 +791,12 @@ pub fn replyGameStats(self: *Game, filter: []const u8) void {
     gameStat(self, filter, "XPMultiplier", "{d}", .{v.xp_multiplier});
     gameStat(self, filter, "PlayerKillingMode", "{d}", .{v.player_killing_mode});
     gameStat(self, filter, "DropOnDeath", "{d}", .{v.drop_on_death});
+    gameStat(self, filter, "DropOnQuit", "{d}", .{v.drop_on_quit});
+    gameStat(self, filter, "IsCreativeMenuEnabled", "{s}", .{boolWord(v.build_create)});
+    gameStat(self, filter, "IsFlyingEnabled", "{s}", .{boolWord(v.build_create)});
+    gameStat(self, filter, "AirDropMarker", "{s}", .{boolWord(v.air_drop_marker)});
+    gameStat(self, filter, "BiomeProgression", "{s}", .{boolWord(v.biome_progression)});
+    gameStat(self, filter, "CameraRestrictionMode", "{d}", .{v.camera_restriction_mode});
     gameStat(self, filter, "LandClaimSize", "{d}", .{v.land_claim_size});
     gameStat(self, filter, "LandClaimOnlineDurabilityModifier", "{d}", .{v.land_claim_online_dur});
     gameStat(self, filter, "LandClaimOfflineDurabilityModifier", "{d}", .{v.land_claim_offline_dur});
@@ -989,6 +996,12 @@ pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
         self.sim.director.clock.bloodmoon_frequency = @intCast(@min(@max(v, 0), 255));
     } else if (std.mem.eql(u8, name, "DayNightLength")) {
         self.sim.director.clock.setDayNightLength(@intCast(@min(@max(v, 10), 1200)));
+        // The weather scheduler scales storm countdowns by the same rate, so it
+        // has to move with the clock (a stale rate mis-times the storm warning).
+        self.world.weather.setDayNightLength(
+            self.sim.director.clock.day_night_length,
+            self.sim.director.clock.time_of_day_inc_per_sec,
+        );
     } else if (std.mem.eql(u8, name, "BlockDamagePlayer")) {
         self.block_damage_player = @intCast(@min(@max(v, 0), 1000));
     } else if (std.mem.eql(u8, name, "XPMultiplier")) {

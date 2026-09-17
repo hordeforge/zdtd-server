@@ -15,6 +15,7 @@ const wire_frame = @import("../../wire/frame.zig");
 const packages = @import("../../wire/packages.zig");
 const paths = @import("../../assets/paths.zig");
 const flate = std.compress.flate;
+const assets_localization = @import("../../assets/localization.zig");
 
 /// Cap per deflated config blob. The DeflateFramer writes into `body_buf`
 /// (512 KiB); deflate of already-deflated data is nearly incompressible, so
@@ -97,6 +98,41 @@ pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_di
         if (b.data.len > 0) blobs += 1;
     }
     std.debug.print("zdtd: config s2c cache rows={d}/{d}\n", .{ blobs, s2c_names.len });
+}
+
+/// Join-phase localization shipping (stock `RequestToEnterGame` IL_0222:
+/// `NetPackageLocalization.StartSendingPacketsToClient`, between the id
+/// mapping and `SendXmlsToClient`). The patched CSV is raw-Deflated once and
+/// split into stock's 128 KiB parts; the frame itself stays uncompressed
+/// (`NetPackageLocalization.get_Compress` IL=2 returns false), which `sendGame`
+/// already decides by package name.
+pub fn sendLocalization(self: *Game, peer: *ln_peer.Peer) !void {
+    if (self.localization.isEmpty()) return;
+    const blob = self.localization.deflatedCsv(self.allocator) catch |err| {
+        std.debug.print("zdtd: localization deflate failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    defer self.allocator.free(blob);
+    const total: i32 = @intCast((blob.len + assets_localization.part_size - 1) / assets_localization.part_size);
+    var seq: i32 = 0;
+    while (seq < total) : (seq += 1) {
+        const start = @as(usize, @intCast(seq)) * assets_localization.part_size;
+        const end = @min(start + assets_localization.part_size, blob.len);
+        const body = packages.buildLocalizationBody(
+            self.body_buf[0 .. end - start + 16],
+            seq,
+            total,
+            blob[start..end],
+        ) catch |err| {
+            std.debug.print("zdtd: localization body failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
+        self.sendGameCritical(peer, "NetPackageLocalization", body) catch |err| {
+            std.debug.print("zdtd: localization part {d}/{d} send failed: {s}\n", .{ seq, total, @errorName(err) });
+            return err;
+        };
+    }
+    self.harness.counters.inc(.packages_encoded);
 }
 
 /// Join-phase config shipping (stock `SendXmlsToClient`, after localization

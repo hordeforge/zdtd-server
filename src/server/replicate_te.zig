@@ -169,7 +169,19 @@ pub fn broadcastStorageTe(self: *Game, cont: *const containers_mod.Container) !v
         Game.resolveItemType,
         self,
     );
-    try self.broadcast("NetPackageTileEntity", body);
+    // Position-scoped, like the powered-trigger and vending TE paths above.
+    // NetPackageTileEntity::ProcessPackage (IL=103) rebroadcasts with
+    // _entitiesInRangeOfWorldPos = ToWorldCenterPos() and _range 192, so a
+    // stock server tells only the clients near the block. A global broadcast
+    // sends every chest edit on the map to every peer, and the receiver drops
+    // it anyway when its own block at that position disagrees.
+    try self.broadcastNear(
+        "NetPackageTileEntity",
+        body,
+        @floatFromInt(cont.pos.x),
+        @floatFromInt(cont.pos.z),
+        self.interest_range,
+    );
 }
 
 /// zdtd's Block::ActivateBlock (asm.il:127088 / 137044): rewrite meta bit 0x1
@@ -215,7 +227,11 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
     const tt = props.trigger_type orelse return;
     // Wire list is the child edges zdtd tracks; the parent link is undirected
     // here, so parentPos stays zero rather than inventing a direction.
-    var wires: [stock_te.max_te_wires]stock_te.Vec3i = undefined;
+    // Sized to what the wire's u8 count can carry, not to the parse-side
+    // max_te_wires: the sim caps wires globally rather than per node, so a
+    // trigger can hold more edges than a small buffer would fit, and a short
+    // buffer silently told the client the node had fewer connections.
+    var wires: [stock_te.max_te_wires_out]stock_te.Vec3i = undefined;
     var wire_n: usize = 0;
     var w: usize = 0;
     while (w < self.sim.power.wire_n and wire_n < wires.len) : (w += 1) {
@@ -226,6 +242,11 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
         wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
         wire_n += 1;
     }
+    // Past 255 edges on one node the stock u8 count cannot describe the list at
+    // all, so the remainder is dropped by the format, not by this buffer. The
+    // sim's global cap is electric.max_wires; reaching 255 on a single node
+    // needs a deliberately pathological build.
+    std.debug.assert(wire_n <= stock_te.max_te_wires_out);
     // Propagate encode failure: a silent return left power switches/traps
     // looking unpowered on remotes after the sim already flipped the node.
     const body = try stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{
@@ -235,6 +256,7 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
         .trigger_type = @intFromEnum(tt),
         .property1 = node.delay_idx,
         .property2 = node.duration_idx,
+        .target_type = node.target_type,
     });
     try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
 }
@@ -254,6 +276,18 @@ pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
         self,
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// Replay a stored sign to one peer (the composite TE body the client's own
+/// edit produced). The handle byte is patched to 255: an unsolicited TE send
+/// carries stock's `Setup(te, 2, 255)` handle, while the edit echo keeps the
+/// client's own handle so its `lockHandleWaitingFor` clears.
+pub fn sendSignTe(self: *Game, peer: *ln_peer.Peer, pos: containers_mod.PosKey) !void {
+    const sign = self.sign_texts.get(pos) orelse return;
+    if (sign.len > self.body_buf.len) return;
+    @memcpy(self.body_buf[0..sign.len], sign.body[0..sign.len]);
+    if (sign.len > 0) self.body_buf[0] = 255;
+    try self.sendGame(peer, "NetPackageTileEntity", self.body_buf[0..sign.len]);
 }
 
 /// Store stock rows as wire TraderStockEntry (ItemStack + markup).
@@ -285,18 +319,24 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     const tt = self.traders;
     var n: usize = 0;
     var refs: []const assets_traders.ItemRef = &.{};
+    // A resolved trader_info with no <trader_items> is intentionally empty
+    // (owner-stocked vending: traders.xml id 3 player_owned, id 5 rentable);
+    // only an unresolved row takes the traderAlways fallback.
+    var resolved_row = false;
     if (v.trader_id > 0 and v.trader_id <= 65535) {
         if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
+            resolved_row = true;
             if (ti.refs.len > 0) refs = ti.refs;
         }
     }
-    if (refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
+    if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
     if (refs.len == 0) return;
     // Deterministic per machine per day (no entity id on a vending block;
-    // the trader_id + day discriminates the stream).
+    // the trader_id + day discriminates the stream). Sandbox
+    // VendingItemAbundance (default 1.0) scales each rolled count.
     var rng = rng_util.XorShift32.initFromU64(game_trader.traderRollSeed(self, @intCast(v.trader_id)));
     var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
-    const rn = tt.rollAllRefs(refs, &rng, &rolled);
+    const rn = tt.rollAllRefs(refs, &rng, game_trader.qualityPolicy(self), self.vending_item_abundance, &rolled);
     if (rn == 0) return;
     // Vending is owner-priced: the renter sets each entry's markup, so the
     // trader_info buy/sell multipliers do not apply here (loot-economy.md
@@ -325,6 +365,10 @@ pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
     const v = self.vending.get(.{ .x = x, .y = y, .z = z }) orelse return;
     var entries_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
     const n = vendingEntries(self, v, &entries_buf);
+    // The allowed-user list is part of the stock TE composite; omitting it told
+    // the owner's client the machine had no allowed users after every reopen.
+    var allowed_buf: [vending_mod.max_allowed_users]packages.platform_user.Id = undefined;
+    const allowed = vendingAllowedIds(v, &allowed_buf);
     const body = try stock_te.buildVendingTeBody(
         self.body_buf[0..4096],
         255,
@@ -336,6 +380,7 @@ pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
             .is_locked = v.is_locked,
             .owner = vendingOwnerId(self, v),
             .password_hash = v.password_hash[0..v.password_len],
+            .allowed = allowed,
             .rental_end_day = v.rental_end_day,
             .trader_id = v.trader_id,
             .entries = entries_buf[0..n],
@@ -357,6 +402,29 @@ pub fn vendingOwnerId(self: *Game, v: *const vending_mod.Vending) ?packages.plat
     };
 }
 
+/// Fill `out` with the stored allowed-user identities, returning the slice that
+/// is populated. The refs borrow the machine's own storage, so the result must
+/// not outlive `v`.
+fn vendingAllowedIds(
+    v: *const vending_mod.Vending,
+    out: *[vending_mod.max_allowed_users]packages.platform_user.Id,
+) []const packages.platform_user.Id {
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < v.allowed_n and i < v.allowed.len) : (i += 1) {
+        // Borrow the machine's storage: a by-value copy of the UserRef dies at
+        // the end of this iteration and the slices into it would dangle.
+        const a = &v.allowed[i];
+        if (a.platform_len == 0) continue;
+        out[n] = .{
+            .platform = a.platform[0..a.platform_len],
+            .id = a.id[0..a.id_len],
+        };
+        n += 1;
+    }
+    return out[0..n];
+}
+
 /// Stock TileEntityVendingMachine.NotifyListeners (loot-economy.md 6): after a
 /// stock/money change the machine pushes its TE to every listener (the clients
 /// with the window open). We approximate with the view-radius interest set - a
@@ -373,16 +441,21 @@ pub fn broadcastVendingTe(self: *Game, x: i32, y: i32, z: i32) !void {
 }
 
 /// Send a POI light TE (TileEntityLight, type 18) to one peer: the authored
-/// intensity/range/colour from the prefab .tts marker, in the stock network
-/// body (stock_te.buildLightTeBody).
+/// light fields from the prefab .tts marker, in the stock network body
+/// (stock_te.buildLightTeBody).
 pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
     const l = self.light_te.get(.{ .x = x, .y = y, .z = z }) orelse return;
+    // ProcessPackage drops the package when teBlockId disagrees with the
+    // block the client holds at the position, so send the real world block
+    // rather than a placeholder.
+    const block_id = self.world.blockWorld(x, y, z) catch return;
     const body = try stock_te.buildLightTeBody(
         self.body_buf[0..4096],
         255,
         x,
         y,
         z,
+        block_id,
         .{
             .intensity = l.intensity,
             .range = l.range,
@@ -390,6 +463,9 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
             .light_type = l.light_type,
             .angle = l.angle,
             .shadows = l.shadows,
+            .state = l.state,
+            .rate = l.rate,
+            .delay = l.delay,
         },
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);

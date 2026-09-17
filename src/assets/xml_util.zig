@@ -90,6 +90,34 @@ pub fn propertyValue(body: []const u8, name: []const u8) ?[]const u8 {
 /// First `<passive_effect name="X" ... value="Y"/>` value in an effect_group
 /// body (items.xml Distraction* / buffs.xml passives, e.g. decoy's
 /// `DistractionRadius` with `operation="base_set"`).
+/// Offset of the `<property name="NAME"` tag in `body`, for the attributes
+/// that sit beside `value` (Extends `param1`, passive_effect `tier`). null when
+/// the property is absent.
+pub fn propertyTagOffset(body: []const u8, name: []const u8) ?usize {
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
+        const name_v = attr(body, pi, "name") orelse {
+            i = pi + 9;
+            continue;
+        };
+        if (std.mem.eql(u8, name_v, name)) return pi;
+        i = pi + 9;
+    }
+    return null;
+}
+
+/// True when the comma list `list` carries `tag` (case-sensitive, like stock
+/// FastTags). Empty list or tag is false.
+pub fn tagListContains(list: []const u8, tag: []const u8) bool {
+    if (list.len == 0 or tag.len == 0) return false;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |seg| {
+        if (std.mem.eql(u8, std.mem.trim(u8, seg, " \t"), tag)) return true;
+    }
+    return false;
+}
+
 pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < body.len) {
@@ -104,6 +132,30 @@ pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
         i = pi + 15;
     }
     return null;
+}
+
+/// Whether an item body declares any `<effect_group>` of its own. Stock
+/// property inheritance carries Effects down an Extends chain, so a child with
+/// no group of its own answers `HasQuality` from its parent's groups.
+pub fn hasEffectGroup(body: []const u8) bool {
+    return std.mem.find(u8, body, "<effect_group") != null;
+}
+
+/// Stock `ItemClass.HasQuality` (IL=9) via `MinEffectController.IsOwnerTiered`
+/// (IL=23): true when at least one `<effect_group>` is owner-tiered.
+/// `MinEffectGroup.OwnerTiered` defaults to true (ctor IL_002F) and stock
+/// items.xml only ever writes `tiered="false"`, so a group counts as tiered
+/// unless it explicitly opts out. An item with no effect group at all has no
+/// quality, matching the null-Effects branch of `get_HasQuality`.
+pub fn hasTieredEffectGroup(body: []const u8) bool {
+    var i: usize = 0;
+    while (i < body.len) {
+        const gi = std.mem.findPos(u8, body, i, "<effect_group") orelse break;
+        i = gi + 13;
+        const t = attr(body, gi, "tiered") orelse return true;
+        if (!std.mem.eql(u8, t, "false") and !std.mem.eql(u8, t, "False")) return true;
+    }
+    return false;
 }
 
 /// First `<passive_effect name="X" .../>` row slice (for extra attrs like
@@ -235,4 +287,29 @@ test "attr accepts XML whitespace and quote forms without suffix matches" {
 test "attr permits greater-than inside a quoted value" {
     const s = "<property name=\"ServerPassword\" value=\"left>right\"/>";
     try std.testing.expectEqualStrings("left>right", attr(s, 0, "value").?);
+}
+
+test "hasTieredEffectGroup follows OwnerTiered defaults" {
+    // ItemClass.HasQuality (IL=9): Effects != null && IsOwnerTiered(). No
+    // effect_group at all means null Effects, so no quality.
+    try std.testing.expect(!hasTieredEffectGroup("<item name=\"resourceWood\"><property name=\"Stacknumber\" value=\"6000\"/></item>"));
+    // MinEffectGroup.OwnerTiered defaults to true in the ctor, so a group with
+    // no `tiered` attribute is tiered.
+    try std.testing.expect(hasTieredEffectGroup("<effect_group name=\"gun\"><passive_effect name=\"ModSlots\" value=\"1\"/></effect_group>"));
+    // Stock only ever writes tiered="false"; a lone opt-out group leaves the
+    // item without quality.
+    try std.testing.expect(!hasTieredEffectGroup("<effect_group name=\"perkBoost\" tiered=\"false\"/>"));
+    // IsOwnerTiered is an ANY over the groups: one plain group outweighs any
+    // number of opt-outs.
+    try std.testing.expect(hasTieredEffectGroup(
+        "<effect_group name=\"a\" tiered=\"false\"/><effect_group name=\"b\"/>",
+    ));
+    try std.testing.expect(!hasTieredEffectGroup(
+        "<effect_group name=\"a\" tiered=\"false\"/><effect_group name=\"b\" tiered=\"false\"/>",
+    ));
+}
+
+test "hasEffectGroup reports only the item's own groups" {
+    try std.testing.expect(!hasEffectGroup("<item name=\"child\"><property name=\"Extends\" value=\"master\"/></item>"));
+    try std.testing.expect(hasEffectGroup("<item name=\"master\"><effect_group name=\"m\" tiered=\"false\"/></item>"));
 }

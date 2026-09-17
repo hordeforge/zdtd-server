@@ -82,18 +82,87 @@ pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) voi
     self.land_claims_n += 1;
 }
 
-/// A destroyed keystone no longer protects: drop the claim entirely. The
-/// in-memory-only table is a known gap (claims do not persist across a
-/// restart); removal still matters for the running session.
+/// Drop one claim row and take its map marker off the wire. Every claim
+/// removal routes here: the block-destroy path, offline expiry, and the
+/// wipeplayer release. Stock's TEFeatureLandClaim.OnDestroy (IL=28) calls
+/// PersistentPlayerList.RemoveLandProtectionBlock and then broadcasts
+/// NetPackageEntityMapMarkerRemove by position with EnumMapObjectType 15. The
+/// login PersistentPlayerState is rebuilt from land_claims, so dropping the row
+/// covers future joins; the broadcast covers clients already online, which
+/// otherwise keep the protection square until they rejoin.
+fn dropClaimRow(self: *Game, i: usize) void {
+    const x = self.land_claims[i].x;
+    const y = self.land_claims[i].y;
+    const z = self.land_claims[i].z;
+    self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
+    self.land_claims_n -= 1;
+    if (packages.buildMapMarkerRemoveByPosition(
+        self.body_buf[0..],
+        @floatFromInt(x),
+        @floatFromInt(y),
+        @floatFromInt(z),
+        .land_claim,
+    )) |mb| {
+        self.broadcast("NetPackageEntityMapMarkerRemove", mb) catch {};
+    } else |_| {}
+}
+
+/// A destroyed keystone no longer protects: drop the claim and its marker.
 pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
     var i: usize = 0;
     while (i < self.land_claims_n) : (i += 1) {
         if (self.land_claims[i].x == x and self.land_claims[i].y == y and self.land_claims[i].z == z) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
             return;
         }
     }
+}
+
+/// Stock `TEFeatureAreaRepair.RepairAll` (IL=9) + the `repair` coroutine: walk
+/// the claim area (stock ±22 blocks around the keystone, matching the
+/// `land_claim_size` 41 protection square) and restore every damaged block to
+/// full HP, replicating each fix through the normal `SetBlock` path. Returns
+/// the number of blocks repaired.
+///
+/// Two conscious simplifications, both stated in DIVERGENCES. Materials:
+/// stock's `repairBlock` (IL=135) consumes `RepairItems` from the TE storage
+/// in proportion to the damage fraction, and zdtd has no TE storage inventory,
+/// so the repair is free. Destroyed blocks: stock only heals damaged ones
+/// (the loop skips air via `get_isair`); a block already broken to air is not
+/// rebuilt, and neither is it here.
+pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
+    const half: i32 = @intCast(self.land_claim_size / 2);
+    var repaired: u32 = 0;
+    var x: i32 = cx - half;
+    while (x <= cx + half) : (x += 1) {
+        var z: i32 = cz - half;
+        while (z <= cz + half) : (z += 1) {
+            repaired += repairClaimColumn(self, x, z);
+        }
+    }
+    return repaired;
+}
+
+/// Repair one XZ column of the claim area: every damaged non-air block from
+/// bedrock to build height gets its damage cleared and a `SetBlock` with
+/// damage 0 fanned to nearby peers. Unloaded chunks are skipped (getOrCreate
+/// would materialize them); damage only lands on resident chunks anyway.
+fn repairClaimColumn(self: *Game, x: i32, z: i32) u32 {
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return 0;
+    var repaired: u32 = 0;
+    var y: i32 = 0;
+    while (y < world_store.y_dim) : (y += 1) {
+        if (c.dmgAt(t.lx, y, t.lz) == 0) continue;
+        if (c.blockAt(t.lx, y, t.lz) == 0) continue;
+        c.clearDmg(t.lx, y, t.lz);
+        const id = c.blockAt(t.lx, y, t.lz);
+        if (packages.buildSetBlockBodyDamage(&self.body_buf, x, y, z, id, 0, 0, 0)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
+        } else |_| {}
+        repaired += 1;
+    }
+    return repaired;
 }
 
 /// Release every claim recorded against `name` and report how many went. The
@@ -107,8 +176,7 @@ pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
     while (i < self.land_claims_n) {
         const claim = &self.land_claims[i];
         if (claim.owner_name_len == name.len and std.mem.eql(u8, claim.owner_name[0..claim.owner_name_len], name)) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
             dropped += 1;
         } else {
             i += 1;
@@ -137,25 +205,47 @@ pub fn expireClaims(self: *Game) void {
     while (i < self.land_claims_n) {
         const claim = &self.land_claims[i];
         if (!claim.owner_online and (day - claim.owner_seen_day) > self.land_claim_expiry_days) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
         } else {
             i += 1;
         }
     }
 }
 
+/// Generic block HP when the catalog is loaded but the id is unknown: fail
+/// closed to one soft value rather than guessing from the id.
+const loaded_catalog_generic_hp: u16 = 100;
+
+/// Offline-only block HP bands, used when no blocks.xml is loaded at all.
+/// The AssignIds id space groups by content, so the bands stand in for the
+/// block classes whose real MaxDamage lives in XML: terrain and the low pins
+/// below 256, containers around 18000 (`cnt_*`), and vegetation from 24000
+/// (`tree_*`, `plant_*`, which break in a hit or two). Approximations, not
+/// stock truth: with `--game-dir` the XML value wins before this is reached.
+const offline_terrain_max_id: u16 = 256;
+const offline_container_min_id: u16 = 18000;
+const offline_container_max_id: u16 = 20000;
+const offline_vegetation_min_id: u16 = 24000;
+const offline_terrain_hp: u16 = 100;
+const offline_container_hp: u16 = 500;
+const offline_vegetation_hp: u16 = 50;
+const offline_default_hp: u16 = 500;
+
 /// MaxDamage from blocks.xml+materials via maxdamage table. Generic floor when unknown.
 pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
     if (block_id == 0) return 1;
     if (self.maxdamage.maxDamage(block_id)) |hp| return hp;
     // Table loaded (by_id or name map): fail closed to soft generic, no pin id HP table.
-    if (self.maxdamage.by_id.count() > 0 or self.maxdamage.id_by_name.count() > 0) return 100;
+    if (self.maxdamage.by_id.count() > 0 or self.maxdamage.id_by_name.count() > 0) {
+        return loaded_catalog_generic_hp;
+    }
     // Offline / empty catalog only: soft defaults by id band (not stock truth).
-    if (block_id < 256) return 100;
-    if (block_id >= 18000 and block_id < 20000) return 500;
-    if (block_id >= 24000) return 50;
-    return 500;
+    if (block_id < offline_terrain_max_id) return offline_terrain_hp;
+    if (block_id >= offline_container_min_id and block_id < offline_container_max_id) {
+        return offline_container_hp;
+    }
+    if (block_id >= offline_vegetation_min_id) return offline_vegetation_hp;
+    return offline_default_hp;
 }
 
 /// materials.xml Experience for a broken block (harvest XP; stock
@@ -207,6 +297,13 @@ pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) !void {
 /// chew and admin edits). pub so scenarios can drive the on_block_damage
 /// plugin verdict through the real path.
 pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
+    // materials.xml CanDestroy=false (Mbedrock): stock zeroes the block-damage
+    // scalar for such a block (ItemActionAttack::Hit IL_028A-029D), so no path
+    // may accumulate damage on it. The choke point covers every non-C2S
+    // damage funnel (zombie chew, traps, blasts).
+    if (!self.maxdamage.canDestroyFor(self.world.blockWorld(x, y, z) catch 0)) {
+        return self.getBlockHp(x, y, z);
+    }
     // on_block_damage verdict (T15): <0 denies the damage, >0 applies that
     // percent. No plugin exports the hook -> 0 -> today's behaviour.
     var applied = dmg;
@@ -231,10 +328,42 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
     c.clearDmg(t.lx, y, t.lz);
 }
 
+/// Every consequence of a block ceasing to exist that is not the block plane
+/// itself. Called by each destruction path (player mine, damage break, zombie
+/// dig, collapse), so a block only has to be removed once for its side state
+/// to go with it.
+///
 /// Stock PersistentPlayerList.SpawnPointRemoved (IL=48): removing a placed
 /// bedroll clears the owner's respawn point (the client falls back to the
 /// default spawn). Scans the fixed client table for the bed position.
+///
+/// The five position-keyed stores (power grid, containers, vending, lights,
+/// workstations) live outside the block plane, so a destruction path that only
+/// clears the plane leaves a node with no block still feeding the grid, a
+/// container still holding its slots at a cell that is now air, a light the
+/// chunk stream keeps shipping to every player who joins later, and a
+/// workstation that keeps broadcasting and saving its fuel and craft queue.
 pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
+    noteBlockRemovedEx(self, x, y, z, cur_id, true);
+}
+
+/// `spill = false` for a POI reset: stock regenerates the chunk back to its
+/// prefab state (RE server-browser-prefabs.md 3.2 ResetBlocksAndRebuild),
+/// which discards what was there rather than dropping it. Spilling on a reset
+/// would let a player farm a POI's containers by re-taking the quest.
+pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spill: bool) void {
+    // What the block held goes to the ground before the stores that hold it
+    // are dropped. Stock fires OnBlockRemoved for any cleared cell, whatever
+    // cleared it (RE blocks.md 4), so damage, a zombie dig and a collapse owe
+    // the contents the same as a player break - previously only the player
+    // paths spilled and the other three destroyed what was inside.
+    if (spill) self.spillStoredItems(x, y, z);
+    if (self.sim.power.removeAt(x, y, z)) self.sim.power.resolve();
+    self.containers.remove(.{ .x = x, .y = y, .z = z });
+    self.sign_texts.remove(.{ .x = x, .y = y, .z = z });
+    self.vending.removeAt(.{ .x = x, .y = y, .z = z });
+    self.light_te.removeAt(.{ .x = x, .y = y, .z = z });
+    self.workstations.removeAt(x, y, z);
     if (!self.isBedrollId(cur_id)) return;
     for (&self.clients) |*cl| {
         if (!cl.joined or !cl.has_bed) continue;
@@ -242,6 +371,25 @@ pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
             cl.has_bed = false;
             return;
         }
+    }
+}
+
+/// The other half of `noteBlockRemoved`: a block appearing at a cell claims
+/// the position-keyed state its type owns. Stock fires OnBlockAdded for any
+/// filled cell whatever filled it (RE blocks.md 4), so a downgrade swap that
+/// lands a powered block owes the grid a node exactly like a player placing
+/// one. Containers stay out: registering one broadcasts its TE, which can
+/// fail, and the placement path already owns that leg.
+pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
+    if (new_id == 0) return;
+    if (self.blocks.isVending(new_id)) {
+        _ = self.vending.getOrCreate(.{ .x = x, .y = y, .z = z }, new_id, self.blocks.traderId(new_id));
+    }
+    if (self.power_registry.lookup(new_id)) |pn| {
+        if (self.sim.power.addNodeAt(pn.kind, x, y, z, pn.watts)) |nid| {
+            if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
+        }
+        self.sim.power.resolve();
     }
 }
 
@@ -359,38 +507,8 @@ pub fn drainExplosions(self: *Game) void {
                         }
                     }
                     if (mult == 0) continue; // category immune to this blast
-                    const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
-                    // Clamp to u16 like the chew path and the ExplosionClient
-                    // broadcast below: the loader caps BlockDamage at 1e6, and
-                    // a modded blast times a DamageBonus multiplier can exceed
-                    // 65535, which would trap the @trunc cast.
-                    const dmg: u16 = @trunc(@min(block_dmg * falloff * mult, 65535.0));
-                    if (dmg == 0) continue;
-                    const max_hp = self.maxDamageForBlock(id);
-                    const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
-                    if (total >= max_hp) {
-                        // Downgrade swap (stock Block.OnBlockDamaged; the
-                        // explosion routes through DamageBlock): a block with
-                        // a DowngradeBlock turns into it instead of breaking.
-                        const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
-                        if (down_raw != 0) {
-                            _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch continue;
-                            self.clearBlockHp(wx, wy, wz);
-                            self.clearBlockRaw(wx, wy, wz);
-                            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {
-                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-                            } else |_| {}
-                        } else {
-                            // A removed bedroll clears the owner's respawn point.
-                            self.noteBlockRemoved(wx, wy, wz, id);
-                            self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                            self.clearBlockHp(wx, wy, wz);
-                            self.clearBlockRaw(wx, wy, wz);
-                            if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
-                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-                            } else |_| {}
-                        }
-                    }
+                    const falloff = blastFalloff(wx, wy, wz, ex.x, ex.y, ex.z, radius);
+                    _ = self.blastBlock(wx, wy, wz, id, block_dmg, falloff, mult, nid);
                 }
             }
         }
@@ -416,6 +534,171 @@ pub fn drainExplosions(self: *Game) void {
     }
 }
 
+/// Stock `Explosion::AttackBlocks` distance falloff for one cell:
+/// `V_21 = FastMax(0, |blockCenter - blastPos| - 0.5)` then
+/// `1 - V_21 / radius` (IL_0201-0222, IL_02A7-02B5). `Vector3i::ToVector3Center`
+/// is the cell corner plus 0.5 on every axis, and the blast position is the
+/// float world position, so the damage is symmetric around the real blast
+/// rather than around the cell index the loop iterates - the difference is
+/// largest on the diagonals, where the cell index overstates the distance.
+/// 0 or less means the block is outside the blast.
+pub fn blastFalloff(block_x: i32, block_y: i32, block_z: i32, px: f32, py: f32, pz: f32, radius: f32) f32 {
+    const bx = @as(f32, @floatFromInt(block_x)) + 0.5 - px;
+    const by = @as(f32, @floatFromInt(block_y)) + 0.5 - py;
+    const bz = @as(f32, @floatFromInt(block_z)) + 0.5 - pz;
+    const dist = std.math.clamp(@sqrt(bx * bx + by * by + bz * bz) - 0.5, 0, radius);
+    return 1.0 - dist / radius;
+}
+
+test "blast falloff measures from the blast position, not the cell index" {
+    // Stock V_21 = FastMax(0, |blockCentre - blastPos| - 0.5) then
+    // 1 - V_21 / radius (IL_0201-0222). The block centre is the corner plus
+    // 0.5, so the cell the blast sits in takes 1 - (sqrt(0.75) - 0.5)/5 and a
+    // diagonal cell is weaker than its integer cell distance suggests.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9268), blastFalloff(0, 0, 0, 0, 0, 0, 5), 0.0005);
+    // Cell distance sqrt(18) = 4.243 would give 0.1515; the centre distance is
+    // sqrt(24.75) - 0.5 = 4.475, so 1 - 4.475/5 = 0.1050.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1050), blastFalloff(3, 0, 3, 0, 0, 0, 5), 0.0005);
+    // The falloff follows the real blast position: half a cell closer is
+    // stronger, and a block beyond the radius reaches 0, not a negative value.
+    try std.testing.expect(blastFalloff(3, 0, 3, 0.5, 0, 0.5, 5) > blastFalloff(3, 0, 3, 0, 0, 0, 5));
+    try std.testing.expectEqual(@as(f32, 0), blastFalloff(6, 0, 0, 0, 0, 0, 5));
+}
+
+/// Stock `World::GetLandProtectionHardnessModifier` (IL=8823/8985) for one
+/// block position: the DIVISOR a blast or attack inside somebody else's land
+/// claim takes.
+///   - 1 when the instigator is an enemy (stock returns early for
+///     `EntityEnemy`) or unattributed: a zombie's blast ignores claims
+///   - 1 when the block's `LPHardnessScale` is 0 (`cntGasPumpRandomLootHelper`)
+///   - otherwise `Max(1, claim owner's durability modifier) x LPHardnessScale`,
+///     where the owner's modifier is the online or offline durability modifier
+///     (stock GameStats 48/49) and only a claim the instigator does not own
+///     counts
+/// A claim modifier below 1 short-circuits exactly like stock's
+/// `if (V_9 < 1) return V_9`. The ally exemption and the vehicle-attacker
+/// doubling stay open (zdtd's claim paths are owner-entity based throughout).
+pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, instigator_entity: i32) f32 {
+    if (instigator_entity >= 0) {
+        if (self.sim.slotOfNetId(instigator_entity)) |s| {
+            if (self.sim.kind[s] == .zombie or self.sim.kind[s] == .animal) return 1;
+        }
+    }
+    const id = self.world.blockWorld(wx, wy, wz) catch return 1;
+    if (id == 0) return 1;
+    const scale: f32 = if (self.blocks.byId(id)) |b| b.lp_hardness_scale else 1;
+    if (scale == 0) return 1;
+    var running: f32 = 1;
+    if (self.claimCovering(wx, wz)) |claim| {
+        if (claim.owner_entity != instigator_entity) {
+            const mod: f32 = if (claim.owner_online)
+                @floatFromInt(self.land_claim_online_dur)
+            else
+                @floatFromInt(self.land_claim_offline_dur);
+            if (mod < 1) return mod;
+            running = @max(running, mod);
+        }
+    }
+    if (running > 1) return running * scale;
+    return running;
+}
+
+/// Apply one blast to the block at (wx,wy,wz), stock `Explosion::AttackBlocks`
+/// (IL=553):
+///   hardness > 0  ->  damage = round((1 - resistance) * power * falloff
+///                                    / (hardness * land_mod) * category_mult)
+///   hardness == 0 ->  the block is destroyed outright (stock switches to the
+///                     `MaxDamage / land_mod` branch, IL_0449)
+/// `power` is the explosion's BlockDamage, `falloff` the 0..1 distance scalar
+/// and `category_mult` the ExplosionData DamageMultiplier for the block's
+/// `damage_category` (the caller skips a block whose multiplier is 0, which is
+/// how stock's earth/stone bonuses keep terrain intact).
+///
+/// An unresolvable material (builtin catalog, or a block with no blocks.xml
+/// Material row) keeps the raw numeric damage instead: stock's hardness comes
+/// from data zdtd does not have there, and inventing the destroy branch would
+/// break the offline paths. `land_mod` stays 1 (no land-claim hardness leg on
+/// this path yet, GAP "Land claim blast hardness").
+///
+/// Returns true when the block changed (damaged, downgraded or destroyed).
+pub fn blastBlock(
+    self: *Game,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+    id: u16,
+    power: f32,
+    falloff: f32,
+    category_mult: f32,
+    instigator_entity: i32,
+) bool {
+    if (id == 0 or !(power > 0) or !(falloff > 0) or !(category_mult > 0)) return false;
+    // materials.xml CanDestroy=false: stock zeroes the damage scalar for such
+    // a block (ItemActionAttack::Hit IL_028A-029D), so a blast never carves it.
+    if (!self.maxdamage.canDestroyFor(id)) return false;
+    const max_hp = self.maxDamageForBlock(id);
+    if (max_hp == 0) return false;
+    const resist = @min(@max(self.maxdamage.explosionResistanceFor(id), 0), 1);
+    // Land claim leg (stock Explosion::AttackBlocks divides by
+    // GetLandProtectionHardnessModifier, IL_03EA): a stranger's blast meets a
+    // tougher block inside somebody else's claim.
+    const land_mod = self.landProtectionHardnessModifier(wx, wy, wz, instigator_entity);
+    if (!(land_mod > 0)) return false;
+    var dmg: f32 = undefined;
+    if (self.maxdamage.materialHardness(id)) |hardness| {
+        if (hardness > 0) {
+            dmg = (1.0 - resist) * power * falloff / (hardness * land_mod) * category_mult;
+        } else {
+            dmg = @as(f32, @floatFromInt(max_hp)) / land_mod;
+        }
+    } else {
+        dmg = (1.0 - resist) * power * falloff / land_mod * category_mult;
+    }
+    const dmg_u16: u16 = @trunc(@min(@max(dmg, 0), 65535.0));
+    if (dmg_u16 == 0) return false;
+    const total = self.addBlockDamage(wx, wy, wz, dmg_u16) catch return false;
+    if (total < max_hp) {
+        // Stock's explosion sends the changed cells as one SetBlockAndDamage
+        // batch, damage-only entries included, so a blast that only cracks a
+        // block still shows on every client. Same echo the chew path uses
+        // (wire damage capped at the block's stage-2 threshold).
+        const raw = self.blockRawAt(wx, wy, wz);
+        if (raw != 0) {
+            const wire_dmg = self.wireBlockDamage(id, total);
+            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, raw, wire_dmg, -1, -1)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+            } else |_| {}
+        }
+        return true;
+    }
+    // Downgrade swap (stock Block.OnBlockDamaged; the explosion routes through
+    // DamageBlock): a block with a DowngradeBlock turns into it instead of
+    // breaking.
+    const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
+    if (down_raw != 0) {
+        // The downgrade displaces the old block and lands a new one, same pair
+        // as the other downgrade arms: this one cleared neither side.
+        self.noteBlockRemoved(wx, wy, wz, id);
+        _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch return true;
+        self.noteBlockAdded(wx, wy, wz, world_store.typeId(down_raw));
+        self.clearBlockHp(wx, wy, wz);
+        self.clearBlockRaw(wx, wy, wz);
+        if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+        } else |_| {}
+        return true;
+    }
+    // A removed bedroll clears the owner's respawn point.
+    self.noteBlockRemoved(wx, wy, wz, id);
+    self.world.setBlockWorld(wx, wy, wz, 0) catch return true;
+    self.clearBlockHp(wx, wy, wz);
+    self.clearBlockRaw(wx, wy, wz);
+    if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
+        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+    } else |_| {}
+    return true;
+}
+
 pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
     const key = packBlockKey(x, y, z);
     var i: usize = 0;
@@ -439,14 +722,20 @@ pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
 }
 
 /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
-/// without meta (the sparse store only holds cells that carry it).
+/// without meta. The sparse mirror is a bounded cache (oldest entries are
+/// evicted), so on a miss fall back to the chunk raw plane, which is the
+/// source of truth for rotation/meta; reading it keeps a resend or a TE
+/// replicate from reporting a bare id for a rotated block. Resident-only
+/// (`chunkAt`, not `getOrCreate`) so a read cannot generate a chunk.
 pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
     const key = packBlockKey(x, y, z);
     var i: usize = 0;
     while (i < self.block_raw_n) : (i += 1) {
         if (self.block_raw_key[i] == key) return self.block_raw[i];
     }
-    return 0;
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return 0;
+    return c.rawAt(t.lx, y, t.lz);
 }
 
 pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
@@ -463,8 +752,8 @@ pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
 
 /// Voxel line-of-sight between two world points, used to gate `bot shoot`
 /// (RFC 0001 §4: the host rejects an LOS-blocked shot). Samples
-/// `World.isSolidWorld` every 0.5 blocks along the line; returns false when a
-/// solid block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
+/// `World.sightBlockedWorld` every 0.5 blocks along the line; returns false
+/// when a sight-blocking block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
 /// (treated as clear) so a bot is not permanently silenced across a chunk
 /// border; the guest brain already gates the shot on its own accuracy rolls.
 pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
@@ -481,7 +770,7 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
         const ix: i32 = @floor(from[0] + dx * t);
         const iy: i32 = @floor(from[1] + dy * t);
         const iz: i32 = @floor(from[2] + dz * t);
-        if (self.world.isSolidWorld(ix, iy, iz) catch continue) return false;
+        if (self.world.sightBlockedWorld(ix, iy, iz)) return false;
     }
     return true;
 }

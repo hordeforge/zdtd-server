@@ -176,8 +176,9 @@ pub const Peer = struct {
     pending: [pending_cap]Pending = [_]Pending{.{}} ** pending_cap,
     /// Earliest time the next resendPending window scan is worth doing. The
     /// WindowFull retry loops call resendPending thousands of times per stall;
-    /// without this gate each call walks all 64 pending slots (86 KiB stride)
-    /// even though nothing can be due until resend_ns has elapsed.
+    /// without this gate each call walks all 64 pending slots (91 KiB stride at
+    /// the stock 1432 MTU) even though nothing can be due until resend_ns has
+    /// elapsed.
     next_resend_check_ns: u64 = 0,
     last_recv_ns: u64 = 0,
     /// Negotiated packet size, learned from the peer's MtuCheck probes (the
@@ -248,20 +249,35 @@ pub const Peer = struct {
         return p;
     }
 
+    /// Largest unreliable user payload this peer accepts: the negotiated MTU
+    /// may sit below the compile cap, so senders must guard on this rather
+    /// than `packet.max_single_user` or an in-between frame returns Overflow
+    /// and is dropped with no fallback (net-send review 2026-09-12).
+    pub fn singleUserLimit(self: *const Peer) usize {
+        const eff_mtu: usize = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
+        return @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size);
+    }
+
     /// Fire-and-forget unreliable (LiteNet property Unreliable). No retransmit.
     /// Use for high-rate cosmetic motion; game-critical still sendReliable.
     pub fn sendUnreliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
-        const eff_mtu: usize = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
-        if (user.len > @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size)) return error.Overflow;
+        if (user.len > self.singleUserLimit()) return error.Overflow;
         if (self.capture) |cap| cap.push(user);
         var buf: [packet.max_packet_size]u8 = undefined;
         // Unreliable header: property byte 0 + user
         if (user.len + 1 > buf.len) return error.Overflow;
         buf[0] = @intFromEnum(packet.Property.unreliable);
-        @memcpy(buf[1..][0..user.len], user);
+        @memcpy(buf[packet.header_size..][0..user.len], user);
         try self.sendRaw(sock, buf[0 .. 1 + user.len]);
     }
 
+    /// Writes the datagram immediately; there is no send queue between the
+    /// caller and the socket. Stock queues instead (`ClientInfo::SendPackage`
+    /// -> `AddToSendQueue`, then `FlushSendQueue` only when the package's
+    /// `get_FlushQueue` is true), so eight packages there override the base
+    /// false to skip the batch. Here every package is flushed on send, which
+    /// makes that property moot - see DIVERGENCES 1. Introducing a queue means
+    /// reinstating those eight as bypasses.
     pub fn sendReliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
         if (self.capture) |cap| {
             // Record full user message for scenarios, then exercise real send path.
@@ -631,10 +647,9 @@ pub const Peer = struct {
                 if (raw.len >= 1) {
                     // Probes step the stock PossibleMtu list ascending, so the
                     // max seen is the negotiated size; 0 = not yet negotiated.
-                    // Clamped to packet.max_packet_size: the part/pending
-                    // buffers are sized for the conservative 1327, so the
-                    // negotiated MTU only ever lowers the S2C size (the stock
-                    // full-1432 throughput is a buffer-growth follow-up).
+                    // Clamped to packet.max_packet_size, which is stock's 1432,
+                    // so the negotiated MTU is exactly the client's last probe
+                    // (the part/pending buffers derive from the same constant).
                     self.peer_mtu = @min(@max(self.peer_mtu, @min(raw.len, 1500)), packet.max_packet_size);
                     var ok_buf: [1500]u8 = undefined;
                     const n = @min(raw.len, ok_buf.len);
@@ -653,7 +668,7 @@ pub const Peer = struct {
         // Stock ReliableChannel.ProcessAck: Size must match header + (windowSize-1)/8+2.
         // Accept ≥ header; loadgen/stock both send full 13-byte acks.
         if (raw.len < packet.channeled_header_size + 1) return;
-        const ack_seq = std.mem.readInt(u16, raw[1..][0..2], .little);
+        const ack_seq = std.mem.readInt(u16, raw[packet.header_size..][0..2], .little);
         if (ack_seq >= packet.max_sequence) return;
         // Stock: RelativeSequenceNumber(localWindowStart, ackSeq) = local - ack ∈ [0, window).
         const rel_base = relSeq(@as(i32, self.local_window_start) - @as(i32, ack_seq));
@@ -692,7 +707,7 @@ pub const Peer = struct {
         const total = packet.channeled_header_size + ack_bitmap_bytes;
         if (buf.len < total) return error.Overflow;
         buf[0] = packet.makeByte0(.ack, self.conn_num);
-        std.mem.writeInt(u16, buf[1..][0..2], self.remote_window_start, .little);
+        std.mem.writeInt(u16, buf[packet.header_size..][0..2], self.remote_window_start, .little);
         buf[3] = 2; // ReliableOrdered channel id
         // Expand window-size bits into ack_bitmap_bytes (extra trailing zeros ok)
         @memset(buf[packet.channeled_header_size..][0..ack_bitmap_bytes], 0);
@@ -710,6 +725,91 @@ fn relSeq(a: i32) i32 {
     if (r < 0) r += max;
     if (r >= half) r -= max;
     return r;
+}
+
+test "MTU probes are answered in full and negotiate up to the stock 1432" {
+    // `packet.max_packet_size` is the game's `NetConstants.MaxPacketSize`,
+    // 1432 (PossibleMtu = [1024,1164,1392,1404,1424,1432], network.md), and
+    // every per-peer part/pending buffer derives from it. A probe is echoed at
+    // its own size so the client's discovery walks the full stock list, and
+    // `peer_mtu` tracks the largest probe up to that same cap, so a stock
+    // client's last probe negotiates the stock send size.
+    var peer: Peer = .{};
+    peer.alive = true;
+    var sock: udp.Socket = .{}; // null socket: sendTo is a no-op
+
+    // The stock list's last entry, as a stock client's final probe would be.
+    var probe: [1432]u8 = undefined;
+    @memset(&probe, 0);
+    probe[0] = packet.makeByte0(.mtu_check, peer.conn_num);
+    try std.testing.expect(try peer.handlePacket(&sock, &probe) == null);
+    try std.testing.expectEqual(packet.max_packet_size, peer.peer_mtu);
+    try std.testing.expectEqual(@as(usize, 1432), peer.peer_mtu);
+    // The unreliable send limit follows the negotiated MTU, not the compile
+    // cap: a smaller probe shrinks it so senders route in-between frames to
+    // the reliable fallback instead of Overflowing and dropping them.
+    try std.testing.expectEqual(
+        @as(usize, 1432) - packet.channeled_header_size,
+        peer.singleUserLimit(),
+    );
+
+    // A probe below the cap negotiates that smaller size verbatim.
+    var small: Peer = .{};
+    small.alive = true;
+    var probe2: [1024]u8 = undefined;
+    @memset(&probe2, 0);
+    probe2[0] = packet.makeByte0(.mtu_check, small.conn_num);
+    try std.testing.expect(try small.handlePacket(&sock, &probe2) == null);
+    try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+    try std.testing.expectEqual(
+        @as(usize, 1024) - packet.channeled_header_size,
+        small.singleUserLimit(),
+    );
+
+    // And it only ever climbs: a late smaller probe does not shrink it.
+    try std.testing.expect(try small.handlePacket(&sock, probe2[0..512]) == null);
+    try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+
+    // An absurd probe is still clamped to the stock cap, never above it.
+    var big: Peer = .{};
+    big.alive = true;
+    var probe3: [1500]u8 = undefined;
+    @memset(&probe3, 0);
+    probe3[0] = packet.makeByte0(.mtu_check, big.conn_num);
+    try std.testing.expect(try big.handlePacket(&sock, &probe3) == null);
+    try std.testing.expectEqual(@as(usize, 1432), big.peer_mtu);
+}
+
+test "relSeq wraps the 32768 sequence space symmetrically" {
+    // Six window decisions ride on this - in-flight count, ack base, both
+    // remote-window comparisons - and none of them tested it: widening the
+    // half-space boundary from `>=` to `>` left the whole suite green.
+    const max: i32 = @intCast(packet.max_sequence);
+    const half: i32 = max / 2;
+
+    try std.testing.expectEqual(@as(i32, 0), relSeq(0));
+    try std.testing.expectEqual(@as(i32, 1), relSeq(1));
+    try std.testing.expectEqual(@as(i32, -1), relSeq(-1));
+
+    // The boundary: exactly `half` ahead is the far edge and must read as
+    // `-half`, not `+half`. Getting it wrong flips the direction of every
+    // wrap comparison for that one distance.
+    try std.testing.expectEqual(-half, relSeq(half));
+    try std.testing.expectEqual(half - 1, relSeq(half - 1));
+
+    // Wrapping across the top keeps the short distance: 5 past the wrap is
+    // +5 from just before it, not -32763.
+    try std.testing.expectEqual(@as(i32, 5), relSeq(5 - max));
+    try std.testing.expectEqual(@as(i32, -5), relSeq(max - 5));
+    try std.testing.expectEqual(@as(i32, 0), relSeq(max));
+
+    // Every result stays in [-half, half), which is what makes the window
+    // comparisons total.
+    var i: i32 = -max;
+    while (i <= max) : (i += 97) {
+        const r = relSeq(i);
+        try std.testing.expect(r >= -half and r < half);
+    }
 }
 
 test "processAck advances local window when bits set" {
@@ -836,6 +936,40 @@ fn fuzzPeerState(_: void, smith: *std.testing.Smith) !void {
     const rlen = smith.slice(&raw);
     peer.processAck(raw[0..rlen]);
     try std.testing.expect(peer.local_window_start <= outstanding);
+}
+
+test "sendReliable splits a large message into fragments that reassemble" {
+    // The reassembly tests feed hand-built fragments, so the send-side split
+    // never runs in them: dropping the round-up in `total_parts`, which loses
+    // the tail of every message that is not an exact multiple of the part
+    // size, left the whole suite green. Drive the real splitter and put its
+    // datagrams back through the parser.
+    var sender: Peer = .{};
+    sender.alive = true;
+    // A null socket makes sendTo a no-op, so the datagrams stay in `pending`
+    // where the test can read them; no real I/O is involved.
+    var sock: udp.Socket = .{};
+
+    // Deliberately not a multiple of the part size: the last fragment is the
+    // one a missing round-up drops.
+    var msg: [3000]u8 = undefined;
+    for (&msg, 0..) |*b, i| b.* = @truncate(i *% 31 +% 7);
+    try sender.sendReliable(&sock, &msg);
+
+    var receiver: Peer = .{};
+    receiver.alive = true;
+    var delivered: ?[]const u8 = null;
+    var parts: usize = 0;
+    for (&sender.pending) |*p| {
+        if (!p.used) continue;
+        const info = packet.parseChanneled(p.data[0..p.len]) orelse continue;
+        if (!info.fragmented) continue;
+        parts += 1;
+        if (receiver.takeFragment(info)) |full| delivered = full;
+    }
+    try std.testing.expect(parts > 1); // it really did fragment
+    try std.testing.expect(delivered != null);
+    if (delivered) |d| try std.testing.expectEqualSlices(u8, &msg, d);
 }
 
 test "two interleaved fragmented messages reassemble independently" {

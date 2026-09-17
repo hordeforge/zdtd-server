@@ -2,333 +2,251 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>zdtd - operator console</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/static/xterm.css">
-<style>/* zdtd-tokens */
+<style>/* zdtd-tokens: paper cockpit. Ground/cards/pills/type from recompile DESIGN.md; the chart + console log are the one TMOG terminal. */
 :root{
- color-scheme:dark;
- --bg:#050507;
- --bg2:#0a0a0c;
- --panel:#111113;
- --panel2:#17171a;
- --inset:#080809;
- --well:#070708;
- --line:#1e1e21;
- --line2:#27272a;
- --edge:#333338;
- --fg:#ededed;
- --muted:#9a9aa0;
- --muted2:#6f6f77;
- --muted3:#52525b;
- --acc:#ededed;
- --acc2:#d4d4d8;
- --acc-soft:rgba(237,237,237,.07);
- --acc-ghost:rgba(237,237,237,.035);
- --acc-ring:rgba(237,237,237,.14);
- --ok:#22c55e;
- --ok-soft:rgba(34,197,94,.08);
- --warn:#eab308;
- --warn-soft:rgba(234,179,8,.10);
- --err:#ef4444;
- --err-soft:rgba(239,68,68,.07);
- --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
- --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Berkeley Mono","JetBrains Mono",monospace;
- --r:0px;
- --r2:2px;
+  color-scheme:light;
+  --bg:#f7f5f0;
+  --bg2:#efece4;
+  --panel:#fffdf8;
+  --panel2:#efece4;
+  --inset:#efece4;
+  --well:#fffdf8;
+  --line:#e2ddd0;
+  --line2:#cfc8b6;
+  --edge:#5f686f;
+  --fg:#1a1d21;
+  --muted:#4d545c;
+  --muted2:#5f686f;
+  --acc:#0f5c37;
+  --acc-ink:#0c4a2d;
+  --acc-soft:#dcefe1;
+  --acc-ghost:rgba(15,92,55,.06);
+  --acc-ring:rgba(15,92,55,.28);
+  --ok:#0f5c37;
+  --ok-soft:#dcefe1;
+  --warn:#6b4a00;
+  --warn-soft:#f2dbaa;
+  --err:#8a2318;
+  --err-border:#d59f96;
+  --err-soft:#f5c9c2;
+  --term:#101418;
+  --term2:#1a2129;
+  --term-line:#2a333d;
+  --term-band1:#22303c;
+  --term-band2:#2c3f4e;
+  --term-text:#d8e2dc;
+  --term-faint:#7f8b94;
+  --term-key:#ffd8a0;
+  --term-ok:#5fd894;
+  --term-bad:#ff7364;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --r:10px;
+  --r-ctl:9px;
+  --shadow:0 1px 2px rgba(26,29,33,.06),0 8px 24px -12px rgba(26,29,33,.18);
 }
 /* /zdtd-tokens */
 *{box-sizing:border-box}
 html{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
-body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line2)}
-a:hover{border-bottom-color:var(--fg)}
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,pre:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
-code{font-family:var(--mono);font-size:0.74em;background:var(--inset);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:0;color:var(--muted);letter-spacing:-0.01em}
-kbd{font-family:var(--mono);font-size:0.62em;line-height:1;background:var(--inset);border:1px solid var(--line2);border-radius:0;padding:0.14em 0.28em;color:var(--muted2)}
-.skip-link{position:absolute;left:0.75rem;top:-100%;background:var(--fg);color:var(--bg);padding:0.3rem 0.5rem;border-radius:0 0 2px 2px;font-weight:600;font-size:0.72rem;z-index:30;text-decoration:none;border:0}
+body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--acc-ink);text-decoration:underline;text-decoration-color:rgba(15,92,55,.35);text-underline-offset:2px}
+a:hover{color:var(--acc-ink)}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,pre:focus-visible,canvas:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+code{font-family:var(--mono);font-size:0.82em;background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
+kbd{font-family:var(--mono);font-size:0.78em;line-height:1;background:var(--bg2);border:1px solid var(--line2);border-radius:6px;padding:0.14em 0.32em;color:var(--muted)}
+.skip-link{position:absolute;left:0.75rem;top:-100%;background:var(--fg);color:var(--bg);padding:0.4rem 0.6rem;border-radius:0 0 6px 6px;font-weight:600;font-size:0.85rem;z-index:30;text-decoration:none}
 .skip-link:focus{top:0}
 
-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:0.6rem;min-height:34px;padding:0 0.75rem;background:var(--bg2);border-bottom:1px solid var(--line)}
-header::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--fg);opacity:.9}
-.hdr-left{display:flex;align-items:baseline;gap:0.65rem;min-width:0}
-.mark{width:20px;height:20px;display:grid;place-items:center;background:var(--fg);color:var(--bg);font-family:var(--mono);font-weight:800;font-size:0.56rem;letter-spacing:0.06em;line-height:1;flex:none}
-.word{display:inline;margin:0;font-family:var(--mono);font-size:0.74rem;font-weight:700;letter-spacing:0.05em;color:var(--fg);text-transform:uppercase}
-.ver{font-family:var(--mono);font-size:0.585rem;letter-spacing:0.025em;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30rem}
-.state{margin-left:0.2rem;display:inline-flex;align-items:center;gap:0.32rem;font-family:var(--mono);font-size:0.585rem;letter-spacing:0.07em;text-transform:uppercase;font-weight:600;color:var(--muted2);border-left:1px solid var(--line);padding-left:0.6rem}
-.state::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px var(--ok-soft)}
-.header-actions{margin-left:auto;display:flex;align-items:center;gap:0.3rem}
-.refresh-ctrl{display:inline-flex;align-items:center;gap:0.3rem;color:var(--muted2);font-family:var(--mono);font-size:0.625rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:500;cursor:pointer;user-select:none}
-.refresh-ctrl input{appearance:none;width:20px;height:12px;border-radius:999px;background:var(--line2);border:1px solid var(--line);position:relative;cursor:pointer;flex:none}
-.refresh-ctrl input::after{content:"";position:absolute;top:1px;left:1px;width:8px;height:8px;border-radius:50%;background:var(--muted);transition:transform .12s,background .12s}
-.refresh-ctrl input:checked{background:var(--fg);border-color:var(--fg)}
-.refresh-ctrl input:checked::after{transform:translateX(8px);background:var(--bg)}
-.btn{appearance:none;min-height:26px;padding:0 0.5rem;border-radius:0;border:1px solid var(--line2);background:transparent;color:var(--muted);font-family:var(--mono);font-size:0.65rem;font-weight:600;letter-spacing:0.03em;cursor:pointer;white-space:nowrap}
-.btn:hover{color:var(--fg);border-color:var(--edge);background:var(--panel2)}
+header{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line)}
+.top{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:0.75rem;min-height:56px;padding:0 1.5rem}
+.hdr-left{display:flex;align-items:center;gap:0.6rem;min-width:0}
+.mark{width:22px;height:22px;display:grid;place-items:center;background:var(--acc);color:#fff;font-family:var(--mono);font-weight:700;font-size:0.7rem;line-height:1;flex:none;border-radius:6px}
+.mark::before{content:">_"}
+.word{display:inline;margin:0;font-family:var(--sans);font-size:1.02rem;font-weight:700;letter-spacing:-0.01em;color:var(--fg)}
+.ver{font-family:var(--mono);font-size:0.72rem;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:26rem}
+.glance{margin-left:0.4rem;display:inline-flex;align-items:center;gap:0.4rem;font-family:var(--sans);font-size:0.78rem;font-weight:600;color:var(--muted)}
+.glance .lamp{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.glance .lamp.bad{background:var(--err)}
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:0.5rem}
+.refresh-ctrl{display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-family:var(--sans);font-size:0.85rem;font-weight:500;cursor:pointer;user-select:none;min-height:44px}
+.refresh-ctrl input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line2);border:1px solid var(--line2);position:relative;cursor:pointer;flex:none;margin:0}
+.refresh-ctrl input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .12s}
+.refresh-ctrl input:checked{background:var(--acc);border-color:var(--acc)}
+.refresh-ctrl input:checked::after{transform:translateX(14px)}
+.btn{appearance:none;min-height:44px;padding:0 1.1rem;border-radius:var(--r-ctl);border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:var(--sans);font-size:0.9rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--bg2)}
 .btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--acc);border-color:var(--acc-ink);color:#fff}
+.btn.primary:hover{background:var(--acc-ink)}
 .logout-form{margin:0}
-.logout-form .btn{border-color:transparent;color:var(--muted2);background:transparent;padding:0 0.35rem;font-weight:500}
-.logout-form .btn:hover{color:var(--err);background:transparent;text-decoration:underline;text-underline-offset:3px}
+.logout-form .btn{border-color:transparent;color:var(--err);background:transparent;font-weight:500}
+.logout-form .btn:hover{background:var(--err-soft)}
 
-.layout{display:flex;min-height:calc(100dvh - 34px);align-items:stretch}
-.page-nav{position:sticky;top:34px;z-index:19;display:flex;flex-direction:column;gap:0;width:148px;flex:none;align-items:stretch;padding:0.35rem 0;background:var(--bg2);border-right:1px solid var(--line);overflow:auto;scrollbar-width:none;align-self:flex-start;max-height:calc(100dvh - 34px)}
-.page-nav::-webkit-scrollbar{display:none}
-.tab{appearance:none;background:transparent;border:0;border-left:2px solid transparent;color:var(--muted2);font-family:var(--mono);font-size:0.635rem;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;min-height:32px;padding:0 0.65rem 0 0.6rem;display:flex;align-items:center;gap:0.45rem;cursor:pointer;white-space:nowrap;text-align:left;width:100%}
-.tab i{font-style:normal;color:var(--muted3);font-size:0.60rem;letter-spacing:0.04em;min-width:1.15rem}
-.tab:hover{color:var(--fg);background:var(--panel)}
-.tab[aria-selected=true]{color:var(--fg);border-left-color:var(--fg);background:var(--panel)}
-.tab[aria-selected=true] i{color:var(--fg)}
+.layout{max-width:1080px;margin:0 auto;padding:1.5rem 1.5rem 5.5rem;display:grid;gap:1.25rem;align-content:start}
+.page-nav{position:sticky;top:56px;z-index:19;display:flex;gap:0.25rem;background:transparent;padding:0;overflow:auto}
+.tab{appearance:none;background:transparent;border:0;color:var(--muted);font-family:var(--sans);font-size:0.92rem;font-weight:500;min-height:44px;padding:0.45rem 0.7rem;display:inline-flex;align-items:center;gap:0.45rem;cursor:pointer;white-space:nowrap;border-radius:8px;flex:none}
+.tab i{font-style:normal;color:var(--muted2);font-family:var(--mono);font-size:0.72rem;min-width:1.15rem}
+.tab:hover{color:var(--fg);background:var(--bg2)}
+.tab[aria-selected=true]{color:var(--acc-ink);background:var(--acc-soft);font-weight:600}
+.tab[aria-selected=true] i{color:var(--acc-ink)}
 
-main{flex:1;min-width:0;padding:0.7rem 0.75rem 2rem;display:grid;gap:0.55rem;max-width:none;margin:0;align-content:start}
-section{background:var(--panel);border:1px solid var(--line);border-radius:0;overflow:hidden}
-section h2{margin:0;font-family:var(--mono);font-size:0.60rem;font-weight:650;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted);padding:0.5rem 0.7rem;border-bottom:1px solid var(--line);background:var(--inset);display:flex;align-items:center;justify-content:space-between;gap:0.5rem}
-section h2::after{content:attr(data-count);font-family:var(--mono);font-size:0.58rem;letter-spacing:0.04em;color:var(--muted3);font-weight:500}
-section h3{margin:0;font-family:var(--mono);font-size:0.585rem;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted2);padding:0.45rem 0.7rem;border-top:1px solid var(--line);background:transparent}
-section h3:first-of-type{border-top:0}
+main{display:grid;gap:1.25rem;min-width:0;align-content:start}
+section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+section h2{margin:0;font-family:var(--sans);font-size:1.05rem;font-weight:600;letter-spacing:-0.01em;color:var(--fg);padding:1rem 1.25rem 0.35rem}
+section h3{margin:0;font-family:var(--sans);font-size:0.9rem;font-weight:600;color:var(--fg);padding:0.9rem 1.25rem 0.3rem}
+.deck-sub{margin:0;padding:0 1.25rem 0.6rem;color:var(--muted);font-size:0.85rem}
 section > div[id]{padding:0}
 #players{overflow:auto}
 
-table{width:100%;border-collapse:collapse;font-size:0.775rem}
-th,td{padding:0.42rem 0.6rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
-thead th{color:var(--muted2);font-family:var(--mono);font-weight:600;font-size:0.595rem;letter-spacing:0.06em;text-transform:uppercase;background:var(--inset);white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:0.95rem}
+th,td{padding:0.75rem 0.95rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+thead th{color:var(--muted);font-family:var(--sans);font-weight:600;font-size:0.78rem;letter-spacing:0.06em;text-transform:uppercase;background:var(--bg2);white-space:nowrap}
 tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
-td{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.74rem;color:var(--fg)}
-tbody tr:hover td{background:rgba(255,255,255,.015)}
+tbody tr:hover td{background:rgba(15,92,55,.05)}
+td{font-family:var(--sans);font-variant-numeric:tabular-nums;color:var(--fg)}
+td.num,th.num,td .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.88rem}
 .num{font-variant-numeric:tabular-nums}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:0;background:transparent;border-top:1px solid var(--line);margin:0;list-style:none}
-.stat{padding:0.5rem 0.65rem;display:flex;flex-direction:column;gap:0.1rem;min-width:0;border-left:1px solid var(--line);border-bottom:1px solid var(--line);background:transparent}
-.stat:first-child{border-left:0}
-@media(min-width:60rem){.stat{border-bottom:0}.grid{border-bottom:1px solid var(--line)}}
-.stat b{display:block;font-family:var(--mono);font-size:0.84rem;font-weight:650;line-height:1.1;letter-spacing:-0.02em;color:var(--fg);overflow-wrap:anywhere}
-.stat b.num{font-variant-numeric:tabular-nums}
-.stat span{color:var(--muted2);font-family:var(--mono);font-size:0.545rem;letter-spacing:0.06em;line-height:1.15;text-transform:uppercase;font-weight:500}
+.pill{display:inline-flex;align-items:center;gap:0.3rem;border:1px solid var(--line2);border-radius:999px;padding:0.22rem 0.6rem;font-family:var(--sans);font-size:0.75rem;font-weight:600;letter-spacing:0.02em;color:var(--muted);background:var(--bg2);white-space:nowrap}
+.pill.ok{background:var(--acc-soft);border-color:#9cc6aa;color:var(--acc-ink)}
+.pill.bad{background:var(--err-soft);border-color:var(--err-border);color:var(--err)}
+.pill.warn{background:var(--warn-soft);border-color:#cbab72;color:var(--warn)}
+
+.glance-band{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;margin:0}
+.glance-cell{padding:0.9rem 1.1rem;border-left:1px solid var(--line);min-width:0}
+.glance-cell:first-child{border-left:0}
+.glance-cell b{display:block;font-family:var(--sans);font-size:1.7rem;font-weight:700;line-height:1.2;letter-spacing:-0.02em;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.glance-cell span{color:var(--muted);font-family:var(--sans);font-size:0.78rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600}
+.glance-cell .pill{margin-top:0.3rem}
+.glance-cell .glance-pill{display:inline-flex;margin-top:0.4rem}
 .warn-text{color:var(--warn)}
-.stat.warn b{color:var(--warn)}
 
-footer{padding:0.45rem 0.75rem;color:var(--muted2);font-family:var(--mono);font-size:0.585rem;letter-spacing:0.03em;border-top:1px solid var(--line);background:var(--bg2);display:flex;flex-wrap:wrap;gap:0.3rem 0.65rem;align-items:center}
-footer a{color:var(--muted2);border-bottom:1px solid transparent}
-footer a:hover{color:var(--fg);border-bottom-color:var(--line2)}
-#refresh-state{color:var(--muted2)}
+.meter{height:10px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);overflow:hidden;margin-top:0.45rem}
+.meter i{display:block;height:100%;border-radius:999px;background:var(--acc);transition:width .5s ease-out}
+.meter.hot i{background:var(--err)}
 
-.cmd-row{display:flex;gap:0.35rem;align-items:center;padding:0.5rem 0.65rem;background:var(--inset);border-bottom:1px solid var(--line)}
-.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:30px;background:var(--well);border:1px solid var(--line2);color:var(--fg);padding:0.35rem 0.5rem;border-radius:0;font-family:var(--mono);font-size:0.79rem}
-.cmd-row input[type=text]::placeholder{color:var(--muted3)}
-.cmd-row input[type=text]:focus{outline:none;border-color:var(--edge);background:var(--panel)}
-.cmd-row button{background:var(--fg);color:var(--bg);border:1px solid var(--fg);border-radius:0;padding:0 0.65rem;min-height:30px;min-width:3.4rem;font-family:var(--mono);font-size:0.68rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer}
-.cmd-row button:hover{background:#fff;border-color:#fff}
-.cmd-row button:disabled{opacity:.5;cursor:wait}
-.quick-row{display:flex;flex-wrap:wrap;gap:0.22rem;padding:0.35rem 0.65rem;border-top:1px solid var(--line);background:transparent}
-.quick-cmd{background:transparent;border:1px solid var(--line);color:var(--muted2);border-radius:0;padding:0.18rem 0.4rem;min-height:22px;font-family:var(--mono);font-size:0.605rem;font-weight:600;letter-spacing:0.02em;cursor:pointer;white-space:nowrap}
-.quick-cmd:hover{color:var(--fg);border-color:var(--line2);background:var(--inset)}
-.row-cmd{background:transparent;border:1px solid transparent;color:var(--muted2);border-radius:0;padding:0.12rem 0.3rem;min-height:20px;font-family:var(--mono);font-size:0.60rem;font-weight:600;cursor:pointer;white-space:nowrap}
-.row-cmd:hover{color:var(--err);background:var(--err-soft);border-color:rgba(239,68,68,.14)}
-.console-term{display:none;position:relative;height:19rem;margin:0 0.65rem 0.6rem;padding:0.15rem;background:var(--well);border:1px solid var(--line);border-radius:0;overflow:hidden}
-.console-term.active{display:block}
-.console-term .xterm{height:100%}
-#apm-chart-wrap{background:var(--inset);border:1px solid var(--line);border-radius:0;padding:0.4rem;margin:0.55rem 0.65rem}
-.chart-tools{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.3rem}
-.chart-tools .meta{font-family:var(--mono);font-size:0.57rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted2)}
-#apm-canvas{width:100%;height:10rem;display:block;border-radius:0;background:var(--well);border:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0;background:transparent;border-top:1px solid var(--line);margin:0;list-style:none;padding:0}
+.stat{padding:0.8rem 1.1rem;min-width:0;border-left:1px solid var(--line);border-bottom:1px solid var(--line);background:transparent}
+.stat:first-child{border-left:0}
+.stat b{display:block;font-family:var(--sans);font-size:1.25rem;font-weight:700;line-height:1.2;letter-spacing:-0.01em;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat span{color:var(--muted);font-family:var(--sans);font-size:0.72rem;letter-spacing:0.05em;line-height:1.4;text-transform:uppercase;font-weight:600}
+.stat .pill{margin-top:0.25rem}
+
+footer{border-top:1px solid var(--line);background:var(--panel)}
+.foot{max-width:1080px;margin:0 auto;padding:1rem 1.5rem 2rem;color:var(--muted);font-family:var(--sans);font-size:0.85rem;display:flex;flex-wrap:wrap;gap:0.3rem 0.65rem;align-items:center;min-height:44px}
+.foot a{color:var(--muted)}
+#refresh-state{color:var(--muted)}
+
+.cmd-row{display:flex;gap:0.5rem;align-items:center;padding:0.9rem 1.25rem;background:var(--panel);border-bottom:1px solid var(--line)}
+.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:44px;background:var(--panel);border:1.5px solid var(--line2);color:var(--fg);padding:0.65rem 0.8rem;border-radius:var(--r-ctl);font-family:var(--mono);font-size:0.95rem;width:100%}
+.cmd-row input[type=text]::placeholder{color:var(--muted2)}
+.cmd-row input[type=text]:hover{border-color:var(--muted2)}
+.cmd-row input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
+.cmd-row button{background:var(--acc);color:#fff;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);padding:0 1.25rem;min-height:44px;min-width:4.5rem;font-family:var(--sans);font-size:0.9rem;font-weight:600;cursor:pointer}
+.cmd-row button:hover{background:var(--acc-ink)}
+.cmd-row button:disabled{opacity:.45;cursor:wait}
+.cmd-help{margin:0;padding:0.8rem 1.25rem;color:var(--muted);font-size:0.85rem;border-bottom:1px solid var(--line)}
+.quick-row{display:flex;flex-wrap:wrap;gap:0.5rem;padding:0.8rem 1.25rem;border-top:1px solid var(--line);background:transparent}
+.quick-cmd{background:var(--panel);border:1px solid var(--line2);color:var(--muted);border-radius:999px;padding:0.45rem 0.85rem;min-height:44px;font-family:var(--mono);font-size:0.82rem;font-weight:500;cursor:pointer;white-space:nowrap}
+.quick-cmd:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
+.mod-btn{background:var(--panel);border:1px solid var(--line2);color:var(--fg);border-radius:var(--r-ctl);padding:0.5rem 0.85rem;min-height:44px;min-width:4.5rem;font-family:var(--sans);font-size:0.85rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.mod-btn:hover{background:var(--bg2)}
+.deck{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.deck-head{display:flex;align-items:center;gap:0.6rem;background:var(--bg2);padding:0.7rem 1.25rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.deck-head .job{font-family:var(--mono);font-size:0.8rem;font-weight:600;letter-spacing:0.06em;color:var(--fg);text-transform:uppercase}
+.deck-head .meta{margin-left:auto}
+.deck-body{padding:1.1rem 1.25rem 1.25rem}
+#apm-chart-wrap{background:var(--term);border:1px solid var(--term-line);border-radius:var(--r);box-shadow:var(--shadow);padding:0.9rem 1rem 1rem;margin:0}
+.chart-tools{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap}
+.chart-tools .meta{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.04em;color:var(--term-faint);font-variant-numeric:tabular-nums}
+.chart-tools-right{display:inline-flex;align-items:center;gap:0.6rem;flex-wrap:wrap}
+.chart-tools .refresh-ctrl{color:var(--term-faint);min-height:44px}
+.chart-tools .refresh-ctrl input{background:var(--term-line);border-color:var(--term-line)}
+.chart-tools .refresh-ctrl input:checked{background:var(--term-ok);border-color:var(--term-ok)}
+#apm-canvas{width:100%;height:11rem;display:block;border-radius:6px;background:var(--term);border:0;touch-action:pan-y;cursor:crosshair}
 a,button,input,[tabindex]{scroll-margin-top:6.5rem}
-pre.cmd-out,pre.cmd-log{margin:0 0.65rem 0.6rem;background:var(--well);border:1px solid var(--line);border-radius:0;padding:0.5rem 0.6rem;font-family:var(--mono);font-size:0.73rem;line-height:1.5;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
+pre.cmd-out,pre.cmd-log{margin:0 1.25rem 1.1rem;background:var(--term);color:var(--term-text);border:1px solid var(--term-line);border-radius:var(--r);padding:0.9rem 1rem;font-family:var(--mono);font-size:0.88rem;line-height:1.7;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
 #cmd-out{padding:0}
-.pbar{display:inline-block;width:4rem;height:3px;border-radius:0;background:var(--line2);vertical-align:middle;overflow:hidden;margin-right:0.3rem}
-.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--fg);border-radius:0}
-pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{color:var(--muted)}
-#players:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
-#players table{min-width:34rem}
-.logs-tools{display:flex;gap:0.3rem;align-items:center;margin:0;padding:0.45rem 0.65rem;border-bottom:1px solid var(--line);background:var(--inset)}
-.logs-tools select,.logs-tools input[type=search]{min-height:28px;background:var(--well);border:1px solid var(--line2);color:var(--fg);border-radius:0;padding:0.2rem 0.4rem;font-family:var(--mono);font-size:0.71rem}
-.logs-tools select:focus,.logs-tools input[type=search]:focus{outline:none;border-color:var(--edge)}
-.logs-tools input[type=search]{flex:1;min-width:12rem}
-.logs-tools input[type=search]::placeholder{color:var(--muted3)}
-#logs-view{margin:0;background:transparent;border:0;border-radius:0;padding:0;font-family:var(--mono);font-size:0.71rem;overflow:auto;max-height:26rem}
-.log-line{display:flex;gap:0.45rem;align-items:baseline;padding:0.22rem 0.65rem;line-height:1.4;border-bottom:1px solid var(--line)}
-.log-line:last-child{border-bottom:0}
-.log-badge{flex:none;min-width:2.4rem;text-transform:uppercase;font-size:0.575rem;letter-spacing:0.06em;font-weight:700}
-.log-ts{flex:none;color:var(--muted2);font-variant-numeric:tabular-nums;font-size:0.66rem}
-.log-msg{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;color:var(--fg);font-size:0.71rem}
-.lvl-debug .log-badge,.lvl-info .log-badge{color:var(--muted2);font-weight:600}
-.lvl-warn .log-badge{color:var(--warn);font-weight:700}
-.lvl-err .log-badge{color:var(--err);font-weight:700}
-.lvl-crit .log-badge{color:var(--err);font-weight:700;text-decoration:underline;text-underline-offset:2px}
-.meta{color:var(--muted);font-family:var(--mono);font-size:0.66rem}
-#status .meta,#apm .meta,#players .meta,#console-log .meta,#logs-view .meta{padding:0.8rem}
-.noscript{margin:0;padding:0.45rem 0.75rem;background:var(--warn-soft);color:var(--warn);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:0.71rem}
-@media(max-width:48rem){
- .layout{flex-direction:column}
- .page-nav{position:sticky;top:34px;width:100%;flex-direction:row;border-right:0;border-bottom:1px solid var(--line);max-height:none;padding:0 0.4rem;gap:0;overflow:auto}
- .tab{border-left:0;border-bottom:2px solid transparent;padding:0 0.5rem;min-height:32px;flex:none;width:auto}
- .tab[aria-selected=true]{border-left-color:transparent;border-bottom-color:var(--fg);background:transparent}
- header{padding:0 0.6rem;gap:0.45rem}
+pre .in{color:var(--term-faint)} .err{color:var(--term-bad)} .ok{color:var(--term-ok)} pre .meta{color:var(--term-faint)}
+#players:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+@media(min-width:55rem){#players table{min-width:34rem}#modules table{min-width:34rem}}
+.meta{color:var(--muted);font-family:var(--sans);font-size:0.85rem}
+.empty-note{color:var(--muted)}
+.flush{margin-top:0}
+#status .meta,#apm .meta,#players .meta,#console-log .meta{padding:0.8rem}
+.noscript{margin:0;padding:0.6rem 1.25rem;background:var(--warn-soft);color:var(--warn);border-bottom:1px solid var(--line);font-family:var(--sans);font-size:0.85rem}
+@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--inset:Canvas;--well:Canvas;--bg2:Canvas;--fg:CanvasText;--muted:CanvasText;--muted2:CanvasText;--line:CanvasText;--line2:CanvasText;--edge:CanvasText;--acc:LinkText;--acc-ink:LinkText;--term:Canvas;--term2:Canvas;--term-line:CanvasText;--term-text:CanvasText;--term-faint:CanvasText}body{background:Canvas;color:CanvasText}header,.page-nav,footer,section,.deck,.glance-band{background:Canvas;border-color:CanvasText}.top,.foot{border-color:CanvasText}main{border:0}a{color:LinkText}input,button,select{border:1px solid ButtonText;background:Canvas;color:CanvasText}input::placeholder{color:GrayText}.err{color:Mark;background:MarkText}.ok,.warn-text{color:MarkText}#apm-canvas{border:1px solid CanvasText}.mark{background:CanvasText;color:Canvas}.pill{border:1px solid CanvasText}.meter{border:1px solid CanvasText}pre.cmd-out,pre.cmd-log{background:Canvas;color:CanvasText;border:1px solid CanvasText}}
+@media(max-width:55rem){
+ .top{padding:0.5rem 1rem;flex-wrap:wrap;row-gap:0.25rem}
+ .layout{padding:1rem 1rem 4rem}
+ .page-nav{position:sticky;top:0;overflow:auto;max-width:100vw}
  header .ver{display:none}
- .state{border-left:0;padding-left:0}
- main{padding:0.55rem}
- .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .glance{margin-left:0}
+ .header-actions{margin-left:0;width:100%;justify-content:flex-start}
+ main{padding:0}
+ .glance-band{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .glance-cell:nth-child(3){border-left:0}
  .cmd-row{flex-wrap:wrap}
  .cmd-row input[type=text]{min-width:0}
+ .chart-tools .meta{flex:1 1 100%}
+ .deck-head .meta{flex:1 1 100%;margin-left:0}
+ .chart-tools-right{width:100%;justify-content:flex-start}
+ #apm-chart-wrap{padding:0.7rem}
+ table.stack thead{display:none}
+ table.stack tbody tr{display:block;border-bottom:1px solid var(--line);padding:0.4rem 0}
+ table.stack tbody td,table.stack tbody th[scope=row]{display:grid;grid-template-columns:8.5rem minmax(0,1fr);gap:0.5rem;border:0;padding:0.4rem 0.95rem;align-items:baseline;white-space:normal;overflow-wrap:anywhere}
+ table.stack tbody td::before,table.stack tbody th[scope=row]::before{content:attr(data-label);font-family:var(--sans);font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted2)}
+ table.stack tbody td:last-child::before{content:""}
+ table.stack tbody td.empty-note{display:block;white-space:normal}
+ table.stack tbody td.empty-note::before{content:""}
 }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}html{scroll-behavior:auto}}
-@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:GrayText}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav,#logs-view{background:Canvas;color:CanvasText;border-color:CanvasText}.cmd-row input[type=text],.cmd-row button,.tab,.logs-tools select,.logs-tools input[type=search]{border:1px solid ButtonText}.tab[aria-selected=true]{border-bottom-color:Highlight}.err,.noscript,.warn-text{color:MarkText;background:Mark}}
-*{box-sizing:border-box}
-html{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
-body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line2)}
-a:hover{border-bottom-color:var(--fg)}
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,pre:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
-code{font-family:var(--mono);font-size:0.78em;background:var(--inset);border:1px solid var(--line);padding:0.12em 0.35em;border-radius:4px;color:var(--muted)}
-kbd{font-family:var(--mono);font-size:0.65em;line-height:1;background:var(--inset);border:1px solid var(--line2);border-bottom-width:1px;border-radius:3px;padding:0.18em 0.32em;color:var(--muted2)}
-.skip-link{position:absolute;left:0.75rem;top:-100%;background:var(--fg);color:var(--bg);padding:0.35rem 0.6rem;border-radius:0 0 6px 6px;font-weight:600;font-size:0.75rem;z-index:30;text-decoration:none;border:0}
-.skip-link:focus{top:0}
-
-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:0.75rem;min-height:40px;padding:0 0.9rem;background:var(--bg2);border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:baseline;gap:0.6rem;min-width:0}
-.brand strong{font-family:var(--mono);font-size:0.82rem;font-weight:700;letter-spacing:0.04em;color:var(--fg)}
-.brand span{font-family:var(--mono);font-size:0.62rem;letter-spacing:0.02em;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:32rem}
-.status{margin-left:0.25rem;display:inline-flex;align-items:center;gap:0.35rem;font-family:var(--mono);font-size:0.60rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;color:var(--muted2)}
-.status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px var(--ok-soft)}
-.header-actions{margin-left:auto;display:flex;align-items:center;gap:0.4rem}
-.refresh-ctrl{display:inline-flex;align-items:center;gap:0.35rem;color:var(--muted2);font-family:var(--mono);font-size:0.66rem;letter-spacing:0.04em;text-transform:uppercase;font-weight:500;cursor:pointer;user-select:none}
-.refresh-ctrl input{appearance:none;width:22px;height:14px;border-radius:999px;background:var(--line2);border:1px solid var(--line);position:relative;cursor:pointer;flex:none}
-.refresh-ctrl input::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:50%;background:var(--muted);transition:transform .14s,background .14s}
-.refresh-ctrl input:checked{background:var(--fg);border-color:var(--fg)}
-.refresh-ctrl input:checked::after{transform:translateX(8px);background:var(--bg)}
-.btn{appearance:none;min-height:28px;padding:0 0.6rem;border-radius:5px;border:1px solid var(--line2);background:transparent;color:var(--muted);font-family:var(--mono);font-size:0.68rem;font-weight:600;letter-spacing:0.03em;cursor:pointer}
-.btn:hover{color:var(--fg);border-color:var(--edge);background:var(--panel2)}
-.btn-primary{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:700}
-.btn-primary:hover{background:#fff;color:#000;border-color:#fff}
-.logout-form{margin:0}
-.logout-form .btn{border-color:transparent;color:var(--muted2);background:transparent}
-.logout-form .btn:hover{color:var(--err);background:var(--err-soft);border-color:transparent}
-
-.page-nav{position:sticky;top:40px;z-index:19;display:flex;align-items:stretch;gap:0;padding:0 0.9rem;background:var(--bg2);border-bottom:1px solid var(--line);overflow:auto;scrollbar-width:none}
-.page-nav::-webkit-scrollbar{display:none}
-.tab{appearance:none;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted2);font-family:var(--mono);font-size:0.68rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;min-height:36px;padding:0 0.6rem;margin-bottom:-1px;cursor:pointer;white-space:nowrap}
-.tab:hover{color:var(--fg)}
-.tab[aria-selected=true]{color:var(--fg);border-bottom-color:var(--fg)}
-
-main{padding:0.85rem 0.9rem 2rem;display:grid;gap:0.65rem;max-width:76rem;width:100%;margin-inline:auto}
-section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
-section h2{margin:0;font-family:var(--mono);font-size:0.62rem;font-weight:650;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);padding:0.6rem 0.85rem;border-bottom:1px solid var(--line);background:transparent}
-section h3{margin:0;font-family:var(--mono);font-size:0.60rem;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted2);padding:0.5rem 0.85rem;border-top:1px solid var(--line);background:transparent}
-section h3:first-of-type{border-top:0}
-section > div[id]{padding:0}
-#players{overflow:auto}
-
-table{width:100%;border-collapse:collapse;font-size:0.79rem}
-th,td{padding:0.45rem 0.65rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
-thead th{color:var(--muted2);font-family:var(--mono);font-weight:600;font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;background:var(--inset);white-space:nowrap}
-tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
-td{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.77rem;color:var(--fg)}
-tbody tr:hover td,tbody tr:hover th{background:rgba(255,255,255,.02)}
-.num{font-variant-numeric:tabular-nums}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr));gap:0;background:transparent;border-top:1px solid var(--line);margin:0;list-style:none}
-.stat{padding:0.55rem 0.8rem;display:flex;flex-direction:column;gap:0.15rem;min-width:0;border-left:1px solid var(--line)}
-.stat:first-child{border-left:0}
-.stat b{display:block;font-family:var(--mono);font-size:0.86rem;font-weight:600;line-height:1.15;letter-spacing:-0.01em;color:var(--fg);overflow-wrap:anywhere}
-.stat b.num{font-variant-numeric:tabular-nums}
-.stat span{color:var(--muted2);font-family:var(--mono);font-size:0.58rem;letter-spacing:0.05em;line-height:1.2;text-transform:uppercase;font-weight:500}
-.warn-text{color:var(--warn)}
-.stat.warn b{color:var(--warn)}
-
-footer{padding:0.55rem 0.9rem;color:var(--muted2);font-family:var(--mono);font-size:0.62rem;letter-spacing:0.02em;border-top:1px solid var(--line);background:var(--bg2);display:flex;flex-wrap:wrap;gap:0.4rem 0.75rem;align-items:center}
-footer a{color:var(--muted2);border-bottom:1px solid transparent}
-footer a:hover{color:var(--fg);border-bottom-color:var(--line2)}
-#refresh-state{color:var(--muted2)}
-
-.cmd-row{display:flex;gap:0.45rem;align-items:center;padding:0.6rem 0.8rem;background:var(--inset);border-bottom:1px solid var(--line)}
-.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:32px;background:var(--well);border:1px solid var(--line2);color:var(--fg);padding:0.4rem 0.6rem;border-radius:5px;font-family:var(--mono);font-size:0.82rem}
-.cmd-row input[type=text]::placeholder{color:var(--muted3)}
-.cmd-row input[type=text]:focus{outline:none;border-color:var(--edge);background:var(--panel)}
-.cmd-row button{background:var(--fg);color:var(--bg);border:1px solid var(--fg);border-radius:5px;padding:0 0.75rem;min-height:32px;min-width:3.8rem;font-family:var(--mono);font-size:0.70rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;cursor:pointer}
-.cmd-row button:hover{background:#fff;border-color:#fff}
-.cmd-row button:disabled{opacity:.5;cursor:wait}
-.quick-row{display:flex;flex-wrap:wrap;gap:0.28rem;padding:0.45rem 0.8rem;border-top:1px solid var(--line);background:transparent}
-.quick-cmd{background:var(--inset);border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:0.22rem 0.5rem;min-height:24px;font-family:var(--mono);font-size:0.64rem;font-weight:600;cursor:pointer;white-space:nowrap}
-.quick-cmd:hover{color:var(--fg);border-color:var(--line2)}
-.row-cmd{background:transparent;border:1px solid var(--line2);color:var(--muted2);border-radius:4px;padding:0.15rem 0.4rem;min-height:24px;font-family:var(--mono);font-size:0.64rem;font-weight:600;cursor:pointer;white-space:nowrap}
-.row-cmd:hover{color:var(--err);border-color:rgba(229,72,77,.35);background:var(--err-soft)}
-.console-term{display:none;position:relative;height:19rem;margin:0 0.8rem 0.75rem;padding:0.25rem;background:var(--well);border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
-.console-term.active{display:block}
-.console-term .xterm{height:100%}
-#apm-chart-wrap{background:var(--inset);border:1px solid var(--line);border-radius:var(--r-sm);padding:0.5rem;margin:0.65rem 0.8rem}
-.chart-tools{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.35rem}
-.chart-tools .meta{font-family:var(--mono);font-size:0.60rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted2)}
-#apm-canvas{width:100%;height:10rem;display:block;border-radius:4px;background:var(--well);border:1px solid var(--line)}
-.chart-tools-right{display:inline-flex;align-items:center;gap:0.45rem}
-#chart-history{min-height:26px;background:var(--well);border:1px solid var(--line2);color:var(--fg);border-radius:5px;padding:0.1rem 0.3rem;font-family:var(--mono);font-size:0.62rem}
+#chart-history{min-height:44px;background:var(--term2);border:1px solid var(--term-line);color:var(--term-text);border-radius:var(--r-ctl);padding:0.3rem 0.5rem;font-family:var(--mono);font-size:0.8rem}
 .chart-tools .meta{font-variant-numeric:tabular-nums}
-@keyframes zdtd-flash{0%{background:var(--acc-soft)}100%{background:transparent}}
+@keyframes zdtd-flash{0%{background:var(--acc-ghost)}100%{background:transparent}}
 .stat.flash,tbody tr.flash{animation:zdtd-flash 1.1s ease-out}
-a,button,input,[tabindex]{scroll-margin-top:6.5rem}
-pre.cmd-out,pre.cmd-log{margin:0 0.8rem 0.75rem;background:var(--well);border:1px solid var(--line);border-radius:var(--r-sm);padding:0.55rem 0.65rem;font-family:var(--mono);font-size:0.76rem;line-height:1.5;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
-#cmd-out{padding:0}
-.pbar{display:inline-block;width:4.25rem;height:4px;border-radius:999px;background:var(--line2);vertical-align:middle;overflow:hidden;margin-right:0.35rem}
-.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:999px}
-pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{color:var(--muted)}
-#players:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
-#players table{min-width:36rem}
-.logs-tools{display:flex;gap:0.4rem;align-items:center;margin:0;padding:0.55rem 0.8rem;border-bottom:1px solid var(--line);background:var(--inset)}
-.logs-tools select,.logs-tools input[type=search]{min-height:30px;background:var(--well);border:1px solid var(--line2);color:var(--fg);border-radius:5px;padding:0.25rem 0.5rem;font-family:var(--mono);font-size:0.75rem}
-.logs-tools select:focus,.logs-tools input[type=search]:focus{outline:none;border-color:var(--edge)}
-.logs-tools input[type=search]{flex:1;min-width:12rem}
-.logs-tools input[type=search]::placeholder{color:var(--muted3)}
-#logs-view{margin:0;background:transparent;border:0;border-radius:0;padding:0;font-family:var(--mono);font-size:0.74rem;overflow:auto;max-height:26rem}
-.log-line{display:flex;gap:0.5rem;align-items:baseline;padding:0.26rem 0.8rem;line-height:1.45;border-bottom:1px solid var(--line)}
-.log-line:last-child{border-bottom:0}
-.log-badge{flex:none;min-width:2.6rem;text-transform:uppercase;font-size:0.60rem;letter-spacing:0.06em;font-weight:700}
-.log-ts{flex:none;color:var(--muted2);font-variant-numeric:tabular-nums;font-size:0.69rem}
-.log-msg{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;color:var(--fg);font-size:0.74rem}
-.lvl-debug .log-badge,.lvl-info .log-badge{color:var(--muted2);font-weight:600}
-.lvl-warn .log-badge{color:var(--warn);font-weight:700}
-.lvl-err .log-badge{color:var(--err);font-weight:700}
-.lvl-crit .log-badge{color:var(--err);font-weight:700;text-decoration:underline;text-underline-offset:2px}
-.meta{color:var(--muted);font-family:var(--mono);font-size:0.68rem}
-#status .meta,#apm .meta,#players .meta,#console-log .meta,#logs-view .meta{padding:0.9rem}
-.noscript{margin:0;padding:0.5rem 0.9rem;background:var(--warn-soft);color:var(--warn);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:0.74rem}
-@media(max-width:44rem){
- header{padding:0 0.7rem;gap:0.5rem}
- header .brand span{display:none}
- .page-nav{padding:0 0.6rem;top:40px}
- main{padding:0.6rem}
- .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
- .cmd-row{flex-wrap:wrap}
- .cmd-row input[type=text]{min-width:0}
-}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}html{scroll-behavior:auto}}
-@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:GrayText}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav,#logs-view{background:Canvas;color:CanvasText;border-color:CanvasText}.cmd-row input[type=text],.cmd-row button,.tab,.logs-tools select,.logs-tools input[type=search]{border:1px solid ButtonText}.tab[aria-selected=true]{border-bottom-color:Highlight}.err,.noscript,.warn-text{color:MarkText;background:Mark}}</style>
+@media(prefers-reduced-motion:reduce){.stat.flash,tbody tr.flash{animation:none}.meter i{transition:none}.refresh-ctrl input::after{transition:none}}
+</style>
+<noscript><style>section[hidden]{display:block}.page-nav,#apm-chart-wrap,.refresh-ctrl,#refresh-now,.glance-band{display:none}</style></noscript>
 </head>
 <body>
+<!-- zdtd-direction: paper cockpit. THESIS: the operator console is a recompile paper spec sheet with one TMOG terminal pasted to it; it refuses the dark-ops-dashboard default and the tab-buried health answer. OWN-WORLD: warm paper ground, white 10px cards, single green signal, pills carry state words, sans reads / mono is the machine, one dark terminal reserved for the tick chart + console log. STORY: the operator sees whole-server health in the first viewport, reads exact numbers beside every signal, and runs the same admin commands as telnet. FIRST VIEWPORT: glance band (lamp + 4 key stats + tick tape), terminal chart deck beside the job-file record, players ledger below; console aft. FORM: user-pinned mix of tmog/DESIGN_RULES.md and recompile/DESIGN.md; no concept roll. FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md. -->
 <a class="skip-link" href="#main-content">Skip to dashboard</a>
 <noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
 <header>
-<div class="hdr-left"><span class="mark">ZD</span><h1 class="word">zdtd</h1><span class="ver">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · operator console</span></div>
-<span class="state" role="status" aria-label="Operator console live">operational</span>
+<div class="top"><div class="hdr-left"><span class="mark" aria-hidden="true"></span><h1 class="word">zdtd</h1><span class="ver">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · operator console</span></div>
+<span class="glance" role="status" aria-label="Server state"><span class="lamp" id="glance-lamp" aria-hidden="true"></span><span id="glance-word">operational</span></span>
 <div class="header-actions">
 <label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> auto</label>
-<button type="button" class="btn" id="refresh-now" aria-controls="status apm players console logs settings modules">Refresh</button>
+<button type="button" class="btn" id="refresh-now" aria-controls="status apm players console settings modules">Refresh</button>
 <form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit" class="btn">Sign out</button></form>
-</div>
+</div></div>
 </header>
 <div class="layout">
-<nav class="page-nav" role="tablist" aria-label="Dashboard sections">
+<nav class="page-nav" role="tablist" aria-label="Dashboard sections" aria-orientation="horizontal">
 <button type="button" class="tab" id="tab-status" role="tab" aria-selected="true" aria-controls="status-section"><i>01</i> Status</button>
-<button type="button" class="tab" id="tab-apm" role="tab" aria-selected="false" aria-controls="apm-section"><i>02</i> Performance</button>
-<button type="button" class="tab" id="tab-players" role="tab" aria-selected="false" aria-controls="players-section"><i>03</i> Players</button>
-<button type="button" class="tab" id="tab-console" role="tab" aria-selected="false" aria-controls="console-section"><i>04</i> Console</button>
-<button type="button" class="tab" id="tab-logs" role="tab" aria-selected="false" aria-controls="logs-section"><i>05</i> Logs</button>
-<button type="button" class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="settings-section"><i>06</i> Settings</button>
-<button type="button" class="tab" id="tab-modules" role="tab" aria-selected="false" aria-controls="modules-section"><i>07</i> Modules</button>
+<button type="button" class="tab" id="tab-apm" tabindex="-1" role="tab" aria-selected="false" aria-controls="apm-section"><i>02</i> Performance</button>
+<button type="button" class="tab" id="tab-players" tabindex="-1" role="tab" aria-selected="false" aria-controls="players-section"><i>03</i> Players</button>
+<button type="button" class="tab" id="tab-console" tabindex="-1" role="tab" aria-selected="false" aria-controls="console-section"><i>04</i> Console</button>
+<button type="button" class="tab" id="tab-settings" tabindex="-1" role="tab" aria-selected="false" aria-controls="settings-section"><i>05</i> Settings</button>
+<button type="button" class="tab" id="tab-modules" tabindex="-1" role="tab" aria-selected="false" aria-controls="modules-section"><i>06</i> Modules</button>
 </nav>
 <main id="main-content" tabindex="-1">
-<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><div class="chart-tools"><span class="meta" id="apm-chart-caption">collecting samples…</span><span class="chart-tools-right"><label class="refresh-ctrl" for="chart-history">history</label><select id="chart-history" aria-label="History window"><option value="120000">2 min</option><option value="300000">5 min</option><option value="600000">10 min</option></select><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></span></div><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
+<div class="glance-band" role="region" aria-label="Server health at a glance"><div class="glance-cell"><b id="glance-tick">–</b><span>server tick</span></div><div class="glance-cell"><b id="glance-players">–</b><span>players in world</span></div><div class="glance-cell"><b id="glance-p99">–</b><span>tick p99 / 50 ms budget</span><div class="meter" role="img" id="glance-meter" aria-label="tick p99 within budget"><i id="glance-meter-fill" style="width:0%"></i></div></div><div class="glance-cell"><b id="glance-state">–</b><span id="glance-state-label">blood moon</span><span class="pill ok glance-pill" id="glance-pill">live</span></div></div>
+<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Tick tape</h2><p class="deck-sub">Live latency on the terminal. Numbers beside every signal; exact values in Performance.</p><div class="deck" id="apm-chart-wrap"><div class="deck-head"><span class="job">tick · live</span><span class="meta" id="apm-chart-caption">collecting samples…</span><span class="chart-tools-right"><label class="refresh-ctrl" for="chart-history">history</label><select id="chart-history" aria-label="History window"><option value="120000">2 min</option><option value="300000">5 min</option><option value="600000">10 min</option></select><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></span></div><div class="deck-body"><canvas id="apm-canvas" width="600" height="150" role="img" tabindex="0" aria-label="Live tick latency and section means." aria-describedby="apm-chart-data apm-chart-live apm-chart-keys">Live performance graphs require JavaScript.</canvas></div><p id="apm-chart-live" class="sr-only" role="status">collecting samples…</p><p id="apm-chart-keys" class="sr-only">Focus and use left and right arrows to inspect past samples, Escape for live. Drag across the chart to inspect.</p><table id="apm-chart-data" class="sr-only"><caption>Newest tick section means, milliseconds</caption><thead><tr><th scope="col">Section</th><th scope="col">Mean</th></tr></thead><tbody></tbody></table></div><h3>Job file</h3><div id="status" hx-get="/partials/status" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
+<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 1s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
 <section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
 <h2 id="console-heading">Console</h2>
-<p id="cmd-help" class="meta" style="margin:0;padding:0.55rem 0.8rem;color:var(--muted);font-size:0.72rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console: <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
+<p class="deck-sub">Same commands as the admin telnet console. Destructive verbs ask first.</p>
+<div class="deck"><div class="deck-head"><span class="job">admin · stdout</span><span class="meta" id="cmd-help-inline">history keeps the last 24 lines</span></div><div class="deck-body">
+<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
+<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
+<label for="cmd-line" class="sr-only">Admin command</label>
+<input type="text" name="line" id="cmd-line" placeholder="help · status · settime day" aria-describedby="cmd-help-inline" autocomplete="off" spellcheck="false" maxlength="256" required>
+<button type="submit">Run</button>
+</form>
 <div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
 <button type="button" class="quick-cmd" data-cmd="help">help</button>
 <button type="button" class="quick-cmd" data-cmd="status">status</button>
@@ -337,54 +255,30 @@ pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .met
 <button type="button" class="quick-cmd" data-cmd="settime day">day</button>
 <button type="button" class="quick-cmd" data-cmd="settime night">night</button>
 </div>
-<div id="console-term" class="console-term"></div>
-<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
-<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
-<label for="cmd-line" class="sr-only">Admin command</label>
-<input type="text" name="line" id="cmd-line" placeholder="help · status · settime day" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
-<button type="submit">Run</button>
-</form>
 <div id="cmd-out" aria-live="polite" aria-atomic="true"></div>
 <div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
+</div></div>
 </section>
 <section id="settings-section" role="tabpanel" aria-labelledby="tab-settings" hidden>
 <h2 id="settings-heading">Settings</h2>
 <div id="settings" aria-live="polite" aria-atomic="true" hx-get="/partials/settings" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading settings…</p></div>
 </section>
 <section id="modules-section" role="tabpanel" aria-labelledby="tab-modules" hidden><h2 id="modules-heading">Modules</h2><div id="modules" role="region" aria-label="Loaded module list" tabindex="0" hx-get="/partials/modules" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading modules…</p></div></section>
-<section id="logs-section" role="tabpanel" aria-labelledby="tab-logs" hidden>
-<h2 id="logs-heading">Server log</h2>
-<div class="logs-tools" role="group" aria-label="Log filters">
-<label class="sr-only" for="log-level">Minimum severity</label>
-<select id="log-level">
-<option value="debug" selected>All</option>
-<option value="info">info +</option>
-<option value="warn">warn +</option>
-<option value="err">err +</option>
-<option value="crit">crit</option>
-</select>
-<label class="sr-only" for="log-filter">Filter log messages</label>
-<input type="search" id="log-filter" placeholder="Filter: chunk, join, error…" autocomplete="off" spellcheck="false">
-<span id="logs-state" class="meta" role="status">Loading…</span>
-</div>
-<div id="logs-view" role="region" aria-label="Server log lines" tabindex="0"><p class="meta">Loading server log…</p></div>
-<p class="meta" style="margin:0;padding:0.5rem 0.8rem;border-top:1px solid var(--line)">Newest first · 2048 lines kept · <code>loglevel</code> controls verbosity.</p>
-</section>
 </main>
 </div>
-<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/api/logs.json">logs.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></footer>
-<script src="/static/xterm.js"></script>
-<script src="/static/addon-fit.js"></script>
+<footer><div class="foot"><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></div></footer>
 <script>
 /* zdtd-ts:shell */
 "use strict";
 //! Webui dashboard shell: htmx-style poller for the [hx-get] partials,
-//! auto-refresh toggle, and the admin console form (POST /api/cmd).
+//! auto-refresh toggle, the admin console form (POST /api/cmd), and the
+//! hx-post modlet forms (POST /api/modlet, delegated: the Modules partial
+//! re-renders every 5s so per-form wiring would die on each poll swap).
 //! Compiled by scripts/build-webui-ts.sh and injected into shell.html.
 const FETCH_TIMEOUT_MS = 8000;
 const HTTP_UNAUTHORIZED = 401;
 const POLL_SLOW_MS = 5000;
-const POLL_FAST_MS = 2000;
+const POLL_FAST_MS = 1000;
 function fetchWithTimeout(url, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -432,6 +326,9 @@ function flashChanges(el) {
 // stays a thin wiring function. Inlining it would push hxPoll past the
 // 60-line function cap the strict preset enforces; the
 // @rikalabs/no-single-use-trivial-helpers off entry covers this.
+// createSwap replaces the region's content with the fetched partial
+// (hx-swap is always innerHTML on this page; the attribute stays in markup
+// as documentation of the intent, but this poller is the implementation).
 function createSwap(el, u) {
     let inFlight = false;
     // Force=true skips the focus guard: Refresh now and post-command refreshes
@@ -524,7 +421,7 @@ const APM_POLL_MS = POLL_FAST_MS;
 // The right-edge value animation spans exactly one poll interval, so the
 // drawn line catches up to the true value just as the next sample arrives.
 const EDGE_LERP_MS = APM_POLL_MS;
-const CHART_SAMPLES_MAX = 300;
+const CHART_SAMPLES_MAX = 600;
 const TICK_BUDGET_MS = 50;
 const COMPRESS_TAU_MS = 60000;
 const APM_JSON_URL = '/api/apm.json';
@@ -591,22 +488,23 @@ const VALUE_GRID_STEPS_MS = [
     VALUE_GRID_250_MS,
     VALUE_GRID_500_MS,
 ];
-const SECTION_KEYS = ['net_mean_ns', 'sim_mean_ns', 'repl_mean_ns', 'stream_mean_ns', 'save_mean_ns'];
+const SECTION_NS_KEYS = ['net_mean_ns', 'sim_mean_ns', 'repl_mean_ns', 'stream_mean_ns', 'save_mean_ns'];
+const SECTION_NAMES = ['network', 'sim', 'replication', 'chunk stream', 'save'];
 function cssVar(name) {
     const styles = globalThis.getComputedStyle(document.documentElement);
     return styles.getPropertyValue(name).trim() || '#6b7280';
 }
-const CHART_LINE_COLOR = cssVar('--fg');
-const CHART_GHOST_COLOR = cssVar('--muted');
-const CHART_GRID_COLOR = cssVar('--line');
-const CHART_LABEL_COLOR = cssVar('--muted2');
-const CHART_BUDGET_COLOR = cssVar('--warn');
+const CHART_LINE_COLOR = cssVar('--term-ok');
+const CHART_GHOST_COLOR = cssVar('--term-faint');
+const CHART_GRID_COLOR = cssVar('--term-line');
+const CHART_LABEL_COLOR = cssVar('--term-faint');
+const CHART_BUDGET_COLOR = cssVar('--term-key');
 const SECTION_FILL_COLORS = [
-    cssVar('--line2'),
-    cssVar('--edge'),
-    cssVar('--muted3'),
-    cssVar('--muted2'),
-    cssVar('--muted'),
+    cssVar('--term-line'),
+    cssVar('--term-band1'),
+    cssVar('--term-band2'),
+    cssVar('--term-faint'),
+    cssVar('--term-text'),
 ];
 const chartCanvas = queryEl('#apm-canvas');
 const chartCtx = chartCanvas.getContext('2d');
@@ -615,9 +513,28 @@ const historyEl = queryEl('#chart-history');
 const chartCaption = document.querySelector('#apm-chart-caption');
 const chartWrap = document.querySelector('#apm-chart-wrap');
 function loadHistoryMs() {
+    // URL wins (?history=120000), then the stored preference, then default.
+    // Unknown values fall back down the chain (missing beats fake).
+    const param = Number(new URLSearchParams(globalThis.location.search).get('history'));
+    if (HISTORY_WINDOW_MS.includes(param)) {
+        return param;
+    }
     // oxlint-disable-next-line @rikalabs/no-json-parse-default-fallback -- deliberate: localStorage holds a bare integer written by this page, not JSON; Number() parse failure falls back to the default window
     const stored = Number(globalThis.localStorage.getItem(HISTORY_STORAGE_KEY));
     return HISTORY_WINDOW_MS.includes(stored) ? stored : HISTORY_DEFAULT_MS;
+}
+function syncHistoryUrl(ms) {
+    const url = new URL(globalThis.location.href);
+    if (url.searchParams.get('history') === String(ms)) {
+        return;
+    }
+    if (ms === HISTORY_DEFAULT_MS) {
+        url.searchParams.delete('history');
+    }
+    else {
+        url.searchParams.set('history', String(ms));
+    }
+    globalThis.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 const samples = [];
 let chartCompressed = true;
@@ -828,6 +745,112 @@ function markChartStale() {
     }
     setCaption(CAPTION_STALE);
 }
+// Non-visual equivalent of the canvas: the newest section means as a
+// visually-hidden table, updated with the caption so screen-reader operators
+// get the same numbers the graph shows.
+const chartTableBody = document.querySelector('#apm-chart-data tbody');
+function updateChartTable() {
+    if (chartTableBody === null || samples.length === 0) {
+        return;
+    }
+    const newest = samples[samples.length - 1];
+    const rows = SECTION_NAMES
+        .map((name, i) => `<tr><th scope="row">${name}</th><td>${newest.sectionsMs[i].toFixed(2)} ms</td></tr>`)
+        .join('');
+    if (chartTableBody.dataset.sig !== rows) {
+        chartTableBody.innerHTML = rows;
+        chartTableBody.dataset.sig = rows;
+    }
+}
+// Keyboard scrub: the canvas is focusable and ArrowLeft/Right move an
+// inspection cursor through the samples; the readout (same element as the
+// live caption) announces that sample. Any new sample or resize clears the
+// cursor back to live.
+let scrubIndex = null;
+const chartLive = document.querySelector('#apm-chart-live');
+function scrubSample() {
+    if (scrubIndex === null || scrubIndex < 0 || scrubIndex >= samples.length) {
+        return null;
+    }
+    return samples[scrubIndex];
+}
+function announceScrub() {
+    if (chartLive === null) {
+        return;
+    }
+    const sample = scrubSample();
+    if (sample === null) {
+        return;
+    }
+    const ageS = Math.max(0, Math.round((Date.now() - sample.at) / SEC_MS));
+    const sections = sample.sectionsMs.map((ms, i) => `${SECTION_NAMES[i]} ${ms.toFixed(1)}`).join(', ');
+    const text = `sample ${ageS}s ago: mean ${sample.tickMeanMs.toFixed(1)}, p99 ${sample.tickP99Ms.toFixed(1)} ms. ${sections} ms`;
+    if (chartLive.textContent !== text) {
+        chartLive.textContent = text;
+    }
+}
+// Cockpit glance band: whole-server health in the first viewport, driven by
+// the same apm sample as the terminal chart (no second fetch).
+// Percent scale for the glance-band budget meter.
+const PERCENT_MAX = 100;
+const glanceTick = document.querySelector('#glance-tick');
+const glancePlayers = document.querySelector('#glance-players');
+const glanceP99 = document.querySelector('#glance-p99');
+const glanceMeter = document.querySelector('#glance-meter');
+const glanceMeterFill = document.querySelector('#glance-meter-fill');
+const glanceState = document.querySelector('#glance-state');
+const glancePill = document.querySelector('#glance-pill');
+const glanceLamp = document.querySelector('#glance-lamp');
+const glanceWord = document.querySelector('#glance-word');
+function setText(el, text) {
+    if (el !== null && el.textContent !== text) {
+        el.textContent = text;
+    }
+}
+function updateGlance(newest) {
+    setText(glanceTick, String(newest.tick));
+    setText(glancePlayers, `${newest.entered}/${newest.joined}`);
+    const p99 = newest.tickP99Ms;
+    setText(glanceP99, `${p99.toFixed(1)} ms`);
+    const frac = Math.min(1, p99 / TICK_BUDGET_MS);
+    if (glanceMeterFill !== null) {
+        glanceMeterFill.style.width = `${Math.round(frac * PERCENT_MAX)}%`;
+    }
+    const over = p99 > TICK_BUDGET_MS;
+    if (glanceMeter !== null) {
+        glanceMeter.classList.toggle('hot', over);
+        glanceMeter.setAttribute('aria-label', over ? 'tick p99 over the 50 ms budget' : 'tick p99 within budget');
+    }
+    const blood = newest.bloodmoonActive;
+    setText(glanceState, blood ? 'ACTIVE' : 'idle');
+    if (glancePill !== null) {
+        const cls = blood ? 'pill bad glance-pill' : 'pill ok glance-pill';
+        if (glancePill.className !== cls) {
+            glancePill.className = cls;
+        }
+        setText(glancePill, blood ? 'blood moon' : 'live');
+    }
+    if (glanceLamp !== null) {
+        glanceLamp.classList.toggle('bad', over);
+    }
+    setText(glanceWord, over ? 'over budget' : 'operational');
+}
+function announceLive() {
+    if (chartLive === null || scrubIndex !== null) {
+        return;
+    }
+    const newest = samples[samples.length - 1];
+    const text = `live: mean ${newest.tickMeanMs.toFixed(1)}, p99 ${newest.tickP99Ms.toFixed(1)} ms`;
+    if (chartLive.textContent !== text) {
+        chartLive.textContent = text;
+    }
+    updateGlance(newest);
+}
+function clearScrub() {
+    scrubIndex = null;
+}
+const SCRUB_BACK = -1;
+const SCRUB_FWD = 1;
 // Leading-edge markers plus their paired numeric readout: the eye anchor and
 // the stable-position numbers for the newest mean/p99 values.
 function finishChartFrame(ctx, nowMs) {
@@ -847,6 +870,30 @@ function finishChartFrame(ctx, nowMs) {
     // Tabular digits via the caption's monospace face; setCaption no-ops
     // when nothing changed.
     setCaption(`mean ${edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs).toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+    updateChartTable();
+    announceLive();
+}
+function drawScrubCursor(ctx, nowMs) {
+    const sample = scrubSample();
+    if (sample === null) {
+        return;
+    }
+    const plot = plotDims();
+    const x = EDGE_PAD_PX + chartX(nowMs - sample.at, chartMaxAgeMs, plot.w, chartCompressed);
+    const yAt = (ms) => EDGE_PAD_PX + plot.h * (1 - ms / chartYMaxMs);
+    ctx.save();
+    ctx.strokeStyle = CHART_LINE_COLOR;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, EDGE_PAD_PX);
+    ctx.lineTo(x, EDGE_PAD_PX + plot.h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, yAt(sample.tickMeanMs), EDGE_MARKER_RADIUS_PX + 1, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_LINE_COLOR;
+    ctx.fill();
+    ctx.restore();
 }
 function drawChart(nowMs) {
     if (chartCtx === null || !sizeChartCanvas()) {
@@ -880,20 +927,48 @@ function drawChart(nowMs) {
     drawStackedSections(ctx, nowMs);
     drawSeries(ctx, nowMs);
     drawBudgetLine(ctx);
+    drawScrubCursor(ctx, nowMs);
     finishChartFrame(ctx, nowMs);
-    if (chartRafId === null) {
+    // The frame loop animates the edge lerp and the wall-clock slide.
+    // Under reduced motion the per-sample redraw is the still frame.
+    // Once the lerp settles the slide moves sub-pixel per frame, so the
+    // chain stops and the next sample fetch redraws (fetchApmSample draws
+    // on every sample; scrub and resize draw on demand).
+    if (reduceMotion === null) {
+        reduceMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
+    }
+    const lerping = (edgeMean !== null && nowMs - edgeMean.startAt < EDGE_LERP_MS) ||
+        (edgeP99 !== null && nowMs - edgeP99.startAt < EDGE_LERP_MS);
+    if (!reduceMotion.matches && lerping && chartRafId === null) {
         chartRafId = globalThis.requestAnimationFrame(() => {
             chartRafId = null;
             drawChart(Date.now());
         });
     }
 }
+function stepScrub(dir) {
+    if (samples.length === 0) {
+        return;
+    }
+    if (scrubIndex === null) {
+        scrubIndex = samples.length - 1;
+    }
+    else {
+        scrubIndex = Math.min(samples.length - 1, Math.max(0, scrubIndex + dir));
+    }
+    announceScrub();
+    drawChart(Date.now());
+}
 function toSample(json) {
     return {
         at: Date.now(),
         tickMeanMs: json.tick_mean_ns / NS_PER_MS,
         tickP99Ms: json.tick_p99_ns / NS_PER_MS,
-        sectionsMs: SECTION_KEYS.map((key) => json[key] / NS_PER_MS),
+        sectionsMs: SECTION_NS_KEYS.map((key) => json[key] / NS_PER_MS),
+        tick: json.tick,
+        joined: json.joined,
+        entered: json.entered,
+        bloodmoonActive: json.bm,
     };
 }
 function pushSample(sample) {
@@ -902,6 +977,8 @@ function pushSample(sample) {
         samples.splice(0, samples.length - CHART_SAMPLES_MAX);
     }
     pruneHistory();
+    // New data invalidates the inspection cursor; the live edge is the truth.
+    clearScrub();
 }
 function startEdgeLerp() {
     const count = samples.length;
@@ -969,10 +1046,58 @@ function chartStop() {
     chartStopRaf();
 }
 const tabButtons = [...document.querySelectorAll('.tab')];
-function selectTab(button) {
+// Deep-linkable tabs: #players selects the Players tab, plain / reloads to
+// Status. Unknown hashes fall back to Status (missing beats fake).
+function tabSlug(button) {
+    return button.id.replace(/^tab-/u, '');
+}
+function tabBySlug(slug) {
+    return tabButtons.find((tab) => tabSlug(tab) === slug) ?? null;
+}
+function tabPanel(button) {
+    const controls = button.getAttribute('aria-controls');
+    if (controls === null) {
+        return null;
+    }
+    return document.querySelector(`#${controls}`);
+}
+function panelPolls(panel) {
+    return polls.filter((p) => panel.contains(p));
+}
+// Only the visible tab's regions poll. Hidden panels keep their last markup
+// but stop fetching, so an operator staring at Status does not pay for four
+// invisible 1s fetch+innerHTML swaps per second.
+function updatePolling() {
+    const on = autoEl.checked && !document.hidden;
+    const selected = tabButtons.find((tab) => tab.getAttribute('aria-selected') === 'true') ?? tabButtons[0];
+    const activePanel = selected ? tabPanel(selected) : null;
+    const active = new Set(activePanel ? panelPolls(activePanel) : []);
+    for (const pollEl of polls) {
+        if (on && active.has(pollEl)) {
+            pollEl._hxStart?.();
+        }
+        else {
+            pollEl._hxStop?.();
+        }
+    }
+    const showChart = on && activePanel !== null && activePanel.id === 'status-section';
+    if (showChart) {
+        chartStart();
+    }
+    else {
+        chartStop();
+    }
+}
+function selectTab(button, pushHash = true) {
     for (const tab of tabButtons) {
         const isOn = tab === button;
         tab.setAttribute('aria-selected', String(isOn));
+        if (isOn) {
+            tab.removeAttribute('tabindex');
+        }
+        else {
+            tab.tabIndex = -1;
+        }
         const controls = tab.getAttribute('aria-controls');
         if (controls === null) {
             continue;
@@ -983,16 +1108,43 @@ function selectTab(button) {
         }
         panel.hidden = !isOn;
     }
-    drawChart(Date.now());
-    void fetchApmSample();
+    if (pushHash) {
+        const slug = tabSlug(button);
+        const hash = slug === 'status' ? '' : `#${slug}`;
+        globalThis.history.replaceState(null, '', `${globalThis.location.pathname}${globalThis.location.search}${hash}`);
+    }
+    updatePolling();
+    // The chart lives on the Status tab; only refresh it when visible.
+    if (button.id === 'tab-status') {
+        drawChart(Date.now());
+        void fetchApmSample();
+    }
+}
+function selectInitialTab() {
+    const slug = globalThis.location.hash.replace(/^#/u, '');
+    if (slug === '') {
+        selectTab(tabButtons[0], false);
+        return;
+    }
+    const target = tabBySlug(slug);
+    if (target === null) {
+        // Unknown hash names no tab: show Status and drop the stray hash
+        // rather than displaying one thing under another's URL.
+        selectTab(tabButtons[0], true);
+        return;
+    }
+    selectTab(target, false);
 }
 function wireTabs() {
     for (const tab of tabButtons) {
         tab.addEventListener('click', () => selectTab(tab));
     }
     const nav = document.querySelector('.page-nav');
+    // Tabs are a vertical tablist on desktop, horizontal bar on mobile; both
+    // axes plus Home/End move per the APG tabs pattern.
     nav?.addEventListener('keydown', (e) => {
-        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') {
+        const keys = new Set(['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End']);
+        if (!keys.has(e.key)) {
             return;
         }
         const index = tabButtons.findIndex((tab) => tab === document.activeElement);
@@ -1001,22 +1153,94 @@ function wireTabs() {
         }
         e.preventDefault();
         const last = tabButtons.length - 1;
-        let next = e.key === 'ArrowRight' ? index + 1 : index - 1;
-        if (next > last) {
+        let next = index;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            next = index + 1 > last ? 0 : index + 1;
+        }
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            next = index - 1 < 0 ? last : index - 1;
+        }
+        else if (e.key === 'Home') {
             next = 0;
         }
-        if (next < 0) {
+        else {
             next = last;
         }
         selectTab(tabButtons[next]);
         tabButtons[next].focus();
     });
 }
+function scrubToEvent(e) {
+    if (samples.length === 0 || !sizeChartCanvas()) {
+        return;
+    }
+    const plot = plotDims();
+    if (plot.w <= 0) {
+        return;
+    }
+    const rect = chartCanvas.getBoundingClientRect();
+    const frac = (e.clientX - rect.left - EDGE_PAD_PX) / plot.w;
+    const nowMs = Date.now();
+    let best = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < samples.length; i++) {
+        const x = EDGE_PAD_PX + chartX(nowMs - samples[i].at, chartMaxAgeMs, plot.w, chartCompressed);
+        const dist = Math.abs(x / plot.w - frac);
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+        }
+    }
+    scrubIndex = best;
+    announceScrub();
+    drawChart(nowMs);
+}
+// Pointer scrub: drag across the canvas to inspect the nearest sample.
+// Reuses the keyboard cursor (same readout, same Escape to clear).
+function initScrubPointer() {
+    let scrubPointer = false;
+    chartCanvas.addEventListener('pointerdown', (e) => {
+        if (samples.length < 2) {
+            return;
+        }
+        scrubPointer = true;
+        chartCanvas.setPointerCapture(e.pointerId);
+        scrubToEvent(e);
+    });
+    chartCanvas.addEventListener('pointermove', (e) => {
+        if (scrubPointer) {
+            scrubToEvent(e);
+        }
+    });
+    chartCanvas.addEventListener('pointerup', () => {
+        scrubPointer = false;
+    });
+    chartCanvas.addEventListener('pointercancel', () => {
+        scrubPointer = false;
+    });
+}
+function initChartScrub() {
+    chartCanvas.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Escape') {
+            return;
+        }
+        e.preventDefault();
+        if (e.key === 'Escape') {
+            clearScrub();
+            drawChart(Date.now());
+        }
+        else {
+            stepScrub(e.key === 'ArrowLeft' ? SCRUB_BACK : SCRUB_FWD);
+        }
+    });
+    initScrubPointer();
+}
 function initChart() {
     compressEl.addEventListener('change', () => {
         chartCompressed = compressEl.checked;
         drawChart(Date.now());
     });
+    initChartScrub();
     historyEl.value = String(historyMs);
     historyEl.addEventListener('change', () => {
         const chosen = Number(historyEl.value);
@@ -1024,6 +1248,7 @@ function initChart() {
             return;
         }
         historyMs = chosen;
+        syncHistoryUrl(chosen);
         try {
             globalThis.localStorage.setItem(HISTORY_STORAGE_KEY, String(historyMs));
             // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: persistence is best-effort; the chosen window still applies to this session
@@ -1038,6 +1263,8 @@ function initChart() {
 }
 wireTabs();
 initChart();
+selectInitialTab();
+globalThis.addEventListener('hashchange', () => selectInitialTab());
 function applyRefresh() {
     const on = autoEl.checked;
     const active = on && !document.hidden;
@@ -1048,20 +1275,7 @@ function applyRefresh() {
     else if (on) {
         stateLabel = 'Auto-refresh paused while tab is hidden';
     }
-    for (const pollEl of polls) {
-        if (active) {
-            pollEl._hxStart?.();
-        }
-        else {
-            pollEl._hxStop?.();
-        }
-    }
-    if (active) {
-        chartStart();
-    }
-    else {
-        chartStop();
-    }
+    updatePolling();
     if (refreshState) {
         refreshState.textContent = stateLabel;
     }
@@ -1093,6 +1307,9 @@ async function submitCommand() {
     }
     input.setCustomValidity('');
     const verb = line.split(/\s+/u, 1)[0].toLowerCase();
+    // Sync point: the destructive verbs the server accepts live in
+    // parseCommand (src/server/admin.zig). A new data-loss verb added there
+    // needs an entry here or it ships without a confirm.
     const destructive = new Set(['shutdown', 'killall', 'ka', 'kick', 'kickall', 'ban', 'wipeplayer']);
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
     if (destructive.has(verb) && !globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
@@ -1144,6 +1361,72 @@ refreshNowButton.addEventListener('click', () => {
     void refreshNow();
 });
 autoEl.addEventListener('change', applyRefresh);
+// Delegated hx-post handler (modlet Enable/Disable forms in the Modules
+// partial). The partial re-renders every 5s, so per-form wiring would die on
+// each poll swap; document-level delegation survives the swap. Forms without
+// hx-post (notably #cmd-form) are ignored.
+async function submitHxForm(form) {
+    const url = form.getAttribute('hx-post') ?? '';
+    const targetSel = form.getAttribute('hx-target') ?? '';
+    const target = targetSel === '' ? null : document.querySelector(targetSel);
+    if (target === null) {
+        return;
+    }
+    const button = form.querySelector('button[type="submit"], button:not([type])');
+    if (button) {
+        button.disabled = true;
+    }
+    target.setAttribute('aria-busy', 'true');
+    try {
+        const fd = new FormData(form);
+        const r = await fetchWithTimeout(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- SAFETY: browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
+            body: new URLSearchParams(fd),
+        });
+        if (r.status === HTTP_UNAUTHORIZED) {
+            globalThis.location.assign('/login');
+            return;
+        }
+        if (!r.ok) {
+            throw new Error(`HTTP ${r.status}`);
+        }
+        target.innerHTML = await r.text();
+        flashChanges(target);
+        // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: the failure is rendered inline below (role=alert); rethrowing here would be an unhandled rejection in the submit listener
+    }
+    catch (err) {
+        const status = err instanceof Error ? err.message : 'network error';
+        const detail = status.startsWith('HTTP')
+            ? `${status}; no change was applied. Retry.`
+            : 'not received; its outcome is unknown. Reload before retrying.';
+        const prior = target.querySelector('p.modlet-err');
+        if (prior) {
+            prior.remove();
+        }
+        const note = document.createElement('p');
+        note.className = 'err modlet-err';
+        note.setAttribute('role', 'alert');
+        note.textContent = `Modlet action failed (${detail})`;
+        target.prepend(note);
+    }
+    finally {
+        target.removeAttribute('aria-busy');
+        if (button) {
+            button.disabled = false;
+        }
+    }
+}
+document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('hx-post')) {
+        return;
+    }
+    e.preventDefault();
+    void submitHxForm(form);
+});
 document.addEventListener('visibilitychange', applyRefresh);
 cmdForm.addEventListener('submit', (e) => {
     e.preventDefault();

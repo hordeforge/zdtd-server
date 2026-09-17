@@ -10,16 +10,36 @@ const ecs_world = @import("world.zig");
 /// instead of one tick spawning the whole population.
 const initial_population_batch: u32 = 4;
 
-/// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
-/// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
-/// seconds_per_hour is the sim's time scale default (30 s per in-game hour);
-/// stock serverconfig DayNightLength (default 60 min day) sets the real scale.
 /// In-game ticks per day (DayTimeToWorldTime: 24000 ticks, 1000 per hour).
 pub const ticks_per_day: u64 = 24000;
+
+/// Stock GameStats[11] TimeOfDayIncPerSec: world-time ticks advanced per real
+/// second, `24000 / (DayNightLength * 60)` in **integer** arithmetic
+/// (RE ../7dtd-engine-research/docs/admin/server-lifecycle.md:168; live
+/// `getgamestat TimeOfDayIncPerSec` = 6 at the default 60 real-minute day).
+/// The truncation is the point: a 60 minute day nominally runs 6.667 ticks/s
+/// but stock advances 6, so it really takes 24000/6 = 4000 real seconds. A day
+/// over 400 real minutes divides to 0 (frozen world time), which is what the
+/// stock expression does; `WorldClock.tick` reproduces that rather than
+/// inventing a floor.
+pub fn timeOfDayIncPerSec(minutes_per_day: u16) u32 {
+    const minutes: u32 = @max(minutes_per_day, 1);
+    return @intCast(ticks_per_day / (@as(u64, minutes) * 60));
+}
+
+/// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
+/// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
+/// DayNightLength (serverconfig, default 60 real minutes per day) sets the
+/// rate through `timeOfDayIncPerSec`; the clock stores both so the sim rate and
+/// the GameStats blob the client is told can never drift apart.
 pub const WorldClock = struct {
     hours: f32 = 7.0,
     day: u32 = 1,
-    seconds_per_hour: f32 = 30.0,
+    /// GameStats[72] DayNightLength: configured real minutes per in-game day
+    /// (config.zig clamps 10..1200). Reported verbatim on the wire.
+    day_night_length: u16 = 60,
+    /// GameStats[11] TimeOfDayIncPerSec: real world-time rate (ticks/s).
+    time_of_day_inc_per_sec: u32 = 6,
     /// Daylight window [dawn, dusk]; night is outside it (stock `World.IsDark`
     /// IL=31: `hour < DawnHour || hour > DuskHour` - the dusk hour itself is
     /// still light, weather-environment.md boundary derivation).
@@ -44,9 +64,12 @@ pub const WorldClock = struct {
     bm_freq: u32 = 0,
     bm_range: u8 = 0,
 
-    /// Real seconds per in-game hour from DayNightLength (real minutes per day).
+    /// Real minutes per in-game day from serverconfig DayNightLength. Recomputes
+    /// the stock TimeOfDayIncPerSec rate, so the world advances at the very rate
+    /// the GameStats blob advertises.
     pub fn setDayNightLength(self: *WorldClock, minutes_per_day: u16) void {
-        self.seconds_per_hour = @as(f32, @floatFromInt(minutes_per_day)) * 60.0 / 24.0;
+        self.day_night_length = @max(minutes_per_day, 1);
+        self.time_of_day_inc_per_sec = timeOfDayIncPerSec(self.day_night_length);
     }
 
     pub fn setDayLightLength(self: *WorldClock, daylight_hours: u8) void {
@@ -70,15 +93,22 @@ pub const WorldClock = struct {
     }
 
     pub fn tick(self: *WorldClock, dt: f32) void {
-        // DIVERGENCE: stock dedicated pauses world time with zero connected
-        // players (live-observed 2026-08-11, server-lifecycle.md 5); zdtd
-        // advances unconditionally - a policy simplification, not a stock
-        // behavior.
-        self.hours += dt / self.seconds_per_hour;
+        // DIVERGENCE (docs/DIVERGENCES.md 6.1): stock dedicated pauses world
+        // time with zero connected players (live-observed 2026-08-11,
+        // server-lifecycle.md 5); zdtd advances unconditionally - a policy
+        // simplification, not a stock behavior.
+        self.hours += self.hoursFor(dt);
         while (self.hours >= 24.0) {
             self.hours -= 24.0;
             self.day +%= 1;
         }
+    }
+
+    /// In-game hours elapsed over `dt` real seconds at the stock world rate:
+    /// `time_of_day_inc_per_sec` world ticks per real second, 1000 ticks per
+    /// in-game hour. Zero when the rate is frozen (DayNightLength > 400).
+    pub fn hoursFor(self: *const WorldClock, dt: f32) f32 {
+        return dt * @as(f32, @floatFromInt(self.time_of_day_inc_per_sec)) / 1000.0;
     }
 
     pub fn isNight(self: *const WorldClock) bool {
@@ -163,11 +193,25 @@ pub const WorldClock = struct {
     }
 };
 
+/// World time units per game hour (stock `DayTimeToWorldTime`, 24000/day).
+const world_time_units_per_hour: u64 = 1000;
+
 /// Resolved gamestages.xml `<spawn>` row: which entitygroup, and how many.
+/// Carries the pacing fields stock's party spawner walks (`SetupGroup`:
+/// `interval` seconds between spawns, `duration` seconds before the next
+/// group row, 0 = no time gate; `num` total spawns before the row is done).
 pub const StageGroup = struct {
     group: []const u8 = "",
     num: u16 = 1,
     max_alive: u16 = 1,
+    interval: u16 = 2,
+    duration: u16 = 0,
+};
+
+/// An `<entityspawner>` TotalPerWave min/max pair (min 0 = property absent).
+pub const WaveRange = struct {
+    min: u32 = 0,
+    max: u32 = 0,
 };
 
 /// AIDirectorChunkEventComponent::SpawnScouts (asm.il ~415972): the scout
@@ -191,15 +235,17 @@ pub const bm_parties_cap: usize = 8;
 /// worldTime + RandomRange(12000, 24000) ticks (12-24 in-game hours); the
 /// schedule is player-gated (no players -> re-choose) and only starts after
 /// day 1 (worldTime > 28000).
-/// Wandering horde (RE: aidirector.md wandering-horde scheduling): a group
-/// of `wandering_horde_size` zombies spawns `wandering_spawn_dist` blocks out
-/// every wander_min_gap..wander_max_gap (12-24 in-game hours of world time)
-/// once the world is past wander_start_after. `wandering_spawn_dist` 92 is
+/// Wandering horde (RE: aidirector.md wandering-horde scheduling): the pack
+/// spawns `wandering_spawn_dist` blocks out every
+/// wander_min_gap..wander_max_gap (12-24 in-game hours of world time) once the
+/// world is past wander_start_after, sized and grouped by the `WanderingHorde`
+/// gamestages.xml ladder (that is the "gamestage-group driven" size observed
+/// live on 2026-08-11: "enemy max 5" for GS 1). `wandering_spawn_dist` 92 is
 /// the `FindTargets` inline start offset (`RandomOnUnitCircle * 92f`, IL_018B,
-/// aidirector.md placement constants); the per-horde size is gamestage-group
-/// driven in stock (live-observed 2026-08-11: "enemy max 5" for GS 1), so the
-/// fixed 6 here is an approximation. Both are `[rules.director]` tunables
-/// (ADR 0021); these aliases are the builtin defaults (tests reference them).
+/// aidirector.md placement constants). `wandering_horde_size` is only the
+/// fallback for when no ladder is wired (offline or builtin tables). Both are
+/// `[rules.director]` tunables (ADR 0021); these aliases are the builtin
+/// defaults (tests reference them).
 pub const wandering_horde_size: u32 = director_defaults.wandering_horde_size;
 pub const wandering_spawn_dist: f32 = director_defaults.wandering_spawn_dist;
 pub const wander_min_gap: u64 = director_defaults.wander_min_gap;
@@ -222,9 +268,12 @@ pub const heat_neighbor_cooldown_seconds: f32 = director_defaults.heat_neighbor_
 /// per-tier scalars (difficulty_hp_0..5, move_scale_0..4); the const arrays
 /// moved there (numbers zdtd-tuned R9, operator policy).
 pub const max_heat_regions: usize = 32;
-/// Ambient spawn rule budget slots (spawning.xml rules are 57 in stock; the
-/// array is a bound, not a cap on the parsed table).
-pub const rule_budget_cap: usize = 64;
+/// Ambient spawn rule budget slots, keyed by the spawning.xml rule index.
+/// Matches the parsed table bound (`assets/spawning.zig max_rules`): stock
+/// has no cap, so a modlet patch adding rules past the old 64 no longer
+/// silently loses its maxcount/respawn budget. 512 × 16 B = 8 KiB per
+/// Director.
+pub const rule_budget_cap: usize = 512;
 pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
 
 pub const HeatRegion = struct {
@@ -294,22 +343,64 @@ pub const Director = struct {
     /// entities table; null keeps the old class_table-only resolution.
     class_resolve_ctx: ?*anyopaque = null,
     class_resolve_fn: ?*const fn (?*anyopaque, []const u8) ?ecs_world.EntityClass = null,
+    /// Ground permission for a mob spawn: (ctx, x, y, z) -> true when the block
+    /// at that cell may carry a spawn. Stock `Chunk::CanMobsSpawnAtPos`
+    /// (IL_0043/IL_004E) requires the block under the spawn cell to be
+    /// `CanMobsSpawnOn` AND movement-solid. Game wires the blocks table; null
+    /// keeps every position allowed (the pre-parse behaviour and the offline
+    /// world, where no blocks.xml table exists).
+    mob_spawn_ok_ctx: ?*anyopaque = null,
+    mob_spawn_ok_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
 
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
     party_stage: i32 = 0,
+    /// Weighted party level (`GameStageDefinition::CalcPartyLevel` over the
+    /// party members), pushed by the Game each tick. The blood moon freezes
+    /// this rather than `party_stage`, because stock's
+    /// `AIDirectorBloodMoonParty::InitParty` IL_0006 resolves the ladder from
+    /// `partySpawner.CalcPartyLevel()`; a two-player party at stage 40/80
+    /// therefore rolls its waves at the weighted level, not the 80 high-water
+    /// mark. 0 = not pushed, fall back to `party_stage`.
+    party_stage_weighted: i32 = 0,
     /// Optional lookup: (ctx, spawner_name, stage) → entitygroup name plus wave
     /// size, resolving gamestages.xml. Game wires it; the ECS layer stays free
-    /// of asset imports, matching the group_pick_fn contract above.
+    /// of asset imports, matching the group_pick_fn contract above. First-row
+    /// only (legacy burst path); the nightly walk uses `stage_group_at_fn`.
     stage_group_ctx: ?*anyopaque = null,
     stage_group_fn: ?*const fn (?*anyopaque, []const u8, i32) ?StageGroup = null,
+    /// Optional lookup: (ctx, spawner_name, stage, index) → the stage's row at
+    /// `index`, null past the end (stock `Stage.GetSpawnGroup`, which returns
+    /// null out of range). Feeds the nightly group walk.
+    stage_group_at_ctx: ?*anyopaque = null,
+    stage_group_at_fn: ?*const fn (?*anyopaque, []const u8, i32, u32) ?StageGroup = null,
+    /// Optional lookup: (ctx, wx, wz, radius) → the weighted party game stage
+    /// of the players around that point, stock
+    /// `GameStageDefinition::CalcGameStageAround`. The wandering-horde ladder
+    /// scales its spawner's own member players rather than the whole server, so
+    /// a wired hook beats the tick's `party_stage` (which is the group high
+    /// water mark). Null keeps `party_stage`.
+    stage_around_ctx: ?*anyopaque = null,
+    stage_around_fn: ?*const fn (?*anyopaque, f32, f32, f32) i32 = null,
+
     /// Optional lookup: (ctx, entityspawner_name) → EntityGroupName from
     /// spawning.xml, for the code-named scout spawners.
     spawner_group_ctx: ?*anyopaque = null,
     spawner_group_fn: ?*const fn (?*anyopaque, []const u8) ?[]const u8 = null,
+    /// Optional lookup: (ctx, entityspawner_name) → that spawner's
+    /// `TotalPerWave` min/max from spawning.xml (min 0 = unset). Stock sizes a
+    /// scout wave per tier (Scouts1 1, Scouts2 2, ScoutsFeral and
+    /// ScoutsRadiated "1,2") and rolls in the range, so without it every tier
+    /// spawns the same count.
+    spawner_wave_ctx: ?*anyopaque = null,
+    spawner_wave_fn: ?*const fn (?*anyopaque, []const u8) WaveRange = null,
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
+    /// Threshold crossings evaluated by the chunk-heat spawner. Only the
+    /// deterministic `cSpawnChance` roll reads it; never persisted (heat
+    /// regions are rebuilt from live activity, not save state).
+    heat_checks: u32 = 0,
     bloodmoon_active: bool = false,
     /// Blood-moon party state (AIDirectorBloodMoonParty, 413090-413140):
     /// players within cPartyJoinDistance 80 m share one focus and one
@@ -319,6 +410,40 @@ pub const Director = struct {
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
+    /// Nightly spawn-group walk (`AIDirectorGameStagePartySpawner`: `groupIndex`
+    /// into the frozen stage's rows, `SetupGroup` per row). `bm_group_index`
+    /// is the current row, `bm_spawned_in_group` counts spawns against its
+    /// `num` (`canSpawn = spawnCount < numToSpawn`), `bm_group_deadline` is
+    /// the world-time tick when a `duration` row expires (0 = no time gate),
+    /// and `bm_spawn_at` paces spawns within the row by its `interval`
+    /// seconds. Reset at each dusk freeze; the walk ends when the rows run
+    /// out (stock `get_IsDone = groupIndex > 0 && spawnGroup == null`), and
+    /// the wave loop falls back to the legacy first-row burst.
+    bm_group_index: u32 = 0,
+    bm_spawned_in_group: u32 = 0,
+    bm_group_deadline: u64 = 0,
+    bm_spawn_at: f32 = 0,
+    /// Blood-moon bonus-loot spawn counter
+    /// (`AIDirectorBloodMoonParty.bonusLootSpawnCount`): incremented per
+    /// non-vulture horde spawn; when it reaches `bonus_loot_every` it resets
+    /// and that zombie's `lootDropProb` scales by `loot_bonus_scale`
+    /// (SpawnZombie IL_00CD-0102). Seeded at `bonus_loot_every / 2` when the
+    /// night's parties form (InitParty IL_0072-0080). The per-night
+    /// `bonus_loot_every` itself is `max(stageSpawnMax / LootBonusMaxCount,
+    /// LootBonusEvery)` (SetPartyLevel IL_007C); zdtd resolves it from the
+    /// frozen party stage the same way through the gamestage table.
+    bm_bonus_count: u32 = 0,
+    bm_bonus_every: u32 = 0,
+    bm_bonus_scale: f32 = 1.0,
+    /// Wandering-horde bonus-loot spawn counter
+    /// (`AIWanderingHordeSpawner.bonusLootSpawnCount`): same shape against
+    /// `wander_bonus_every` x `wander_bonus_scale`
+    /// (AIWanderingHordeSpawner IL_00F8-011C). Both refresh from the
+    /// gamestages.xml config block each tick (the Game syncs them; the ECS
+    /// layer stays free of asset imports).
+    wander_bonus_count: u32 = 0,
+    wander_bonus_every: u32 = 3,
+    wander_bonus_scale: f32 = 15.0,
     /// World time (ticks) of the next wandering horde (0 = not scheduled yet).
     /// ChooseNextTime: now + RandomRange(12000, 24000); player-gated.
     wandering_next: u64 = 0,
@@ -460,7 +585,7 @@ pub const Director = struct {
         // spawning.xml per-rule budget gate still applies per spawn
         // (spawnNearPlayers -> budgetFor/budgetAllows).
         if (spawn_z and !self.initial_population_done) {
-            const target: u32 = @intFromFloat(@as(f32, @floatFromInt(cap)) * w.rules.director.initial_population_frac);
+            const target: u32 = @trunc(@as(f32, @floatFromInt(cap)) * w.rules.director.initial_population_frac);
             const gap: u32 = if (alive_z < target) target - alive_z else 0;
             if (gap == 0) {
                 self.initial_population_done = true;
@@ -476,25 +601,75 @@ pub const Director = struct {
             }
             if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
                 // Freeze the party gamestage at dusk (InitParty): the ladder and
-                // the horde size stay fixed for the whole night.
-                if (self.bm_stage_frozen == 0) self.bm_stage_frozen = self.party_stage;
+                // the horde size stay fixed for the whole night. The Game pushes
+                // the matching bonus-loot cadence in through pushBloodMoonBonus
+                // (the stage sum lives in the asset table, not in this layer);
+                // until it does, the stock XML defaults below stand in.
+                if (self.bm_stage_frozen == 0) {
+                    self.bm_stage_frozen = if (self.party_stage_weighted > 0)
+                        self.party_stage_weighted
+                    else
+                        self.party_stage;
+                    // Seed the bonus counter once per night, the way stock
+                    // InitParty does. Keep whatever cadence the Game already
+                    // pushed from the ladder; only fall back to the stock XML
+                    // defaults when nothing has set one yet.
+                    if (self.bm_bonus_every == 0) {
+                        self.setBloodMoonBonus(12, 25);
+                    } else {
+                        self.bm_bonus_count = self.bm_bonus_every / 2;
+                    }
+                    // Start the nightly group walk at row 0 (stock SetPartyLevel
+                    // resets groupIndex/spawnCount, then SetupGroup).
+                    self.bm_group_index = 0;
+                    self.setupBmGroup(w);
+                }
                 self.buildBloodMoonParties(w);
                 self.recountAndTeleportHorde(w);
                 if (spawn_z) {
-                    const bm = self.stageGroup(bloodmoon_spawner);
-                    var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
-                    var bm_group: []const u8 = "";
-                    if (bm) |sg| {
-                        wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
-                        bm_group = sg.group;
+                    const now = self.clock.worldTimeBits();
+                    // Row pacing (spawner Tick): a `duration` row expires into
+                    // the next row; the row's `interval` gates the wave burst.
+                    // Stock ticks this per party spawner; one shared walk is
+                    // the same count (one spawner per night per party, and
+                    // zdtd runs one wave loop across parties).
+                    if (self.stageGroupAt(self.bm_group_index) != null) {
+                        if (self.bm_group_deadline != 0 and now >= self.bm_group_deadline) {
+                            self.bm_group_index += 1;
+                            self.setupBmGroup(w);
+                        }
                     }
-                    spawned += self.spawnBloodMoonParties(w, wave, bm_group);
+                    if (self.stageGroupAt(self.bm_group_index)) |row| {
+                        // Row done (`spawnCount >= numToSpawn`) advances, like
+                        // canSpawn going false into the next SetupGroup.
+                        if (self.bm_spawned_in_group >= row.num) {
+                            self.bm_group_index += 1;
+                            self.setupBmGroup(w);
+                        }
+                    }
+                    if (self.stageGroupAt(self.bm_group_index)) |walk| {
+                        spawned += self.spawnBloodMoonWalk(w, walk);
+                    } else {
+                        // Walk exhausted (or no indexed lookup wired): the
+                        // legacy first-row burst keeps the night populated.
+                        const bm = self.stageGroup(bloodmoon_spawner);
+                        var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
+                        var bm_group: []const u8 = "";
+                        if (bm) |sg| {
+                            wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
+                            bm_group = sg.group;
+                        }
+                        spawned += self.spawnBloodMoonParties(w, wave, bm_group);
+                    }
                     self.bloodmoon_cd = w.rules.director.bloodmoon_wave_cd;
                 }
             } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
                 // EndBloodMoon (412618): clear horde marks and the frozen stage at
                 // dawn; nothing is despawned.
                 self.bm_stage_frozen = 0;
+                self.bm_group_index = 0;
+                self.bm_spawned_in_group = 0;
+                self.bm_group_deadline = 0;
                 clearHordeMarks(w);
             }
             // Horde zombies keep to their party focus every tick (teleport back
@@ -519,7 +694,8 @@ pub const Director = struct {
             // Heat map: decay always; the 5 s scout spawn is cap-gated.
             self.tickHeat(w, dt, spawn_z);
             if (spawn_z and !self.clock.isNight() and self.scouts_cd <= 0) {
-                spawned += self.spawnNearPlayers(w, 1, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
+                // Wave size is the tier's own TotalPerWave, not a flat 1.
+                spawned += self.spawnNearPlayers(w, self.scoutWaveSize(1), w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
                 self.scouts_cd = w.rules.director.scout_drip_cd;
             }
         }
@@ -616,6 +792,22 @@ pub const Director = struct {
     /// gamestages.xml spawner name the blood moon draws from.
     pub const bloodmoon_spawner = "BloodMoonHorde";
 
+    /// gamestages.xml spawner name the wandering horde draws from
+    /// (`AIWanderingHordeSpawner::.ctor` IL_0056/IL_0066; the Bandits spawn
+    /// type uses "WanderingBandits" instead, which zdtd does not schedule).
+    pub const wandering_spawner = "WanderingHorde";
+
+    /// `AIWanderingHordeSpawner::.ctor` IL_0066 passes this as
+    /// `ResetPartyLevel(mod)`: the wandering ladder wraps at 50 because the
+    /// XML's 50 rows stop there (its own comment). Only this ladder wraps -
+    /// the blood moon and ScoutGSList spawners pass 0.
+    pub const wandering_stage_mod = 50;
+
+    /// Radius for `GameStageDefinition::CalcGameStageAround` (IL=38):
+    /// `World::GetPlayersAround(pos, 100f)`, i.e. the weighted party level of
+    /// the players near the spawner.
+    pub const gamestage_around_radius: f32 = 100.0;
+
     /// Resolve a gamestages.xml spawner at the current party stage (the
     /// blood-moon ladder reads the night-frozen stage once set).
     fn stageGroup(self: *const Director, spawner: []const u8) ?StageGroup {
@@ -626,11 +818,87 @@ pub const Director = struct {
         return sg;
     }
 
+    /// Resolve one row of the frozen stage by index (stock
+    /// `Stage.GetSpawnGroup`, null past the end). Null group also ends the
+    /// walk, matching `get_IsDone = groupIndex > 0 && spawnGroup == null`.
+    fn stageGroupAt(self: *const Director, index: u32) ?StageGroup {
+        const f = self.stage_group_at_fn orelse return null;
+        const sg = f(self.stage_group_at_ctx, bloodmoon_spawner, self.bm_stage_frozen, index) orelse return null;
+        if (sg.group.len == 0) return null;
+        return sg;
+    }
+
+    /// Advance the nightly group walk to the next row (stock `SetupGroup`:
+    /// row = stage row at `groupIndex`; `interval` paces spawns, `duration`
+    /// arms the row deadline in world-time units, `num` sizes the row). A null
+    /// row ends the walk for the night.
+    fn setupBmGroup(self: *Director, w: *ecs_world.World) void {
+        _ = w;
+        if (self.stageGroupAt(self.bm_group_index)) |sg| {
+            self.bm_spawned_in_group = 0;
+            self.bm_spawn_at = 0;
+            // Stock AIDirectorGameStagePartySpawner::SetupGroup IL_0044-0062:
+            // nextStageTime = world.worldTime + duration * 1000. World time is
+            // 1000 units per game hour (DayTimeToWorldTime), not 20 Hz ticks;
+            // the old *20 armed every row deadline 50x too early.
+            self.bm_group_deadline = if (sg.duration > 0)
+                self.clock.worldTimeBits() + @as(u64, sg.duration) * world_time_units_per_hour
+            else
+                0;
+        } else {
+            // Past the last row: mark done. The wave loop treats this as
+            // "walk exhausted" and falls back to the legacy first-row burst.
+            self.bm_group_index = std.math.maxInt(u32);
+        }
+    }
+
+    /// Blood-moon bonus cadence for the frozen stage
+    /// (`AIDirectorGameStagePartySpawner.SetPartyLevel` IL_0065-007C):
+    /// `bonusLootEvery = max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)`
+    /// where `stageSpawnMax` sums every spawn-group `num` in the stage
+    /// (CalcStageSpawnMax IL=30). The spawn-count walk needs the full stage,
+    /// which the `stage_group_fn` projection (first row only) does not carry,
+    /// so the Game pushes the resolved cadence + scale in with the nightly
+    /// stage freeze; the fallback below keeps offline/builtin tables on the
+    /// stock XML defaults. Seeding `bm_bonus_count` at half the cadence is
+    /// stock `InitParty` (IL_0072-0080).
+    pub fn setBloodMoonBonus(self: *Director, every: u32, scale: f32) void {
+        self.setBloodMoonBonusParams(every, scale);
+        self.bm_bonus_count = self.bm_bonus_every / 2;
+    }
+
+    /// Update the cadence and scale without touching the progress counter.
+    /// The Game re-pushes the resolved gamestage values every tick of an
+    /// active blood moon so a ladder loaded mid-night takes effect, and that
+    /// caller must not re-seed: `bm_bonus_count` advances once per horde
+    /// spawn, so a 20 Hz reset to `every / 2` held it below `every` and the
+    /// bonus drop never fired for any cadence above 2.
+    pub fn setBloodMoonBonusParams(self: *Director, every: u32, scale: f32) void {
+        self.bm_bonus_every = @max(1, every);
+        self.bm_bonus_scale = if (scale > 0) scale else 1.0;
+    }
+
     /// Daytime scout entity group for the current party stage; empty when the
     /// spawning.xml entityspawner table is unavailable.
     fn scoutGroup(self: *const Director) []const u8 {
         const f = self.spawner_group_fn orelse return "";
         return f(self.spawner_group_ctx, scoutSpawnerName(self.party_stage)) orelse "";
+    }
+
+    /// The tier's `TotalPerWave` from spawning.xml, falling back to `dflt`
+    /// when no table is wired (offline tests) or the property is absent.
+    fn scoutWaveSize(self: *const Director, dflt: u32) u32 {
+        const f = self.spawner_wave_fn orelse return dflt;
+        const r = f(self.spawner_wave_ctx, scoutSpawnerName(self.party_stage));
+        if (r.min == 0) return dflt;
+        const hi = @max(r.min, r.max);
+        if (hi == r.min) return r.min;
+        // Stock rolls RandomRange(min, max + 1) per wave
+        // (EntitySpawner.il.txt:565-573). Seeded off the spawn counter so the
+        // sequence stays deterministic for a given run.
+        const span: u64 = hi - r.min + 1;
+        const roll: u64 = (@as(u64, self.total_spawned) *% 2654435761) % span;
+        return r.min + @as(u32, @intCast(roll));
     }
 
     /// `group_override` wins over the day/night spawning.xml groups; empty
@@ -714,8 +982,15 @@ pub const Director = struct {
         const st = &self.rule_budgets[i];
         st.count +|= 1;
         if (st.count == 1 and st.next_respawn_wt == std.math.maxInt(u64)) {
-            const days: u64 = @floor(budget.respawn_days);
-            st.next_respawn_wt = w.director.clock.worldTimeBits() + days *% ticks_per_day;
+            // Stock scales days to world ticks (BiomeSpawningFromXml IL_0191:
+            // ParseFloat * 24000) and arms delayWorldTime = now + delay *
+            // RandomRange(0.9, 1.1) (ResetRespawn IL_0146-0159). The delay is
+            // fractional days (dz02 day respawns in 0.3 d), so no whole-day
+            // floor: a floor would stretch a 7-hour respawn to a full day.
+            // Deterministic midpoint (1.0x) instead of the 0.9-1.1 roll: the
+            // budget has no per-rule RNG stream.
+            const ticks: u64 = @intFromFloat(@max(0, budget.respawn_days) * @as(f32, ticks_per_day));
+            st.next_respawn_wt = w.director.clock.worldTimeBits() + ticks;
         }
     }
 
@@ -837,7 +1112,7 @@ pub const Director = struct {
                 const x = party.focus_x + @cos(ang) * r;
                 const z = party.focus_z + @sin(ang) * r;
                 const y = w.groundY(x, z) orelse (nearestPlayerY(w, x, z) orelse continue);
-                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
+                const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .bloodmoon) orelse continue;
                 if (nearestPlayerSlot(w, x, z)) |ps| {
                     w.zombie_ai[slot].state = .chase;
                     w.zombie_ai[slot].target_id = w.network_id[ps].id;
@@ -847,12 +1122,56 @@ pub const Director = struct {
                 n += 1;
             }
         }
+        self.bm_spawned_in_group +|= n;
         return n;
+    }
+
+    /// Spawn one walk-row wave per party (stock spawner Tick pacing): the
+    /// current row's `interval` gates bursts (`bm_spawn_at` accumulates the
+    /// wave cooldown), `num` caps the row (`bm_spawned_in_group`), and the
+    /// row's `maxAlive` caps the burst like the legacy path. Counts into the
+    /// row total so the driver advances when the row is done.
+    fn spawnBloodMoonWalk(self: *Director, w: *ecs_world.World, row: StageGroup) u32 {
+        self.bm_spawn_at -= w.rules.director.bloodmoon_wave_cd;
+        const interval_s: f32 = @floatFromInt(@max(1, row.interval));
+        if (self.bm_spawn_at > 0 and interval_s > 0) {
+            // Not due yet: hold the burst until the row interval elapses.
+            self.bm_spawn_at += w.rules.director.bloodmoon_wave_cd;
+            return 0;
+        }
+        self.bm_spawn_at = interval_s;
+        const remaining: u32 = row.num -| self.bm_spawned_in_group;
+        if (remaining == 0) return 0;
+        var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
+        wave = @min(wave, @max(1, @as(u32, row.max_alive)));
+        wave = @min(wave, remaining);
+        return self.spawnBloodMoonParties(w, wave, row.group);
     }
 
     /// Pick the group class at (x,z) and spawn one zombie; mark horde when
     /// requested. Shared by the per-player ring and the party spawner.
+    /// `loot_kind` selects the bonus-loot counter the spawn feeds: blood-moon
+    /// waves count toward `bonusLootEvery` x `LootBonusScale`, wandering packs
+    /// toward `LootWanderingBonusEvery` x `LootWanderingBonusScale`, and
+    /// everything else (drips, scouts, ambient) carries no bonus. Stock keeps
+    /// one counter per spawner object; zdtd keeps one per kind on the
+    /// director, which is the same count (one spawner of each kind per night).
+    const LootKind = enum { none, bloodmoon, wandering };
     fn spawnOneZombie(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool) ?ecs_world.Slot {
+        return self.spawnOneZombieLoot(w, x, y, z, group_override, seed, mark_horde, .none);
+    }
+    fn spawnOneZombieLoot(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind) ?ecs_world.Slot {
+        // Stock `Chunk::CanMobsSpawnAtPos` ground gate: the cell under the
+        // spawn must carry CanMobsSpawnOn and be movement-solid, so a
+        // player-built floor (which declares neither) does not host spawns.
+        // The caller's y is the stand cell (groundY = surface + 1), so the
+        // ground block sits one below it.
+        if (self.mob_spawn_ok_fn) |ok| {
+            const gx: i32 = @intFromFloat(@floor(x));
+            const gy: i32 = @as(i32, @intFromFloat(@floor(y))) - 1;
+            const gz: i32 = @intFromFloat(@floor(z));
+            if (!ok(self.mob_spawn_ok_ctx, gx, gy, gz)) return null;
+        }
         var ct = w.class_table[1];
         const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
         const grp = if (group_override.len > 0)
@@ -904,6 +1223,35 @@ pub const Director = struct {
         const nid = id orelse return null;
         const slot = w.slotOfNetId(nid) orelse return null;
         if (mark_horde) w.zombie_ai[slot].is_horde = true;
+        // Bonus loot (SpawnZombie IL_00CD-0102, AIWanderingHordeSpawner
+        // IL_00F8-011C): count the spawn, and every Nth one carries the
+        // scaled drop probability on its class row. Stock skips the count for
+        // the forced radiated vulture (the 50% AttachedToEntity roll returns
+        // before the counter); zdtd has no vulture force path, so every spawn
+        // through these two kinds counts.
+        switch (loot_kind) {
+            .none => {},
+            .bloodmoon => {
+                const every = if (self.bm_bonus_every > 0) self.bm_bonus_every else 12;
+                const scale = if (self.bm_bonus_scale > 0) self.bm_bonus_scale else 25;
+                self.bm_bonus_count += 1;
+                if (self.bm_bonus_count >= every) {
+                    self.bm_bonus_count = 0;
+                    w.class_id[slot].drop_prob *= scale;
+                    w.class_id[slot].bonus_loot = true;
+                }
+            },
+            .wandering => {
+                const every = if (self.wander_bonus_every > 0) self.wander_bonus_every else 3;
+                const scale = if (self.wander_bonus_scale > 0) self.wander_bonus_scale else 15;
+                self.wander_bonus_count += 1;
+                if (self.wander_bonus_count >= every) {
+                    self.wander_bonus_count = 0;
+                    w.class_id[slot].drop_prob *= scale;
+                    w.class_id[slot].bonus_loot = true;
+                }
+            },
+        }
         return slot;
     }
 
@@ -929,23 +1277,34 @@ pub const Director = struct {
         return wt + min_gap + off;
     }
 
-    /// Spawn one wandering-horde group of 6 at ~92 m around the first online
-    /// player, marked IsHordeZombie and set to chase the party. Stock walks the
-    /// pack as a startPos->endPos path (AstarManager location line) with
-    /// pit-stop commands; the direct-chase simplification keeps the client
-    /// visible behaviour (a scheduled pack arriving from outside) without the
+    /// Spawn one wandering-horde pack at ~92 m around the first online player,
+    /// marked IsHordeZombie and set to chase the party. Stock walks the pack as
+    /// a startPos->endPos path (AstarManager location line) with pit-stop
+    /// commands; the direct-chase simplification keeps the client visible
+    /// behaviour (a scheduled pack arriving from outside) without the
     /// path-command AI, which stays a residual (GAP wandering hordes row).
+    ///
+    /// The pack's size and entity group come from the `WanderingHorde` ladder
+    /// in gamestages.xml, not from a rule: `AIWanderingHordeSpawner::.ctor`
+    /// IL_0066 builds its `AIDirectorGameStagePartySpawner` with `mod = 50`
+    /// (the ladder's own "These will wrap around at 50" comment) and
+    /// `UpdateSpawn` IL_006D spawns the resolved stage row's `group` `num`
+    /// times. Without a ladder (offline or builtin tables, or a wrapped stage
+    /// below the first row) it falls back to the rules-sized biome-group pack.
     fn spawnWanderingHorde(self: *Director, w: *ecs_world.World) u32 {
         for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            const row = self.wanderingHordeRow(w.transform[p].x, w.transform[p].z);
+            const count: u32 = if (row) |r| @max(1, @as(u32, r.num)) else w.rules.director.wandering_horde_size;
+            const group: []const u8 = if (row) |r| r.group else "";
             var n: u32 = 0;
             var i: u32 = 0;
-            while (i < w.rules.director.wandering_horde_size) : (i += 1) {
+            while (i < count) : (i += 1) {
                 const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(i)) * 1.0472;
                 const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.groundY(x, z) orelse w.transform[p].y;
-                const slot = self.spawnOneZombie(w, x, y, z, "", self.total_spawned +% n, true) orelse continue;
+                const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .wandering) orelse continue;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
@@ -954,6 +1313,28 @@ pub const Director = struct {
             return n;
         }
         return 0;
+    }
+
+    /// The `WanderingHorde` stage row for a pack around (wx,wz).
+    /// `AIDirectorGameStagePartySpawner::ResetPartyLevel` IL_0000-0015 keeps
+    /// the weighted party level inside the ladder (`if (mod != 0) level %=
+    /// mod`, `mod = 50` for this spawner), and the level itself is
+    /// `CalcPartyLevel` over the spawner's member players. A stage the ladder
+    /// has no row at or below (0, or a wrap to 0) yields null.
+    fn wanderingHordeRow(self: *const Director, wx: f32, wz: f32) ?StageGroup {
+        const f = self.stage_group_fn orelse return null;
+        const stage = @mod(self.stageAround(wx, wz), wandering_stage_mod);
+        if (stage <= 0) return null;
+        const sg = f(self.stage_group_ctx, wandering_spawner, stage) orelse return null;
+        if (sg.group.len == 0) return null;
+        return sg;
+    }
+
+    /// `GameStageDefinition::CalcGameStageAround` over the wired radius when
+    /// the Game supplies one, else the tick's party stage.
+    fn stageAround(self: *const Director, wx: f32, wz: f32) i32 {
+        if (self.stage_around_fn) |f| return f(self.stage_around_ctx, wx, wz, gamestage_around_radius);
+        return self.party_stage;
     }
 
     /// 5x5-chunk region key for a world position (AIDirectorChunkData map).
@@ -993,8 +1374,9 @@ pub const Director = struct {
     }
 
     /// AIDirectorChunkEventComponent::Tick: decay region activity (events
-    /// expire), then every 5 s run CheckToSpawn: a region at/above 25 spawns a
-    /// scout party toward its center and cooldowns itself and its neighbors.
+    /// expire), then every 5 s run CheckToSpawn: a region at/above 25 resets,
+    /// and the `heat_spawn_chance` roll decides whether it spawns a scout party
+    /// toward its center and takes the long cooldown table, or only cools.
     fn tickHeat(self: *Director, w: *ecs_world.World, dt: f32, spawn_z: bool) void {
         var i: usize = 0;
         while (i < self.heat_n) {
@@ -1022,24 +1404,39 @@ pub const Director = struct {
         while (ci < self.heat_n) : (ci += 1) {
             const r = &self.heat[ci];
             if (r.activity < w.rules.director.heat_spawn_threshold or r.cooldown > 0) continue;
-            // FindBestEventAndReset + StartCooldownOnNeighbors; the feral roll
-            // (rules.director.heat_feral_chance) doubles the cooldown
-            // (rules.director.heat_feral_cd_mult; deterministic, seeded stream).
-            // roll = round(1/chance): default 0.2 -> 1-in-5, exactly as before.
-            const chance = w.rules.director.heat_feral_chance;
-            const roll: u32 = if (chance > 0 and std.math.isFinite(chance))
-                @max(1, @as(u32, @round(1.0 / chance)))
-            else
-                std.math.maxInt(u32);
-            const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % roll == 0;
+            // CheckToSpawn (IL=46): FindBestEventAndReset picks the max-Value
+            // event and stamps the short cooldown (240 s), then the
+            // cSpawnChance roll (20%) decides whether this crossing spawns
+            // scouts. On a spawn, SetLongDelay hard-sets 1320 s and
+            // StartCooldownOnNeighbors(true) gives the eight neighbours 720 s;
+            // otherwise the region keeps the 240 and the neighbours get 180.
+            // The feral/radiated scout *type* is not a roll here: it comes from
+            // the gamestage bracket (scoutGroup -> Scouts1/2/Feral/Radiated).
+            const spawns = self.heatSpawnRolls(w.rules.director.heat_spawn_chance);
             r.activity = 0;
-            r.cooldown = if (feral)
-                w.rules.director.heat_cooldown_seconds * w.rules.director.heat_feral_cd_mult
-            else
-                w.rules.director.heat_cooldown_seconds;
-            self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
-            self.spawnHeatScouts(w, r.key);
+            r.cooldown = w.rules.director.heat_cooldown_seconds;
+            if (spawns) {
+                r.cooldown = w.rules.director.heat_long_cooldown_seconds;
+                self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_long_cooldown_seconds);
+                self.spawnHeatScouts(w, r.key);
+            } else {
+                self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
+            }
         }
+    }
+
+    /// One `CheckToSpawn` spawn roll against `chance` (stock `cSpawnChance`,
+    /// a GameRandom roll). zdtd derives it from a counter that advances once per
+    /// threshold crossing, so a replay with the same inputs makes the same
+    /// choices without a shared global RNG (sim rule 22).
+    fn heatSpawnRolls(self: *Director, chance: f32) bool {
+        const ordinal = self.heat_checks;
+        self.heat_checks +%= 1;
+        if (!std.math.isFinite(chance) or chance <= 0) return false;
+        if (chance >= 1) return true;
+        const h = (ordinal +% 0x9E3779B9) *% 0x85EBCA6B;
+        const roll = (h ^ (h >> 16)) % 1000;
+        return roll < @as(u32, @trunc(chance * 1000.0));
     }
 
     /// StartCooldownOnNeighbors: the eight surrounding regions get the shorter
@@ -1066,7 +1463,10 @@ pub const Director = struct {
         const group = self.scoutGroup();
         var n: u32 = 0;
         var i: u32 = 0;
-        while (i < w.rules.director.heat_scout_count) : (i += 1) {
+        // Stock sizes the heat wave from the tier's TotalPerWave; the rule is
+        // the fallback when no spawning.xml table is wired.
+        const wave = self.scoutWaveSize(w.rules.director.heat_scout_count);
+        while (i < wave) : (i += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
             const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;
             const z = center.z + @sin(ang) * w.rules.director.heat_scout_dist;
@@ -1098,10 +1498,41 @@ pub const Director = struct {
     }
 };
 
+test "clock rate is the stock truncated TimeOfDayIncPerSec" {
+    // RE ../7dtd-engine-research/docs/admin/server-lifecycle.md:168:
+    // GameStats[11] = 24000 / (DayNightLength * 60), integer division.
+    try std.testing.expectEqual(@as(u32, 40), timeOfDayIncPerSec(10));
+    try std.testing.expectEqual(@as(u32, 6), timeOfDayIncPerSec(60));
+    try std.testing.expectEqual(@as(u32, 4), timeOfDayIncPerSec(90));
+    try std.testing.expectEqual(@as(u32, 3), timeOfDayIncPerSec(120));
+    try std.testing.expectEqual(@as(u32, 1), timeOfDayIncPerSec(400));
+    // The stock expression truncates to 0 past 400 real minutes, which freezes
+    // world time. Reproduce it rather than inventing a floor nobody measured.
+    try std.testing.expectEqual(@as(u32, 0), timeOfDayIncPerSec(401));
+    try std.testing.expectEqual(@as(u32, 0), timeOfDayIncPerSec(1200));
+
+    var cl: WorldClock = .{};
+    cl.setDayNightLength(60);
+    try std.testing.expectEqual(@as(u16, 60), cl.day_night_length);
+    try std.testing.expectEqual(@as(u32, 6), cl.time_of_day_inc_per_sec);
+    // A stock 60 minute day really runs 24000/6 = 4000 s. Sixty seconds of
+    // 20 TPS ticks advance 0.36 in-game hours; the old flat scale (6.667
+    // ticks/s) advanced 0.4 and ran the client's day ahead of the server's.
+    var i: usize = 0;
+    while (i < 1200) : (i += 1) cl.tick(0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.36), cl.hours, 1e-3);
+
+    // Frozen rate advances nothing.
+    var frozen: WorldClock = .{};
+    frozen.setDayNightLength(1200);
+    frozen.tick(600.0);
+    try std.testing.expectEqual(@as(f32, 7.0), frozen.hours);
+}
+
 test "clock advances and bloodmoon spans dusk to dawn across rollover" {
     // BM day 7: the horde runs day 7 22:00 (dusk) through day 8 04:00 (dawn),
     // including the midnight day rollover (stock IsBloodMoonTime).
-    var cl: WorldClock = .{ .hours = 21.0, .day = 7, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 21.0, .day = 7, .time_of_day_inc_per_sec = 1000 };
     try std.testing.expect(!cl.isBloodMoonNight()); // before dusk
     cl.tick(2.0); // 23:00 day 7: at/after dusk
     try std.testing.expectEqual(@as(u32, 7), cl.day);
@@ -1114,7 +1545,7 @@ test "clock advances and bloodmoon spans dusk to dawn across rollover" {
 }
 
 test "worldTimeBits encodes stock day 1 as zero offset" {
-    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .time_of_day_inc_per_sec = 1000 };
     // Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000; WorldTimeToDays
     // (wt/24000 + 1) must round-trip the wire day.
     const wt = cl.worldTimeBits();
@@ -1128,7 +1559,7 @@ test "worldTimeBits encodes stock day 1 as zero offset" {
 
 test "director spawns at night near player ecs" {
     var w: ecs_world.World = .{};
-    var dir: Director = .{ .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 }, .horde_cd = 0 };
+    var dir: Director = .{ .clock = .{ .hours = 23.0, .day = 1, .time_of_day_inc_per_sec = 1000 }, .horde_cd = 0 };
     _ = w.spawnPlayer(0, 70, 0, 0);
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(r.spawned >= 1);
@@ -1155,7 +1586,7 @@ test "starter population fills toward the cap once, batched" {
     try std.testing.expect(w.director.initial_population_done);
     try std.testing.expect(w.countKind(.zombie) > 0);
     // Never overshoots the target (0.25 x 64 = 16).
-    const target: u32 = @intFromFloat(64.0 * w.rules.director.initial_population_frac);
+    const target: u32 = @trunc(64.0 * w.rules.director.initial_population_frac);
     try std.testing.expect(w.countKind(.zombie) <= target);
     // The fill does not re-fire: daytime has no horde drip, so the count
     // stays put once the target is reached.
@@ -1188,7 +1619,7 @@ test "director spawns daytime animals up to cap" {
     var w: ecs_world.World = .{};
     // Noon, animal cap 3, no zombie horde interference (day).
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive_animals = 3,
         .scouts_cd = 999, // suppress daytime scout zombie
     };
@@ -1209,7 +1640,7 @@ test "director=false stops zombies but wildlife follows its own flag" {
     w.rules.systems.director = false;
     w.rules.systems.animals = true;
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive_animals = 3,
     };
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -1236,7 +1667,7 @@ test "director=false stops zombies but wildlife follows its own flag" {
 test "animals and heat keep ticking when the zombie cap is full" {
     var w: ecs_world.World = .{};
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive = 2,
         .max_alive_animals = 3,
         .scouts_cd = 999,
@@ -1280,7 +1711,7 @@ test "spawned classes carry full entityclasses stats via the resolver (A35)" {
     };
     var w: ecs_world.World = .{};
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .horde_cd = 0,
         // hpScale neutral tier (difficulty_hp_2 = 1.0): the assert below
         // checks the resolver's class stats unscaled, not the difficulty
@@ -1334,8 +1765,65 @@ test "bloodmoon frequency and range" {
     try std.testing.expectEqual(@as(u32, 1), hits); // exactly one blood moon in cycle 1's window
 }
 
-test "scout spawner tier follows the stock gamestage thresholds" {
-    // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
+test "blood moon walks the stage spawn groups across the night" {
+    // Stock party spawner (SetupGroup/Tick): row 0 spawns `num` zombies, then
+    // the walk advances to row 1; a null row ends the walk (get_IsDone).
+    const Hooks = struct {
+        fn stageGroupAt(_: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.bloodmoon_spawner)) return null;
+            if (stage != 61) return null;
+            if (index == 0) return .{ .group = "ZombiesNight", .num = 2, .max_alive = 8, .interval = 1, .duration = 0 };
+            if (index == 1) return .{ .group = "ZombiesNight", .num = 3, .max_alive = 8, .interval = 1, .duration = 0 };
+            return null;
+        }
+        fn pick(_: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            return null; // class_table rotation fallback
+        }
+    };
+    var w: ecs_world.World = .{};
+    w.rules.director.initial_population_frac = 0;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
+        .bloodmoon_enemy_count = 8,
+        .bloodmoon_cd = 0,
+        .horde_cd = 999,
+        .party_stage = 61,
+        // The Game pushes the weighted party level next to the high-water
+        // mark; the freeze must take the weighted one (InitParty IL_0006).
+        .party_stage_weighted = 61,
+        .group_pick_fn = &Hooks.pick,
+        .stage_group_at_ctx = undefined,
+        .stage_group_at_fn = &Hooks.stageGroupAt,
+    };
+    // Dusk freeze starts the walk at row 0.
+    _ = dir.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 61), dir.bm_stage_frozen);
+    try std.testing.expectEqual(@as(u32, 0), dir.bm_group_index);
+    // Drive waves until row 0 (num=2) is done: the walk must advance to row 1
+    // and keep spawning its num=3.
+    var ticks: u32 = 0;
+    while (dir.bm_group_index == 0 and ticks < 40) : (ticks += 1) {
+        dir.bloodmoon_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expectEqual(@as(u32, 1), dir.bm_group_index);
+    // The advancing tick already spawns row 1's first wave (stock advances
+    // and spawns in the same spawner tick), so the counter is mid-row, not
+    // zero; what matters is the walk keeps spawning row 1 to its num=3.
+    try std.testing.expect(dir.bm_spawned_in_group >= 1);
+    ticks = 0;
+    while (dir.bm_spawned_in_group < 3 and ticks < 60) : (ticks += 1) {
+        dir.bloodmoon_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expectEqual(@as(u32, 3), dir.bm_spawned_in_group);
+    // Past the last row the walk is done; the night stays populated via the
+    // legacy first-row burst (no indexed lookup here means the walk ends).
+    try std.testing.expect(dir.stageGroupAt(2) == null);
+}
+
+test "scout spawner tier follows the stock gamestage thresholds" { // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(0));
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(44));
     try std.testing.expectEqualStrings("Scouts2", scoutSpawnerName(45));
@@ -1365,7 +1853,7 @@ test "director draws the daytime scout group from the stage tier" {
     var w: ecs_world.World = .{};
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .party_stage = 90,
         .spawner_group_fn = &Hooks.spawnerGroup,
         .group_pick_fn = &Hooks.pick,
@@ -1373,6 +1861,71 @@ test "director draws the daytime scout group from the stage tier" {
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(r.spawned >= 1);
     try std.testing.expectEqualStrings("ScoutsFeral", Hooks.asked[0..Hooks.asked_len]);
+}
+
+test "daytime scout wave size comes from the spawner TotalPerWave" {
+    // The count was a hardcoded 1 while spawning.xml sizes each tier
+    // (Scouts1 1, Scouts2 2, ScoutsFeral/Radiated "1,2"). With a table wired
+    // the tier's own value drives the wave; without one the caller's fallback
+    // still applies.
+    const Hooks = struct {
+        fn spawnerGroup(_: ?*anyopaque, _: []const u8) ?[]const u8 {
+            return "ZombieScoutsFeral";
+        }
+        fn pick(_: ?*anyopaque, group: []const u8, _: u32) ?[]const u8 {
+            if (std.mem.eql(u8, group, "ZombieScoutsFeral")) return "zombieJoe";
+            return null;
+        }
+        fn waveThree(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{ .min = 3, .max = 3 };
+        }
+        fn waveUnset(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{};
+        }
+        // The ScoutsFeral / ScoutsRadiated shape: TotalPerWave "1,2".
+        fn waveOneToTwo(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{ .min = 1, .max = 2 };
+        }
+    };
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
+        .party_stage = 90,
+        .spawner_group_fn = &Hooks.spawnerGroup,
+        .group_pick_fn = &Hooks.pick,
+        .spawner_wave_fn = &Hooks.waveThree,
+    };
+    try std.testing.expectEqual(@as(u32, 3), dir.scoutWaveSize(1));
+
+    // An absent property keeps the caller's fallback rather than spawning 0.
+    dir.spawner_wave_fn = &Hooks.waveUnset;
+    try std.testing.expectEqual(@as(u32, 1), dir.scoutWaveSize(1));
+
+    // No table wired at all (offline tests) also keeps the fallback.
+    dir.spawner_wave_fn = null;
+    try std.testing.expectEqual(@as(u32, 2), dir.scoutWaveSize(2));
+
+    // A "1,2" range rolls inside the range, never below min or above max, and
+    // both ends are reachable across the spawn counter.
+    dir.spawner_wave_fn = &Hooks.waveOneToTwo;
+    var saw_one = false;
+    var saw_two = false;
+    var i: u32 = 0;
+    while (i < 16) : (i += 1) {
+        dir.total_spawned = i;
+        const n = dir.scoutWaveSize(9);
+        try std.testing.expect(n >= 1 and n <= 2);
+        if (n == 1) saw_one = true;
+        if (n == 2) saw_two = true;
+    }
+    try std.testing.expect(saw_one and saw_two);
+
+    // Deterministic: the same counter yields the same roll.
+    dir.total_spawned = 5;
+    const first = dir.scoutWaveSize(9);
+    dir.total_spawned = 5;
+    try std.testing.expectEqual(first, dir.scoutWaveSize(9));
 }
 
 test "blood moon wave size is capped by the stage maxAlive" {
@@ -1389,7 +1942,7 @@ test "blood moon wave size is capped by the stage maxAlive" {
     _ = w.spawnPlayer(0, 70, 0, 0);
     // Blood moon night with a generous BloodMoonEnemyCount; maxAlive=2 wins.
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 40,
         .party_stage = 61,
         .horde_cd = 999, // isolate the blood moon branch from the night horde
@@ -1407,13 +1960,47 @@ test "director without stage hooks keeps its unstaged behaviour" {
     w.rules.director.initial_population_frac = 0; // isolate the wave count from the starter fill
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 8,
         .horde_cd = 999,
     };
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(dir.bloodmoon_active);
     try std.testing.expectEqual(@as(u32, 4), r.spawned); // BloodMoonEnemyCount / 2
+}
+
+test "horde bonus loot scales every Nth spawn and marks the row" {
+    // Stock SpawnZombie (IL_00CD-0102): bonusLootSpawnCount++ per non-vulture
+    // spawn, reset + lootDropProb *= LootBonusScale at bonusLootEvery; the
+    // death path then reads the stored probability verbatim. Seeded at half
+    // cadence by InitParty (IL_0072-0080).
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{};
+    dir.setBloodMoonBonus(4, 25);
+    try std.testing.expectEqual(@as(u32, 2), dir.bm_bonus_count); // seeded at every/2
+    var bonus_n: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", i, true, .bloodmoon) orelse return error.TestUnexpectedResult;
+        if (w.class_id[slot].bonus_loot) {
+            bonus_n += 1;
+            try std.testing.expectEqual(@as(f32, 25.0), w.class_id[slot].drop_prob);
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), bonus_n); // 2nd spawn after the half seed
+    try std.testing.expectEqual(@as(u32, 0), dir.bm_bonus_count); // reset on the award
+    // Wandering kind runs its own counter (every 3rd x15, stock XML values).
+    var wbonus: u32 = 0;
+    i = 0;
+    while (i < 3) : (i += 1) {
+        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", 100 + i, true, .wandering) orelse return error.TestUnexpectedResult;
+        if (w.class_id[slot].bonus_loot) {
+            wbonus += 1;
+            try std.testing.expectEqual(@as(f32, 15.0), w.class_id[slot].drop_prob);
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), wbonus);
 }
 
 test "bloodMoonDayFor returns the jittered horde day, not the multiple" {
@@ -1466,7 +2053,9 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
     defer w.deinit();
     const pid = w.spawnPlayer(0, 70, 0, 0).?;
     _ = pid;
-    var d: Director = .{};
+    // Pin the clock rate so one 50 ms tick advances a whole world tick past the
+    // "due" schedule it forces below (the stock 6 ticks/s needs ~4 ticks).
+    var d: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
     // Day 1 (worldTime < 28000): not scheduled yet.
     _ = d.tick(&w, 0.05);
     try std.testing.expectEqual(@as(u64, 0), d.wandering_next);
@@ -1505,7 +2094,7 @@ test "wandering horde size and distance follow [rules.director]" {
     w.rules.director.wandering_horde_size = 3;
     w.rules.director.wandering_spawn_dist = 40.0;
     _ = w.spawnPlayer(0, 70, 0, 0);
-    var d: Director = .{ .clock = .{ .day = 2, .hours = 10.0 } };
+    var d: Director = .{ .clock = .{ .day = 2, .hours = 10.0, .time_of_day_inc_per_sec = 1000 } };
     d.wandering_next = d.clock.worldTimeBits() + 1;
     _ = d.tick(&w, 0.05);
     var horde: u32 = 0;
@@ -1520,6 +2109,92 @@ test "wandering horde size and distance follow [rules.director]" {
     const hs = horde_slot orelse return error.TestUnexpectedResult;
     const dist = @sqrt(w.transform[hs].x * w.transform[hs].x + w.transform[hs].z * w.transform[hs].z);
     try std.testing.expect(dist > 30.0 and dist < 50.0); // config 40 m, not 92
+}
+
+test "the blood-moon freeze takes the weighted party level, not the high-water mark" {
+    // AIDirectorBloodMoonParty::InitParty IL_0006 resolves the ladder from
+    // partySpawner.CalcPartyLevel() over the party members, so a two-player
+    // party at stage 40/80 freezes the weighted level (40 + 80*0.5 = 80 with
+    // the stock DiminishingReturns of 0.5 ... the exact value comes from
+    // GameStageDefinition::CalcPartyLevel), never the 80 max alone.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.rules.director.initial_population_frac = 0;
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7 },
+        .horde_cd = 999,
+        .party_stage = 80,
+        .party_stage_weighted = 52,
+    };
+    _ = d.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 52), d.bm_stage_frozen);
+    // With nothing pushed (offline tables, tests) the high-water mark stands.
+    var d2: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7 },
+        .horde_cd = 999,
+        .party_stage = 80,
+    };
+    _ = d2.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 80), d2.bm_stage_frozen);
+}
+
+test "wandering horde takes its size and group from the WanderingHorde ladder" {
+    // AIWanderingHordeSpawner::.ctor IL_0066 builds its party spawner with
+    // mod = 50, and UpdateSpawn IL_006D spawns the resolved stage row's group
+    // `num` times. The ladder index is the weighted party level wrapped at 50,
+    // so a stage of 71 resolves row 21, and the pack is that row's size/group
+    // rather than the rules fallback.
+    const Hooks = struct {
+        var asked_stage: i32 = -1;
+        fn stageGroup(_: ?*anyopaque, spawner: []const u8, stage: i32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.wandering_spawner)) return null;
+            asked_stage = stage;
+            if (stage != 21) return null;
+            return .{ .group = "wanderingHordeStageGS21", .num = 7, .max_alive = 30, .interval = 2, .duration = 9 };
+        }
+        fn around(_: ?*anyopaque, _: f32, _: f32, radius: f32) i32 {
+            // The wired hook is asked with the stock CalcGameStageAround radius.
+            if (radius != Director.gamestage_around_radius) return 0;
+            return 71;
+        }
+        fn pick(_: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            return null; // class_table rotation fallback
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{
+        .clock = .{ .day = 3, .hours = 12.0, .time_of_day_inc_per_sec = 1000 },
+        .stage_group_ctx = undefined,
+        .stage_group_fn = &Hooks.stageGroup,
+        .stage_around_ctx = undefined,
+        .stage_around_fn = &Hooks.around,
+        .group_pick_ctx = undefined,
+        .group_pick_fn = &Hooks.pick,
+    };
+    d.wandering_next = d.clock.worldTimeBits() + 1; // due
+    _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, 21), Hooks.asked_stage); // 71 % 50
+    var horde: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 7), horde); // the row's num, not the rule's 6
+
+    // A stage that wraps to 0 (party stage 50, 100, ...) has no ladder row at
+    // or below it, so the pack falls back to the rules size rather than
+    // vanishing.
+    var d2: Director = .{
+        .clock = .{ .day = 3, .hours = 12.0 },
+        .party_stage = 50,
+        .stage_group_ctx = undefined,
+        .stage_group_fn = &Hooks.stageGroup,
+    };
+    try std.testing.expectEqual(@as(i32, 0), @mod(d2.party_stage, Director.wandering_stage_mod));
+    try std.testing.expect(d2.wanderingHordeRow(0, 0) == null);
 }
 
 test "wandering horde skips with no players and re-arms" {
@@ -1538,6 +2213,9 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
     var d: Director = .{};
+    // Stock's cSpawnChance (20%) is a roll; pin it to 1 so this test is about
+    // the spawn mechanics. The chance split has its own test below.
+    w.rules.director.heat_spawn_chance = 1;
     // A forge (6 per event, 720-tick duration) feeds every tick: 30 ticks give
     // activity ~180, well past the 25 threshold.
     var t: u32 = 0;
@@ -1547,7 +2225,8 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
     }
     try std.testing.expect(d.heat_n >= 1);
     try std.testing.expect(d.heat[0].activity >= 25);
-    // The 5 s CheckToSpawn fires: scouts spawn, the region resets and cools.
+    // The 5 s CheckToSpawn fires: scouts spawn, the region resets and takes the
+    // long cooldown (stock SetLongDelay 1320 s, not the 240 the reset stamped).
     var warm: u32 = 0;
     while (warm < 110) : (warm += 1) _ = d.tick(&w, 0.05);
     var scouts: u32 = 0;
@@ -1557,17 +2236,79 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
         scouts += 1;
     }
     try std.testing.expectEqual(@as(u32, 2), scouts); // rules.director.heat_scout_count default
-    // Region was reset (activity 0) and is on cooldown. Region key of (0,0):
-    // floor(0/80)=0 on both axes, packed = 0.
+    // Region was reset (activity 0) and is on the long cooldown. Region key of
+    // (0,0): floor(0/80)=0 on both axes, packed = 0.
     var found = false;
     for (d.heat[0..d.heat_n]) |*r| {
         if (r.key == 0) {
             found = true;
             try std.testing.expect(r.activity == 0);
-            try std.testing.expect(r.cooldown > 0);
+            // Long branch (a spawn happened), minus the ~5.5 s of ticks this
+            // test runs past the check; the exact table is asserted in the
+            // chance-split test below.
+            try std.testing.expect(r.cooldown > w.rules.director.heat_cooldown_seconds);
+            try std.testing.expect(r.cooldown <= w.rules.director.heat_long_cooldown_seconds);
         }
     }
     try std.testing.expect(found);
+}
+
+test "heat map: cSpawnChance picks the short or long cooldown table" {
+    // Stock CheckToSpawn (IL=46, aidirector.md verified literals): the reset
+    // stamps 240 s, then a 20% roll either spawns (SetLongDelay 1320 s plus
+    // StartCooldownOnNeighbors(true) = 720 s on the eight neighbours) or not
+    // (the region keeps 240 and the neighbours get 180). zdtd spawned on every
+    // crossing and modelled the long delay as a feral 2x cooldown, so scout
+    // parties came about five times too often and the region re-armed after
+    // 240 s instead of 22 minutes.
+    var w0: ecs_world.World = .{};
+    defer w0.deinit();
+    _ = w0.spawnPlayer(0, 70, 0, 0).?;
+    // District (1,0) is one 80-block region east of district (0,0).
+    const neighbour_key = Director.heatRegionKey(80, 0);
+
+    // Roll fails: no scouts, region 240, neighbour 180.
+    var d0: Director = .{ .heat_check_cd = 0 };
+    w0.rules.director.heat_spawn_chance = 0;
+    d0.notifyActivity(0, 0, 30, 720);
+    d0.notifyActivity(80, 0, 30, 720);
+    _ = d0.tick(&w0, 0.05);
+    var zombies: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w0.alive[s] and w0.zombie_ai[s].is_horde) zombies += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 0), zombies);
+    try std.testing.expectEqual(@as(f32, 240), cooldownOf(&d0, 0));
+    try std.testing.expectEqual(@as(f32, 180), cooldownOf(&d0, neighbour_key));
+
+    // Roll lands: the same crossing spawns and takes the long table.
+    var w1: ecs_world.World = .{};
+    defer w1.deinit();
+    _ = w1.spawnPlayer(0, 70, 0, 0).?;
+    var d1: Director = .{ .heat_check_cd = 0 };
+    w1.rules.director.heat_spawn_chance = 1;
+    d1.notifyActivity(0, 0, 30, 720);
+    d1.notifyActivity(80, 0, 30, 720);
+    _ = d1.tick(&w1, 0.05);
+    zombies = 0;
+    s = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w1.alive[s] and w1.zombie_ai[s].is_horde) zombies += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 2), zombies);
+    try std.testing.expectEqual(@as(f32, 1320), cooldownOf(&d1, 0));
+    // The neighbour's own check is skipped because the long cooldown is already
+    // stamped, so it holds exactly the neighbour-long value.
+    try std.testing.expectEqual(@as(f32, 720), cooldownOf(&d1, neighbour_key));
+}
+
+/// Cooldown of the heat region with `key`, or -1 when absent (test helper).
+fn cooldownOf(d: *const Director, key: i64) f32 {
+    for (d.heat[0..d.heat_n]) |r| {
+        if (r.key == key) return r.cooldown;
+    }
+    return -1;
 }
 
 test "heat map: low activity never spawns and decays away" {
@@ -1595,7 +2336,7 @@ test "bloodmoon schedule persists position and advances past the live day" {
     // cycle 1 (freq 7 + jitter 0..2); the horde spans dusk to dawn across
     // midnight; advancing the live day rolls the schedule forward; a runtime
     // frequency change rebuilds it.
-    var cl: WorldClock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 };
     cl.bloodmoon_frequency = 7;
     cl.bloodmoon_range = 2;
     const first = cl.bloodMoonDayFor(1);
@@ -1657,6 +2398,32 @@ test "blood moon spawns past the ordinary world budget (1.9x CanSpawn)" {
     try std.testing.expect(w.countKind(.zombie) <= 64);
 }
 
+test "blood moon row duration converts to world time units" {
+    // AIDirectorGameStagePartySpawner::SetupGroup IL_0044-0062:
+    // nextStageTime = world.worldTime + duration * 1000 (1000 units per game
+    // hour, 24000 per day). The old *20 armed every row deadline 50x early.
+    const Ctx = struct {
+        fn at(_: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.bloodmoon_spawner)) return null;
+            if (stage != 61) return null;
+            if (index == 0) return .{ .group = "ZombiesNight", .num = 1, .max_alive = 8, .interval = 5, .duration = 1 };
+            if (index == 1) return .{ .group = "ZombiesNight", .num = 1, .max_alive = 8, .interval = 5, .duration = 0 };
+            return null;
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .day = 7, .hours = 23.0 } };
+    d.bm_stage_frozen = 61;
+    d.stage_group_at_fn = &Ctx.at;
+    d.setupBmGroup(&w);
+    try std.testing.expectEqual(d.clock.worldTimeBits() + world_time_units_per_hour, d.bm_group_deadline);
+    // duration 0 leaves the row ungated (stock writes 0).
+    d.bm_group_index = 1;
+    d.setupBmGroup(&w);
+    try std.testing.expectEqual(@as(u64, 0), d.bm_group_deadline);
+}
+
 test "blood moon kills the horde when the party is wiped" {
     // Stock KillPartyZombies (party Tick, aidirector.md): when the horde's
     // party empties (all players dead), the horde zombies die instead of
@@ -1697,7 +2464,7 @@ test "night spawns ground-snap through the world ground hook" {
     }.f;
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 8,
         .horde_cd = 0,
     };
@@ -1802,6 +2569,22 @@ test "ambient rule budget caps the drip and releases on destroy" {
     try std.testing.expect(w.countKind(.zombie) >= 2);
 }
 
+test "rule budgets cover the full parsed table, not just the first 64" {
+    // A modlet patch can add spawning.xml rules up to the parsed bound
+    // (512); an index past the old 64-slot array must be budgeted, not
+    // silently treated as unbudgeted. Index 511 with maxcount 1 admits one
+    // consume and denies the second until release.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const b: RuleBudget = .{ .index = 511, .maxcount = 1, .respawn_days = 1.0 };
+    try std.testing.expect(w.director.budgetAllows(b, &w));
+    w.director.budgetConsume(b, &w);
+    try std.testing.expectEqual(@as(u8, 1), w.director.rule_budgets[511].count);
+    try std.testing.expect(!w.director.budgetAllows(b, &w));
+    w.director.releaseRule(511);
+    try std.testing.expect(w.director.budgetAllows(b, &w));
+}
+
 test "difficulty damage scale uses the comptime XML ladder" {
     // The six difficulty presets decode from the embedded sandbox_presets
     // XML (assets/sandbox_presets.zig) into `[rules.difficulty]
@@ -1833,4 +2616,38 @@ test "difficulty damage scale uses the comptime XML ladder" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.7), d.damageScale(false, true, r), 1e-4);
     d.sandbox_incoming = 0; // unset -> ladder back
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), d.damageScale(false, true, r), 1e-4);
+}
+
+test "a spawn whose ground forbids mobs is refused" {
+    // Stock `Chunk::CanMobsSpawnAtPos` IL_0043/IL_004E: the block under the
+    // spawn cell must be CanMobsSpawnOn and movement-solid, so a player-built
+    // floor hosts no spawns. The director asks through a hook; with no hook
+    // every position stays allowed (offline/builtin world), which the second
+    // half pins.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
+    const Gate = struct {
+        var allow = false;
+        var seen_y: i32 = 0;
+        fn ok(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            seen_y = y;
+            return allow;
+        }
+    };
+    d.mob_spawn_ok_ctx = null;
+    d.mob_spawn_ok_fn = &Gate.ok;
+
+    Gate.allow = false;
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.0, 70.0, 10.0, "", 7, false, .none) == null);
+    // The gate sees the GROUND cell: the caller's y is the stand cell.
+    try std.testing.expectEqual(@as(i32, 69), Gate.seen_y);
+
+    Gate.allow = true;
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.0, 70.0, 10.0, "", 7, false, .none) != null);
+
+    // No hook: the same position spawns (pre-parse behaviour).
+    var d2: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
+    try std.testing.expect(d2.spawnOneZombieLoot(&w, 12.0, 70.0, 12.0, "", 9, false, .none) != null);
 }

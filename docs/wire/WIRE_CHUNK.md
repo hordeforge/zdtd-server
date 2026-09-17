@@ -56,6 +56,17 @@ Package name: `NetPackageChunk`.
 Stock body: `chunkKey:i64` = `WorldChunkCache.MakeChunkKey(cx, cz)`  
 `((cz & 0xFFFFFF) << 24) | (cx & 0xFFFFFF)`.
 
+Provenance of that formula: **empirical, not IL-cited.** `MakeChunkKey` is
+called from the dumped methods (for example
+`il/dedi-complete-v3.1.0/ChunkProviderGenerateWorld_RequestChunk_Int32_Int32_il.txt`
+`IL_0026`) but its own body is in no retained dump, and no dump contains the
+`0xFFFFFF` mask. The shift/mask above is what a stock client accepts: the same
+key rides `NetPackageChunk`, `ChunkRemove` and `NetPackageDecoResetWorldChunk`,
+and all three are live-verified against a stock client (EAC off) plus loadgen.
+A wrong key would strand or duplicate chunks visibly rather than fail quietly,
+so the live path is real evidence, but weaker than an IL citation: if the key
+ever has to change, re-derive it from a fresh dump rather than from this line.
+
 ## Layout B / C (removed)
 
 Former intermediate encoders **ZCHC** (column tops) and **ZCHL** (layered

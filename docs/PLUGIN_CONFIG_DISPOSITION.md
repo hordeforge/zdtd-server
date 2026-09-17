@@ -25,7 +25,7 @@ on_shutdown, on_player_death, on_entity_killed, on_block_damage,
 on_quest_complete, on_admin_command, on_chat, on_player_login, on_player_leave,
 on_player_damage, on_quest_accept, on_craft_request, on_loot_roll,
 on_trader_event, on_mcp_frame, on_trade_price, on_perk_spend, on_stat_changed,
-on_game_event, on_evidence`. Host: `src/server/game/wasm_host.zig`
+on_game_event, on_evidence, on_buff`. Host: `src/server/game/wasm_host.zig`
 (wasmTick / killVerdict / wasmQueue / wasmSense / wasmQuery / adminPlugin).
 
 Existing modules (`plugins/`): core_craftgate (craft verdict), core_killfeed
@@ -199,7 +199,7 @@ full-suite runs green). Residuals, each with a reason:
    lock was free.
 3. **Concurrent-session transient webui failure.** One `zig build test` run
    reported 2 failing webui login-lockout tests (`renderLoginLockout ...`,
-   `loginHintHtml ...`) while the concurrent session was mid-edit of the webui
+   `renderLogin ...`; the latter was then named `loginHintHtml`) while the
    HTML pages (`login_lockout.html` etc., 17:04–17:09); their follow-up HTML
    edit restored the `aria-live="off"` markup the tests assert, and subsequent
    runs pass. Not a code defect in the current tree.
@@ -248,3 +248,14 @@ KBs, and an oversized operator-supplied `.wasm` fails closed instead of
 loading). Both are the "FAIL safety guards" class from RULES_CONFIG, not
 tunables. The frame-level C2S deflate bounds (`wire/frame.zig` inflate_cap
 512 KiB, max_inflate_ratio 64) are the same class on the transport side.
+
+### 2026-09-12 correction (plugin table ceiling)
+
+The 8-slot table above was a guard that had quietly become a policy: the tree
+now ships 14 modules (12 core plugins plus the mcp/parachute addons, and
+`fps_bot` for bot play), so a `[plugin] modules` list naming them all lost the
+tail at the cap. `max_wasm_plugins` is 32 now, still a fixed ceiling with
+fail-closed behaviour past it (the loader logs and skips, never a partial
+module). The host test "shipped core plugins declare the host contract version"
+loads the whole shipped set and asserts it fits, so the ceiling cannot fall
+below the shipped tree again without a red test.

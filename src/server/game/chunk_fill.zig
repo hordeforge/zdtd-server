@@ -12,10 +12,16 @@ const ln_peer = @import("../../litenet/peer.zig");
 const apm = @import("../../apm/root.zig");
 const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const requirements = @import("../../assets/requirements.zig");
+const sandbox = @import("../../assets/sandbox.zig");
+const game_tick = @import("tick.zig");
+const game_player = @import("player.zig");
+const game_loot = @import("loot.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const containers_mod = @import("../../world/containers.zig");
+const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
@@ -57,7 +63,11 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
             var hsum: u32 = 0;
             for (ch.heights) |h| hsum += h;
             const havg: u8 = @intCast(hsum / 256);
-            break :hb if (havg < 40) @as(u8, 5) else if (havg > 90) @as(u8, 1) else 3;
+            // Key on the stock biome names and resolve through the loaded
+            // biomes.xml `<biomemap id>` table; the offline pins apply only
+            // when the table is missing (no game-dir).
+            const want: []const u8 = if (havg < 40) "snow" else if (havg > 90) "desert" else "pine_forest";
+            break :hb @import("../../world/biomes.zig").biomeIdForName(&self.biome_colors, want);
         };
         ch.biome_id = b;
         break :blk b;
@@ -145,7 +155,11 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // bit-for-bit with no overrides: densityForBlock(type) per cell.
         .dens_at = if (ch.densities == null) null else BlockCtx.dens,
         .water_block_id = self.world.terrain_ids.water,
-        .dmg_at = DmgCtx.at,
+        // Same gate as dens_at: with no damage plane every cell reads 0, and
+        // writeDamageChannel's null branch (sameValue 0 per layer) writes the
+        // bytes the scalar path produces, so the 65536 indirect
+        // dmgAt/blockAt/wireBlockDamage calls per chunk were pure cost.
+        .dmg_at = if (ch.damages == null) null else DmgCtx.at,
         .dmg_ctx = &dmg_ctx,
         // Dense plane already lives on the chunk after getOrCreate; pass it so
         // encode skips the 65536-cell scratch fill and the density/water SIMD
@@ -208,7 +222,8 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const id: u16 = world_store.typeId(blocks[live.blockIndex(lx, y, lz)]);
+                const raw = blocks[live.blockIndex(lx, y, lz)];
+                const id: u16 = world_store.typeId(raw);
                 if (id != last_id) {
                     last_id = id;
                     last_power = self.power_registry.lookup(id);
@@ -217,11 +232,26 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
                 const wx = base_x + lx;
                 const wz = base_z + lz;
                 if (self.sim.power.addNodeAt(pn.kind, wx, y, wz, pn.watts)) |nid| {
-                    if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
+                    if (self.sim.power.indexOfId(nid)) |ni| {
+                        pn.applyToNode(&self.sim.power.nodes[ni]);
+                        // applyToNode latches a switch off, which is right for
+                        // a freshly placed one. Here the block came off disk
+                        // with the player's own latch in its meta (the SetBlock
+                        // path writes it and the ZCH3 plane keeps it), so a
+                        // restart used to switch every powered base back off.
+                        if (pn.is_switch) {
+                            const on = (packages.blockMeta(raw) & packages.block_meta_on) != 0;
+                            self.sim.power.nodes[ni].on = on;
+                        }
+                    }
                 }
             }
         }
     }
+    // Saved player-set node state (generator fuel, trigger delay/duration,
+    // motion TargetType) applies before resolve so the first tick after a
+    // restart runs on the restored values, not on the scan's defaults.
+    self.sim.power.applyPendingState();
     self.sim.power.resolve();
     // Restored wire edges whose endpoints are now both scanned reconnect.
     self.sim.power.reconnectPending();
@@ -281,7 +311,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     // Fail closed (audit A31): a storage block with no
                     // LootList stays empty instead of inventing woodenChest.
                     if (self.maxdamage.lootListFor(id)) |ll| {
-                        self.fillContainerFromLoot(cont, ll, lootSeedAt(wx, y, wz));
+                        self.setContainerSizeFromLoot(cont, ll);
                     }
                 }
                 found += 1;
@@ -303,6 +333,18 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                 // Authored Light TEs (type 18): store the parsed
                 // intensity/range/colour so the chunk stream emits the light.
                 if (te_type == te_types.light) {
+                    // The authored light is only real while its block is: a
+                    // destroyed lamp clears the store entry, but te_scanned is
+                    // per-session, so the next restart re-scanned this prefab
+                    // and put the lamp back on a cell that is now air. Same
+                    // block read the storage branch below does.
+                    const llx = wx - tc.base_x;
+                    const llz = wz - tc.base_z;
+                    const lblock: u16 = if (llx >= 0 and llx < 16 and llz >= 0 and llz < 16 and wy >= 0 and wy < tc.ch.y_dim)
+                        world_store.typeId(tc.ch.blocks.?[tc.ch.blockIndex(llx, wy, llz)])
+                    else
+                        0;
+                    if (lblock == 0) return;
                     const lpos = light_te_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                     if (tc.g.light_te.get(lpos) == null) {
                         if (tc.g.light_te.getOrCreate(lpos)) |lt| {
@@ -311,8 +353,15 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     }
                     return;
                 }
-                // Loot-like types only.
-                if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type))) return;
+                // Loot-like types only. `powered` (0x0F) is deliberately NOT
+                // here: it is a TileEntityPowered, not storage, and making it
+                // a container gave it an invented 8-slot grid and meant
+                // `sendStorageTe` would push a composite-storage body for it.
+                // The client instantiates its TE from the block, so those
+                // bytes would land in `TileEntityPowered::read`. Powered
+                // blocks replicate through `broadcastPoweredTriggerTe`, which
+                // is driven by the power registry instead.
+                if (!(te_types.isStorageLike(te_type) or te_types.isSignLike(te_type))) return;
                 const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                 if (tc.g.containers.get(pos) != null) return;
                 // Block id from the chunk being scanned, not world.blockWorld:
@@ -328,14 +377,19 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     world_store.typeId(tc.ch.blocks.?[tc.ch.blockIndex(lx, wy, lz)])
                 else
                     0;
-                const id: u16 = if (block_id != 0) block_id else replicate_te.seedChestBlockId(tc.g);
-                const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
+                // The prefab container is only real while its block is. The
+                // scan re-runs after a restart (te_scanned is per-session), so
+                // creating one on an empty cell resurrected every prefab chest
+                // a player had mined out. The seed chest does not need this
+                // fallback: init_world places its own block and container.
+                if (block_id == 0) return;
+                const cont = tc.g.containers.getOrCreate(pos, 8, block_id) orelse return;
                 // World container (prefab TE, not player-placed).
                 cont.player_storage = false;
                 if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
                     // Fail closed (audit A31): no LootList, no invented loot.
-                    if (tc.g.maxdamage.lootListFor(id)) |ll| {
-                        tc.g.fillContainerFromLoot(cont, ll, lootSeedAt(wx, wy, wz));
+                    if (tc.g.maxdamage.lootListFor(block_id)) |ll| {
+                        tc.g.setContainerSizeFromLoot(cont, ll);
                     }
                 }
                 tc.found.* += 1;
@@ -359,7 +413,34 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     }
 }
 
-pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
+/// `LootGateCtx.buffs` sink: applies a spawned entry's `buffs=` to the opener.
+/// Stock collects the list during the roll and calls
+/// `LootContainer.ExecuteBuffActions` after it, which is exactly this shape.
+const LootBuffCtx = struct {
+    g: *Game,
+    ps: ecs.Slot,
+    entity_id: i32,
+
+    fn add(ctx: ?*anyopaque, name: []const u8) void {
+        const s: *@This() = @ptrCast(@alignCast(ctx.?));
+        _ = game_tick.addCatalogBuff(s.g, s.entity_id, s.ps, name, s.entity_id);
+    }
+};
+
+/// `LootGateCtx.prob_scale` sink: folds the opener's `LootProb` passives onto a
+/// tagged entry's probability.
+const LootProbCtx = struct {
+    g: *Game,
+    peer_slot: usize,
+    ps: ecs.Slot,
+
+    fn scale(ctx: ?*anyopaque, tags: []const u8, base: f32) f32 {
+        const s: *@This() = @ptrCast(@alignCast(ctx.?));
+        return game_player.lootProbScale(s.g, s.peer_slot, s.ps, tags, base);
+    }
+};
+
+pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
     // Remember the table that filled this container: the destroy_on_close
     // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
     cont.loot_list = loot_name;
@@ -375,7 +456,48 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // Roll up to the container's own capacity (the roll is capped by the
     // buffer, so a bigger container actually fills more stacks).
     var stacks: [containers_mod.max_container_slots]assets_loot.Stack = undefined;
-    var n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count]);
+    // The container's own biome answers a `LootEntryRequirementBiome` gate
+    // (`biomes.xml` names); a caller with no position leaves it null, so a
+    // biome-gated entry stays omitted rather than rolling everywhere.
+    const biome_id = self.biomeIdAt(cont.pos.x, cont.pos.z) orelse 0;
+    // The opener's requirement context answers the loot requirement classes
+    // that read player state (`Progression`, `CVar`, `RandomRoll @$cvar`): the
+    // same `requirements.Ctx` the buff/perk VM uses, built from the opener's
+    // own ledger. Without an opener (scan-time sizing, an anonymous re-roll)
+    // the ctx stays null and those gates refuse, so the entry is omitted
+    // rather than rolled unconditionally.
+    var player_ctx: ?requirements.Ctx = null;
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    var buff_ctx: LootBuffCtx = undefined;
+    var buff_sink: ?assets_loot.LootBuffSink = null;
+    var prob_ctx: LootProbCtx = undefined;
+    var prob_sink: ?assets_loot.ProbScale = null;
+    if (opener_peer >= 0 and @as(usize, @intCast(opener_peer)) < self.clients.len) {
+        const oc = &self.clients[@intCast(opener_peer)];
+        if (oc.joined) {
+            if (self.sim.playerByPeer(@intCast(opener_peer))) |ps| {
+                buff_ctx = .{ .g = self, .ps = ps, .entity_id = oc.entity_id };
+                buff_sink = .{ .ctx = &buff_ctx, .add = LootBuffCtx.add };
+                prob_ctx = .{ .g = self, .peer_slot = @intCast(opener_peer), .ps = ps };
+                prob_sink = .{ .ctx = &prob_ctx, .scale = LootProbCtx.scale };
+            }
+            // The decoded server sandbox code answers a `SandboxOption` gate;
+            // the buffer lives for this call, which is all the ctx is used for.
+            const sandbox_n = sandbox.decode(self.sandbox_code, &sandbox_buf);
+            player_ctx = .{
+                .levels = oc.skill_levels[0..oc.skill_level_n],
+                .cvars = &oc.cvars,
+                .sandbox_groups = sandbox_buf[0..sandbox_n],
+            };
+        }
+    }
+    const gate_ctx: assets_loot.LootGateCtx = .{
+        .biome_name = self.world.biome_layers_table.nameById(biome_id),
+        .player = player_ctx,
+        .buffs = buff_sink,
+        .prob_scale = prob_sink,
+    };
+    var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
     const sv = self.plugins.lootRoll(loot_name, @intCast(n));
@@ -394,27 +516,85 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         // (stock ItemClass.HasQuality = tiered effect controller, which
         // zdtd approximates as stack==1; quality items never stack) carry
         // it, so stackables keep quality 1 and merge normally.
+        // `ItemClass.HasQuality` (items.xml owner-tiered effect groups), not
+        // `stack == 1`: a tool like meleeToolRepairT0StoneAxe has quality with
+        // Stacknumber 500, so the stack heuristic silently dropped its rolled
+        // quality. Quality items still never stack (addSlotStacked merges on
+        // equal quality), and a stackable keeps quality 1.
         const q = if (self.items.byId(eid)) |d|
-            (if (d.stack == 1) stacks[i].quality else 1)
+            (if (d.has_quality) stacks[i].quality else 1)
         else
             stacks[i].quality;
-        cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q });
+        // `random_durability="true"`: the item starts worn at
+        // `(int)(MaxUseTimes * RandomRange(0.2, 0.8))` (stock LootContainer).
+        // Deterministic per container + stack index, like the rest of the roll.
+        const use_times: f32 = if (stacks[i].random_durability)
+            assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
+        else
+            0;
+        const rolled = self.rollItemStats(eid, q, loot_stage, seed ^ @as(u32, @intCast(i)));
+        cont.setSlot(si, .{
+            .item_id = eid,
+            .count = stacks[i].count,
+            .quality = q,
+            .use_times = use_times,
+            .stats = rolled.stats,
+            .stats_n = rolled.n,
+        });
+        // The entry's `mods=` list installs on the stack's own slot, rolled
+        // from the same deterministic per-stack stream.
+        if (stacks[i].mods.len > 0) {
+            game_loot.installLootMods(self, &cont.slots[si], eid, stacks[i].mods, stacks[i].mod_chance, seed ^ @as(u32, @intCast(i)));
+        }
         si += 1;
     }
-    // LootRespawnDays base: the day this loot was generated.
+    // Stock sets `bTouched` and `worldTimeTouched` BEFORE the roll
+    // (LootManager.LootContainerOpened), so an empty roll still stops the
+    // container from re-rolling until the LootRespawnDays interval elapses.
+    cont.touched = true;
     cont.touched_day = self.sim.director.clock.day;
 }
 
-/// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
-/// container re-rolls its contents when the interval since the touch day
-/// has elapsed. Player-placed storage never respawns. The next open
-/// regenerates fresh loot; the cycle-varying seed makes each respawn
-/// differ while staying deterministic per (pos, cycle). A block without a
-/// LootList stays empty (fail closed, audit A31), never woodenChest.
-pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
-    if (self.loot_respawn_days == 0) return;
+/// Derive a container's storage grid from loot.xml without rolling it. Stock's
+/// TE carries the `LootContainer` size from the block's loot list, while the
+/// roll itself waits for the first open (`LootManager.LootContainerOpened`), so
+/// the chunk/prefab scan sizes the grid here and leaves the contents empty.
+pub fn setContainerSizeFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8) void {
+    cont.loot_list = loot_name;
+    if (self.loot.containerByName(loot_name)) |lc| {
+        const want = @min(@as(usize, lc.size_x) * @as(usize, lc.size_y), containers_mod.max_container_slots);
+        if (want >= 1) cont.slot_count = @intCast(want);
+    }
+}
+
+/// LootManager.LootContainerOpened + TEFeatureStorage.UpdateTick: the roll a
+/// container gets when a player opens it. An untouched world container rolls
+/// here with the **opener's** loot stage (stock's input) and stamps
+/// `bTouched`/`worldTimeTouched`; an already-touched, emptied container re-rolls
+/// once the LootRespawnDays interval has elapsed. Player-placed storage never
+/// rolls, and a block without a LootList stays empty (fail closed, audit A31).
+pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_peer: usize) void {
     if (cont.player_storage) return;
-    if (!cont.touched) return;
+    const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
+    const pos = cont.pos;
+    // Stock resolves the table by the TE's stored `lootListName`, falling back
+    // to the block's LootList.
+    const resolved = if (cont.loot_list.len > 0) cont.loot_list else (self.maxdamage.lootListFor(id) orelse "");
+    if (!cont.touched) {
+        if (resolved.len == 0) return;
+        const ll = resolved;
+        const cmod = self.maxdamage.lootStageModFor(id);
+        const cbonus = self.maxdamage.lootStageBonusFor(id);
+        self.fillContainerFromLoot(
+            cont,
+            ll,
+            lootSeedAt(pos.x, pos.y, pos.z),
+            self.lootStageForPlayerWithContainer(opener_peer, cmod, cbonus),
+            @intCast(opener_peer),
+        );
+        return;
+    }
+    if (self.loot_respawn_days == 0) return;
     var empty = true;
     for (cont.slots[0..cont.slot_count]) |s| {
         if (s.count > 0 and s.item_id != 0) {
@@ -430,15 +610,18 @@ pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void 
     // rejected the future case.
     const elapsed = day -% cont.touched_day;
     if (elapsed < self.loot_respawn_days) return;
-    const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
     const cycle: u32 = day / self.loot_respawn_days;
-    const pos = cont.pos;
     // Fail closed (audit A31): no LootList, the container stays empty.
-    const ll = self.maxdamage.lootListFor(id) orelse return;
+    if (resolved.len == 0) return;
+    const ll = resolved;
+    const cmod = self.maxdamage.lootStageModFor(id);
+    const cbonus = self.maxdamage.lootStageBonusFor(id);
     self.fillContainerFromLoot(
         cont,
         ll,
         lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
+        self.lootStageForPlayerWithContainer(opener_peer, cmod, cbonus),
+        @intCast(opener_peer),
     );
 }
 
@@ -467,6 +650,73 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
         }
     }
     self.containers.remove(pos);
+    if (n == 0) return;
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+        self.broadcastLootSpawn(bag_nid) catch {};
+    }
+}
+
+/// Spill a broken workstation's four slot groups as a ground bag, then drop
+/// the store entry. Same rule as `tryContainerSpill`: the block is gone, so
+/// what it held has to go somewhere the player can reach, or breaking a
+/// forge silently destroys its fuel, inputs, tools and finished output.
+/// Spill a broken vending machine's stock as a ground bag, then drop the
+/// store entry. Same rule as the container and workstation spills: the stock
+/// rows are the owner's goods, bought and stocked by a player, so destroying
+/// the block must not destroy them. The takings (`available_money`) are not
+/// spillable - zdtd has no money item - so they are lost with the machine and
+/// that stays a documented gap rather than an invented coin drop.
+pub fn tryVendingSpill(self: *Game, x: i32, y: i32, z: i32) void {
+    const pos = vending_mod.PosKey{ .x = x, .y = y, .z = z };
+    const vm = self.vending.get(pos) orelse return;
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    var si: usize = 0;
+    while (si < vm.stock_n and si < vm.stock.len) : (si += 1) {
+        const e = vm.stock[si];
+        if (e.type_id == 0 or e.count <= 0) continue;
+        if (n >= ecs.components.max_inv_slots) break;
+        // Stock rows carry absolute wire types; the ground bag holds ECS ids.
+        const eid = Game.reverseItemType(self, e.type_id);
+        if (eid == 0) continue;
+        drop_inv.slots[n] = .{
+            .item_id = eid,
+            .count = @intCast(@min(e.count, 65535)),
+            .quality = e.quality,
+        };
+        n += 1;
+    }
+    self.vending.removeAt(pos);
+    if (n == 0) return;
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+        self.broadcastLootSpawn(bag_nid) catch {};
+    }
+}
+
+pub fn tryWorkstationSpill(self: *Game, x: i32, y: i32, z: i32) void {
+    const ws = self.workstations.get(x, y, z) orelse return;
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    for ([_][]const ecs.components.InvSlot{
+        ws.fuel[0..],
+        ws.input[0..],
+        ws.tools[0..],
+        ws.output[0..],
+    }) |group| {
+        for (group) |s| {
+            if (s.count == 0 or s.item_id == 0) continue;
+            if (n >= ecs.components.max_inv_slots) break;
+            drop_inv.slots[n] = s;
+            n += 1;
+        }
+    }
+    self.workstations.removeAt(x, y, z);
     if (n == 0) return;
     const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
     const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
@@ -558,7 +808,10 @@ pub fn rollBlockDropEvent(
         if (event == .harvest) {
             if (self.sim.playerByPeer(peer_slot)) |ps| {
                 if (self.sim.mask[ps].inventory) {
-                    const tool = self.sim.inventory[ps].slots[self.sim.inventory[ps].holding];
+                    // heldItem() guards the no-holding sentinel: a harvest
+                    // packet can arrive before the player selects a toolbelt
+                    // slot.
+                    const tool = self.sim.inventory[ps].heldItem();
                     if (tool.item_id != 0) {
                         const mult = self.items.harvestMultiplier(tool.item_id, tool.quality, d.tag);
                         if (mult <= 0) continue;
@@ -631,6 +884,10 @@ fn tryPlaceStuckDrop(
     const cur = self.world.blockWorld(x, y, z) catch return false;
     if (cur != 0) return false; // target cell must be air
     self.world.setBlockWorld(x, y, z, bid) catch return false;
+    // A stuck drop is a placement like any other: whatever its type owns is
+    // claimed here rather than left for a later chunk rescan. Debris rows are
+    // rarely powered, but the rule is the placement, not the block id.
+    self.noteBlockAdded(x, y, z, bid);
     if (packages.buildSetBlockBody(self.body_buf[0..64], x, y, z, bid) catch null) |sb| {
         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
     }

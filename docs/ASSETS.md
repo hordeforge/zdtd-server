@@ -4,7 +4,7 @@
 
 > **Related:** [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) · [MAPS](MAPS.md) · [WORLDGEN](WORLDGEN.md) · [PROVENANCE](PROVENANCE.md) · [ZIG_CLONE](ZIG_CLONE.md) · [STATUS](STATUS.md) · [wire/PACKAGES](wire/PACKAGES.md) · [AUTHORITY](AUTHORITY.md)
 
-Policy hub for loading game data from the operator's install (`--game-dir`). Stock content is data loaded at init and never hardcoded; see [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) for the config precedence and persistence plane.
+Policy hub for loading game data from the operator's install (`--game-dir`). Stock content is data loaded at init and never hardcoded; see [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) for the config precedence and persistence plane. The RE values the loaders implement were read from one exact stock install: the studied-build file hashes are pinned in [PROVENANCE.md](PROVENANCE.md) ("Studied bytes"). A TFP re-release can keep the version string and change bytes, so an operator diffing their install against those hashes is what tells them they are off-pin.
 
 ## Config XML + overrides
 

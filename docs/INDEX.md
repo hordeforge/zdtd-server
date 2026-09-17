@@ -64,6 +64,7 @@ What goes over the socket, and how it is proven against the stock client.
 | [wire/WIRE_WORKSTATION.md](wire/WIRE_WORKSTATION.md) | Workstation tile-entity wire |
 | [wire/INVENTORY.md](wire/INVENTORY.md) | Inventory wire |
 | [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
+| [DIVERGENCES.md](DIVERGENCES.md) | Every deliberate departure from stock behaviour, with its cost |
 | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff and C2S coverage tooling |
 
@@ -142,4 +143,4 @@ review contradicts [STATUS.md](STATUS.md), STATUS wins.
 | [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | archived (see `docs/archive/`) |
 | [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
 | [prompts/net-send-review.md](prompts/net-send-review.md) | not yet run |
-| [prompts/plugin-composability-review.md](prompts/plugin-composability-review.md) | not yet run |
+| [prompts/plugin-composability-review.md](prompts/plugin-composability-review.md) | [reviews/PLUGIN_COMPOSABILITY.md](reviews/PLUGIN_COMPOSABILITY.md) (2026-09-12, against arXiv:2608.25512v1) |

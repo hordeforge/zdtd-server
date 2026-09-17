@@ -11,7 +11,9 @@ const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
 const prefabs_mod = @import("../../world/prefabs.zig");
 const items = @import("../../assets/items.zig");
+const assets_traders = @import("../../assets/traders.zig");
 const assignids = @import("../../assets/assignids_comptime.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -483,6 +485,68 @@ pub fn heldItemLight(ctx: ?*anyopaque, item_id: u16) f32 {
 /// Runs on parallel AI/turret workers (LOS, movement probes, gravity), so the
 /// world probe holds `terrain_mu`: `isSolidWorld` reaches `World.getOrCreate`,
 /// which mutates shared state (chunk-map insert/evict/rehash, touch_seq) and
+/// `blocks.xml` Collide `movement` verb for a block id: stock
+/// `Block.IsCollideMovement`. Wired onto `World.movement_solid_fn`, so the
+/// block id is resolved by the store and the table stays out of `world/`. An id
+/// the table does not know keeps the pre-parse behaviour (solid).
+pub fn blockMovementSolid(ctx: ?*anyopaque, id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.blocks.byId(id)) |d| return (d.collide & assets_blocks.collide_movement) != 0;
+    return true;
+}
+
+/// `blocks.xml` Collide `sight` verb for a block id: the `IsCollideSight` half
+/// of stock `Block.IsSeeThrough` (water is handled by the store, since it
+/// always blocks sight). An id the table does not know keeps the pre-parse
+/// behaviour (sight blocked).
+pub fn blockSightBlocked(ctx: ?*anyopaque, id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.blocks.byId(id)) |d| return (d.collide & assets_blocks.collide_sight) != 0;
+    return true;
+}
+
+/// Per-item `TraderQualityMod="min,max"` pair for the price lerp: stock's
+/// `XUiM_Trader.GetBuyPrice`/`GetSellPrice` use the item's own
+/// `TraderQualityMinMod`/`MaxMod` when declared, else the trader's. Null when
+/// the item declares no pair (or the table has no entry), which keeps the
+/// trader's pair.
+pub fn itemQualityMod(ctx: ?*anyopaque, item: u16) ?[2]f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byId(item) orelse return null;
+    if (d.trader_quality_min_mod <= 0 and d.trader_quality_max_mod <= 0) return null;
+    return .{ d.trader_quality_min_mod, d.trader_quality_max_mod };
+}
+
+/// Ground half of stock `Chunk::CanMobsSpawnAtPos` (IL_0043/IL_004E): the block
+/// at (x, y, z) must carry `CanMobsSpawnOn` AND be movement-solid, so a
+/// player-built floor (which declares neither) stops hosting spawns while
+/// terrain keeps them. A block the table does not know (builtin/offline world)
+/// stays allowed, which is the pre-parse behaviour; a probe failure fails open
+/// so a chunk border cannot silence the director.
+pub fn blockMobSpawnGround(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    // The gate is authoritative only when the operator's blocks.xml is loaded:
+    // the builtin offline table carries synthetic ids and no CanMobsSpawnOn, so
+    // a flat/offline world keeps the pre-parse "allowed" answer (it has no
+    // terrain materialized at the probe either).
+    if (g.blocks.source != .xml) return true;
+    const id = g.world.blockWorld(x, y, z) catch return true; // probe failure fails open
+    if (id == 0) return true; // air / unmaterialized chunk: the caller's placement decides
+    if (g.blocks.byId(id)) |d| {
+        if (!d.can_mobs_spawn_on) return false;
+        return (d.collide & assets_blocks.collide_movement) != 0;
+    }
+    return true;
+}
+
+/// Coordinate-level sight probe for the AI/voxel LOS paths: the same
+/// `sightBlockedWorld` the bot gate uses, through a function pointer so
+/// `ecs/systems.zig` does not need the store's chunk machinery.
+pub fn blockSightBlockedAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.world.sightBlockedWorld(x, y, z);
+}
+
 /// allocates from the non-thread-safe World allocator.
 pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -501,9 +565,9 @@ pub fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     return g.world.isWaterId(id);
 }
 
-/// Door-id oracle: true when the block id resolves to a door (name-based, per
-/// the stock door-naming set). Feeds `isSolidWorld` so open doors are
-/// passable and closed doors block.
+/// Door-id oracle: true when the block id resolves to a `BlockTag="Door"`
+/// block (stock `BlockTags` bit 2, resolved through Extends). Feeds
+/// `isSolidWorld` so open doors are passable and closed doors block.
 pub fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const def = g.blocks.byId(id) orelse return false;
@@ -635,15 +699,20 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const d = g.items.byId(item_id) orelse return 0;
     if (d.econ == 0) return 0;
-    var sell_markup: f32 = 0.02;
+    // Same resolution order as fillTraderFromXml: per-trader override, then
+    // the traders.xml root row, then the fallback. Optional, not a sentinel
+    // compare, so an override equal to the fallback survives.
+    var sell_markup: f32 = assets_traders.default_sell_markdown;
     if (g.sim.mask[trader_slot].trader_stock) {
+        var sell_ov: ?f32 = null;
         const info_id = g.sim.trader_stock[trader_slot].trader_info_id;
         if (info_id != 0) {
             if (g.traders.traderInfo(info_id)) |ti| {
-                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+                if (ti.override_sell_markup > 0) sell_ov = ti.override_sell_markup;
             }
         }
-        if (sell_markup == 0.02 and g.traders.sell_markdown > 0) sell_markup = g.traders.sell_markdown;
+        sell_markup = sell_ov orelse
+            (if (g.traders.sell_markdown > 0) g.traders.sell_markdown else assets_traders.default_sell_markdown);
     }
     // EconomicBundleSize (RE loot-economy.md §5 GetSellPrice): the sell base
     // divides by the bundle; the caller multiplies unit × qty.
@@ -670,7 +739,7 @@ pub fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f
 /// MaxUseTimes for a quality (tier 1..6): the DegradationMax pair lerped
 /// over (quality-1)/5 like the stock passive tier range, truncated to int
 /// per get_MaxUseTimesBase's `(int)GetValue(...)` cast. 0 = no durability.
-fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
+pub fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
     if (d.degradation_max == 0) return 0;
     const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
     const t: f32 = (q - 1.0) / 5.0;

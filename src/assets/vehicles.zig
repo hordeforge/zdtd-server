@@ -7,6 +7,9 @@ const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed vehicle defs, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock vehicles.xml
+/// defines **6**, so this leaves ample room for modlets.
 pub const max_vehicles: usize = 32;
 
 pub const Def = struct {
@@ -17,8 +20,14 @@ pub const Def = struct {
     velocity_max: f32 = 0,
     /// Motor torque forward (vehicles.xml motorTorque_turbo). 0 = unset.
     motor_torque: f32 = 0,
-    /// Max HP when used as entity (EntityVehicle C# constant: gyro 250,
-    /// 4x4 300, rest 200; stock entityclasses carry no vehicle HealthMax).
+    /// Max HP when used as entity. There is no per-kind constant in stock:
+    /// `Vehicle::SetItemValue` IL=65 sets `Stats.Health.BaseMax` from
+    /// `ItemValue.MaxUseTimes` (`ItemValue::get_MaxUseTimesBase` IL=25 =
+    /// `EffectManager.GetValue(DegradationMax = 8, ...)`), i.e. the vehicle
+    /// placeable item's `DegradationMax` (bicycle 1500, minibike 2000,
+    /// gyrocopter 3500, motorcycle 4000, truck4x4 8000). `resolveMaxHp` fills
+    /// it from the loaded items table; the literal below is only the no-items
+    /// offline floor.
     max_hp: f32 = 200,
     /// vehicles.xml fuelTank `capacity` (minibike 40, motorcycle 120,
     /// 4x4 400, gyro 80). 0 = unset → the `[rules.vehicle] fuel_cap` floor.
@@ -31,7 +40,7 @@ pub const Def = struct {
 const max_seat_scan: usize = 99;
 
 pub const Table = struct {
-    defs: []const Def = &.{},
+    defs: []Def = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {
@@ -61,7 +70,31 @@ pub const Table = struct {
         }
         return null;
     }
+
+    /// Set each def's `max_hp` from its placeable item's `DegradationMax`
+    /// (the stock source; see `Def.max_hp`). `lookup(name)` is the items table,
+    /// passed as a callback so this module keeps no asset dependency. A kind
+    /// with no resolved item keeps the offline floor.
+    pub fn resolveMaxHp(self: *Table, lookup: *const fn (?*anyopaque, []const u8) ?u32, ctx: ?*anyopaque) void {
+        for (self.defs) |*d| {
+            const item_name = placeableItemName(d.kind) orelse continue;
+            const dm = lookup(ctx, item_name) orelse continue;
+            if (dm > 0) d.max_hp = @floatFromInt(dm);
+        }
+    }
 };
+
+/// `vehicle<Kind>Placeable`, the items.xml item whose `DegradationMax` becomes
+/// the entity's max health (`Vehicle::SetItemValue` IL=65).
+pub fn placeableItemName(kind: components.VehicleKind) ?[]const u8 {
+    return switch (kind) {
+        .bicycle => "vehicleBicyclePlaceable",
+        .minibike => "vehicleMinibikePlaceable",
+        .motorcycle => "vehicleMotorcyclePlaceable",
+        .four_by_four => "vehicleTruck4x4Placeable",
+        .gyrocopter => "vehicleGyrocopterPlaceable",
+    };
+}
 
 fn kindFromName(name: []const u8) ?components.VehicleKind {
     if (std.mem.find(u8, name, "Bicycle") != null) return .bicycle;
@@ -180,6 +213,31 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("vehicles.xml", Table, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "resolveMaxHp takes the placeable item's DegradationMax" {
+    // Vehicle::SetItemValue IL=65: Stats.Health.BaseMax = ItemValue.MaxUseTimes
+    // (ItemValue::get_MaxUseTimesBase IL=25 -> DegradationMax = passive 8), so
+    // a truck4x4 is 8000 HP, not the offline floor 200.
+    const Hooks = struct {
+        fn lookup(_: ?*anyopaque, name: []const u8) ?u32 {
+            if (std.mem.eql(u8, name, "vehicleTruck4x4Placeable")) return 8000;
+            if (std.mem.eql(u8, name, "vehicleBicyclePlaceable")) return 1500;
+            return null;
+        }
+    };
+    var defs = [_]Def{
+        .{ .name = "vehicleTruck4x4", .kind = .four_by_four },
+        .{ .name = "vehicleBicycle", .kind = .bicycle },
+        .{ .name = "vehicleUnknown", .kind = .minibike },
+    };
+    var t: Table = .{ .defs = &defs };
+    t.resolveMaxHp(&Hooks.lookup, undefined);
+    try std.testing.expectEqual(@as(f32, 8000), defs[0].max_hp);
+    try std.testing.expectEqual(@as(f32, 1500), defs[1].max_hp);
+    // No item row for the kind keeps the offline floor.
+    try std.testing.expectEqual(@as(f32, 200), defs[2].max_hp);
+    try std.testing.expectEqualStrings("vehicleGyrocopterPlaceable", placeableItemName(.gyrocopter).?);
 }
 
 test "missing velocityMax fails closed to 0" {

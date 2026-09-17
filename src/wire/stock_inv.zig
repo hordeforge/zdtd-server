@@ -59,6 +59,27 @@ pub const StockSlot = struct {
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
     mods: [4]u16 = .{0} ** 4,
     mod_n: u8 = 0,
+    /// Per-mod Quality parallel to `mods` (nested ItemValue.Quality).
+    mod_qualities: [4]u8 = .{0} ** 4,
+    /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
+    /// deltas a client-created item carries. Stock writes them as
+    /// `type u8 | slotA i16 | slotB i16` and its `Stat` ctor makes
+    /// `isBoosted = slotB > 0`, so keeping the wire pair verbatim
+    /// round-trips the entry exactly.
+    stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats,
+    stats_n: u8 = 0,
+};
+
+/// Stock items carry at most five distinct stat effects (the `<stats>` blocks
+/// peak at five); 6 leaves the writer room without growing the slot much.
+pub const max_item_stats: usize = 6;
+
+/// One `ItemValue/Stat` entry as the wire carries it.
+pub const StatEntry = struct {
+    /// `PassiveEffects` numeric value (`assets/passive_effects.zig`).
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
 };
 
 /// ItemValue.Flags bit 0: Activated (get_Activated = Flags & 1; the old
@@ -100,13 +121,28 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
         flags |= 1;
         wire_type -= items_start_here;
     }
-    // no Stats → flag bit 1 clear
+    // Bit 2 = `Stats != null` on the reader side (`flags & 2`).
+    if (s.stats_n > 0) flags |= 2;
     try w.writeByte(flags);
     try w.writeU16(@intCast(wire_type));
     try w.writeF32(s.use_times);
     try w.writeU16(s.quality);
     try w.writeU16(s.meta);
     try w.writeByte(0); // metadata count
+    // ItemValue stats (stock ItemValue.Write IL=323: flag bit 2, then a u8
+    // count and one `type u8 | slotA i16 | slotB i16` per entry, written
+    // before the mod arrays). Dropping them stripped the passive deltas a
+    // client-created item carries (the `<stats>` roll), so an echo changed the
+    // item's damage.
+    if (s.stats_n > 0) {
+        try w.writeByte(s.stats_n);
+        var sti: u8 = 0;
+        while (sti < s.stats_n and sti < s.stats.len) : (sti += 1) {
+            try w.writeByte(s.stats[sti].effect);
+            try w.writeI16(s.stats[sti].slot_a);
+            try w.writeI16(s.stats[sti].slot_b);
+        }
+    }
     // not ItemClassModifier path: write mod arrays
     try w.writeByte(s.mod_n); // Modifications.Length
     var mi: u8 = 0;
@@ -114,7 +150,7 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
         const mod_id = s.mods[mi];
         const has = mod_id != 0;
         try w.writeBool(has);
-        if (has) try writeItemValueNested(w, mod_id);
+        if (has) try writeItemValueNested(w, mod_id, s.mod_qualities[mi]);
     }
     try w.writeByte(0); // CosmeticMods.Length
     try w.writeByte(s.flags);
@@ -125,16 +161,18 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
 
 /// A mod slot's nested ItemValue (stock ItemValue.Write IL=323 recursively
 /// writes each Modifications entry): minimal v9 value with the mod item id
-/// and default quality. The mods' stat effects are client-side; the id rides
-/// so the client re-renders the attachment.
-fn writeItemValueNested(w: *binary.Writer, mod_id: u16) !void {
+/// and its Quality. The mods' stat effects are client-side; id+quality ride
+/// so RequirementItemModTier and the client re-render stay honest.
+fn writeItemValueNested(w: *binary.Writer, mod_id: u16, quality: u8) !void {
     try w.writeByte(9); // item_value_save_version
     // Mods are items: the item flag (bit 1) + the item index (the ECS id,
     // which for items IS the index past ItemsStartHere).
     try w.writeByte(1);
     try w.writeU16(mod_id);
     try w.writeF32(0); // use_times
-    try w.writeU16(1); // quality
+    // Stock default when unset is 1 (prior nested writer hardcoded it).
+    const q: u16 = if (quality == 0) 1 else quality;
+    try w.writeU16(q);
     try w.writeU16(0); // meta
     try w.writeByte(0); // metadata count
     // No nested mod arrays: ItemClassModifier items skip them (the stock
@@ -224,10 +262,14 @@ pub fn writeHoldingItem(w: *binary.Writer, entity_id: i32, held: StockSlot, hold
 /// Optional absolute-type resolver (from ItemTable.stockTypeFor). null → builtin relative.
 pub const TypeResolver = *const fn (ctx: ?*anyopaque, item_id: u16) i32;
 
+/// NetPackagePlayerInventory body (RE protocol-packages.md 5.4, write IL=107);
+/// field order in writePlayerInventory.
 pub fn buildFromEcs(buf: []u8, inv: *const components.Inventory) ![]u8 {
     return buildFromEcsResolved(buf, inv, null, null);
 }
 
+/// NetPackagePlayerInventory body with an absolute-type resolver (RE
+/// protocol-packages.md 5.4, write IL=107).
 pub fn buildFromEcsResolved(
     buf: []u8,
     inv: *const components.Inventory,
@@ -265,10 +307,13 @@ pub fn buildFromEcsResolved(
     return w.written();
 }
 
+/// NetPackageHoldingItem body (RE inventories/netpackage-bodies.md, write
+/// IL=16): entityId | ItemStack | holdingItemIndex; see writeHoldingItem.
 pub fn buildHoldingFromEcs(buf: []u8, entity_id: i32, inv: *const components.Inventory) ![]u8 {
     return buildHoldingFromEcsResolved(buf, entity_id, inv, null, null);
 }
 
+/// NetPackageHoldingItem body with an absolute-type resolver (RE write IL=16).
 pub fn buildHoldingFromEcsResolved(
     buf: []u8,
     entity_id: i32,
@@ -300,9 +345,29 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
         .meta = s.meta,
         .use_times = s.use_times,
         .seed = s.seed,
+        .flags = s.flags,
     };
     out.mods = s.mods;
-    out.mod_n = s.mod_n;
+    out.mod_n = @min(s.mod_n, out.mods.len);
+    out.mod_qualities = s.mod_qualities;
+    copyStatsToWire(&out, s.stats, s.stats_n);
+    // Installed mods ride the wire as *relative* item ids (each nested
+    // ItemValue writes `type - ItemsStartHere`), while the ECS slot holds ECS
+    // ids. Convert each through the same resolver as the item itself; the
+    // builtin fixture catalog passes no resolver and its id equals the
+    // relative index, which keeps the offline pins unchanged. Unknown mod
+    // (resolver 0 or a non-item type) writes 0 = absent slot: fail closed
+    // rather than name the wrong attachment.
+    var mi: u8 = 0;
+    while (mi < out.mod_n and mi < out.mods.len) : (mi += 1) {
+        const mid = s.mods[mi];
+        if (mid == 0) continue;
+        const mt: i32 = if (resolve) |r| r(ctx, mid) else typeFromBuiltinId(mid);
+        out.mods[mi] = if (mt > items_start_here and mt - items_start_here <= 65535)
+            @intCast(mt - items_start_here)
+        else
+            0;
+    }
     return out;
 }
 
@@ -570,13 +635,19 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         }
     }
 
+    var stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats;
+    var stats_n: u8 = 0;
     if ((flags & 2) != 0) {
         const sc = try r.readByte();
         var si: u8 = 0;
         while (si < sc) : (si += 1) {
-            _ = try r.readByte(); // type
-            _ = try r.readI16();
-            _ = try r.readI16();
+            const effect = try r.readByte();
+            const slot_a = try r.readI16();
+            const slot_b = try r.readI16();
+            if (stats_n < stats.len) {
+                stats[stats_n] = .{ .effect = effect, .slot_a = slot_a, .slot_b = slot_b };
+                stats_n += 1;
+            }
         }
     }
 
@@ -598,6 +669,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
                         @intCast(m.type_id - items_start_here)
                     else
                         @intCast(m.type_id);
+                    out.mod_qualities[mi] = @min(m.quality, 255);
                     if (mi >= out.mod_n) out.mod_n = mi + 1;
                 }
             }
@@ -634,7 +706,10 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     if (!is_modifier) {
         out2.mods = out.mods;
         out2.mod_n = out.mod_n;
+        out2.mod_qualities = out.mod_qualities;
     }
+    out2.stats = stats;
+    out2.stats_n = stats_n;
     return out2;
 }
 
@@ -800,36 +875,50 @@ pub fn applyPlayerInventoryBody(
     }
 }
 
-/// NetPackagePlayerEquipment body after the entityId (Equipment.Read IL=93):
-/// byte count-marker (5 slots when <= 2, 8 when == 3, else 12) | N x (byte
-/// present + ItemValue) | N x cosmetic i32 | i32 unlockedCount | N x i32.
-/// Applies the armor/equipment values to the ECS equip slots (the cosmetic +
-/// unlock tail is skipped: client-side cosmetics, recorded). Mirrors the
-/// embedded-equipment section of applyPlayerInventoryBody but with the
-/// byte marker + equipment_slots width.
+/// NetPackagePlayerEquipment body after the entityId (`Equipment::Read` IL=93,
+/// Equipment.il.txt:1673): version byte (5 slots when <= 2, 8 when == 3, else
+/// the ctor's 12) | N x `ItemValue::ReadOrNull` | when version >= 2, N x
+/// cosmetic i32 | i32 unlockedCount | unlockedCount x i32.
+///
+/// `ReadOrNull` (ItemValue.il.txt:2202) reads the ItemValue's own version byte
+/// and treats 0 as null, so an empty slot is a single `0` and there is **no**
+/// separate presence bool. This is not the same shape as the equipment section
+/// of `NetPackagePlayerInventory`, which goes through
+/// `GameUtils::ReadItemValueArray` (u16 count + a bool per entry); reading a
+/// bool here consumed the next slot's version byte and desynced the rest of
+/// the body.
+///
+/// Returns the number of bytes consumed so a relay can trim to the stock body.
+/// The cosmetic + unlock tail is parsed for stream correctness and dropped
+/// (client-side cosmetics, recorded).
 pub fn applyEquipmentBody(
     body: []const u8,
     inv: *components.Inventory,
     reverse: ?ReverseResolver,
     ctx: ?*anyopaque,
-) binary.ReadError!void {
+) binary.ReadError!usize {
     var r: binary.Reader = .{ .data = body };
-    const marker = try r.readByte();
-    const eq_n: usize = if (marker <= 2) 5 else if (marker == 3) 8 else equipment_slots;
+    const version = try r.readByte();
+    const eq_n: usize = if (version <= 2) 5 else if (version == 3) 8 else equipment_slots;
     var i: usize = 0;
     while (i < eq_n) : (i += 1) {
-        const present = try r.readBool();
-        var s: StockSlot = .{};
-        if (present) s = try readItemValue(&r);
+        // ReadOrNull: the ItemValue's own version byte doubles as the presence
+        // marker, so an empty slot is one `0` byte.
+        const s = try readItemValue(&r);
         if (i < components.inv_equip_count) {
             inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
         }
     }
-    var ci: usize = 0;
-    while (ci < eq_n) : (ci += 1) _ = try r.readI32();
-    const unlocked = try r.readI32();
-    var ui: i32 = 0;
-    while (ui < unlocked) : (ui += 1) _ = try r.readI32();
+    // The cosmetic + unlock tail only exists from version 2 on
+    // (Equipment.il.txt:1711, `blt` past it when version < 2).
+    if (version >= 2) {
+        var ci: usize = 0;
+        while (ci < eq_n) : (ci += 1) _ = try r.readI32();
+        const unlocked = try r.readI32();
+        var ui: i32 = 0;
+        while (ui < unlocked) : (ui += 1) _ = try r.readI32();
+    }
+    return r.pos;
 }
 
 /// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
@@ -923,10 +1012,44 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         .meta = s.meta,
         .use_times = s.use_times,
         .seed = s.seed,
+        .flags = s.flags,
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    out.mod_qualities = s.mod_qualities;
+    copyStatsToEcs(&out, s.stats, s.stats_n);
+    // Reverse of slotFromEcs: the parsed nested mod ids are relative item
+    // ids, the ECS slot wants ECS ids. No resolver keeps the fixture pin
+    // (relative index == ECS id in the builtin catalog).
+    var mi: u8 = 0;
+    while (mi < out.mod_n and mi < out.mods.len) : (mi += 1) {
+        const rel = s.mods[mi];
+        if (rel == 0) continue;
+        const abs: i32 = items_start_here + @as(i32, rel);
+        out.mods[mi] = if (reverse) |rv| rv(ctx, abs) else fallbackEcsId(abs);
+    }
     return out;
+}
+
+/// Copy the ECS slot's stats onto the wire slot (the two structs live in
+/// different layers on purpose: `ecs` must not import `wire`).
+fn copyStatsToWire(out: *StockSlot, src: [components.max_item_stats]components.ItemStat, n: u8) void {
+    const k = @min(n, out.stats.len);
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        out.stats[i] = .{ .effect = src[i].effect, .slot_a = src[i].slot_a, .slot_b = src[i].slot_b };
+    }
+    out.stats_n = k;
+}
+
+/// Reverse of `copyStatsToWire`.
+fn copyStatsToEcs(out: *components.InvSlot, src: [max_item_stats]StatEntry, n: u8) void {
+    const k = @min(n, out.stats.len);
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        out.stats[i] = .{ .effect = src[i].effect, .slot_a = src[i].slot_a, .slot_b = src[i].slot_b };
+    }
+    out.stats_n = k;
 }
 
 fn fallbackEcsId(stock_type: i32) u16 {
@@ -999,6 +1122,41 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 /// Stock PersistentPlayerList entry reason enum: Login = 0 (RE: save-persistence.md).
 pub const persistent_reason_login: u8 = 0;
 
+/// Longest name the join path keeps (`Client.name` is a fixed 32-byte field),
+/// so the largest name this body can ever carry.
+pub const persistent_player_name_max_len: usize = 32;
+
+/// How many of a player's land-protection blocks ride the overlay. Bounded by
+/// what the body's own buffer holds beside a worst-case header, so the list can
+/// never be the reason the package fails to build: the caller drops the body on
+/// error, and a dropped body costs the joining player their name on every other
+/// client, not just the claim markers.
+pub const max_lp_blocks_on_wire: usize = 24;
+
+/// How many rented-machine positions ride the overlay. Stock lets a player hold
+/// one rental at a time (`CanRent` case 2, `checkAlreadyRentingVM`), and the
+/// rent handler enforces the same rule, so one is the whole list.
+pub const max_vending_positions_on_wire: usize = 1;
+
+/// Buffer a caller must provide for the worst-case body: both identities and
+/// the name at their caps, with a full claim and rental list. Everything else
+/// in the body is fixed-width.
+pub const persistent_player_state_max_len: usize = blk: {
+    const puid = 2 + platform_user.max_stream_len;
+    break :blk 1 // reason
+    + puid * 3 // PrimaryId, NativeId, AuthoredText author
+    + 1 // playGroup
+    + 1 + 1 + persistent_player_name_max_len // AuthoredText present + string
+    + 8 // lastLogin i64
+    + 12 // pos
+    + 4 // entityId
+    + 4 + max_lp_blocks_on_wire * 12 // lpCount + Vector3i list
+    + 4 // backpacks count
+    + 12 // bedroll
+    + 4 // questPositions count
+    + 4 + max_vending_positions_on_wire * 12; // vending count + Vector3i list
+};
+
 /// Build NetPackagePersistentPlayerState body (reason=Login) so clients can map
 /// entityId → player name (GameMessage shows '' otherwise).
 ///
@@ -1016,6 +1174,18 @@ pub fn buildPersistentPlayerState(
     x: i32,
     y: i32,
     z: i32,
+    /// The player's own land-protection block positions, in the stock
+    /// `lpBlockCount : i32` + `lpBlockCount x Vector3i` shape (RE
+    /// server-lifecycle.md 6.1, PersistentPlayerData.Write IL=205). Empty is
+    /// the correct value for a player with no claims.
+    lp_blocks: []const [3]i32,
+    /// Positions of the vending machines this player currently rents, in the
+    /// stock `OwnedVendingMachinePositions` count + Vector3i shape (RE
+    /// save-region.md, PersistentPlayerData.Write IL=205 fields 25-28). The
+    /// client draws a map marker per entry, so an empty list is what an
+    /// un-renting player gets and a stale one leaves a marker on a machine
+    /// whose rental has lapsed.
+    vending_positions: []const [3]i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(persistent_reason_login);
@@ -1031,14 +1201,25 @@ pub fn buildPersistentPlayerState(
     try w.writeI32(y);
     try w.writeI32(z);
     try w.writeI32(entity_id);
-    try w.writeI32(0); // lpBlocks count
+    // lpBlockCount : i32, then that many Vector3i (RE server-lifecycle.md 6.1).
+    try w.writeI32(@intCast(lp_blocks.len));
+    for (lp_blocks) |b| {
+        try w.writeI32(b[0]);
+        try w.writeI32(b[1]);
+        try w.writeI32(b[2]);
+    }
     try w.writeI32(0); // backpacks count
     // bedroll: y=int.max marks unset
     try w.writeI32(0);
     try w.writeI32(std.math.maxInt(i32));
     try w.writeI32(0);
     try w.writeI32(0); // questPositions count
-    try w.writeI32(0); // vending count
+    try w.writeI32(@intCast(vending_positions.len));
+    for (vending_positions) |p| {
+        try w.writeI32(p[0]);
+        try w.writeI32(p[1]);
+        try w.writeI32(p[2]);
+    }
     return w.written();
 }
 
@@ -1046,7 +1227,9 @@ test "persistent player state body layout" {
     var buf: [512]u8 = undefined;
     const primary: platform_user.Id = .{ .platform = "EOS", .id = "0123456789abcdef" };
     const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
-    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449);
+    const lp = [_][3]i32{ .{ 10, 64, -20 }, .{ 300, 70, 512 } };
+    const vm = [_][3]i32{.{ -44, 68, 91 }};
+    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449, &lp, &vm);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
@@ -1074,6 +1257,88 @@ test "persistent player state body layout" {
     try std.testing.expectEqual(@as(i32, 61), try r.readI32());
     try std.testing.expectEqual(@as(i32, 449), try r.readI32());
     try std.testing.expectEqual(@as(i32, 107), try r.readI32()); // entity_id
+    // lpBlockCount : i32, then that many Vector3i (RE server-lifecycle.md 6.1
+    // PersistentPlayerData.Write IL=205). These used to be a hardcoded 0, so a
+    // player's land claims never reached the client overlay.
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // lpBlockCount
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 64), try r.readI32());
+    try std.testing.expectEqual(@as(i32, -20), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 300), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 512), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // backpacks count
+    // Bedroll Vector3i, then the two trailing counts. Nothing read these, so
+    // the y = int.max "unset" marker could swap with either zero beside it and
+    // the body still parsed - which would put a real coordinate where the
+    // marker belongs and hand the player a bedroll at the world edge.
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // bedroll x
+    try std.testing.expectEqual(std.math.maxInt(i32), try r.readI32()); // y: unset
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // bedroll z
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // questPositions
+    // OwnedVendingMachinePositions: count then Vector3i list (PPD.Write
+    // fields 25-28). This was a hardcoded 0, so a player who rented a machine
+    // lost its map marker on every rejoin.
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // vending count
+    try std.testing.expectEqual(@as(i32, -44), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 68), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 91), try r.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
+test "persistent player state with no claims writes an empty lpBlocks list" {
+    var buf: [512]u8 = undefined;
+    const primary: platform_user.Id = .{ .platform = "EOS", .id = "abc" };
+    const body = try buildPersistentPlayerState(&buf, 7, "solo", primary, primary, 0, 0, 0, &.{}, &.{});
+    // Walk to the count: the empty list must still write a 0, not vanish.
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readByte(); // reason
+    var sbuf: [64]u8 = undefined;
+    for (0..2) |_| { // primary + native PUID
+        _ = try r.readByte();
+        _ = try r.readByte();
+        _ = try r.readString(&sbuf);
+        _ = try r.readString(&sbuf);
+    }
+    _ = try r.readByte(); // playGroup
+    _ = try r.readByte(); // AuthoredText present
+    _ = try r.readString(&sbuf); // name
+    _ = try r.readByte(); // author present
+    _ = try r.readByte(); // version
+    _ = try r.readString(&sbuf);
+    _ = try r.readString(&sbuf);
+    _ = try r.readI64(); // lastLogin
+    for (0..4) |_| _ = try r.readI32(); // x, y, z, entity_id
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // lpBlockCount
+}
+
+test "persistent player state fits a full claim list at max identity length" {
+    // The caller builds into a fixed slice of body_buf and drops the package on
+    // error, so an overflow here is silent: the joining player's name never
+    // reaches the other clients ("Player '' joined") and no claim overlay is
+    // drawn. Both identity strings and the name are at their caps, with both
+    // lists full, which is the largest body the join path can produce.
+    var buf: [persistent_player_state_max_len]u8 = undefined;
+    const long_id = "0123456789" ** 6 ++ "0123"; // 64 = platform_user.max_id_len
+    const long_platform = "0123456789abcdef"; // 16 = platform_user.max_platform_len
+    const primary: platform_user.Id = .{ .platform = long_platform, .id = long_id };
+    var lp: [max_lp_blocks_on_wire][3]i32 = undefined;
+    for (&lp, 0..) |*b, i| b.* = .{ @intCast(i), 64, @intCast(i) };
+    var vm: [max_vending_positions_on_wire][3]i32 = undefined;
+    for (&vm, 0..) |*p, i| p.* = .{ @intCast(i), 68, @intCast(i) };
+    const body = try buildPersistentPlayerState(
+        &buf,
+        107,
+        "0123456789abcdef0123456789abcdef", // 32 = the join name cap
+        primary,
+        primary,
+        -273,
+        61,
+        449,
+        &lp,
+        &vm,
+    );
+    try std.testing.expect(body.len <= persistent_player_state_max_len);
 }
 
 // --- NetPackageBag: entityId i32 | u16 blob_len | Bag.Write ---
@@ -1238,6 +1503,81 @@ pub fn readDropItemsContainer(body: []const u8) binary.ReadError!DropItemsParsed
 
 // --- golden tests ---
 
+/// Build a `NetPackagePlayerData` body for tests: the PDF write shape the C2S
+/// handler parses (ECD head with networkWrite=false, then toolbelt, bag, drag,
+/// the meta head and Equipment v4). `entity_id` is the id the body claims,
+/// which the handler compares against the sending peer. Toolbelt slot 0 gets
+/// `toolbelt_item` and equipment slot 0 gets `equip_item`, both relative ECS
+/// ids; 0 leaves the slot empty.
+///
+/// Test-only helper: it exists so a scenario can drive the real handler with a
+/// well-formed body instead of duplicating ~60 hand-written field writes, and
+/// so the claimed entity id is a parameter rather than a constant.
+pub fn buildPlayerDataBodyForTest(
+    w: *binary.Writer,
+    entity_id: i32,
+    toolbelt_item: u16,
+    equip_item: u16,
+) !void {
+    try w.writeByte(36);
+    try w.writeI32(0);
+    try w.writeI32(entity_id);
+    try w.writeF32(std.math.floatMax(f32));
+    try w.writeF32(-273);
+    try w.writeF32(61);
+    try w.writeF32(449);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(-273);
+    try w.writeI32(61);
+    try w.writeI32(449);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeF32(0); // stressAmount v36
+    try w.writeU16(1);
+    try writeItemStack(w, .{ .type_id = items_start_here + toolbelt_item, .count = 3, .quality = 1 });
+    try w.writeByte(0); // selectedInventorySlot
+    try w.writeByte(1); // Bag v1
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeBool(false);
+    try w.writeBool(false);
+    try w.writeU16(1); // dragAndDrop: one empty stack
+    try w.writeU16(0);
+    try w.writeU16(0); // alreadyCrafted
+    try w.writeByte(0);
+    try w.writeI64(0);
+    try w.writeBool(true);
+    try w.writeI16(0);
+    try w.writeBool(true); // bLoaded
+    try w.writeI32(-273);
+    try w.writeI32(61);
+    try w.writeI32(449);
+    try w.writeF32(0);
+    try w.writeI32(entity_id);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeByte(4); // Equipment v4
+    try writeItemValue(w, .{ .type_id = items_start_here + equip_item, .count = 1, .quality = 1 });
+    var ei: usize = 1;
+    while (ei < equipment_slots) : (ei += 1) try w.writeByte(0);
+    ei = 0;
+    while (ei < equipment_slots) : (ei += 1) try w.writeI32(0);
+    try w.writeI32(0);
+}
+
 test "applyPlayerDataNetwork applies equipment after drag" {
     var buf: [1024]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -1322,6 +1662,13 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     const before = unchanged;
     try std.testing.expectError(error.EndOfStream, applyPlayerDataNetwork(w.written()[0 .. w.written().len - 1], &unchanged, null, null));
     try std.testing.expectEqualDeep(before, unchanged);
+
+    // The shared test builder emits the same body this fixture writes by hand,
+    // so a scenario driving the real handler exercises this exact layout.
+    var hbuf: [1024]u8 = undefined;
+    var hw: binary.Writer = .{ .buf = &hbuf };
+    try buildPlayerDataBodyForTest(&hw, 106, 2, 8);
+    try std.testing.expectEqualSlices(u8, w.written(), hw.written());
 }
 
 test "empty item value is single zero byte" {
@@ -1343,12 +1690,18 @@ test "item value v9 minimal shape" {
     var buf: [64]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
     // absolute type items_start_here + 8 (stoneAxe builtin)
+    // flags and ammo_index carry distinct non-zero values: both defaulted to
+    // 0 here, which made the CosmeticMods length byte, flags and ammo_index
+    // three interchangeable zeros on the wire, so a swap among them emitted
+    // identical bytes and the assertions below could not tell them apart.
     try writeItemValue(&w, .{
         .type_id = items_start_here + 8,
         .count = 1,
         .quality = 1,
         .meta = 0,
         .seed = 42,
+        .flags = 3,
+        .ammo_index = 2,
     });
     const b = w.written();
     try std.testing.expectEqual(@as(u8, 9), b[0]); // save version
@@ -1358,9 +1711,9 @@ test "item value v9 minimal shape" {
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b[8..10], .little));
     try std.testing.expectEqual(@as(u8, 0), b[12]); // metadata count
     try std.testing.expectEqual(@as(u8, 0), b[13]); // mods
-    try std.testing.expectEqual(@as(u8, 0), b[14]); // cosmetics
-    try std.testing.expectEqual(@as(u8, 0), b[15]); // activated
-    try std.testing.expectEqual(@as(u8, 0), b[16]); // ammo
+    try std.testing.expectEqual(@as(u8, 0), b[14]); // cosmetics length
+    try std.testing.expectEqual(@as(u8, 3), b[15]); // Flags (V3.2.0 bitfield)
+    try std.testing.expectEqual(@as(u8, 2), b[16]); // SelectedAmmoIndex
     try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, b[17..19], .little));
     try std.testing.expectEqual(@as(u8, 0), b[19]); // texture default
 }
@@ -1390,6 +1743,20 @@ test "holding item body layout" {
     try std.testing.expectEqual(@as(i32, 42), std.mem.readInt(i32, body[0..4], .little));
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[4..6], .little));
     try std.testing.expectEqual(@as(u8, 0), body[body.len - 1]); // holding index
+
+    // The empty-stack form the join path sends before the inventory lands. It
+    // was open-coded in game/join.zig, out of reach of the wire audits, and a
+    // swapped entityId/count there went unnoticed by the whole suite. Layout
+    // is `NetPackageHoldingItem::write` (IL=16): Write(Int32) entityId,
+    // ItemStack::Write (count u16, no ItemValue when zero), Write(Byte) index.
+    var eb: [16]u8 = undefined;
+    var ew: binary.Writer = .{ .buf = &eb };
+    try writeHoldingItem(&ew, 42, .{}, 3);
+    const empty = ew.written();
+    try std.testing.expectEqual(@as(usize, 7), empty.len);
+    try std.testing.expectEqual(@as(i32, 42), std.mem.readInt(i32, empty[0..4], .little));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, empty[4..6], .little));
+    try std.testing.expectEqual(@as(u8, 3), empty[6]);
 }
 
 /// Test reverse mapper: stock type 65536+id → id (matches typeFromBuiltinId).
@@ -1477,6 +1844,16 @@ test "bag package roundtrip player bag slots" {
     try std.testing.expectEqual(@as(u16, 7), inv2.slots[10].item_id);
     try std.testing.expectEqual(@as(u16, 15), inv2.slots[10].count);
     try std.testing.expectEqual(@as(u16, 3), inv2.slots[11].item_id);
+
+    // Bag.Write closes with three bools: no LockedSlots, touched, no
+    // PreferenceTracker. Only the slots were read back, so a swap among those
+    // three went unnoticed - and the outer two are both false, which is why
+    // the middle one has to be true here to be observable at all. Layout:
+    // entityId i32 | blobLen u16 | version u8 | count u16 | N x ItemStack.
+    const tail = body[body.len - 3 ..];
+    try std.testing.expectEqual(@as(u8, 0), tail[0]); // LockedSlots absent
+    try std.testing.expectEqual(@as(u8, 1), tail[1]); // touched
+    try std.testing.expectEqual(@as(u8, 0), tail[2]); // PreferenceTracker absent
 }
 
 test "drop items container encode decode" {
@@ -1488,7 +1865,11 @@ test "drop items container encode decode" {
     const body = try writeDropItemsContainer(&buf, 10, "EntityLootContainer", 1.5, 70, -2.5, items[0..]);
     const p = try readDropItemsContainer(body);
     try std.testing.expectEqual(@as(i32, 10), p.dropped_by);
+    // All three coordinates, not just x: y and z had no assertion, so they
+    // could swap and the round-trip still passed.
     try std.testing.expectEqual(@as(f32, 1.5), p.x);
+    try std.testing.expectEqual(@as(f32, 70), p.y);
+    try std.testing.expectEqual(@as(f32, -2.5), p.z);
     try std.testing.expectEqual(@as(usize, 2), p.item_count);
     try std.testing.expectEqual(@as(u16, 5), p.items[0].count);
 }
@@ -1528,6 +1909,30 @@ test "C2S apply keeps bag slots past the old 32-slot subset" {
     try std.testing.expectEqual(@as(usize, 12), components.inv_equip_count);
 }
 
+test "a bag count wider than the ECS bag does not spill into other slots" {
+    // The apply path's bag loop runs to the client's declared u16 count, not
+    // to the ECS bag width: the index guard inside the loop is what keeps bag
+    // index 45 and beyond from writing into equipment. Nothing pinned that,
+    // and the loop reads a stack per iteration, so a forged count is bounded
+    // by the body running out rather than by a cap.
+    var buf: [8192]u8 = undefined;
+    var inv: components.Inventory = .{};
+    inv.slots[components.inv_equip_start] = .{ .item_id = 99, .count = 1, .quality = 1 };
+    const body = try buildFromEcs(&buf, &inv);
+
+    // Widen the bag count the builder wrote, past the ECS bag width.
+    const want: u16 = @intCast(components.inv_bag_count);
+    const at = std.mem.find(u8, body, &std.mem.toBytes(want)) orelse
+        return error.TestUnexpectedResult;
+    std.mem.writeInt(u16, body[at..][0..2], want + 32, .little);
+
+    var applied: components.Inventory = .{};
+    // Running out mid-stack and applying are both acceptable outcomes; what
+    // must hold is that bag indices never reach the equipment slots.
+    applyPlayerInventoryBody(body, &applied, null, null) catch {};
+    try std.testing.expectEqual(@as(u16, 0), applied.slots[components.inv_equip_start].item_id);
+}
+
 test "item mods round-trip through the wire ItemValue" {
     // Stock ItemValue.Write (IL=323) carries the Modifications array; zdtd
     // now captures the mod ids on read and emits them on write, so a modded
@@ -1538,6 +1943,7 @@ test "item mods round-trip through the wire ItemValue" {
         .quality = 5,
     };
     src.mods = .{ 10, 20, 0, 0 };
+    src.mod_qualities = .{ 3, 5, 0, 0 };
     src.mod_n = 2;
     var buf: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -1547,7 +1953,22 @@ test "item mods round-trip through the wire ItemValue" {
     try std.testing.expectEqual(@as(u8, 2), out.mod_n);
     try std.testing.expectEqual(@as(u16, 10), out.mods[0]);
     try std.testing.expectEqual(@as(u16, 20), out.mods[1]);
+    try std.testing.expectEqual(@as(u8, 3), out.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 5), out.mod_qualities[1]);
     try std.testing.expectEqual(@as(u16, 5), out.quality);
+
+    // Nested mod ItemValue carries Quality (then meta 0). Byte-check the
+    // first mod body so a write/read swap of quality vs meta stays visible.
+    // Layout: outer version u8 | flags u8 | type u16 | useTimes f32 | quality
+    // u16 | meta u16 | metaCount u8 | Modifications.Length u8 | present bool,
+    // then the nested value starts.
+    const body = w.written();
+    const nested = 1 + 1 + 2 + 4 + 2 + 2 + 1 + 1 + 1;
+    try std.testing.expectEqual(@as(u8, 9), body[nested]); // nested version
+    try std.testing.expectEqual(@as(u8, 1), body[nested + 1]); // item flag
+    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[nested + 2 ..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, body[nested + 8 ..][0..2], .little)); // quality
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[nested + 10 ..][0..2], .little)); // meta
 }
 
 test "item mods survive the ECS conversion both ways" {
@@ -1557,38 +1978,55 @@ test "item mods survive the ECS conversion both ways" {
         .quality = 3,
     };
     inv.mods = .{ 12, 13, 0, 0 };
+    inv.mod_qualities = .{ 4, 6, 0, 0 };
     inv.mod_n = 2;
     const wire = slotFromEcs(inv, null, null);
     try std.testing.expectEqual(@as(u8, 2), wire.mod_n);
+    try std.testing.expectEqual(@as(u8, 4), wire.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 6), wire.mod_qualities[1]);
     const back = toEcs(wire, null, null);
     try std.testing.expectEqual(@as(u8, 2), back.mod_n);
     try std.testing.expectEqual(@as(u16, 12), back.mods[0]);
     try std.testing.expectEqual(@as(u16, 13), back.mods[1]);
+    try std.testing.expectEqual(@as(u8, 4), back.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 6), back.mod_qualities[1]);
 }
 
 test "applyEquipmentBody parses the standalone equipment body" {
-    // RE Equipment.Read IL=93: byte count-marker (>= 4 → 12 slots) | N x
-    // (bool present + ItemValue) | N x cosmetic i32 | i32 unlocked | N x i32.
+    // Equipment::Write (Equipment.il.txt:1594): version 4 | 12 x
+    // ItemValue::Write, where a null slot is the bare `0` byte its own version
+    // field would carry | 12 x cosmetic i32 | i32 unlocked | unlocked x i32.
+    // There is no presence bool: this test used to write one, which is why the
+    // parser's matching bug survived.
     var buf: [1024]u8 = undefined;
     var w = binary.Writer{ .buf = &buf };
-    try w.writeByte(4); // count marker → 12 slots
+    try w.writeByte(4); // Equipment version -> 12 slots
     for (0..12) |i| {
         if (i == 2) {
-            try w.writeBool(true);
             // Absolute stock type (items_start_here + relative); fallbackEcsId
             // maps it back to the relative ECS id.
             try writeItemValue(&w, .{ .type_id = items_start_here + 5, .count = 1 });
         } else {
-            try w.writeBool(false);
+            try w.writeByte(0); // null ItemValue
         }
     }
     for (0..12) |_| try w.writeI32(0); // cosmetics
     try w.writeI32(0); // unlocked count
     var inv: components.Inventory = .{};
-    try applyEquipmentBody(w.written(), &inv, null, null);
+    const used = try applyEquipmentBody(w.written(), &inv, null, null);
     try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
+    // The whole body is consumed, so a relay can trim to it.
+    try std.testing.expectEqual(w.written().len, used);
+
+    // Trailing bytes do not extend the parsed length.
+    var padded: [1024]u8 = undefined;
+    const n = w.written().len;
+    @memcpy(padded[0..n], w.written());
+    @memset(padded[n..][0..6], 0xcc);
+    var inv2: components.Inventory = .{};
+    try std.testing.expectEqual(n, try applyEquipmentBody(padded[0 .. n + 6], &inv2, null, null));
 }
 
 test "bag blob parses the stock Bag.Write layout" {
@@ -1619,4 +2057,50 @@ test "bag blob parses the stock Bag.Write layout" {
     try w3.writeByte(7);
     try w3.writeU16(0);
     try std.testing.expectError(error.Overflow, parseBagSlots(w3.written(), out[0..]));
+}
+
+test "ItemValue stats survive a parse and a re-write" {
+    // Stock ItemValue.Write (IL=323): flag bit 2, a u8 count, then one
+    // `type u8 | slotA i16 | slotB i16` per entry, ahead of the mod arrays.
+    // The server used to skip the block on read and never write it, so an
+    // echo stripped the passive deltas a client-created item carries.
+    var buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    var slot: StockSlot = .{
+        .type_id = items_start_here + 7,
+        .count = 1,
+        .quality = 6,
+        .stats_n = 2,
+    };
+    // `EntityDamage` base 20 (no boost) and `DegradationMax` boosted by 5.
+    slot.stats[0] = .{ .effect = 1, .slot_a = 20, .slot_b = 0 };
+    slot.stats[1] = .{ .effect = 8, .slot_a = 0, .slot_b = 5 };
+    try writeItemValue(&w, slot);
+    const body = w.written();
+
+    var r: binary.Reader = .{ .data = body };
+    const parsed = try readItemValue(&r);
+    try std.testing.expectEqual(@as(u8, 2), parsed.stats_n);
+    try std.testing.expectEqual(@as(u8, 1), parsed.stats[0].effect);
+    try std.testing.expectEqual(@as(i16, 20), parsed.stats[0].slot_a);
+    try std.testing.expectEqual(@as(i16, 0), parsed.stats[0].slot_b);
+    try std.testing.expectEqual(@as(u8, 8), parsed.stats[1].effect);
+    try std.testing.expectEqual(@as(i16, 5), parsed.stats[1].slot_b);
+
+    // Byte-for-byte round-trip: the writer reproduces what the reader took.
+    var buf2: [128]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &buf2 };
+    try writeItemValue(&w2, parsed);
+    try std.testing.expectEqualSlices(u8, body, w2.written());
+
+    // An item without stats keeps the old shape: no bit 2, no count block.
+    const plain: StockSlot = .{ .type_id = items_start_here + 7, .count = 1 };
+    var buf3: [64]u8 = undefined;
+    var w3: binary.Writer = .{ .buf = &buf3 };
+    try writeItemValue(&w3, plain);
+    var r3: binary.Reader = .{ .data = w3.written() };
+    try std.testing.expectEqual(@as(u8, item_value_save_version), try r3.readByte());
+    try std.testing.expectEqual(@as(u8, 0), (try r3.readByte()) & 2);
+    const parsed3 = try readItemValue(&r3);
+    try std.testing.expectEqual(@as(u8, 0), parsed3.stats_n);
 }

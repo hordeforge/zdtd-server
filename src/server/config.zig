@@ -92,6 +92,13 @@ pub const Config = struct {
     enemy_difficulty: u8 = 0, // EnemyDifficulty 0=normal, 1=feral
     loot_abundance: u16 = 100, // LootAbundance percent
     xp_multiplier: u16 = 100, // XPMultiplier percent
+    /// Sandbox stock-count multiplier for trader windows
+    /// (`TraderItemAbundance`, default 1.0). Float on purpose: the stock set is
+    /// LowDefaultHigh (0.25/0.5/1.0/1.5/2.0), and percent math would corrupt it.
+    trader_item_abundance: f32 = 1.0,
+    /// Sandbox stock-count multiplier for vending machines
+    /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
+    vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
     block_damage_ai: u16 = 100, // BlockDamageAI percent
     block_damage_ai_bm: u16 = 100, // BlockDamageAIBM percent (blood moon)
@@ -103,7 +110,24 @@ pub const Config = struct {
     incoming_damage_modifier: f32 = 0,
     max_spawned_animals: u16 = 50, // MaxSpawnedAnimals server-wide cap
     air_drop_frequency: u16 = 72, // AirDropFrequency in game hours (0 = off)
-    drop_on_death: u8 = 1, // DropOnDeath 0=nothing 1=all 2=toolbelt 3=backpack 4=delete
+    drop_on_death: u8 = 1,
+    /// serverconfig `BuildCreate`: the cheat/build mode a server runs with.
+    /// Stock seeds GameStats[18] IsCreativeMenuEnabled and [20]
+    /// IsFlyingEnabled from it (server-lifecycle.md GameStats table:
+    /// GamePrefs 58), so a client's creative menu and flight follow the
+    /// server instead of a constant.
+    build_create: bool = false,
+    /// serverconfig `CameraRestrictionMode` (0 free, 1 first person, 2 third).
+    /// GameStats[68].
+    camera_restriction_mode: u8 = 0,
+    /// Sandbox option `AirDropMarker` (default on). GameStats[53]; the client
+    /// draws the crate marker.
+    air_drop_marker: bool = true,
+    /// Sandbox option `DropOnQuit`. GameStats[34], separate from DropOnDeath.
+    drop_on_quit: u8 = 0,
+    /// Sandbox option `BiomeProgression` (default on). GameStats[66]: the
+    /// biome gamestage/lootstage progression the client's HUD reads.
+    biome_progression: bool = true, // DropOnDeath 0=nothing 1=all 2=toolbelt 3=backpack 4=delete
     /// DeathPenalty 0=nothing 1=XPOnly 2=Backpack 3=Delete (stock
     /// GameStat.DeathPenalty; the behaviour runs client-side on the stat).
     death_penalty: u8 = 1,
@@ -229,6 +253,8 @@ pub const known_serverconfig_names = [_][]const u8{
     "MaxSpawnedAnimals",
     "AirDropFrequency",
     "DropOnDeath",
+    "BuildCreate",
+    "CameraRestrictionMode",
     "LandClaimSize",
     "LandClaimOnlineDurabilityModifier",
     "LandClaimOfflineDurabilityModifier",
@@ -344,6 +370,10 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.incoming_damage_modifier = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "GlobalLootCount")) {
             cfg.loot_abundance = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "TraderItemAbundance")) {
+            cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
+            cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "BloodMoonFrequency")) {
             cfg.blood_moon_frequency = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BloodMoonRange")) {
@@ -360,6 +390,12 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.air_drop_frequency = sandboxIntU16(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "DropOnDeath")) {
             cfg.drop_on_death = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "DropOnQuit")) {
+            cfg.drop_on_quit = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "AirDropMarker")) {
+            cfg.air_drop_marker = sandbox.valueI(o, set, g.index) != 0;
+        } else if (std.mem.eql(u8, o.name, "BiomeProgression")) {
+            cfg.biome_progression = sandbox.valueI(o, set, g.index) != 0;
         } else if (std.mem.eql(u8, o.name, "DeathPenalty")) {
             cfg.death_penalty = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "ZombieMove")) {
@@ -490,6 +526,8 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRangeNamed("MaxSpawnedAnimals", v, 0, 2048, cfg.max_spawned_animals);
     if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRangeNamed("AirDropFrequency", v, 0, 8760, cfg.air_drop_frequency);
     if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8Named("DropOnDeath", v, 0, 4, cfg.drop_on_death);
+    if (prop(raw, "BuildCreate")) |v| cfg.build_create = parseXmlBool(v) orelse cfg.build_create;
+    if (prop(raw, "CameraRestrictionMode")) |v| cfg.camera_restriction_mode = clampU8Named("CameraRestrictionMode", v, 0, 2, cfg.camera_restriction_mode);
     if (prop(raw, "DeathPenalty")) |v| cfg.death_penalty = clampU8Named("DeathPenalty", v, 0, 3, cfg.death_penalty);
     if (prop(raw, "LandClaimSize")) |v| {
         // Stock keystone area is odd (centered on block); force odd after clamp.
@@ -601,10 +639,12 @@ test "parse config fixture" {
 
 test "sandbox code applies gameplay tuning (RE sandbox-options §5)" {
     // Synthetic code: XPMultiplier(18)=ASJ idx9=3, BloodMoonFrequency(48)=BWK
-    // idx10=10, DayNightLength(66)=COD idx3=40, ZombieMove(34)=BIC idx2=2.
+    // idx10=10, DayNightLength(66)=COD idx3=40, ZombieMove(34)=BIC idx2=2,
+    // TraderItemAbundance(134)=FEE idx4=2.0 (LowDefaultHigh index 4 is 2.0),
+    // VendingItemAbundance(138)=FID idx3=1.5.
     const xml_src =
         \\<ServerSettings>
-        \\  <property name="SandboxCode" value="AASJBWKCODBIC"/>
+        \\  <property name="SandboxCode" value="AASJBWKCODBICFEEFID"/>
         \\</ServerSettings>
     ;
     var tmp = std.testing.tmpDir(.{});
@@ -620,6 +660,8 @@ test "sandbox code applies gameplay tuning (RE sandbox-options §5)" {
     try std.testing.expectEqual(@as(u8, 10), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u16, 40), cfg.day_night_length);
     try std.testing.expectEqual(@as(u8, 2), cfg.zombie_move);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), cfg.trader_item_abundance, 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), cfg.vending_item_abundance, 1e-4);
     // Untouched knobs keep stock defaults.
     try std.testing.expectEqual(@as(u8, 3), cfg.zombie_move_night);
     try std.testing.expectEqual(@as(u16, 100), cfg.block_damage_player);
@@ -893,4 +935,45 @@ test "parseXmlBool accepts stock spellings only" {
     try std.testing.expectEqual(@as(?bool, false), parseXmlBool("0"));
     try std.testing.expectEqual(@as(?bool, null), parseXmlBool(""));
     try std.testing.expectEqual(@as(?bool, null), parseXmlBool("on"));
+}
+
+test "BuildCreate and CameraRestrictionMode come from serverconfig" {
+    // Stock seeds GameStats[18] IsCreativeMenuEnabled and [20]
+    // IsFlyingEnabled from GamePrefs 58 `BuildCreate` (server-lifecycle.md
+    // GameStats table) and [68] from `CameraRestrictionMode`; both are real
+    // serverconfig keys, so an operator can hand the client creative mode,
+    // flight and a camera restriction instead of a constant.
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="BuildCreate" value="true"/>
+        \\  <property name="CameraRestrictionMode" value="2"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expect(cfg.build_create);
+    try std.testing.expectEqual(@as(u8, 2), cfg.camera_restriction_mode);
+
+    // An out-of-range camera mode clamps into the enum (clampU8Named), and a
+    // missing BuildCreate keeps the default.
+    try io_fs.writeFile(path,
+        \\<ServerSettings>
+        \\  <property name="CameraRestrictionMode" value="9"/>
+        \\</ServerSettings>
+    );
+    var cfg2 = try loadFromPath(std.testing.allocator, path);
+    defer cfg2.deinit();
+    try std.testing.expectEqual(@as(u8, 2), cfg2.camera_restriction_mode); // 9 clamped to the enum max
+    try std.testing.expect(!cfg2.build_create);
+    // The sandbox-managed trio keeps its documented defaults until a code sets it.
+    try std.testing.expect(cfg2.air_drop_marker);
+    try std.testing.expectEqual(@as(u8, 0), cfg2.drop_on_quit);
+    try std.testing.expect(cfg2.biome_progression);
 }

@@ -268,6 +268,20 @@ pub const default_mappings = [_][]const u8{
 };
 
 const id_map = blk: {
+    // A repeated name is a silent wire fault, not a typo: the index in
+    // default_mappings *is* the negotiated package id, StaticStringMap keeps
+    // only one of the two entries, and every id after the duplicate shifts by
+    // one. The server would then advertise ids it never dispatches on. Reject
+    // it where it costs nothing to notice. The pairwise scan is n^2 over 191
+    // names, so it needs a branch budget; it runs once at compile time.
+    @setEvalBranchQuota(default_mappings.len * default_mappings.len * 4);
+    for (default_mappings, 0..) |a, i| {
+        for (default_mappings[i + 1 ..]) |b| {
+            if (std.mem.eql(u8, a, b)) {
+                @compileError("duplicate package name in default_mappings: " ++ a);
+            }
+        }
+    }
     var kvs: [default_mappings.len]struct { []const u8, u16 } = undefined;
     for (default_mappings, 0..) |m, i| kvs[i] = .{ m, @intCast(i) };
     break :blk std.StaticStringMap(u16).initComptime(kvs);
@@ -281,12 +295,12 @@ pub const VersionInfo = struct {
     release_type: u8 = 1,
     major: i32 = 3,
     /// Raw Minor for the 3.2.0 wire (changelog-3.2.0 §1: minor 10->20,
-    /// build 14->9; version.zig `stock_wire_gsi_version` = "V.3.20.9"). The
-    /// client derives the display form ("V 3.2.0") from these numbers and
+    /// §8: build 9->10; version.zig `stock_wire_gsi_version` = "V.3.20.10").
+    /// The client derives the display form ("V 3.2.0") from these numbers and
     /// echoes it back in the login package, so the PackageIds numeric
     /// version must match the login gate (`stock_wire_comp`) exactly.
     minor: i32 = 20,
-    build: i32 = 9,
+    build: i32 = 10,
 
     pub fn write(self: VersionInfo, w: *binary.Writer) !void {
         try w.writeByte(self.release_type);
@@ -296,6 +310,12 @@ pub const VersionInfo = struct {
     }
 };
 
+/// NetPackagePackageIds (RE inventories/netpackage-bodies.md write IL=62,
+/// protocol.md §4): `VersionInformation.Write` | mapping count i32 | count x
+/// name string | `serverUseEAC` bool | `hasHostUserAndToken` bool, then the
+/// host identity pair only when that bool is true. zdtd runs EAC-off with no
+/// host token, so both bools are false and the pair is correctly absent.
+/// Index = package id; the client must use these server-advertised ids.
 pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try ver.write(&w);
@@ -306,6 +326,13 @@ pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []cons
     return w.written();
 }
 
+/// NetPackagePlayerLoginAnswer (RE inventories/netpackage-bodies.md, write
+/// IL=46): `bAllowed` bool | `data` string | `platformLobbyId`
+/// (PlatformLobbyId.Write) | host identity (ToStream + string) | server
+/// identity (ToStream + string). zdtd writes the lobby and both identity pairs
+/// as null: a headless EAC-off dedi has no platform lobby and no host token, so
+/// a fabricated identity is exactly what rule 3 forbids. A null
+/// PlatformUserIdentifier is one 0 byte, which is the stock null path.
 pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(allowed);
@@ -315,6 +342,23 @@ pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
     try w.writeString("");
     try w.writeByte(0);
     try w.writeString("");
+    return w.written();
+}
+
+/// Stock `NetPackageLocalization` body (write IL=30): seqNr i32 | totalParts
+/// i32 | dataLen i32 (-1 when null) | data bytes. `Compress()` is false for
+/// this package (`get_Compress` IL=2), so the frame stays uncompressed even
+/// though the payload itself is stock's raw-Deflate patch blob.
+pub fn buildLocalizationBody(buf: []u8, seq: i32, total: i32, data: ?[]const u8) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(seq);
+    try w.writeI32(total);
+    if (data) |d| {
+        try w.writeI32(@intCast(d.len));
+        try w.writeBytes(d);
+    } else {
+        try w.writeI32(-1);
+    }
     return w.written();
 }
 
@@ -363,12 +407,32 @@ pub const PlayerIdOpts = struct {
     bag: []const stock_inv.StockSlot = &.{},
     b_loaded: bool = true,
     game_stage_born_at: u64 = game_stage_born_unset,
+    /// Character-sheet counters (`PlayerDataFile.playerKills/zombieKills/
+    /// deaths/score`). Stock carries these in the save, so a join that writes
+    /// 0 resets a returning player's sheet even though its own PlayerDataFile
+    /// held the totals; the restored values ride here.
+    player_kills: i32 = 0,
+    zombie_kills: i32 = 0,
+    deaths: i32 = 0,
+    score: i32 = 0,
+    /// The client's own character profile, as sent in
+    /// `NetPackageRequestToSpawnPlayer` (stock stores it on the ECD:
+    /// `GameManager::RequestToSpawnPlayer` `GameManager.il.txt:4614-4617`).
+    /// Null keeps the offline default appearance.
+    profile: ?stock_entity.PlayerProfile = null,
+    /// The player's display name for the ECD (`ClientInfo.playerName` in
+    /// stock). Bounded by the caller's own name buffer.
+    player_name: []const u8 = "Player",
 };
 
+/// NetPackagePlayerId with default options (see buildPlayerIdBodyWithOpts for
+/// the RE field order, write IL=21).
 pub fn buildPlayerIdBody(buf: []u8, entity_id: i32, team: i16, chunk_view_dim: i32, sx: i32, sy: i32, sz: i32) ![]u8 {
     return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{});
 }
 
+/// NetPackagePlayerId carrying the join inventory (see buildPlayerIdBodyWithOpts
+/// for the RE field order, write IL=21).
 pub fn buildPlayerIdBodyInv(
     buf: []u8,
     entity_id: i32,
@@ -395,6 +459,10 @@ pub fn buildPlayerIdBodyInv(
 /// down to it (asm.il ~1975949), so the sentinel reads as zero days survived.
 pub const game_stage_born_unset: u64 = std.math.maxInt(u64);
 
+/// NetPackagePlayerId (RE inventories/netpackage-bodies.md, write IL=21):
+/// `id` i32 | `teamNumber` i16 | `playerDataFile` (PlayerDataFile.WriteNetwork)
+/// | `chunkViewDim` i32. The PDF body is written by
+/// writeEmptyPlayerDataFileNetwork.
 pub fn buildPlayerIdBodyWithOpts(
     buf: []u8,
     entity_id: i32,
@@ -408,11 +476,12 @@ pub fn buildPlayerIdBodyWithOpts(
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
     try w.writeI16(team);
-    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, opts.quests, opts.unlocked_recipes, opts.toolbelt, opts.bag, opts.b_loaded, opts.game_stage_born_at);
+    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, opts);
     try w.writeI32(chunk_view_dim);
     return w.written();
 }
 
+/// NetPackagePlayerId (RE write IL=21; field order in buildPlayerIdBodyWithOpts).
 /// Like buildPlayerIdBodyInv; b_loaded=false for death-respawn re-bundle (avoids
 /// GameManager.PlayerId CreateEntity+ToPlayer on an already-spawned local player).
 /// `game_stage_born_at` is the server's survival-streak origin in world ticks,
@@ -449,21 +518,30 @@ fn writeEmptyPlayerDataFileNetwork(
     sx: i32,
     sy: i32,
     sz: i32,
-    quests: []const stock_quest.StockQuestWrite,
-    unlocked_recipes: []const []const u8,
-    toolbelt: []const stock_inv.StockSlot,
-    bag: []const stock_inv.StockSlot,
-    b_loaded: bool,
-    game_stage_born_at: u64,
+    opts: PlayerIdOpts,
 ) !void {
+    const quests = opts.quests;
+    const unlocked_recipes = opts.unlocked_recipes;
+    const toolbelt = opts.toolbelt;
+    const bag = opts.bag;
+    const b_loaded = opts.b_loaded;
+    const game_stage_born_at = opts.game_stage_born_at;
     const px: f32 = @floatFromInt(sx);
     const py: f32 = @floatFromInt(sy);
     const pz: f32 = @floatFromInt(sz);
+    const profile = opts.profile;
+    const player_name = opts.player_name;
     // --- EntityCreationData.write(bw, networkWrite=false) ---
-    // V3.1.0 ECD FileVersion=36. Use playerMale + profile so GameManager.PlayerId
-    // with bLoaded=true can CreateEntity + ToPlayer (applies bag/toolbelt).
+    // V3.1.0 ECD FileVersion=36. Use the player class matching the client's own
+    // profile so GameManager.PlayerId with bLoaded=true can CreateEntity +
+    // ToPlayer (applies bag/toolbelt) and the client adopts its real
+    // appearance; the offline default stays playerMale.
+    const player_class: i32 = if (profile) |p|
+        (if (p.is_male) stock_entity.class_player_male else stock_entity.class_player_female)
+    else
+        stock_entity.class_player_male;
     try w.writeByte(36); // FileVersion
-    try w.writeI32(stock_entity.class_player_male);
+    try w.writeI32(player_class);
     try w.writeI32(entity_id); // id (match PlayerId entity)
     try w.writeF32(std.math.floatMax(f32)); // lifetime
     try w.writeF32(px);
@@ -488,10 +566,10 @@ fn writeEmptyPlayerDataFileNetwork(
     // player branch: holdingItem, team, name, skin, profile
     try stock_inv.writeEmptyItemValue(w);
     try w.writeByte(0); // teamNumber
-    try w.writeString("Player");
+    try w.writeString(player_name);
     try w.writeString(""); // skinTexture
     try w.writeBool(true); // has PlayerProfile
-    try stock_entity.writePlayerProfile(w, .{
+    try stock_entity.writePlayerProfile(w, profile orelse .{
         .archetype = "BaseMale",
         .is_male = true,
         .race_name = "White",
@@ -537,10 +615,10 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeI32(sz);
     try w.writeF32(0);
     try w.writeI32(-1); // pdf id
-    try w.writeI32(0); // playerKills
-    try w.writeI32(0); // zombieKills
-    try w.writeI32(0); // deaths
-    try w.writeI32(0); // score
+    try w.writeI32(opts.player_kills);
+    try w.writeI32(opts.zombie_kills);
+    try w.writeI32(opts.deaths);
+    try w.writeI32(opts.score);
     // Equipment.Write: version 4, 12 empty ItemValues, 12 cosmetic i32 zeros, unlocked 0
     try w.writeByte(4);
     var i: usize = 0;
@@ -628,11 +706,83 @@ test "player id body layout: header fields and non-empty pdf" {
     try std.testing.expectEqual(@as(f32, -273), try r.readF32());
     try std.testing.expectEqual(@as(f32, 61), try r.readF32());
     try std.testing.expectEqual(@as(f32, 449), try r.readF32());
+
+    // Anchor on the coordinate triple itself: -273 | 61 | 449 as i32 is a
+    // distinct bit pattern from the same numbers written as f32 in the ECD
+    // head above. Finding it proves the three words are adjacent and in order,
+    // which is what a swap would break; the fields after it follow at a fixed
+    // offset. This must run before body2 reuses `buf` underneath `body`.
+    var want: [12]u8 = undefined;
+    std.mem.writeInt(i32, want[0..4], -273, .little);
+    std.mem.writeInt(i32, want[4..8], 61, .little);
+    std.mem.writeInt(i32, want[8..12], 449, .little);
+    // The triple appears twice: homePosition in the ECD, then
+    // lastSpawnPosition in the PDF. Both are worth pinning, so take each.
+    const home_at = std.mem.find(u8, body, &want) orelse return error.HomePosNotFound;
+    const lsp = home_at + 12 +
+        (std.mem.find(u8, body[home_at + 12 ..], &want) orelse return error.LastSpawnPosNotFound);
+    try std.testing.expectEqual(@as(f32, 0), @as(f32, @bitCast(std.mem.readInt(u32, body[lsp + 12 ..][0..4], .little))));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[lsp + 16 ..][0..4], .little)); // pdf id
+
     const body2 = try buildPlayerIdBody(&buf, 999, 3, 8, 0, 70, 0);
     try std.testing.expectEqual(@as(i32, 999), std.mem.readInt(i32, body2[0..4], .little));
     try std.testing.expectEqual(@as(i16, 3), std.mem.readInt(i16, body2[4..6], .little));
     try std.testing.expectEqual(@as(i32, 8), std.mem.readInt(i32, body2[body2.len - 4 ..][0..4], .little));
     try std.testing.expectEqual(body.len, body2.len);
+
+    // lastSpawnPosition sits deep in the PDF, past a bag whose length depends
+    // on CarryCapacity, so anchor on the bytes rather than count offsets:
+    // `selectedSpawnPointKey` is the only i64 zero in the body and is followed
+    // by a fixed run (bool true, i16 0, bool bLoaded) before the position.
+    // Nothing read this triple back, and a swap would tell a joining client
+    // its last spawn was somewhere it never stood.
+}
+
+test "player id PDF pins the drag-drop list, the score counters and the save marker" {
+    // Wire-order audit 2026-09-11: three adjacent same-width pairs in the join
+    // PDF survived every test in the suite. Swapping any of them changes what a
+    // joining client reads - different kill/death counters, a zero-length
+    // dragAndDropItem list, or a bDead of 88 - and the whole suite stayed
+    // green, so nothing was pinning the PDF's field order at those offsets.
+    var buf: [16384]u8 = undefined;
+    const body = try buildPlayerIdBodyWithOpts(&buf, 171, 0, 4, -273, 61, 449, .{
+        .player_kills = 11,
+        .zombie_kills = 22,
+        .deaths = 33,
+        .score = 44,
+    });
+
+    // pdf id (-1) then the four counters, in stock PlayerDataFile.Write order.
+    // Distinct values keep the run unique in the body.
+    var counters: [20]u8 = undefined;
+    std.mem.writeInt(i32, counters[0..4], -1, .little);
+    std.mem.writeInt(i32, counters[4..8], 11, .little); // playerKills
+    std.mem.writeInt(i32, counters[8..12], 22, .little); // zombieKills
+    std.mem.writeInt(i32, counters[12..16], 33, .little); // deaths
+    std.mem.writeInt(i32, counters[16..20], 44, .little); // score
+    try std.testing.expect(std.mem.find(u8, body, &counters) != null);
+
+    // dragAndDropItem is a one-element list whose single stack is empty, then
+    // alreadyCraftedList, the spawnPoints count, selectedSpawnPointKey, the two
+    // hardcoded fields and b_loaded. The long zero run followed by `01 00 01`
+    // is what makes this window unique enough to search for.
+    const drag_drop = [_]u8{
+        1, 0, // dragAndDropItem list count 1
+        0, 0, // its ItemStack.count 0 (no ItemValue)
+        0, 0, // alreadyCraftedList
+        0, // spawnPoints count
+        0, 0, 0, 0, 0, 0, 0, 0, // selectedSpawnPointKey
+        1, // stock hardcodes true
+        0, 0, // stock hardcodes 0
+        1, // b_loaded
+    };
+    try std.testing.expect(std.mem.find(u8, body, &drag_drop) != null);
+
+    // deathUpdateTime(0) + currentLife(0) then bDead false and the 88 stock
+    // format marker. The 88 byte is unique in the PDF, so this window pins the
+    // pair directly.
+    const dead_marker = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 88, 0, 1 };
+    try std.testing.expect(std.mem.find(u8, body, &dead_marker) != null);
 }
 
 test "gameStageBornAtWorldTime rides the same offset as the -1 sentinel" {
@@ -676,6 +826,59 @@ pub fn buildSpawnedBody(buf: []u8, reason: i32, x: i32, y: i32, z: i32, entity_i
     return w.written();
 }
 
+/// Parse side of the same layout (read IL=14, GetLength 16): the client sends
+/// this back after it finishes spawning locally, and stock's server
+/// `ProcessPackage` (IL=47) validates the claimed entity against the sender
+/// (`ValidEntityIdForSender`) before running `GameManager.PlayerSpawnedInWorld`
+/// and rebroadcasting the confirm to every other peer on channel 192.
+pub fn parseSpawnedBody(body: []const u8) !struct { reason: i32, x: i32, y: i32, z: i32, entity_id: i32 } {
+    if (body.len < 20) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    return .{
+        .reason = try r.readI32(),
+        .x = try r.readI32(),
+        .y = try r.readI32(),
+        .z = try r.readI32(),
+        .entity_id = try r.readI32(),
+    };
+}
+
+test "spawned-in-world body is reason, position and entity id in that order" {
+    // Five i32 in a row with nothing reading them back: the join path has four
+    // call sites (game.zig, c2s/join.zig) and no wire test covered any of
+    // them, so a swapped pair here would tell the client it spawned at a
+    // coordinate built from the reason code.
+    var buf: [32]u8 = undefined;
+    const body = try buildSpawnedBody(
+        &buf,
+        @intFromEnum(RespawnType.enter_multiplayer),
+        -273,
+        61,
+        449,
+        106,
+    );
+    try std.testing.expectEqual(@as(usize, 20), body.len);
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, -273), std.mem.readInt(i32, body[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[8..12], .little));
+    try std.testing.expectEqual(@as(i32, 449), std.mem.readInt(i32, body[12..16], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[16..20], .little));
+    // ...and the parser reads those same five positions back. The parse side
+    // had no test at all: only `entity_id` was exercised (the spawn-confirm
+    // scenario), so the mutant audit found reason/x/y/z interchangeable. Every
+    // value here is distinct, which is what pins the order.
+    const p = try parseSpawnedBody(body);
+    try std.testing.expectEqual(@as(i32, 4), p.reason);
+    try std.testing.expectEqual(@as(i32, -273), p.x);
+    try std.testing.expectEqual(@as(i32, 61), p.y);
+    try std.testing.expectEqual(@as(i32, 449), p.z);
+    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
+}
+
+/// NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write IL=76):
+/// `entityId` i32 | pos.x,y,z f32 | `bUseQRotation` bool | rot.x,y,z f32 euler
+/// degrees (the `false` branch) | `onGround` bool. The client applies it with 3
+/// update steps.
 pub fn buildPosAndRotBody(buf: []u8, entity_id: i32, x: f32, y: f32, z: f32, rx: f32, ry: f32, rz: f32, on_ground: bool) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -767,7 +970,21 @@ fn readWorldI32(r: *binary.Reader) binary.ReadError!i32 {
     return v;
 }
 
-pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
+/// Read side of NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write
+/// IL=76): `entityId` i32 | pos.x,y,z f32 | `bUseQRotation` bool | then either
+/// euler f32 x3 or a quaternion f32 x4, mutually exclusive | `onGround` bool.
+/// NetPackageEntityTeleport has no own write and rides this exact body (5.5.2),
+/// so both C2S handlers share this parser.
+///
+/// Rotation is consumed but not returned: the server keeps the yaw it already
+/// has for the entity, and a rotation from the wire is not a value it acts on.
+/// Position goes through readWorldF32 so a coordinate outside the world bound
+/// is an error here, not a teleport the sim has to undo.
+/// `wire_len` is where the stock body ends, which is not `body.len`: the
+/// `bUseQRotation` branch makes the length variable, and a peer may append
+/// trailing bytes. A relay must forward `body[0..wire_len]`, never the raw
+/// slice.
+pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool, wire_len: usize } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -786,9 +1003,14 @@ pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y:
         _ = try readFiniteF32(&r);
     }
     const on_ground = try r.readBool();
-    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground };
+    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground, .wire_len = r.pos };
 }
 
+/// NetPackageEntityRelPosAndRot (RE protocol-packages.md 5.5.4, write IL=30).
+/// Extends the Rotation body (5.5.3), so the full wire order is: `entityId` i32
+/// | `bUseQRotation` bool | rot.x,y,z i16 (EncodeRot, rot*256/360) | dPos.x,y,z
+/// i16 (1/32 block) | `onGround` bool | `updateSteps` i16. The body-inventory
+/// table lists only the five fields after the Rotation base.
 pub fn buildRelPosBody(buf: []u8, entity_id: i32, dx: i16, dy: i16, dz: i16, rx: i16, ry: i16, rz: i16, on_ground: bool, steps: i16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -815,6 +1037,9 @@ pub const cF_is_alert: u16 = components.flag_is_alert;
 /// gates (hear muffle + sleeper detect).
 pub const cF_crouching: u16 = components.flag_crouching;
 
+/// NetPackageEntityAliveFlags (RE inventories/netpackage-bodies.md, write
+/// IL=8): the EntityTargeted base entityId, then `flags` u16. Bit meanings in
+/// protocol-packages.md 5.5.6.
 pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -822,6 +1047,11 @@ pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     return w.written();
 }
 
+/// Read side of NetPackageEntityAliveFlags (RE protocol-packages.md 5.5.6,
+/// write IL=8): `entityId` i32 | `flags` u16, the order buildAliveFlagsBody
+/// writes. Unknown bits are kept rather than masked off: the bit meanings are
+/// canonical in ecs/components.zig and the caller decides which it acts on, so
+/// dropping a bit here would hide a client the RE table does not yet cover.
 pub fn parseAliveFlagsBody(body: []const u8) !struct { entity_id: i32, flags: u16 } {
     var r: binary.Reader = .{ .data = body };
     return .{ .entity_id = try r.readI32(), .flags = try r.readU16() };
@@ -837,6 +1067,11 @@ pub fn buildEntitySpeedsBody(buf: []u8, entity_id: i32, movement_state: u8, spee
     return w.written();
 }
 
+/// Read side of NetPackageEntitySpeeds (RE protocol-packages.md residual table,
+/// write IL=17, Process IL=37): `entityId` i32 | `movementState` u8 |
+/// `speedForward` f32 | `speedStrafe` f32, the order buildEntitySpeedsBody
+/// writes. Both speeds go through readFiniteF32, so a NaN or infinity from the
+/// wire is an error instead of a value that poisons every later comparison.
 pub fn parseEntitySpeedsBody(body: []const u8) !struct { entity_id: i32, movement_state: u8, speed_forward: f32, speed_strafe: f32 } {
     if (body.len < 13) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -848,10 +1083,20 @@ pub fn parseEntitySpeedsBody(body: []const u8) !struct { entity_id: i32, movemen
     };
 }
 
-/// Head of PlayerDataFile.WriteNetwork / ECD.write(networkWrite=false) for SavePlayerData C2S.
-/// Returns entity id + world position from the embedded EntityCreationData.
-pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32 } {
-    // FileVersion:u8 | entityClass:i32 | id:i32 | lifetime:f32 | pos:f32*3 | ...
+/// Head of PlayerDataFile.WriteNetwork / ECD.write(networkWrite=false) for the
+/// SavePlayerData C2S body: `FileVersion` u8 | `entityClass` i32 | `id` i32 |
+/// `lifetime` f32 | pos f32 x3 (RE EntityCreationData.write, protocol-packages
+/// 5.1).
+///
+/// Returns the entity id only. The position used to come back too, and both
+/// call sites discarded it with "pos unreliable (origin-relative); ignore" -
+/// the client writes it relative to its own origin, so it is not a world
+/// coordinate the server can use. Handing back three unchecked f32 that nobody
+/// consumes is the same shape as the nearEntityId guess removed the same day:
+/// a value the server cannot act on should not leave the parser. The pos bytes
+/// are still consumed so the version/length validation this function exists for
+/// stays exact.
+pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32 } {
     if (body.len < 1 + 4 + 4 + 4 + 12) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const ver = try r.readByte();
@@ -859,10 +1104,10 @@ pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32, x: f32
     _ = try r.readI32(); // entityClass
     const entity_id = try r.readI32();
     _ = try r.readF32(); // lifetime
-    const x = try r.readF32();
-    const y = try r.readF32();
-    const z = try r.readF32();
-    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z };
+    _ = try r.readF32(); // pos.x, origin-relative
+    _ = try r.readF32(); // pos.y
+    _ = try r.readF32(); // pos.z
+    return .{ .entity_id = entity_id };
 }
 
 test "entity speeds body roundtrip" {
@@ -878,12 +1123,82 @@ test "entity speeds body roundtrip" {
 test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, game_stage_born_unset);
-    const h = try parsePlayerDataEcdHead(w.written());
+    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, .{});
+    const body = w.written();
+    const h = try parsePlayerDataEcdHead(body);
     try std.testing.expectEqual(@as(i32, 106), h.entity_id);
-    try std.testing.expectApproxEqAbs(@as(f32, -273), h.x, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f32, 61), h.y, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f32, 449), h.z, 0.01);
+    // The parser no longer returns the position (origin-relative, unusable
+    // server-side), but the bytes must still sit where the ECD head puts them,
+    // or the length validation above would be checking the wrong layout:
+    // FileVersion u8 | entityClass i32 | id i32 | lifetime f32 | pos f32 x3.
+    const pos_off = 1 + 4 + 4 + 4;
+    const px: f32 = @bitCast(std.mem.readInt(u32, body[pos_off..][0..4], .little));
+    const py: f32 = @bitCast(std.mem.readInt(u32, body[pos_off + 4 ..][0..4], .little));
+    const pz: f32 = @bitCast(std.mem.readInt(u32, body[pos_off + 8 ..][0..4], .little));
+    try std.testing.expectApproxEqAbs(@as(f32, -273), px, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 61), py, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 449), pz, 0.01);
+}
+
+test "player id body wraps the PDF with entityId, team and chunkViewDim" {
+    // NetPackagePlayerId (RE write IL=21) is entityId i32 | team i16 |
+    // PlayerDataFile.WriteNetwork | chunkViewDim i32. The join path builds it
+    // (game.zig) and no wire test covered the frame around the PDF, only the
+    // ECD head inside it, so the three outer fields and this body's own copy
+    // of the ECD position run had nothing reading them back.
+    var buf: [8192]u8 = undefined;
+    const body = try buildPlayerIdBodyInvLoaded(
+        &buf,
+        106, // entity id
+        7, // team: distinct from every neighbouring constant
+        5, // chunkViewDim
+        -273,
+        61,
+        449,
+        &.{},
+        &.{},
+        &.{},
+        &.{},
+        true,
+        game_stage_born_unset,
+    );
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i16, 7), std.mem.readInt(i16, body[4..6], .little));
+    // chunkViewDim closes the body.
+    try std.testing.expectEqual(@as(i32, 5), std.mem.readInt(i32, body[body.len - 4 ..][0..4], .little));
+
+    // The PDF's ECD head starts at byte 6: FileVersion u8 | entityClass i32 |
+    // id i32 | lifetime f32 | pos f32 x3.
+    const ecd = 6;
+    try std.testing.expectEqual(@as(u8, 36), body[ecd]);
+    try std.testing.expectEqual(stock_entity.class_player_male, std.mem.readInt(i32, body[ecd + 1 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[ecd + 5 ..][0..4], .little));
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(std.math.floatMax(f32), f32At(body, ecd + 9)); // lifetime
+    try std.testing.expectApproxEqAbs(@as(f32, -273), f32At(body, ecd + 13), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 61), f32At(body, ecd + 17), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 449), f32At(body, ecd + 21), 0.01);
+
+    // Then rot f32 x3 | onGround bool | BodyDamage (cBinaryVersion 4, type 0,
+    // flags 0) | hasStats bool | deathTime i16 | hasBag bool | homePosition
+    // i32 x3 | homeRange i16 | spawnerSource u8. None of that was read back,
+    // so the version 4 could swap with the zero beside it and homePosition's
+    // three words could rotate.
+    const after_rot = ecd + 25 + 12; // past pos, rot
+    try std.testing.expectEqual(@as(u8, 1), body[after_rot]); // onGround
+    const bd = after_rot + 1;
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[bd..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[bd + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, body[bd + 8 ..][0..4], .little));
+    const home = bd + 12 + 1 + 2 + 1; // past hasStats, deathTime, hasBag
+    try std.testing.expectEqual(@as(i32, -273), std.mem.readInt(i32, body[home..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[home + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 449), std.mem.readInt(i32, body[home + 8 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i16, -1), std.mem.readInt(i16, body[home + 12 ..][0..2], .little));
 }
 
 test "player id PDF bag is CarryCapacity empties" {
@@ -952,6 +1267,10 @@ pub fn buildRemoveBody(buf: []u8, entity_id: i32) ![]u8 {
     return buildRemoveBodyReason(buf, entity_id, .killed);
 }
 
+/// NetPackageEntityRemove (RE protocol-packages.md, write IL=8): the
+/// EntityTargeted base `entityId` i32, then `reason` u8
+/// (EnumRemoveEntityReason). The body-inventory table lists only `reason`,
+/// since it shows fields after the base.
 pub fn buildRemoveBodyReason(buf: []u8, entity_id: i32, reason: RemoveEntityReason) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -1147,8 +1466,20 @@ pub const dmg_pain_hit: u32 = 0x100;
 pub const dmg_turn_into_crawler: u32 = 0x200;
 pub const dmg_trap_kill_xp: u32 = 0x400;
 
-/// Minimal DamageEntity body (V3.2.0 layout): enough for entityId + flags +
-/// source + type + strength + fatal path, with the tail fields zeroed.
+/// NetPackageDamageEntity (RE inventories/netpackage-bodies.md, write IL=144).
+/// All 30 fields in stock order: `entityId` i32 | `flags` u32 | `damageSrc` u8 |
+/// `damageTyp` u8 | `strength` u16 | `hitDirection` u8 | `hitBodyPart` i16 |
+/// `movementState` u8 | `attackerEntityId` i32 | dir f32 x3 | `blockPos`
+/// (StreamUtils Vector3i) | `hitTransformName` string | hitTransformPosition
+/// f32 x3 | uvHit f32 x2 | `KillXPScale` f32 | `damageMultiplier` f32 |
+/// `random` f32 | `bonusDamageType` u8 | `StunType` u8 | `StunDuration` f32 |
+/// `ArmorSlot` u8 | `ArmorSlotGroup` u8 | `ArmorDamage` u16 | `attackingItem`
+/// bool, then the ItemValue only when that bool is true.
+///
+/// zdtd fills the head (entity, flags, source, type, strength, attacker) and
+/// writes the descriptive tail as neutral values: hit transform, uv and armour
+/// slots describe a client-side hit report we do not originate, and the false
+/// `attackingItem` flag is the stock null path rather than a truncation.
 pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, attacker: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -1187,9 +1518,13 @@ pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strengt
     return w.written();
 }
 
-/// Parse the V3.2.0 DamageEntity head (the C2S damage path consumes the
-/// packed flags + strength; the tail beyond the head is not validated here).
-pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool } {
+/// Read side of the V3.2.0 NetPackageDamageEntity head: `entityId` i32 |
+/// packed flags u32 | `source` u8 | `damageType` u8 | `strength` u16 |
+/// `hitDirection` u8 | `hitBodyPart` i16, matching the builder above (the ten
+/// 3.1.0 booleans folded into one flag word in 3.2.0; docs/wire/PACKAGES.md).
+/// The tail past the head is not decoded: the server recomputes damage from
+/// its own weapon and armor state, so those fields are not values it acts on.
+pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool, body_part: i16 } {
     if (body.len < 4 + 4 + 1 + 1 + 2 + 1 + 2 + 1) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -1198,7 +1533,7 @@ pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, d
     const dtype = try r.readByte();
     const strength = try r.readU16();
     _ = try r.readByte(); // hitDirection
-    _ = try r.readI16(); // hitBodyPart
+    const body_part = try r.readI16(); // hitBodyPart (EnumBodyPartHit)
     _ = try r.readByte(); // movementState
     return .{
         .entity_id = entity_id,
@@ -1207,6 +1542,7 @@ pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, d
         .strength = strength,
         .fatal = (flags & dmg_fatal) != 0,
         .trap_kill_xp = (flags & dmg_trap_kill_xp) != 0,
+        .body_part = body_part,
     };
 }
 
@@ -1229,6 +1565,16 @@ test "DamageEntity V3.2.0 golden layout: packed flags + KillXPScale at fixed off
     try std.testing.expectEqual(@as(u8, 3), body[9]); // dtype
     try std.testing.expectEqual(@as(u16, 100), std.mem.readInt(u16, body[10..12], .little));
     try std.testing.expectEqual(@as(i32, 0x55667788), std.mem.readInt(i32, body[16..20], .little));
+    // The direction vector at 20 is (0, -1, 0): two zeros around a -1, so the
+    // -1 is the only observable word and its position is what a swap moves.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 20));
+    try std.testing.expectEqual(@as(f32, -1), f32At(body, 24)); // dirV y
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 28));
     // KillXPScale (V3.2.0 addition) sits at 65; damageMultiplier at 69.
     const kxs: f32 = @bitCast(std.mem.readInt(u32, body[65..69], .little));
     try std.testing.expectEqual(@as(f32, 1.0), kxs);
@@ -1344,6 +1690,37 @@ test "POI metadata response: 512 dense records fit the response buffer" {
     const body = try buildPoiMetadataResponse(&buf, &records);
     try std.testing.expect(body.len > 65536); // the old slice could not hold it
     try std.testing.expect(body.len < buf.len);
+
+    // Size alone says nothing about field order, and the record above cannot
+    // say it either: y, z and rotation all sit at 0. Build one record with a
+    // distinct value everywhere and read it back - the client keys map markers
+    // and quest offers off these, so a rotated triple misplaces a POI.
+    const one = [_]PoiMetadata{.{
+        .x = 11,
+        .y = 12,
+        .z = 13,
+        .size_x = 21,
+        .size_y = 22,
+        .size_z = 23,
+        .rotation = 2,
+        .tier = 5,
+        .trader_area = true,
+        .prefab_name = "p",
+        .tags = "t",
+        .quest_tags = "q",
+    }};
+    var one_buf: [512]u8 = undefined;
+    const b = try buildPoiMetadataResponse(&one_buf, &one);
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, b[0..4], .little)); // count
+    try std.testing.expectEqual(@as(i32, 11), std.mem.readInt(i32, b[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 12), std.mem.readInt(i32, b[8..12], .little));
+    try std.testing.expectEqual(@as(i32, 13), std.mem.readInt(i32, b[12..16], .little));
+    try std.testing.expectEqual(@as(i32, 21), std.mem.readInt(i32, b[16..20], .little));
+    try std.testing.expectEqual(@as(i32, 22), std.mem.readInt(i32, b[20..24], .little));
+    try std.testing.expectEqual(@as(i32, 23), std.mem.readInt(i32, b[24..28], .little));
+    try std.testing.expectEqual(@as(u8, 2), b[28]); // rotation
+    try std.testing.expectEqual(@as(u8, 5), b[29]); // tier
+    try std.testing.expectEqual(@as(u8, 1), b[30]); // traderArea
 }
 
 /// NetPackageConfirmSpawnEntity body (V3.2.0, changelog-3.2.0 §3.3):
@@ -1388,6 +1765,9 @@ pub fn extractChunkKeyZ(key: i64) i32 {
     return shifted >> 8;
 }
 
+/// zdtd height-map payload for tests and loadgen, **not a stock package body**:
+/// cx i32 | cz i32 | ydim i32 | 256 height bytes. The stock chunk body is built
+/// by stock_chunk.buildNetPackageChunkNew; see buildStockChunkEnvelope below.
 pub fn buildChunkPayload(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(cx);
@@ -1420,6 +1800,15 @@ pub const ChunkParsed = struct {
     heights: []const u8,
 };
 
+/// Read side of buildChunkBody: the stock NetPackageChunk envelope
+/// (`overwrite` bool | cx,cy,cz i16 | `len` i32 | payload) wrapped around
+/// zdtd's height-plane payload, which is **not a stock chunk body**. The real
+/// client stream is built by stock_chunk.buildNetPackageChunkNew and read by
+/// the client, never by this function; this decodes what the tests and loadgen
+/// write.
+///
+/// A body that does not start with a 0/1 discriminant is taken as a bare
+/// payload, so both forms round-trip through one entry point.
 pub fn parseChunkBody(body: []const u8) !ChunkParsed {
     // Stock envelope?
     if (body.len >= chunk_stock_envelope_overhead + chunk_body_size and (body[0] == 0 or body[0] == 1)) {
@@ -1453,18 +1842,122 @@ fn parseChunkPayload(body: []const u8) !ChunkParsed {
     return .{ .cx = cx, .cz = cz, .heights = heights };
 }
 
-/// NetPackageRequestToSpawnPlayer: chunkViewDim:i16 | PlayerProfile | nearEntityId:i32
-/// Profile is opaque; we only need view dim when present.
-pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32, near_entity_id: i32 } {
+/// NetPackageRequestToSpawnPlayer (RE inventories/netpackage-bodies.md write
+/// IL=17, protocol.md §5): `chunkViewDim` i16 | `playerProfile`
+/// (PlayerProfile.Write) | `nearEntityId` i32.
+///
+/// Only `chunkViewDim` is read. The profile is the client's display copy and
+/// the server owns the real one, so parsing it would buy nothing; `nearEntityId`
+/// sits behind that variable-length blob and is unused server-side. It used to
+/// be grabbed from the last four bytes without parsing the profile, which is a
+/// guess rather than a read: on a short body those four bytes overlap
+/// chunkViewDim itself. Reading a field we do not use, from an offset we did
+/// not derive, is strictly worse than not reading it.
+pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32 } {
     if (body.len < 2) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
-    const dim = try r.readI16();
-    // Skip profile best-effort: if remaining has at least 4 bytes at end for nearEntityId
-    var near: i32 = -1;
-    if (body.len >= 6) {
-        near = std.mem.readInt(i32, body[body.len - 4 ..][0..4], .little);
-    }
-    return .{ .chunk_view_dim = dim, .near_entity_id = near };
+    return .{ .chunk_view_dim = try r.readI16() };
+}
+
+/// The client's `PlayerProfile` out of a `NetPackageRequestToSpawnPlayer` body
+/// (stock read IL=14: `chunkViewDim:i16`, then `PlayerProfile::Read`). Separate
+/// from parseRequestToSpawnPlayer so a body without the profile still yields
+/// the dim, and a malformed profile leaves the caller on its default
+/// appearance instead of dropping the spawn.
+pub fn parseRequestToSpawnProfile(body: []const u8) !stock_entity.OwnedProfile {
+    if (body.len < 2 + 4) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readI16();
+    return stock_entity.readOwnedProfile(&r);
+}
+
+test "RequestToSpawnPlayer reads only the leading chunkViewDim" {
+    // A bare two-byte body is legal: everything after chunkViewDim is the
+    // client's profile blob plus a field the server does not use.
+    var two: [2]u8 = undefined;
+    std.mem.writeInt(i16, &two, 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&two)).chunk_view_dim);
+
+    // A trailing blob must not change what is read. The old code took the last
+    // four bytes as nearEntityId, so a body this shape used to reinterpret its
+    // own header bytes; asserting the dim is stable pins that it no longer
+    // depends on the body's length.
+    var long: [24]u8 = @splat(0xAB);
+    std.mem.writeInt(i16, long[0..2], 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&long)).chunk_view_dim);
+
+    // Shorter than the one field it does read is an error, not a zero.
+    var one: [1]u8 = .{0};
+    try std.testing.expectError(error.EndOfStream, parseRequestToSpawnPlayer(&one));
+}
+
+test "the client's profile round-trips out of RequestToSpawnPlayer" {
+    // Body shape from NetPackageRequestToSpawnPlayer (read IL=14):
+    // chunkViewDim:i16 | PlayerProfile (v5) | nearEntityId:i32.
+    var buf: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI16(4);
+    try stock_entity.writePlayerProfile(&w, .{
+        .archetype = "BaseFemale",
+        .is_male = false,
+        .race_name = "Black",
+        .variant_number = 3,
+        .hair_name = "hairFemaleShort",
+        .hair_color = "0,0,0",
+        .mustache_name = "",
+        .chops_name = "",
+        .beard_name = "",
+        .eye_color = "Green01",
+    });
+    try w.writeI32(-1);
+    const body = w.written();
+
+    const p = try parseRequestToSpawnProfile(body);
+    try std.testing.expectEqualStrings("BaseFemale", p.view().archetype);
+    try std.testing.expect(!p.view().is_male);
+    try std.testing.expectEqualStrings("Black", p.view().race_name);
+    try std.testing.expectEqual(@as(u8, 3), p.view().variant_number);
+    try std.testing.expectEqualStrings("hairFemaleShort", p.view().hair_name);
+    try std.testing.expectEqualStrings("Green01", p.view().eye_color);
+    // The dim still parses from the same body.
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(body)).chunk_view_dim);
+    // A body without the profile blob yields the dim and no profile.
+    var dim_only: [2]u8 = undefined;
+    std.mem.writeInt(i16, &dim_only, 6, .little);
+    try std.testing.expectError(error.EndOfStream, parseRequestToSpawnProfile(&dim_only));
+    try std.testing.expectEqual(@as(i32, 6), (try parseRequestToSpawnPlayer(&dim_only)).chunk_view_dim);
+}
+
+test "a received profile drives the PDF player class and appearance" {
+    var pbuf: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pbuf };
+    try pw.writeI16(4);
+    try stock_entity.writePlayerProfile(&pw, .{
+        .archetype = "BaseFemale",
+        .is_male = false,
+        .race_name = "Black",
+        .variant_number = 3,
+        .eye_color = "Green01",
+    });
+    try pw.writeI32(0);
+    const prof = try parseRequestToSpawnProfile(pw.written());
+
+    var buf: [4096]u8 = undefined;
+    const body = try buildPlayerIdBodyWithOpts(&buf, 7, 0, 4, 1, 2, 3, .{
+        .profile = prof.view(),
+        .player_name = "Ann",
+    });
+    // id i32 + team i16, then the ECD FileVersion byte and the entityClass:
+    // the female player class.
+    try std.testing.expectEqual(@as(u8, 36), body[6]);
+    try std.testing.expectEqual(@as(i32, stock_entity.class_player_female), std.mem.readInt(i32, body[7..11], .little));
+    try std.testing.expect(std.mem.find(u8, body, "BaseFemale") != null);
+    try std.testing.expect(std.mem.find(u8, body, "Green01") != null);
+    try std.testing.expect(std.mem.find(u8, body, "Ann") != null);
+    // Without a profile the body keeps the offline default (male class).
+    const dflt = try buildPlayerIdBodyWithOpts(&buf, 7, 0, 4, 1, 2, 3, .{});
+    try std.testing.expectEqual(@as(i32, stock_entity.class_player_male), std.mem.readInt(i32, dflt[7..11], .little));
+    try std.testing.expect(std.mem.find(u8, dflt, "BaseMale") != null);
 }
 
 /// Stock NetPackageSetBlock body (derived V3.0.1, live against V3.1.0 b14):
@@ -1507,13 +2000,16 @@ pub fn withBlockMeta(raw: u32, meta: u8) u32 {
     return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
 }
 
-/// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
+/// NetPackageSetBlock, one change (RE write IL=37; field order in
+/// buildSetBlockBodyRaw). Null platform user; peers accept S2C without id check.
 /// Id-only: rotation and meta bits are zero, so this is safe for fresh placement
 /// and wrong for echoing a mutated block. Those callers want buildSetBlockBodyRaw.
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
     return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), 0, 0, 0);
 }
 
+/// NetPackageSetBlock carrying block damage (RE write IL=37; the damage u16 is
+/// part of BlockValue.Write, see buildSetBlockBodyRaw).
 pub fn buildSetBlockBodyDamage(
     buf: []u8,
     x: i32,
@@ -1531,6 +2027,15 @@ pub fn buildSetBlockBodyDamage(
 /// echo a mutated block must use this, not the id-only form: rotation and meta
 /// live above the low 16 bits (asm.il:141018 BlockValue::Write), so rebuilding
 /// rawData from the id alone snaps switches back off and doors back shut.
+/// NetPackageSetBlock (RE protocol-packages.md 6.9 + write IL=37):
+/// `persistentPlayerId` (ToStream; null = one 0 byte) | `blockChanges` count
+/// i16 | count x BlockChangeInfo.Write | `localPlayerThatChanged` i32.
+///
+/// BlockChangeInfo.Write is BlockValueRef | `changedByEntityId` i32 | flags u8,
+/// then the payloads the flags select. We set bChangeBlockValue only, so what
+/// follows is BlockValue.Write = `rawData` u32 + `damage` u16 (Write IL=10).
+/// The damage u16 belongs to BlockValue, not to the bChangeDamage flag: that
+/// flag only tells the receiver to apply the damage that already rides here.
 pub fn buildSetBlockBodyRaw(
     buf: []u8,
     x: i32,
@@ -1569,7 +2074,11 @@ pub const BlockChange = struct {
     has_value: bool = false,
 };
 
-/// Parse first stock BlockChangeInfo (or legacy simplified x/y/z/u16 for old fixtures).
+/// First change of a NetPackageSetBlock body, for the callers that only ever
+/// act on one (RE blocks.md, BlockChangeInfo.Read IL=76). Full layout and the
+/// legacy fixture form are in parseSetBlockChanges; this is a projection of it,
+/// not a second decoder. A change without both a position and a value is an
+/// error here because there is nothing to return.
 pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, block_id: u16 } {
     var one: [1]BlockChange = undefined;
     const n = try parseSetBlockChanges(body, one[0..]);
@@ -1577,22 +2086,28 @@ pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, blo
     return .{ .x = one[0].x, .y = one[0].y, .z = one[0].z, .block_id = one[0].block_id };
 }
 
-/// Parse all BlockChangeInfo entries with world positions + block values.
+/// Read side of NetPackageSetBlock (RE blocks.md, BlockChangeInfo.Write IL=89 /
+/// Read IL=76): `persistentPlayerId` (PlatformUserIdentifier) | `count` i16 |
+/// then per change a `BlockValueRef` (discriminant byte, 1 = Block followed by
+/// Vector3i) | `changedByEntityId` i32 | flags byte | the flagged payloads in
+/// flag order (BlockValue.Write = `rawData` u32 + `damage` u16, `sbyte`
+/// density, TextureFullArray). bForceDensity and bUpdateLight are flags with no
+/// payload.
+///
+/// An unknown flag bit is an error, not a skip: the bit selects a payload this
+/// reader cannot size, so continuing would decode every later change in the
+/// batch from a desynced offset as a bogus world edit. Changes lacking a
+/// position or a value are dropped from the output rather than returned half
+/// filled.
+///
+/// There is no length-keyed shortcut here. A 14-byte legacy branch used to sit
+/// at the top, and 14 is a length a stock body reaches on its own: identity
+/// plus a zero count is `6 + platform.len + id.len`, so any pair summing to 8
+/// (`"Steam"` with a 3-character id) hit it, and an empty change list came back
+/// as one change with x/y/z read out of the identity bytes. The caller's reach
+/// check happened to reject those coordinates; that is not a defence a parser
+/// should lean on.
 pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
-    // Legacy intermediate: 14 bytes.
-    if (body.len == 14) {
-        if (out.len == 0) return 0;
-        var r: binary.Reader = .{ .data = body };
-        out[0] = .{
-            .x = try r.readI32(),
-            .y = try r.readI32(),
-            .z = try r.readI32(),
-            .block_id = try r.readU16(),
-            .has_pos = true,
-            .has_value = true,
-        };
-        return 1;
-    }
     var r: binary.Reader = .{ .data = body };
     try platform_user.skip(&r);
     const n_i = try r.readI16();
@@ -1608,6 +2123,338 @@ pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
         }
     }
     return written;
+}
+
+/// One `NetPackageWaterSet/WaterSetInfo`: `worldPos` Vector3i then a
+/// `WaterValue` whose whole serialized form is a `UInt16 mass`
+/// (WaterValue.il.txt:127, SerializedLength IL=2 returns 2).
+pub const WaterSetChange = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    mass: u16 = 0,
+};
+
+/// Stock `WaterValue.Full` mass (WaterValue.il.txt:141, `ldc.i4 19500`); the
+/// `BlockValue` ctor maps an isWater block to exactly this. `Empty` is 0.
+pub const water_mass_full: u16 = 19500;
+
+/// `NetPackageWaterSet::read` (NetPackageWaterSet.il.txt:55): `senderEntityId`
+/// i32 | `changes.Count` u16 | WaterSetInfo per entry. The client sends this
+/// when a jar fill/empty or a water-cube tool edits water; stock's server
+/// relays it to every other peer and then applies it, so the change is not
+/// local to the acting client.
+pub fn parseWaterSet(body: []const u8, out: []WaterSetChange) binary.ReadError!struct { sender: i32, n: usize } {
+    var r: binary.Reader = .{ .data = body };
+    const sender = try r.readI32();
+    const count = try r.readU16();
+    var written: usize = 0;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const x = try r.readI32();
+        const y = try r.readI32();
+        const z = try r.readI32();
+        const mass = try r.readU16();
+        if (written < out.len) {
+            out[written] = .{ .x = x, .y = y, .z = z, .mass = mass };
+            written += 1;
+        }
+    }
+    return .{ .sender = sender, .n = written };
+}
+
+/// Write side of the same body, for the server relay (stock
+/// `NetPackageWaterSet::write` IL=36, NetPackageWaterSet.il.txt:86: base
+/// write, `senderEntityId` i32, `changes.Count` as u16, then
+/// `WaterSetInfo::Write` per entry, itself `StreamUtils::Write(Vector3i)` plus
+/// `WaterValue::Write` u16, NetPackageWaterSet_WaterSetInfo.il.txt:16).
+pub fn buildWaterSetBody(buf: []u8, sender: i32, changes: []const WaterSetChange) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(sender);
+    if (changes.len > std.math.maxInt(u16)) return error.Overflow;
+    try w.writeU16(@intCast(changes.len));
+    for (changes) |c| {
+        try w.writeI32(c.x);
+        try w.writeI32(c.y);
+        try w.writeI32(c.z);
+        try w.writeU16(c.mass);
+    }
+    return w.written();
+}
+
+test "water set body round-trips the stock layout" {
+    var buf: [64]u8 = undefined;
+    // Every coordinate is distinct, so swapping any two of the three i32
+    // writes (or the matching reads) fails here. Sharing y between entries
+    // would let an x/y swap through.
+    const changes = [_]WaterSetChange{
+        .{ .x = 10, .y = 70, .z = -4, .mass = water_mass_full },
+        .{ .x = 11, .y = 71, .z = -5, .mass = 0 },
+    };
+    const body = try buildWaterSetBody(&buf, 107, &changes);
+    // i32 sender + u16 count + 2 x (3 x i32 + u16)
+    try std.testing.expectEqual(@as(usize, 4 + 2 + 2 * 14), body.len);
+    var out: [4]WaterSetChange = undefined;
+    const got = try parseWaterSet(body, &out);
+    try std.testing.expectEqual(@as(i32, 107), got.sender);
+    try std.testing.expectEqual(@as(usize, 2), got.n);
+    try std.testing.expectEqual(@as(i32, 10), out[0].x);
+    try std.testing.expectEqual(@as(i32, 70), out[0].y);
+    try std.testing.expectEqual(@as(i32, -4), out[0].z);
+    try std.testing.expectEqual(water_mass_full, out[0].mass);
+    try std.testing.expectEqual(@as(i32, 11), out[1].x);
+    try std.testing.expectEqual(@as(i32, 71), out[1].y);
+    try std.testing.expectEqual(@as(i32, -5), out[1].z);
+    try std.testing.expectEqual(@as(u16, 0), out[1].mass);
+
+    // A count larger than the body is a truncation error, not a short read.
+    try std.testing.expectError(error.EndOfStream, parseWaterSet(body[0 .. body.len - 1], &out));
+}
+
+/// `Audio.NetPackageAudio` body: the `NetPackageEntityTargeted` base
+/// (`entityId` i32, NetPackageEntityTargeted.il.txt:11) then `soundGroupName`
+/// string, `play` bool, `position` as three bare f32, `playOnEntity` bool,
+/// `occlusion` f32, `volumeScale` f32, `signalOnly` bool (read IL=49,
+/// Audio/NetPackageAudio.il.txt:55).
+pub const AudioPlay = struct {
+    entity_id: i32 = 0,
+    sound_group: []const u8 = "",
+    play: bool = false,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    play_on_entity: bool = false,
+    occlusion: f32 = 0,
+    volume_scale: f32 = 1,
+    signal_only: bool = false,
+};
+
+/// Read side of the layout above (stock `Audio.NetPackageAudio::read` IL=49,
+/// Audio/NetPackageAudio.il.txt:55, over the `NetPackageEntityTargeted::read`
+/// base at NetPackageEntityTargeted.il.txt:11). `name_buf` receives the
+/// sound-group name.
+pub fn parseAudioPlay(body: []const u8, name_buf: []u8) binary.ReadError!AudioPlay {
+    var r: binary.Reader = .{ .data = body };
+    var out: AudioPlay = .{ .entity_id = try r.readI32() };
+    out.sound_group = try r.readStringTruncating(name_buf);
+    out.play = try r.readBool();
+    out.x = try r.readF32();
+    out.y = try r.readF32();
+    out.z = try r.readF32();
+    out.play_on_entity = try r.readBool();
+    out.occlusion = try r.readF32();
+    out.volume_scale = try r.readF32();
+    out.signal_only = try r.readBool();
+    return out;
+}
+
+/// Write side of the same body, for the server relay (stock
+/// `Audio.NetPackageAudio::write` IL=53, Audio/NetPackageAudio.il.txt:106:
+/// base write then the same field order the reader expects).
+pub fn buildAudioPlayBody(buf: []u8, a: AudioPlay) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(a.entity_id);
+    try w.writeString(a.sound_group);
+    try w.writeBool(a.play);
+    try w.writeF32(a.x);
+    try w.writeF32(a.y);
+    try w.writeF32(a.z);
+    try w.writeBool(a.play_on_entity);
+    try w.writeF32(a.occlusion);
+    try w.writeF32(a.volume_scale);
+    try w.writeBool(a.signal_only);
+    return w.written();
+}
+
+test "audio play body round-trips the stock field order" {
+    var buf: [128]u8 = undefined;
+    const src: AudioPlay = .{
+        .entity_id = 107,
+        .sound_group = "open_door",
+        .play = true,
+        .x = 1.5,
+        .y = 70,
+        .z = -2.5,
+        .play_on_entity = true,
+        .occlusion = 0.25,
+        .volume_scale = 0.75,
+        .signal_only = false,
+    };
+    const body = try buildAudioPlayBody(&buf, src);
+    var name_buf: [64]u8 = undefined;
+    const got = try parseAudioPlay(body, &name_buf);
+    try std.testing.expectEqual(@as(i32, 107), got.entity_id);
+    try std.testing.expectEqualStrings("open_door", got.sound_group);
+    try std.testing.expect(got.play);
+    // Assert every f32, not just z: occlusion and volume_scale are adjacent
+    // same-width fields, and x/y went unchecked, so a swap among them would
+    // otherwise pass.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), got.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 70), got.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, -2.5), got.z, 0.001);
+    try std.testing.expect(got.play_on_entity);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), got.occlusion, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), got.volume_scale, 0.001);
+    try std.testing.expect(!got.signal_only);
+
+    try std.testing.expectError(error.EndOfStream, parseAudioPlay(body[0 .. body.len - 1], &name_buf));
+}
+
+/// `NetPackageQuestTreasurePoint/QuestPointActions`
+/// (NetPackageQuestTreasurePoint_QuestPointActions.il.txt:3).
+pub const quest_point_get_goto: u8 = 0;
+pub const quest_point_get_treasure: u8 = 1;
+pub const quest_point_update_treasure: u8 = 2;
+pub const quest_point_update_blocks: u8 = 3;
+
+/// `NetPackageQuestTreasurePoint` body. The layout branches on the leading
+/// `ActionType` byte (read IL=54, NetPackageQuestTreasurePoint.il.txt:125):
+/// action 2 carries only `questCode` i32 + `position` Vector3i; every other
+/// action carries the full request/response form.
+pub const QuestTreasurePoint = struct {
+    action: u8 = 0,
+    player_id: i32 = 0,
+    distance: f32 = 0,
+    offset: i32 = 0,
+    treasure_radius: f32 = 0,
+    blocks_per_reduction: i32 = 0,
+    quest_code: i32 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    off_x: f32 = 0,
+    off_y: f32 = 0,
+    off_z: f32 = 0,
+    use_nearby: bool = false,
+};
+
+/// Read side of the branch above (stock `NetPackageQuestTreasurePoint::read`
+/// IL=54, NetPackageQuestTreasurePoint.il.txt:125): `ActionType` u8, then for
+/// action 2 only `questCode` i32 + `position` Vector3i, else `playerId` i32,
+/// `distance` f32, `offset` i32, `treasureRadius` f32, `blocksPerReduction`
+/// i32, `questCode` i32, `position` Vector3i, `treasureOffset` Vector3 and
+/// `useNearby` bool.
+pub fn parseQuestTreasurePoint(body: []const u8) binary.ReadError!QuestTreasurePoint {
+    var r: binary.Reader = .{ .data = body };
+    var out: QuestTreasurePoint = .{ .action = try r.readByte() };
+    if (out.action == quest_point_update_treasure) {
+        out.quest_code = try r.readI32();
+        out.x = try r.readI32();
+        out.y = try r.readI32();
+        out.z = try r.readI32();
+        return out;
+    }
+    out.player_id = try r.readI32();
+    out.distance = try r.readF32();
+    out.offset = try r.readI32();
+    out.treasure_radius = try r.readF32();
+    out.blocks_per_reduction = try r.readI32();
+    out.quest_code = try r.readI32();
+    out.x = try r.readI32();
+    out.y = try r.readI32();
+    out.z = try r.readI32();
+    out.off_x = try r.readF32();
+    out.off_y = try r.readF32();
+    out.off_z = try r.readF32();
+    out.use_nearby = try r.readBool();
+    return out;
+}
+
+/// The server's answer to a GetTreasurePoint request: stock re-Setups the
+/// package with the resolved dig position and sends it back to the asking
+/// player (`Setup` IL=26 at :36 pins ActionType 1 and zeroes distance/offset;
+/// `write` IL=59 at :182 emits the same branch the reader expects).
+pub fn buildQuestTreasurePointReply(
+    buf: []u8,
+    player_id: i32,
+    quest_code: i32,
+    blocks_per_reduction: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    off_x: f32,
+    off_y: f32,
+    off_z: f32,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeByte(quest_point_get_treasure);
+    try w.writeI32(player_id);
+    try w.writeF32(0); // distance: Setup zeroes it
+    try w.writeI32(0); // offset: Setup zeroes it
+    try w.writeF32(0); // treasureRadius: not re-set by Setup
+    try w.writeI32(blocks_per_reduction);
+    try w.writeI32(quest_code);
+    try w.writeI32(x);
+    try w.writeI32(y);
+    try w.writeI32(z);
+    try w.writeF32(off_x);
+    try w.writeF32(off_y);
+    try w.writeF32(off_z);
+    try w.writeBool(false); // useNearby: not re-set by Setup
+    return w.written();
+}
+
+test "quest treasure point body branches on the action byte" {
+    // Action 2 is the short form: questCode + Vector3i and nothing else.
+    var short_buf: [32]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &short_buf };
+    try sw.writeByte(quest_point_update_treasure);
+    try sw.writeI32(77);
+    try sw.writeI32(10);
+    try sw.writeI32(70);
+    try sw.writeI32(-4);
+    const short = try parseQuestTreasurePoint(sw.written());
+    try std.testing.expectEqual(@as(usize, 17), sw.written().len);
+    try std.testing.expectEqual(@as(i32, 77), short.quest_code);
+    try std.testing.expectEqual(@as(i32, -4), short.z);
+
+    // The reply form round-trips through the long branch.
+    // The reply: check the bytes at fixed offsets rather than round-tripping.
+    // A round trip through zdtd's own writer and reader proves they agree with
+    // each other, not with stock, and Setup pins distance/offset/treasureRadius
+    // to zero - three consecutive fields (f32, i32, f32) that no round-trip
+    // assertion can tell apart from each other or from a width swap.
+    // Order per NetPackageQuestTreasurePoint::read (IL=54, :125): action u8 |
+    // playerId i32 | distance f32 | offset i32 | treasureRadius f32 |
+    // blocksPerReduction i32 | questCode i32 | position Vector3i |
+    // treasureOffset Vector3 | useNearby bool.
+    var buf: [64]u8 = undefined;
+    const reply = try buildQuestTreasurePointReply(&buf, 107, 77, 3, 100, 60, -200, 0.5, 0.25, 1.5);
+    try std.testing.expectEqual(@as(usize, 1 + 4 + 4 + 4 + 4 + 4 + 4 + 12 + 12 + 1), reply.len);
+    try std.testing.expectEqual(quest_point_get_treasure, reply[0]);
+    const i32At = struct {
+        fn f(b: []const u8, off: usize) i32 {
+            return std.mem.readInt(i32, b[off..][0..4], .little);
+        }
+    }.f;
+    const f32At = struct {
+        fn f(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.f;
+    try std.testing.expectEqual(@as(i32, 107), i32At(reply, 1)); // playerId
+    try std.testing.expectEqual(@as(f32, 0), f32At(reply, 5)); // distance
+    try std.testing.expectEqual(@as(i32, 0), i32At(reply, 9)); // offset
+    try std.testing.expectEqual(@as(f32, 0), f32At(reply, 13)); // treasureRadius
+    try std.testing.expectEqual(@as(i32, 3), i32At(reply, 17)); // blocksPerReduction
+    try std.testing.expectEqual(@as(i32, 77), i32At(reply, 21)); // questCode
+    try std.testing.expectEqual(@as(i32, 100), i32At(reply, 25)); // position.x
+    try std.testing.expectEqual(@as(i32, 60), i32At(reply, 29)); // position.y
+    try std.testing.expectEqual(@as(i32, -200), i32At(reply, 33)); // position.z
+    // Distinct offsets: equal ones could not catch a swap among the three.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), f32At(reply, 37), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), f32At(reply, 41), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), f32At(reply, 45), 0.001);
+    try std.testing.expectEqual(@as(u8, 0), reply[49]); // useNearby
+
+    // The parser agrees with those bytes.
+    const got = try parseQuestTreasurePoint(reply);
+    try std.testing.expectEqual(@as(i32, 107), got.player_id);
+    try std.testing.expectEqual(@as(i32, 3), got.blocks_per_reduction);
+    try std.testing.expectEqual(@as(i32, -200), got.z);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), got.off_y, 0.001);
+
+    try std.testing.expectError(error.EndOfStream, parseQuestTreasurePoint(reply[0 .. reply.len - 1]));
 }
 
 fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
@@ -1645,21 +2492,71 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     return ch;
 }
 
-/// Stock `NetPackage.get_Channel` override set (asm.il 808632-808638, 826004,
-/// 833771): bulk world data rides envelope channel 1 so it does not sit in the
-/// same queue as control traffic. Everything else is channel 0.
+/// Stock `NetPackage.get_Channel` override set: bulk world data rides envelope
+/// channel 1 so it does not sit in the same queue as control traffic.
+/// `NetPackage::get_Channel` returns 0 (IL=2) and exactly four packages
+/// override it to 1, each `get_Channel() IL=2` returning `ldc.i4.1`:
+/// NetPackageChunk, NetPackageChunkRemove, NetPackageDynamicMesh,
+/// NetPackageMapChunks and NetPackageWorldFolder (RE network.md "Second
+/// envelope stream ... 5 packages";
+/// `il/netpackages-v3.2.0/NetPackageWorldFolder_il.txt` IL_0000 = ldc.i4.1).
+/// WorldFolder was missing here until 2026-09-06; zdtd never emits it, so
+/// nothing was mis-sent, but the channel would have been wrong on the first
+/// send.
+///
+/// `NetPackagePOIMetadataResponse` is deliberately absent. Its 3.1.0
+/// predecessor `NetPackagePOIAround` did override to 1
+/// (`il/full-v3.1.0/_global/NetPackagePOIAround.il.txt`), but the 3.2.0
+/// replacement declares no `get_Channel` at all
+/// (`il/full-v3.2.0/_global/NetPackagePOIMetadataResponse.il.txt`, base
+/// NetPackage, no intermediate class), so it inherits channel 0. zdtd carried
+/// the old channel across the package swap until 2026-09-04.
 pub fn channelFor(name: []const u8) u8 {
     if (std.mem.eql(u8, name, "NetPackageChunk") or
         std.mem.eql(u8, name, "NetPackageChunkRemove") or
         std.mem.eql(u8, name, "NetPackageDynamicMesh") or
         std.mem.eql(u8, name, "NetPackageMapChunks") or
-        std.mem.eql(u8, name, "NetPackagePOIMetadataResponse")) return 1;
+        std.mem.eql(u8, name, "NetPackageWorldFolder")) return 1;
     return 0;
 }
 
 pub fn framed(buf: []u8, name: []const u8, body: []const u8) ![]u8 {
     const id = idOf(name) orelse return error.UnknownPackage;
     return frame.framePackage(buf, channelFor(name), id, body);
+}
+
+test "only the five stock get_Channel overrides ride channel 1" {
+    // Nothing tested this: dropping every override to 0 left the suite green.
+    // The set is the packages whose `get_Channel() IL=2` returns ldc.i4.1;
+    // `NetPackage::get_Channel` returns 0 for everything else.
+    //
+    // WorldFolder was missing here until 2026-09-06. The RE names five
+    // (network.md "Second envelope stream ... 5 packages") and
+    // `il/netpackages-v3.2.0/NetPackageWorldFolder_il.txt` IL_0000 is
+    // `ldc.i4.1`; the test asserted "four" and so pinned the omission in
+    // place. zdtd never emits WorldFolder, so nothing was mis-sent, but the
+    // channel would have been wrong the moment it did.
+    const on_one = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageChunkRemove",
+        "NetPackageDynamicMesh",
+        "NetPackageMapChunks",
+        "NetPackageWorldFolder",
+    };
+    for (on_one) |n| try std.testing.expectEqual(@as(u8, 1), channelFor(n));
+
+    // Every other advertised package inherits 0. Checking the whole table
+    // rather than a sample is what catches a name added to the override set
+    // without an IL override behind it - which is how POIMetadataResponse got
+    // there, inherited from its removed 3.1.0 predecessor POIAround.
+    for (default_mappings) |n| {
+        var overridden = false;
+        for (on_one) |o| {
+            if (std.mem.eql(u8, n, o)) overridden = true;
+        }
+        if (overridden) continue;
+        try std.testing.expectEqual(@as(u8, 0), channelFor(n));
+    }
 }
 
 test "setblock stock body roundtrip" {
@@ -1675,6 +2572,12 @@ test "setblock stock body roundtrip" {
     var one: [1]BlockChange = undefined;
     const n = try parseSetBlockChanges(dmg_body, one[0..]);
     try std.testing.expectEqual(@as(usize, 1), n);
+    // The change position is the point of the package and nothing read it
+    // back: the parser could have swapped two of the three coordinates and
+    // every assertion here would still have passed.
+    try std.testing.expectEqual(@as(i32, 1), one[0].x);
+    try std.testing.expectEqual(@as(i32, 2), one[0].y);
+    try std.testing.expectEqual(@as(i32, 3), one[0].z);
     try std.testing.expectEqual(@as(u16, 20304), one[0].block_id);
     try std.testing.expectEqual(@as(u16, 7), one[0].damage);
     try std.testing.expectEqual(@as(u16, 13), p.block_id);
@@ -1726,6 +2629,24 @@ test "setblock raw body preserves the meta nibble" {
     try std.testing.expectEqual(@as(u8, 0), blockMeta(one[0].raw));
 }
 
+test "an empty change list from an identified client is not a block edit" {
+    // A stock body is `identity | count i16 | changes`, and an identity plus a
+    // zero count is 6 + platform.len + id.len bytes. Any pair summing to 8 -
+    // "Steam" with a 3-character id, say - lands on exactly 14, which a
+    // length-keyed legacy branch would decode as x/y/z/id read straight out of
+    // the identity bytes: a block edit the client never asked for, at a
+    // position taken from its account name.
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "abc" });
+    try w.writeI16(0); // no changes
+    const body = w.written();
+    try std.testing.expectEqual(@as(usize, 14), body.len);
+
+    var one: [1]BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 0), try parseSetBlockChanges(body, one[0..]));
+}
+
 test "block meta accessors match BlockValue get_meta/set_meta" {
     try std.testing.expectEqual(@as(u8, 0), blockMeta(19200));
     try std.testing.expectEqual(@as(u32, 19200 | (2 << 22)), withBlockMeta(19200, 2));
@@ -1736,26 +2657,51 @@ test "block meta accessors match BlockValue get_meta/set_meta" {
     try std.testing.expectEqual(rot & ~@as(u32, 15 << 22), withBlockMeta(rot, 0));
 }
 
-test "NetPackageChunk package id is 12" {
-    // Loadgen / stock maps use this id for terrain; join must deliver it.
-    try std.testing.expectEqual(@as(u16, 12), idOf("NetPackageChunk").?);
+test "NetPackageChunk resolves to an id and frames at that id" {
+    // The id itself is not a contract: ids are negotiated through
+    // NetPackagePackageIds, so the client uses whatever index this table
+    // advertises. What must hold is that the name resolves and that `framed`
+    // stamps the same id `idOf` returns - a mismatch there would send terrain
+    // under a header the client resolves to some other package.
+    const chunk_id = idOf("NetPackageChunk") orelse return error.TestUnexpectedResult;
     var heights: [256]u8 = .{70} ** 256;
     var body_buf: [512]u8 = undefined;
     const body = try buildChunkBody(&body_buf, -18, 28, &heights);
     try std.testing.expectEqual(@as(usize, chunk_stock_envelope_overhead + chunk_body_size), body.len);
     var frame_buf: [512]u8 = undefined;
     const fr = try framed(&frame_buf, "NetPackageChunk", body);
+    // framePackage: channel 1 | payloadSize i32 | compressed 1 | encrypted 1 |
+    // count u16 | contentLen i32, then the package id.
+    const pkg_id_off: usize = 1 + 4 + 1 + 1 + 2 + 4;
+    try std.testing.expectEqual(chunk_id, std.mem.readInt(u16, fr[pkg_id_off..][0..2], .little));
     // LiteNet channeled total must fit pending_bytes (1200).
     try std.testing.expect(fr.len + 4 < 1200);
 }
 
 test "pos body golden size" {
     var body_buf: [64]u8 = undefined;
-    const body = try buildPosAndRotBody(&body_buf, 7, 1, 2, 3, 0, 90, 0, true);
+    // Distinct values in every slot: the body is entityId | pos x,y,z |
+    // bUseQRotation | rot x,y,z | onGround, and a length check plus an id
+    // check cannot see two of those floats trading places.
+    const body = try buildPosAndRotBody(&body_buf, 7, 1, 2, 3, 11, 90, 13, true);
     try std.testing.expectEqual(@as(usize, 30), body.len);
     const p = try parsePosAndRotBody(body);
     try std.testing.expectEqual(@as(i32, 7), p.entity_id);
     try std.testing.expect(p.on_ground);
+
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 1), f32At(body, 4)); // pos x
+    try std.testing.expectEqual(@as(f32, 2), f32At(body, 8));
+    try std.testing.expectEqual(@as(f32, 3), f32At(body, 12));
+    try std.testing.expectEqual(@as(u8, 0), body[16]); // bUseQRotation false
+    try std.testing.expectEqual(@as(f32, 11), f32At(body, 17)); // rot x
+    try std.testing.expectEqual(@as(f32, 90), f32At(body, 21));
+    try std.testing.expectEqual(@as(f32, 13), f32At(body, 25));
+    try std.testing.expectEqual(@as(u8, 1), body[29]); // onGround
 }
 
 test "pos body rejects non-finite and out-of-range coordinates" {
@@ -1778,13 +2724,29 @@ test "entity speeds rejects non-finite" {
 
 test "rel body golden size" {
     var body_buf: [64]u8 = undefined;
-    const body = try buildRelPosBody(&body_buf, 1, 1, 0, -1, 0, 128, 0, true, 2);
+    // Distinct values: the six i16 (rot x,y,z then dPos x,y,z) had zeros and
+    // repeats among them, so most swaps in that run emitted identical bytes
+    // and the size check could not have seen the rest.
+    const body = try buildRelPosBody(&body_buf, 1, 21, 22, 23, 11, 12, 13, true, 2);
     try std.testing.expectEqual(@as(usize, 20), body.len);
     var frame_buf: [128]u8 = undefined;
     const fr = try framed(&frame_buf, "NetPackageEntityRelPosAndRot", body);
     // contentLen at offset 9 = 22
     const cl = std.mem.readInt(i32, fr[9..][0..4], .little);
     try std.testing.expectEqual(@as(i32, 22), cl);
+
+    // entityId i32 | bUseQRotation bool | rot x,y,z i16 | dPos x,y,z i16 |
+    // onGround bool | updateSteps i16 (RE protocol-packages.md 5.5.4).
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(u8, 0), body[4]); // bUseQRotation
+    try std.testing.expectEqual(@as(i16, 11), std.mem.readInt(i16, body[5..7], .little)); // rot x
+    try std.testing.expectEqual(@as(i16, 12), std.mem.readInt(i16, body[7..9], .little));
+    try std.testing.expectEqual(@as(i16, 13), std.mem.readInt(i16, body[9..11], .little));
+    try std.testing.expectEqual(@as(i16, 21), std.mem.readInt(i16, body[11..13], .little)); // dPos x
+    try std.testing.expectEqual(@as(i16, 22), std.mem.readInt(i16, body[13..15], .little));
+    try std.testing.expectEqual(@as(i16, 23), std.mem.readInt(i16, body[15..17], .little));
+    try std.testing.expectEqual(@as(u8, 1), body[17]); // onGround
+    try std.testing.expectEqual(@as(i16, 2), std.mem.readInt(i16, body[18..20], .little)); // updateSteps
 }
 
 test "package ids body" {
@@ -1793,13 +2755,17 @@ test "package ids body" {
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
-    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9);
-    // a client derives "V 3.2.0" from these and echoes it in the login.
+    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9;
+    // §8: build 9->10). A client derives "V 3.2.0" from these and echoes it
+    // in the login.
     try std.testing.expectEqual(@as(i32, 20), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 9), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
     try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
 }
 
+/// NetPackageWorldTime (RE inventories/netpackage-bodies.md, write IL=8): a
+/// single `worldTime` u64, encoded as WorldClock.worldTimeBits (24000 per day,
+/// 1000 per hour).
 pub fn buildWorldTimeBody(buf: []u8, world_time: u64) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeU64(world_time);
@@ -1864,6 +2830,45 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     return wr.written();
 }
 
+/// One `NetPackageWorldFolder` part (write IL=30): seqNr:i32, totalParts:i32,
+/// dataLen:i32 (-1 when null), then data bytes. Channel 1. The client's
+/// ProcessPackage appends each part to ReceiveStream and, on the last
+/// (seqNr == totalParts - 1), runs uncompressWorld.
+pub fn buildWorldFolderPartBody(buf: []u8, seq: i32, total: i32, data: []const u8) ![]u8 {
+    var wr: binary.Writer = .{ .buf = buf };
+    try wr.writeI32(seq);
+    try wr.writeI32(total);
+    try wr.writeI32(@intCast(data.len));
+    try wr.writeBytes(data);
+    return wr.written();
+}
+
+/// Empty world-folder transfer: one part carrying a zlib-deflated
+/// `fileCount:i32 = 0` blob. RE: `NetPackageWorldFolder.write` IL=30,
+/// `ProcessPackage` IL=93, `sendPacketsToClient` IL=84 and
+/// `uncompressWorld` coroutine IL=321
+/// (`../7dtd-engine-research/docs/network/protocol-packages.md` "World-folder").
+/// Stock's prepareWorldFolderData streams real world files; zdtd's
+/// flat/default worlds have nothing to ship (WorldInfo already advertised
+/// hashCount=0), but worldInfoCo still calls RequestWorld when no local world
+/// matches, and that coroutine waits on WorldReceivedAndUncompressed. An
+/// empty last-part clears the wait the same way a zero-file zip would
+/// (uncompressWorld: count=0 loop, write completed marker, set the flag).
+pub fn buildEmptyWorldFolderTransfer(buf: []u8) ![]u8 {
+    const flate = std.compress.flate;
+    var plain: [4]u8 = undefined;
+    std.mem.writeInt(i32, &plain, 0, .little);
+    var window: [flate.max_window_len]u8 = undefined;
+    var out_scratch: [64]u8 = undefined;
+    var sink: std.Io.Writer = .fixed(&out_scratch);
+    // Stock DeflateOutputStream (prepareWorldFolderData) is zlib-wrapped;
+    // the client DeflateInputStream expects the same container.
+    var comp = flate.Compress.init(&sink, &window, .zlib, .default) catch return error.Overflow;
+    comp.writer.writeAll(&plain) catch return error.Overflow;
+    comp.finish() catch return error.Overflow;
+    return buildWorldFolderPartBody(buf, 0, 1, out_scratch[0..sink.end]);
+}
+
 /// Stock NetPackageChunkClusterInfo body (NetPackageChunkClusterInfo.write
 /// IL=36): name:string, cMinPos:2xi32, cMaxPos:2xi32, bInfinite:bool,
 /// pos:Vector3 (3xf32). Server fills from `Setup(ChunkCluster)`: name =
@@ -1913,6 +2918,20 @@ test "world info body layout ends with hashCount0 and worldDataSize" {
     const tail = body[body.len - 12 ..];
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tail[0..4], .little));
     try std.testing.expectEqual(@as(i64, 0), std.mem.readInt(i64, tail[4..12], .little));
+}
+
+test "empty world folder transfer is one last part with zlib payload" {
+    var buf: [128]u8 = undefined;
+    const body = try buildEmptyWorldFolderTransfer(&buf);
+    var rd: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(i32, 0), try rd.readI32()); // seqNr
+    try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // totalParts (last = seq 0)
+    const len = try rd.readI32();
+    try std.testing.expect(len > 0);
+    try std.testing.expectEqual(@as(usize, @intCast(len)), body.len - rd.pos);
+    // zlib header: CMF=0x78
+    try std.testing.expectEqual(@as(u8, 0x78), body[rd.pos]);
+    try std.testing.expectEqual(@as(u8, 1), channelFor("NetPackageWorldFolder"));
 }
 
 test "sign data empty last batch is bool true + len0" {
@@ -1965,49 +2984,139 @@ pub fn buildEntityStatChangedBody(
     return w.written();
 }
 
+/// Stock NetPackageEntityAwardKillServer body (read IL=9): EntityId:i32 (the
+/// killer) | KilledEntityId:i32. Sent by `GameManager.AwardKill` (IL=27) to a
+/// remote killer so its client fires the local EntityKill event that kill
+/// challenges subscribe to.
+pub fn buildAwardKillBody(buf: []u8, killer_id: i32, killed_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(killer_id);
+    try w.writeI32(killed_id);
+    return w.written();
+}
+
+/// Stock NetPackageSetAttackTarget body (read IL=8, GetLength 8):
+/// entityId:i32 (the NetPackageEntityTargeted base) | targetId:i32. The
+/// client feeds it to `EntityAlive::SetAttackTargetClient`, which backs
+/// `GetAttackTargetLocal` for remote entities (drone beam targeting and the
+/// DynamicMusic threat level read it). `target_id` is -1 for "no target",
+/// which is what stock sends when the attack-target window expires
+/// (EntityAlive::OnUpdateLive) as well as on an explicit clear.
+pub fn buildSetAttackTargetBody(buf: []u8, entity_id: i32, target_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeI32(target_id);
+    return w.written();
+}
+
 /// Stock NetPackageEntityStealth body (write IL=12): id:i32 | data:u16.
-/// The data packing matches the three Setup overloads + the client-branch
-/// read (ProcessPackage IL=92): bit 0 = crouching, bit 2 = eating, bit 3 =
-/// sheltered, bits 8..14 = 7-bit noise volume, bit 15 = alertEnemy, and the
-/// low byte doubles as the light level in the (light, noise, alert) variant
-/// the server's PlayerStealth.TickServer sends (IL_0470). The stealth system
-/// owns the values; light stays 0 until the clone-side world-light model
-/// lands (RE-blocked, documented).
+///
+/// The three `Setup` overloads pack `data` three mutually exclusive ways, and
+/// none of them combines the crouch flag with the light/noise payload:
+///   - `Setup(player, isCrouching)` sets data to exactly 0 or 1 (IL=13, :9).
+///   - `Setup(local, smellRadius, eating, sheltered)` is the smell form,
+///     tagged with bit 1 and routed server-side (IL=36, :24).
+///   - `Setup(player, lightLevel, noiseVolume, isAlert)` packs
+///     `(byte)lightLevel | ((noise & 127) << 8)`, plus bit 15 for alert
+///     (IL=26, :62). This is the one PlayerStealth.TickServer broadcasts.
+/// The client branch reads `light = (byte)data`, so the light level owns the
+/// whole low byte (ProcessPackage IL_009F-00A5). ORing a crouch bit into the
+/// light form would land inside that byte and report light+1.
 pub fn buildEntityStealthBody(
     buf: []u8,
     entity_id: i32,
     light_level: u8,
     noise_volume: u8,
     is_alert: bool,
-    is_crouching: bool,
 ) ![]u8 {
     var data: u16 = @as(u16, light_level) | (@as(u16, noise_volume & 127) << 8);
     if (is_alert) data |= 32768;
-    if (is_crouching) data |= 1;
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
     try w.writeU16(data);
     return w.written();
 }
 
+/// The crouch-only `Setup(player, isCrouching)` form (IL=13): data is the bare
+/// flag, never combined with the light/noise payload.
+pub fn buildEntityStealthCrouchBody(buf: []u8, entity_id: i32, is_crouching: bool) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeU16(if (is_crouching) 1 else 0);
+    return w.written();
+}
+
 test "entity stealth body packs the stock data bits" {
     var buf: [16]u8 = undefined;
-    const body = try buildEntityStealthBody(&buf, 107, 5, 90, true, true);
+    const body = try buildEntityStealthBody(&buf, 107, 5, 90, true);
     try std.testing.expectEqual(@as(usize, 6), body.len);
     try std.testing.expectEqual(@as(i32, 107), std.mem.readInt(i32, body[0..4], .little));
     const data = std.mem.readInt(u16, body[4..6], .little);
     try std.testing.expectEqual(@as(u16, 5), data & 0xff); // light
     try std.testing.expectEqual(@as(u16, 90), (data >> 8) & 127); // noise
     try std.testing.expect(data & 32768 != 0); // alert
-    try std.testing.expect(data & 1 != 0); // crouch
+}
+
+test "stealth light owns the whole low byte" {
+    // The client reads light as (byte)data, so an odd light value must not be
+    // confusable with the crouch form: light 5 stays 5, never 4 or 5|crouch.
+    var buf: [16]u8 = undefined;
+    for ([_]u8{ 0, 1, 2, 3, 5, 127, 254, 255 }) |light| {
+        const body = try buildEntityStealthBody(&buf, 107, light, 0, false);
+        const data = std.mem.readInt(u16, body[4..6], .little);
+        try std.testing.expectEqual(@as(u16, light), data & 0xff);
+    }
+}
+
+test "crouch stealth body is the bare flag form" {
+    var buf: [16]u8 = undefined;
+    const on = try buildEntityStealthCrouchBody(&buf, 107, true);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, on[4..6], .little));
+    var buf2: [16]u8 = undefined;
+    const off = try buildEntityStealthCrouchBody(&buf2, 107, false);
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, off[4..6], .little));
 }
 
 test "entity stat changed body size" {
     var buf: [32]u8 = undefined;
-    const body = try buildEntityStatChangedBody(&buf, 106, -1, .health, 100, 100, 0);
+    // value and max were both 100 and maxModifier 0, so the three trailing
+    // floats were two duplicates and a zero: a swap among them emitted the
+    // same bytes. Distinct values make the run observable.
+    const body = try buildEntityStatChangedBody(&buf, 106, -1, .health, 75, 100, 25);
     try std.testing.expectEqual(@as(usize, 4 + 4 + 1 + 4 + 4 + 4), body.len);
     try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[4..8], .little)); // instigator
     try std.testing.expectEqual(@as(u8, 0), body[8]); // Health
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 75), f32At(body, 9)); // value
+    try std.testing.expectEqual(@as(f32, 100), f32At(body, 13)); // max
+    try std.testing.expectEqual(@as(f32, 25), f32At(body, 17)); // maxModifier
+}
+
+test "inventory transaction request body is the compact zdtd order" {
+    // buildInvTxRequest had no test at all. It is not the stock layout (that
+    // is parseStockInvTx), but it rides the stock package name for loadgen and
+    // the scenarios, so its field order still has to hold: op u8 | a u16 |
+    // b u16 | qty u16 | entityId i32.
+    var buf: [16]u8 = undefined;
+    const body = try buildInvTxRequest(&buf, 2, 11, 22, 33, 106);
+    try std.testing.expectEqual(@as(usize, 11), body.len);
+    try std.testing.expectEqual(@as(u8, 2), body[0]);
+    try std.testing.expectEqual(@as(u16, 11), std.mem.readInt(u16, body[1..3], .little));
+    try std.testing.expectEqual(@as(u16, 22), std.mem.readInt(u16, body[3..5], .little));
+    try std.testing.expectEqual(@as(u16, 33), std.mem.readInt(u16, body[5..7], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[7..11], .little));
+    // The parser must agree field for field, not just on the length.
+    const p = try parseInvTxRequest(body);
+    try std.testing.expectEqual(@as(u8, 2), p.op);
+    try std.testing.expectEqual(@as(u16, 11), p.a);
+    try std.testing.expectEqual(@as(u16, 22), p.b);
+    try std.testing.expectEqual(@as(u16, 33), p.qty);
+    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
 }
 
 /// Stock-compatible player inventory body (NetPackagePlayerInventory.write fields).
@@ -2015,6 +3124,13 @@ pub fn buildInventoryBodyStock(buf: []u8, inv: *const components.Inventory) ![]u
     return stock_inv.buildFromEcs(buf, inv);
 }
 
+/// NetPackagePlayerInventory (RE protocol-packages.md 5.4, write IL=107):
+/// `toolbelt` present bool (+ ItemStack[] if set) | `bag` present bool
+/// (+ Bag.Write) | `equipment` present bool (+ Equipment: ItemValue array, one
+/// cosmetic i32 per slot, then the unlockedCosmetics count) | `dragAndDropItem`
+/// present bool (+ ItemStack). The body-inventory table shows the cosmetics
+/// list as a top-level field; the narrative places it inside the equipment
+/// block, which is where stock_inv.writeEquipment puts it.
 pub fn buildInventoryBodyStockResolved(
     buf: []u8,
     inv: *const components.Inventory,
@@ -2024,7 +3140,10 @@ pub fn buildInventoryBodyStockResolved(
     return stock_inv.buildFromEcsResolved(buf, inv, resolve, ctx);
 }
 
-/// NetPackageIdMapping body: name string + i32 len + bytes.
+/// NetPackageIdMapping body: name string + i32 len + bytes, matching
+/// `NetPackageIdMapping::write` (IL=18: `Write(String)`, `Write(Int32)`,
+/// `Write(Byte[])`) and its read (IL=13: `ReadString`, `ReadInt32`,
+/// `ReadBytes`).
 pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeString(name);
@@ -2033,15 +3152,33 @@ pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     return w.written();
 }
 
-pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_container: i32, count: u16 } {
-    var r: binary.Reader = .{ .data = body };
-    return .{
-        .holding = try r.readU16(),
-        .open_container = try r.readI32(),
-        .count = try r.readU16(),
-    };
+/// One `(stock type id, name)` row of a NameIdMapping payload, in
+/// `NameIdMapping::SaveToWriter` order (IL=72: per entry `Write(Int32)` the id
+/// then `Write(String)` the name).
+pub const IdMappingEntry = struct { id: i32, name: []const u8 };
+
+/// NameIdMapping payload: version i32 (1) | count i32 | per entry id i32 +
+/// name string. The count is written after the rows because stock backfills it
+/// the same way (`SaveToWriter` seeks back to the reserved slot, IL=72).
+/// Returns the payload for `buildIdMappingBody` to wrap.
+pub fn buildNameIdMappingPayload(buf: []u8, entries: []const IdMappingEntry) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(1); // version
+    const count_pos = w.pos;
+    try w.writeI32(0);
+    var n: i32 = 0;
+    for (entries) |e| {
+        try w.writeI32(e.id);
+        try w.writeString(e.name);
+        n += 1;
+    }
+    std.mem.writeInt(i32, buf[count_pos..][0..4], n, .little);
+    return w.written();
 }
 
+/// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
+/// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
+/// u8. Body written by stock_inv.writeHoldingItem.
 pub fn buildHoldingBodyResolved(
     buf: []u8,
     entity_id: i32,
@@ -2052,7 +3189,15 @@ pub fn buildHoldingBodyResolved(
     return stock_inv.buildHoldingFromEcsResolved(buf, entity_id, inv, resolve, ctx);
 }
 
-/// Transaction request: op:u8 | a:u16 | b:u16 | qty:u16 | entity_id:i32
+/// zdtd's own compact transaction request: op:u8 | a:u16 | b:u16 | qty:u16 |
+/// entity_id:i32. **Not the stock body.** Stock writes
+/// `InventoryTransaction.Write` (RE inventories/netpackage-bodies.md, Write
+/// IL=75): a nested op list (count | count | Key Vector3i | InitialHash i32 |
+/// FinalHash i32 | Ops count | InventoryOperation.Write each). The C2S handler
+/// tries the stock layout first and only falls back to this one
+/// (`c2s/inv.zig`, parseStockInvTx), so a real client is served the stock
+/// shape; this compact form exists for scenarios driving the same handler
+/// without building a full stock transaction. It is never sent to a client.
 pub fn buildInvTxRequest(buf: []u8, op: u8, a: u16, b: u16, qty: u16, entity_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(op);
@@ -2063,6 +3208,13 @@ pub fn buildInvTxRequest(buf: []u8, op: u8, a: u16, b: u16, qty: u16, entity_id:
     return w.written();
 }
 
+/// Read side of buildInvTxRequest and likewise **not the stock body**: op u8 |
+/// a u16 | b u16 | qty u16 | entityId i32. The stock layout is
+/// InventoryTransaction.Write (RE inventories/netpackage-bodies.md, Write
+/// IL=75), decoded by parseStockInvTx. The C2S handler tries the stock form
+/// first and only falls back here (c2s/inv.zig), so a real client never
+/// reaches this parser; it exists for the zdtd tools and fixtures that write
+/// the compact form.
 pub fn parseInvTxRequest(body: []const u8) !struct { op: u8, a: u16, b: u16, qty: u16, entity_id: i32 } {
     if (body.len < 11) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -2075,7 +3227,11 @@ pub fn parseInvTxRequest(body: []const u8) !struct { op: u8, a: u16, b: u16, qty
     };
 }
 
-/// Response: ok:u8 | dropped_entity:i32 | then optional inventory snap (caller appends).
+/// zdtd's compact transaction response head, the counterpart to
+/// buildInvTxRequest and likewise **not the stock body**: ok u8 |
+/// dropped_entity i32, then an optional inventory snapshot the caller appends.
+/// Stock's NetPackageInventoryTransactionResponse (RE write IL=66) is
+/// inventories bool | i32 | success bool | keys count | Vector3i | bool.
 pub fn buildInvTxResponseHead(buf: []u8, ok: bool, dropped_entity: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromBool(ok));
@@ -2083,7 +3239,11 @@ pub fn buildInvTxResponseHead(buf: []u8, ok: bool, dropped_entity: i32) ![]u8 {
     return w.written();
 }
 
-/// Legacy container data request: entity_id i32 (loadgen / older path).
+/// Legacy container data request: entity_id i32. **Not the stock body**, which
+/// is `KeyHashPair` + `managerToken` Guid (RE inventories/netpackage-bodies.md
+/// NetPackageInventoryDataRequest, write IL=12) and is decoded by
+/// parseInvDataRequestStock. The C2S handler tries the stock form first
+/// (c2s/inv.zig), so this serves loadgen and the older zdtd path only.
 pub fn parseInvDataRequest(body: []const u8) !i32 {
     if (body.len < 4) return error.EndOfStream;
     return std.mem.readInt(i32, body[0..4], .little);
@@ -2096,6 +3256,12 @@ pub const InvDataRequestStock = struct {
     manager_token: [16]u8,
 };
 
+/// Read side of the stock NetPackageInventoryDataRequest (RE
+/// inventories/netpackage-bodies.md, write IL=12): `keyHash`
+/// (KeyHashPair.Write, itself Guid `Key` + i32 `Hash`, Write IL=9) |
+/// `managerToken` Guid. Both Guids are carried opaquely: the server matches the
+/// key and echoes the token back on the response, so their internal layout is
+/// never interpreted here.
 pub fn parseInvDataRequestStock(body: []const u8) !InvDataRequestStock {
     // 16 + 4 + 16 = 36
     if (body.len < 36) return error.EndOfStream;
@@ -2120,7 +3286,13 @@ pub fn buildInvDataResponseNotFound(buf: []u8, inventory_key: [16]u8, manager_to
     return w.written();
 }
 
-/// Stock success response with item stacks (hash miss / full sync path).
+/// NetPackageInventoryDataResponse (RE protocol-packages.md, write IL=24 /
+/// Process IL=30): `success` bool | `errorMsg` string | `inventoryKey` Guid |
+/// `ItemStack[]` (i16 count + ItemStack.Write each) | `managerToken` Guid.
+/// The body-inventory table omits the stack array; the narrative row and the
+/// client's UpdateInventory(items, managerToken) both have it, so the array
+/// sits between key and token. This is the hash-miss / full-sync path; the
+/// hash-hit path writes count -1 for a null list (Request Process IL=92 step 3).
 pub fn buildInvDataResponseItems(
     buf: []u8,
     inventory_key: [16]u8,
@@ -2147,15 +3319,26 @@ pub fn buildInvDataResponseItems(
 pub const LockRequestHead = struct {
     locking: bool,
     channel: u16,
+    /// Declared target span length. Stock's `LockRequestServer` gate 2
+    /// (IL=239) refuses more than `max_lock_targets_declared`, but the deny
+    /// response echoes the request's targets, so the parser walks the span and
+    /// the C2S handler owns the rule.
+    target_count: i32,
+    /// True when any target entry is null (`WriteIdentifyingInfo` writes a
+    /// `false` presence byte and nothing else). Stock's gate 2 rejects a span
+    /// containing a null target with the same deny as an over-long span.
+    has_null_target: bool,
     /// Slice of request body covering targetCount i32 + target identifying blobs (not context).
     targets_blob: []const u8,
     /// Remaining body after targets (context type string + optional payload).
     context_tail: []const u8,
 };
 
-fn skipLockTargetIdent(r: *binary.Reader) binary.ReadError!void {
+/// Walk one target's identifying info, returning false for a null target (the
+/// presence byte was 0).
+fn skipLockTargetIdent(r: *binary.Reader) binary.ReadError!bool {
     const present = try r.readByte();
-    if (present == 0) return;
+    if (present == 0) return false;
     const ty = try r.readByte();
     switch (ty) {
         0 => { // TileEntity → Vector3i
@@ -2178,37 +3361,62 @@ fn skipLockTargetIdent(r: *binary.Reader) binary.ReadError!void {
         },
         else => return error.EndOfStream,
     }
+    return true;
 }
 
-/// Parse LockRequest; on success returns head with slices into `body`.
+/// Stock's hard cap on a lock request's target span. `LockRequestServer` gate 2
+/// (IL=239, RE dedicated-leftovers.md:136) refuses a span longer than 5. The
+/// refusal still produces a reply: the failure sets `errorMsg` and falls
+/// through to the `NetPackageLockResponse` send with `success = false`
+/// (IL_0263), so the C2S handler owns this rule and must answer with a deny.
+/// The constant previously held 32 with a comment claiming the limit was
+/// undocumented, which accepted requests stock rejects.
+pub const max_lock_targets_declared: i32 = 5;
+
+/// Parse-time work bound on the declared target count, deliberately above the
+/// stock rule above: the parser has to walk the span even for a request the
+/// server will refuse, because the deny response echoes the request's targets.
+/// A count past this bound is malformed rather than merely over-limit.
+const max_lock_targets_parseable: i32 = 64;
+
+/// NetPackageLockRequest (RE write IL=74; the response in buildLockResponseGrant
+/// echoes these fields): `locking` bool | `channel` u16 | target count i32 |
+/// targets | `context` string. On success returns a head with slices into `body`.
 pub fn parseLockRequest(body: []const u8) binary.ReadError!LockRequestHead {
     var r: binary.Reader = .{ .data = body };
     const locking = try r.readBool();
     const channel = try r.readU16();
     const count_pos = r.pos;
     const count = try r.readI32();
-    if (count < 0 or count > 32) return error.EndOfStream;
+    if (count < 0 or count > max_lock_targets_parseable) return error.EndOfStream;
+    var has_null_target = false;
     var i: i32 = 0;
     while (i < count) : (i += 1) {
-        try skipLockTargetIdent(&r);
+        if (!try skipLockTargetIdent(&r)) has_null_target = true;
     }
     const targets_end = r.pos;
     // remainder is context
     return .{
         .locking = locking,
         .channel = channel,
+        .target_count = count,
+        .has_null_target = has_null_target,
         .targets_blob = body[count_pos..targets_end],
         .context_tail = body[targets_end..],
     };
 }
 
-/// Build LockResponse that grants the lock by echoing request targets/context.
-/// Layout: locking | success | error | isForceUnlocked | channel | targets | context
+/// NetPackageLockResponse granting the lock (RE inventories/netpackage-bodies.md,
+/// write IL=74): `locking` bool | `success` bool | `errorMsg` string |
+/// `isForceUnlocked` bool | `channel` u16 | `targets` | `context` string. The
+/// targets and context are echoed verbatim from the request, which is what
+/// keeps the client's pending lock correlated.
 pub fn buildLockResponseGrant(buf: []u8, req: LockRequestHead) ![]u8 {
     return buildLockResponse(buf, req, true, "");
 }
 
-/// Deny lock (held by another peer / channel busy).
+/// NetPackageLockResponse denying the lock, held by another peer or a busy
+/// channel (RE write IL=74; field order in buildLockResponseGrant).
 pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {
     return buildLockResponse(buf, req, false, err_msg);
 }
@@ -2229,11 +3437,58 @@ fn buildLockResponse(buf: []u8, req: LockRequestHead, success: bool, err_msg: []
     return w.written();
 }
 
-/// Grant a lock whose target is a trader entity. Stock serializes the
-/// EntityTraderLockContext into the LockResponse (loot-economy.md): the type
-/// name and Command are echoed from the request, then hasTraderData=true and
-/// the server TraderData. NetPackageTraderData is ToServer-only, so this is
-/// the packet that carries trader inventory to the opening client.
+/// NetPackageLockResponse forcing a held lock open (RE write IL=74; field order
+/// in `buildLockResponseGrant`). `locking = false` selects the client's
+/// `LockManager.UnlockResponse(success, errorMsg, isForceUnlocked)` branch
+/// (ProcessPackage IL=27), which reads neither the targets nor the context - so
+/// this needs only the channel, and the server does not have to have kept the
+/// original request's target blob. Stock sends the same thing from
+/// `ForceUnlockByPlayer` (IL=11) on disconnect cleanup and after a failed
+/// inventory transaction.
+pub fn buildLockResponseForceUnlock(buf: []u8, channel: u16) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeBool(false); // locking = false -> UnlockResponse branch
+    try w.writeBool(true); // success
+    try w.writeString("");
+    try w.writeBool(true); // isForceUnlocked
+    try w.writeU16(channel);
+    try w.writeI32(0); // no targets: the unlock branch never reads them
+    try w.writeString("");
+    return w.written();
+}
+
+test "force-unlock lock response selects the unlock branch" {
+    // The two directions are different client calls (ProcessPackage IL=27), so
+    // `locking` is what routes it; a grant-shaped body with success=true would
+    // re-open the window instead of closing it.
+    var buf: [64]u8 = undefined;
+    const body = try buildLockResponseForceUnlock(&buf, 3);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(false, try r.readBool()); // locking
+    try std.testing.expectEqual(true, try r.readBool()); // success
+    var s: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s));
+    try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // target count
+    try std.testing.expectEqualStrings("", try r.readString(&s));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
+/// Grant a lock whose target is a trader. Stock serializes the target's lock
+/// context into the LockResponse, and the two trader-ish contexts do **not**
+/// share a layout:
+///   - `EntityTraderLockContext::Read` (EntityTrader_EntityTraderLockContext
+///     .il.txt:38): `Command` string, `hasTraderData` bool, then TraderData
+///     only when that bool is set.
+///   - `VendingMachineLockContext::Read` (TileEntityVendingMachine_Vending
+///     MachineLockContext.il.txt:19): TraderData **directly**, with no command
+///     and no bool.
+/// Emitting the entity shape for a vending machine hands the client two extra
+/// bytes (the empty command's length and the bool) which it reads as the first
+/// half of `TraderID`, desyncing the rest of the body.
+/// NetPackageTraderData is ToServer-only, so this is the packet that carries
+/// trader inventory to the opening client.
 pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity.TraderDataInfo) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Type name + Command from the request context tail (empty-safe fallbacks).
@@ -2256,26 +3511,99 @@ pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity
     try w.writeU16(req.channel);
     try w.writeBytes(req.targets_blob);
     try w.writeString(type_name);
-    try w.writeString(command);
-    try w.writeBool(true); // hasTraderData
+    // VendingMachineLockContext has neither field; only the entity context
+    // carries Command + hasTraderData ahead of the TraderData.
+    if (!std.mem.eql(u8, type_name, vending_lock_context)) {
+        try w.writeString(command);
+        try w.writeBool(true); // hasTraderData
+    }
     try stock_entity.writeTraderDataBody(&w, td);
     return w.written();
 }
 
+/// Stock type name for the vending-machine lock context, the discriminator the
+/// client uses to pick which context `Read` runs.
+pub const vending_lock_context = "VendingMachineLockContext";
+
 /// Unlock response (locking=false path on client ProcessPackage).
+/// NetPackageLockResponse for an unlock (RE write IL=74; field order in
+/// buildLockResponseGrant). locking=false with an empty target list.
 pub fn buildLockResponseUnlock(buf: []u8, success: bool) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(false); // locking
     try w.writeBool(success);
     try w.writeString("");
     try w.writeBool(false); // isForceUnlocked
-    // remaining fields read by client only on locking=true path for UnlockResponse
-    // but write still emits channel/targets/context for stream completeness when locking=false
-    // UnlockResponse only uses success/error/force: client stops early. Still write minimal tail.
-    try w.writeU16(0);
-    try w.writeI32(0); // no targets
-    try w.writeString("");
+    // The tail is written even though an unlock carries nothing in it:
+    // omitting it would desync the reader's BinaryReader rather than save
+    // bytes. The RE body table lists nine fields, but the last two (target
+    // `FullName`, `ILockContext.Write`) sit behind the same two null guards as
+    // LockRequest (protocol-packages.md residual table): the per-target info
+    // is written only for a non-null target list, and the context payload only
+    // for a non-null context. An empty list and an empty context type name are
+    // therefore the complete stock encoding of "nothing locked".
+    try w.writeU16(0); // channel
+    try w.writeI32(0); // targets: empty list
+    try w.writeString(""); // context type name (empty = null context)
     return w.written();
+}
+
+test "lock request span cap is the handler's rule, not the parser's" {
+    // Stock LockRequestServer gate 2 (IL=239) refuses a span longer than 5 and
+    // still replies with a deny that echoes the request's targets (IL_0263), so
+    // the parser must walk an over-limit span far enough for the C2S handler to
+    // answer it. Rejecting at parse time silently dropped the request, which
+    // left the client's pending lock unresolved.
+    const buildTargets = struct {
+        fn call(w: *binary.Writer, n: i32) !void {
+            try w.writeBool(true);
+            try w.writeU16(0);
+            try w.writeI32(n);
+            var i: i32 = 0;
+            while (i < n) : (i += 1) {
+                try w.writeByte(1); // present
+                try w.writeByte(1); // TEFeatureAbs
+                try w.writeI32(i);
+                try w.writeI32(70);
+                try w.writeI32(2);
+                try w.writeString("Storage");
+            }
+            try w.writeString("");
+        }
+    }.call;
+
+    // The literal 5 is the point of the test: deriving the bounds from the
+    // constant would pass for any value it happens to hold, which is exactly
+    // what let the old 32 sit here unnoticed.
+    try std.testing.expectEqual(@as(i32, 5), max_lock_targets_declared);
+
+    var over_buf: [1024]u8 = undefined;
+    var over_w: binary.Writer = .{ .buf = &over_buf };
+    try buildTargets(&over_w, 6);
+    const over = try parseLockRequest(over_w.written());
+    try std.testing.expectEqual(@as(i32, 6), over.target_count);
+    try std.testing.expect(!over.has_null_target);
+    // The whole span is walked, so the deny response can echo it. The blob
+    // starts after locking (1) + channel (2).
+    try std.testing.expectEqual(over_w.written().len, 3 + over.targets_blob.len + over.context_tail.len);
+
+    // A null target is gate 2's other reject; the parser reports it rather than
+    // pretending the span was well formed.
+    var null_buf: [64]u8 = undefined;
+    var null_w: binary.Writer = .{ .buf = &null_buf };
+    try null_w.writeBool(true);
+    try null_w.writeU16(0);
+    try null_w.writeI32(1);
+    try null_w.writeByte(0); // present = 0 -> null target
+    try null_w.writeString("");
+    const nul = try parseLockRequest(null_w.written());
+    try std.testing.expect(nul.has_null_target);
+
+    // Past the parse bound the body is malformed, not merely over-limit.
+    var huge_buf: [2048]u8 = undefined;
+    var huge_w: binary.Writer = .{ .buf = &huge_buf };
+    try buildTargets(&huge_w, max_lock_targets_parseable + 1);
+    try std.testing.expectError(error.EndOfStream, parseLockRequest(huge_w.written()));
 }
 
 test "lock request grant response layout" {
@@ -2300,6 +3628,29 @@ test "lock request grant response layout" {
     const resp = try buildLockResponseGrant(&resp_buf, head);
     try std.testing.expectEqual(@as(u8, 1), resp[0]); // locking
     try std.testing.expectEqual(@as(u8, 1), resp[1]); // success
+
+    // Only those two bytes were checked. The rest is locking | success |
+    // errorMsg | isForceUnlocked | channel | targets | context, and the deny
+    // path had no test at all - it differs from grant only in the success bit
+    // and the message, which is exactly the pair a swap would hide.
+    var r: binary.Reader = .{ .data = resp };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqual(true, try r.readBool()); // locking
+    try std.testing.expectEqual(true, try r.readBool()); // success
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
+    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel
+    // targets_blob is echoed verbatim: count 1 then the one target entry.
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32());
+
+    var deny_buf: [128]u8 = undefined;
+    const deny = try buildLockResponseDeny(&deny_buf, head, "busy");
+    var dr: binary.Reader = .{ .data = deny };
+    try std.testing.expectEqual(true, try dr.readBool()); // locking echoed
+    try std.testing.expectEqual(false, try dr.readBool()); // success cleared
+    try std.testing.expectEqualStrings("busy", try dr.readString(&s_buf));
+    try std.testing.expectEqual(false, try dr.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 0), try dr.readU16()); // channel
 }
 
 test "inventory data request stock layout and not-found response" {
@@ -2352,9 +3703,31 @@ pub const GameStatsValues = struct {
     air_drop_frequency: i32 = 0,
     party_shared_kill_range: i32 = 100,
     show_friend_player_on_map: bool = true,
+    /// GameStats[18]/[20] IsCreativeMenuEnabled / IsFlyingEnabled: stock seeds
+    /// both from GamePrefs 58 `BuildCreate`
+    /// (server-lifecycle.md GameStats table), so a server running with cheat
+    /// mode on hands the client its creative menu and flight.
+    build_create: bool = false,
+    /// GameStats[53] AirDropMarker (sandbox option, default on).
+    air_drop_marker: bool = true,
+    /// GameStats[34] DropOnQuit (sandbox option `DropOnQuit`, distinct from
+    /// DropOnDeath).
+    drop_on_quit: i32 = 0,
+    /// GameStats[66] BiomeProgression (sandbox option, default on).
+    biome_progression: bool = true,
+    /// GameStats[68] CameraRestrictionMode (serverconfig).
+    camera_restriction_mode: i32 = 0,
+    /// GameStats[29] ScorePlayerKillMultiplier: `GameModeSurvival::Init`
+    /// IL_0035-0038 sets it to 0 (a player kill scores nothing), while
+    /// [28] ScoreZombieKillMultiplier is 1 and [30] ScoreDiedMultiplier -5
+    /// (IL_003D-0049). Mode semantics, not a tunable.
+    score_player_kill_multiplier: i32 = 0,
     is_spawn_enemies: bool = true,
     enemy_spawn_mode: bool = true,
-    time_of_day_inc_per_sec: i32 = 20,
+    /// GameStats[11] TimeOfDayIncPerSec = 24000 / (DayNightLength * 60) in
+    /// integer arithmetic: 6 at the stock 60 real-minute day (live `getgamestat`
+    /// 2026-08-12). Callers pass the WorldClock's own rate.
+    time_of_day_inc_per_sec: i32 = 6,
     death_penalty: i32 = 1,
     quest_progression_daily_limit: i32 = 4,
     /// Percent, stock GamePrefs.StormFreq default 100 (asm.il 1908835). Also the
@@ -2377,6 +3750,17 @@ pub const GameStatsValues = struct {
 /// Write emits only bPersistent PropertyDecls in engine propertyList order with
 /// no name/id prefix (RE sandbox-options §6.1, GameStats.il Write IL=60).
 /// Empty payload (len=0) remains valid. Full blob uses stock defaults + overrides.
+///
+/// **propertyList order is not EnumGameStats order.** `initPropertyDecl`
+/// (IL=702, `il/full-v3.2.0/_global/GameStats.il.txt`) fills 78 slots with
+/// literal enum ids that are out of order in several places: slot 4/5 carry
+/// FragLimit (enum 6/7) and slot 6/7 carry DayLimit (enum 4/5), slot 14 carries
+/// IsSpawnNearOtherPlayer (enum 25) ahead of TimeOfDayIncPerSec (enum 11), and
+/// nine slots are non-persistent and skipped entirely (EnemyCount and
+/// AnimalCount among them). Since the blob carries no field names, the writes
+/// below follow slot order; the enum index table in
+/// inventories/gamestats-gameprefs.md documents the enum, not this order, and
+/// reordering these lines to match it would shift every later field.
 pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Reserve i16 length; fill after payload.
@@ -2405,18 +3789,18 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeBool(false); // ShowSpawnWindow
     try w.writeBool(false); // IsSpawnNearOtherPlayer
     try w.writeI32(v.time_of_day_inc_per_sec); // TimeOfDayIncPerSec
-    try w.writeBool(false); // IsCreativeMenuEnabled
+    try w.writeBool(v.build_create); // IsCreativeMenuEnabled (GamePrefs 58)
     try w.writeBool(false); // IsTeleportEnabled
-    try w.writeBool(false); // IsFlyingEnabled
+    try w.writeBool(v.build_create); // IsFlyingEnabled (GamePrefs 58)
     try w.writeBool(true); // IsPlayerDamageEnabled
     try w.writeBool(true); // IsPlayerCollisionEnabled
     try w.writeBool(v.is_spawn_enemies); // IsSpawnEnemies
     try w.writeI32(v.player_killing_mode); // PlayerKillingMode
-    try w.writeI32(1); // ScorePlayerKillMultiplier
+    try w.writeI32(v.score_player_kill_multiplier); // ScorePlayerKillMultiplier
     try w.writeI32(1); // ScoreZombieKillMultiplier
     try w.writeI32(-5); // ScoreDiedMultiplier
     try w.writeI32(v.drop_on_death); // DropOnDeath
-    try w.writeI32(0); // DropOnQuit
+    try w.writeI32(v.drop_on_quit); // DropOnQuit (sandbox)
     try w.writeI32(v.game_difficulty); // GameDifficulty
     try w.writeI32(v.blood_moon_enemy_count); // BloodMoonEnemyCount
     try w.writeBool(v.enemy_spawn_mode); // EnemySpawnMode
@@ -2432,7 +3816,7 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeI32(v.land_claim_offline_delay); // LandClaimOfflineDelay
     try w.writeI32(v.bedroll_expiry_time); // BedrollExpiryTime
     try w.writeI32(v.air_drop_frequency); // AirDropFrequency
-    try w.writeBool(true); // AirDropMarker
+    try w.writeBool(v.air_drop_marker); // AirDropMarker (sandbox)
     try w.writeI32(v.party_shared_kill_range); // PartySharedKillRange
     try w.writeBool(false); // AutoParty
     try w.writeI32(0); // OptionsPOICulling
@@ -2443,9 +3827,9 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeBool(true); // TwitchBloodMoonAllowed
     try w.writeI32(v.death_penalty); // DeathPenalty
     try w.writeI32(v.quest_progression_daily_limit); // QuestProgressionDailyLimit
-    try w.writeBool(true); // BiomeProgression
+    try w.writeBool(v.biome_progression); // BiomeProgression (sandbox)
     try w.writeI32(v.storm_freq); // StormFreq
-    try w.writeI32(0); // CameraRestrictionMode
+    try w.writeI32(v.camera_restriction_mode); // CameraRestrictionMode
     try w.writeI32(v.jar_refund); // JarRefund
     try w.writeString(v.sandbox_preset); // SandboxPreset
     try w.writeString(v.sandbox_code); // SandboxCode
@@ -2456,8 +3840,8 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeI32(v.loot_respawn_days); // LootRespawnDays
     try w.writeI32(100); // GlobalGSModifier
     try w.writeI32(100); // BiomeGSModifier
-    try w.writeI32(100); // GlobalLMModifier
-    try w.writeI32(100); // BiomeLMModifier
+    try w.writeI32(100); // GlobalLSModifier
+    try w.writeI32(100); // BiomeLSModifier
 
     const payload_len: i32 = @intCast(w.pos - payload_start);
     if (payload_len > std.math.maxInt(i16)) return error.Overflow;
@@ -2479,6 +3863,237 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expect(plen > 100);
     const defaults = try buildGameStatsBodyValues(buf[256..], .{});
     try std.testing.expect(defaults.len > 100);
+
+    // The blob carries no field names, so position is the only thing that
+    // identifies a value. A length assertion alone cannot see a reordering,
+    // which is exactly the defect this layout is prone to: pin the head
+    // against the propertyList slot order in initPropertyDecl (IL=702).
+    var r: binary.Reader = .{ .data = body[2..] };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // 0: GameState Running
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 1: GameModeId
+    try std.testing.expectEqual(false, try r.readBool()); // 2: TimeLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 3: TimeLimitThisRound
+    // Slots 4..7 are Frag before Day (enum 6,7,4,5), not enum order.
+    try std.testing.expectEqual(false, try r.readBool()); // 4: FragLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 5: FragLimitThisRound
+    try std.testing.expectEqual(false, try r.readBool()); // 6: DayLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 7: DayLimitThisRound
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // 8: ShowWindow
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // 9: LoadScene
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 10: CurrentRoundIx
+
+    // Slots 0..10 are all constant zeros and empty strings, so swapping two
+    // same-typed neighbours there produces identical bytes and proves nothing.
+    // Slots 11..15 are where the caller's values land, and they are the only
+    // part of the head a reordering can actually be caught in: give each a
+    // distinct value and read them back in slot order. Slot 14 is
+    // IsSpawnNearOtherPlayer (enum 25), ahead of TimeOfDayIncPerSec (enum 11).
+    var distinct: [512]u8 = undefined;
+    const d = try buildGameStatsBodyValues(&distinct, .{
+        .show_friend_player_on_map = true,
+        .time_of_day_inc_per_sec = 37,
+        // These three default to the same values as the hardcoded constants
+        // written beside them: is_spawn_enemies is true next to a literal
+        // true, and player_killing_mode / drop_on_death sit among the literal
+        // 1 score multipliers. That made the whole slot run unobservable, so
+        // pick values differing from both neighbours.
+        .is_spawn_enemies = false,
+        .player_killing_mode = 2,
+        .drop_on_death = 3,
+        // Same collision a few slots on: DropOnQuit is a literal 0 while
+        // enemy_difficulty defaults to 0, and the difficulty / blood-moon /
+        // daylight values have to differ from each other as well.
+        .game_difficulty = 4,
+        .blood_moon_enemy_count = 9,
+        .enemy_difficulty = 5,
+        .day_light_length = 19,
+        .land_claim_count = 6,
+        // The remaining caller-supplied collisions, found by walking the whole
+        // write list against the fixture rather than one audit run at a time:
+        // the two land-claim durability modifiers both default to 32, the
+        // block-damage / XP / loot values all default to 100, and blood_moon_day
+        // defaults to 0 next to the literal-0 OptionsPOICulling.
+        .land_claim_online_dur = 31,
+        .land_claim_offline_dur = 33,
+        .blood_moon_day = 21,
+        .block_damage_player = 101,
+        .xp_multiplier = 102,
+        .block_damage_ai = 103,
+        .block_damage_ai_bm = 104,
+        .loot_abundance = 105,
+    });
+    var dr: binary.Reader = .{ .data = d[2..] };
+    dr.pos = r.pos; // same head width, already asserted field by field above
+    try std.testing.expectEqual(false, try dr.readBool()); // 11: ShowAllPlayersOnMap
+    try std.testing.expectEqual(true, try dr.readBool()); // 12: ShowFriendPlayerOnMap
+    try std.testing.expectEqual(false, try dr.readBool()); // 13: ShowSpawnWindow
+    try std.testing.expectEqual(false, try dr.readBool()); // 14: IsSpawnNearOtherPlayer
+    try std.testing.expectEqual(@as(i32, 37), try dr.readI32()); // 15: TimeOfDayIncPerSec
+
+    // Slots 16..20 are five hardcoded bools: three false then two true. A swap
+    // inside either group is invisible by construction, but one across the
+    // boundary turns player damage or collision off for every client, so read
+    // all five and let the boundary carry the check.
+    try std.testing.expectEqual(false, try dr.readBool()); // 16: IsCreativeMenuEnabled
+    try std.testing.expectEqual(false, try dr.readBool()); // 17: IsTeleportEnabled
+    try std.testing.expectEqual(false, try dr.readBool()); // 18: IsFlyingEnabled
+    try std.testing.expectEqual(true, try dr.readBool()); // 19: IsPlayerDamageEnabled
+    try std.testing.expectEqual(true, try dr.readBool()); // 20: IsPlayerCollisionEnabled
+    // Slots 21..26 mix caller values with hardcoded score multipliers, which
+    // is where the defaults collided: with is_spawn_enemies false and the two
+    // i32 distinct from the literal 1 / -5 beside them, each position is now
+    // observable.
+    try std.testing.expectEqual(false, try dr.readBool()); // 21: IsSpawnEnemies
+    try std.testing.expectEqual(@as(i32, 2), try dr.readI32()); // 22: PlayerKillingMode
+    // 23 is 0 and 24 is 1: `GameModeSurvival::Init` IL_0035-0040 sets the
+    // player-kill multiplier to nothing and the zombie one to 1, so the pair
+    // is no longer two identical constants.
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 23: ScorePlayerKillMultiplier
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 24: ScoreZombieKillMultiplier
+    try std.testing.expectEqual(@as(i32, -5), try dr.readI32()); // 25: ScoreDiedMultiplier
+    try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 26: DropOnDeath
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 27: DropOnQuit
+    try std.testing.expectEqual(@as(i32, 4), try dr.readI32()); // 28: GameDifficulty
+    try std.testing.expectEqual(@as(i32, 9), try dr.readI32()); // 29: BloodMoonEnemyCount
+    try std.testing.expectEqual(true, try dr.readBool()); // 30: EnemySpawnMode
+    try std.testing.expectEqual(@as(i32, 5), try dr.readI32()); // 31: EnemyDifficulty
+    try std.testing.expectEqual(@as(i32, 19), try dr.readI32()); // 32: DayLightLength
+    try std.testing.expectEqual(@as(i32, 6), try dr.readI32()); // 33: LandClaimCount
+
+    // The rest of the blob, to the end. Reading only the head left 35 slots
+    // whose position nothing checked, and the blob is the one body where a
+    // single misplaced field shifts every value after it.
+    try std.testing.expectEqual(@as(i32, 41), try dr.readI32()); // 34: LandClaimSize
+    try std.testing.expectEqual(@as(i32, 30), try dr.readI32()); // 35: LandClaimDeadZone
+    try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 36: LandClaimExpiryTime
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 37: LandClaimDecayMode
+    try std.testing.expectEqual(@as(i32, 31), try dr.readI32()); // 38: LandClaimOnlineDur
+    try std.testing.expectEqual(@as(i32, 33), try dr.readI32()); // 39: LandClaimOfflineDur
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 40: LandClaimOfflineDelay
+    try std.testing.expectEqual(@as(i32, 45), try dr.readI32()); // 41: BedrollExpiryTime
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 42: AirDropFrequency
+    try std.testing.expectEqual(true, try dr.readBool()); // 43: AirDropMarker
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 44: PartySharedKillRange
+    try std.testing.expectEqual(false, try dr.readBool()); // 45: AutoParty
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 46: OptionsPOICulling
+    try std.testing.expectEqual(@as(i32, 21), try dr.readI32()); // 47: BloodMoonDay
+    try std.testing.expectEqual(@as(i32, 101), try dr.readI32()); // 48: BlockDamagePlayer
+    try std.testing.expectEqual(@as(i32, 102), try dr.readI32()); // 49: XPMultiplier
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 50: BloodMoonWarning
+    try std.testing.expectEqual(true, try dr.readBool()); // 51: TwitchBloodMoonAllowed
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 52: DeathPenalty
+    try std.testing.expectEqual(@as(i32, 4), try dr.readI32()); // 53: QuestProgressionDailyLimit
+    try std.testing.expectEqual(true, try dr.readBool()); // 54: BiomeProgression
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 55: StormFreq
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 56: CameraRestrictionMode
+    try std.testing.expectEqual(@as(i32, 60), try dr.readI32()); // 57: JarRefund
+    var gs_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try dr.readString(&gs_buf)); // 58: SandboxPreset
+    try std.testing.expectEqualStrings("", try dr.readString(&gs_buf)); // 59: SandboxCode
+    try std.testing.expectEqual(@as(i32, 60), try dr.readI32()); // 60: DayNightLength
+    try std.testing.expectEqual(@as(i32, 103), try dr.readI32()); // 61: BlockDamageAI
+    try std.testing.expectEqual(@as(i32, 104), try dr.readI32()); // 62: BlockDamageAIBM
+    try std.testing.expectEqual(@as(i32, 105), try dr.readI32()); // 63: LootAbundance
+    try std.testing.expectEqual(@as(i32, 7), try dr.readI32()); // 64: LootRespawnDays
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 65: GlobalGSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 66: BiomeGSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 67: GlobalLSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 68: BiomeLSModifier
+    // Nothing left: the blob ends exactly here.
+    try std.testing.expectEqual(@as(usize, 0), dr.remaining());
+
+    // Pairs that remain indistinguishable because both sides are the same
+    // constant, not because the fixture is weak: the empty strings at 8/9 and
+    // 58/59, the false runs at 13/14 and 16..18, the true pair at 19/20, and
+    // the four 100s at 65..68. No caller input can separate those;
+    // initPropertyDecl holds the order, and the swap-mutation audit reports
+    // them as survivors by construction.
+}
+
+test "lock response for a trader carries the context and trader data" {
+    // buildLockResponseTrader had no test. It differs from a plain grant by
+    // forcing success true and appending the context type name, the command
+    // and a TraderData block, so the leading locking/success pair is where a
+    // swap would pass unnoticed.
+    var req_buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &req_buf };
+    try w.writeBool(true); // locking
+    try w.writeU16(3); // channel
+    try w.writeI32(0); // no targets
+    try w.writeString("EntityTraderLockContext");
+    try w.writeString("trade");
+    const head = try parseLockRequest(w.written());
+
+    var resp_buf: [512]u8 = undefined;
+    const resp = try buildLockResponseTrader(&resp_buf, head, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    var r: binary.Reader = .{ .data = resp };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqual(true, try r.readBool()); // locking echoed
+    try std.testing.expectEqual(true, try r.readBool()); // success forced
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
+    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // channel echoed
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // targets count
+    try std.testing.expectEqualStrings("EntityTraderLockContext", try r.readString(&s_buf));
+    try std.testing.expectEqualStrings("trade", try r.readString(&s_buf));
+    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
+
+    // With locking=true both leading bools are true, so a swap between the
+    // echoed locking and the forced success emits identical bytes. Repeat with
+    // locking=false: the pair is then observable, and success must still be
+    // forced true regardless.
+    var req2_buf: [64]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &req2_buf };
+    try w2.writeBool(false); // locking
+    try w2.writeU16(3);
+    try w2.writeI32(0);
+    try w2.writeString("EntityTraderLockContext");
+    try w2.writeString("trade");
+    const head2 = try parseLockRequest(w2.written());
+    var resp2_buf: [512]u8 = undefined;
+    const resp2 = try buildLockResponseTrader(&resp2_buf, head2, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    try std.testing.expectEqual(@as(u8, 0), resp2[0]); // locking echoed false
+    try std.testing.expectEqual(@as(u8, 1), resp2[1]); // success still forced
+
+    // Same builder, vending context: VendingMachineLockContext::Read takes the
+    // TraderData straight after the type name, with no Command and no
+    // hasTraderData bool (TileEntityVendingMachine_VendingMachineLockContext
+    // .il.txt:19). Emitting the entity shape here handed the client two extra
+    // bytes it reads as the first half of TraderID.
+    var vreq_buf: [64]u8 = undefined;
+    var vw: binary.Writer = .{ .buf = &vreq_buf };
+    try vw.writeBool(true);
+    try vw.writeU16(3);
+    try vw.writeI32(0);
+    try vw.writeString(vending_lock_context);
+    const vhead = try parseLockRequest(vw.written());
+    var vresp_buf: [512]u8 = undefined;
+    const vresp = try buildLockResponseTrader(&vresp_buf, vhead, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    var vr: binary.Reader = .{ .data = vresp };
+    _ = try vr.readBool(); // locking
+    _ = try vr.readBool(); // success
+    _ = try vr.readString(&s_buf); // errorMsg
+    _ = try vr.readBool(); // isForceUnlocked
+    _ = try vr.readU16(); // channel
+    _ = try vr.readI32(); // targets count
+    try std.testing.expectEqualStrings(vending_lock_context, try vr.readString(&s_buf));
+    // TraderData begins immediately: its TraderID, not a command length byte.
+    try std.testing.expectEqual(@as(i32, 42), try vr.readI32());
+    // The two contexts must not produce the same tail length for equal data.
+    try std.testing.expect(vresp.len < resp.len);
 }
 
 /// One biome weather snapshot (WeatherPackage on wire).
@@ -2563,18 +4178,35 @@ pub fn buildChunkRemoveBody(buf: []u8, cx: i32, cz: i32) ![]u8 {
     return w.written();
 }
 
+/// Read side of NetPackageChunkRemove: one `chunkKey` i64, the key
+/// buildChunkRemoveBody writes. The coordinates come back out through the same
+/// WorldChunkCache.MakeChunkKey packing, so any i64 decodes to some chunk and
+/// the range check belongs at the caller, not here.
 pub fn parseChunkRemoveBody(body: []const u8) !struct { cx: i32, cz: i32 } {
     if (body.len < 8) return error.EndOfStream;
     const key = std.mem.readInt(i64, body[0..8], .little);
     return .{ .cx = extractChunkKeyX(key), .cz = extractChunkKeyZ(key) };
 }
 
-/// Collect loot: entity_id i32 (bag). Optional playerId i32 on stock wire.
-pub fn parseCollectBody(body: []const u8) !i32 {
-    if (body.len < 4) return error.EndOfStream;
-    return std.mem.readInt(i32, body[0..4], .little);
+/// Read side of NetPackageEntityCollect (RE inventories/netpackage-bodies.md,
+/// write IL=12): `entityId` i32 | `playerId` i32, the order
+/// buildEntityCollectBody writes.
+///
+/// Both fields come back because stock uses the second one: Process IL=51 runs
+/// ValidEntityIdForSender(playerId) before collecting, so a parser that
+/// returned only the bag id would leave the handler with nothing to check the
+/// claim against.
+pub fn parseCollectBody(body: []const u8) !struct { entity_id: i32, player_id: i32 } {
+    if (body.len < 8) return error.EndOfStream;
+    return .{
+        .entity_id = std.mem.readInt(i32, body[0..4], .little),
+        .player_id = std.mem.readInt(i32, body[4..8], .little),
+    };
 }
 
+/// NetPackageEntityCollect (RE inventories/netpackage-bodies.md, write IL=12):
+/// `entityId` i32 then `playerId` i32. The dedi rebroadcasts with flags 192
+/// after ValidEntityIdForSender (protocol-packages.md, Process IL=51).
 pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -2582,11 +4214,35 @@ pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
     return w.written();
 }
 
+test "entity collect body is bag then collector, and the parser agrees" {
+    // Two i32 whose order decides which entity is collected and which player
+    // is credited. The C2S handler rejects a collect whose playerId is not the
+    // sender (ValidEntityIdForSender, Process IL=51), so a swap here would
+    // reject every honest collect and accept nothing else.
+    var buf: [8]u8 = undefined;
+    const body = try buildEntityCollectBody(&buf, 4242, 106);
+    try std.testing.expectEqual(@as(usize, 8), body.len);
+    try std.testing.expectEqual(@as(i32, 4242), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[4..8], .little));
+    const p = try parseCollectBody(body);
+    try std.testing.expectEqual(@as(i32, 4242), p.entity_id);
+    try std.testing.expectEqual(@as(i32, 106), p.player_id);
+}
+
 /// GameUtils/EKickReason (asm.il:1913681-1913720). Only the values zdtd emits:
 /// an operator `kick` and a server-side guard-policy decision. zdtd has no EAC
 /// integration, so the Eac* reasons are never sent.
 pub const KickReason = enum(i32) {
+    /// EKickReason.ManualKick (10), RE `protocol-packages.md` "EKickReason";
+    /// stock also uses it for a platform-blocked enter.
     manual_kick = 0x0A,
+    /// 16. **Name and client-facing string unverified.** The RE records 35
+    /// values and names ten of them; 16 is in range but is not one of the
+    /// named ones, and no retained dump carries the full enum, so what a
+    /// stock client renders for it is unknown. Only the guard-policy kick
+    /// (`game/guard.zig`) sends it, and that call fills the custom reason
+    /// string, which is what an operator actually reads. Re-derive the label
+    /// from a fresh enum dump before relying on it.
     mod_decision = 0x10,
     /// EKickReason.VersionMismatch (asm.il GameUtils_EKickReason): the
     /// client's compatibilityVersion differs from LongStringNoBuild.
@@ -2676,6 +4332,50 @@ pub fn buildGameEventResponse(buf: []u8, request_body: []const u8) ![]u8 {
     return w.written();
 }
 
+/// Stock NetPackageGameEventResponse carrying a client action for the
+/// receiver to perform (`ActionBaseClientAction.PerformTargetAction` sends
+/// `ResponseTypes.ClientSequenceAction = 12` with the action key; the client
+/// runs it via `HandleGameEventSequenceItemForClient(eventName, actionKey)`
+/// against its own gameevents.xml copy). Body: eventName str |
+/// targetEntityID i32 | extraData str | tag str | responseType u8 |
+/// entitySpawnedID i32 (-1 stock) | actionKey str (read IL=89, write IL=144).
+/// The key is stock's `BaseAction.actionKey`: `<sequenceName><index>` for a
+/// root action (`SetActionKeyData` IL=23), `<parentKey>:<index>` when nested.
+pub fn buildGameEventSequenceAction(
+    buf: []u8,
+    event_name: []const u8,
+    target_entity_id: i32,
+    action_key: []const u8,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeString(event_name);
+    try w.writeI32(target_entity_id);
+    try w.writeString("");
+    try w.writeString("");
+    try w.writeByte(12); // ResponseTypes.ClientSequenceAction
+    try w.writeI32(-1); // entitySpawnedID (unused by the type-12 arm)
+    try w.writeString(action_key);
+    return w.written();
+}
+
+test "game event sequence action carries type 12 plus the action key" {
+    var buf: [128]u8 = undefined;
+    const body = try buildGameEventSequenceAction(&buf, "game_on_death_default", 107, "game_on_death_default0");
+    var r: binary.Reader = .{ .data = body };
+    var nb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_default", try r.readString(&nb));
+    try std.testing.expectEqual(@as(i32, 107), try r.readI32());
+    var eb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&eb));
+    var tb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&tb));
+    try std.testing.expectEqual(@as(u8, 12), try r.readByte());
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32());
+    var kb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_default0", try r.readString(&kb));
+    try std.testing.expectEqual(body.len, r.pos);
+}
+
 test "game event response echoes request name and approves" {
     var rb: [128]u8 = undefined;
     var rw: binary.Writer = .{ .buf = &rb };
@@ -2761,6 +4461,10 @@ pub const StockChat = struct {
     recipient_count: u8 = 0,
 };
 
+/// NetPackageChat (RE inventories/netpackage-bodies.md, write IL=63):
+/// `chatType` u8 | `senderEntityId` i32 | `msg` string | `msgSender` u8
+/// (EMessageSender) | `bbMode` u8 (BbCodeSupportMode) | `recipientEntityIds`
+/// count i32 | count x i32. An empty recipient list means every peer.
 pub fn buildStockChat(buf: []u8, chat_type: u8, sender_entity_id: i32, msg: []const u8, recipients: []const i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(chat_type);
@@ -2773,6 +4477,9 @@ pub fn buildStockChat(buf: []u8, chat_type: u8, sender_entity_id: i32, msg: []co
     return w.written();
 }
 
+/// NetPackageChat, read side (RE write IL=63; same field order as
+/// buildStockChat): `chatType` u8 | `senderEntityId` i32 | `msg` string |
+/// `msgSender` u8 | `bbMode` u8 | recipient count i32 | count x i32.
 pub fn parseStockChat(body: []const u8) !StockChat {
     if (body.len < 6) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -2822,6 +4529,9 @@ pub const SoundAtPosition = struct {
     distance: i32 = 0,
     entity_id: i32 = 0,
     volume_scale: f32 = 0,
+    /// End of the stock body. The clip string makes the length variable, so a
+    /// relay must forward `body[0..wire_len]` rather than the raw slice.
+    wire_len: usize = 0,
 
     pub fn clipSlice(self: *const SoundAtPosition) []const u8 {
         return self.clip[0..self.clip_len];
@@ -2831,6 +4541,13 @@ pub const SoundAtPosition = struct {
 /// Audio clip names are short asset paths; anything longer fails closed.
 pub const max_audio_clip_len: usize = 256;
 
+/// Read side of NetPackageSoundAtPosition (RE write IL=25): pos Vector3 | clip
+/// string | `mode` u8 | `distance` i32 | `entityId` i32, the order
+/// buildSoundAtPosition writes and where stock's write also stops.
+///
+/// `volume_scale` therefore never comes off the wire; it stays at its default
+/// and only the local relay path sets it. The clip string is the one
+/// client-controlled length in the body, so it is capped rather than trusted.
 pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflow})!SoundAtPosition {
     if (body.len < 22) return error.EndOfStream; // 12 pos + 1 clip-len + 1 mode + 4 + 4
     var r: binary.Reader = .{ .data = body };
@@ -2839,12 +4556,16 @@ pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflo
     };
     var clip_buf: [max_audio_clip_len]u8 = undefined;
     const clip = try r.readString(&clip_buf);
-    if (clip.len > max_audio_clip_len) return error.Overflow;
+    // clip_len is a u8, so the cap itself does not fit: readString accepts a
+    // length equal to the buffer, and >= (not >) is what keeps the cast below
+    // in range. A joined client controls this length.
+    if (clip.len >= max_audio_clip_len) return error.Overflow;
     @memcpy(out.clip[0..clip.len], clip);
     out.clip_len = @intCast(clip.len);
     out.mode = try r.readByte();
     out.distance = try r.readI32();
     out.entity_id = try r.readI32();
+    out.wire_len = r.pos;
     return out;
 }
 
@@ -2869,8 +4590,10 @@ test "sound at position parses the stock 5-field body" {
     // i32 | entityId i32. volumeScale is Setup-only and never on the wire.
     var body: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &body };
+    // pos[1] is 64.75, not 0: with a zero there a swap with either neighbour
+    // emitted bytes the assertions could not tell apart.
     try w.writeF32(100.5);
-    try w.writeF32(0);
+    try w.writeF32(64.75);
     try w.writeF32(-50.25);
     try w.writeString("Sounds/explosions/boom");
     try w.writeByte(1); // Linear
@@ -2888,7 +4611,21 @@ test "sound at position parses the stock 5-field body" {
     // A trailing volumeScale byte is not part of the wire: the parser stops
     // after entityId and the builder emits exactly 5 fields (a stock client
     // reader would desync on a 6-field body).
-    const built = try buildSoundAtPosition(&body, .{ .pos = .{ 100.5, 0, -50.25 }, .mode = 1, .distance = 30, .entity_id = 42 });
+    // Separate buffer: `body` is the parsed input and `s` slices into it, so
+    // building into it would overwrite the very values being written.
+    var out_buf: [128]u8 = undefined;
+    const built = try buildSoundAtPosition(&out_buf, s);
+    // Values, not just the field count: this block only checked that the body
+    // ends after five fields, so a reordering inside the builder would hide
+    // behind a parser that moved with it. pos[1] also had to stop being 0.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 100.5), f32At(built, 0));
+    try std.testing.expectEqual(@as(f32, 64.75), f32At(built, 4));
+    try std.testing.expectEqual(@as(f32, -50.25), f32At(built, 8));
     var br: binary.Reader = .{ .data = built };
     _ = try br.readF32();
     _ = try br.readF32();
@@ -2899,6 +4636,38 @@ test "sound at position parses the stock 5-field body" {
     _ = try br.readI32();
     _ = try br.readI32();
     try std.testing.expectError(error.EndOfStream, br.readF32()); // no 6th field
+}
+
+test "a clip name at the cap fails closed instead of trapping the cast" {
+    // clip_len is u8 while max_audio_clip_len is 256, and readString accepts a
+    // length equal to the buffer, so a clip of exactly 256 bytes reached
+    // @intCast(256) -> u8 and panicked. Any joined client can send this
+    // package, so the cast has to be unreachable, not merely unlikely.
+    var body: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    const long = [_]u8{'a'} ** max_audio_clip_len;
+    try w.writeString(&long);
+    try w.writeByte(1);
+    try w.writeI32(30);
+    try w.writeI32(42);
+    try std.testing.expectError(error.Overflow, parseSoundAtPosition(w.written()));
+
+    // One byte under the cap still parses, so the rejection is about the cap
+    // itself and not a broken length path.
+    var body2: [512]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &body2 };
+    try w2.writeF32(1);
+    try w2.writeF32(2);
+    try w2.writeF32(3);
+    try w2.writeString(long[0 .. max_audio_clip_len - 1]);
+    try w2.writeByte(1);
+    try w2.writeI32(30);
+    try w2.writeI32(42);
+    const ok = try parseSoundAtPosition(w2.written());
+    try std.testing.expectEqual(@as(usize, max_audio_clip_len - 1), ok.clipSlice().len);
 }
 
 /// Stock `NetPackageParticleEffect` (write IL=20): a `ParticleEffect`
@@ -2914,26 +4683,42 @@ pub const ParticleEffectInvoke = struct {
     entity_caused: i32,
     force_creation: bool,
     world_spawn: bool,
+    /// End of the stock body. The two sound-name strings make the length
+    /// variable, so a relay must forward `body[0..wire_len]`.
+    wire_len: usize = 0,
 };
 
+/// NetPackageParticleEffect (write IL=20, NetPackageParticleEffect.il.txt:43):
+/// `pe` (ParticleEffect::Write) | `entityThatCausedIt` i32 | `forceCreation`
+/// bool | `worldSpawn` bool.
+///
+/// `ParticleEffect::Write` (ParticleEffect.il.txt:397-435) ends with
+/// `parentEntityId` i32 and `attachment` u8 after volumeScale. Those five
+/// bytes are part of the effect, not the package tail: reading the package's
+/// own i32 too early took `parentEntityId` as `entityThatCausedIt` and then
+/// derived both bools from the attachment byte and the real causing id.
 pub fn parseParticleEffectInvoke(body: []const u8) (binary.ReadError || error{Overflow})!ParticleEffectInvoke {
     var r: binary.Reader = .{ .data = body };
     _ = try r.readI32(); // ParticleId
     var i: usize = 0;
     while (i < 3) : (i += 1) _ = try r.readF32(); // pos
     i = 0;
-    while (i < 4) : (i += 1) _ = try r.readF32(); // rot
+    while (i < 4) : (i += 1) _ = try r.readF32(); // rot (Quaternion)
     i = 0;
-    while (i < 4) : (i += 1) _ = try r.readByte(); // color
+    while (i < 4) : (i += 1) _ = try r.readByte(); // color (Color32)
     var scratch: [128]u8 = undefined;
     _ = try r.readString(&scratch); // soundName
     _ = try r.readString(&scratch); // additionalHitSoundName
     _ = try r.readF32(); // volumeScale
-    return .{
+    _ = try r.readI32(); // ParticleEffect.parentEntityId
+    _ = try r.readByte(); // ParticleEffect.attachment
+    var out: ParticleEffectInvoke = .{
         .entity_caused = try r.readI32(),
         .force_creation = try r.readBool(),
         .world_spawn = try r.readBool(),
     };
+    out.wire_len = r.pos;
+    return out;
 }
 
 test "particle effect invoke parses the stock body" {
@@ -2953,7 +4738,11 @@ test "particle effect invoke parses the stock body" {
     try w.writeByte(255);
     try w.writeString("Sounds/blood");
     try w.writeString("");
-    try w.writeF32(1);
+    try w.writeF32(1); // volumeScale
+    // ParticleEffect::Write ends here, with two fields the package tail sits
+    // behind. Distinct values so reading them as the tail cannot pass.
+    try w.writeI32(999); // ParticleEffect.parentEntityId
+    try w.writeByte(3); // ParticleEffect.attachment
     try w.writeI32(42); // entityThatCausedIt
     try w.writeBool(true); // forceCreation
     try w.writeBool(false); // worldSpawn
@@ -3007,6 +4796,9 @@ pub const AttachType = enum(u8) {
 /// with vehicleId = -1 / slot = -1 (asm.il:541872, asm.il:406816).
 pub const slot_any: i16 = -1;
 
+/// NetPackageEntityAttach (RE inventories/netpackage-bodies.md, write IL=21):
+/// `attachType` u8 | `riderId` i32 | `vehicleId` i32 | `slot` i16. Slot is an
+/// int32 in memory but conv.i2 on the wire (asm.il:844620).
 pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromEnum(attach_type));
@@ -3016,12 +4808,18 @@ pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehi
     return w.written();
 }
 
+/// Read side of NetPackageEntityAttach (RE inventories/netpackage-bodies.md,
+/// write IL=21): `attachType` u8 | `riderId` i32 | `vehicleId` i32 | `slot`
+/// i16, the order buildEntityAttach writes. An `attachType` outside the four
+/// stock values is rejected rather than clamped: stock switches on it, so a
+/// fifth value has no defined meaning and guessing one would attach or detach
+/// on a byte the client never meant as either.
 pub fn parseEntityAttach(body: []const u8) !struct { attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16 } {
     if (body.len < 11) return error.EndOfStream;
     const at_raw = body[0];
-    if (at_raw > 3) return error.InvalidEvent;
+    const at = std.enums.fromInt(AttachType, at_raw) orelse return error.InvalidEvent;
     return .{
-        .attach_type = @enumFromInt(at_raw),
+        .attach_type = at,
         .rider_id = std.mem.readInt(i32, body[1..5], .little),
         .vehicle_id = std.mem.readInt(i32, body[5..9], .little),
         .slot = std.mem.readInt(i16, body[9..11], .little),
@@ -3136,12 +4934,16 @@ test "world areas stock wire" {
             .pos_x = 10,
             .pos_y = 61,
             .pos_z = 20,
+            // size_x and size_z were both 60, which made that swap emit
+            // identical bytes; the audit reported it as a survivor.
             .size_x = 60,
             .size_y = 28,
-            .size_z = 60,
+            .size_z = 62,
+            // pad_x and pad_z were both -2, which made that swap emit
+            // identical bytes.
             .pad_x = -2,
             .pad_y = 0,
-            .pad_z = -2,
+            .pad_z = -3,
             .teleports = &.{
                 .{ .start_x = 7, .start_y = 1, .start_z = 2, .size_x = 52, .size_y = 12, .size_z = 5 },
                 .{ .start_x = 2, .start_y = 1, .start_z = 7, .size_x = 57, .size_y = 28, .size_z = 41 },
@@ -3152,12 +4954,34 @@ test "world areas stock wire" {
     try std.testing.expectEqual(@as(usize, 1 + 2 + 34), body.len);
     try std.testing.expectEqual(@as(u8, 1), body[0]); // cVersion
     try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[1..3], .little));
+    // Whole position and size triples: only pos_x and size_x were read, so
+    // pos_y/pos_z and size_y/size_z could swap unnoticed.
     try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[3..7], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[7..11], .little));
+    try std.testing.expectEqual(@as(i32, 20), std.mem.readInt(i32, body[11..15], .little));
     try std.testing.expectEqual(@as(i16, 60), std.mem.readInt(i16, body[15..17], .little));
+    try std.testing.expectEqual(@as(i16, 28), std.mem.readInt(i16, body[17..19], .little));
+    try std.testing.expectEqual(@as(i16, 62), std.mem.readInt(i16, body[19..21], .little));
+    // The padding triple and both teleport triples, not just their first
+    // component: pad_y/pad_z, start_y/start_z and size_y/size_z each had
+    // nothing reading them back and could swap unnoticed.
     try std.testing.expectEqual(@as(i8, -2), @as(i8, @bitCast(body[21]))); // pad_x
+    try std.testing.expectEqual(@as(i8, 0), @as(i8, @bitCast(body[22]))); // pad_y
+    try std.testing.expectEqual(@as(i8, -3), @as(i8, @bitCast(body[23]))); // pad_z
     try std.testing.expectEqual(@as(u8, 2), body[24]); // teleport count
     try std.testing.expectEqual(@as(i8, 7), @as(i8, @bitCast(body[25]))); // vol0 start_x
+    try std.testing.expectEqual(@as(i8, 1), @as(i8, @bitCast(body[26]))); // vol0 start_y
+    try std.testing.expectEqual(@as(i8, 2), @as(i8, @bitCast(body[27]))); // vol0 start_z
     try std.testing.expectEqual(@as(u8, 52), body[28]); // vol0 size_x
+    try std.testing.expectEqual(@as(u8, 12), body[29]); // vol0 size_y
+    try std.testing.expectEqual(@as(u8, 5), body[30]); // vol0 size_z
+    // Second volume follows immediately, six bytes on.
+    try std.testing.expectEqual(@as(i8, 2), @as(i8, @bitCast(body[31]))); // vol1 start_x
+    try std.testing.expectEqual(@as(i8, 1), @as(i8, @bitCast(body[32])));
+    try std.testing.expectEqual(@as(i8, 7), @as(i8, @bitCast(body[33])));
+    try std.testing.expectEqual(@as(u8, 57), body[34]); // vol1 size_x
+    try std.testing.expectEqual(@as(u8, 28), body[35]);
+    try std.testing.expectEqual(@as(u8, 41), body[36]);
 }
 
 /// NetPackageEntityVelocity (write IL=23): entityId i32, bAdd bool, motion
@@ -3199,6 +5023,8 @@ pub const ClientInfoEntry = struct {
     admin: bool,
 };
 
+/// NetPackageClientInfo (RE inventories/netpackage-bodies.md, write IL=41):
+/// `playerIds` count u16, then per entry entityId i32 | ping i16 | isAdmin bool.
 pub fn buildClientInfoBody(buf: []u8, entries: []const ClientInfoEntry) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeU16(@intCast(entries.len));
@@ -3292,6 +5118,10 @@ pub const PlayerPositionEntry = struct {
     z: i32,
 };
 
+/// NetPackagePersistentPlayerPositions (RE inventories/netpackage-bodies.md,
+/// write IL=38): `positions` count i32, then per entry the persistent player id
+/// (PlatformUserIdentifier ToStream) and the position (StreamUtils Vector3i =
+/// three i32).
 pub fn buildPersistentPlayerPositionsBody(buf: []u8, entries: []const PlayerPositionEntry) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(@intCast(entries.len));
@@ -3332,6 +5162,11 @@ test "PersistentPlayerPositions body is count + id stream + Vector3i per entry" 
     try std.testing.expectEqual(@as(i32, 0), try r.readI32());
 }
 
+/// Read side of NetPackageLandClaimRepair (docs/wire/PACKAGES.md, extracted
+/// read `ReadInt64;ReadInt64;ReadInt64;ReadBoolean;`): the block position
+/// arrives as three i64, then `beginRepair` bool. Each coordinate is narrowed
+/// to i32 and a value that does not fit is an error, since no world position
+/// needs the wider type and a forged one would wrap into a valid-looking block.
 pub fn parseLandClaimRepair(body: []const u8) !struct { x: i32, y: i32, z: i32, begin_repair: bool } {
     if (body.len < 25) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -3340,6 +5175,83 @@ pub fn parseLandClaimRepair(body: []const u8) !struct { x: i32, y: i32, z: i32, 
     const z = std.math.cast(i32, try r.readI64()) orelse return error.EndOfStream;
     const begin = try r.readBool();
     return .{ .x = x, .y = y, .z = z, .begin_repair = begin };
+}
+
+/// Write side of NetPackageLandClaimRepair (write IL=26): blockPosition as
+/// three i64, then `beginRepair` bool. The server emits the end-repair form
+/// (`Setup(blockPos, false)`) to the requester when the repair pass finishes
+/// (TEFeatureAreaRepair repair coroutine IL_0337), clearing its IsRepairing.
+pub fn buildLandClaimRepairBody(buf: []u8, x: i32, y: i32, z: i32, begin_repair: bool) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI64(x);
+    try w.writeI64(y);
+    try w.writeI64(z);
+    try w.writeBool(begin_repair);
+    return w.written();
+}
+
+/// `EnumMapObjectType` values used by the marker-removal package. The enum has
+/// 18 entries (RE map-objects.md 90); only the ones zdtd removes are named here,
+/// so an unused value cannot be cited as if it were verified.
+pub const MapObjectType = enum(i32) {
+    sleeping_bag = 1,
+    supply_drop = 13,
+    land_claim = 15,
+};
+
+/// `removeByType` selector: the entity id and the position are mutually
+/// exclusive on the wire (RE protocol-packages.md 1735).
+pub const map_marker_remove_by_entity: i32 = 0;
+pub const map_marker_remove_by_position: i32 = 1;
+
+/// NetPackageEntityMapMarkerRemove keyed by entity id (write IL=24, RE
+/// protocol-packages.md 1735): `removeByType` i32 = 0 | `entityId` i32 |
+/// `mapObjectType` i32. The client's `World.ObjectOnMapRemove` drops the marker.
+pub fn buildMapMarkerRemoveByEntity(buf: []u8, entity_id: i32, object_type: MapObjectType) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(map_marker_remove_by_entity);
+    try w.writeI32(entity_id);
+    try w.writeI32(@intFromEnum(object_type));
+    return w.written();
+}
+
+/// NetPackageEntityMapMarkerRemove keyed by position (same write IL=24, RE
+/// protocol-packages.md 1735): `removeByType` i32 = 1 | `position` Vector3
+/// (3 x f32) | `mapObjectType` i32. The two key forms are mutually exclusive.
+/// Used where the marker belongs to something that is not an entity, which is
+/// how stock removes a land-claim marker (`NetPackageEntityMapMarkerRemove(
+/// EnumMapObjectType.LandClaim = 15, pos)`, RE server-lifecycle.md:292).
+pub fn buildMapMarkerRemoveByPosition(buf: []u8, x: f32, y: f32, z: f32, object_type: MapObjectType) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(map_marker_remove_by_position);
+    try w.writeF32(x);
+    try w.writeF32(y);
+    try w.writeF32(z);
+    try w.writeI32(@intFromEnum(object_type));
+    return w.written();
+}
+
+test "map marker remove body layout, both key forms" {
+    // The two key forms are mutually exclusive on the wire: reading a
+    // position-keyed body as an id-keyed one would take the first coordinate
+    // word as an entity id and then run off the end.
+    var buf: [32]u8 = undefined;
+    const by_id = try buildMapMarkerRemoveByEntity(&buf, 106, .supply_drop);
+    var r: binary.Reader = .{ .data = by_id };
+    try std.testing.expectEqual(map_marker_remove_by_entity, try r.readI32());
+    try std.testing.expectEqual(@as(i32, 106), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 13), try r.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+
+    var buf2: [32]u8 = undefined;
+    const by_pos = try buildMapMarkerRemoveByPosition(&buf2, 10, 64, -20, .land_claim);
+    var r2: binary.Reader = .{ .data = by_pos };
+    try std.testing.expectEqual(map_marker_remove_by_position, try r2.readI32());
+    try std.testing.expectEqual(@as(f32, 10), try r2.readF32());
+    try std.testing.expectEqual(@as(f32, 64), try r2.readF32());
+    try std.testing.expectEqual(@as(f32, -20), try r2.readF32());
+    try std.testing.expectEqual(@as(i32, 15), try r2.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r2.remaining());
 }
 
 /// NetPackageNavObject add/remove map marker (quest/trader style).
@@ -3367,7 +5279,76 @@ pub fn buildNavObjectAdd(
     return w.written();
 }
 
-/// Minimal ExplosionClient: center xyz + identity quat + expType i16 + power/radius/blockDmg u16 + entityId + changes u16=0.
+/// NetPackageNavObject remove form (Setup(Int32 _entityId) IL=20): every
+/// field is still written, with an empty class/name and a zero position, and
+/// isAdd = false. The client's ProcessPackage (IL=77, isAdd false branch) then
+/// calls NavObjectManager.UnRegisterNavObjectByEntityID(entityId). Stock sends
+/// this from AIDirectorAirDropComponent.RemoveSupplyCrate (IL=54), reached by
+/// EntitySupplyCrate.OnEntityUnload (IL=17) when the unload reason is Killed;
+/// EntitySupplyCrate.OnEntityDeath (IL=30) sends the parallel
+/// NetPackageEntityMapMarkerRemove(SupplyDrop, entityId).
+pub fn buildNavObjectRemove(buf: []u8, entity_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeString(""); // navObjectClass
+    try w.writeString(""); // name
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0); // position
+    try w.writeBool(false); // isAdd
+    try w.writeBool(false); // useOverrideColor
+    try w.writeU32(0); // overrideColor, ignored by the remove branch
+    try w.writeBool(false); // usingLocalizationId
+    try w.writeI32(entity_id);
+    return w.written();
+}
+
+test "nav object add body layout" {
+    // No test covered this builder. Two strings, then a Vector3 whose three
+    // words nothing read back, then a run of flags around a packed colour.
+    var buf: [128]u8 = undefined;
+    const body = try buildNavObjectAdd(&buf, "quest", "Trader Jen", 11, 12, 13, 106);
+    var r: binary.Reader = .{ .data = body };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("quest", try r.readString(&s_buf));
+    try std.testing.expectEqualStrings("Trader Jen", try r.readString(&s_buf));
+    try std.testing.expectEqual(@as(f32, 11), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 12), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 13), try r.readF32());
+    try std.testing.expectEqual(true, try r.readBool()); // isAdd
+    try std.testing.expectEqual(false, try r.readBool()); // useOverrideColor
+    try std.testing.expectEqual(@as(u32, 0xffffffff), try r.readU32()); // colour
+    try std.testing.expectEqual(false, try r.readBool()); // usingLocalizationId
+    try std.testing.expectEqual(@as(i32, 106), try r.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
+test "nav object remove body is the same shape with isAdd clear" {
+    // The stock remove form still writes every field; only the client branch
+    // reads entityId. A body that omitted the leading strings/position would
+    // desync the client's BinaryReader.
+    var buf: [128]u8 = undefined;
+    const body = try buildNavObjectRemove(&buf, 106);
+    var r: binary.Reader = .{ .data = body };
+    var s_buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf));
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf));
+    try std.testing.expectEqual(@as(f32, 0), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 0), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 0), try r.readF32());
+    try std.testing.expectEqual(false, try r.readBool()); // isAdd
+    try std.testing.expectEqual(false, try r.readBool()); // useOverrideColor
+    _ = try r.readU32(); // colour, ignored by the remove branch
+    try std.testing.expectEqual(false, try r.readBool()); // usingLocalizationId
+    try std.testing.expectEqual(@as(i32, 106), try r.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
+/// NetPackageExplosionClient (RE protocol-packages.md 6.15 + write IL=60):
+/// `center` Vector3 | `rotation` Quaternion | `expType` i16 | `blastPower` u16 |
+/// `blastRadius` u16 | `blockDamage` u16 | `entityId` i32 | `changeCount` u16,
+/// then changeCount x BlockChangeInfo. zdtd emits the FX with an empty change
+/// list: block results already ride the authoritative SetBlock path, so
+/// repeating them here would apply them twice on the client.
 pub fn buildExplosionClient(
     buf: []u8,
     cx: f32,
@@ -3397,6 +5378,33 @@ pub fn buildExplosionClient(
     return w.written();
 }
 
+test "explosion client body layout" {
+    // No test covered this builder. It is pos Vector3 | identity quaternion |
+    // type i16 | blastPower u16 | blastRadius u16 | blockDamage u16 |
+    // entityId i32 | changes count u16, and the three u16 in a row are the
+    // part a swap moves without changing the length.
+    var buf: [64]u8 = undefined;
+    const body = try buildExplosionClient(&buf, 11, 12, 13, 3, 21, 22, 23, 106);
+    try std.testing.expectEqual(@as(usize, 12 + 16 + 2 + 6 + 4 + 2), body.len);
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 11), f32At(body, 0));
+    try std.testing.expectEqual(@as(f32, 12), f32At(body, 4));
+    try std.testing.expectEqual(@as(f32, 13), f32At(body, 8));
+    // Identity quaternion: three zeros then w = 1.
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 12));
+    try std.testing.expectEqual(@as(f32, 1), f32At(body, 24));
+    try std.testing.expectEqual(@as(i16, 3), std.mem.readInt(i16, body[28..30], .little));
+    try std.testing.expectEqual(@as(u16, 21), std.mem.readInt(u16, body[30..32], .little)); // blastPower
+    try std.testing.expectEqual(@as(u16, 22), std.mem.readInt(u16, body[32..34], .little)); // blastRadius
+    try std.testing.expectEqual(@as(u16, 23), std.mem.readInt(u16, body[34..36], .little)); // blockDamage
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[36..40], .little));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[40..42], .little));
+}
+
 /// C2S ExplosionInitiate head (protocol-frames §12).
 /// worldPos 3xf32 | blockPos 3xi32 | quat 4xf32 | blobLen u16 | blob | entityId i32 | delay f32 …
 pub const ExplosionInitiate = struct {
@@ -3411,12 +5419,24 @@ pub const ExplosionInitiate = struct {
     /// Best-effort radius from nested blob (default 3).
     radius: f32 = 3,
     block_damage: u16 = 50,
-    /// ExplosionData.entityRadius * 0.05 (default 3).
+    /// ExplosionData.EntityRadius, a raw i16 in blocks (default 3).
     entity_radius: f32 = 3,
     /// ExplosionData.entityDamage (default 0 -> falls back to block_damage).
     entity_damage: f32 = 0,
 };
 
+/// Read side of NetPackageExplosionInitiate (RE protocol-packages.md,
+/// inventories/netpackage-bodies.md write IL=55): `worldPos` Vector3 |
+/// `blockPos` Vector3i | `rotation` Quaternion | `explosionBlobLen` u16 + blob
+/// | `entityId` i32 | `delay` f32 | `bRemoveBlockAtExplPosition` bool | item
+/// present bool + ItemValue.
+///
+/// The two trailing fields are not read. `bRemoveBlockAtExplPosition` clears
+/// the center block in stock (GameManager.ExplosionServer IL=50), which
+/// c2s/blocks.zig does anyway, and the optional ItemValue feeds passives
+/// 19/20/21 (block damage, entity damage, radius) that zdtd does not apply to
+/// a client-supplied blast. Both sit at the end of the body, so skipping them
+/// cannot desync the reader.
 pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
     var r: binary.Reader = .{ .data = body };
     var out: ExplosionInitiate = .{};
@@ -3446,8 +5466,14 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
         _ = br.readI16() catch 0; // duration deci-seconds
         const radius_raw = br.readI16() catch 0;
         if (radius_raw > 0) out.radius = @as(f32, @floatFromInt(radius_raw)) * 0.05;
+        // EntityRadius is a raw i16 in blocks: the RE table notes a scale
+        // factor on Duration (x10) and BlockRadius (x20) and leaves this row
+        // blank (protocol-packages.md ExplosionData, Read IL=82). Dividing it
+        // by 20 as well turned the stock value 6 into 0.3, which the caller
+        // then clamped up to its 1 m floor, so a stock explosion barely
+        // reached any entity while its block damage worked normally.
         if (br.readI16()) |er| {
-            if (er > 0) out.entity_radius = @as(f32, @floatFromInt(er)) * 0.05;
+            if (er > 0) out.entity_radius = @floatFromInt(er);
         } else |_| {}
         _ = br.readI16() catch 0; // blastPower
         if (br.readF32()) |bd| {
@@ -3519,8 +5545,11 @@ test "explosion initiate parses ExplosionData blob positionally" {
     try std.testing.expectEqual(@as(i32, 107), p.entity_id);
 }
 
-/// zdtd-native quest accept/progress (not stock client wire).
-/// def_id u16, op u8 (0=list,1=accept,2=abandon). Kept for unit/loadgen fixtures.
+/// zdtd-native quest accept/progress, **not a stock client wire body**:
+/// def_id u16, op u8 (0=list, 1=accept, 2=abandon). Kept for unit and loadgen
+/// fixtures. The stock quest C2S shapes are NetPackageNPCQuestList
+/// (parseNpcQuestList) and NetPackageQuestObjectiveUpdate, both tried before
+/// this one in c2s/quest.zig.
 pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
     if (body.len < 3) return error.EndOfStream;
     return .{
@@ -3548,16 +5577,21 @@ pub const NpcQuestListHead = struct {
     remove_index: u8 = 0,
 };
 
-/// Parse stock C2S NPCQuestList head (npc, player, eventType + optional tier).
+/// Read side of NetPackageNPCQuestList (RE protocol-packages.md, Process
+/// IL=180): `npcEntityID` i32 | `playerEntityID` i32 | `eventType` u8, then a
+/// type-dependent tail. Only the head and `tierLevel` are decoded here; the
+/// FetchList entry list, POI vectors and the RemoveQuest index beyond
+/// `remove_index` are tails the server never needs to read back, since it is
+/// the side that produces them.
+///
+/// An `eventType` outside the five stock values is rejected: stock switches on
+/// it, so a sixth selects no tail and nothing sensible to answer.
 pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     if (body.len < 9) return error.EndOfStream;
     const npc = std.mem.readInt(i32, body[0..4], .little);
     const player = std.mem.readInt(i32, body[4..8], .little);
     const et_raw = body[8];
-    const et: NpcQuestEventType = if (et_raw <= 4)
-        @enumFromInt(et_raw)
-    else
-        return error.InvalidEvent;
+    const et = std.enums.fromInt(NpcQuestEventType, et_raw) orelse return error.InvalidEvent;
     var head: NpcQuestListHead = .{
         .npc_entity_id = npc,
         .player_entity_id = player,
@@ -3574,8 +5608,9 @@ pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     return head;
 }
 
-/// S2C FetchList with QuestPacketEntry offers (stock trader UI).
-/// Empty offers: pass `entries` as `&.{}` (npc | player | eventType=0 | tier | count=0).
+/// NetPackageNPCQuestList, S2C FetchList with QuestPacketEntry offers (stock
+/// trader UI): npc i32 | player i32 | eventType u8 | tier i32 | entry count i32
+/// | count x QuestPacketEntry. Empty offers: pass `entries` as `&.{}`.
 pub fn buildNpcQuestListFetch(
     buf: []u8,
     npc_entity_id: i32,
@@ -3604,13 +5639,20 @@ pub const QuestObjectiveUpdate = struct {
     block_z: i32 = 0,
 };
 
+/// Read side of NetPackageQuestObjectiveUpdate (RE
+/// inventories/netpackage-bodies.md, write IL=21): `senderEntityID` i32 |
+/// `questCode` i32 | `eventType` u8 | `blockPos` (StreamUtils Vector3i), the
+/// order buildQuestObjectiveUpdate writes.
+///
+/// The trailing block position is optional here while stock always writes it:
+/// a 9-byte body leaves the position zero rather than erroring, which is what
+/// keeps the zdtd-native {def_id u16, op u8} fixtures in c2s/quest.zig
+/// parseable. An `eventType` outside the three stock values is rejected, since
+/// stock switches on it and a fourth has no objective to advance.
 pub fn parseQuestObjectiveUpdate(body: []const u8) !QuestObjectiveUpdate {
     if (body.len < 9) return error.EndOfStream;
     const et_raw = body[8];
-    const et: QuestObjectiveEventType = if (et_raw <= 2)
-        @enumFromInt(et_raw)
-    else
-        return error.InvalidEvent;
+    const et = std.enums.fromInt(QuestObjectiveEventType, et_raw) orelse return error.InvalidEvent;
     var out: QuestObjectiveUpdate = .{
         .sender_entity_id = std.mem.readInt(i32, body[0..4], .little),
         .quest_code = std.mem.readInt(i32, body[4..8], .little),
@@ -3624,6 +5666,9 @@ pub fn parseQuestObjectiveUpdate(body: []const u8) !QuestObjectiveUpdate {
     return out;
 }
 
+/// NetPackageQuestObjectiveUpdate (RE inventories/netpackage-bodies.md, write
+/// IL=21): `senderEntityID` i32 | `questCode` i32 | `eventType` u8 |
+/// `blockPos` (StreamUtils Vector3i = three i32).
 pub fn buildQuestObjectiveUpdate(buf: []u8, u: QuestObjectiveUpdate) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(u.sender_entity_id);
@@ -3661,7 +5706,9 @@ test "entity attach carries the stock mount and dismount shapes" {
     const wide = try parseEntityAttach(try buildEntityAttach(&buf, .attach_client, 1, 2, 32767));
     try std.testing.expectEqual(@as(i16, 32767), wide.slot);
 
-    for ([_]AttachType{ .attach_server, .attach_client, .detach_server, .detach_client }) |t| {
+    // Derived from the enum, not a hand-listed set: a new variant must be
+    // covered here automatically rather than slipping through untested.
+    for (std.enums.values(AttachType)) |t| {
         const rt = try parseEntityAttach(try buildEntityAttach(&buf, t, -2147483648, 2147483647, -32768));
         try std.testing.expectEqual(t, rt.attach_type);
         try std.testing.expectEqual(@as(i32, -2147483648), rt.rider_id);
@@ -3783,11 +5830,43 @@ test "stock quest objective update layout" {
     try std.testing.expectEqual(@as(usize, 21), body.len);
     const u = try parseQuestObjectiveUpdate(body);
     try std.testing.expectEqual(@as(i32, 106), u.sender_entity_id);
+    try std.testing.expectEqual(@as(i32, 1), u.quest_code);
     try std.testing.expectEqual(QuestObjectiveEventType.block_activated, u.event_type);
+    // Whole block position: y and z were unread, so a swap would advance the
+    // objective against a different block than the one the client activated.
     try std.testing.expectEqual(@as(i32, 10), u.block_x);
+    try std.testing.expectEqual(@as(i32, 70), u.block_y);
+    try std.testing.expectEqual(@as(i32, 20), u.block_z);
 }
 
-/// Trader buy/sell: trader_entity i32, item u16, qty u16, side u8 (0=buy,1=sell).
+test "every declared npc quest and objective event variant parses" {
+    // Both parsers derive their bound from the enum via std.enums.fromInt, so
+    // a new variant stays legal on the wire instead of becoming InvalidEvent.
+    for (std.enums.values(NpcQuestEventType)) |ev| {
+        // 14 bytes covers the longest tail (remove_quest adds remove_index).
+        var body: [14]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 50, .little);
+        std.mem.writeInt(i32, body[4..8], 106, .little);
+        body[8] = @intFromEnum(ev);
+        const head = try parseNpcQuestList(&body);
+        try std.testing.expectEqual(ev, head.event_type);
+    }
+    for (std.enums.values(QuestObjectiveEventType)) |ev| {
+        var body: [21]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 106, .little);
+        std.mem.writeInt(i32, body[4..8], 1, .little);
+        body[8] = @intFromEnum(ev);
+        const u = try parseQuestObjectiveUpdate(&body);
+        try std.testing.expectEqual(ev, u.event_type);
+    }
+}
+
+/// Trader buy/sell, **not a stock package body**: trader_entity i32 | item u16
+/// | qty u16 | side u8 (0=buy, 1=sell), exactly 9 bytes. Stock has no
+/// NetPackageTraderTrade; a real client's trade shows up as its post-trade
+/// TraderData copy (parseTraderDataToServer). This body rides under the
+/// NetPackageTraderData name for loadgen and the sim, and c2s/quest.zig picks
+/// the arm on an exact length of 9 so a stock body cannot land here.
 pub fn parseTraderTrade(body: []const u8) !struct { trader_entity: i32, item: u16, qty: u16, side: u8 } {
     if (body.len < 9) return error.EndOfStream;
     return .{
@@ -3810,6 +5889,11 @@ pub const VendingMachineAccess = struct {
     removing: bool,
 };
 
+/// Read side of NetPackagePlayerVendingMachine (RE protocol-packages.md
+/// residual table, write IL=28): `userId` (PlatformUserIdentifier) | x,y,z i32
+/// | `removing` bool. An empty identity is an error rather than a null user:
+/// the whole package exists to add or remove that user from a machine's
+/// allowed list, so there is nothing to apply without one.
 pub fn parseVendingMachineAccess(body: []const u8, plat_buf: []u8, id_buf: []u8) !VendingMachineAccess {
     var r: binary.Reader = .{ .data = body };
     const user = (try platform_user.read(&r, plat_buf, id_buf)) orelse return error.EndOfStream;
@@ -3820,6 +5904,11 @@ pub fn parseVendingMachineAccess(body: []const u8, plat_buf: []u8, id_buf: []u8)
     return .{ .user = user, .x = x, .y = y, .z = z, .removing = removing };
 }
 
+/// zdtd's own trade request body, **not a stock package**: traderEntity i32 |
+/// item u16 | qty u16 | side u8. Stock has no single "trade" package; a buy or
+/// sell rides the inventory transaction path. This feeds Game.handleTrade
+/// directly and is never framed with a stock package name, so it cannot reach
+/// or come from a client.
 pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, side: u8) ![]u8 {
     if (buf.len < 9) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], trader_entity, .little);
@@ -3846,6 +5935,12 @@ pub const TraderDataToServer = struct {
     trader_data: []const u8 = &.{},
 };
 
+/// Read side of the stock NetPackageTraderData ToServer header documented
+/// above (asm.il 843046; RE protocol-packages.md, Process IL=50). The
+/// discriminant picks the length: an entity target is 1 + 4 + 1 bytes, a tile
+/// entity 1 + 12 + 1, and the TraderData::Write body follows only when
+/// `hasTraderData` is set. That body is returned as an unparsed slice; the
+/// caller decides what of it, if anything, it trusts.
 pub fn parseTraderDataToServer(body: []const u8) !TraderDataToServer {
     if (body.len < 6) return error.EndOfStream;
     const is_entity = body[0] != 0;
@@ -3882,6 +5977,16 @@ pub const PickupBlock = struct {
     player_id: i32 = 0,
 };
 
+/// Read side of NetPackagePickupBlock (RE inventories/netpackage-bodies.md,
+/// read asm.il 20 / write IL=22): `blockPos` (StreamUtils Vector3i) | `rawData`
+/// u32 | `playerId` i32 | `persistentPlayerId` (PlatformUserIdentifier, null =
+/// one 0 byte). Same order buildPickupBlockBody writes.
+///
+/// The platform identity is handed back through `sent` rather than dropped
+/// because the C2S handler needs it: stock runs both ValidEntityIdForSender on
+/// `playerId` and ValidUserIdForSender on the identity, and a parser that
+/// consumed the identity silently would leave the second check with nothing to
+/// compare (c2s/blocks.zig).
 pub fn parsePickupBlockBody(body: []const u8, plat_buf: []u8, id_buf: []u8, sent: *?platform_user.Id) !PickupBlock {
     if (body.len < 16) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -3896,6 +6001,10 @@ pub fn parsePickupBlockBody(body: []const u8, plat_buf: []u8, id_buf: []u8, sent
     return p;
 }
 
+/// NetPackagePickupBlock (RE inventories/netpackage-bodies.md, write IL=22):
+/// `blockPos` (StreamUtils Vector3i) | `rawData` u32 | `playerId` i32 |
+/// `persistentPlayerId` (PlatformUserIdentifier ToStream; null = one 0 byte,
+/// which is what a dedi with no platform identity writes).
 pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(x);
@@ -3933,6 +6042,10 @@ pub const SetBlockTexture = struct {
     channel: u8 = 0,
 };
 
+/// Read side of NetPackageSetBlockTexture (RE
+/// inventories/netpackage-bodies.md, write IL=24): `blockPos` (StreamUtils
+/// Vector3i) | `blockFace` u8 | `idx` u8 | `playerIdThatChanged` i32 |
+/// `channel` u8, which is the 19-byte minimum checked here.
 pub fn parseSetBlockTexture(body: []const u8) !SetBlockTexture {
     if (body.len < 19) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -3947,6 +6060,9 @@ pub fn parseSetBlockTexture(body: []const u8) !SetBlockTexture {
     };
 }
 
+/// NetPackageSetBlockTexture (RE inventories/netpackage-bodies.md, write
+/// IL=24): `blockPos` (StreamUtils Vector3i = three i32) | `blockFace` u8 |
+/// `idx` u8 | `playerIdThatChanged` i32 | `channel` u8.
 pub fn buildSetBlockTextureBody(buf: []u8, t: SetBlockTexture) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(t.x);
@@ -3970,6 +6086,9 @@ pub const VehicleDataSync = struct {
     data: []const u8,
 };
 
+/// NetPackageVehicleDataSync (RE inventories/netpackage-bodies.md, write
+/// IL=27): `senderId` i32 | `vehicleId` i32 | `syncFlags` u16 | `entityData`
+/// length u16 + bytes.
 pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
     if (body.len < 12) return error.EndOfStream;
     const data_len = std.mem.readInt(u16, body[10..12], .little);
@@ -3986,7 +6105,14 @@ pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
 /// never be confused with a stock body carrying the same package name.
 pub const vehicle_control_len: usize = 13;
 
-/// Vehicle control: entity_id i32, op u8 (0=enter,1=exit,2=drive), throttle f32, steer f32
+/// Vehicle control, **not a stock layout**: entity_id i32 | op u8 (0=enter,
+/// 1=exit, 2=drive) | throttle f32 | steer f32, exactly `vehicle_control_len`
+/// bytes. Stock has no C2S package of this shape; its vehicle placement rides
+/// NetPackageVehicleSpawn (entityType i32 | pos | rot | ItemValue |
+/// entityThatPlaced i32, RE inventories/netpackage-bodies.md). The dispatch in
+/// c2s/misc.zig gates on the exact 13-byte length, so a stock body cannot be
+/// decoded here; it falls through unhandled, since zdtd does not implement
+/// client-requested vehicle spawning (docs/DIVERGENCES.md).
 pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, throttle: f32, steer: f32 } {
     if (body.len < 5) return error.EndOfStream;
     const eid = std.mem.readInt(i32, body[0..4], .little);
@@ -4001,6 +6127,12 @@ pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, t
     return .{ .entity_id = eid, .op = op, .throttle = throttle, .steer = steer };
 }
 
+/// zdtd's own vehicle control body, **not a stock layout**: entityId i32 | op u8
+/// | throttle f32 | steer f32, fixed at vehicle_control_len bytes. Stock's
+/// NetPackageVehicleSpawn (RE write IL=24) is entityType i32 | pos Vector3 |
+/// rot Vector3 | ItemValue | entityThatPlaced i32, which is a different shape
+/// and a different purpose. The C2S handler distinguishes them by the exact
+/// 13-byte length, so a real stock body can never be read as this one.
 pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32, steer: f32) ![]u8 {
     if (buf.len < 13) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], entity_id, .little);
@@ -4008,6 +6140,70 @@ pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32,
     std.mem.writeInt(u32, buf[5..9], @as(u32, @bitCast(throttle)), .little);
     std.mem.writeInt(u32, buf[9..13], @as(u32, @bitCast(steer)), .little);
     return buf[0..13];
+}
+
+/// One decoded NetPackageItemActionEffects body. The two Vector3 are optional
+/// on the wire (a presence bool covers both); `wire_len` is the consumed
+/// length so a relay forwards exactly what stock writes.
+pub const ItemActionEffects = struct {
+    entity_id: i32 = 0,
+    slot_idx: u8 = 0,
+    action_idx: u8 = 0,
+    firing_state: u8 = 0,
+    user_data: i32 = 0,
+    wire_len: usize = 0,
+};
+
+/// NetPackageItemActionEffects::read (IL=39,
+/// il/netpackages-v3.2.0/NetPackageItemActionEffects_il.txt:33): entityId i32
+/// | slotIdx u8 | actionIdx u8 | firingState u8 | a bool that, when set, is
+/// followed by startPos and direction as Vector3 (write IL=52 sets it only
+/// when either vector is non-zero, so a false here means both are zero).
+pub fn parseItemActionEffects(body: []const u8) binary.ReadError!ItemActionEffects {
+    var r: binary.Reader = .{ .data = body };
+    const eid = try r.readI32();
+    const slot = try r.readByte();
+    const action = try r.readByte();
+    const firing = try r.readByte();
+    if (try r.readBool()) {
+        var i: usize = 0;
+        while (i < 6) : (i += 1) _ = try r.readF32();
+    }
+    const user_data = try r.readI32();
+    return .{
+        .entity_id = eid,
+        .slot_idx = slot,
+        .action_idx = action,
+        .firing_state = firing,
+        .user_data = user_data,
+        .wire_len = r.pos,
+    };
+}
+
+/// One decoded NetPackageWireToolActions body. `operation` is the stock
+/// `WireActions` enum byte; `entity_id` is the player the client claims is
+/// holding the wire tool, which the server checks against the sender.
+pub const WireToolActions = struct {
+    operation: u8 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    entity_id: i32 = 0,
+};
+
+/// NetPackageWireToolActions::read (IL=13,
+/// il/netpackages-v3.2.0/NetPackageWireToolActions_il.txt:17):
+/// currentOperation u8 | tileEntityPosition Vector3i | entityID i32.
+/// GetLength() IL=2 returns 12, but the read is 17 bytes; the length hint is
+/// the pool size class, not the body size, so trust the read.
+pub fn parseWireToolActions(body: []const u8) binary.ReadError!WireToolActions {
+    var r: binary.Reader = .{ .data = body };
+    const op = try r.readByte();
+    const x = try r.readI32();
+    const y = try r.readI32();
+    const z = try r.readI32();
+    const eid = try r.readI32();
+    return .{ .operation = op, .x = x, .y = y, .z = z, .entity_id = eid };
 }
 
 /// Stock NetPackageWireActions SetParent body (asm.il:842779): op=0,
@@ -4037,10 +6233,23 @@ test "chunk body layout size and fields" {
     try std.testing.expectEqual(@as(i32, 1), p.cx);
     try std.testing.expectEqual(@as(i32, -2), p.cz);
     try std.testing.expectEqual(@as(u8, 70), p.heights[5 + 5 * 16]);
+    // The envelope's three i16 are cx, cy, cz. The parser reads cx and cz by
+    // offset, so it would agree with the writer even if both moved together;
+    // read the raw words instead. Layout: overwrite bool | cx | cy | cz | len.
+    try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[1..3], .little));
+    try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, body[3..5], .little)); // cy
+    try std.testing.expectEqual(@as(i16, -2), std.mem.readInt(i16, body[5..7], .little));
+    try std.testing.expectEqual(@as(i32, chunk_body_size), std.mem.readInt(i32, body[7..11], .little));
+
     // bare payload still parses
     const bare = try buildChunkPayload(buf[0..chunk_body_size], 3, 4, &heights);
     const p2 = try parseChunkBody(bare);
     try std.testing.expectEqual(@as(i32, 3), p2.cx);
+    try std.testing.expectEqual(@as(i32, 4), p2.cz);
+    // Payload head is cx | cz | ydim as i32, ydim distinct from both coords.
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, bare[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, bare[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 256), std.mem.readInt(i32, bare[8..12], .little));
 }
 
 test "console cmd parse + client reply roundtrip" {
@@ -4133,9 +6342,19 @@ pub const PlayerLogin = struct {
 
 /// Parse a full login body. `name_buf` receives the raw (unsanitized) name; the
 /// caller still owns sanitizing it before it reaches any operator surface.
+/// NetPackagePlayerLogin (RE inventories/netpackage-bodies.md, write IL=52):
+/// `playerName` string | native identity (ToStream + auth-token string) |
+/// crossplatform identity (ToStream + auth-token string) | `version` string |
+/// `compVersion` string | `discordUserId` u64. The two auth tokens are skipped:
+/// zdtd runs EAC-off and validates nothing platform-side, so reading them would
+/// only be theatre.
 pub fn parsePlayerLogin(body: []const u8, name_buf: []u8) binary.ReadError!PlayerLogin {
     var r: binary.Reader = .{ .data = body };
-    var out: PlayerLogin = .{ .name = try r.readString(name_buf) };
+    // Stock writes playerName as an unbounded .NET string. Keep what fits and
+    // consume the rest: failing here would abandon the whole body, and the
+    // caller's version check and player-slot cap ride on a successful parse.
+    // A split codepoint at the cut is dropped by sanitizePlayerName.
+    var out: PlayerLogin = .{ .name = try r.readStringTruncating(name_buf) };
     var plat_buf: [platform_user.max_platform_len]u8 = undefined;
     var id_buf: [platform_user.max_id_len]u8 = undefined;
 
@@ -4177,6 +6396,11 @@ pub fn buildAllyRequestBody(
     return w.written();
 }
 
+/// Read side of NetPackageAllyRequest (RE inventories/netpackage-bodies.md,
+/// write IL=18): `source` | `target` (both PlatformUserIdentifier ToStream) |
+/// `addAlly` bool. docs/wire/PACKAGES.md shows only `ReadBoolean;` for this
+/// package because the two identity reads go through a static FromStream that
+/// the extractor does not follow; the note at the top of that file covers it.
 pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
     var r: binary.Reader = .{ .data = body };
     var plat_buf: [platform_user.max_platform_len]u8 = undefined;
@@ -4238,11 +6462,24 @@ pub const WaypointInvite = struct {
 pub const max_waypoint_str: usize = 256;
 
 fn copyWaypointStr(dst: *[max_waypoint_str]u8, src: []const u8) error{Overflow}!u8 {
-    if (src.len > max_waypoint_str) return error.Overflow;
+    // The returned length is a u8 and the cap is 256, so the cap itself does
+    // not fit: reject at >= (not >) or the @intCast below traps on a
+    // client-controlled 256-byte string.
+    if (src.len >= max_waypoint_str) return error.Overflow;
     @memcpy(dst[0..src.len], src);
     return @intCast(src.len);
 }
 
+/// Read side of NetPackageWaypoint (RE protocol-packages.md 5.7, write/read
+/// IL=17, Waypoint version 7 with every version gate open): `pos` Vector3i |
+/// `icon` string | `name` AuthoredText (present bool, then text + identity) |
+/// `bTracked` | `hiddenOnCompass` | `ownerId` identity |
+/// `lastKnownPositionEntityId` i32 | `bIsAutoWaypoint` | `bUsingLocalizationId`
+/// | `inviterEntityId` i32 | `hiddenOnMap` | `lastKnownPositionEntityType` i32,
+/// then `inviteMode` u8 and a second `inviterEntityId` i32 outside the Waypoint.
+///
+/// Both client-controlled strings go through copyWaypointStr, which rejects a
+/// length that would not fit its u8 counter.
 pub fn parseWaypointInvite(body: []const u8) (binary.ReadError || error{Overflow})!WaypointInvite {
     var r: binary.Reader = .{ .data = body };
     var out: WaypointInvite = .{ .pos = .{ 0, 0, 0 } };
@@ -4273,8 +6510,8 @@ pub fn parseWaypointInvite(body: []const u8) (binary.ReadError || error{Overflow
 }
 
 /// Rebuild the relay body. Matches the server adjustments in
-/// WaypointInviteServer: bTracked=false, waypoint.inviterEntityId = inviter
-/// (Setup), package inviterEntityId = inviter.
+/// NetPackageWaypointInvite (RE: WaypointInviteServer Setup). bTracked=false,
+/// waypoint.inviterEntityId = inviter, package inviterEntityId = inviter.
 pub fn buildWaypointInviteBody(buf: []u8, wp: *const WaypointInvite, inviter: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(wp.pos[0]);
@@ -4300,6 +6537,32 @@ pub fn buildWaypointInviteBody(buf: []u8, wp: *const WaypointInvite, inviter: i3
     return w.written();
 }
 
+pub const WaypointEntry = struct {
+    entity_id: i32,
+    x: f32,
+    y: f32,
+    z: f32,
+};
+
+/// Stock `NetPackageEntityWaypointList` (write IL=39): listType i16
+/// (`eWayPointListType` Vehicle=0 / Drone=1) then a count-prefixed list of
+/// (entityId i32, position Vector3 as 3xf32). The server ships the owner's
+/// vehicles to a remote player
+/// (`VehicleManager.UpdateVehicleWaypointsForPlayer` IL=69, channel 192) so
+/// their map shows where they parked.
+pub fn buildEntityWaypointListBody(buf: []u8, list_type: i16, entries: []const WaypointEntry) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI16(list_type);
+    try w.writeI32(@intCast(entries.len));
+    for (entries) |e| {
+        try w.writeI32(e.entity_id);
+        try w.writeF32(e.x);
+        try w.writeF32(e.y);
+        try w.writeF32(e.z);
+    }
+    return w.written();
+}
+
 test "waypoint invite parses and rebuilds round-trip" {
     var src: [512]u8 = undefined;
     var w: binary.Writer = .{ .buf = &src };
@@ -4311,10 +6574,13 @@ test "waypoint invite parses and rebuilds round-trip" {
     try w.writeString("my marker");
     try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000000" });
     try w.writeBool(true); // bTracked
-    try w.writeBool(false); // hiddenOnCompass
+    // hiddenOnCompass true, and isAuto / usingLocId differ: all three were
+    // false, which matched the literal false the builder writes beside them
+    // and made those swaps emit identical bytes.
+    try w.writeBool(true); // hiddenOnCompass
     try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
     try w.writeI32(-1);
-    try w.writeBool(false); // isAuto
+    try w.writeBool(true); // isAuto
     try w.writeBool(false); // usingLocId
     try w.writeI32(7); // waypoint inviterEntityId
     try w.writeBool(true); // hiddenOnMap
@@ -4332,7 +6598,12 @@ test "waypoint invite parses and rebuilds round-trip" {
     try std.testing.expectEqualStrings("Steam", author.platform);
     try std.testing.expectEqualStrings("76561198000000000", author.id);
     try std.testing.expect(wp.b_tracked);
-    try std.testing.expect(!wp.hidden_on_compass);
+    try std.testing.expect(wp.hidden_on_compass);
+    // isAuto and usingLocId were both unread and both false, matching the
+    // literal false the builder writes nearby; distinct values plus these two
+    // assertions make that run observable.
+    try std.testing.expect(wp.is_auto);
+    try std.testing.expect(!wp.using_loc_id);
     try std.testing.expectEqual(@as(i32, 2), wp.last_known_entity_type);
     try std.testing.expectEqual(@as(u8, 0), wp.invite_mode);
     try std.testing.expectEqual(@as(i32, 7), wp.inviter_entity_id);
@@ -4352,17 +6623,32 @@ test "waypoint invite parses and rebuilds round-trip" {
     var ri: [platform_user.max_id_len]u8 = undefined;
     const ra: platform_user.Id = (try platform_user.read(&rd, &rp, &ri)).?;
     try std.testing.expectEqualStrings("76561198000000000", ra.id);
-    try std.testing.expect(!try rd.readBool()); // bTracked cleared
-    try std.testing.expect(!try rd.readBool()); // hiddenOnCompass
+    try std.testing.expect(!try rd.readBool()); // bTracked cleared on relay
+    try std.testing.expect(try rd.readBool()); // hiddenOnCompass echoed
     try std.testing.expect((try platform_user.read(&rd, &rp, &ri)) != null);
     try std.testing.expectEqual(@as(i32, -1), try rd.readI32());
-    try std.testing.expect(!try rd.readBool());
-    try std.testing.expect(!try rd.readBool());
+    try std.testing.expect(try rd.readBool()); // isAuto echoed
+    try std.testing.expect(!try rd.readBool()); // usingLocId echoed
     try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
     try std.testing.expect(try rd.readBool());
     try std.testing.expectEqual(@as(i32, 2), try rd.readI32());
     try std.testing.expectEqual(@as(u8, 0), try rd.readByte());
     try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
+}
+
+test "a waypoint icon at the cap fails closed instead of trapping the cast" {
+    // Same shape as the sound clip: the stored length is a u8 while
+    // max_waypoint_str is 256, so a client-sent 256-byte icon reached
+    // @intCast(256) -> u8. It must be rejected, not panic.
+    var src: [1024]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &src };
+    try w.writeI32(1);
+    try w.writeI32(2);
+    try w.writeI32(3);
+    const long = [_]u8{'i'} ** max_waypoint_str;
+    try w.writeString(&long);
+    try w.writeBool(false); // no name
+    try std.testing.expectError(error.Overflow, parseWaypointInvite(w.written()));
 }
 
 /// Stock `NetPackagePartyQuestChange::read` (asm.il): senderEntityID i32 |
@@ -4376,6 +6662,9 @@ pub const PartyQuestChange = struct {
     quest_code: i32,
 };
 
+/// Read side of NetPackagePartyQuestChange (RE
+/// inventories/netpackage-bodies.md, write IL=20): `senderEntityID` i32 |
+/// `objectiveIndex` u8 | `isComplete` bool | `questCode` i32.
 pub fn parsePartyQuestChange(body: []const u8) binary.ReadError!PartyQuestChange {
     var r: binary.Reader = .{ .data = body };
     return .{
@@ -4430,6 +6719,30 @@ test "player login body parses stock field order" {
     try std.testing.expectEqualStrings("V 3.10", login.compVersion());
     // InternalId prefers the crossplatform account.
     try std.testing.expectEqualStrings("EOS", login.internalId().get().?.platform);
+}
+
+test "player login with a name longer than the buffer still parses" {
+    // Stock writes playerName unbounded. An over-long name used to fail the
+    // whole parse, and the caller runs its version check and player-slot cap
+    // only on the success branch, so such a client joined ungated.
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    const long_name = "0123456789012345678901234567890123456789ABCDEF";
+    try w.writeString(long_name);
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
+    try w.writeString("native-ticket");
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
+    try w.writeString("eos-jwt");
+    try w.writeString("V 3.2.0");
+    try w.writeString("V 3.2.0");
+    try w.writeU64(7);
+
+    var name_buf: [32]u8 = undefined;
+    const login = try parsePlayerLogin(w.written(), &name_buf);
+    try std.testing.expectEqualStrings(long_name[0..32], login.name);
+    // The fields behind the name still land, so the version gate can run.
+    try std.testing.expectEqualStrings("V 3.2.0", login.compVersion());
+    try std.testing.expectEqual(@as(u64, 7), login.discord_user_id);
 }
 
 test "player login with both identities null still yields the name" {
@@ -4564,9 +6877,14 @@ pub const StockInvTx = struct {
     entry_n: u8 = 0,
 };
 
-/// Parse a stock InventoryTransaction.Write body. Returns error.EndOfStream on
-/// truncation and error.InvalidArgument when the layout is not stock-shaped
-/// (callers fall back to the native body).
+/// Read side of the stock NetPackageInventoryTransactionRequest body, one
+/// InventoryTransaction.Write (RE inventories/netpackage-bodies.md, Write
+/// IL=75): a nested op list of count | count | `Key` Vector3i | `InitialHash`
+/// i32 | `FinalHash` i32 | ops count | InventoryOperation.Write each.
+///
+/// Returns error.EndOfStream on truncation and error.InvalidArgument when the
+/// layout is not stock-shaped, which is how c2s/inv.zig knows to fall back to
+/// the compact zdtd body (parseInvTxRequest).
 pub fn parseStockInvTx(body: []const u8) !StockInvTx {
     var r: binary.Reader = .{ .data = body };
     var out: StockInvTx = .{};
@@ -4746,7 +7064,11 @@ test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
     var sent2: ?platform_user.Id = null;
     const p = try parsePickupBlockBody(out, &plat, &id, &sent2);
     try std.testing.expect(sent2 == null);
+    // Whole position: y and z had nothing reading them back, so a swap in the
+    // triple would pick up a different block than the client asked for.
     try std.testing.expectEqual(@as(i32, 7), p.x);
+    try std.testing.expectEqual(@as(i32, 8), p.y);
+    try std.testing.expectEqual(@as(i32, 9), p.z);
     try std.testing.expectEqual(@as(u32, 0x1234), p.raw);
     try std.testing.expectEqual(@as(i32, 42), p.player_id);
 }
@@ -4762,7 +7084,11 @@ test "parseSetBlockTexture reads the stock paint body" {
     try w.writeI32(-1); // dedi rebroadcast playerIdThatChanged
     try w.writeByte(0); // channel
     const t = try parseSetBlockTexture(w.written());
+    // Whole position: only x was read back, so y and z could swap unnoticed
+    // and paint would land on a different block.
     try std.testing.expectEqual(@as(i32, 5), t.x);
+    try std.testing.expectEqual(@as(i32, 60), t.y);
+    try std.testing.expectEqual(@as(i32, -8), t.z);
     try std.testing.expectEqual(@as(u8, 3), t.face);
     try std.testing.expectEqual(@as(u8, 17), t.idx);
     try std.testing.expectEqual(@as(i32, -1), t.player_id);
@@ -4774,6 +7100,16 @@ test "parseSetBlockTexture reads the stock paint body" {
     const t2 = try parseSetBlockTexture(built);
     try std.testing.expectEqual(@as(i32, -8), t2.z);
     try std.testing.expectEqual(@as(u8, 17), t2.idx);
+    // Raw bytes, not only the round-trip: build and parse can move a field
+    // together and still agree with each other, which is what the swap audit
+    // reported here after the parse-side assertions were added.
+    try std.testing.expectEqual(@as(i32, 5), std.mem.readInt(i32, built[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 60), std.mem.readInt(i32, built[4..8], .little));
+    try std.testing.expectEqual(@as(i32, -8), std.mem.readInt(i32, built[8..12], .little));
+    try std.testing.expectEqual(@as(u8, 3), built[12]); // face
+    try std.testing.expectEqual(@as(u8, 17), built[13]); // idx
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, built[14..18], .little));
+    try std.testing.expectEqual(@as(u8, 0), built[18]); // channel
     // Truncated at every boundary is EndOfStream.
     var cut: usize = 0;
     while (cut < 19) : (cut += 1) {
@@ -4801,11 +7137,139 @@ test "parseItemReload reads the single entityId" {
 /// NetEntityDistribution.SendPacketToTrackedPlayersAndTrackedEntity, so a
 /// verbatim relay to the other clients matches the intent (the owner already
 /// ragdolled locally).
+/// `AnimParamData/ValueTypes` (AnimParamData_ValueTypes.il.txt:3). The value
+/// width follows the type: Bool and Trigger read a bool, Float and DataFloat a
+/// f32, Int an i32 (`CreateFromBinary` switch, AnimParamData.il.txt:62).
+pub const anim_param_bool: u8 = 0;
+pub const anim_param_trigger: u8 = 1;
+pub const anim_param_float: u8 = 2;
+pub const anim_param_int: u8 = 3;
+pub const anim_param_data_float: u8 = 4;
+
+/// `NetPackageEntityAnimationData::read` (IL=22,
+/// NetPackageEntityAnimationData.il.txt:58): the `NetPackageEntityTargeted`
+/// base `entityId` i32, a count i32, then that many `AnimParamData` entries of
+/// `hash` i32 + `type` u8 + a type-sized value. An unknown type throws in
+/// stock ("Invalid Value Type:", :82), so it is a parse error here too.
+///
+/// Only the id and the consumed length are returned: the parameters are an
+/// opaque client animation list the server does not act on, but the length is
+/// what lets the relay trim instead of forwarding appended bytes.
+pub const AnimationData = struct {
+    entity_id: i32 = 0,
+    param_count: i32 = 0,
+    wire_len: usize = 0,
+};
+
+/// Read side of the layout above (stock
+/// `NetPackageEntityAnimationData::read` IL=22,
+/// NetPackageEntityAnimationData.il.txt:58, over the
+/// `NetPackageEntityTargeted::read` base and `AnimParamData::CreateFromBinary`
+/// at AnimParamData.il.txt:54).
+pub fn parseAnimationData(body: []const u8) binary.ReadError!AnimationData {
+    var r: binary.Reader = .{ .data = body };
+    var out: AnimationData = .{ .entity_id = try r.readI32() };
+    out.param_count = try r.readI32();
+    if (out.param_count < 0) return error.EndOfStream;
+    var i: i32 = 0;
+    while (i < out.param_count) : (i += 1) {
+        _ = try r.readI32(); // parameter name hash
+        switch (try r.readByte()) {
+            anim_param_bool, anim_param_trigger => _ = try r.readBool(),
+            anim_param_float, anim_param_data_float => _ = try r.readF32(),
+            anim_param_int => _ = try r.readI32(),
+            else => return error.EndOfStream, // stock throws on an unknown type
+        }
+    }
+    out.wire_len = r.pos;
+    return out;
+}
+
+test "animation data parses the typed parameter list" {
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(107);
+    try w.writeI32(3);
+    try w.writeI32(0x1111);
+    try w.writeByte(anim_param_bool);
+    try w.writeBool(true);
+    try w.writeI32(0x2222);
+    try w.writeByte(anim_param_float);
+    try w.writeF32(1.5);
+    try w.writeI32(0x3333);
+    try w.writeByte(anim_param_int);
+    try w.writeI32(-9);
+    const got = try parseAnimationData(w.written());
+    try std.testing.expectEqual(@as(i32, 107), got.entity_id);
+    try std.testing.expectEqual(@as(i32, 3), got.param_count);
+    // 4 id + 4 count + bool(4+1+1) + float(4+1+4) + int(4+1+4) = 32
+    try std.testing.expectEqual(@as(usize, 32), got.wire_len);
+    try std.testing.expectEqual(w.written().len, got.wire_len);
+
+    // Trailing bytes do not extend the parsed length.
+    var padded: [96]u8 = undefined;
+    const n = w.written().len;
+    @memcpy(padded[0..n], w.written());
+    @memset(padded[n..][0..5], 0x5a);
+    try std.testing.expectEqual(n, (try parseAnimationData(padded[0 .. n + 5])).wire_len);
+
+    // An unknown value type is a parse error, as it is in stock.
+    var bad: [16]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &bad };
+    try bw.writeI32(107);
+    try bw.writeI32(1);
+    try bw.writeI32(0x4444);
+    try bw.writeByte(9);
+    try std.testing.expectError(error.EndOfStream, parseAnimationData(bw.written()));
+}
+
 pub const RagdollInvoke = struct {
     entity_id: i32,
     flags: u8,
+    /// End of the stock body. The flag-gated tails make the length variable,
+    /// so a relay must forward `body[0..wire_len]` and not the raw slice.
+    wire_len: usize = 0,
 };
 
+/// NetPackagePlayerLaserSight (read IL=16): entityId i32 | laserSightActive
+/// bool | laserSightPosition Vector3 **only when active** (the read branches
+/// on the flag at IL_001E, so an inactive body is 5 bytes, not 17). Stock's
+/// ProcessPackage (IL=70) re-sends the body from the server to every client
+/// except the sender's own entity, so a player sees a mate's laser dot.
+pub const LaserSight = struct {
+    entity_id: i32,
+    active: bool,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    /// End of the stock body; the length is variable, so a relay must trim to
+    /// it rather than forward the raw slice.
+    wire_len: usize = 0,
+};
+
+/// Read side of NetPackagePlayerLaserSight (read IL=16), laid out on
+/// `LaserSight` above. Server-side the body is relayed, so nothing past the
+/// ownership check reads the position fields.
+pub fn parseLaserSight(body: []const u8) binary.ReadError!LaserSight {
+    var r: binary.Reader = .{ .data = body };
+    var out: LaserSight = .{
+        .entity_id = try r.readI32(),
+        .active = try r.readBool(),
+    };
+    if (out.active) {
+        out.x = try r.readF32();
+        out.y = try r.readF32();
+        out.z = try r.readF32();
+    }
+    out.wire_len = r.pos;
+    return out;
+}
+
+/// Read side of NetPackageEntityRagdoll, whose layout and conditional tails are
+/// documented on RagdollInvoke above (RE protocol-packages.md, write IL=59).
+/// Only `entityId` and `flags` are returned; the flagged tails are consumed so
+/// a truncated body still errors, but the server relays the bytes verbatim
+/// rather than acting on the force vectors.
 pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -4822,7 +7286,36 @@ pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
     }
     if ((flags & 2) != 0) _ = try r.readByte(); // mode
     if ((flags & 4) != 0) _ = try r.readByte(); // state
-    return .{ .entity_id = entity_id, .flags = flags };
+    return .{ .entity_id = entity_id, .flags = flags, .wire_len = r.pos };
+}
+
+test "laser sight position is conditional on the active flag" {
+    // An inactive body is 5 bytes: stock's read branches on the flag, so
+    // demanding the Vector3 rejected every laser-off packet as malformed and
+    // the off transition never reached the other clients.
+    var off_buf: [8]u8 = undefined;
+    var ow: binary.Writer = .{ .buf = &off_buf };
+    try ow.writeI32(107);
+    try ow.writeBool(false);
+    const off = try parseLaserSight(ow.written());
+    try std.testing.expectEqual(@as(i32, 107), off.entity_id);
+    try std.testing.expect(!off.active);
+    try std.testing.expectEqual(@as(usize, 5), off.wire_len);
+
+    var on_buf: [32]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &on_buf };
+    try w.writeI32(107);
+    try w.writeBool(true);
+    try w.writeF32(1.5);
+    try w.writeF32(2.5);
+    try w.writeF32(3.5);
+    const on = try parseLaserSight(w.written());
+    try std.testing.expect(on.active);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), on.y, 0.001);
+    try std.testing.expectEqual(@as(usize, 17), on.wire_len);
+
+    // A truncated active body is still an error, not a short read.
+    try std.testing.expectError(error.EndOfStream, parseLaserSight(on_buf[0..9]));
 }
 
 test "ragdoll invoke parses the stock body" {
@@ -4846,4 +7339,178 @@ test "ragdoll invoke parses the stock body" {
     const r = try parseRagdollInvoke(w.written());
     try std.testing.expectEqual(@as(i32, 77), r.entity_id);
     try std.testing.expectEqual(@as(u8, 0x07), r.flags);
+    // wire_len is where the stock body ends, so a relay can trim whatever a
+    // peer appended instead of fanning it out.
+    try std.testing.expectEqual(w.written().len, r.wire_len);
+
+    // A flags=0 body stops right after the flags byte, and trailing bytes do
+    // not extend it.
+    var short: [32]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &short };
+    try sw.writeI32(77);
+    try sw.writeByte(0);
+    try sw.writeBytes(&[_]u8{ 0xde, 0xad, 0xbe, 0xef });
+    const r2 = try parseRagdollInvoke(sw.written());
+    try std.testing.expectEqual(@as(usize, 5), r2.wire_len);
+    try std.testing.expect(r2.wire_len < sw.written().len);
+}
+
+test "variable-length relay bodies report where the stock body ends" {
+    // SoundAtPosition and ParticleEffect both carry client-sized strings, so
+    // body.len is not the stock length: a raw relay forwards appended bytes.
+    var buf: [128]u8 = undefined;
+    const snd = try buildSoundAtPosition(&buf, .{
+        .pos = .{ 1, 2, 3 },
+        .clip = blk: {
+            var c: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len;
+            @memcpy(c[0..4], "boom");
+            break :blk c;
+        },
+        .clip_len = 4,
+        .mode = 1,
+        .distance = 30,
+        .entity_id = 107,
+    });
+    const exact = try parseSoundAtPosition(snd);
+    try std.testing.expectEqual(snd.len, exact.wire_len);
+
+    var padded: [160]u8 = undefined;
+    @memcpy(padded[0..snd.len], snd);
+    @memset(padded[snd.len..][0..8], 0xaa);
+    const trailing = try parseSoundAtPosition(padded[0 .. snd.len + 8]);
+    try std.testing.expectEqual(snd.len, trailing.wire_len);
+    try std.testing.expectEqual(@as(i32, 107), trailing.entity_id);
+}
+
+test "id mapping body is name, then length, then bytes" {
+    // The join path builds this for the item NameIdMapping and nothing read it
+    // back: swapping the name string with the i32 length left the whole suite
+    // green while the body no longer matched `NetPackageIdMapping::read`
+    // (IL=13: ReadString, ReadInt32, ReadBytes).
+    var buf: [64]u8 = undefined;
+    const body = try buildIdMappingBody(&buf, "items", &.{ 7, 8, 9 });
+
+    var r: binary.Reader = .{ .data = body };
+    var name_buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("items", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 3), try r.readI32());
+    try std.testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, body[r.pos..]);
+}
+
+test "name id mapping payload is version, count, then id before name" {
+    // The join path built this inline in game/join.zig, where neither the
+    // mutant tool nor the coverage counts reach: swapping the id with the name
+    // left the whole suite green while the payload stopped matching
+    // `NameIdMapping::SaveToWriter` (IL=72: per entry Write(Int32) the id then
+    // Write(String) the name).
+    var buf: [128]u8 = undefined;
+    const payload = try buildNameIdMappingPayload(&buf, &.{
+        .{ .id = 65543, .name = "meleeToolStoneAxe" },
+        .{ .id = 65545, .name = "gunHandgunT1Pistol" },
+    });
+
+    var r: binary.Reader = .{ .data = payload };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // version
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // backfilled count
+    var name_buf: [32]u8 = undefined;
+    try std.testing.expectEqual(@as(i32, 65543), try r.readI32());
+    try std.testing.expectEqualStrings("meleeToolStoneAxe", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 65545), try r.readI32());
+    try std.testing.expectEqualStrings("gunHandgunT1Pistol", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+
+    // An empty map still carries a well-formed header.
+    const none = try buildNameIdMappingPayload(&buf, &.{});
+    try std.testing.expectEqual(@as(usize, 8), none.len);
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, none[4..8], .little));
+}
+
+test "explosion blob decodes radii at their stock scales" {
+    // ExplosionData (RE protocol-packages.md, Read IL=82): Duration is stored
+    // x10 and BlockRadius x20, EntityRadius and BlastPower are raw. The stock
+    // cop/feral explosion is radius_blocks 5, radius_entities 6, so a blob
+    // carrying 100 and 6 must decode to 5.0 and 6.0 blocks.
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeF32(10); // worldPos
+    try w.writeF32(70);
+    try w.writeF32(10);
+    try w.writeI32(10); // blockPos
+    try w.writeI32(70);
+    try w.writeI32(10);
+    try w.writeF32(0); // rotation quaternion
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+
+    var blob: [64]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &blob };
+    try bw.writeI16(3); // particleIndex
+    try bw.writeI16(25); // duration, x10 -> 2.5 s
+    try bw.writeI16(100); // blockRadius, x20 -> 5 blocks
+    try bw.writeI16(6); // entityRadius, raw -> 6 blocks
+    try bw.writeI16(1); // blastPower
+    try bw.writeF32(120); // blockDamage
+    try bw.writeF32(45); // entityDamage
+    const blob_bytes = bw.written();
+
+    try w.writeU16(@intCast(blob_bytes.len));
+    try w.writeBytes(blob_bytes);
+    try w.writeI32(42); // entityId
+    try w.writeF32(0); // delay
+
+    const ex = try parseExplosionInitiate(w.written());
+    try std.testing.expectEqual(@as(i32, 42), ex.entity_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), ex.radius, 0.001);
+    // The bug this pins: entity_radius was divided by 20 as well, so the stock
+    // value 6 arrived as 0.3 and the caller's 1 m floor swallowed it.
+    try std.testing.expectApproxEqAbs(@as(f32, 6), ex.entity_radius, 0.001);
+    try std.testing.expectEqual(@as(u16, 120), ex.block_damage);
+    try std.testing.expectApproxEqAbs(@as(f32, 45), ex.entity_damage, 0.001);
+}
+
+test "GameStats carries the config-driven creative, marker and camera values" {
+    // GameStats[18]/[20] come from GamePrefs 58 BuildCreate, [53] from the
+    // sandbox AirDropMarker, [34] from DropOnQuit, [66] from BiomeProgression
+    // and [68] from serverconfig CameraRestrictionMode. They used to be
+    // constants in the writer, so an operator could not turn creative mode,
+    // flight, the air-drop marker or the camera restriction on.
+    var on_buf: [512]u8 = undefined;
+    const on = try buildGameStatsBodyValues(&on_buf, .{
+        .build_create = true,
+        .air_drop_marker = false,
+        .drop_on_quit = 2,
+        .biome_progression = false,
+        .camera_restriction_mode = 1,
+    });
+    var off_buf: [512]u8 = undefined;
+    const off = try buildGameStatsBodyValues(&off_buf, .{});
+    // Same field set, so only the values differ: the writer's field order is
+    // the propertyList contract.
+    try std.testing.expectEqual(off.len, on.len);
+    try std.testing.expect(!std.mem.eql(u8, on, off));
+    // ScorePlayerKillMultiplier is 0 in both (GameModeSurvival::Init IL_0035).
+    const defaults = GameStatsValues{};
+    try std.testing.expectEqual(@as(i32, 0), defaults.score_player_kill_multiplier);
+    try std.testing.expectEqual(@as(i32, 0), defaults.drop_on_quit);
+    try std.testing.expect(!defaults.build_create);
+    try std.testing.expect(defaults.air_drop_marker);
+    try std.testing.expect(defaults.biome_progression);
+}
+
+test "localization body carries seq, total and the deflate blob" {
+    // NetPackageLocalization::write IL=0030: seqNr i32, totalParts i32,
+    // data length (i32, -1 for null) then the bytes.
+    var buf: [64]u8 = undefined;
+    const body = try buildLocalizationBody(&buf, 0, 1, &[_]u8{ 0x03, 0x00 });
+    try std.testing.expectEqualSlices(u8, &[_]u8{
+        0, 0, 0, 0, // seqNr
+        1, 0, 0, 0, // totalParts
+        2,    0,    0, 0, // data length
+        0x03, 0x00,
+    }, body);
+    const nul = try buildLocalizationBody(&buf, 2, 3, null);
+    try std.testing.expectEqualSlices(u8, &[_]u8{
+        2, 0, 0, 0, 3, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
+    }, nul);
 }

@@ -34,6 +34,16 @@ const CraftComplete = workstations.CraftComplete;
 /// GetStableHashCode("TEFeatureStorage"): matches Extensions.GetStableHashCode.
 pub const feature_hash_storage: i32 = 731446478;
 
+/// GetStableHashCode("TEFeatureSignable"): the composite module that carries a
+/// block's authored sign text (`<property class="TEFeatureSignable">` inside
+/// `CompositeFeatures`, blocks.xml). Same hash formula as the row above.
+pub const feature_hash_signable: i32 = 924617576;
+
+/// Longest authored sign text zdtd accepts from a client. Stock puts no limit
+/// on the wire (the XUI input caps the typed text), so an over-long claim fails
+/// closed (`error.Overflow`) instead of being truncated mid-string.
+pub const max_sign_text_bytes: usize = 1024;
+
 const unity_hash = @import("../assets/unity_hash.zig");
 
 fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
@@ -139,6 +149,54 @@ fn writeCompositeStoragePayload(
     return w.written();
 }
 
+/// Largest storage module body: `<54 slots x item value>` plus the header,
+/// grid, touch and lock fields. The item value is a fixed-shape save blob
+/// (~25 B) plus its nested mods, so this is a generous bound.
+pub const max_storage_feature_bytes: usize = 8192;
+
+/// Splice the server's clamped storage module into a copy of the client's
+/// composite body, so the echo carries every module the client sent - a
+/// writable crate's sign text and lock state included - the way stock's
+/// `TileEntityComposite::write` reserializes the whole TE it just read.
+///
+/// Only an in-place splice is possible here: the module keeps the received
+/// span, so this applies when the re-encoded module has exactly the received
+/// length (same grid, no preferences). Returns null when it does not fit, and
+/// the caller falls back to a storage-only body - which the client's modern
+/// reader accepts: it reads the modules the body declares and warns only about
+/// hashes the block no longer defines (TileEntityComposite::read IL=1227,
+/// version >= 17 branch at IL_0262; the "Skipping TE payload" path at
+/// IL_016C-IL_01FC is the legacy version < 17 branch).
+pub fn spliceStorageEcho(
+    buf: []u8,
+    body: []const u8,
+    parsed: *const ParsedTe,
+    cont: *const containers.Container,
+    resolve: ?stock_inv.TypeResolver,
+    ctx: ?*anyopaque,
+) ?[]u8 {
+    if (!parsed.found_storage or parsed.storage_blob_len == 0) return null;
+    if (parsed.storage_blob_off + parsed.storage_blob_len > body.len) return null;
+    if (body.len > buf.len) return null;
+    var scratch: [max_storage_feature_bytes]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &scratch };
+    writeStorageFeature(&w, cont, resolve, ctx) catch return null;
+    const blob = w.written();
+    if (blob.len != parsed.storage_blob_len) return null;
+    @memcpy(buf[0..body.len], body);
+    @memcpy(buf[parsed.storage_blob_off..][0..blob.len], blob);
+    return buf[0..body.len];
+}
+
+/// Stock world time for the start of `day`, matching WorldClock.worldTimeBits:
+/// 1000 units per hour, 24000 per day, day 1 is the epoch. The store keeps the
+/// touch as a day number (the granularity LootRespawnDays needs), so the
+/// hour-of-day part is zero. Day 0 means "never looted" and stays 0.
+fn worldTimeTouchedBits(touched_day: u32) u32 {
+    if (touched_day == 0) return 0;
+    return (touched_day - 1) *| 24000;
+}
+
 fn writeStorageFeature(
     w: *binary.Writer,
     cont: *const containers.Container,
@@ -161,7 +219,7 @@ fn writeStorageFeature(
     try w.writeU16(size_x);
     try w.writeU16(size_y);
     try w.writeBool(cont.touched);
-    try w.writeU32(0); // worldTimeTouched
+    try w.writeU32(worldTimeTouchedBits(cont.touched_day));
     try w.writeBool(cont.player_storage);
 
     const count: i16 = @intCast(@min(n, containers.max_container_slots));
@@ -205,10 +263,26 @@ pub const ParsedTe = struct {
     item_count: usize = 0,
     size_x: u16 = 0,
     size_y: u16 = 0,
+    touched: bool = false,
+    /// The composite carried a TEFeatureStorage module. A composite without
+    /// one is not a storage TE (a sign body used to parse "successfully" and
+    /// created a phantom 8-slot container at the sign).
+    found_storage: bool = false,
+    /// Byte span of the storage module's body inside the parsed `body` (0/0
+    /// when absent). `spliceStorageEcho` writes the server's clamped module
+    /// back over this exact span.
+    storage_blob_off: usize = 0,
+    storage_blob_len: usize = 0,
+    /// Stock `worldTimeTouched`: the world time the container was last looted.
+    /// TEFeatureStorage.UpdateTick derives LootRespawnDays from it, so it is
+    /// state and not a formality.
+    world_time_touched: u32 = 0,
 };
 
-/// Parse NetPackageTileEntity body if stock composite+storage; error if ZTE1 or unknown.
-pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
+/// Parse NetPackageTileEntity body if stock composite+storage; error if ZTE1,
+/// unknown, or a valid composite with no TEFeatureStorage module (that is not a
+/// storage TE: a sign body would otherwise create a phantom container).
+pub fn parseStorageTeBody(body: []const u8) (binary.ReadError || error{NotStorageTe})!ParsedTe {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedTe = .{};
     const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
@@ -246,7 +320,13 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
         const feat_payload_len = feat_size - 4;
         if (pr.remaining() < feat_payload_len) return error.EndOfStream;
         const feat_start = pr.pos;
-        if (hash == feature_hash_storage or hash == unity_hash.getStableHashCode("TEFeatureStorage")) {
+        if (hash == feature_hash_storage) {
+            out.found_storage = true;
+            // `pr.data` is the payload slice of `body`, so the module body's
+            // offset in the whole NetPackageTileEntity body is the base delta
+            // plus the sub-reader position.
+            out.storage_blob_off = (@intFromPtr(pr.data.ptr) - @intFromPtr(body.ptr)) + pr.pos;
+            out.storage_blob_len = feat_payload_len;
             try parseStorageFeature(&pr, &out);
         } else {
             pr.pos += feat_payload_len;
@@ -256,6 +336,90 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
         if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
         if (consumed > feat_payload_len) return error.InvalidString;
     }
+    if (!out.found_storage) return error.NotStorageTe;
+    return out;
+}
+
+/// A composite TE that carries `TEFeatureSignable` (a sign, or a writable
+/// crate that also has storage). Filled by `parseSignableTeBody`.
+pub const ParsedSignTe = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    /// AuthoredText present; 0 means the client cleared the sign.
+    has_text: bool = false,
+    text_len: usize = 0,
+    /// The same composite carries TEFeatureStorage: that leg owns the body
+    /// (it must still apply the item list), so the sign leg stands down.
+    has_storage: bool = false,
+};
+
+pub const ParseSignTeError = binary.ReadError || error{ NotSignableTe, Overflow };
+
+/// Parse a NetPackageTileEntity body whose composite carries
+/// `TEFeatureSignable`. `error.NotSignableTe` when the payload is a valid
+/// composite without that module. `text_buf` receives the authored UTF-8 text;
+/// a text longer than the buffer fails closed with `error.Overflow` (stock
+/// truncates nothing, and the echo relays the client's own bytes).
+pub fn parseSignableTeBody(body: []const u8, text_buf: []u8) ParseSignTeError!ParsedSignTe {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedSignTe = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+
+    // chunkPos + composite size marker (inclusive) + blockID, then the owner
+    // PlatformUserIdentifier and the module list (TileEntityComposite::write).
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    const outer_size = try pr.readU32();
+    if (outer_size < 4 or outer_size - 4 > pr.remaining()) return error.InvalidString;
+    const payload_block_id = try pr.readI32();
+    if (out.block_id == 0) out.block_id = payload_block_id;
+    const owner_tag = try pr.readByte();
+    if (owner_tag != 0) {
+        _ = try pr.readByte();
+        try pr.skipString();
+        try pr.skipString();
+    }
+    const mod_n = try pr.readByte();
+    var found = false;
+    var mi: u8 = 0;
+    while (mi < mod_n) : (mi += 1) {
+        const hash = try pr.readI32();
+        const feat_size = try pr.readU32();
+        // feat_size includes its own 4-byte marker (stock FinalizeSizeMarker).
+        if (feat_size < 4) return error.InvalidString;
+        const feat_payload_len = feat_size - 4;
+        if (pr.remaining() < feat_payload_len) return error.EndOfStream;
+        const feat_start = pr.pos;
+        if (hash == feature_hash_signable) {
+            found = true;
+            // TEFeatureSignable::Write: AuthoredText present flag, then the
+            // 7-bit length-prefixed UTF-8 text, then the author identity
+            // (u8 present, u8 version, 2 strings) - all when present.
+            out.has_text = try pr.readBool();
+            if (out.has_text) {
+                const t = try pr.readString(text_buf);
+                out.text_len = t.len;
+            }
+            if (try pr.readBool()) {
+                _ = try pr.readByte();
+                try pr.skipString();
+                try pr.skipString();
+            }
+        } else {
+            if (hash == feature_hash_storage) out.has_storage = true;
+            pr.pos += feat_payload_len;
+        }
+        const consumed = pr.pos - feat_start;
+        if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
+        if (consumed > feat_payload_len) return error.InvalidString;
+    }
+    if (!found) return error.NotSignableTe;
     return out;
 }
 
@@ -264,8 +428,8 @@ fn parseStorageFeature(r: *binary.Reader, out: *ParsedTe) binary.ReadError!void 
     if (has_list) try r.skipString();
     out.size_x = try r.readU16();
     out.size_y = try r.readU16();
-    _ = try r.readBool(); // touched
-    _ = try r.readU32(); // worldTime
+    out.touched = try r.readBool();
+    out.world_time_touched = try r.readU32();
     _ = try r.readBool(); // player storage
     const count_i = try r.readI16();
     const count: usize = if (count_i > 0) @intCast(count_i) else 0;
@@ -568,9 +732,15 @@ fn readCraftComplete(r: *binary.Reader) binary.ReadError!CraftComplete {
     return out;
 }
 
-/// Parse a workstation TE write (network mode) in full. The whole payload must be
-/// consumed: a stock peer always writes exactly this layout, and stopping short
-/// is how a missing trailing field goes unnoticed until a real client throws.
+/// Read side of a NetPackageTileEntity workstation body, the layout
+/// buildWorkstationTeBody writes (outer header and composite payload are in the
+/// file header above).
+///
+/// The whole payload must be consumed: a stock peer always writes exactly this
+/// layout, and stopping short is how a missing trailing field goes unnoticed
+/// until a real client throws. A payload version other than
+/// `workstation_te_version` is an error rather than a best-effort decode, since
+/// the field list after it is version specific.
 pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstation {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedWorkstation = .{};
@@ -635,11 +805,16 @@ fn testWorkstationBody(buf: []u8) ![]u8 {
     try stock_inv.writeItemStack(&bw, .{ .type_id = stock_inv.items_start_here + 4, .count = 6 });
 
     var queue = [_]QueueItem{.{}} ** workstations.stock_queue_len;
+    // Distinct values per field: the queue item is positional, so a field
+    // sharing a value with its neighbour makes a swap between them invisible.
+    // quality left at 0 hid it behind the RepairItem-null bool, and
+    // one_item_craft_time matching craft_time_left hid it behind that.
     queue[queue.len - 1] = .{
         .multiplier = 3,
         .is_crafting = true,
         .craft_time_left = 1.5,
-        .one_item_craft_time = 1.5,
+        .quality = 4,
+        .one_item_craft_time = 2.25,
         .starting_entity_id = 171,
         .output_type = stock_inv.items_start_here + 9,
         .output_count = 2,
@@ -701,6 +876,10 @@ test "workstation queue slot keeps its recipe and identity fields" {
     try std.testing.expectEqual(@as(i16, 3), active.multiplier);
     try std.testing.expect(active.is_crafting);
     try std.testing.expectEqual(@as(i32, 171), active.starting_entity_id);
+    // These two sat unasserted, and their fixture values matched a neighbour,
+    // so a swap on either side of them emitted identical bytes.
+    try std.testing.expectEqual(@as(u8, 4), active.quality);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.25), active.one_item_craft_time, 0.01);
     try std.testing.expectEqual(stock_inv.items_start_here + 9, active.output_type);
     try std.testing.expectEqual(@as(i32, 2), active.output_count);
     try std.testing.expectEqual(@as(i32, 5), active.craft_exp_gain);
@@ -766,6 +945,163 @@ test "workstation array count wider than our store is rejected" {
     try std.testing.expectError(error.InvalidString, parseWorkstationTeBody(body));
 }
 
+test "signable te parse reads the authored text and flags storage siblings" {
+    // Stock carries a sign's text in the composite TE stream
+    // (NetPackageTileEntity, TEComposite Feature TEFeatureSignable::Write),
+    // not in its own package. The parser walks the module table by hash and by
+    // the inclusive per-feature marker, so an unknown sibling is skipped
+    // without being parsed.
+    const TestBody = struct {
+        fn build(
+            buf: []u8,
+            handle: u8,
+            block_id: i32,
+            text: ?[]const u8,
+            modules: []const i32,
+        ) ![]u8 {
+            var pay: [1024]u8 = undefined;
+            var pw: binary.Writer = .{ .buf = &pay };
+            try pw.writeI32(3);
+            try pw.writeI32(70);
+            try pw.writeI32(5);
+            const om = try reserveU32(&pw);
+            try pw.writeI32(block_id);
+            try pw.writeByte(0); // no owner
+            try pw.writeByte(@intCast(modules.len));
+            for (modules) |hash| {
+                try pw.writeI32(hash);
+                const fm = try reserveU32(&pw);
+                if (hash == feature_hash_signable) {
+                    try pw.writeBool(text != null);
+                    if (text) |t| try pw.writeString(t);
+                    try pw.writeBool(false); // no author identity
+                } else {
+                    try pw.writeU32(0); // opaque sibling body
+                }
+                finalizeU32(&pw, fm);
+            }
+            finalizeU32(&pw, om);
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeByte(handle);
+            try w.writeI32(3);
+            try w.writeI32(70);
+            try w.writeI32(5);
+            try w.writeI32(block_id);
+            try w.writeI32(@intCast(pw.pos));
+            try w.writeBytes(pay[0..pw.pos]);
+            return w.written();
+        }
+    }.build;
+
+    var body_buf: [1024]u8 = undefined;
+    var text_buf: [64]u8 = undefined;
+    const sign_only = try TestBody(&body_buf, 7, 742, "hello base", &.{feature_hash_signable});
+    const sign = try parseSignableTeBody(sign_only, &text_buf);
+    try std.testing.expectEqual(@as(u8, 7), sign.handle);
+    try std.testing.expectEqual(@as(i32, 742), sign.block_id);
+    try std.testing.expect(sign.has_text);
+    try std.testing.expectEqualStrings("hello base", text_buf[0..sign.text_len]);
+    try std.testing.expect(!sign.has_storage);
+
+    // A clearing write (AuthoredText present = 0) yields no text.
+    var body_buf2: [1024]u8 = undefined;
+    const cleared = try TestBody(&body_buf2, 9, 742, null, &.{feature_hash_signable});
+    const cl = try parseSignableTeBody(cleared, &text_buf);
+    try std.testing.expect(!cl.has_text);
+    try std.testing.expectEqual(@as(usize, 0), cl.text_len);
+
+    // A writable crate's composite carries storage and signable: the sign leg
+    // reports the storage sibling so the storage branch keeps the item list.
+    var body_buf3: [1024]u8 = undefined;
+    const mixed = try TestBody(&body_buf3, 11, 900, "crate label", &.{ feature_hash_storage, feature_hash_signable });
+    const mx = try parseSignableTeBody(mixed, &text_buf);
+    try std.testing.expect(mx.has_storage);
+    try std.testing.expectEqualStrings("crate label", text_buf[0..mx.text_len]);
+
+    // No signable module at all is not a sign body, and the storage parser
+    // refuses the sign body (it used to create a phantom container there).
+    var body_buf4: [1024]u8 = undefined;
+    const storage_only = try TestBody(&body_buf4, 12, 900, null, &.{feature_hash_storage});
+    try std.testing.expectError(error.NotSignableTe, parseSignableTeBody(storage_only, &text_buf));
+    try std.testing.expectError(error.NotStorageTe, parseStorageTeBody(sign_only));
+
+    // A text longer than the buffer fails closed instead of truncating
+    // mid-string (stock has no wire limit; the XUI input caps the typed text).
+    var big: [400]u8 = undefined;
+    @memset(big[0..300], 'x');
+    var body_buf5: [1024]u8 = undefined;
+    const long = try TestBody(&body_buf5, 13, 742, big[0..300], &.{feature_hash_signable});
+    try std.testing.expectError(error.Overflow, parseSignableTeBody(long, &text_buf));
+}
+
+test "storage echo keeps the client's other composite modules" {
+    // A writable crate's composite is storage + signable (+ lockable). Stock
+    // reserializes the whole TE it just read, so the echo carries every module;
+    // zdtd replaces only the storage module with the server's clamped state and
+    // leaves the rest of the client's body byte-identical.
+    var server: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+    server.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 1 });
+    const client: containers.Container = blk: {
+        var c: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+        c.setSlot(0, .{ .item_id = 7, .count = 999, .quality = 1 }); // over-stack claim
+        break :blk c;
+    };
+
+    var pay: [8192]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pay };
+    try pw.writeI32(4);
+    try pw.writeI32(70);
+    try pw.writeI32(4);
+    const om = try reserveU32(&pw);
+    try pw.writeI32(500);
+    try pw.writeByte(0); // no owner
+    try pw.writeByte(2); // storage + signable
+    try pw.writeI32(feature_hash_storage);
+    const sm = try reserveU32(&pw);
+    try writeStorageFeature(&pw, &client, null, null);
+    finalizeU32(&pw, sm);
+    try pw.writeI32(feature_hash_signable);
+    const gm = try reserveU32(&pw);
+    try pw.writeBool(true);
+    try pw.writeString("crate label");
+    try pw.writeBool(false);
+    finalizeU32(&pw, gm);
+    finalizeU32(&pw, om);
+
+    var body_buf: [8192]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body_buf };
+    try w.writeByte(4);
+    try w.writeI32(4);
+    try w.writeI32(70);
+    try w.writeI32(4);
+    try w.writeI32(500);
+    try w.writeI32(@intCast(pw.pos));
+    try w.writeBytes(pay[0..pw.pos]);
+    const body = w.written();
+
+    const parsed = try parseStorageTeBody(body);
+    try std.testing.expect(parsed.found_storage);
+    try std.testing.expect(parsed.storage_blob_len > 0);
+    try std.testing.expectEqual(@as(u16, 999), parsed.items[0].count);
+
+    var echo_buf: [8192]u8 = undefined;
+    const echo = spliceStorageEcho(&echo_buf, body, &parsed, &server, null, null) orelse return error.TestUnexpectedResult;
+    // Same length (the module encodes to a fixed span for the same grid), so
+    // everything after the storage module - the sign text and its markers - is
+    // byte-identical to what the client sent.
+    try std.testing.expectEqual(body.len, echo.len);
+    const after = parsed.storage_blob_off + parsed.storage_blob_len;
+    try std.testing.expectEqualSlices(u8, body[after..], echo[after..]);
+    const echoed = try parseStorageTeBody(echo);
+    try std.testing.expectEqual(@as(u16, 12), echoed.items[0].count); // clamped
+
+    // A body whose module would change length cannot be spliced in place: the
+    // caller falls back to the storage-only echo, which the client's modern
+    // reader accepts (it reads the declared modules and warns about the rest).
+    var empty: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+    try std.testing.expect(spliceStorageEcho(&echo_buf, body, &parsed, &empty, null, null) == null);
+}
+
 test "stable hash TEFeatureStorage" {
     try std.testing.expectEqual(@as(i32, 731446478), unity_hash.getStableHashCode("TEFeatureStorage"));
     try std.testing.expectEqual(feature_hash_storage, unity_hash.getStableHashCode("TEFeatureStorage"));
@@ -784,6 +1120,17 @@ test "storage te encode decode roundtrip" {
 
     var buf: [8192]u8 = undefined;
     const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+
+    // The payload opens with chunkPos through StreamUtils.Write(Vector3i),
+    // which emits x, y, z (`il/full-v3.2.0/_global/StreamUtils.il.txt` IL=13).
+    // parseStorageTeBody skips those three, so nothing else here would notice
+    // them coming out reordered - the swap-mutation audit found exactly that
+    // gap. World (10, 70, -3) is local x 10, y 70 (full world y), z 13.
+    const payload_start: usize = 1 + 12 + 4 + 4; // handle | worldPos | blockId | payLen
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[payload_start..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 70), std.mem.readInt(i32, body[payload_start + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 13), std.mem.readInt(i32, body[payload_start + 8 ..][0..4], .little));
+
     const parsed = try parseStorageTeBody(body);
     try std.testing.expectEqual(@as(i32, 10), parsed.world_x);
     try std.testing.expectEqual(@as(i32, 500), parsed.block_id);
@@ -799,6 +1146,70 @@ test "storage te encode decode roundtrip" {
     const parsed2 = try parseStorageTeBody(body2);
     try std.testing.expectEqual(@as(u16, 6), parsed2.size_x);
     try std.testing.expectEqual(@as(u16, 2), parsed2.size_y);
+}
+
+test "a storage slot count reaching past its feature is rejected" {
+    // The stack loop is bounded by the payload, not by the feature length the
+    // body itself declared, so a forged count reads through the end of its own
+    // feature and into whatever follows. It still fails closed: the reader runs
+    // out (`EndOfStream`) before the post-loop overrun check is reached, and a
+    // body that disagrees with itself is refused whole rather than yielding a
+    // truncated container. Only the slots the container can hold are kept, so
+    // the extra iterations cost reads, not memory.
+    var cont: containers.Container = .{
+        .pos = .{ .x = 10, .y = 70, .z = -3 },
+        .block_id = 500,
+        .slot_count = 4,
+    };
+    var buf: [8192]u8 = undefined;
+    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+
+    // handle 1 | worldPos 12 | blockId 4 | payLen 4 = 21, then chunkPos 12 |
+    // outer marker 4 | blockId 4 | ownerTag 1 | moduleCount 1 | hash 4 |
+    // feature marker 4 = 30, then the feature's hasList 1 | size_x 2 |
+    // size_y 2 | touched 1 | worldTimeTouched 4 | playerStorage 1 = 11.
+    const count_off: usize = 21 + 30 + 11;
+    try std.testing.expectEqual(@as(i16, 4), std.mem.readInt(i16, body[count_off..][0..2], .little));
+    std.mem.writeInt(i16, body[count_off..][0..2], 1000, .little);
+    try std.testing.expectError(error.EndOfStream, parseStorageTeBody(body));
+}
+
+test "storage te carries the touch time the container was looted at" {
+    // TEFeatureStorage.UpdateTick computes LootRespawnDays from
+    // worldTimeTouched (RE loot-economy.md: daysElapsed =
+    // (WorldTimeToTotalHours(now) - WorldTimeToTotalHours(worldTimeTouched))
+    // / 24). Sending a constant 0 for a container the server knows was looted
+    // on day 5 tells the client the loot is ancient.
+    var cont: containers.Container = .{
+        .pos = .{ .x = 4, .y = 70, .z = 4 },
+        .block_id = 500,
+        .slot_count = 4,
+        .touched = true,
+        .touched_day = 5,
+        .player_storage = false,
+    };
+    var buf: [8192]u8 = undefined;
+    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed = try parseStorageTeBody(body);
+    try std.testing.expect(parsed.touched);
+    // Day 5 in stock world-time bits: (day - 1) * 24000, matching
+    // WorldClock.worldTimeBits so both sides agree on the epoch.
+    try std.testing.expectEqual(@as(u32, 4 * 24000), parsed.world_time_touched);
+
+    // An untouched container has no touch time to report.
+    cont.touched = false;
+    cont.touched_day = 0;
+    const body2 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed2 = try parseStorageTeBody(body2);
+    try std.testing.expectEqual(@as(u32, 0), parsed2.world_time_touched);
+
+    // touched_day comes off disk as a u32, so a corrupt or absurd value must
+    // saturate rather than wrap into a plausible-looking recent time.
+    cont.touched = true;
+    cont.touched_day = std.math.maxInt(u32);
+    const body3 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed3 = try parseStorageTeBody(body3);
+    try std.testing.expectEqual(std.math.maxInt(u32), parsed3.world_time_touched);
 }
 
 // --- TileEntityVendingMachine (TileEntityType.VendingMachine = 7) ---
@@ -892,9 +1303,24 @@ pub const ParsedVending = struct {
 
 pub const max_vending_allowed: usize = 8;
 
-/// Read the vending TE composite. `plat_buf` / `id_buf` / `pw_buf` are the
-/// caller's scratch for the owner identity, allowed-user identities and the
-/// password string; `allowed` storage lives in the returned struct.
+/// Cap on the declared `allowedUserIds` count when parsing a vending TE.
+/// Stock writes a plain i32 count with no documented limit (RE
+/// tile-entities-power.md, TEFeatureLockable), so this is a zdtd bound on how
+/// much work one C2S body may cost, not a stock rule: entries past
+/// `max_vending_allowed` are read into scratch and dropped, and this stops a
+/// hostile count from making that loop run for billions of iterations. Set well
+/// above any plausible real list so a legitimate client is never rejected.
+pub const max_vending_allowed_declared: i32 = 64;
+
+/// Read side of a NetPackageTileEntity vending body, the layout
+/// buildVendingTeBody writes (outer header and composite payload are in the
+/// file header above).
+///
+/// `plat_buf` / `id_buf` / `pw_buf` are the caller's scratch for the owner
+/// identity, allowed-user identities and the password string; `allowed` storage
+/// lives in the returned struct. The declared allowed-user count is capped at
+/// `max_vending_allowed_declared` before anything is read against it, so a
+/// client-declared count cannot drive an unbounded read.
 pub fn parseVendingTeBody(
     body: []const u8,
     plat_buf: []u8,
@@ -920,7 +1346,7 @@ pub fn parseVendingTeBody(
     }
     out.password = try pr.readString(pw_buf);
     const allowed_count = try pr.readI32();
-    if (allowed_count < 0 or allowed_count > 64) return error.InvalidString;
+    if (allowed_count < 0 or allowed_count > max_vending_allowed_declared) return error.InvalidString;
     var i: i32 = 0;
     while (i < allowed_count) : (i += 1) {
         if (out.allowed_n < max_vending_allowed) {
@@ -967,7 +1393,16 @@ pub const trigger_type_switch: u8 = 0;
 pub const trigger_type_timer_relay: u8 = 2;
 pub const trigger_type_motion: u8 = 3;
 pub const trigger_type_trip_wire: u8 = 4;
+/// Wires a parsed C2S trigger keeps. The wire field is a u8 count, so a sender
+/// may declare up to 255; `wire_total` records what it declared and `wire_n`
+/// what was kept. Inbound only: do not size an outbound list with this, or the
+/// echo silently tells the client about fewer connections than the sim holds.
 pub const max_te_wires: usize = 8;
+
+/// Wires an S2C powered-trigger echo can carry. Bounded by the u8 count field,
+/// not by the parse-side buffer. `buildPoweredTriggerTeBody` returns
+/// error.Overflow rather than truncating when a list will not fit its payload.
+pub const max_te_wires_out: usize = 255;
 
 pub const Vec3i = struct { x: i32 = 0, y: i32 = 0, z: i32 = 0 };
 
@@ -1075,8 +1510,10 @@ pub fn parsePoweredTriggerTeBody(body: []const u8) binary.ReadError!PoweredTrigg
     return out;
 }
 
-/// Build the authoritative S2C body for a powered trigger, i.e.
-/// TileEntity/StreamModeWrite.ToClient (2).
+/// NetPackageTileEntity carrying a powered trigger, S2C direction
+/// (TileEntity/StreamModeWrite.ToClient = 2). RE: TileEntityPowered write
+/// (asm.il:1322032 for the read side); the payload order is the sequence of
+/// writes below, wrapped in the outer TE header.
 pub fn buildPoweredTriggerTeBody(
     buf: []u8,
     handle: u8,
@@ -1086,7 +1523,10 @@ pub fn buildPoweredTriggerTeBody(
     te_block_id: i32,
     st: PoweredTriggerState,
 ) ![]u8 {
-    var payload: [1024]u8 = undefined;
+    // Sized so the u8 wire count is the real limit: 255 wires * 12 bytes plus
+    // the fixed head and tail. A smaller buffer would make the encoder fail on
+    // lists the count field says are legal.
+    var payload: [max_te_wires_out * 12 + 64]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };
     const lp = localChunkPos(world_x, world_y, world_z);
     try pw.writeI32(lp.x);
@@ -1176,8 +1616,13 @@ test "powered trigger C2S body roundtrips every stock trigger type" {
             .reset_trigger = true,
             .target_type = 9,
         };
+        // Two wires with distinct coordinates: with a single entry an
+        // off-by-one in the wire loop shifts parentPos but reads back the same
+        // way a correct parse of a different count would, so the test could
+        // not tell the two apart.
         src.wires[0] = .{ .x = 4, .y = 71, .z = 5 };
-        src.wire_n = 1;
+        src.wires[1] = .{ .x = -6, .y = 72, .z = 7 };
+        src.wire_n = 2;
         const body = try buildPoweredTriggerTeBodyToServer(&buf, 10, 70, -3, 19300, src);
         const p = try parsePoweredTriggerTeBody(body);
         try std.testing.expectEqual(@as(u8, 3), p.handle);
@@ -1185,9 +1630,18 @@ test "powered trigger C2S body roundtrips every stock trigger type" {
         try std.testing.expectEqual(@as(i32, 19300), p.block_id);
         try std.testing.expect(p.is_player_placed);
         try std.testing.expectEqual(@as(u8, 3), p.power_item_type);
-        try std.testing.expectEqual(@as(usize, 1), p.wire_n);
+        try std.testing.expectEqual(@as(usize, 2), p.wire_n);
+        try std.testing.expectEqual(@as(i32, 4), p.wires[0].x);
         try std.testing.expectEqual(@as(i32, 71), p.wires[0].y);
+        try std.testing.expectEqual(@as(i32, 5), p.wires[0].z);
+        try std.testing.expectEqual(@as(i32, -6), p.wires[1].x);
+        try std.testing.expectEqual(@as(i32, 72), p.wires[1].y);
+        try std.testing.expectEqual(@as(i32, 7), p.wires[1].z);
+        // parentPos sits right after the wire list, so a miscounted loop
+        // lands here.
+        try std.testing.expectEqual(@as(i32, 1), p.parent.x);
         try std.testing.expectEqual(@as(i32, 70), p.parent.y);
+        try std.testing.expectEqual(@as(i32, 2), p.parent.z);
         try std.testing.expectApproxEqAbs(@as(f32, -1.5), p.yaw, 0.001);
         try std.testing.expectEqual(t, p.trigger_type);
         if (t == trigger_type_switch) {
@@ -1223,6 +1677,16 @@ test "powered trigger S2C body carries IsPowered and the type tail" {
     try std.testing.expectEqual(@as(u8, 255), body[0]);
     const pay_len = std.mem.readInt(i32, body[17..21], .little);
     try std.testing.expectEqual(@as(usize, @intCast(pay_len)), body.len - 21);
+
+    // Each wire is a Vector3i written x, y, z. Nothing read these back, so a
+    // swapped component rode out silently; the fixture uses 1, 2, 3 so the
+    // three positions cannot be confused. Payload: chunkPos (12) + the
+    // TileEntityPowered constant i32 (4) + isPlayerPlaced (1) + powerItemType
+    // (1) + wire count (1) = 19 bytes before the first wire.
+    const first_wire = 21 + 19;
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[first_wire..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, body[first_wire + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, body[first_wire + 8 ..][0..4], .little));
     // ToClient adds IsPowered before pitch/yaw and drops ResetTrigger, so it is
     // one byte longer than the same trigger going the other way.
     var c2s_buf: [512]u8 = undefined;
@@ -1367,10 +1831,18 @@ test "vending TE body matches TileEntityVendingMachine::write layout" {
     try std.testing.expectEqual(@as(usize, 0), pr.remaining());
 }
 
-/// TileEntityLight network body (RE tile-entities-power.md 3.x
-/// TileEntityLight.write IL=48): TileEntity.write network (chunkPos local
+/// TileEntityLight network body (TileEntityLight.write IL=48,
+/// TileEntityLight.il.txt:198): TileEntity.write network (chunkPos local
 /// Vector3i + version u16 18) then LightIntensity f32, LightRange f32,
-/// Color32, LightType u8, LightAngle f32, LightShadows u8.
+/// Color32, LightType u8, LightAngle f32, LightShadows u8, LightState u8,
+/// Rate f32, Delay f32.
+///
+/// The last three are not optional on this path. `read` gates them on
+/// version > 5 / > 6 / > 7 (`:174-195`), but the network branch pins the
+/// version to 18 (`:135-137`), so the client always reads all nine fields.
+/// Nothing brackets the body with a size marker, and the reader holds only
+/// this package's payload, so a short body reads stale bytes out of the
+/// pooled buffer instead of failing.
 pub const LightTeInfo = struct {
     intensity: f32 = 1.0,
     range: f32 = 10.0,
@@ -1379,9 +1851,14 @@ pub const LightTeInfo = struct {
     light_type: u8 = 1,
     angle: f32 = 0,
     shadows: u8 = 1,
+    state: u8 = 0,
+    rate: f32 = 0,
+    delay: f32 = 0,
 };
 
-pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, info: LightTeInfo) ![]u8 {
+/// NetPackageTileEntity carrying a light TE (RE: TileEntityLight write). Outer
+/// TE header, then the nine payload fields in `LightTeInfo` order.
+pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, te_block_id: i32, info: LightTeInfo) ![]u8 {
     var payload: [64]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };
     const lp = localChunkPos(world_x, world_y, world_z);
@@ -1395,31 +1872,41 @@ pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world
     try pw.writeByte(info.light_type);
     try pw.writeF32(info.angle);
     try pw.writeByte(info.shadows);
+    try pw.writeByte(info.state);
+    try pw.writeF32(info.rate);
+    try pw.writeF32(info.delay);
 
     var w: binary.Writer = .{ .buf = buf };
-    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, 0, pw.written().len);
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pw.written().len);
     try w.writeBytes(pw.written());
     return w.written();
 }
 
 test "light TE body round-trips the stock network layout" {
     var buf: [128]u8 = undefined;
-    const body = try buildLightTeBody(&buf, 255, 10, 70, 20, .{
+    const body = try buildLightTeBody(&buf, 255, 10, 70, 20, 1234, .{
         .intensity = 1.3,
         .range = 3.0,
         .color = 0xff2993ff,
         .light_type = 2,
         .angle = 0.5,
         .shadows = 1,
+        .state = 3,
+        .rate = 0.25,
+        .delay = 1.5,
     });
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 255), try r.readByte()); // handle
     try std.testing.expectEqual(@as(i32, 10), try r.readI32()); // world pos
     try std.testing.expectEqual(@as(i32, 70), try r.readI32());
     try std.testing.expectEqual(@as(i32, 20), try r.readI32());
-    _ = try r.readI32(); // block id (0)
+    // ProcessPackage drops the package when this disagrees with the client's
+    // block at the position, so it carries the real world block.
+    try std.testing.expectEqual(@as(i32, 1234), try r.readI32());
     const pay_len = try r.readI32();
-    try std.testing.expect(pay_len == 3 * 4 + 2 + 4 + 4 + 4 + 1 + 4 + 1);
+    // chunkPos + version + the nine fields; the client reads every one of
+    // them on the network path, so a short body is a stream desync.
+    try std.testing.expect(pay_len == 3 * 4 + 2 + 4 + 4 + 4 + 1 + 4 + 1 + 1 + 4 + 4);
     // payload: local chunkPos + version 18 + fields
     try std.testing.expectEqual(@as(i32, 10), try r.readI32());
     try std.testing.expectEqual(@as(i32, 70), try r.readI32());
@@ -1430,5 +1917,9 @@ test "light TE body round-trips the stock network layout" {
     try std.testing.expectEqual(@as(u32, 0xff2993ff), try r.readU32());
     try std.testing.expectEqual(@as(u8, 2), try r.readByte());
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), try r.readF32(), 0.001);
-    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // shadows
+    try std.testing.expectEqual(@as(u8, 3), try r.readByte()); // state
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), try r.readF32(), 0.001); // rate
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), try r.readF32(), 0.001); // delay
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }

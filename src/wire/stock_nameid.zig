@@ -242,9 +242,12 @@ test "full blocks mapping frames inside the server body buffer" {
     try write(w, t.idNameIterator(), s);
     const framed = try fr.finish();
     try std.testing.expect(framed.len < send_buf.len);
-    // Every fragment the reliable channel can carry: 512 parts of 1317 user bytes
-    // (src/litenet/peer.zig, src/litenet/packet.zig).
-    try std.testing.expect(framed.len < 512 * 1317);
+    // Every fragment the reliable channel can carry: `max_payload` (512 KiB)
+    // split into fragments of `max_fragment_user` bytes (src/litenet/peer.zig,
+    // src/litenet/packet.zig; the fragment size is stock's 1432 minus the
+    // 10-byte fragmented header). The wire edge here is the 512 KiB cap, not
+    // the fragment count, so the bound is stated against it.
+    try std.testing.expect(framed.len < 524288);
 
     // Inflate the way the client does (Noemax raw deflate into a growable
     // MemoryStream, asm.il 788690-788728). zdtd's own inbound parser cannot be

@@ -85,6 +85,13 @@ pub const ClassId = struct {
     loot_list: []const u8 = "",
     /// LootDropProb chance a death drops the bag; 1.0 default.
     drop_prob: f32 = 1.0,
+    /// Bonus-loot kill: this zombie's `drop_prob` was already scaled at spawn
+    /// (blood-moon `bonusLootSpawnCount >= bonusLootEvery` x `LootBonusScale`,
+    /// wandering `>= LootWanderingBonusEvery` x `LootWanderingBonusScale`;
+    /// aidirector.md). The kill roll reads the stored probability verbatim,
+    /// exactly as stock's death path reads the entity field the spawner
+    /// mutated.
+    bonus_loot: bool = false,
     /// TimeStayAfterDeath seconds the corpse lingers (30 zombies, 300 animals).
     time_stay: f32 = 0,
     /// Resolved per-entity class stats (XML chase/wander/damage). 0 = fall
@@ -102,6 +109,10 @@ pub const ClassId = struct {
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
     attack_damage: f32 = 0,
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
+    /// class; 0 = class_table[id] then no resist. Applied only at the
+    /// server-computed damage chokes (turrets, deferred accumulator).
+    phys_resist: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = class_table[id] then the Rules chew floor.
     block_chew: f32 = 0,
@@ -111,6 +122,20 @@ pub const ClassId = struct {
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres
+    /// (stock `EAISetNearestEntityAsTarget` targetClasses); 0 = unset, and
+    /// the sense path falls back to sight_range. A negative stock value
+    /// (bandits at -10/-8: never target) stays negative so the gate below
+    /// keeps it denied rather than reading it as unset.
+    target_player_see: f32 = 0,
+    target_player_hear: f32 = 0,
+    /// `SetAsTargetIfHurt class=` victim-class filter bits (see
+    /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
+    /// always-retarget path.
+    hurt_target_classes: u8 = 0,
+    /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only). Bit 1
+    /// set = sense acquisition is blocked while the entity is unalerted.
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = class_table[id] then the
     /// Rules floor (systems.sightLightThreshold).
@@ -151,9 +176,23 @@ pub const ClassId = struct {
     /// predators and zombies carry the attack task. Defaults true so classes
     /// without a task list keep the zombie-brain behavior.
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits. 0 = no XML list (native table).
+    /// Bit 15 set means a list was parsed; only the TaskId bits then run.
+    ai_tasks: u16 = 0,
     /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
     /// then the caller's flat floor.
     xp_gain: f32 = 0,
+    /// Dismember tuning (RE EntityAlive.CheckDismember IL=125 /
+    /// GetDismemberChance IL=128), resolved per entity at spawn like the
+    /// speeds above. The EntityClass cctor default for the three multipliers
+    /// is 1, so the roll reads max(stored, implicit-1-when-class-known);
+    /// 0 with no class data = fall back to class_table[id] then 1. The leg
+    /// pair has no cctor fallback: 0 is the true stock default there too.
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    leg_cripple_scale: f32 = 0,
+    leg_crawler_threshold: f32 = 0,
 };
 
 pub const AiState = enum(u8) {
@@ -190,6 +229,21 @@ pub const TaskId = enum(u8) {
     look,
     wander,
 };
+
+/// entityclasses.xml parsed a task list (pipe `AITask` or numbered `AITask-N`).
+/// Unset mask 0 keeps the shared native table; a set list only runs its bits.
+pub const ai_task_list_set: u16 = 1 << 15;
+
+pub fn aiTaskBit(id: TaskId) u16 {
+    const n = @intFromEnum(id);
+    if (n == 0) return 0;
+    return @as(u16, 1) << @intCast(n);
+}
+
+pub fn aiTaskAllowed(mask: u16, id: TaskId) bool {
+    if (mask & ai_task_list_set == 0) return true;
+    return mask & aiTaskBit(id) != 0;
+}
 
 /// Waypoints buffered from one A* solve. Eight cells is roughly the distance a
 /// chasing zombie covers in one replan interval, so the buffer empties about
@@ -309,6 +363,15 @@ pub const ZombieAi = struct {
     kb_time: f32 = 0,
     kb_dx: f32 = 0,
     kb_dz: f32 = 0,
+    /// Crippled legs (RE DamageResponse.CrippleLegs): set by the dismember
+    /// roll on a leg hit past the scaled chance. Stock slows the walk through
+    /// the leg-damage path; until the movement side lands this is recorded
+    /// state the S2C damage flags report.
+    crippled: bool = false,
+    /// Turned crawler (RE DamageResponse.TurnIntoCrawler / ShouldBeCrawler):
+    /// a leg hit past the crawler threshold converts the zombie. Same
+    /// recording-state posture as crippled until movement follows.
+    crawler: bool = false,
     /// EntityAlive.pendingDistraction: the nearest dropped EntityItem that
     /// broadcast itself into this entity's 25 m (distractionRadius) window
     /// (EntityItem.tickDistraction). Net id of the loot-bag entity, -1 = none.
@@ -336,6 +399,25 @@ pub const ZombieAi = struct {
         return self.path_wp[self.path_wp_i];
     }
 };
+
+/// Stock EnumBodyPartHit leg masks (EnumBodyPartHitExtensions IL=6 each):
+/// IsLeg = part & 816, IsLeftLeg = & 272, IsRightLeg = & 544. Values:
+/// None 0, Torso 1, Head 2, arms 4/8/64/128, legs 16/32/256/512. File scope
+/// (not in wire) so the sim reads them without importing wire.
+pub const bodypart_leg_mask: i16 = 816;
+pub const bodypart_left_leg_mask: i16 = 272;
+pub const bodypart_right_leg_mask: i16 = 544;
+
+/// Body-part regions for the dismember roll (EnumBodyPartHitExtensions
+/// ToPrimary: Head -> head multiplier, arms -> arms, legs -> legs).
+pub const BodyRegion = enum { head, arms, legs, other };
+
+pub fn bodyPartRegion(part: i16) BodyRegion {
+    if (part == 2) return .head;
+    if ((part & bodypart_leg_mask) != 0) return .legs;
+    if (part == 4 or part == 8 or part == 64 or part == 128) return .arms;
+    return .other;
+}
 
 /// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-fps-bots skill model
 /// (BotCharacter, BotAimAtEnemy, BotCheckAttack). The guest Wasm brain reads
@@ -412,6 +494,11 @@ pub const max_seats: usize = 6;
 /// the C2S Bag blob parse has a hard bound (rule 20).
 pub const max_basket_slots: usize = 8;
 
+/// Owner-name field width for entities that outlive a session (vehicles,
+/// turrets). Matches the land-claim owner field, which solves the same
+/// problem: a client slot is per-session, so the name is what persists.
+pub const max_owner_name: usize = 32;
+
 /// Seat 0 is the driver: EntityVehicle::AttachEntityToSelf sets hasDriver only
 /// when the resolved slot is 0 (asm.il:542176 IL_008a).
 pub const driver_seat: u8 = 0;
@@ -437,6 +524,18 @@ pub const Vehicle = struct {
     /// A packed fixed array, like the player inventory; empty slots hold id 0.
     basket: [max_basket_slots]InvSlot = [_]InvSlot{.{}} ** max_basket_slots,
     basket_n: u8 = 0,
+    /// Owning client slot (stock Entity.belongsPlayerId, resolved from the
+    /// placing player's platform id via Vehicle.OwnerId); -1 = unowned
+    /// (worldgen/admin spawns). The owner sees their parked vehicles on the
+    /// map through NetPackageEntityWaypointList
+    /// (VehicleManager.UpdateVehicleWaypointsForPlayer).
+    ///
+    ///
+    /// Not persisted: no production path sets it. Vehicles reach the world
+    /// through worldgen and the admin console, never through a player
+    /// placement package, so every live vehicle is unowned and the waypoint
+    /// list is empty until a placement path exists.
+    owner_slot: i16 = -1,
 
     pub fn driverNetId(self: *const Vehicle) i32 {
         return self.seats[driver_seat];
@@ -469,8 +568,21 @@ pub const Turret = struct {
     target_id: i32 = -1,
     power_node: u16 = 0,
     /// Client slot that placed the turret; -1 = unowned (demo). Trap kills
-    /// credit this owner with quest progress, XP and the kill counter.
+    /// credit this owner with quest progress, XP and the kill counter. The
+    /// slot is per-session; `owner_name` is what survives a restart and the
+    /// login path re-maps the slot from it.
     owner_slot: i16 = -1,
+    owner_name: [max_owner_name]u8 = .{0} ** max_owner_name,
+    owner_name_len: u8 = 0,
+
+    /// Record the placing player's name alongside the slot. A name longer
+    /// than the field is truncated rather than rejected: the login re-map
+    /// compares the stored prefix, so a truncated name still matches itself.
+    pub fn setOwnerName(self: *Turret, name: []const u8) void {
+        const n = @min(name.len, max_owner_name);
+        @memcpy(self.owner_name[0..n], name[0..n]);
+        self.owner_name_len = @intCast(n);
+    }
 };
 
 pub const max_journal: usize = 8;
@@ -625,12 +737,37 @@ pub const InvSlot = struct {
     /// so the same planted seed grows the same way (meta is durability/flags,
     /// not the seed).
     seed: u16 = 0,
+    /// Stock ItemValue.Flags (V3.2.0 bitfield). Bit 0 = Activated
+    /// (`get_Activated`); used by `IsItemActive`. Not in ZPV16 slot stride yet —
+    /// persist reloads as 0 (ponytail: add when save format bumps).
+    flags: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 covers the
     /// stock slot counts). The mods' stat effects are client-side; the ids
     /// persist so a modded weapon survives a relog. 0 = empty slot.
     mods: [4]u16 = .{0} ** 4,
     /// Active mod count (<= mods.len).
     mod_n: u8 = 0,
+    /// Per-mod ItemValue.Quality (parallel to `mods`). Wire nested ItemValue
+    /// carries it; RequirementItemModTier compares it. 0 with a non-zero mod
+    /// id means "unset" and folds as stock's nested default of 1.
+    /// ponytail: not in ZPV16 slot stride yet — persist reloads as 1.
+    mod_qualities: [4]u8 = .{0} ** 4,
+    /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
+    /// deltas a client-created item carries. Kept as the wire pair so an echo
+    /// round-trips exactly (stock's `Stat` ctor sets `isBoosted = slot_b > 0`).
+    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats_n: u8 = 0,
+};
+
+/// Stock items carry at most five distinct stat effects; see
+/// `wire/stock_inv.zig` (`max_item_stats`), which owns the wire cap.
+pub const max_item_stats: usize = 6;
+
+/// One `ItemValue/Stat` entry in the same shape the wire uses.
+pub const ItemStat = struct {
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
 };
 
 /// Offline stack caps when `World.stack_fn` is null. Must match
@@ -725,7 +862,11 @@ pub const Inventory = struct {
             const s = &self.slots[i];
             if (s.item_id != 0 and s.count != 0) continue;
             const put: u16 = @min(max_stack, left);
-            s.* = .{ .item_id = item.item_id, .count = put, .quality = item.quality, .meta = item.meta };
+            // A fresh slot carries the whole value (stats/mods/use_times/seed),
+            // not just the stack triple: merging into an existing stack keeps
+            // the resident's value, but a new stack must not drop the deposit's.
+            s.* = item;
+            s.count = put;
             left -= put;
         }
         return left == 0;
@@ -827,6 +968,12 @@ pub const StockEntry = struct {
     /// player-owned/rentable machines) prices from 1 + Markup*0.2. Fresh stock
     /// and restocks reset it to 0.
     markup: i8 = 0,
+    /// Stock `ItemValue` stats on the stocked stack (`TraderInfo::SpawnItem`
+    /// IL_022F calls `AddGSStats` with stage -1, i.e. derived from the first
+    /// row of the entry's quality). Same wire shape as the inventory slot so
+    /// the buy path deposits the whole value.
+    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats_n: u8 = 0,
 };
 
 fn defaultStock() [max_stock]StockEntry {
@@ -882,6 +1029,20 @@ pub const LootBag = struct {
     /// Stock EntityItem.nextDistractionTick: 20-tick broadcast cadence
     /// (tickDistraction, asm.il EntityItem:1341-1349).
     next_distraction_tick: i32 = 0,
+    /// Air-drop supply crate: carries a server-pushed `supply_drop` nav marker
+    /// for as long as the bag lives. Stock re-registers the crate markers for
+    /// each joining player (`AIDirectorAirDropComponent.RefreshCrates(entityId)`
+    /// at join step 11, RE protocol.md:317), so the flag is what lets the join
+    /// bundle find the live crates. A death bag is not one of these: its marker
+    /// rides the owner's backpack list instead.
+    supply_crate: bool = false,
+    /// Player death backpack: spawns as the "Backpack" entity class
+    /// (EntityBackpack, entityclasses.xml) rather than the generic
+    /// DroppedLootContainer the spills use. Stock's client creates it in
+    /// EntityPlayerLocal.dropBackpack and sends NetPackageRequestToSpawnEntity;
+    /// zdtd builds its own from the victim's inventory, so the class is a zdtd
+    /// choice and must match what the client would have created.
+    backpack: bool = false,
 };
 
 pub const Sleeper = struct {
@@ -974,8 +1135,6 @@ pub const StealthNoiseEvent = struct {
     muffled_when_crouched: f32,
     /// `heat_map_strength` (> 0 feeds NotifyActivity, the noise-to-heat leg).
     heat_map_strength: f32,
-    /// `heat_map_time` seconds (stock ×10 ticks).
-    heat_map_time: f32,
 };
 
 /// One cell carried by a falling-blocks group entity (world coords + the
@@ -1089,13 +1248,14 @@ pub const Dirty = packed struct(u8) {
     rot: bool = false,
     flags: bool = false,
     hp: bool = false,
-    spawn: bool = false,
-    remove: bool = false,
-    inv: bool = false,
-    _pad: bool = false,
+    /// Padding to the u8 backing type. `spawn`/`remove`/`inv` used to live
+    /// here: nothing ever read them, and they were never cleared, so any
+    /// entity that set one stayed in `dirty_bits` forever (ECS review
+    /// 2026-09-12). Marking an entity dirty is `pos`/`flags`/`hp`.
+    _pad: u4 = 0,
 
     pub fn any(self: Dirty) bool {
-        return self.pos or self.rot or self.flags or self.hp or self.spawn or self.remove or self.inv;
+        return self.pos or self.rot or self.flags or self.hp;
     }
 };
 
@@ -1105,7 +1265,13 @@ pub const Dirty = packed struct(u8) {
 pub const buff_ticks_per_second: f32 = 20;
 /// Concurrent buffs per entity. Stock's ActiveBuffs list is unbounded; a fixed
 /// set keeps the component POD and bounds what one client can push at us.
-pub const max_buffs_per_entity: usize = 8;
+/// Measured need: a player carries the check buffs (buffStatusCheck01/02 plus
+/// buffSmellCheck), the six hunger/thirst stage buffs, the level tracker, the
+/// biome-screen checks and any injury/weather buff at once, which is already
+/// past 8 - the survival stage machine lost the thirst stages to the cap and
+/// re-added them every tick. 32 keeps headroom for a full injury set without
+/// changing the POD layout.
+pub const max_buffs_per_entity: usize = 32;
 
 /// BuffEffectStackTypes (asm.il 738358): what a repeat application of an
 /// already-active buff does. Absent stack_type in buffs.xml means Ignore
@@ -1121,7 +1287,12 @@ pub const BuffFlags = packed struct(u8) {
     update: bool = false,
     invalid: bool = false,
     paused: bool = false,
-    _pad: u2 = 0,
+    /// The buff's own `onSelfBuffStart` rows have run (once per instance, fired
+    /// by the survival pass because stock runs them from AddBuff).
+    start_fired: bool = false,
+    /// The buff's `onSelfEnteredGame` rows have run (once per instance; stock
+    /// fires the event when the entity enters the game).
+    entered_game_fired: bool = false,
 };
 
 /// One entry of stock's EntityBuffs::ActiveBuffs (BuffValue, asm.il 733040).

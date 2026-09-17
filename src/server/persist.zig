@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV12), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV16), entities.zen
 //! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -17,6 +17,8 @@ const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
 const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
+const game_types = @import("game/types.zig");
+const platform_user = @import("../wire/platform_user.zig");
 const max_land_claims = game_mod.max_land_claims;
 
 pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
@@ -53,6 +55,7 @@ pub fn saveAllStores(self: *Game) bool {
     }.f;
     self.world.saveAll() catch |e| note(&ok, self, "save world", e);
     self.containers.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save containers", e);
+    self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save sign texts", e);
     self.workstations.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save workstations", e);
     self.vending.save(self.world.world_dir) catch |e| note(&ok, self, "save vending", e);
     self.saveClaims() catch |e| note(&ok, self, "save claims", e);
@@ -88,59 +91,84 @@ pub const Zpv2Drop = struct {
 /// attribute/perk levels survive a restart. 12 (ZPV12, magic byte 'C')
 /// appends the attached mod ids (4 x u16) to each inventory slot record so a
 /// modded weapon survives a restart (the mods' stat effects are client-side;
-/// the ids re-render the attachments). The bedroll field is
+/// the ids re-render the attachments). 13 (ZPV13, magic byte 'D') appends the
+/// dropped-bag marker list (`n:u8 | n x (x,y,z i32)`) after the skill tail, so
+/// a bag restored from entities.zen still shows on its owner's map instead of
+/// lying there unmarked. 14 (ZPV14, magic byte 'E') appends the character-sheet
+/// kill/death counters (`deaths:i32 | zombieKills:u32 | playerKills:u32`) after
+/// the bag list, so a restart or relog keeps the sheet stock keeps in
+/// PlayerDataFile instead of re-deriving it from a session that is gone.
+/// 15 (ZPV15, magic byte 'F') appends the platform identity
+/// (`id_present:u8`, then the primary and native `puid_primary`/`puid_native`
+/// pairs as `present:u8 | plat_len:u8 | id_len:u8 | strings`), so restore and
+/// merge-write match on the account, not on the login display name: stock keys
+/// PlayerDataFile on `PrimaryId.CombinedString` (asm.il 1884842), and a name
+/// key let any client load another player's save by typing their name
+/// (DIVERGENCES 1.6). A record that carries an identity is owned by that
+/// account whatever the name; a legacy record with no identity is matched by
+/// name once and gains one on the next save. The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
 /// misread as this record's bed_present. Only the file's own magic decides
 /// whether a bedroll field is present, the same way `prog` already gates the
-/// rest of the v3 tail.
+/// rest of the v3 tail. 16 (ZPV16, magic byte 'G') widens every inventory slot
+/// record to `stats_n:u8 | stats_n x (effect:u8, slot_a:i16, slot_b:i16)` -
+/// stock `ItemValue`'s `Stats` (wire blob flag bit 2), so a rolled or
+/// client-sent stat entry survives a restart instead of being dropped on save.
 /// Inventory slot-record stride in bytes: 7 through v6
 /// (item:u16, count:u16, quality:u8, meta:u16), 11 from v7 (those plus
 /// use_times: f32), 13 from v10 (plus seed:u16 - the stock ItemValue.Seed,
 /// so a plantable's per-item seed survives a restart).
+/// Version this build writes (ZPV16). Older files stay readable.
+pub const persist_version: u8 = 16;
+
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 16) return 52; // 21 + stats_n u8 + 6 x (effect u8, two i16) (ZPV16)
     if (version >= 12) return 21; // 13 + 4 mod ids (ZPV12)
     if (version >= 10) return 13;
     return if (version >= 7) 11 else 7;
 }
 
-/// Convert a legacy 7-byte inventory slot block to the v7 11-byte shape:
-/// each slot keeps (item, count, quality, meta) and appends a zero
-/// `use_times` (f32) - carried old records have no known durability.
-fn emitZpv7Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
-    // Legacy 7-byte slots widen straight to the current 13-byte shape: six
-    // zero bytes (use_times f32 + seed u16) - carried records have no known
-    // durability or seed.
+/// Widen a slot block of `src_stride` bytes to the current v12 21-byte shape,
+/// zero-filling whatever the older record lacked (use_times, seed, mod ids).
+/// Carried records have no known value for those fields.
+fn emitZpv12SlotsFrom(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    old: []const u8,
+    inv_n_pos: usize,
+    inv_n: usize,
+    src_stride: usize,
+) !void {
+    const dst_stride = zpvSlotStride(persist_version);
+    std.debug.assert(src_stride <= dst_stride);
     try out.append(allocator, old[inv_n_pos]); // inv_n byte
     var p = inv_n_pos + 1;
     var k: usize = 0;
     while (k < inv_n) : (k += 1) {
-        try out.appendSlice(allocator, old[p .. p + 7]);
-        try out.appendNTimes(allocator, 0, 6);
-        p += 7;
+        try out.appendSlice(allocator, old[p .. p + src_stride]);
+        try out.appendNTimes(allocator, 0, dst_stride - src_stride);
+        p += src_stride;
     }
 }
 
-/// Widen a v7-9 (11-byte) slot block to the v10 13-byte shape: each slot
-/// appends a zero `seed` (carried records predate seed persistence).
-fn emitZpv10Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize, stride: usize) !void {
-    try out.append(allocator, old[inv_n_pos]); // inv_n byte
-    var p = inv_n_pos + 1;
-    var k: usize = 0;
-    while (k < inv_n) : (k += 1) {
-        try out.appendSlice(allocator, old[p .. p + stride]);
-        try out.appendNTimes(allocator, 0, 2);
-        p += stride;
-    }
+/// Widen a v10/v11 (13-byte) slot block to the v12 21-byte shape.
+fn emitZpv12Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
+    return emitZpv12SlotsFrom(out, allocator, old, inv_n_pos, inv_n, 13);
 }
 
 /// Position of a v3+ record's progression-tail prog byte (journal end).
 /// v2 records have no tail; returns the record end.
+///
+/// The slot stride is `zpvSlotStride(version)`, not a fixed width: this is
+/// called for v6, v7 and v8, and v7 widened slots from 7 to 11 bytes when they
+/// gained `use_times`. It used to hard-code 7, which walked a v7/v8 record 4
+/// bytes short per slot.
 fn tailStartOf(old: []const u8, rec_start: usize, nl: usize, version: u8) error{CorruptPlayersFile}!usize {
     const inv_pos = rec_start + 1 + nl + 16;
     const inv_n: usize = old[inv_pos];
-    const jn_pos = inv_pos + 1 + inv_n * 7;
+    const jn_pos = inv_pos + 1 + inv_n * zpvSlotStride(version);
     const jn: usize = old[jn_pos];
     return journalSectionEnd(old, jn_pos + 1, jn, version);
 }
@@ -216,7 +244,58 @@ fn emitZpv11Skills(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*
     }
 }
 
+/// ZPV13 tail: the player's dropped-bag markers. Written for every record so
+/// the version alone decides the shape; a carried record from an older file
+/// emits a zero count, which is what it knew.
+fn emitZpv13Backpacks(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    var n: u8 = 0;
+    if (cl) |c| n = @min(c.backpack_n, game_types.max_tracked_backpacks);
+    try out.append(allocator, n);
+    if (cl) |c| {
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            for (c.backpacks[i]) |v| {
+                var tmp: [4]u8 = undefined;
+                std.mem.writeInt(i32, &tmp, v, .little);
+                try out.appendSlice(allocator, &tmp);
+            }
+        }
+    }
+}
+
+/// ZPV14 stats tail: the kill/death counters the client's character sheet
+/// shows (`EntityNetworkStats` / `EntityAlive.AddScore`), which are otherwise
+/// session-only on zdtd. Stock keeps them in PlayerDataFile, so a restart or
+/// relog must carry them through players.zsv instead of re-deriving them from
+/// a live session that no longer exists. Layout: `deaths:i32 | zombieKills:u32
+/// | playerKills:u32`, size `zpv_stats_tail_len`.
+pub const zpv_stats_tail_len: usize = 12;
+
+fn emitZpv14Stats(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    const deaths: i32 = if (cl) |c| c.deaths else 0;
+    const zk: u32 = if (cl) |c| c.zombie_kills else 0;
+    const pk: u32 = if (cl) |c| c.player_kills else 0;
+    var buf: [zpv_stats_tail_len]u8 = undefined;
+    std.mem.writeInt(i32, buf[0..4], deaths, .little);
+    std.mem.writeInt(u32, buf[4..8], zk, .little);
+    std.mem.writeInt(u32, buf[8..12], pk, .little);
+    try out.appendSlice(allocator, &buf);
+}
+
+/// Where a record's optional ZPV15 identity section starts. `off` is 0 when the
+/// file version predates the section (a carried record keeps the version it was
+/// written under, so the offset has to come from the same walk that computed the
+/// record length, not from re-deriving the layout).
+pub const RecordSpan = struct {
+    len: usize,
+    identity_off: usize = 0,
+};
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
+    return (try zpvRecordSpan(data, off, version)).len;
+}
+
+pub fn zpvRecordSpan(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!RecordSpan {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
     if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
@@ -268,9 +347,149 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
                     p += 1 + snl + 1;
                 }
             }
+            if (version >= 13) {
+                if (p >= data.len) return error.CorruptPlayersFile;
+                const bp_n: usize = data[p];
+                p += 1;
+                if (bp_n > game_types.max_tracked_backpacks) return error.CorruptPlayersFile;
+                if (p + bp_n * 12 > data.len) return error.CorruptPlayersFile;
+                p += bp_n * 12;
+            }
+            if (version >= 14) {
+                if (p + zpv_stats_tail_len > data.len) return error.CorruptPlayersFile;
+                p += zpv_stats_tail_len;
+            }
+            if (version >= 15) {
+                const identity_off = p;
+                const end = try zpvIdentitySectionEnd(data, p);
+                return .{ .len = end - off, .identity_off = identity_off };
+            }
         }
     }
-    return p - off;
+    return .{ .len = p - off };
+}
+
+/// Max bytes the ZPV15 identity section occupies on top of its marker byte:
+/// `primary_platform_len:u8 | primary_id_len:u8 | native_platform_len:u8 |
+/// native_id_len:u8` plus the four strings at their caps. A present identity is
+/// written as two of them (`primary`, `native`), each its own present byte, so
+/// the section is `id_present | primary_present | plat_len | id_len | ... |
+/// native_present | ...`. Sized from the wire caps so a writer buffer and a
+/// reader bound cannot disagree.
+pub const max_zpv_identity_len: usize =
+    1 + 1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len) +
+    1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len);
+
+/// Advance past one identity (`present:u8 | plat_len:u8 | plat | id_len:u8 |
+/// id`); a zero present byte is the whole field, so an absent identity costs
+/// one byte.
+fn zpvSkipIdentity(data: []const u8, p_in: usize) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const present = data[p];
+    p += 1;
+    if (present == 0) return p;
+    if (p + 2 > data.len) return error.CorruptPlayersFile;
+    const plat_len: usize = data[p];
+    const id_len: usize = data[p + 1];
+    p += 2;
+    if (plat_len > platform_user.max_platform_len or id_len > platform_user.max_id_len) return error.CorruptPlayersFile;
+    if (p + plat_len + id_len > data.len) return error.CorruptPlayersFile;
+    return p + plat_len + id_len;
+}
+
+/// End offset of the ZPV15 identity section: `id_present:u8`, then the primary
+/// and native identities when present. The marker distinguishes "this record
+/// carries identity" from "the file has no room for it" without a magic that a
+/// v14 reader would have to guess at, the same reason the ZPV11 skill tail and
+/// ZPV13 bag list have their own bytes.
+fn zpvIdentitySectionEnd(data: []const u8, p_in: usize) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const id_present = data[p];
+    p += 1;
+    if (id_present == 0) return p;
+    p = try zpvSkipIdentity(data, p);
+    return try zpvSkipIdentity(data, p);
+}
+
+/// Identity section of one record (v15+) for the merge and restore matchers.
+/// Copies the strings into caller buffers so the returned `Id` does not alias a
+/// file buffer the caller is about to drop.
+const ZpvIdentity = struct {
+    present: bool = false,
+    primary: platform_user.Stored = .{},
+    native: platform_user.Stored = .{},
+
+    /// True when this record should restore into `cl`. An identity-bearing row
+    /// belongs to that account and nothing else: a matching name is not enough
+    /// once the row has an identity, and an absent or different identity never
+    /// inherits it (fail closed). A legacy row with no identity is still
+    /// matched by name so an existing world upgrades in place on the next save.
+    fn matchesClient(self: ZpvIdentity, cl: *const Client, name_matches: bool) bool {
+        if (!self.present) return name_matches;
+        const theirs = self.primary.get() orelse return false;
+        const mine = cl.puid_primary.get() orelse return false;
+        return platform_user.Id.eql(mine, theirs);
+    }
+};
+
+/// Read the v15 identity section into `out`. `p` must be the section offset as
+/// `zpvRecordLen` computed it; the bounds were checked there, so this re-checks
+/// only the copy.
+fn zpvIdentityFrom(data: []const u8, p: usize, out: *ZpvIdentity) void {
+    out.* = .{};
+    var q = p;
+    const id_present = data[q];
+    q += 1;
+    if (id_present == 0) return;
+    out.present = true;
+    const slots: [2]*platform_user.Stored = .{ &out.primary, &out.native };
+    for (slots) |slot| {
+        const present = data[q];
+        q += 1;
+        if (present == 0) continue;
+        const plat_len: usize = data[q];
+        const id_len: usize = data[q + 1];
+        q += 2;
+        const platform = data[q..][0..plat_len];
+        q += plat_len;
+        const id = data[q..][0..id_len];
+        q += id_len;
+        slot.set(.{ .platform = platform, .id = id }) catch {
+            // Over-cap identity: cannot be represented, so it matches nothing
+            // (fail closed). `zpvRecordLen` already bounded the lengths, so this
+            // is reachable only if the caps shrink between writer and reader.
+            out.present = false;
+            return;
+        };
+    }
+}
+
+/// Identity bytes a record writes: `1 | primary | native` with each identity a
+/// present byte plus its two length-prefixed strings. `cl` null writes the
+/// absent marker (a carried record whose owner is offline), which is one byte.
+fn emitZpv15Identity(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    const has = if (cl) |c| c.puid_primary.get() != null else false;
+    if (!has) {
+        try out.append(allocator, 0);
+        return;
+    }
+    try out.append(allocator, 1);
+    try emitZpvIdentity(out, allocator, cl.?.puid_primary.get());
+    try emitZpvIdentity(out, allocator, cl.?.puid_native.get());
+}
+
+fn emitZpvIdentity(out: *std.ArrayList(u8), allocator: std.mem.Allocator, v: ?platform_user.Id) !void {
+    const u = v orelse {
+        try out.append(allocator, 0);
+        return;
+    };
+    try out.append(allocator, 1);
+    try out.append(allocator, @intCast(u.platform.len));
+    try out.append(allocator, @intCast(u.id.len));
+    try out.appendSlice(allocator, u.platform);
+    try out.appendSlice(allocator, u.id);
 }
 
 /// Max quest id length persisted in a ZPV5 journal entry (stock ids stay well
@@ -365,9 +584,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E' and old_data[3] != 'F' and old_data[3] != 'G'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else if (old_data[3] == 'F') 15 else if (old_data[3] == 'G') 16 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -380,14 +599,15 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'C', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'G', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
         var off: usize = 0;
         while (ri < old_count) : (ri += 1) {
             const rec_start = off;
-            const rec_len = zpvRecordLen(old_recs, off, old_version) catch return error.CorruptPlayersFile;
+            const rec_span = zpvRecordSpan(old_recs, off, old_version) catch return error.CorruptPlayersFile;
+            const rec_len = rec_span.len;
             const nl: usize = old_recs[off];
             const rec_name = old_recs[off + 1 ..][0..nl];
             const had_prog_tail = zpvRecordHasProgTail(old_recs, off, old_version);
@@ -400,20 +620,52 @@ pub fn savePlayers(self: *Game) !void {
             // loop below skips it. Match the write predicate exactly to avoid a
             // lost-update window on a connected-but-not-spawned player.
             var rewritten = false;
+            var rec_ident: ZpvIdentity = .{};
+            if (rec_span.identity_off != 0) {
+                // Identity of the carried record, so a rename (or a different
+                // name claiming the same account) still merges into one row.
+                zpvIdentityFrom(old_recs, rec_span.identity_off, &rec_ident);
+            }
             for (&self.clients) |*cl| {
                 if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
-                if (cl.name_len != nl or !std.mem.eql(u8, cl.name[0..nl], rec_name)) continue;
+                const name_matches = cl.name_len == nl and std.mem.eql(u8, cl.name[0..nl], rec_name);
+                if (!rec_ident.matchesClient(cl, name_matches)) continue;
                 if (self.sim.playerByPeer(cl.slot) == null) continue;
                 rewritten = true;
                 break;
             }
             if (rewritten) continue;
-            if (old_version >= 10) {
-                // v10 records are v11-shaped except the skill tail: carry
-                // verbatim, then emit the empty tail (predates purchases).
-                // v11 is the current shape - carried byte-for-byte.
+            if (old_version >= 12) {
+                // Current shape: carried byte-for-byte, then the v14 stats tail
+                // the older file did not carry (counters it never knew are 0).
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                if (had_prog_tail and old_version < 14) {
+                    try emitZpv14Stats(&out, self.allocator, null);
+                }
+                // The carried bytes are v12+ shaped, so a v15 file already
+                // holds its identity section; only older records need one.
+                if (old_version < 15) try emitZpv15Identity(&out, self.allocator, null);
+                written += 1;
+                continue;
+            }
+            if (old_version >= 10) {
+                // v10/v11 differ from v12 only in the slot stride (13 vs 21:
+                // v12 appends four mod ids) and, for v10, the missing skill
+                // tail. The header is rewritten to ZPVC either way, so a
+                // verbatim carry would leave 13-byte slots in a file the
+                // reader walks with a 21-byte stride - every later field in
+                // the record reads from the wrong offset and the next load
+                // fails as CorruptPlayersFile. Widen the slots instead.
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 13;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv12Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                try emitZpv15Identity(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -423,9 +675,11 @@ pub fn savePlayers(self: *Game) !void {
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 11;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -437,10 +691,12 @@ pub fn savePlayers(self: *Game) !void {
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 11;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -451,13 +707,15 @@ pub fn savePlayers(self: *Game) !void {
                 // tail.
                 const inv_pos: usize = rec_start + 1 + nl + 16;
                 const inv_n: usize = old_recs[inv_pos];
-                const slots_end = inv_pos + 1 + inv_n * 7;
+                const slots_end = inv_pos + 1 + inv_n * 11;
                 const tail_start = tailStartOf(old_recs, rec_start, nl, 7) catch return error.CorruptPlayersFile;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -469,10 +727,12 @@ pub fn savePlayers(self: *Game) !void {
                 const slots_end = inv_pos + 1 + inv_n * 7;
                 const tail_start = tailStartOf(old_recs, rec_start, nl, 6) catch return error.CorruptPlayersFile;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 7);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -493,7 +753,7 @@ pub fn savePlayers(self: *Game) !void {
             jp += 1 + inv_n * 7;
             const jn: usize = old_recs[jp];
             try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-            try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+            try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 7);
             try out.appendSlice(self.allocator, old_recs[jp .. jp + 1]); // jn byte
             var qp: usize = jp + 1;
             {
@@ -561,13 +821,29 @@ pub fn savePlayers(self: *Game) !void {
                 try out.append(self.allocator, 0);
             }
             if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+            if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+            if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
             written += 1;
         }
     }
     for (&self.clients) |*cl| {
         if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-        var rec: [2048]u8 = undefined;
+        // The slot loop below breaks on a short buffer rather than failing,
+        // so a record that cannot hold a full inventory would silently drop
+        // the tail slots. Prove at compile time that it never has to: name
+        // header + position + wallet + inv_n + every slot at the version this
+        // build writes must fit, or the cap moved and this buffer needs to
+        // move with it. (ZPV16 widened the slot record, which is what caught
+        // the v12 literal that had been left in this assert.)
+        const rec_capacity = 4096;
+        comptime {
+            const head = 1 + 32 + 3 * 4 + 4 + 1;
+            const inv_bytes = ecs.components.max_inv_slots * zpvSlotStride(persist_version);
+            if (head + inv_bytes > rec_capacity)
+                @compileError("player record buffer too small for a full inventory at the current stride");
+        }
+        var rec: [rec_capacity]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
         o += 1;
@@ -587,11 +863,19 @@ pub fn savePlayers(self: *Game) !void {
         o += 1;
         var inv_n: u8 = 0;
         if (self.sim.mask[ps].inventory) {
+            // The write below emits a full v12 slot, so the room it needs is
+            // the v12 stride. Reading it off `zpvSlotStride` keeps the bound
+            // and the layout on one number: the previous literal 13 was the
+            // v10 stride left behind when v12 appended the mod ids, so the
+            // guard admitted a slot with room for the head and none for the
+            // tail.
+            const slot_bytes = zpvSlotStride(persist_version);
             for (self.sim.inventory[ps].slots) |s| {
-                // ZPV10 slot record: item:u16, count:u16, quality:u8, meta:u16,
+                // ZPV12 slot record: item:u16, count:u16, quality:u8, meta:u16,
                 // use_times:f32 (stock ItemValue.UseTimes), seed:u16 (stock
-                // ItemValue.Seed, so a plantable's seed survives a restart).
-                if (o + 13 > rec.len) break;
+                // ItemValue.Seed, so a plantable's seed survives a restart),
+                // then 4 mod ids:u16 (stock ItemValue.Modifications).
+                if (o + slot_bytes > rec.len) break;
                 std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                 std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
                 rec[o + 4] = s.quality;
@@ -603,7 +887,16 @@ pub fn savePlayers(self: *Game) !void {
                 while (mz < s.mods.len) : (mz += 1) {
                     std.mem.writeInt(u16, rec[o + 13 + mz * 2 ..][0..2], s.mods[mz], .little);
                 }
-                o += 21;
+                // ZPV16: the ItemValue stats (wire blob bit 2), so a rolled or
+                // client-sent item keeps its passive deltas across a restart.
+                rec[o + 21] = s.stats_n;
+                var sz: usize = 0;
+                while (sz < s.stats.len) : (sz += 1) {
+                    rec[o + 22 + sz * 5] = s.stats[sz].effect;
+                    std.mem.writeInt(i16, rec[o + 23 + sz * 5 ..][0..2], s.stats[sz].slot_a, .little);
+                    std.mem.writeInt(i16, rec[o + 25 + sz * 5 ..][0..2], s.stats[sz].slot_b, .little);
+                }
+                o += slot_bytes;
                 inv_n += 1;
             }
         }
@@ -732,6 +1025,20 @@ pub fn savePlayers(self: *Game) !void {
         // record bytes, only when prog == 1 (zpvRecordLen walks it the same
         // way). Appending before the record would misalign the next record.
         if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv13Backpacks(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv14Stats(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv15Identity(&out, self.allocator, cl);
+        // Identity-keyed row with no identity to key on: the row falls back to
+        // the login name, so another client can still claim it (ADR 0038). A
+        // real client always presents one; the bots do not, which is why this
+        // is a counted notice rather than a write refusal.
+        if (tail_has_prog and cl.puid_primary.get() == null and self.harness.counters.get(.identity_less_saves) == 0) {
+            self.harness.counters.inc(.identity_less_saves);
+            std.debug.print(
+                "zdtd: player save has no platform identity; row stays name-keyed (ADR 0038)\n",
+                .{},
+            );
+        }
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
@@ -770,12 +1077,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F' and data[3] != 'G'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else if (data[3] == 'G') 16 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -795,6 +1102,17 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         }
         const name_slice = data[off..][0..nl];
         off += nl;
+        // v15 identity, parsed from the record's own tail offset rather than
+        // the read cursor: the matcher below has to decide before the body is
+        // walked, and the tail layout does not depend on the cursor.
+        var rec_ident: ZpvIdentity = .{};
+        if (version >= 15) {
+            // The body walk below re-walks the same record for its fields; the
+            // length walk already validated it, so a failure here is the same
+            // corrupt tail the caller reports.
+            const sp = zpvRecordSpan(data, rec_start, version) catch RecordSpan{ .len = 0 };
+            if (sp.identity_off != 0) zpvIdentityFrom(data, sp.identity_off, &rec_ident);
+        }
         const rest = data[off..][0..16];
         off += 16;
         const inv_n: usize = data[off];
@@ -817,13 +1135,29 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 .seed = if (slot_stride >= 13) std.mem.readInt(u16, ib[11..13], .little) else 0,
             };
             // ZPV12: mod ids at bytes 13..21 (old saves read as empty).
-            if (slot_stride >= 21) {
+            // Same bound as the slot write above: `inv_n` is a u8 off disk, so
+            // a record claiming more slots than the array holds must keep
+            // consuming bytes (the stride advance above) without writing.
+            if (k < inv.len and slot_stride >= 21) {
                 var mz: usize = 0;
                 while (mz < inv[k].mods.len) : (mz += 1) {
                     const mod_id = std.mem.readInt(u16, ib[13 + mz * 2 ..][0..2], .little);
                     if (mod_id == 0) continue;
                     inv[k].mods[mz] = mod_id;
                     if (mz >= inv[k].mod_n) inv[k].mod_n = @intCast(mz + 1);
+                }
+            }
+            // ZPV16: stats_n, then 6 x (effect u8, slot_a i16, slot_b i16).
+            if (k < inv.len and slot_stride >= 52) {
+                const sn = @min(ib[21], inv[k].stats.len);
+                inv[k].stats_n = @intCast(sn);
+                var sz: usize = 0;
+                while (sz < sn) : (sz += 1) {
+                    inv[k].stats[sz] = .{
+                        .effect = ib[22 + sz * 5],
+                        .slot_a = std.mem.readInt(i16, ib[23 + sz * 5 ..][0..2], .little),
+                        .slot_b = std.mem.readInt(i16, ib[25 + sz * 5 ..][0..2], .little),
+                    };
                 }
             }
         }
@@ -926,7 +1260,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 }
             }
         }
-        if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) {
+        // Identity wins over the name: a record that carries one belongs to
+        // that account, so a different player typing the same display name
+        // cannot load it (the stock PrimaryId.CombinedString key). A legacy
+        // record with no identity is still matched by name so it can be
+        // upgraded in place on the next save.
+        const name_match = c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice);
+        if (!rec_ident.matchesClient(c, name_match)) {
             // ZPV3 records carry a progression tail after the journal;
             // consume it for non-matching records too so the scan stays
             // aligned with the next record.
@@ -954,6 +1294,25 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             var fi: usize = 0;
             while (fi < inv_n and fi < inv.len) : (fi += 1) {
                 if (fi < self.sim.inventory[ps].slots.len) self.sim.inventory[ps].slots[fi] = inv[fi];
+            }
+            // Bring saved stacks down to the current items.xml cap, but only
+            // for items the catalog resolves. The file is server-written and
+            // was legal when saved; the cap can still move under it when a
+            // Stacknumber is lowered or the world is loaded against a
+            // different game-dir, and nothing else would ever correct that.
+            //
+            // Deliberately not clampInventoryStacks: that path uses
+            // itemStackFor, which fails closed to 1 for an id it cannot
+            // resolve. Failing closed is right against a client claim and
+            // destructive here, where an unresolved id (game-dir absent, mod
+            // removed) would silently crush a legitimate stack to 1 on every
+            // load. An unknown id keeps whatever the save recorded.
+            for (&self.sim.inventory[ps].slots) |*s| {
+                if (s.count == 0 or s.item_id == 0) continue;
+                if (self.items.byId(s.item_id) == null) continue;
+                // The sandbox MaxStackSize multiplier belongs in the cap: the
+                // raw Stacknumber would crush a legitimately scaled stack.
+                s.count = @min(s.count, self.items.stackFor(s.item_id));
             }
         }
         if (self.sim.mask[ps].journal) {
@@ -1098,23 +1457,158 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                                 }
                             }
                         }
+                        if (resolved == null) {
+                            for (self.progression_table.crafting_skills) |sk| {
+                                if (std.mem.eql(u8, sk.name, sname)) {
+                                    resolved = sk.name;
+                                    break;
+                                }
+                            }
+                        }
                         const rname = resolved orelse continue;
                         c.skill_levels[c.skill_level_n] = .{ .name = rname, .level = slevel };
                         c.skill_level_n += 1;
                     }
                 }
             }
+            if (version >= 13) {
+                if (off < data.len) {
+                    const bp_n: usize = data[off];
+                    off += 1;
+                    var bi: usize = 0;
+                    while (bi < bp_n and off + 12 <= data.len) : (bi += 1) {
+                        const bx = std.mem.readInt(i32, data[off..][0..4], .little);
+                        const by = std.mem.readInt(i32, data[off + 4 ..][0..4], .little);
+                        const bz = std.mem.readInt(i32, data[off + 8 ..][0..4], .little);
+                        off += 12;
+                        // addBackpack caps and evicts, so a file claiming more
+                        // markers than the cap cannot overrun the array.
+                        c.addBackpack(bx, by, bz);
+                    }
+                }
+            }
+            // ZPV14 stats tail: the character-sheet counters stock keeps in
+            // PlayerDataFile. Restored before the join bundle so the PlayerId
+            // PDF (and the PlayerStats push) carry the surviving totals.
+            if (version >= 14 and off + zpv_stats_tail_len <= data.len) {
+                c.deaths = std.mem.readInt(i32, data[off..][0..4], .little);
+                c.zombie_kills = @intCast(@min(
+                    std.mem.readInt(u32, data[off + 4 ..][0..4], .little),
+                    std.math.maxInt(u16),
+                ));
+                c.player_kills = @intCast(@min(
+                    std.mem.readInt(u32, data[off + 8 ..][0..4], .little),
+                    std.math.maxInt(u16),
+                ));
+                off += zpv_stats_tail_len;
+            }
         }
         return;
     }
 }
 
+/// Bytes an `entities.zen` basket record occupies: the type byte, the slot
+/// count, then one v12-shaped slot per basket slot. The stride is the same
+/// `zpvSlotStride(12)` the player record uses, so a slot carries its mods and
+/// seed here too rather than a second, narrower slot encoding.
+const basket_record_max: usize =
+    2 + ecs.components.max_basket_slots * zpvSlotStride(12);
+
+/// Record type for a vehicle's basket, written directly after the vehicle it
+/// belongs to. A new record type rather than a magic bump: a world saved
+/// before baskets persisted still loads, it just has no type-4 records.
+const zen_rec_basket: u8 = 4;
+
+/// Record type for the owner name of the entity written just before it.
+/// Same reason as the basket record: appending to the turret record would
+/// have shifted a format older worlds still hold.
+const zen_rec_owner: u8 = 5;
+
+/// Bytes an owner record occupies: type byte, length byte, then the name.
+const owner_record_max: usize = 2 + ecs.components.max_owner_name;
+
+/// Record type for the player-set state of one power node, keyed by world
+/// position. The grid itself is rebuilt from the block plane on chunk load
+/// (`scanChunkPower`), which recovers the layout but resets everything the
+/// player configured: a generator comes back with a full tank, a trigger with
+/// default delay and duration, a motion sensor targeting nobody. A switch
+/// latch is not here because it already rides the block meta.
+const zen_rec_power: u8 = 6;
+
+/// Bytes a power-node record occupies: type byte, three i32 coordinates,
+/// fuel f32, delay u8, duration u8, target i32.
+const power_record_bytes: usize = 1 + 12 + 4 + 1 + 1 + 4;
+
+/// Record type for a loot bag on the ground. Stock protects dropped backpacks
+/// as a persisted category (RE save-region.md ProtectedPositionCache), and a
+/// death bag holds a whole player inventory, so losing it to a restart is the
+/// largest single loss in this family. Bags never expire in zdtd, so without
+/// this every one of them died at shutdown.
+const zen_rec_bag: u8 = 7;
+
+/// Marks the preceding bag record as an air-drop supply crate. Its `supply_drop`
+/// nav marker is a server push (RE map-objects.md:306) re-registered for each
+/// joining player, so without this a crate restored from disk sat on the map
+/// full of loot with nothing pointing at it. A separate record rather than a
+/// field on the bag: old saves stay readable, exactly as `zen_rec_owner` tags
+/// the turret record before it.
+const zen_rec_supply_crate: u8 = 8;
+
+/// Marks the preceding bag record as a player death backpack. Stock spawns the
+/// "Backpack" entity class (EntityBackpack) for the death drop and the generic
+/// "DroppedLootContainer" for a block spill; a restart that restored a backpack
+/// as a ground bag changed the wire class. One tag follows the bag, like
+/// `zen_rec_supply_crate` (a bag is never both).
+const zen_rec_backpack: u8 = 9;
+
+/// Bytes a bag record occupies at most: type byte, three f32 coordinates,
+/// slot count, a v12-shaped slot per filled slot, and the one-byte tag
+/// (supply-crate or backpack) that may follow it. A bag carries at most one.
+const bag_record_max: usize =
+    1 + 12 + 1 + ecs.components.max_inv_slots * zpvSlotStride(12) + 1;
+
+/// Write one inventory slot in the v12 shape. Shared so a second store
+/// persisting InvSlots cannot drift into its own narrower encoding.
+fn writeSaveSlot(w: *wire_binary.Writer, s: ecs.components.InvSlot) !void {
+    try w.writeU16(s.item_id);
+    try w.writeU16(s.count);
+    try w.writeByte(s.quality);
+    try w.writeU16(s.meta);
+    try w.writeU32(@bitCast(s.use_times));
+    try w.writeU16(s.seed);
+    for (s.mods) |m| try w.writeU16(m);
+}
+
+/// Read one v12-shaped inventory slot. Mirrors `writeSaveSlot` field for
+/// field; `mod_n` is derived from the ids, which is what the player record
+/// does with the same layout.
+fn readSaveSlot(r: *wire_binary.Reader) !ecs.components.InvSlot {
+    var s: ecs.components.InvSlot = .{};
+    s.item_id = try r.readU16();
+    s.count = try r.readU16();
+    s.quality = try r.readByte();
+    s.meta = try r.readU16();
+    s.use_times = @bitCast(try r.readU32());
+    s.seed = try r.readU16();
+    for (&s.mods, 0..) |*m, mi| {
+        m.* = try r.readU16();
+        if (m.* != 0) s.mod_n = @intCast(mi + 1);
+    }
+    return s;
+}
+
 pub fn saveEntities(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
-    // Vehicle/turret records (32 B each) plus the power-wire section
-    // (24 B per saved edge, 512 max).
-    var buf: [ecs.max_entities * 32 + ecs.electric.max_wires * 24 + 16]u8 = undefined;
+    // Vehicle/turret records (32 B each), one optional basket record per
+    // vehicle and one optional owner record per turret, the power-wire
+    // section (24 B per saved edge, 512 max), and at most one node-state
+    // record per power node.
+    var buf: [
+        ecs.max_entities * (32 + basket_record_max + owner_record_max + bag_record_max) +
+            ecs.electric.max_wires * 2 * 24 +
+            ecs.electric.max_nodes * power_record_bytes + 16
+    ]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
     // Overflow must propagate (callers log persistence errors): a silent
     // abort here would drop the vehicle/turret save without any signal.
@@ -1136,6 +1630,15 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeByte(v.seat_count);
             try w.writeF32(v.max_speed);
             count += 1;
+            // The basket is server-held storage: the C2S bag write reach-gates
+            // it and clamps its stacks like any other container, so dropping
+            // it on restart destroys items the server accepted.
+            if (v.basket_n > 0) {
+                try w.writeByte(zen_rec_basket);
+                try w.writeByte(v.basket_n);
+                for (v.basket[0..v.basket_n]) |s| try writeSaveSlot(&w, s);
+                count += 1;
+            }
         } else if (self.sim.kind[i] == .turret) {
             const t = self.sim.turret[i];
             try w.writeByte(2);
@@ -1146,13 +1649,55 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeF32(t.damage);
             try w.writeU16(t.ammo);
             count += 1;
+            // Trap kills pay the owner XP, quest progress and a kill count,
+            // so an owner lost on restart silently moves that reward to
+            // nobody. The client slot is per-session; the name is what can be
+            // saved, and the login path re-maps the slot from it.
+            if (t.owner_name_len > 0) {
+                try w.writeByte(zen_rec_owner);
+                try w.writeByte(t.owner_name_len);
+                try w.writeBytes(t.owner_name[0..t.owner_name_len]);
+                count += 1;
+            }
+        } else if (self.sim.kind[i] == .loot_bag and self.sim.mask[i].inventory) {
+            // A death bag holds a whole player inventory and never expires,
+            // so a restart used to be the one thing that could destroy it.
+            const inv = &self.sim.inventory[i];
+            var filled: u8 = 0;
+            for (inv.slots) |sl| {
+                if (sl.item_id != 0 and sl.count > 0) filled += 1;
+            }
+            if (filled == 0) continue;
+            try w.writeByte(zen_rec_bag);
+            try w.writeF32(self.sim.transform[i].x);
+            try w.writeF32(self.sim.transform[i].y);
+            try w.writeF32(self.sim.transform[i].z);
+            try w.writeByte(filled);
+            for (inv.slots) |sl| {
+                if (sl.item_id == 0 or sl.count == 0) continue;
+                try writeSaveSlot(&w, sl);
+            }
+            count += 1;
+            if (self.sim.loot_bag[i].supply_crate) {
+                try w.writeByte(zen_rec_supply_crate);
+                count += 1;
+            } else if (self.sim.loot_bag[i].backpack) {
+                try w.writeByte(zen_rec_backpack);
+                count += 1;
+            }
         }
     }
     // Power wire edges by endpoint position (node ids are per-session).
-    // The grid also keeps a live wire list plus any pending reconnect set;
-    // saving both would duplicate, so persist the live wires only.
-    if (self.sim.power.wire_n > 0) {
-        var edge_buf: [ecs.electric.max_wires * 24]u8 = undefined;
+    // Both the live wire list and the pending-reconnect set are written: they
+    // are disjoint, not duplicates. A pending edge is one loaded from a
+    // previous save whose endpoints have not come back yet (the blocks sit in
+    // chunks nobody has visited this session), and `reconnectPending` only
+    // promotes it once both are present. Writing the live list alone dropped
+    // every such edge on each save, so a base in unvisited chunks lost its
+    // wiring after one restart.
+    if (self.sim.power.wire_n > 0 or self.sim.power.pending_wire_n > 0) {
+        // Live plus pending, each capped at max_wires: 24 bytes per edge.
+        var edge_buf: [ecs.electric.max_wires * 2 * 24]u8 = undefined;
         var ew = wire_binary.Writer{ .buf = &edge_buf };
         var edges: u16 = 0;
         var wi: usize = 0;
@@ -1170,12 +1715,46 @@ pub fn saveEntities(self: *Game) !void {
             try ew.writeI32(pb.z);
             edges += 1;
         }
+        // Carry the not-yet-reconnected edges through untouched, in the same
+        // endpoint-position form the loader reads back.
+        var pi: usize = 0;
+        while (pi < self.sim.power.pending_wire_n) : (pi += 1) {
+            const pw = self.sim.power.pending_wires[pi];
+            try ew.writeI32(pw.ax);
+            try ew.writeI32(pw.ay);
+            try ew.writeI32(pw.az);
+            try ew.writeI32(pw.bx);
+            try ew.writeI32(pw.by);
+            try ew.writeI32(pw.bz);
+            edges += 1;
+        }
         if (edges > 0) {
             try w.writeByte(3);
             try w.writeU16(edges);
             try w.writeBytes(ew.written());
             count += 1;
         }
+    }
+    // Player-set node state, keyed by position. Only nodes that differ from
+    // what a fresh scan would produce are written: a world of untouched
+    // default nodes should not grow the file, and a node whose block is gone
+    // by the next load simply finds no match.
+    var ni: usize = 0;
+    while (ni < self.sim.power.node_n) : (ni += 1) {
+        const n = self.sim.power.nodes[ni];
+        const fuel_default = n.capacity;
+        const configured = n.fuel_or_energy != fuel_default or
+            n.delay_idx != 0 or n.duration_idx != 1 or n.target_type != 0;
+        if (!configured) continue;
+        try w.writeByte(zen_rec_power);
+        try w.writeI32(n.x);
+        try w.writeI32(n.y);
+        try w.writeI32(n.z);
+        try w.writeF32(n.fuel_or_energy);
+        try w.writeByte(n.delay_idx);
+        try w.writeByte(n.duration_idx);
+        try w.writeI32(n.target_type);
+        count += 1;
     }
     const written = w.written();
     std.mem.writeInt(u16, written[4..6], count, .little);
@@ -1196,12 +1775,29 @@ pub fn loadEntities(self: *Game) !void {
     if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZENT")) return error.BadMagic;
     const count = std.mem.readInt(u16, data[4..6], .little);
     var r = wire_binary.Reader{ .data = data, .pos = 6 };
+    // A basket record applies to the vehicle written just before it, so the
+    // loader carries that slot forward. Null when the last record was not a
+    // vehicle, or when the vehicle failed to spawn.
+    var last_vehicle: ?ecs.Slot = null;
+    // Same carry for the owner record, which follows the turret it names.
+    var last_turret: ?ecs.Slot = null;
+    // Same carry for the supply-crate tag, which follows the bag it marks.
+    var last_bag: ?ecs.Slot = null;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const rec_type = r.readByte() catch return error.Truncated;
+        if (rec_type != zen_rec_basket) last_vehicle = null;
+        if (rec_type != zen_rec_owner) last_turret = null;
+        if (rec_type != zen_rec_supply_crate and rec_type != zen_rec_backpack) last_bag = null;
         switch (rec_type) {
             1 => {
-                const kind: ecs.components.VehicleKind = @enumFromInt(r.readByte() catch return error.Truncated);
+                // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
+                // on an out-of-range byte: range-check the raw value first or a
+                // corrupt entities.zen takes the server down on load. Same
+                // shape as the allies.zal status byte.
+                const kind_raw = r.readByte() catch return error.Truncated;
+                if (kind_raw >= @typeInfo(ecs.components.VehicleKind).@"enum".fields.len) return error.BadRecord;
+                const kind: ecs.components.VehicleKind = @enumFromInt(kind_raw);
                 const x = r.readF32() catch return error.Truncated;
                 const y = r.readF32() catch return error.Truncated;
                 const z = r.readF32() catch return error.Truncated;
@@ -1217,6 +1813,7 @@ pub fn loadEntities(self: *Game) !void {
                     if (self.sim.slotOfNetId(nid)) |vs| {
                         self.sim.vehicle[vs].fuel = fuel;
                         self.sim.transform[vs].yaw = yaw;
+                        last_vehicle = vs;
                     }
                 }
             },
@@ -1232,6 +1829,7 @@ pub fn loadEntities(self: *Game) !void {
                         self.sim.turret[ts].range = range;
                         self.sim.turret[ts].damage = damage;
                         self.sim.turret[ts].ammo = ammo;
+                        last_turret = ts;
                     }
                 }
             },
@@ -1252,6 +1850,81 @@ pub fn loadEntities(self: *Game) !void {
                     };
                     self.sim.power.addPendingWire(wp);
                 }
+            },
+            zen_rec_basket => {
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_basket_slots) return error.BadRecord;
+                // Read every slot the record claims even when there is no
+                // vehicle to put them in: leaving bytes in the stream would
+                // shift every record after this one.
+                var bi: usize = 0;
+                while (bi < n) : (bi += 1) {
+                    const s = readSaveSlot(&r) catch return error.Truncated;
+                    if (last_vehicle) |vs| self.sim.vehicle[vs].basket[bi] = s;
+                }
+                if (last_vehicle) |vs| self.sim.vehicle[vs].basket_n = n;
+            },
+            zen_rec_owner => {
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_owner_name) return error.BadRecord;
+                // Consume the name whether or not there is a turret to give
+                // it to: leftover bytes would shift every later record.
+                var nb: [ecs.components.max_owner_name]u8 = undefined;
+                var ni: usize = 0;
+                while (ni < n) : (ni += 1) nb[ni] = r.readByte() catch return error.Truncated;
+                // The slot stays -1 until that player logs in: entity ids and
+                // client slots are per-session, so the login re-map is what
+                // reconnects the name to a live slot.
+                if (last_turret) |ts| self.sim.turret[ts].setOwnerName(nb[0..n]);
+            },
+            zen_rec_power => {
+                // Queued, not applied: this runs before any chunk has been
+                // scanned, so the node does not exist yet. Same lazy-chunk
+                // problem the pending wires above solve the same way.
+                self.sim.power.addPendingState(.{
+                    .x = r.readI32() catch return error.Truncated,
+                    .y = r.readI32() catch return error.Truncated,
+                    .z = r.readI32() catch return error.Truncated,
+                    .fuel_or_energy = r.readF32() catch return error.Truncated,
+                    .delay_idx = r.readByte() catch return error.Truncated,
+                    .duration_idx = r.readByte() catch return error.Truncated,
+                    .target_type = r.readI32() catch return error.Truncated,
+                });
+            },
+            zen_rec_bag => {
+                const bx = r.readF32() catch return error.Truncated;
+                const by = r.readF32() catch return error.Truncated;
+                const bz = r.readF32() catch return error.Truncated;
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_inv_slots) return error.BadRecord;
+                // Read every slot the record claims even if the bag cannot be
+                // spawned: leftover bytes would shift every later record.
+                var inv: ecs.components.Inventory = .{};
+                var bi: usize = 0;
+                while (bi < n) : (bi += 1) {
+                    const sl = readSaveSlot(&r) catch return error.Truncated;
+                    if (bi < inv.slots.len) inv.slots[bi] = sl;
+                }
+                if (n > 0) {
+                    if (self.sim.spawnLootBagFrom(bx, by, bz, &inv, 0, n)) |nid| {
+                        // The marker on the owner's map is rebuilt from the
+                        // player record's own state, not from here: bags carry
+                        // no owner, so a restored bag is anyone's to collect,
+                        // which is what stock's unowned ground bag is.
+                        last_bag = self.sim.slotOfNetId(nid);
+                    }
+                }
+            },
+            zen_rec_supply_crate => {
+                // Tags the bag written just before it. A tag with no bag ahead
+                // of it means the bag failed to spawn (entity cap), so there is
+                // nothing to mark and the record is simply consumed.
+                if (last_bag) |bs| self.sim.loot_bag[bs].supply_crate = true;
+            },
+            zen_rec_backpack => {
+                // Same carry as the supply-crate tag: a restored death bag must
+                // broadcast as the Backpack class, not the spill class.
+                if (last_bag) |bs| self.sim.loot_bag[bs].backpack = true;
             },
             else => return error.BadRecord,
         }
@@ -1333,7 +2006,56 @@ pub fn loadClaims(self: *Game) !void {
 /// Format: magic | version u8 | count u16 | per trader: name_len u8 + name,
 /// reset_interval i32, last_restock_day u32, wallet i32, wallet_default i32,
 /// n u8, n x (item_name_len u8 + name, count u16, quality u8, price u16,
-/// sell u16, markup i8).
+/// sell u16, markup i8[, v2: stats_n u8 + stats_n x (effect u8, slot_a i16,
+/// slot_b i16)]). v1 files load with no stats.
+///
+/// Walk a traders.zst blob and return the offset one past the last record,
+/// without touching sim state. `loadTraders` does the same walk inline and then
+/// applies each record; keeping a pure copy makes the cursor arithmetic - the
+/// part that desynced when a skipped record failed to consume its entries -
+/// fuzzable without standing up a whole Game.
+///
+/// A record whose trader is absent from the world is still fully consumed, so a
+/// blob that parses here parses identically in the loader.
+pub fn ztrScanLen(data: []const u8) error{ BadMagic, BadVersion, Truncated, BadRecord }!usize {
+    if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
+    if (data[4] != 1 and data[4] != 2) return error.BadVersion;
+    const v2 = data[4] == 2;
+    const count = std.mem.readInt(u16, data[5..7], .little);
+    var o: usize = 7;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (o >= data.len) return error.Truncated;
+        const name_len = data[o];
+        o += 1;
+        if (o + name_len > data.len) return error.Truncated;
+        o += name_len;
+        if (o + 17 > data.len) return error.Truncated;
+        const n = data[o + 16];
+        o += 17;
+        if (n > ecs.components.max_stock) return error.BadRecord;
+        var e: usize = 0;
+        while (e < n) : (e += 1) {
+            if (o >= data.len) return error.Truncated;
+            const ilen = data[o];
+            o += 1;
+            if (o + ilen > data.len) return error.Truncated;
+            o += ilen;
+            if (o + 8 > data.len) return error.Truncated;
+            o += 8;
+            if (v2) {
+                if (o >= data.len) return error.Truncated;
+                const sn = data[o];
+                o += 1;
+                if (sn > ecs.components.max_item_stats) return error.BadRecord;
+                if (o + @as(usize, sn) * 5 > data.len) return error.Truncated;
+                o += @as(usize, sn) * 5;
+            }
+        }
+    }
+    return o;
+}
+
 pub fn saveTraders(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/traders.zst", .{self.world.world_dir});
@@ -1360,7 +2082,7 @@ pub fn saveTraders(self: *Game) !void {
         }
     };
     try buf.appendSlice(self.allocator, "ZTR1");
-    try B.byte(self.allocator, &buf, 1); // version
+    try B.byte(self.allocator, &buf, 2); // version (v2: stat blob per entry)
     const count_pos = buf.items.len;
     try buf.appendNTimes(self.allocator, 0, 2);
     var count: u16 = 0;
@@ -1376,7 +2098,20 @@ pub fn saveTraders(self: *Game) !void {
         try B.i32v(self.allocator, &buf, st.wallet);
         try B.i32v(self.allocator, &buf, st.wallet_default);
         const n: u8 = @intCast(@min(st.n, ecs.components.max_stock));
-        try B.byte(self.allocator, &buf, n);
+        // The count byte must equal the number of entries actually written:
+        // the reader walks exactly that many, so writing a header of `n` and
+        // then dropping an unresolvable entry would leave it reading the next
+        // record's bytes as this record's tail. Count the writable ones first.
+        var writable: u8 = 0;
+        {
+            var c: usize = 0;
+            while (c < n) : (c += 1) {
+                const nm = if (self.items.byId(st.entries[c].item)) |d| d.name else "";
+                if (nm.len == 0 or nm.len > 255) continue;
+                writable += 1;
+            }
+        }
+        try B.byte(self.allocator, &buf, writable);
         var e: usize = 0;
         while (e < n) : (e += 1) {
             const item_name = if (self.items.byId(st.entries[e].item)) |d| d.name else "";
@@ -1391,6 +2126,16 @@ pub fn saveTraders(self: *Game) !void {
             try B.u16v(self.allocator, &buf, st.entries[e].price);
             try B.u16v(self.allocator, &buf, st.entries[e].sell);
             try B.byte(self.allocator, &buf, @bitCast(st.entries[e].markup));
+            // v2 stat blob: the rolled ItemValue stats survive a restart.
+            const sn: u8 = @intCast(@min(st.entries[e].stats_n, ecs.components.max_item_stats));
+            try B.byte(self.allocator, &buf, sn);
+            var si: usize = 0;
+            while (si < sn) : (si += 1) {
+                const stt = st.entries[e].stats[si];
+                try B.byte(self.allocator, &buf, stt.effect);
+                try B.u16v(self.allocator, &buf, @bitCast(stt.slot_a));
+                try B.u16v(self.allocator, &buf, @bitCast(stt.slot_b));
+            }
         }
         count +|= 1;
     }
@@ -1414,7 +2159,8 @@ pub fn loadTraders(self: *Game) !void {
     };
     defer self.allocator.free(data);
     if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
-    if (data[4] != 1) return error.BadVersion;
+    if (data[4] != 1 and data[4] != 2) return error.BadVersion;
+    const v2 = data[4] == 2;
     const count = std.mem.readInt(u16, data[5..7], .little);
     var o: usize = 7;
     var i: usize = 0;
@@ -1445,11 +2191,17 @@ pub fn loadTraders(self: *Game) !void {
                 break;
             }
         }
-        const t = ts orelse continue;
-        self.sim.trader_stock[t].reset_interval = reset_interval;
-        self.sim.trader_stock[t].last_restock_day = last_restock_day;
-        self.sim.trader_stock[t].wallet = wallet;
-        self.sim.trader_stock[t].wallet_default = wallet_default;
+        // A trader missing from this world (map changed) is skipped, but its
+        // record still has to be consumed: `o` sits at the first stock entry
+        // here, so returning to the outer loop without walking the entries
+        // would parse the next record from the middle of this one (an item
+        // name length read as a trader name length, and so on).
+        if (ts) |t| {
+            self.sim.trader_stock[t].reset_interval = reset_interval;
+            self.sim.trader_stock[t].last_restock_day = last_restock_day;
+            self.sim.trader_stock[t].wallet = wallet;
+            self.sim.trader_stock[t].wallet_default = wallet_default;
+        }
         var restored: usize = 0;
         var e: usize = 0;
         while (e < n) : (e += 1) {
@@ -1466,9 +2218,32 @@ pub fn loadTraders(self: *Game) !void {
             const sell = std.mem.readInt(u16, data[o + 5 ..][0..2], .little);
             const markup = @as(i8, @bitCast(data[o + 7]));
             o += 8;
+            // v2 stat blob; v1 records end here and restore as no stats.
+            var stats: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+            var stats_n: u8 = 0;
+            if (v2) {
+                if (o >= data.len) return error.Truncated;
+                const sn = data[o];
+                o += 1;
+                if (sn > ecs.components.max_item_stats) return error.BadRecord;
+                if (o + @as(usize, sn) * 5 > data.len) return error.Truncated;
+                var si: usize = 0;
+                while (si < sn) : (si += 1) {
+                    stats[si] = .{
+                        .effect = data[o],
+                        .slot_a = @bitCast(std.mem.readInt(u16, data[o + 1 ..][0..2], .little)),
+                        .slot_b = @bitCast(std.mem.readInt(u16, data[o + 3 ..][0..2], .little)),
+                    };
+                    o += 5;
+                }
+                stats_n = sn;
+            }
+            const t = ts orelse continue; // no live trader: entry consumed, dropped
             const iid = self.items.ecsIdByName(iname);
             if (iid == 0) continue; // unknown item (version drift) -> skipped
-            if (restored >= ecs.components.max_stock) break;
+            // Full: keep consuming the remaining entries so `o` still lands on
+            // the next record boundary.
+            if (restored >= ecs.components.max_stock) continue;
             self.sim.trader_stock[t].entries[restored] = .{
                 .item = iid,
                 .count = count_v,
@@ -1476,19 +2251,21 @@ pub fn loadTraders(self: *Game) !void {
                 .price = price,
                 .sell = sell,
                 .markup = markup,
+                .stats = stats,
+                .stats_n = stats_n,
             };
             restored += 1;
         }
-        self.sim.trader_stock[t].n = restored;
+        if (ts) |t| self.sim.trader_stock[t].n = restored;
     }
 }
 
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F' and data[3] != 'G'))
         return error.CorruptPlayersFile;
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else if (data[3] == 'G') 16 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);

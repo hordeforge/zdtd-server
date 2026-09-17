@@ -119,14 +119,26 @@ Replacing a whole component means claiming all of its points.
 
 ### Declarative dependencies (`_zdtd_requires`)
 
-A module may export `_zdtd_requires() -> (ptr, len)` returning a comma-
-separated list of capabilities it needs (hook names + the host verbs
-`log` / `tick` / `queue` / `sense` / `query` / `json_parse` / `json_str` /
-`json_raw` / `json_obj` / `config`). The host validates the list at load and
-**rejects
-the module loudly** when a capability is unknown or a declared hook is not
-actually exported. This is fail-closed at load: a typo'd hook name cannot
-silently never fire.
+A module declares the capabilities it needs with
+`_zdtd_requires() -> (ptr, len)`, a comma-separated list of hook names plus the
+host verbs `log` / `tick` / `queue` / `sense` / `query` / `json_parse` /
+`json_str` / `json_raw` / `json_obj` / `config`. The host validates the list at
+load and **rejects the module loudly** when a capability is unknown or a
+declared hook is not actually exported. `sense` and `query` are optional host
+callbacks, so they are accepted only when the owner wired them: a module that
+declares one against an owner that never installed it would otherwise validate
+and then read 0 bytes forever.
+
+**A discovered mod must export it.** A mod found through `manifest.toml` is a
+claim about capabilities, so a module that exports at least one hook and no
+`_zdtd_requires` is refused with `error.RequiresUnmet` - otherwise nothing
+would ever check the hook names it believes it registered, and a typo'd hook
+would be a silent never-fire. A module that exports no hook at all (a pure
+verb or config-only module) has nothing to declare and is left alone. The
+in-repo test fixtures and the legacy `[plugin] modules` list load through the
+raw path, which stays permissive because `--export-all` fixtures export symbols
+they never meant to claim; anything an operator can enable through `Mods/`
+takes the strict path.
 
 ```c
 long long _zdtd_requires(void) {
@@ -396,6 +408,7 @@ completes the authoring view):
 | `on_game_event` | `(player: i32, event_ptr, event_len, target, var_count: i32) -> i32` | ADR 0035: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock sender/party gate runs native before the verdict |
 | `on_player_leave` | `(peer_slot: i32, entity_id: i32) -> ()` | void observer at disconnect (the join counterpart) |
 | `on_stat_changed` | `(player: i32, hp, food, water, stamina, level, xp: i32) -> ()` | ADR 0034: pure observer fired when the survival pass or an XP award changed a tracked stat |
+| `on_buff` | `(entity: i32, name_ptr, name_len: i32, adding: i32) -> ()` | pure observer fired for every buff applied or dropped, whatever caused it (C2S request, tick expiry, death clear on respawn). The name is the stable key; `def_id` is a per-load catalog index and never crosses the boundary |
 | `on_evidence` | `(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits: i32) -> ()` | T21: read-only guard evidence event (detector/severity/surface are enum values; the two floats arrive as f32 bits - `@bitCast` back). `severity` is the EFFECTIVE value after the T20 hard ceiling (a client-informed detector's `.hard` arrives as `.strong`). Never a gate: the return is discarded |
 | `on_trader_event` | `(player: i32, trader_entity: i32, kind: i32) -> ()` | void observer on trade open / sell / buy |
 

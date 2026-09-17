@@ -1,18 +1,269 @@
 # Status: stock-client join and play path
 
-> **What this is:** the living hub for what actually works today on the V3.2.0 b9 stock-client join and play path, with gate evidence and residual gaps.
+> **What this is:** the living hub for what actually works today on the V3.2.0 b10 stock-client join and play path, with gate evidence and residual gaps.
 
 > **Related:** gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md)
 
 **Date pin:** 2026-08-30  
-**Game line:** V 3.x Mono (connected client **V3.2.0 b9**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
+**Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
+**Studied bytes:** the exact stock files the RE pins came from, by sha256 ([PROVENANCE.md](PROVENANCE.md) "Studied bytes"): `Assembly-CSharp.dll` `3737eedc…1d0fc64d`, `entityclasses.xml` `0c95e733…912db0b0`, `traders.xml` `06202f16…31ca40dfcc`, `buffs.xml` `d6c714d7…e72fdab5b1c`. Same version string, different hash = different build = re-pin before trusting value comparisons.
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`); `game.zig` delegates to 44 shards in
+`lint-architecture: clean`). **Container loot rolls on first open 2026-09-12**:
+the chunk/prefab scan sizes a container's grid from loot.xml only
+(`setContainerSizeFromLoot`) and the roll moved to the open path
+(`ensureContainerLoot` on `InventoryDataRequest`, stock
+`LootManager.LootContainerOpened`), where it uses the **opener's** loot stage
+(`lootStageForPlayer`), the container's biome, and the TE's loot-list name;
+`touched`/`touched_day` are stamped at open even for an empty roll, the
+`LootRespawnDays` re-roll uses the same stage, player-placed storage never
+auto-rolls and a block without a LootList stays empty. Gated by
+`scenario world container loot rolls on first open, not at load` (empty and
+untouched before the open, rolled and stamped after, player storage untouched)
+plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
+0 failed.
+**Loadgen Navezgane mixed-mode smoke 2026-09-12
+(round 19, post damage/loot changes)**: on the current commit (passive-43 EDR +
+`AffectedByArmor` source gate + loot `EntryGate`) the real map loaded (loot
+groups=1015 containers=339, 1559 prefabs) and 2 mixed-mode bots
+(`--mode mixed --mixed-actions`, break/loot/jump/use) ran 18 PASS joins over
+120-action lives with `join_fail`/`net_payload_errors`/`decode_rejects`/
+`encode_errors`/`net_send_errors`/`c2s_malformed`/`stream_errors`/
+`phase_rejects`/`ownership_rejects`/`bounds_rejects`/`persistence_errors` all
+0, `plugin_verbs_denied`/`plugin_effects_not_reverted` 0, and
+`requirement_unsupported` 147 (the tracked VM-gate diagnostic, not an error).
+**Loot entry gates 2026-09-12**: loot.xml's 87
+`<requirement>`-gated entries now carry an `EntryGate`: `Biome` resolves at roll
+time against the container's own biome (the container fill passes
+`biome_layers.nameById(biomeIdAt(pos))`), and the player-state classes are
+omitted from rolls instead of dropping ungated; before this a book entry with
+prob 1.0 gated on `RandomRoll @$perkBookwormChance` filled every Working Stiffs
+crate. Gated by two `assets.loot` stock tests (the books entry is
+`GateKind.other` and its item names never appear across 200 crate rolls; the
+wasteland-only `plantedGraceCorn1Schematic` rolls with `biome_name="wasteland"`,
+is absent for `"forest"` and absent with no ctx, and the group still produces
+loot). The player-state evaluator (cvars/levels/sandbox/quest tags) remains a
+recorded residual, together with the `onSelfProgressionUpdate` triggered row
+that writes `$perkBookwormChance`.
+**AffectedByArmor source gate 2026-09-12**:
+`DamageSource::AffectedByArmor()` (IL=5) is External-only, so the C2S damage
+path now applies the armour branch (physical rating or passive 43) only when
+the wire `source` byte is 0; an Internal claim keeps GDR and skips armour. The
+explosion blast is External and now mitigates for the blaster too (was
+exempted), and the server's drowning/radiated-biome legs model Internal
+self-damage so they run GDR-only. Gated by the extended
+`scenario ElementalDamageResist` (source=1 heat and bashing hits on the
+armoured victim take the full claimed strength while source=0 is mitigated)
+plus the `protocol` source test.
+**Item mod stats fold server-side 2026-09-12**:
+`item_modifiers.xml` now parses each modifier's effect rows (layer 13) through
+the shared buffs scanner, and the item fold adds an item's installed mods'
+rows alongside its own, so the flat defensive rows apply:
+`modArmorInsulatedLiner`/`modArmorCoolingMesh` (+1 ElementalDamageResist
+heat/electrical), `modRadiationReady` (+50% radiation), the fittings' stamina
+rows and the admin shirt's `HealthMax`. The tagged EDR query folds mod rows too
+(verified by the `server.game.tests` "equipped item mods fold their passives
+(layer 13, stock data)" test: +1 heat on the liner, >40% radiation on
+Radiation Ready, both tag-scoped and reverting when the mods are removed, plus
+a plating mod's +1 PhysicalDamageResist reaching `armorMitigation` while the
+same mod on the held item does not), and the parser test asserts an ungated
+fixture row plus an empty slice for a mod with no rows. Attacker-side modifier rows stay client-computed (the damage
+packet carries the finished number); tiered modifier rows and
+`params.ItemValue` gates remain recorded residuals.
+**Starter-hostile seeds configurable 2026-09-12**:
+the near-spawn demo seeds (2 zombies, sleeper, animal) are `[sim]
+starter_zombies` (default true, unchanged behaviour; `false` leaves a fresh
+world to the lazy AIDirector spawner like stock). The divergence is recorded in
+DIVERGENCES 6.2 and the provenance register row is updated; gated by
+`server.game.tests` "starter_zombies gates the near-spawn demo hostiles" (off =
+0 zombies/0 animals, on = the 3+1 demo set) and by the zdtd.toml binder
+assertion. Two stale register/scorecard entries were corrected while auditing:
+the invented `zombieFeral` class row was already repointed to the real
+`zombieBoeFeral` (A40), and the "perk purchase is denied (parent-skill
+prerequisite)" note was stale (`skillCostOf` uses stock's
+`GetCalculatedMaxLevel` level_requirements gate).
+**Elemental damage resistance 2026-09-12**:
+passive 43 (`ElementalDamageResist`) now has its stock consumer. The wire
+`damageType` byte classifies physical vs elemental (`EnumDamageTypes` ordinals;
+stock's physical set is `piercing,bashing,slashing,crushing,none,corrosive`, so
+`dtype <= 5`), the C2S player path takes PDR for physical and a tag-matched EDR
+for everything else, the explosion blast takes Heat (6), drowning Suffocation
+(16) and the radiated biome Radiation (8). `Game.elementalDamageResist` folds
+the victim's equipped item rows, buffs and perks on the damage event with the
+damage type as the query tag, so armor's `tags="heat,electrical"` rows resist
+those types and not cold. The new `scenario ElementalDamageResist` test on
+stock items.xml reads bare heat 100, Q6 helmet heat 87.5, cold 99.8 and bashing
+87.7. Writing it also exposed two latent crashes (`0xFFFF` no-holding sentinel
+read directly in `armorMitigationVs` and the harvest held-tool read), both fixed
+through `Inventory.heldItem()`. `zig build test` 1793 passed / 2 skipped / 0
+failed.
+**Plugin verb interception 2026-09-12
+(composability review F4, ADR 0039)**: a module can declare queued verbs it
+will not issue (`manifest.toml deny`), and `zdtd.toml [plugin] deny`/`allow`
+merge over that declaration right-biased (operator denies add, operator allows
+clear). The `zdtd.queue` boundary checks the effective per-module mask before
+the ECS buffer and the host `bot` family, so a denied verb cannot spawn, chat or
+reach the bot manager; drops land in the new `plugin_verbs_denied` counter and a
+boot log line states the policy per module. Gated by the `plugin.manifest`
+policy-grammar test, the `plugin.wasm` module-deny/right-bias/reload test and
+the `server.game.tests` boundary test (denied dropped and counted, allowed
+queued, native src exempt). `zig build test` 1791 passed / 2 skipped / 0 failed.
+**Heat-map spawn rate 2026-09-12**: the chunk-heat
+spawner now follows the stock `CheckToSpawn` table instead of spawning on every
+threshold crossing: 20% spawn chance, region 240 s (no spawn) / 1320 s
+(`SetLongDelay`), neighbours 180 s / 720 s. The zdtd-only
+`heat_feral_chance`/`heat_feral_cd_mult` rules are replaced by
+`heat_spawn_chance`, `heat_long_cooldown_seconds` and
+`heat_neighbor_long_cooldown_seconds`; the roll is deterministic
+(`Director.heatSpawnRolls`, seeded off the crossing ordinal) so a replay makes
+the same choices. Gated by the `ecs.aidirector` chance-split test (0% -> no
+scouts and the 240/180 table; 100% -> a spawn and the 1320/720 table) plus the
+existing forge test pinned to chance 1. `zig build test` 1788 passed / 2 skipped
+/ 0 failed.
+**Plugin contract version + table ceiling
+2026-09-12 (composability review F6)**: a guest may now declare the contract
+version it was built against with `_zdtd_api() -> i32` (`mods/plugin_common.zig`
+exports it for every Zig guest). The host reads it at load; a version newer than
+`api.plugin_api_version` is refused fail-closed with a reason naming both, an
+older one is accepted and logged, and an absent export keeps the permissive
+legacy path (the C fixtures, `fps_bot`). The host test "shipped core plugins
+declare the host contract version" loads all 14 shipped modules and asserts each
+declares the host version, so the guest and host constants cannot drift. That
+test also showed `max_wasm_plugins` was 8 while 14 modules ship, so a full
+`[plugin] modules` list lost its tail at the cap; the ceiling is 32 and the test
+asserts the shipped set fits. `zig build test` 1787 passed / 2 skipped / 0
+failed (both skips are the environment-dependent live-asset samples).
+**Plugin reload claim reconciliation 2026-09-12
+(composability review F2)**: `plugin reload` now re-reads the module's
+`manifest.toml` and rebuilds its exclusive override-point claims, so a replaced
+module that dropped a `points` claim releases it (it used to hold the hook
+exclusively forever, since its export was still present) and one that added a
+claim gets it, under the boot install rule (missing hook or a point held by
+another live module = refused, logged). A legacy `[plugin] modules` path is
+never reconciled. Gated by the `plugin.wasm` test "reload reconciles the
+module's manifest point claims" (claim install, second-claimant refusal,
+drop-on-reload release, install after release, missing-hook refusal,
+legacy-path no-op) on temp dirs with hand-built modules; `zig build test` 1786
+passed / 1 skipped / 0 failed.
+**Pregen world matrix re-run 2026-09-12**: the
+open P1 "C2S payload decode Overflow on every pregen world" from 2026-08-12 does
+not reproduce. Pregen06k01 (dtm=6144x6144, 3469 prefabs) took 2 wander bots
+through 11 lives / 1200 ticks with `join_fail=0`, `net_payload_errors=0`,
+`decode_rejects=0` and every enter PASS; Pregen08k02 (5103 prefabs) took 3 bots
+through 25 PASS joins with the same zeros. The join failure that report recorded
+on Pregen06k01 was the S2C `WorldSpawnPoints` 512-byte builder overflow fixed
+2026-08-29. The only residual is a transient `stream_errors` WindowFull on the
+chunk stream (1 on Pregen06k01, 2 on Pregen08k02), which leaves the unsent chunk
+pending and retries it on the next stream period; `reliable_window_drops` (41 /
+59) are the droppable repackages the window policy is allowed to shed.
+**Loadgen Navezgane smoke 2026-09-12 (round 9,
+world-clock rate)**: the real map loaded, 2/2 wander bots joined and stayed
+alive to the timeout (w=2659/2621 steps, deaths=0), and
+`join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/
+`c2s_malformed`/`phase_rejects`/`ownership_rejects` were all 0 on 3600 ticks
+(`movement_rejects=77` is the bots' jump steps, `tick_overruns=75` is join
+churn). The clock rate was sampled live over the admin console twice, 60 s and
+61 s apart: 07:17 -> 07:39 and 07:41 -> 08:03, i.e. 22 in-game minutes per
+minute = 0.36 game-min/s, the stock `getgamestat TimeOfDayIncPerSec = 6`
+ticks/s (the previous flat scale would have read 24). `make check` green
+(`zig build test` 1785 passed / 1 skipped / 0 failed; fuzz clean; provenance
+203/203 files, 64 constants; `gen_provenance.py` leaves `docs/provenance.html`
+unchanged).
+**Loadgen Navezgane smoke 2026-09-12 (round 27,
+deco suppression)**: the real map loaded (dtm=6144x6144, 1559 prefabs, 39 water
+sources), one wander bot joined and walked 247 steps with
+`join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/
+`c2s_malformed` all 0, the join `DecoUpdate` sent 277 objects in one package
+uncapped, and `deco_suppress_saturated` stayed 0 (no deco chunk hit the
+16-footprint cap). The gate itself is pinned by the `world.prefabs` unit test
+and the Navezgane integration test, which asserts a real non-opted-in POI is
+suppressed, its sampler yields no species while 4000 blocks away is not
+suppressed, and the shipped map contains both opted-in and default prefabs.
+**Loadgen combat smoke 2026-09-12 (round 24,
+movement tags)** on the same setup: 2/2 joins, 12 zombie kills, every
+wire/encode/decode/phase/ownership counter 0, and the `survival` section at
+32 us mean / 24.5 us p50 with both the item fold and the movement tag in the
+binary (Debug, 2 players), which is within noise of the pre-fold 35 us mean, so
+the earlier round-23 note that attributed a 45 us mean to the item fold is
+superseded: that comparison was not isolated and no folded-path cost is
+measurable here. `requirement_unsupported` moved 69 -> 96 (wander) / 186
+(combat) over ~1.1-1.3 k player-ticks; the counter tracks how many gate-bearing
+rows the run reaches, and a newly resolving gate (`EntityHasMovementTag`) lets
+gated triggered rows fire and expose the next row's gates, so it is a
+reachability diagnostic rather than a regression signal. A second wander run
+the same build: 8 joins, `join_fail=0`, all wire counters 0.
+**Loadgen combat smoke 2026-09-12 (round 23,
+item-passive fold)** on the same setup: 2/2 joins, 12 zombie kills, and every
+wire/encode/decode/phase/ownership counter still 0. `tick_total` p50 read
+0.79 ms in both runs of that build against 0.39 ms in the
+round-22 run, which is join-churn dominated (the same run's `sim_entities` p50
+is 0.39 ms and `replicate` mean 11.5 ms). The item-fold arithmetic itself is
+pinned by the `assets` and `game` tests with stock items.xml, not by the bots,
+which spawn without armor.
+**Loadgen combat smoke 2026-09-12** (AGENTS rule 5,
+Debug binary, flat world with the stock `--game-dir`, `--mode combat
+--spawn-zombies`, 2 bots): 8 joins, `join_fail=0`, 16 zombies spawned, 12
+deaths from zombie melee (the deferred-damage choke), and
+`encode_errors`/`decode_rejects`/`c2s_malformed`/`c2s_unhandled`/
+`phase_rejects`/`ownership_rejects`/`stream_errors`/`persistence_errors`/
+`net_send_errors` all 0; tick p50 0.39 ms with the usual join-burst overruns.
+That is the live path for the round-22 damage-resist change (armor +
+`GeneralDamageResist` at the AI melee choke), whose arithmetic is pinned by the
+`ecs` and `game` tests rather than by the bots, which carry no armor.
+**Loadgen smoke 2026-09-08** (AGENTS rule 5, on
+the ReleaseSafe binary against a fresh proc world): 81 joins, `join_fail=0`,
+and `c2s_malformed`, `c2s_unhandled`, `decode_rejects`, `encode_errors`,
+`ownership_rejects` and `net_send_errors` all 0 across wander, chatty, combat
+and demolition modes (122 joins total, `phase_rejects=0`). That exercises the
+join handshake, movement, crouch/stealth, melee, block breaks, dynamite and
+the chat path end to end against a real LiteNet client, not just unit tests.
+Tick p50 held at 0.39 ms; the spikes (max 7.4 s, 213 overruns, 1000 window
+drops) come from the run's own rejoin churn (41 joins, 39 rejoins in ~100 s)
+and are the known join-burst PARTIAL in GAP_ANALYSIS §11, not a regression.
+Re-run 2026-09-09 after the equipment and animation parser rewrites: another
+81 joins across the same four modes, all the same counters still 0.
+**Stock-map run 2026-09-09** (the first on real prefab data; earlier runs used
+the flat proc world, which has no prefabs and so never exercised the prefab TE
+scan): `--game-dir` Navezgane, 1559 prefabs loaded, 16 joins, `join_fail=0`,
+and `stream_errors`, `c2s_malformed`, `c2s_unhandled`, `decode_rejects`,
+`encode_errors`, `net_send_errors` all 0. 19.6 M TE cells scanned and
+`containers.zct` persisted 6400 bytes, confirming the scan produced real
+storage TEs rather than being filtered out.
+**What loadgen does not cover:** it never sends `NetPackagePlayerEquipment` or
+`NetPackageEntityAnimationData` (checked against its sender list), so those two
+parsers are exercised only by `scenarios.zig` through the real C2S handler, not
+by a live client. It also cannot validate the chat echo: it resolves
+`NetPackageSimpleChat` in preference to `NetPackageChat` (`ActionLoop.cs:597`),
+so it drives the path that always broadcast, not the branch fixed on
+2026-09-09; and it paces chats ~40 ms apart against the 200 ms
+`min_chat_gap_ns` anti-spam gate, so only the first chat per client is
+accepted (110 sent, 2 accepted in the 2026-09-09 stock-map run). That gate is
+deliberate, not a defect. A stock-client pass is still the open validation
+step.
+
+**Regression run for the 2026-09-09 relay and reach gates** (DIVERGENCES 1a5,
+1a6): 185 joins over wander and combat on a flat world, `join_fail=0`,
+`ownership_rejects=0`, `decode_rejects=0`, `c2s_malformed=0`,
+`c2s_unhandled=0`, `encode_errors=0`, `net_send_errors=0`, `phase_rejects=0`.
+`bounds_rejects` moved 1 to 4, from the pre-existing block and movement sites,
+not the new trader gates.
+
+What that run does and does not prove: it shows the eight new gates reject
+nothing in ordinary play, which is the regression risk when adding a gate.
+It does **not** exercise the gated paths, because loadgen sends none of
+`NetPackageTraderData`, `NetPackageNPCQuestList`, `NetPackageItemActionEffects`,
+`NetPackageItemReload`, `NetPackageWireToolActions` or `NetPackageSharedQuest`
+(checked against its sources; those names appear nowhere in `src/LoadGen`).
+The accept side of each gate is covered only by `scenarios.zig`, which drives
+the real handler and was mutation-checked, but by a synthetic body rather than
+a real client. Confirming the trader paths against a stock client remains
+open.
+`game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 295 features: **294 `WORKS`,
-1 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
-54 bullets carry ad-hoc labels and are not counted). Residuals are recorded
+owns all C2S domains. `GAP_ANALYSIS.md` scores 300 features: **298 `WORKS`,
+2 `PARTIAL`, 0 `MISSING`** (recounted 2026-09-11 from the per-feature markers;
+see its scorecard for the per-area breakdown; 50 bullets carry ad-hoc labels
+and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
 recorded-not-wired effect classes (block-light/moon/shade light slices,
 client-local consume buffs, group AI, RWG caves/water, animal distress,
@@ -32,6 +283,240 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (`StatCompareCurrent`)
+
+`StatCompareCurrent` IL=52 compares a stat's current value rather than a
+fraction of max (that is `StatComparePercCurrentToMax`). StatTypes 1..4 read
+`Stats.Health/Stamina/Water/Food.Value`, which the ctx carries as `frac * max`,
+so 16 stock rows resolve (13 Health, 3 Stamina). StatType 5 reads
+`Equipment::GetTotalPhysicalArmorRating`, which `Ctx.armor_rating` now carries
+from the `coredamageresist` fold, so the 8 `stat="Armor"` rows behind check01's
+`buffStatusArmorLow/High/Broken` states resolve as well. That rating is produced
+by the same tick's VM pass, so those gates read the previous tick's value: one
+50 ms tick, documented at the field rather than hidden. The mod-max family still
+needs a mod-max on the ctx and stays counted.
+
+---
+
+## 2026-09-11 (`value="@cvar"` operands, and the general update event)
+
+The requirement parser read every `value` attribute as a float, so an `@name`
+operand became a constant 0 - 255 stock requirement rows are written that way.
+The visible damage was the level-bonus chain: `buffLevelUpTracking`'s
+`PlayerLevel GT value="@$LastPlayerLevel"` guard always passed, `$LastPlayerLevel`
+climbed on every 0.1 s update, and check01's `$PlayerLevelBonus` became an
+unbounded max-HP bonus (168 where the data accounts for 150). `operand(ctx, r)`
+now resolves `value_cvar` through the entity's CVars, and every comparison kind
+reads through it.
+
+With that, the last hardcoded pair in the survival pass is gone: every active
+buff fires its own `onSelfBuffUpdate` rows on its own rate (`<update_rate>` is
+seconds * 20 ticks: check01 40, check02 44), `survivalCheckId`/`armorCheckId`
+are unused by the server, `syncStageBuffs` is removal-only, and the check-buff
+scenarios wait the real rates. At level 1 the accounted max HP is 150: the
+tracker sets `$LastPlayerLevel` to 1, check01 sets `$PlayerLevelBonus` to 1 and
+subtracts 1, so `HealthMax` gains 0.
+
+---
+
+## 2026-09-11 (buff lifecycle: start/remove for every active buff)
+
+Stock applies a triggered row's `AddBuff`/`RemoveBuff` during the scan, so a
+later row's `HasBuff` gate sees an earlier row's add. zdtd collected the
+requests and applied them after the scan, which is exactly why round 24's
+lifecycle sweep broke the survival stages: all six stage rows passed against
+the snapshot, then every stage's `onSelfBuffStart` removed the others.
+`requirements.Ctx` now carries a sink (called as each add/remove row passes)
+and a live `buff_active` lookup that `HasBuff` prefers over the snapshot. A
+fixture pins the ordering.
+
+With that, every active buff fires its own lifecycle rows: `onSelfBuffStart`
+once per instance and `onSelfBuffRemove` when flagged, so the 444 stock start
+rows run - `buffShocked` writes `$buffShockedDamage` from its start rows, the
+first CVar driven by a buff other than the two checks. `onSelfEnteredGame` was
+already generalised to the active set. The survival stage chain now behaves
+like stock, and the two scenarios that blocked the last round pass unchanged.
+
+---
+
+## 2026-09-11 (entity class `Buffs=`, and a buff-set cap of 8)
+
+The entity class's `Buffs="buffStatusCheck01,buffStatusCheck02"` list is applied
+at spawn now, so the check buffs are real active buffs from the first survival
+pass: the client is relayed their adds, their own passives fold, and
+buffStatusCheck02's `PhysicalDamageResist base_add @.ArmorLightTotal` closes the
+armour loop (with `perkLightArmor` 1 and four light pieces the armour rating
+gains exactly the derived 4, and loses it again when the perk goes).
+
+That activation exposed a real cap bug rather than a survival-rule one:
+`max_buffs_per_entity` was 8, and the stage machine alone needs the six
+hunger/thirst stages plus the level tracker, before the check buffs, the biome
+checks or any injury. The thirst stages (added last) fell off the end of the
+fixed set and were re-added every tick, which is what made round 22's stage
+scenario fail two ticks late; the cap is 32 with a scenario holding ten stock
+buffs at once that fails at 8. One expectation moved with it, as stock
+behaviour: the sandbox-gated row scenario reads 149 instead of 150, because with
+`PlayerLevelBonusApplied` on, check01 sets `$PlayerLevelBonus = $LastPlayerLevel(0) - 1`
+and its own `HealthMax` row folds the -1 (stock refreshes `$LastPlayerLevel`
+from `buffLevelUpTracking`, which zdtd does not apply yet).
+
+---
+
+## 2026-09-11 (`WornItems` and the armor-perk chain)
+
+`WornItems` (IL=54) was the gate refusing check02's entire light/medium/heavy
+armor chain: it walks the equipment slots and counts those whose item carries
+any of the row's `tags`. The tick now collects each worn item's `Tags` property
+next to the armor groups, so with `perkLightArmor` 1 and four `lightArmor`
+pieces buffStatusCheck02's update rows derive `.ArmorLightWorn=4`,
+`.ArmorLightLevel=1` and `.ArmorLightTotal=4` from the data, and without the
+perk the effect_group gate refuses the chain. `WornItems` gates 70 stock rows
+(38 in `buffs.xml`, 32 in `items.xml`) and none of them is a tracked passive, so
+the gated tracked-row split stays 31 resolve / 12 refuse; what it unblocks is
+that triggered chain. The
+`PhysicalDamageResist = @.ArmorLightTotal` passive those rows feed lives on
+buffStatusCheck02 itself, so it starts folding once the entity class `Buffs=`
+list makes that check buff an active buff.
+
+---
+
+## 2026-09-11 (per-entity CVars + `CVarCompare` + `ModifyCVar`)
+
+Stock keeps a per-entity `string -> float` map (`EntityBuffs::CVars`) that
+triggered rows write and gates read; zdtd had neither, so 1027 `CVarCompare`
+gates refused closed and every `value="@name"` passive folded 0. `src/assets/cvars.zig`
+now carries the store and the operations straight from the IL:
+`SetCustomVar` IL=130 (the six XML spellings plus `percentadd`/`percentsubtract`
+on the current value, and the IL_008A zero-divisor guard of 0.0001),
+`GetCustomVar` IL=10 (a missing name reads 0), `RemoveCustomVar` IL=21, and the
+prefix rule that decides networking (`.`/`_` never, `%` always). It is a fixed
+128-entry array per player client, passed to the engine through
+`requirements.Ctx.cvars`, so there is no tick allocation. `CVarCompare` landed
+as a kind, `value="@name"` passive rows read the store instead of the curve
+(58 in stock `buffs.xml`), and `ModifyCVar`/`RemoveCVar` apply **in document
+order during the scan**, which is what makes check02's `.ArmorLightTotal`
+(`set @.ArmorLightLevel` then `multiply @.ArmorLightWorn`) correct and visible
+to the rows that gate on it. The `randomint(...)`/`randomfloat(...)` and
+comma-list operands are refused rather than applied as 0 (6 stock rows).
+`onSelfEnteredGame` fires once per client session for the check buffs now, so
+`buffStatusCheck01`'s rows land: `$infectionMaxDuration=25200`,
+`$dysenteryMaxDuration=3600`, and the `buffBiomeProgressionCheck` /
+`buffCheckScreenEffects` adds reach the client on the wire. Measured: the gated
+tracked-row split moves 24 resolve / 19 refuse to 31 / 12. Stock's server does
+**not** push min-event CVar writes (`_netSync = IsLocal`, false on a dedi, since
+the owning client runs the same XML), so `NetPackageModifyCVar` stays unbuilt
+on purpose.
+
+---
+
+## 2026-09-11 (`requirement_group` AND/OR and effect_group gates)
+
+The requirement evaluator's own comment claimed `op="or"` groups never ship.
+They ship 61 times (37 in `buffs.xml`, 24 in `items.xml`, 6 nested) and every
+one was skipped whole, which is the worst polarity available: the gate was
+dropped, so a row gated on `A or B` ran as if it were ungated. Groups are now
+nodes in the gate tree (`RequirementGroup::EvalAnd` IL=66, `EvalOr` IL=70: an
+empty AND passes, an empty OR fails, unsupported children are reported without
+turning an OR into a pass), `elementEnd` is depth-aware so a nested group no
+longer ends its parent early, and `scanChildren` reads a range's direct gates.
+The triggered-row walk is two levels like the passive walk now, so a triggered
+row carries its effect_group's gates: 52 of `buffStatusCheck02`'s 128 rows sit
+inside a gated effect_group and were ungated before. Measured blast radius is
+zero for the paths zdtd drives today (0 tracked passives and 0 driven
+AddBuff/RemoveBuff rows sit in a group-gated effect_group in stock `buffs.xml`),
+so this changes no folded value yet; it is the gate layer the CVar rows need.
+Also fixed: consecutive self-closing `<buff/>` rows dropped every second one.
+
+---
+
+## 2026-09-11 (buff row gates + armor-set activation chain)
+
+Buff triggered rows were only half gated: `evaluateTriggered` read the row's
+`StatComparePercCurrentToMax` child and ignored the rest, and the armor-set
+bonus buffs were never applied at all because nothing parsed the entity
+classes' `Buffs=` list. Now every triggered row is gated through the shared
+requirement evaluator, and `buffStatusCheck02`'s `onSelfBuffUpdate` rows run
+each tick, so the 15 armor-set bonus buffs are granted and revoked entirely
+from data: grant rows are `ArmorGroupCount group_name=... Equals 4` +
+`!HasBuff`, revoke rows `LTE 3` + `HasBuff`, and each bonus buff's own tier
+rows are `ArmorGroupLowestQuality Equals N`. `buffBikerSetBonus` is never
+added by name anywhere in zdtd. Two kinds landed (`ArmorGroupCount` counts the
+worn pieces per group, 0 when unworn; `StatComparePercCurrentToMax` reads the
+Health/Stamina/Food/Water fraction of max and fails both polarities when the
+max is not positive, IL=120). Measured with the loaded catalog: the tracked
+passive surface stays 43 gated rows / 24 resolve / 19 refuse (these kinds gate
+the triggered rows, not the tracked folds), while the triggered surface is 282
+AddBuff rows (127 gated, 51 resolvable) and 577 RemoveBuff rows (118 gated, 38
+resolvable), with the rest still refusing on `CVarCompare`/`EntityTagCompare`
+and friends. Scenario: a full biker set at qualities
+5/4/4/3 folds tier 3, losing a piece flags the bonus buff Remove and the next
+tick reaps it, and a nomad helmet grants nothing.
+
+Two defects fell out of it. The stage machine took its *state* from the row
+requests, but the stage rows are gated `!HasBuff` on their own stage, so the
+state dropped the stage the moment it landed and the buff set oscillated every
+tick (the stage-3 starvation gate flickered, folding the gated
+`perkHealingFactor` regen on alternate ticks); the state now comes from the
+thresholds in buffs.xml (`buffs.survival`), while the row requests still drive
+the adds. And the triggered result's bounded arrays were `[4]`, below
+`buffStatusCheck02`'s 16 AddBuff and 16 RemoveBuff rows, so most set bonuses
+could never be granted and the six stage adds were truncated to four; the caps
+now sit above the stock maxima and anything past them is counted in the `apm`
+`triggered_rows_dropped` counter instead of silently shortening the list.
+
+---
+
+## 2026-09-11 (progression `<requirement>` gates + `<book>` catalog)
+
+The passive-effects VM folded every tracked row regardless of its gates. The
+EffectManager `<requirement>` vocabulary now has one parser and evaluator
+(`src/assets/requirements.zig`, IL-anchored: `MinEffectGroup::ParseXml` reads
+the enclosing element's direct children, `PassiveEffect::ParsePassiveEffect`
+reads the row's own, `RequirementGroup::EvalAnd` ANDs them,
+`RequirementBase::compareValues` fixes the six relations). Six kinds evaluate
+against live player state (`ProgressionLevel`, `PlayerLevel`, `HasBuff`,
+`IsAlive`, `IsAttachedToEntity`, `InBiome`); everything else fails closed and
+increments the `apm` `requirement_unsupported` counter, so the vocabulary gap
+is measured, not silent. The fixed behaviour: `perkHealingFactor`'s regen no
+longer applies while a `buffStatusHungry03`/`buffStatusThirsty03` gate is
+active. `<book>` blocks (152) joined the catalog - a book is a progression
+value items.xml grants, and it was previously invisible, so reading an almanac
+stored no level and folded no passive - which exposed `curveValueAtLevels`
+returning 0 for a single `level=` anchor (every book row and 148 progression
+rows). Perk purchase was re-scored: Perk purchase was re-scored: `skillCostOf`'s
+parent-skill prerequisite denied every perk (the parent is a `<skill>` name
+that is never leveled), so the row moved `WORKS` -> `PARTIAL` for one round,
+then back to `WORKS` once the gate became stock's own:
+`<level_requirements>` are parsed into the catalog and
+`ProgressionClass::GetCalculatedMaxLevel` (IL=343) decides the highest
+purchasable level, with `CalculatedCostForLevel` (IL=423,
+`trunc(base * mult^level)`) and the seven stock `override_cost` tables as the
+cost side. `<book>` rows are refused as purchases (item-granted).
+The `tags=` gate landed too: `buffs.tagsMatch` is
+`PassiveEffect::hasMatchingTag` (IL=53) with the stock ctor defaults, and the
+survival pass now runs two queries like stock (untagged stats plus the
+`coredamageresist` armor query that `GetTotalPhysicalArmorRating` IL=887 uses),
+so `perkRuleOneCardio`'s `running` stamina bonus and the armor stamina rows no
+longer inflate the idle regen, while `god`'s tagged physical-resist row still
+reaches `buff_phys_resist` (200 untagged, 400 under the armor query).
+Buff passive rows now carry their effect_group gates too (the buff parser was a
+flat walk): 43 gated tracked buff rows, 10 resolve and 33 refuse closed with the
+gap counted, so `buffCoffee` no longer adds both of its `HasBuff`/`!HasBuff`
+StaminaChangeOT rows together and `buffBikerSetBonus` no longer sums all six
+armor-quality tiers. Two more gates landed: `HoldingItemHasTags` reads the held
+item's Tags each tick (buffHoldBreathAiming01 now picks the row matching the
+held weapon's perk and its rank) and `SandboxOptionBool` reads the decoded
+`SandboxCode` from serverconfig, and `ArmorGroupLowestQuality` reads the worn
+armor groups' lowest quality (items.xml `ArmorGroup`), so 24 of the 43 gated
+tracked buff rows resolve and 19 refuse closed. Buff passive curves now
+evaluate on the buff's elapsed duration when the row is anchored with
+`duration=` (`BuffClass::ModifyValue` IL=105), so `buffInternalBleeding`,
+`buffDrowning03` and `buffRadiation03` ramp their damage over time instead of
+folding a constant, and the anchor-less branch follows `ModValue` IL=3C4 (one
+value flat, two averaged, more applies nothing).
+
+---
+
 ## Batch T 2026-08-30 (pointer-stable chunk store + join-burst pacing)
 
 `World.chunks` now maps keys to `*Chunk` (one allocation per chunk, freed on
@@ -44,7 +529,7 @@ stay valid across map resizes (pointer-stable store)" holds a pointer across
 40+ forced resizes and the mid-scan create pattern. The same hazard class in
 the prefab TTS cache (`world/prefabs.zig`) was closed the same way
 (`*TtsBlocks` per-entry allocations; regression test holds a pointer across
-11 cache puts). Scorecard: 294 WORKS,
+11 cache puts). Scorecard: 297 WORKS,
 1 PARTIAL (join-burst tick budget), 0 MISSING.
 
 GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only
@@ -396,8 +881,30 @@ Then the loot probability row's headline gap closed: rollGroup picks are
 prob-weighted like stock (stage-resolved prob as the relative weight;
 zero-prob never picked; tested at ~90/10), on top of the existing
 lootstage templates + gamestage-derived stage + force_prob gates. The row
-stays PARTIAL for <requirement> filtering (85 stock uses) and per-entry
-abundance_type (68).
+stayed PARTIAL for `<requirement>` filtering (85 stock uses) and per-entry
+abundance_type (68). Then the requirement evaluator landed (2026-09-12):
+`Biome` resolves from the container's biome and `Progression` / `CVar` /
+`RandomRoll` from the opener's own ledger (the fill path builds the shared
+`requirements.Ctx`; `RandomRoll` uses the deterministic per-entry stream and a
+`value="@$cvar"` operand). The `$perkBookwormChance` writer is data too:
+progression.xml's `perkIntellectMastery` `onSelfProgressionUpdate` rows fire on
+every level change, so an Intellect Mastery 2+ opener rolls those 63 rows at
+25%. `SandboxOption` rows compare the option's value under the decoded server
+sandbox code too (stock `HarvestingOutput EQ 0`), and `abundance_type` scales a
+group's counts by its category's `*LootCount` sandbox option (67 stock groups,
+a disabled category spawns none), and `loot_stage_count_mod` grows a count with
+the loot stage (84 stock ammo rows), and a spawned entry's `buffs=` list is
+applied to the opener (63 stock rows, the bookworm success buff). The residual
+is the remaining loot-entry attributes: entry `tags` now feed the `LootProb`
+PlayerExpGain (87) folds onto non-kill `awardXp` / `awardXpTagged` (harvest uses the `Harvesting` tag; kill XP stays on `awardXpSilent`).
+GlobalGameStageModifier / GlobalLootStageModifier fold onto `gameStageOf` / `lootStageOf` (base 1, fraction perc_add); biome XML terms already cover the biome path.
+fold for the opener's perk/attribute, buff and equipped/held item rows (431
+stock entries, e.g. Dead Eye's `ammo762mm` rows and the Farmer Helmet's
+`seedSkill` row), and entry `mods=`/`mod_chance=` installs a fitting
+modifier on the spawned gun (5 stock rows; the modifier rows are item classes
+in the same id space as items.xml, so the id rides the wire). The row stays
+PARTIAL only for stock's item-tags query fallback and `GetSandboxProb`
+(treasure-map chance, static default 1.0).
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
@@ -926,7 +1433,7 @@ recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
 total **250/41/0**. (Current state, recounted 2026-08-30 from the live
-markers: 295 canonical features, **294 WORKS / 1 PARTIAL / 0 MISSING**; the
+markers: 300 canonical features, **298 WORKS / 2 PARTIAL / 0 MISSING**; the
 chunk-pointer stability gap closed 2026-08-30 by the pointer-stable chunk
 store, and the join-burst tick budget PARTIAL is paced to the 50 ms budget
 in ReleaseFast with its W2b residual recorded in the row.)
@@ -1305,6 +1812,20 @@ A thirteenth pass (2026-08-27) verified the not-a-mod-host boundary
 detects a top-level DLL and warns "code part not hosted, XML patches
 still apply" instead of ever loading one, and never reads Bundles/
 content (stock assetbundle modlets load as data via the patch catalogs).
+A fifteenth pass (2026-09-13) audited the patch engine against the op
+vocabulary stock actually registers (extracted from the V3.2.0 DLL's
+`XmlPatchMethodAttribute` blobs): `csv` (not only the internal
+`csvoperations` spelling), `setattribute` reading `name=` off the patch
+element while `set` handles `/@attr` and element ReplaceNodes, append/
+prepend to an attribute target, a `remove` of an attribute path refused
+like stock, every XPath match patched (not just the first), and the
+predicates real modlets use (`contains`, `starts-with`, `and`/`or`,
+`[@attr]`, `[N]`). `<conditional>` evaluates `mod_loaded`/`mod_version`
+and skips an unevaluable NCalc expression with a warning, and a patch now
+resolves as `<mod>/Config/<configName>` like stock so subdirectory
+configs are covered. Known limit: a modlet-added **block** is inert
+because the block id space is dump-pinned (PRD 0003 G9); modlet items,
+recipes, loot, buffs and progression apply fully.
 A fourteenth pass (2026-08-27) verified persistence via store (rule 21):
 player data saves on reap (tick.zig) through persist.savePlayers, the
 block world is the ZCH3 store (per-cell damage via hdr flag 15, atomic
@@ -1425,7 +1946,11 @@ MTU negotiation shipped 2026-08-21 (Net and ops 36/15/5 -> 37/14/5): the
 MtuCheck probes now drive a per-peer negotiated MTU (client steps the stock
 PossibleMtu list ascending; the server records the max probe and caps S2C
 single datagrams + fragment parts at it), so a path MTU below the old fixed
-1327 no longer drops every reliable datagram and kills the join. Outbound
+1327 no longer drops every reliable datagram and kills the join. The cap
+itself was aligned to stock's 1432 on 2026-09-12 (the 1327 value matched no
+PossibleMtu entry, so a stock client's last probe negotiated only 1327 and
+large bodies fragmented more than stock's; the part/pending/hold buffers
+derive from the constant and grew with it). Outbound
 Ping / RTT-adaptive retransmit stays a documented non-client-visible residual
 (10 s RX-silence reap covers dead peers). Total 175/114/44 -> **176/113/44**.
 
@@ -2258,7 +2783,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
-| Player persist v3+ | **PASS** | players.zsv **ZPV12** (quality/meta + journal + level/XP/food/water/buffs + skill points + game stage + hp; ZPV2-ZPV11 still read and upgraded in place); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
+| Player persist v3+ | **PASS** | players.zsv **ZPV15** (quality/meta + journal + level/XP/food/water/buffs + skill points + game stage + hp + dropped-bag markers + kill/death counters; ZPV2-ZPV14 still read and upgraded in place); join PDF carries restored toolbelt/bag and the restored character-sheet counters; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
@@ -2498,7 +3023,7 @@ bPersistent blob on join + HUD day from WorldTime.
 | `src/server/game.zig` | Orchestration + Game struct (thin façade over `src/server/game/*`) |
 | `src/server/game/*` | Per-domain game logic (join, tick, world, player, quest, social, trader, stability, replicate, net, loot, deco, weather, vehicle, sleeper, hooks, types) |
 | `src/server/c2s/*` | All 5 C2S domains (join, move, inv, quest, misc) |
-| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV12, entities.zen, claims.zlc) |
+| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV15, entities.zen, claims.zlc) |
 
 ---
 

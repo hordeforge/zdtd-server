@@ -37,6 +37,9 @@ pub const Section = enum(u8) {
     /// Paced spawn-area drain pass (replicate): one pass = the shared
     /// per-tick drain budget of chunk bodies + per-chunk ACK yields.
     join_drain,
+    /// Non-exhaustive marker (Zig `_`), not a switch catch-all: `scope` must
+    /// stay inert for an unnamed/unknown id (`@enumFromInt(200)` in the test),
+    /// so the enum deliberately has a tag space wider than its named members.
     _,
 };
 

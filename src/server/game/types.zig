@@ -7,6 +7,7 @@
 const std = @import("std");
 const ln_peer = @import("../../litenet/peer.zig");
 const ecs = @import("../../ecs/root.zig");
+const cvars = @import("../../assets/cvars.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const bot_mod = @import("bot.zig");
 const guard_policy = @import("../guard_policy.zig");
@@ -23,6 +24,11 @@ pub const AuthorityMode = server_config.AuthorityMode;
 /// Game embeds the claim table on the heap; 1024 covers a long-lived server
 /// (GAP 12: 256 silently dropped the 257th claim on register).
 pub const max_land_claims: usize = 1024;
+
+/// Dropped bags tracked per player. Stock's PersistentPlayerData keeps three
+/// and evicts the oldest on a fourth (AddDroppedBackpack IL=69, RE
+/// save-region.md), which is what the client's marker list expects.
+pub const max_tracked_backpacks: usize = 3;
 
 /// Default trader AvailableMoney display value. Stock AvailableMoney is a
 /// per-day dukes pool that regenerates and is spent on player sells; zdtd has
@@ -72,6 +78,9 @@ pub const map_window_radius: i32 = 8;
 pub const map_window_n: usize = 17 * 17;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
+/// PosAndRot heartbeat period when an entity has no dirty motion bit (paired
+/// with motion_replicate_period_ticks; the effective interval is their LCM).
+pub const default_pos_heartbeat_period_ticks: u64 = 5;
 
 /// WorldTime (and weather) broadcast cadence, and vehicle position cadence
 /// (zdtd.toml [stream] world_time_send_ticks / vehicle_pos_send_ticks).
@@ -82,6 +91,10 @@ pub const default_turret_sync_ticks: u64 = 10;
 pub const default_save_interval_ticks: u64 = 100;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
+/// Cap on a claimed sound's `volumeScale` (the client multiplies the clip's
+/// sounds.xml `Noise::volume` by it, stock `Audio.Server::Play` -> `SignalAI`).
+/// zdtd policy like the damage claim cap: a legit client sends ~1.
+pub const default_max_claimed_noise_scale: f32 = 8;
 pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
 
@@ -122,6 +135,12 @@ pub const default_storm_frequency: i32 = 100;
 /// still reclaiming dead slots.
 pub const default_peer_stale_ms: u64 = 10000;
 
+/// Auth-state age cap (stock `MaxDurationInAuthState` = 10 s, network.md:810):
+/// a peer that never echoes the challenge is reaped this long after the
+/// challenge went out, even if it keeps the socket warm with junk. Separate
+/// from the RX-silence reap, which skips pre-first-packet peers.
+pub const default_auth_state_ms: u64 = 10000;
+
 /// Join rate-limit gap per IP (zdtd.toml [authority] join_rate_limit_ms).
 /// Stock paces connection attempts at ~500 ms/IP (asm.il ConnectionManager
 /// flood gate); loopback is exempt so bots/tests share 127.0.0.1.
@@ -132,8 +151,12 @@ pub const default_join_rate_limit_ms: u64 = 500;
 /// governed; 20 bounds a single burst.
 pub const default_craft_max_times: u16 = 20;
 
-/// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
-pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
+/// Container lock auto-release after this many ns, measured from the last
+/// grant or keep-open refresh (zdtd.toml [authority] lock_stale_ms). Stock's
+/// LockManager.Update (IL=128) force-unlocks a keepOpenTimes stamp older than
+/// 10s, and the client refreshes it every 2.5s with NetPackageInventoryKeepOpen
+/// while its window is open, so 10s is the silence window, not a lock lifetime.
+pub const default_lock_stale_ns: u64 = 10_000_000_000; // 10s
 pub const default_deco_objects_per_join: usize = 8192;
 
 /// Reliable-window retry pacing - see game_net.zig for the policy comment.
@@ -274,6 +297,15 @@ pub const InitOptions = struct {
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,
     xp_multiplier: u16 = 100,
+    /// Sandbox stock-count multiplier for trader windows
+    /// (`TraderItemAbundance`, default 1.0; stock
+    /// `TraderInfo::SpawnAllItemsFromList` multiplies each rolled count by it,
+    /// then `FastMax(1, ...)` floors). Follows the same float path as the
+    /// parsed sandbox table, not a percent.
+    trader_item_abundance: f32 = 1.0,
+    /// Sandbox stock-count multiplier for vending machines
+    /// (`VendingItemAbundance`, default 1.0; same formula).
+    vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -283,6 +315,17 @@ pub const InitOptions = struct {
     max_spawned_animals: u16 = 50,
     air_drop_frequency: u16 = 72,
     drop_on_death: u8 = 1,
+    /// serverconfig `BuildCreate` (creative menu + flight, stock GameStats
+    /// [18]/[20]).
+    build_create: bool = false,
+    /// serverconfig `CameraRestrictionMode` (GameStats[68]).
+    camera_restriction_mode: u8 = 0,
+    /// Sandbox `AirDropMarker` (GameStats[53]).
+    air_drop_marker: bool = true,
+    /// Sandbox `DropOnQuit` (GameStats[34]).
+    drop_on_quit: u8 = 0,
+    /// Sandbox `BiomeProgression` (GameStats[66]).
+    biome_progression: bool = true,
     death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
     land_claim_online_durability_modifier: u16 = 4,
@@ -314,6 +357,7 @@ pub const InitOptions = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    pos_heartbeat_period_ticks: u64 = default_pos_heartbeat_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     /// 2 Hz class of sim side-work (zdtd.toml [stream] sleeper_tick_ticks):
@@ -326,6 +370,7 @@ pub const InitOptions = struct {
     save_interval_ticks: u64 = default_save_interval_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
+    max_claimed_noise_scale: f32 = default_max_claimed_noise_scale,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     /// Movement envelope cap (zdtd.toml [authority] max_horizontal_speed_mps).
@@ -388,8 +433,30 @@ pub const InitOptions = struct {
     /// dialect the server emits (zdtd.toml `[wire] profile`, resolved by
     /// main.zig; default stock). Non-stock needs a paired client mod.
     wire_profile: protocol.WireProfile = .{},
-    /// Register in-tree sample_hello static plugin (logs once on enable).
-    enable_sample_plugin: bool = true,
+    /// Register the in-tree sample_hello static plugin (logs once on enable).
+    /// Default false: ADR 0020 decision 2 calls the native vtable host test
+    /// scaffolding, not a product surface, so the shipped configuration runs
+    /// one plugin mechanism (Wasm). Tests and a deliberate operator opt-in
+    /// (`enable_sample_plugin = true` in a preset) still exercise it.
+    enable_sample_plugin: bool = false,
+    /// Seed the near-spawn demo hostiles at world init (2 zombies, a sleeper
+    /// and an animal). Default true: a fresh world has something to fight and
+    /// the demo turret has targets. Stock spawns these lazily through the
+    /// AIDirector instead; `[sim] starter_zombies = false` matches that
+    /// (docs/DIVERGENCES.md).
+    starter_zombies: bool = true,
+    /// Operator starter kit for a fresh player (`zdtd.toml [sim]
+    /// spawn_starter_kit`, rows `name` or `name:count` comma-separated). Parsed
+    /// once at create, after the item catalog loads; null keeps the built-in
+    /// default kit (stone axe 1, foodCanBeef 5, resourceWood 20, casinoCoin 50).
+    /// A fresh-spawn kit is server policy, not stock data (stock defines it in
+    /// code), so it is config per ADR 0010.
+    spawn_starter_kit: ?[]const u8 = null,
+    /// Seed the rest of the near-spawn demo set on a fresh world: Trader Jen,
+    /// the minibike, the seed chest and the demo turret (`starter_zombies`
+    /// covers the hostiles). Default true, the historical demo world; false
+    /// leaves a fresh world to the lazy stock systems (docs/DIVERGENCES.md 6.2).
+    demo_seed: bool = true,
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
     /// modules; ADR 0020). Empty = no Wasm plugins.
     plugin_modules: []const []const u8 = &.{},
@@ -397,6 +464,15 @@ pub const InitOptions = struct {
     /// When set, it wins over `plugin_modules` (which are folded in as legacy
     /// explicit modules by the resolver). Owned by main until after Game init.
     plugin_plan: ?*const plugin_mod.resolver.ResolvedResult = null,
+    /// Operator queued-verb interception policy (`zdtd.toml [plugin] deny` /
+    /// `allow`), parsed by main.zig into fixed tables and applied over each
+    /// module's own `manifest.toml deny` (paper 3.2.3 right-biased merge).
+    plugin_policy_deny: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
+        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+    plugin_policy_deny_n: u8 = 0,
+    plugin_policy_allow: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
+        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+    plugin_policy_allow_n: u8 = 0,
     /// Per-instance budget for Wasm plugins (fuel + max linear-memory pages;
     /// fuel is lifetime, never re-armed).
     plugin_budget: plugin_mod.wasm.Budget = .{},
@@ -420,10 +496,47 @@ pub const InitOptions = struct {
 pub const SkillLevel = assets_progression.SkillLevel;
 
 /// Cap on distinct purchased skills per player (stock: 8 attributes + 57
-/// perks + skills; 64 covers the tree with room for skill rows).
-pub const max_skill_levels: usize = 64;
+/// perks + 23 crafting_skills; 128 covers the tree with room for skill rows).
+pub const max_skill_levels: usize = 128;
 
 pub const Client = struct {
+    /// The player's current movement tag, `EntityAlive.CurrentMovementTag`
+    /// (`MovementTagIdle`/`Walking`/`Running`, set in
+    /// `EntityAlive::OnUpdateLive` from the move direction plus
+    /// `bMovementRunning`). zdtd reads the client's own report
+    /// (`NetPackageEntitySpeeds.MovementState`, derived from the same speeds by
+    /// `EntityAlive::SetMovementState`) and folds it to this three-value set;
+    /// that is the whole vocabulary stock uses in `EntityHasMovementTag` rows
+    /// (idle 3, running 24, walking+running 1), so no tag a row can ask for is
+    /// left underivable.
+    pub const MoveTag = enum(u8) {
+        idle,
+        walking,
+        running,
+
+        /// The tag name as stock writes it in `CurrentMovementTag`
+        /// (`FastTags.Parse` of "idle"/"walking"/"running").
+        pub fn name(self: MoveTag) []const u8 {
+            return switch (self) {
+                .idle => "idle",
+                .walking => "walking",
+                .running => "running",
+            };
+        }
+
+        /// Fold the reported `MovementState` (0 stopped, 1 moving, 2 above walk
+        /// speed, 3 above aggro speed; `EntityAlive::SetMovementState` IL=45).
+        /// State 3 is the client's sprint/aggro band, which is what stock's
+        /// `bMovementRunning` reports for a running body.
+        pub fn fromMovementState(state: u8) MoveTag {
+            return switch (state) {
+                0 => .idle,
+                1, 2 => .walking,
+                else => .running,
+            };
+        }
+    };
+
     peer: ?*ln_peer.Peer = null,
     entity_id: i32 = -1,
     /// Server-side XP ledger (XPMultiplier applied on award).
@@ -447,11 +560,26 @@ pub const Client = struct {
     /// when a mod removed the perk).
     skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
     skill_level_n: u8 = 0,
+    /// Per-player custom variables (`assets/cvars.zig`): written by the
+    /// EffectManager's ModifyCVar/RemoveCVar rows (the check buffs' entered-game
+    /// and update rows), read by `CVarCompare` gates and `value="@name"` passive
+    /// rows. Names point into the buff catalog's arena. Session-scoped: stock
+    /// saves CVars with the entity, which is a separate persistence gap.
+    cvars: cvars.Set = .{},
+    /// onSelfEnteredGame fired for this client (stock fires it when the player
+    /// entity enters the game; the buff catalog's check buffs carry the rows).
+    entered_game_fired: bool = false,
     /// Per-player blood-moon-music eligibility edge state (stock
     /// EntityPlayer.bloodMoonParty): the horde music plays while the player's
     /// own party's horde is alive, not for every player on a multi-party
     /// server.
     bloodmoon_music: bool = false,
+    /// Deaths this session. Stock's EntityNetworkStats.killed is filled from
+    /// EntityAlive.get_Died() (FillFromEntity IL=150), which OnEntityDeath
+    /// (IL=146) bumps through AddScore(1, 0, 0, -1, 0) on the victim. Separate
+    /// from the kill counters: the client's character sheet reads it as the
+    /// death count.
+    deaths: i32 = 0,
     /// Zombie kills this session, for the AddScoreClient character-sheet
     /// counter (stock EntityAlive.AddScore on kill).
     zombie_kills: u16 = 0,
@@ -492,6 +620,10 @@ pub const Client = struct {
     pending_area_ring: i32 = 0,
     pending_area_idx: u32 = 0,
     challenge: [16]u8 = .{0} ** 16,
+    /// Monotonic ns when the challenge went out (stock auth-state StartTime).
+    /// The auth-age sweep reaps peers that never echo past
+    /// `MaxDurationInAuthState` (10 s); 0 = no challenge outstanding.
+    challenge_ns: u64 = 0,
     slot: usize = 0,
     view_radius: i32 = default_view_radius,
     name: [32]u8 = .{0} ** 32,
@@ -511,14 +643,23 @@ pub const Client = struct {
     map_middle_z: i32 = 0,
     map_middle_set: bool = false,
     map_chunks_sent: [map_window_n]u8 = [_]u8{0} ** map_window_n,
-    /// Dropped-backpack marker (RE EntityBackpack / PersistentPlayerData
-    /// SetDroppedBackpackPositions): set at the death position when
-    /// DropOnDeath drops a bag, cleared when the bag is collected; the
-    /// broadcast drives the client's backpack markers.
-    backpack_x: i32 = 0,
-    backpack_y: i32 = 0,
-    backpack_z: i32 = 0,
-    has_backpack: bool = false,
+    /// Dropped-backpack markers (RE EntityBackpack / PersistentPlayerData
+    /// SetDroppedBackpackPositions): a position per bag this player has on
+    /// the ground, oldest first. Stock caps the tracking at
+    /// `max_tracked_backpacks` and evicts the oldest when a fourth drops
+    /// (AddDroppedBackpack IL=69, save-region.md), so a player can be shown
+    /// several at once and only loses the oldest marker.
+    backpacks: [max_tracked_backpacks][3]i32 = [_][3]i32{.{ 0, 0, 0 }} ** max_tracked_backpacks,
+    backpack_n: u8 = 0,
+    /// True from the moment a death produced a bag until the player respawns.
+    /// One death must not produce two bags (the C2S kill path and the
+    /// hp-replicate detector both see the same corpse), which is what this
+    /// guards. `has_backpack` cannot: it stays set until the bag is
+    /// collected, so gating on it made a second death drop nothing at all.
+    bagged_this_death: bool = false,
+    /// Latched with `deaths` so the hp-replicate drain cannot count the same
+    /// corpse twice. Cleared on respawn alongside `bagged_this_death`.
+    death_counted: bool = false,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),
@@ -560,6 +701,12 @@ pub const Client = struct {
     /// drain (UpdatePlayerStaminaOT).
     sprint_speed: f32 = 0,
     sprint_stale_cd: f32 = 0,
+    /// Movement tag the client last reported (NetPackageEntitySpeeds), gating
+    /// `EntityHasMovementTag` rows (perkHardTarget's walking/running damage
+    /// resist, the running-tagged StaminaChangeOT rows). Latched with the same
+    /// stale timer as `sprint_speed`: a client that stops reporting stops
+    /// claiming to be moving rather than keeping the gate open forever.
+    move_tag: MoveTag = .idle,
     /// Cost-class token buckets (refill on accept path).
     inv_tokens: u8 = 0,
     inv_refill_ns: u64 = 0,
@@ -582,4 +729,43 @@ pub const Client = struct {
     /// Cleared for free by `clients[slot] = .{}` on kick/disconnect.
     puid_primary: platform_user.Stored = .{},
     puid_native: platform_user.Stored = .{},
+
+    /// The character profile the client sent in
+    /// `NetPackageRequestToSpawnPlayer` (stock keeps it on the
+    /// EntityCreationData: `GameManager::RequestToSpawnPlayer`
+    /// `GameManager.il.txt:4614-4617`). `profile_ok` is false until a body with
+    /// a parseable profile arrives, and the builders then keep the offline
+    /// default appearance rather than sending half a character.
+    profile: @import("../../wire/stock_entity.zig").OwnedProfile = .{},
+    profile_ok: bool = false,
+
+    /// Track a bag this player just dropped. At the cap the oldest marker is
+    /// evicted rather than the new one dropped, matching stock's
+    /// timestamp-ordered eviction: the bags a player is most likely to still
+    /// reach are the recent ones.
+    pub fn addBackpack(self: *Client, x: i32, y: i32, z: i32) void {
+        if (self.backpack_n == max_tracked_backpacks) {
+            var i: usize = 1;
+            while (i < max_tracked_backpacks) : (i += 1) self.backpacks[i - 1] = self.backpacks[i];
+            self.backpacks[max_tracked_backpacks - 1] = .{ x, y, z };
+            return;
+        }
+        self.backpacks[self.backpack_n] = .{ x, y, z };
+        self.backpack_n += 1;
+    }
+
+    /// Drop the marker at a position, if one is tracked there. Returns true
+    /// when a marker was removed, so callers only rebroadcast on a change.
+    pub fn removeBackpackAt(self: *Client, x: i32, y: i32, z: i32) bool {
+        var i: usize = 0;
+        while (i < self.backpack_n) : (i += 1) {
+            const b = self.backpacks[i];
+            if (b[0] != x or b[1] != y or b[2] != z) continue;
+            var j = i + 1;
+            while (j < self.backpack_n) : (j += 1) self.backpacks[j - 1] = self.backpacks[j];
+            self.backpack_n -= 1;
+            return true;
+        }
+        return false;
+    }
 };

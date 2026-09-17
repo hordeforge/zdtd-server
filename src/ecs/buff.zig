@@ -162,10 +162,17 @@ fn durationTick(e: *BuffInstance) void {
 
 /// BuffClass::RemoveOnDeath (asm.il 1371585): the client drops these itself when
 /// the entity dies, so the server clears them silently rather than broadcasting.
-pub fn clearOnDeath(set: *BuffSet) u8 {
+/// Clear the buffs that do not survive death, reporting each into `removed` so
+/// the net layer can relay it. Stock's removals all drain through the tick that
+/// emits the wire (`removeBuff` marks `Remove=true`, RE buffs.md:194), so a
+/// clear the clients never hear about leaves the icon on their HUD forever:
+/// nothing else ever mentions that buff again. Removals past `removed.len` are
+/// still cleared, matching `tick`'s saturating report.
+pub fn clearOnDeath(set: *BuffSet, removed: []Removed) u8 {
     var n: u8 = 0;
     for (&set.slots) |*e| {
         if (!e.active or !e.remove_on_death) continue;
+        if (n < removed.len) removed[n] = .{ .def_id = e.def_id };
         e.* = .{};
         n += 1;
     }
@@ -362,7 +369,10 @@ test "clearOnDeath keeps buffs the client keeps" {
     var set: BuffSet = .{};
     _ = addDefault(&set, shocked); // remove_on_death default true
     _ = addDefault(&set, harvest); // remove_on_death false
-    try std.testing.expectEqual(@as(u8, 1), clearOnDeath(&set));
+    var cleared: [2]Removed = undefined;
+    try std.testing.expectEqual(@as(u8, 1), clearOnDeath(&set, &cleared));
+    // The removal is reported, not just applied: the net layer relays it.
+    try std.testing.expectEqual(shocked.def_id, cleared[0].def_id);
     try std.testing.expectEqual(@as(u8, 1), set.count());
     try std.testing.expect(set.find(harvest.def_id) != null);
 }

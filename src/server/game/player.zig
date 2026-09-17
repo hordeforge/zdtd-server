@@ -12,6 +12,12 @@ const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
+const ecs = @import("../../ecs/root.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
+const requirements = @import("../../assets/requirements.zig");
+const assets_progression = @import("../../assets/progression.zig");
+const assets_items = @import("../../assets/items.zig");
+const hooks = @import("hooks.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
 
@@ -20,8 +26,31 @@ const max_clients = game_mod.max_clients;
 /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
 /// serverconfig key, so it rides the `[sim] party_shared_kill_range` surface).
 /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
-/// Levels up using progression.xml exp curve when loaded.
+/// Levels up using progression.xml exp curve when loaded. Non-kill sources
+/// (harvest, quest Exp, craft, magazine GiveExp) also push
+/// NetPackageEntityAddExpClient as `_xpOther` so the owning client shows
+/// the icon; kill XP uses awardXpSilent + a typed Kill packet instead.
+/// Non-kill XP (harvest / craft / quest / magazine). Stock
+/// `Progression.AddLevelExp(..., useBonus: true)` folds PlayerExpGain (87)
+/// onto the award; kill XP uses `awardXpSilent` (useBonus false).
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {
+    awardXpTagged(self, slot, base, "");
+}
+
+/// Like `awardXp`, with the GetValue query tag set (stock XPTypes FastTags —
+/// harvest passes `"Harvesting"` so miner/motherlode rows can match).
+pub fn awardXpTagged(self: *Game, slot: usize, base: u64, tags: []const u8) void {
+    const scaled = playerExpGainScale(self, slot, tags, base);
+    awardXpTyped(self, slot, scaled, packages.stock_xp.xp_type_other);
+}
+
+/// Ledger + level-up only. Kill XP and party-share use this so the typed
+/// S2C packet (AddExpClient Kill / SharedPartyKill) is the only client notify.
+pub fn awardXpSilent(self: *Game, slot: usize, base: u64) void {
+    awardXpTyped(self, slot, base, null);
+}
+
+fn awardXpTyped(self: *Game, slot: usize, base: u64, notify_type: ?i16) void {
     if (slot >= self.clients.len) return;
     const c = &self.clients[slot];
     const before_xp = c.xp;
@@ -50,8 +79,27 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     }
     // Stat-changed observer (ADR 0034): the XP/level leg, one call per award.
     if (c.xp != before_xp) {
-        const h = &self.sim.health[self.sim.playerByPeer(slot) orelse return];
-        self.statChangedObserver(c.entity_id, @trunc(h.hp), @trunc(h.food), @trunc(h.water), @trunc(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        if (self.sim.playerByPeer(slot)) |ps| {
+            const h = &self.sim.health[ps];
+            self.statChangedObserver(c.entity_id, @trunc(h.hp), @trunc(h.food), @trunc(h.water), @trunc(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        }
+        if (notify_type) |xp_type| {
+            const granted: i32 = @intCast(@min(c.xp -| before_xp, std.math.maxInt(i32)));
+            if (granted > 0 and c.entity_id > 0) {
+                if (c.peer) |peer| {
+                    if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
+                        .entity_id = c.entity_id,
+                        .xp = granted,
+                        .xp_type = xp_type,
+                    })) |xb| {
+                        self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send AddExpClient failed: {s}\n", .{@errorName(err)});
+                        };
+                    } else |_| {}
+                }
+            }
+        }
     }
 }
 
@@ -72,6 +120,16 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
         .level = c.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(c.skill_points, 65535)),
+        .deaths = c.deaths,
+        .killed_zombies = c.zombie_kills,
+        .killed_players = c.player_kills,
+        // Stock fills the whole EntityNetworkStats from the entity, held
+        // stack included. Omitting it told every other client the player had
+        // just put their weapon away on each progression push.
+        .held_item = if (self.sim.playerByPeer(slot)) |ps|
+            self.playerHoldingStock(ps)
+        else
+            null,
     })) |psb| {
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.peer == null or cl.entity_id == c.entity_id) continue;
@@ -105,7 +163,18 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
 /// (party_shared_kill_range, stock default 100); every other in-range
 /// member gets the same split XP through NetPackageSharedPartyKill so the
 /// client shows the shared-kill tooltip. Out of party the award is full.
-pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
+pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool, killed_entity_id: i32) void {
+    // Stock SharedKillServer (IL=162) builds every mate's
+    // NetPackageSharedPartyKill from the killed entity: entityTypeID =
+    // entityAlive.entityClass, entityID = entityAlive.entityId, killerID =
+    // the killer (Setup IL=14; the client SharedKillClient IL=65 resolves the
+    // class for the tooltip and fires EntityKilled on entityID). Read it from
+    // the corpse before the dwell sweep frees the slot; 0/unset falls back to
+    // the stock default zombie class, matching the spawn wire (replicate.zig).
+    const killed_class: i32 = if (self.sim.slotOfNetId(killed_entity_id)) |ks| blk: {
+        if (self.sim.mask[ks].class_id and self.sim.class_id[ks].hash != 0) break :blk self.sim.class_id[ks].hash;
+        break :blk packages.stock_entity.class_zombie_default;
+    } else packages.stock_entity.class_zombie_default;
     // on_entity_killed verdict >0 scales the kill XP (100 = keep). base is
     // xpGainFor-clamped to i32 range, so the u64 product cannot overflow.
     const base_scaled: u64 = base * scale_pct / 100;
@@ -135,11 +204,12 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         base_scaled * (100 - 10 * @as(u64, in_range)) / 100
     else
         base_scaled;
-    awardXp(self, killer_slot, split);
+    awardXpSilent(self, killer_slot, split);
     // Stock sends NetPackageEntityAddExpClient (xpType 0 = Kill) so the
     // killer's client shows the XP icon and applies the gain locally; the
     // party split is server-computed, so the killer cannot derive it alone.
     // Mates get NetPackageSharedPartyKill instead (below), matching stock.
+    // awardXpSilent keeps the ledger from also emitting `_xpOther`.
     if (killer.peer) |peer| {
         if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
             .entity_id = killer.entity_id,
@@ -156,12 +226,12 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         for (p.members[0..p.n]) |m| {
             if (m == killer.entity_id) continue;
             if (self.clientByEntityId(m)) |mate| {
-                awardXp(self, mate.slot, split);
+                awardXpSilent(self, mate.slot, split);
                 if (mate.peer) |peer| {
                     if (packages.stock_party.buildSharedKillBody(&self.body_buf, .{
-                        .entity_type = 3, // zombieEntity (class hash name in stock; ECD carries the class)
+                        .entity_type = killed_class,
                         .xp = @intCast(@min(split, std.math.maxInt(i32))),
-                        .entity_id = killer.entity_id,
+                        .entity_id = killed_entity_id,
                         .killer_id = killer.entity_id,
                     })) |skb| {
                         self.sendGame(peer, "NetPackageSharedPartyKill", skb) catch |err| {
@@ -173,6 +243,30 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
             }
         }
     }
+}
+
+/// Stock `GameManager.AwardKill` (IL=27): when the killer is a remote entity
+/// the server ships `NetPackageEntityAwardKillServer(killerId, killedId)` to
+/// it, and the receiving client runs `QuestEventManager.EntityKilled`
+/// (IL=24), which fires its local `EntityKill` event. That event is what
+/// `Challenges/ChallengeObjectiveKill` and `ChallengeObjectiveKillByTag`
+/// subscribe to, so without this send a player's kill challenges never
+/// advance - challenges are client-tracked, and this is the wire that feeds
+/// them.
+///
+/// Server-side credit (quests, XP, the score counter) is computed on the
+/// death path and is not affected: this notifies, it does not award. The
+/// inbound direction stays an accept-and-drop (DIVERGENCES 1.12).
+pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
+    const killer = &self.clients[killer_slot];
+    const peer = killer.peer orelse return;
+    if (killer.entity_id <= 0) return;
+    var buf: [8]u8 = undefined;
+    const body = packages.buildAwardKillBody(&buf, killer.entity_id, killed_entity_id) catch return;
+    self.sendGame(peer, "NetPackageEntityAwardKillServer", body) catch |err| {
+        self.harness.counters.inc(.net_send_errors);
+        std.debug.print("zdtd: send AwardKill failed: {s}\n", .{@errorName(err)});
+    };
 }
 
 /// Stock SharedKillServer -> SharedKillClient (IL=65): an in-range party
@@ -238,11 +332,25 @@ pub fn tickStealthBroadcast(self: *Game) void {
             }
         }
         if (noise8 == c.stealth_noise_sent and crouch == c.stealth_crouch_sent and alert == c.stealth_alert_sent and light8 == c.stealth_light_sent) continue;
+        const crouch_changed = crouch != c.stealth_crouch_sent;
+        const levels_changed = noise8 != c.stealth_noise_sent or alert != c.stealth_alert_sent or light8 != c.stealth_light_sent;
         c.stealth_noise_sent = noise8;
         c.stealth_crouch_sent = crouch;
         c.stealth_alert_sent = alert;
         c.stealth_light_sent = light8;
-        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert, crouch)) |sb| {
+        // Stock's Setup overloads are mutually exclusive: the crouch flag has
+        // its own package and never rides the light/noise payload, whose low
+        // byte the client reads whole as the light level.
+        if (crouch_changed) {
+            if (packages.buildEntityStealthCrouchBody(self.body_buf[0..16], c.entity_id, crouch)) |cb| {
+                self.broadcastExcept("NetPackageEntityStealth", cb, null) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
+                };
+            } else |_| {}
+        }
+        if (!levels_changed) continue;
+        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert)) |sb| {
             self.broadcastExcept("NetPackageEntityStealth", sb, null) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
@@ -279,6 +387,7 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
             }
         }
     }
+    const global_mod = stageGlobalModifier(self, c.slot, "GlobalGameStageModifier");
     return assets_gamestages.playerStage(self.gamestages.config, .{
         .level = c.level,
         .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
@@ -286,7 +395,61 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
         .biome_bonus = bmods.game_bonus,
         .quest_mod = qmod,
         .quest_bonus = qbonus,
+        .global_modifier = global_mod,
     });
+}
+
+/// Fold `GlobalGameStageModifier` / `GlobalLootStageModifier` onto base 1.0
+/// (stock EntityPlayer getters). Same perk/buff/held/equip layers as
+/// `playerExpGainScale`. Biome*StageModifier stays at 1 — biomes.xml terms
+/// already cover that path via `biomeStageMods`.
+fn stageGlobalModifier(self: *const Game, peer_slot: usize, passive_name: []const u8) f32 {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return 1.0;
+    var counts: requirements.Counts = .{};
+    var v: f32 = 1.0;
+    const held = heldItemTagsForPeer(self, ps);
+    const broken = holdingItemBrokenForPeer(self, ps);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        // ponytail: no cvars on *const Game; value_cvar Global* rows rare — add *Game overload if needed.
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .held_tags = held,
+            .holding_item_broken = broken,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.namedPassiveFold(passive_name, progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        const inv = &self.sim.inventory[ps];
+        const held_slot = inv.heldItem();
+        if (held_slot.count > 0) {
+            if (self.items.byId(held_slot.item_id)) |def| {
+                v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, held_slot.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0) or !std.math.isFinite(v)) return 1.0;
+    return v;
 }
 
 /// The player's biome stage modifiers (biomes.xml), resolved from the biome
@@ -307,6 +470,13 @@ fn biomeStageMods(self: *const Game, slot: usize) assets_biome_layers.BiomeMods 
 /// with the biome lootstage terms and no POI tier terms until those tables
 /// are parsed.
 pub fn lootStageOf(self: *const Game, slot: usize) i32 {
+    return lootStageWithContainer(self, slot, 0, 0);
+}
+
+/// GetLootStage with the opened container's blocks.xml LootStageMod/Bonus
+/// (RE loot-economy.md PropLootStageModifier/Bonus). Callers without a
+/// container keep the zero defaults via lootStageOf.
+pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32, container_bonus: f32) i32 {
     if (slot >= self.clients.len) return 1;
     const bmods = biomeStageMods(self, slot);
     // POITierMod/Bonus (loot_settings, indexed DifficultyTier-1): the tier of
@@ -327,12 +497,18 @@ pub fn lootStageOf(self: *const Game, slot: usize) i32 {
             }
         }
     }
+    const global_mod = stageGlobalModifier(self, self.clients[slot].slot, "GlobalLootStageModifier");
     return assets_gamestages.lootStage(.{
         .level = self.clients[slot].level,
         .poi_tier_mod = poi_mod,
         .poi_tier_bonus = poi_bonus,
         .biome_mod = bmods.loot_mod,
         .biome_bonus = bmods.loot_bonus,
+        .biome_min = bmods.loot_min,
+        .biome_max = bmods.loot_max,
+        .container_mod = container_mod,
+        .container_bonus = container_bonus,
+        .global_modifier = global_mod,
     });
 }
 
@@ -371,12 +547,51 @@ pub fn partyLootStage(self: *const Game) i32 {
     return best;
 }
 
+/// `GameStageDefinition::CalcPartyLevel` over the largest party's members (or
+/// every joined player when nobody is grouped): stock's blood-moon party builds
+/// its spawner from exactly this (`AIDirectorBloodMoonParty::InitParty` IL_0006
+/// calls `partySpawner.CalcPartyLevel()`, and `Party::get_GameStage` =
+/// `CalcPartyLevel(members)`), so the nightly ladder resolves at the weighted
+/// level rather than the high-water mark of `partyHighestGameStage`.
+pub fn partyWeightedGameStage(self: *Game) i32 {
+    var stages: [max_clients]i32 = undefined;
+    var n: usize = 0;
+    var best_party: ?*const ecs_party.Party = null;
+    var best_n: usize = 0;
+    for (&self.parties.parties, &self.parties.used) |*p, *u| {
+        if (!u.*) continue;
+        if (p.n > best_n) {
+            best_n = p.n;
+            best_party = p;
+        }
+    }
+    if (best_party) |p| {
+        for (p.members[0..p.n]) |m| {
+            if (self.clientByEntityId(m)) |mc| {
+                if (mc.slot >= self.clients.len) continue;
+                stages[n] = gameStageOf(self, mc.slot);
+                n += 1;
+            }
+        }
+    } else {
+        for (&self.clients, 0..) |*c, i| {
+            if (!c.joined) continue;
+            stages[n] = gameStageOf(self, i);
+            n += 1;
+        }
+    }
+    if (n == 0) return 0;
+    return assets_gamestages.partyLevel(self.gamestages.config, stages[0..n]);
+}
+
 /// Party.get_HighestGameStage (parties-factions.md "Group gamestage /
 /// loot"): the max member game stage of the largest party, or of all joined
-/// players when nobody is grouped. Stock feeds this to the blood-moon
-/// director and horde difficulty, which scale to the group high water mark
-/// rather than the weighted CalcPartyLevel. Sleeper volumes keep
-/// partyStageAround (CalcGameStageAround) below.
+/// players when nobody is grouped. This is the per-player director stage
+/// aggregate (a director blip scales with its own player); the blood-moon
+/// ladder freezes `partyWeightedGameStage` instead, because
+/// `AIDirectorBloodMoonParty::InitParty` IL_0006 builds its party spawner from
+/// `CalcPartyLevel`. Sleeper volumes keep partyStageAround
+/// (CalcGameStageAround) below.
 pub fn partyHighestGameStage(self: *Game) i32 {
     var best: i32 = 0;
     var best_party: ?*const ecs_party.Party = null;
@@ -407,18 +622,24 @@ pub fn partyHighestGameStage(self: *Game) i32 {
 /// player's party members, or the player alone when ungrouped. World-gen
 /// fills with no player context keep the global partyLootStage.
 pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
+    return lootStageForPlayerWithContainer(self, peer_slot, 0, 0);
+}
+
+/// Party.GetHighestLootStage for one opener, with the opened container's
+/// LootStageMod/Bonus applied to every member's GetLootStage (stock).
+pub fn lootStageForPlayerWithContainer(self: *Game, peer_slot: usize, container_mod: f32, container_bonus: f32) i32 {
     if (peer_slot >= self.clients.len or !self.clients[peer_slot].joined) return partyLootStage(self);
     const me = self.clients[peer_slot].entity_id;
     var best: i32 = 1;
     if (self.parties.partyByMember(me)) |p| {
         for (p.members[0..p.n]) |m| {
             if (self.clientByEntityId(m)) |mc| {
-                best = @max(best, lootStageOf(self, mc.slot));
+                best = @max(best, lootStageWithContainer(self, mc.slot, container_mod, container_bonus));
             }
         }
         return best;
     }
-    return @max(1, lootStageOf(self, peer_slot));
+    return @max(1, lootStageWithContainer(self, peer_slot, container_mod, container_bonus));
 }
 
 /// Purchased level of a progression value (attribute/perk) for a client.
@@ -431,60 +652,86 @@ pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
     return 0;
 }
 
-/// CalculatedCostForLevel (stock ProgressionClass; the exact IL rounding is
-/// RE-tracked, formula shape from progression.xml base_skill_point_cost x
-/// cost_multiplier_per_level^(level-1), standard stock geometric cost).
+/// ProgressionClass::CalculatedCostForLevel (IL=423):
+/// `conv.i4(Mathf.Pow(CostMultiplier, level) * BaseCostToLevel)`. Mathf.Pow
+/// computes in double and casts back to float (the same shape as expForLevel),
+/// and `conv.i4` truncates toward zero, so the ladder is cheaper than the old
+/// `round(base * mult^(level-1))`: for stock attributes (1, 1.14) level 5 costs
+/// 1, not 2. Level 0 has no cost.
 fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
-    if (level <= 1) return def_cost;
-    var acc: f64 = @as(f64, @floatFromInt(def_cost));
-    var i: u8 = 1;
-    while (i < level) : (i += 1) acc *= @as(f64, mult);
-    const v: u64 = @round(acc);
-    return @intCast(@max(1, @min(v, 65535)));
+    if (level == 0) return 0;
+    const powf: f32 = @floatCast(std.math.pow(f64, mult, @floatFromInt(level)));
+    const v = @as(f32, @floatFromInt(def_cost)) * powf;
+    if (!(v > 0)) return 0; // NaN / <= 0; a zero-cost row is free like stock
+    if (v >= 65535) return 65535;
+    return @trunc(v);
 }
 
 /// Catalog-validated cost of buying `skill` at `target_level`, or null when
 /// the purchase would be denied (unknown skill, not the next level, already
-/// maxed, unmet parent attribute). Mirrors the validation inside
-/// purchaseSkillAtCost so the on_perk_spend verdict can scale the cost
-/// before the purchase applies (ADR 0033).
+/// maxed, above the level the `<level_requirements>` allow, a book). Mirrors
+/// the validation inside purchaseSkillAtCost so the on_perk_spend verdict can
+/// scale the cost before the purchase applies (ADR 0033).
+///
+/// The level gate is stock's own: `ProgressionClass::GetCalculatedMaxLevel`
+/// (IL=343) takes the highest `<level_requirements>` block whose gates pass.
+/// It replaced a check that required the perk's `parent` attribute, which is a
+/// `<skill>` grouping name (`perkPummelPete parent="skillStrengthCombat"`) that
+/// is never levelled, so every perk purchase was denied.
 pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
     if (slot >= self.clients.len) return null;
+    const c = &self.clients[slot];
     const cur = self.skillLevelOf(slot, skill);
     if (target_level != cur + 1) return null; // one level per purchase
     const pt = self.progression_table;
-    // Resolve the skill: attributes first, then perks.
-    var is_attr = false;
+    // Resolve the skill: attributes first, then perks/books.
     var max_level: u8 = 0;
     var base_cost: u16 = 1;
     var cost_mult: f32 = 1.0;
+    var override_cost: []const u16 = &.{};
+    var found = false;
     for (pt.attributes) |a| {
         if (!std.mem.eql(u8, a.name, skill)) continue;
-        is_attr = true;
         max_level = a.max_level;
         base_cost = a.base_cost;
         cost_mult = a.cost_mult;
+        override_cost = a.override_cost;
+        found = true;
         break;
     }
-    if (!is_attr) {
-        var parent: []const u8 = "";
+    if (!found) {
         for (pt.perks) |pk| {
             if (!std.mem.eql(u8, pk.name, skill)) continue;
+            // A `<book>` is granted by reading its item, never bought.
+            if (pk.book) return null;
             max_level = pk.max_level;
-            parent = pk.parent_attr;
+            base_cost = pk.base_cost;
+            cost_mult = pk.cost_mult;
+            override_cost = pk.override_cost;
+            found = true;
             break;
         }
-        if (max_level == 0) return null; // unknown skill
-        if (parent.len > 0 and self.skillLevelOf(slot, parent) == 0) return null;
     }
+    if (!found or max_level == 0) return null; // unknown skill
     if (cur >= max_level) return null;
+    // Stock's purchase gate (ProgressionClass::GetCalculatedMaxLevel, IL=343).
+    const allowed = pt.calculatedMaxLevel(c.skill_levels[0..c.skill_level_n], c.level, skill) orelse max_level;
+    if (target_level > allowed) return null;
+    // ProgressionClass.OverrideCost replaces the curve when the row has one
+    // (IL=423). Stock indexes the table by `level - 1`; a level past its end
+    // refuses rather than falling back to the curve.
+    if (override_cost.len > 0) {
+        const idx = @as(usize, target_level) - 1;
+        if (idx >= override_cost.len) return null;
+        return override_cost[idx];
+    }
     return skillCostForLevel(base_cost, cost_mult, target_level);
 }
 
 /// Purchase one progression level (NetPackageEntitySetSkillLevelServer,
 /// RE progression.md §3 SpendSkillPoints). Validates: known skill, one level
-/// at a time, max level, SP balance >= cost, and (for perks) the parent
-/// attribute purchased. Applies server-side and echoes
+/// at a time, max level, the stock `<level_requirements>` gate for that level,
+/// SP balance >= cost. Applies server-side and echoes
 /// NetPackageEntitySetSkillLevelClient. Returns false when denied.
 pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
     return purchaseSkillAtCost(self, slot, skill, target_level, null);
@@ -495,40 +742,480 @@ pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: 
 pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_level: u8, cost_override: ?u32) bool {
     if (slot >= self.clients.len) return false;
     const c = &self.clients[slot];
-    const cost = self.skillCostOf(slot, skill, target_level) orelse return false;
+    // The C2S caller reads the name into a stack buffer, so the ledger must
+    // hold catalog memory: skill_levels outlives the packet frame and is what
+    // the save writer and the passive-effects fold read.
+    const interned = internProgressionName(self, skill) orelse return false;
+    const cost = self.skillCostOf(slot, interned, target_level) orelse return false;
     const eff_cost = cost_override orelse cost;
     if (c.skill_points < eff_cost) return false;
     c.skill_points -= eff_cost;
     var i: usize = 0;
     while (i < c.skill_level_n) : (i += 1) {
-        if (std.mem.eql(u8, c.skill_levels[i].name, skill)) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
             c.skill_levels[i].level = target_level;
+            fireProgressionUpdate(self, slot, interned);
+            firePerkLevelChanged(self, slot, interned);
             return true;
         }
     }
     if (c.skill_level_n < c.skill_levels.len) {
-        c.skill_levels[c.skill_level_n] = .{ .name = skill, .level = target_level };
+        c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = target_level };
         c.skill_level_n += 1;
+        fireProgressionUpdate(self, slot, interned);
+        firePerkLevelChanged(self, slot, interned);
         return true;
     }
     return false;
 }
 
-const assets_progression_test = @import("../../assets/progression.zig");
+/// Intern a progression.xml name (attribute, perk, or crafting_skill) so
+/// Client.skill_levels points at catalog memory, not a transient buffer.
+fn internProgressionName(self: *const Game, name: []const u8) ?[]const u8 {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.name;
+    }
+    for (self.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, name)) return pk.name;
+    }
+    for (self.progression_table.crafting_skills) |sk| {
+        if (std.mem.eql(u8, sk.name, name)) return sk.name;
+    }
+    return null;
+}
 
-test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" {
+/// Catalog MaxLevel for a progression name (attribute, perk, or
+/// crafting_skill). Unknown names return null (fail closed).
+fn progressionMaxLevel(self: *const Game, name: []const u8) ?u16 {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.max_level;
+    }
+    for (self.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, name)) return pk.max_level;
+    }
+    for (self.progression_table.crafting_skills) |sk| {
+        if (std.mem.eql(u8, sk.name, name)) return sk.max_level;
+    }
+    return null;
+}
+
+/// MinEventActionAddProgressionLevel (RE minevents.md IL=143): add `delta`
+/// to the named ProgressionValue, clamped to the crafting_skill max_level
+/// (stock magazines ship level="1"). Unknown names fail closed.
+/// Perk/attribute passives by name (the ledger keys on the catalog name).
+fn progressionPassives(self: *const Game, name: []const u8) []const assets_buffs.Passive {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.passives;
+    }
+    for (self.progression_table.perks) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.passives;
+    }
+    return &.{};
+}
+
+/// Fold the opening player's `LootProb` rows onto a loot entry's probability,
+/// with the entry's own `tags=` as the GetValue query set: the purchased
+/// perk/attribute rows at their level plus the active buffs' rows at their
+/// elapsed duration (stock `getProbability` -> `EffectManager.GetValue(79,
+/// ..., entry.tags)`). Equipped-item rows are not folded yet (2 stock rows, on
+/// the seed-packet items), and the query falls back to the item's own tags in
+/// stock only when the entry has none.
+pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const u8, base: f32) f32 {
+    var counts: requirements.Counts = .{};
+    var v = base;
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .cvars = &c.cvars,
+            .tags = tags,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.lootProbFold(progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .tags = tags };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.lootProbFold(def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    // Equipped and held items (stock GetValue layers 7/8): each item's rows
+    // evaluate at its own quality tier, so a Q6 armorFarmerHelmet
+    // (`LootProb perc_add 2..20 tags="seedSkill"`) contributes its tier value.
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .tags = tags };
+        const inv = &self.sim.inventory[ps];
+        const held = inv.heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| {
+                v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(self, held.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    return v;
+}
+
+/// Fold PlayerExpGain (87) onto a non-kill XP award — same layers as
+/// `lootProbScale` (purchased perks/attrs, active buffs, held + equipped
+/// items), with `held_tags` filled so `HoldingItemHasTags` rows (miner69r)
+/// can pass. Kill XP skips this (`awardXpSilent` / useBonus false).
+fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64) u64 {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return base;
+    var counts: requirements.Counts = .{};
+    var v: f32 = @floatFromInt(base);
+    const held = heldItemTagsForPeer(self, ps);
+    const broken = holdingItemBrokenForPeer(self, ps);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .cvars = &c.cvars,
+            .tags = tags,
+            .held_tags = held,
+            .holding_item_broken = broken,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.playerExpGainFold(progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .held_tags = held, .holding_item_broken = broken };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.playerExpGainFold(def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .held_tags = held, .holding_item_broken = broken };
+        const inv = &self.sim.inventory[ps];
+        const held_slot = inv.heldItem();
+        if (held_slot.count > 0) {
+            if (self.items.byId(held_slot.item_id)) |def| {
+                v = assets_buffs.playerExpGainFold(def.passives, itemQualityAxis(self, held_slot.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.playerExpGainFold(def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0)) v = 0;
+    // Round toward nearest like a float→int XP grant; clamp to u64.
+    const rounded: u128 = @intFromFloat(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
+    return @intCast(@min(rounded, @as(u128, std.math.maxInt(u64))));
+}
+
+/// Held-item tags for requirement rows (`HoldingItemHasTags`). Local copy of
+/// tick.zig's helper — that one is file-private.
+fn heldItemTagsForPeer(self: *const Game, ps: ecs.Slot) []const u8 {
+    if (!self.sim.mask[ps].inventory) return "";
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return "";
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return "";
+    const def = self.items.byId(s.item_id) orelse return "";
+    return def.tags;
+}
+
+/// Held ItemValue brokenness for `HoldingItemBroken` (PercentUsesLeft == 0).
+fn holdingItemBrokenForPeer(self: *const Game, ps: ecs.Slot) bool {
+    if (!self.sim.mask[ps].inventory) return false;
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return false;
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return false;
+    const def = self.items.byId(s.item_id) orelse return false;
+    const max_use = hooks.maxUseTimes(def, s.quality);
+    if (max_use == 0) return false;
+    return s.use_times >= @as(f32, @floatFromInt(max_use));
+}
+
+/// Item quality as the passive-fold axis (matches the tick's item fold).
+fn itemQualityAxis(self: *const Game, quality: u8) assets_buffs.Axis {
+    const qmax = self.items.max_quality_tier;
+    return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
+}
+
+/// A progression value's `triggered_effect` rows from progression.xml.
+fn progressionTriggered(self: *const Game, name: []const u8) []const assets_buffs.Triggered {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.triggered;
+    }
+    for (self.progression_table.perks) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.triggered;
+    }
+    return &.{};
+}
+
+/// Fire a progression value's `onSelfProgressionUpdate` rows (stock runs them
+/// whenever the value changes, from SetProgressionLevel and the purchase path).
+/// The rows are data: `perkIntellectMastery` sets `$perkBookwormChance` to 25
+/// at level >= 2 and 0 at <= 1, which is what the loot RandomRoll gates read.
+/// ModifyCVar/RemoveCVar land in the client's cvar store as the evaluator
+/// scans; the returned stat/buff lists are not applied yet (perk runtime open),
+/// the same limitation the parsed perk passives carry.
+pub fn fireProgressionUpdate(self: *Game, slot: usize, name: []const u8) void {
+    if (slot >= self.clients.len) return;
+    const rows = progressionTriggered(self, name);
+    if (rows.len == 0) return;
+    const c = &self.clients[slot];
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .cvars = &c.cvars,
+    };
+    _ = assets_buffs.evaluateRows(rows, .progression_update, ctx, &counts);
+}
+
+/// Fire a perk's `onPerkLevelChanged` rows after a purchase (the 4
+/// `perkIntellectMastery` point-chance cvar rows). Same ctx as the
+/// progression update; a separate trigger per stock's naming.
+pub fn firePerkLevelChanged(self: *Game, slot: usize, name: []const u8) void {
+    if (slot >= self.clients.len) return;
+    const rows = progressionTriggered(self, name);
+    if (rows.len == 0) return;
+    const c = &self.clients[slot];
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .cvars = &c.cvars,
+    };
+    _ = assets_buffs.evaluateRows(rows, .perk_level_changed, ctx, &counts);
+}
+
+pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
+    if (delta == 0 or slot >= self.clients.len) return false;
+    const interned = internProgressionName(self, name) orelse return false;
+    const max_level: u16 = progressionMaxLevel(self, interned) orelse 100;
+    const c = &self.clients[slot];
+    var i: usize = 0;
+    while (i < c.skill_level_n) : (i += 1) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
+            const cur: u16 = c.skill_levels[i].level;
+            const next: u16 = @min(max_level, cur + delta);
+            if (next == cur) return false;
+            c.skill_levels[i].level = @intCast(next);
+            fireProgressionUpdate(self, slot, interned);
+            return true;
+        }
+    }
+    if (c.skill_level_n >= c.skill_levels.len) return false;
+    const first: u16 = @min(max_level, delta);
+    c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = @intCast(first) };
+    c.skill_level_n += 1;
+    fireProgressionUpdate(self, slot, interned);
+    return true;
+}
+
+/// MinEventActionSetProgressionLevel with level=-1 (RE minevents.md IL=104):
+/// set ProgressionClass.MaxLevel. Stock almanacs/journals ship only -1.
+/// Unknown names fail closed.
+pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
+    if (slot >= self.clients.len) return false;
+    const interned = internProgressionName(self, name) orelse return false;
+    const max_level = progressionMaxLevel(self, interned) orelse return false;
+    const target: u8 = if (max_level > 255) 255 else @intCast(max_level);
+    const c = &self.clients[slot];
+    var i: usize = 0;
+    while (i < c.skill_level_n) : (i += 1) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
+            if (c.skill_levels[i].level == target) return false;
+            c.skill_levels[i].level = target;
+            return true;
+        }
+    }
+    if (c.skill_level_n >= c.skill_levels.len) return false;
+    c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = target };
+    c.skill_level_n += 1;
+    return true;
+}
+
+/// Magazine / almanac eat: items.xml AddProgressionLevel and/or
+/// SetProgressionLevel(level=-1) plus GiveExp on the consumed item.
+/// GiveExp (RE minevents.md IL=63) is `_xpOther` / XPTypes 8 on stock; the
+/// wire maps any non-kill type to `_xpOther`, so AddExpClient uses
+/// xp_type_other. Unknown names fail closed; 0 exp is a no-op.
+pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
+    if (item_id == 0 or slot >= self.clients.len) return;
+    const def = self.items.byId(item_id) orelse return;
+    if (def.progression_add > 0 and def.progression_name.len > 0) {
+        _ = addProgressionLevel(self, slot, def.progression_name, def.progression_add);
+    }
+    for (def.progression_set_max) |pname| {
+        _ = setProgressionLevelMax(self, slot, pname);
+    }
+    if (def.eat_exp == 0) return;
+    awardXp(self, slot, def.eat_exp);
+}
+
+/// Fold one named passive over a client's purchased attribute/perk levels
+/// (level-aware curveAt) plus an actor sim slot's active buffs at level 1.
+/// Shared by the DismemberSelfChance (143) dismember fold and the Bartering
+/// (148/149) trade folds: base_add/subtract accumulate, base_set overrides,
+/// perc ops skipped (no stock row for these names uses them). Returns 0 with
+/// no rows, which is the stock unbuffed value, not a silent default.
+pub fn namedPassiveFold(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot, name: []const u8) f32 {
+    if (slot >= self.clients.len) return 0;
+    const c = &self.clients[slot];
+    var bonus: f32 = 0;
+    // Perk/attribute leg.
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        if (sl.level == 0) continue;
+        const passives: []const assets_buffs.Passive = blk: {
+            for (self.progression_table.attributes) |a| {
+                if (std.mem.eql(u8, a.name, sl.name)) break :blk a.passives;
+            }
+            for (self.progression_table.perks) |pk| {
+                if (std.mem.eql(u8, pk.name, sl.name)) break :blk pk.passives;
+            }
+            break :blk &.{};
+        };
+        for (passives) |p| {
+            if (!std.mem.eql(u8, p.name, name)) continue;
+            const v = assets_buffs.curveAt(p, sl.level);
+            switch (p.op) {
+                .base_set, .set => bonus = v,
+                .base_add, .add => bonus += v,
+                .base_subtract, .subtract => bonus -= v,
+                else => {},
+            }
+        }
+    }
+    // Active-buff leg at level 1.
+    if (actor_sim_slot) |as| {
+        if (self.sim.mask[as].buffs) {
+            for (self.sim.buffs[as].slots) |bs| {
+                if (!bs.active) continue;
+                const def = self.buffs.byId(bs.def_id) orelse continue;
+                for (def.passives) |p| {
+                    if (!std.mem.eql(u8, p.name, name)) continue;
+                    const v = assets_buffs.curveAt(p, 1);
+                    switch (p.op) {
+                        .base_set, .set => bonus = v,
+                        .base_add, .add => bonus += v,
+                        .base_subtract, .subtract => bonus -= v,
+                        else => {},
+                    }
+                }
+            }
+        }
+    }
+    return bonus;
+}
+
+/// Attacker's DismemberSelfChance bonus (stock passive 143) for the dismember
+/// roll: the region multiplier is the base, and perk + active-buff rows add
+/// on top (EffectManager.GetValue, RE GetDismemberChance IL=128).
+pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot) f32 {
+    return namedPassiveFold(self, slot, actor_sim_slot, "DismemberSelfChance");
+}
+
+/// Barter scales (RE XUiM_Trader GetBuyPrice IL=240 / GetSellPrice IL=217):
+/// buying pays `unit - unit * BarteringBuying(148)`, selling gains
+/// `unit + unit * BarteringSelling(149)`. Hook bodies for the ECS trade path.
+pub fn barterBuyScale(ctx: ?*anyopaque, slot: usize) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const as = g.sim.playerByPeer(slot);
+    return @max(0, 1 - namedPassiveFold(g, slot, as, "BarteringBuying"));
+}
+
+pub fn barterSellScale(ctx: ?*anyopaque, slot: usize) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const as = g.sim.playerByPeer(slot);
+    return 1 + @max(0, namedPassiveFold(g, slot, as, "BarteringSelling"));
+}
+
+/// Parse the `[sim] spawn_starter_kit` spec into the sim's fixed starter kit
+/// (ADR 0010: a fresh-spawn kit is server policy, so it is config, not code).
+///
+/// Rows are `name` or `name:count`, separated by commas or semicolons; `name`
+/// is a stock items.xml name resolved through the loaded catalog. An unknown
+/// name keeps its row with `item_id = 0` (spawnPlayer omits it) so a typo
+/// cannot silently fall back to the built-in kit, and a count above the item's
+/// Stacknumber is clamped to it. A null/empty spec leaves the kit unconfigured
+/// (`starter_kit_n == 0`), which selects the built-in default in spawnPlayer.
+pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
+    self.sim.starter_kit = [_]ecs.world.StarterKitEntry{.{}} ** ecs.world.max_starter_kit;
+    self.sim.starter_kit_n = 0;
+    const text = spec orelse return;
+    var it = std.mem.tokenizeAny(u8, text, ",;");
+    while (it.next()) |raw| {
+        if (self.sim.starter_kit_n >= ecs.world.max_starter_kit) {
+            std.debug.print(
+                "zdtd: spawn_starter_kit: more than {d} rows; the rest are ignored\n",
+                .{ecs.world.max_starter_kit},
+            );
+            break;
+        }
+        const row = std.mem.trim(u8, raw, " \t");
+        if (row.len == 0) continue;
+        var name = row;
+        var count: u16 = 1;
+        if (std.mem.indexOfScalar(u8, row, ':')) |colon| {
+            name = std.mem.trim(u8, row[0..colon], " \t");
+            const ctext = std.mem.trim(u8, row[colon + 1 ..], " \t");
+            count = std.fmt.parseInt(u16, ctext, 10) catch {
+                std.debug.print("zdtd: spawn_starter_kit: bad count '{s}' for '{s}'; row skipped\n", .{ ctext, name });
+                continue;
+            };
+        }
+        if (name.len == 0 or count == 0) continue;
+        const id = self.items.ecsIdByName(name);
+        if (id == 0) {
+            std.debug.print("zdtd: spawn_starter_kit: '{s}' is not in items.xml; omitted\n", .{name});
+        } else {
+            const cap = self.sim.maxStack(id);
+            if (cap > 0 and count > cap) count = cap;
+        }
+        self.sim.starter_kit[self.sim.starter_kit_n] = .{ .item_id = id, .count = count };
+        self.sim.starter_kit_n += 1;
+    }
+}
+
+const assets_progression_test = @import("../../assets/progression.zig");
+const requirements_test = @import("../../assets/requirements.zig");
+
+test "skill ledger: level-up awards SP; purchase validates, level gate and spends" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ledger", 0);
     defer {
         g.deinit();
         gpa.destroy(g);
     }
-    // Minimal progression tree: one attribute + one perk gated on it.
+    // Minimal progression tree: one attribute + one perk whose level 1 is
+    // gated on the attribute (stock's shape: the gate is `<level_requirements>`
+    // on a progression name, not the perk's `parent` grouping name).
+    const gate_l1 = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 1, .arg = "attGeneral" }};
+    const gate_l2 = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 3, .arg = "attGeneral" }};
+    const lvl_reqs = [_]assets_progression_test.LevelReq{
+        .{ .level = 1, .reqs = &gate_l1 },
+        .{ .level = 2, .reqs = &gate_l2 },
+    };
     const attrs = [_]assets_progression_test.AttrDef{
         .{ .name = "attGeneral", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
     };
     const perks = [_]assets_progression_test.PerkDef{
-        .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "attGeneral" },
+        .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "skillGeneral", .level_reqs = &lvl_reqs },
     };
     g.progression_table.attributes = &attrs;
     g.progression_table.perks = &perks;
@@ -540,24 +1227,90 @@ test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" 
     try std.testing.expectEqual(@as(u16, 2), g.clients[0].level);
     try std.testing.expectEqual(@as(u32, 1), g.clients[0].skill_points);
 
-    // Perk without the parent attribute: prereq denies.
+    // Perk with unmet level gate: denied, no SP spent.
     try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
+    try std.testing.expectEqual(@as(u32, 1), g.clients[0].skill_points);
     // Unknown skill denies.
     try std.testing.expect(!g.purchaseSkill(0, "notASkill", 1));
-    // Buy the attribute first (cost 1 = base), then the perk.
+    // Buy the attribute first (cost 1 = base), then the perk level 1.
     try std.testing.expect(g.purchaseSkill(0, "attGeneral", 1));
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "attGeneral"));
     try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
     // Second level would cost base x mult (1.14 -> round 1): still 0 SP.
     try std.testing.expect(!g.purchaseSkill(0, "attGeneral", 2));
-    // Perk buys at base cost 1.
+    // Perk buys at base cost 1 now that its level-1 gate passes.
     g.clients[0].skill_points = 1;
     try std.testing.expect(g.purchaseSkill(0, "perkLightEater", 1));
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "perkLightEater"));
     try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
     // Re-purchase of the same level denies (one level per request).
     try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
-    std.debug.print("PASS skill-ledger: SP award, cost, prereq, echo state\n", .{});
+    // Level 2 needs attGeneral >= 3, which the ledger does not hold yet.
+    g.clients[0].skill_points = 5;
+    try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 2));
+    try std.testing.expectEqual(@as(u32, 5), g.clients[0].skill_points);
+    g.clients[0].skill_levels[0] = .{ .name = "attGeneral", .level = 3 };
+    try std.testing.expect(g.purchaseSkill(0, "perkLightEater", 2));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(0, "perkLightEater"));
+    std.debug.print("PASS skill-ledger: SP award, cost, level gate, echo state\n", .{});
+}
+
+test "skill cost follows CalculatedCostForLevel and the row override table" {
+    // IL=423: conv.i4(Mathf.Pow(CostMultiplier, level) * BaseCostToLevel), with
+    // Mathf.Pow in double cast back to float and conv.i4 truncating. Stock
+    // attributes are base 1 / mult 1.14, so the goldens are 1,1,1,1,1,2,2,2,3,3
+    // (the old round(base*mult^(level-1)) gave 2 at level 5 and 3 at level 8).
+    const goldens = [_]u32{ 1, 1, 1, 1, 1, 2, 2, 2, 3, 3 };
+    for (goldens, 0..) |want, i| {
+        try std.testing.expectEqual(want, skillCostForLevel(1, 1.14, @intCast(i + 1)));
+    }
+    // A flat multiplier (stock perks: mult 1) costs the base at every level.
+    try std.testing.expectEqual(@as(u32, 1), skillCostForLevel(1, 1.0, 5));
+    try std.testing.expectEqual(@as(u32, 3), skillCostForLevel(3, 1.0, 4));
+    // A zero-cost row is free (stock conv.i4 of 0); level 0 has no cost.
+    try std.testing.expectEqual(@as(u32, 0), skillCostForLevel(0, 1.14, 3));
+    try std.testing.expectEqual(@as(u32, 0), skillCostForLevel(1, 1.14, 0));
+}
+
+test "override_cost replaces the curve and refuses past its end" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_cost", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const attrs = [_]assets_progression_test.AttrDef{
+        .{ .name = "attPerception", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
+    };
+    const gate = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 1, .arg = "attPerception" }};
+    const lvl = [_]assets_progression_test.LevelReq{
+        .{ .level = 1, .reqs = &gate },
+        .{ .level = 2, .reqs = &gate },
+    };
+    // Stock shape: perkPummelPete carries override_cost="1,2,2,3".
+    const perks = [_]assets_progression_test.PerkDef{
+        .{ .name = "perkPummelPete", .max_level = 4, .level_reqs = &lvl, .override_cost = &.{ 1, 2 } },
+    };
+    g.progression_table.attributes = &attrs;
+    g.progression_table.perks = &perks;
+    g.clients[0].skill_levels[0] = .{ .name = "attPerception", .level = 4 };
+    g.clients[0].skill_level_n = 1;
+    g.clients[0].skill_points = 10;
+    // The attribute ladder: level 5 costs 1 under the stock formula.
+    try std.testing.expectEqual(@as(?u32, 1), g.skillCostOf(0, "attPerception", 5));
+    // The override table wins for the perk.
+    try std.testing.expectEqual(@as(?u32, 1), g.skillCostOf(0, "perkPummelPete", 1));
+    try std.testing.expect(g.purchaseSkill(0, "perkPummelPete", 1));
+    try std.testing.expectEqual(@as(u32, 9), g.clients[0].skill_points);
+    try std.testing.expectEqual(@as(?u32, 2), g.skillCostOf(0, "perkPummelPete", 2));
+    try std.testing.expect(g.purchaseSkill(0, "perkPummelPete", 2));
+    try std.testing.expectEqual(@as(u32, 7), g.clients[0].skill_points);
+    // Level 3 has no override entry: stock would index past the table, so the
+    // purchase refuses instead of falling back to the curve.
+    try std.testing.expect(g.skillCostOf(0, "perkPummelPete", 3) == null);
+    try std.testing.expect(!g.purchaseSkill(0, "perkPummelPete", 3));
+    try std.testing.expectEqual(@as(u32, 7), g.clients[0].skill_points);
+    std.debug.print("PASS perk cost: stock curve + row override_cost\n", .{});
 }
 
 test "killXpAward scales by the on_entity_killed verdict percent" {
@@ -567,10 +1320,171 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
         g.deinit();
         gpa.destroy(g);
     }
-    // killXpAward(slot, base, scale, trap): 200 base x 150% = 300 (xp_multiplier
-    // default 100 keeps 1.0x).
+    // killXpAward(slot, base, scale, trap, killed): 200 base x 150% = 300
+    // (xp_multiplier default 100 keeps 1.0x). No corpse net id -> the shared
+    // kill class falls back to the stock default (unused here, no party).
     const before = g.clients[0].xp;
-    g.killXpAward(0, 200, 150, false);
+    g.killXpAward(0, 200, 150, false, 0);
     try std.testing.expectEqual(before + 300, g.clients[0].xp);
     std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
+}
+
+test "addProgressionLevel clamps to crafting_skill max and fails closed on unknown names" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magread", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const skills = [_]assets_progression.CraftingSkill{
+        .{ .name = "craftingHarvestingTools", .max_level = 5, .entries = &.{} },
+    };
+    g.progression_table.crafting_skills = &skills;
+    try std.testing.expect(!g.addProgressionLevel(0, "notASkill", 1));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 10));
+    try std.testing.expectEqual(@as(u8, 5), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(!g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+}
+
+test "grantMagazineRead awards GiveExp through the server ledger" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magxp", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const skills = [_]assets_progression.CraftingSkill{
+        .{ .name = "craftingHarvestingTools", .max_level = 100, .entries = &.{} },
+    };
+    g.progression_table.crafting_skills = &skills;
+    const defs = [_]assets_items.ItemDef{
+        .{
+            .id = 100,
+            .name = "harvestingToolsSkillMagazine",
+            .is_eat = true,
+            .progression_name = "craftingHarvestingTools",
+            .progression_add = 1,
+            .eat_exp = 50,
+        },
+    };
+    g.items = .{ .defs = &defs, .source = .xml };
+    const before = g.clients[0].xp;
+    g.grantMagazineRead(0, 100);
+    try std.testing.expectEqual(before + 50, g.clients[0].xp);
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "craftingHarvestingTools"));
+}
+
+test "grantMagazineRead SetProgressionLevel -1 sets perk to max" {
+    // RE minevents.md IL=104: level=-1 sets ProgressionClass.MaxLevel.
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_setmax", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const perks = [_]assets_progression.PerkDef{
+        .{ .name = "perkFiremansAlmanacHeat", .max_level = 5 },
+        .{ .name = "perkFiremansAlmanacComplete", .max_level = 1 },
+    };
+    g.progression_table.perks = &perks;
+    const set_names = [_][]const u8{ "perkFiremansAlmanacHeat", "perkFiremansAlmanacComplete" };
+    const defs = [_]assets_items.ItemDef{
+        .{
+            .id = 100,
+            .name = "bookFiremansAlmanacHeat",
+            .is_eat = true,
+            .progression_set_max = &set_names,
+            .eat_exp = 50,
+        },
+    };
+    g.items = .{ .defs = &defs, .source = .xml };
+    const before = g.clients[0].xp;
+    g.grantMagazineRead(0, 100);
+    try std.testing.expectEqual(before + 50, g.clients[0].xp);
+    try std.testing.expectEqual(@as(u8, 5), g.skillLevelOf(0, "perkFiremansAlmanacHeat"));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "perkFiremansAlmanacComplete"));
+    // Idempotent at max.
+    try std.testing.expect(!g.setProgressionLevelMax(0, "perkFiremansAlmanacHeat"));
+    try std.testing.expect(!g.setProgressionLevelMax(0, "notAPerk"));
+}
+
+test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dismember143", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // No rows anywhere: the stock unbuffed value.
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, null));
+    // Perk leg: a DismemberSelfChance base_add curve 0.1/level.
+    const perks = [_]assets_progression.PerkDef{
+        .{
+            .name = "perkSkullCrusher",
+            .max_level = 5,
+            .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .curve = .{ 0.1, 0.2, 0.3, 0, 0, 0, 0, 0 }, .curve_len = 3, .curve_levels = .{ 1, 2, 3, 0, 0, 0, 0, 0 }, .curve_levels_len = 3 }},
+        },
+    };
+    g.progression_table.perks = &perks;
+    _ = g.sim.spawnPlayer(0, 70, 0, 0).?;
+    g.clients[0].skill_levels[0] = .{ .name = "perkSkullCrusher", .level = 2 };
+    g.clients[0].skill_level_n = 1;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), g.dismemberSelfChance(0, null), 0.0001);
+    // Unknown skill names are ignored (fail closed).
+    g.clients[0].skill_levels[0].name = "notAPerk";
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, null));
+    g.clients[0].skill_levels[0].name = "perkSkullCrusher";
+    // Buff leg: an active buff's untagged row adds at level 1.
+    const defs = [_]assets_buffs.BuffDef{
+        .{ .name = "testDismemberBuff", .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .value = 0.5 }} },
+    };
+    g.buffs.defs = defs[0..];
+    const ps = g.sim.playerByPeer(0) orelse return error.TestUnexpectedResult;
+    const bs = g.sim.buffsMut(ps);
+    bs.slots[0] = .{ .active = true, .def_id = 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), g.dismemberSelfChance(0, ps), 0.0001);
+    // Inactive buff contributes nothing.
+    bs.slots[0].active = false;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), g.dismemberSelfChance(0, ps), 0.0001);
+    // Removing the perk level reverts exactly.
+    g.clients[0].skill_level_n = 0;
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, ps));
+    std.debug.print("PASS dismember-143: perk curve + buff leg fold, revertible\n", .{});
+}
+
+test "barter scales discount buying and bonus selling off the same fold" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_barter", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // No rows: scales are identity (slot 0 has no player yet, so the
+    // buff leg resolves empty and only the empty perk ledger folds).
+    // g is already *Game; &g would be **Game and mis-cast.
+    const ctx: ?*anyopaque = @ptrCast(g);
+    try std.testing.expectEqual(@as(f32, 1), barterBuyScale(ctx, 0));
+    try std.testing.expectEqual(@as(f32, 1), barterSellScale(ctx, 0));
+    const perks = [_]assets_progression.PerkDef{
+        .{
+            .name = "perkBetterBarter",
+            .max_level = 5,
+            .passives = &.{
+                .{ .name = "BarteringBuying", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2, .curve_levels = .{ 1, 2, 0, 0, 0, 0, 0, 0 }, .curve_levels_len = 2 },
+                .{ .name = "BarteringSelling", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2, .curve_levels = .{ 1, 2, 0, 0, 0, 0, 0, 0 }, .curve_levels_len = 2 },
+            },
+        },
+    };
+    g.progression_table.perks = &perks;
+    _ = g.sim.spawnPlayer(0, 70, 0, 0).?;
+    g.clients[0].skill_levels[0] = .{ .name = "perkBetterBarter", .level = 2 };
+    g.clients[0].skill_level_n = 1;
+    // Level 2: 10% off buys, 10% over sells.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9), barterBuyScale(ctx, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), barterSellScale(ctx, 0), 0.0001);
+    std.debug.print("PASS barter-scale: buy 0.9x sell 1.1x at level 2\n", .{});
 }

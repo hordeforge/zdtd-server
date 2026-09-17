@@ -78,7 +78,10 @@ sends as `NetPackageConfigFile` during join.
   new `on_*` export without adding the hook to the host first.
 - `_zdtd_requires` lists hooks + host verbs, comma-separated, matching what
   the module actually imports/exports; validated fail-closed at load (ADR
-  0030). A typo'd capability is a loud load rejection.
+  0030). A typo'd capability is a loud load rejection. **Required** for any
+  discovered mod that exports a hook: absence is `error.RequiresUnmet`, since
+  without it nothing validates the names the module believes it registered. A
+  module with no hook exports may omit it.
 - Log lines start with the module name: `"core_announce v2.0 enabled ..."`.
 
 ## manifest.toml format
@@ -100,7 +103,8 @@ tier = "official"                 # optional; "official" | "user" ("core" is an 
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
 points = "damage.player_scale"    # optional; comma-separated core override points (PRD 0005 R5)
 claim_mode = "chain"              # reserved; rejected at load (RFC 0005 3.3) - omit it
-requires = "<other-mod-name>"     # optional; comma-separated mods that must load first
+deny = "say,damage"              # optional; queued verbs this module will not issue (ADR 0039); known: spawn, despawn, damage, say, glide, bot
+requires = "<other-mod-name>"     # optional; comma-separated mods that must load first (a name that is absent, disabled, or blacklisted fails the load)
 ```
 
 ### Rules
@@ -121,6 +125,12 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
    otherwise).
 6. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
    component are config errors.
+6b. `deny` is the module's own interception declaration (ADR 0039): the host
+   refuses those queued verbs for this module before they reach the command
+   buffer, and the operator's `[plugin] deny`/`allow` lists apply over it
+   (operator last, so it can tighten or relax). An unknown verb name fails the
+   manifest at load. Known verbs: `spawn`, `despawn`, `damage`, `say`, `glide`,
+   `bot`.
 7. **Config-only mods** (PRD 0005 style, no wasm): `preset = "<path>"` points
    at a preset file **inside the mod folder** (e.g. `preset.toml`) - its
    gameplay keys and `[rules.*]` override the built-in defaults exactly like

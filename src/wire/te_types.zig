@@ -37,3 +37,24 @@ pub fn isStorageLike(te_type: u8) bool {
 pub fn isSignLike(te_type: u8) bool {
     return te_type == sign or te_type == secure_loot_signed;
 }
+
+test "powered is neither storage-like nor sign-like" {
+    // A TileEntityPowered is not storage. Classifying it as storage-like on
+    // the prefab scan turned every powered marker into an 8-slot container,
+    // which both invented a grid and meant the storage TE sender would push a
+    // composite-storage body for it. The client builds its TE from the block,
+    // so those bytes would be fed to TileEntityPowered::read.
+    try std.testing.expect(!isStorageLike(powered));
+    try std.testing.expect(!isSignLike(powered));
+    try std.testing.expect(!isStorageLike(power_source));
+    try std.testing.expect(!isStorageLike(power_range_trap));
+    try std.testing.expect(!isStorageLike(power_melee_trap));
+    try std.testing.expect(!isStorageLike(trigger));
+
+    // The types that genuinely are storage still classify.
+    try std.testing.expect(isStorageLike(composite));
+    try std.testing.expect(isStorageLike(loot));
+    try std.testing.expect(isStorageLike(secure_loot));
+    try std.testing.expect(isSignLike(sign));
+    try std.testing.expect(isSignLike(secure_loot_signed));
+}

@@ -80,7 +80,7 @@ is available.
 | `NetPackageInventoryTransactionResponse` | S→C | zdtd head: ok u8, dropped_entity i32 + stock inventory body |
 | `NetPackageInventoryDataRequest` | C→S | entity_id i32 (open container) |
 | `NetPackageInventoryDataResponse` | S→C | stock inventory body for container entity |
-| `NetPackageEntityCollect` | C→S | bag entity_id i32 (open+take+vacuum) |
+| `NetPackageEntityCollect` | **both** | bag entity_id i32 + collector playerId i32 (open+take+vacuum). C2S is gated on `ValidEntityIdForSender(playerId)`. |
 
 ### Stock ItemValue (v9, minimal)
 
@@ -105,7 +105,7 @@ version 1, slot count u16 (45 padded, `bag_slots`), stacks, locked=false, touche
 
 ## Join
 
-Starter kit: stone axe (8), food×5 (2), wood×20 (7), casinoCoin×50 (6). Full inventory + holding sent in join bundle.
+Starter kit: stone axe (8), food×5 (2), wood×20 (7), currency×50 (traders.xml `currency_item`, stock casinoCoin / offline id 6). Full inventory + holding sent in join bundle.
 `players.zsv` restores inventory by **login name** (persist key; no platform id
 yet; [ADR 0017](../adr/0017-player-identity-login-name.md)).
 

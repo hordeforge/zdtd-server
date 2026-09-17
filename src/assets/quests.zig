@@ -208,6 +208,20 @@ const PhaseGraph = struct {
     objectives: []const quest.FlatObjective,
 };
 
+/// Objective `type` attribute to its stock Write shape. The client builds the
+/// objective by reflection on the attribute (`GetTypeWithPrefix("Objective",
+/// type)`, QuestsFromXml.il.txt:634), so the type name selects the class whose
+/// Write override the body must match. Only these four override Write; every
+/// other type keeps the BaseObjective shape. A wrong shape here desyncs the
+/// whole objective block, not just one entry.
+fn objectiveWireKind(typ: []const u8) quest.ObjectiveWireKind {
+    if (std.mem.eql(u8, typ, "TreasureChest")) return .treasure_chest;
+    if (std.mem.eql(u8, typ, "POIStayWithin")) return .empty;
+    if (std.mem.eql(u8, typ, "StayWithin")) return .empty;
+    if (std.mem.eql(u8, typ, "Time")) return .time;
+    return .base;
+}
+
 /// Build the ordered phase graph from a quest body, mirroring stock
 /// QuestClass.HighestPhase (max objective `phase`) and per-phase advancing
 /// objective (Quest.refreshQuestCompletion). `tier` drives the kill-count boost
@@ -259,7 +273,17 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         // count requirement stays 1 and the radius is carried on the spec.
         var radius: f32 = 0;
         if (kind == .goto_point or kind == .stay_within) {
-            if (xml.attr(body, oi, "value")) |v| radius = std.fmt.parseFloat(f32, v) catch 0;
+            // ObjectiveStayWithin carries its radius as a nested
+            // `<property name="radius" value="25"/>` (15 stock rows); the
+            // ObjectiveGoto distance rides the objective `value` attribute
+            // (ObjectiveGoto::distance, asm.il 966955-966966). Read both so a
+            // stay objective no longer falls back to the policy default.
+            const el0 = body[oi..elem_end];
+            const rad_src = if (kind == .stay_within)
+                (xml.propertyValue(el0, "radius") orelse xml.attr(body, oi, "value"))
+            else
+                (xml.attr(body, oi, "value") orelse xml.propertyValue(el0, "radius"));
+            if (rad_src) |rv| radius = std.fmt.parseFloat(f32, rv) catch 0;
             if (radius > 0) target = 1;
         }
         // The XML body text is transient; the marker class must live in the
@@ -279,14 +303,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             .force = objectiveFlag(el, "force_phase_finish"),
         };
         obj_phase_bytes[n] = phase;
-        // Objective Write subclass by type (stock CreateQuest). Everything not
-        // listed writes the BaseObjective shape (FileVersion + CurrentValue).
-        obj_kind_bytes[n] = if (std.mem.eql(u8, typ, "TreasureChest"))
-            .treasure_chest
-        else if (std.mem.eql(u8, typ, "POIStayWithin"))
-            .empty
-        else
-            .base;
+        obj_kind_bytes[n] = objectiveWireKind(typ);
         if (phase > highest) highest = phase;
         n += 1;
     }
@@ -341,11 +358,13 @@ fn objectiveIsArrival(kind: quest.PhaseKind) bool {
     };
 }
 
-/// Dukes total from stock `<reward type="Item" id="casinoCoin" value="N">`
+/// Dukes total from stock `<reward type="Item" id="{currency}" value="N">`
 /// entries. Stock quests.xml has no Coin reward type: quest dukes are granted
-/// as casinoCoin item rewards, so the server wallet credit must match the sum
+/// as currency item rewards, so the server wallet credit must match the sum
 /// of those values (the client Quest.Write already lists them as Item rewards).
-fn sumCoinReward(body: []const u8) u32 {
+/// `currency` is traders.xml root `currency_item` (stock "casinoCoin").
+fn sumCoinReward(body: []const u8, currency: []const u8) u32 {
+    const coin = if (currency.len > 0) currency else "casinoCoin";
     var total: u32 = 0;
     var i: usize = 0;
     while (i < body.len) {
@@ -358,7 +377,7 @@ fn sumCoinReward(body: []const u8) u32 {
         };
         if (std.mem.eql(u8, typ, "Item")) {
             if (xml.attr(open, 0, "id")) |rid| {
-                if (std.mem.eql(u8, rid, "casinoCoin")) {
+                if (std.mem.eql(u8, rid, coin)) {
                     if (xml.attr(open, 0, "value")) |v| {
                         total +%= xml.parseU32(v) orelse 0;
                     }
@@ -383,7 +402,22 @@ const ObjectiveMeta = struct {
     allow_current_poi: bool = false,
 };
 
-fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta {
+/// Property value with stock's `param1` variable substitution: a property
+/// carrying `param1="X"` takes the quest's `<variable name="X" value=...>`
+/// override when one exists, else the property's own value. Stock ships 18
+/// `biome_filter_type` variables (8 AnyBiome, 10 SameBiome) overriding the
+/// objective template default.
+fn propertyValueVars(el: []const u8, name: []const u8, vars: []const QuestVar) ?[]const u8 {
+    const pi = xml.propertyTagOffset(el, name) orelse return null;
+    if (xml.attr(el, pi, "param1")) |param| {
+        for (vars) |v| {
+            if (std.mem.eql(u8, v.name, param)) return v.value;
+        }
+    }
+    return xml.attr(el, pi, "value");
+}
+
+fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8, vars: []const QuestVar) !ObjectiveMeta {
     var m: ObjectiveMeta = .{};
     var i: usize = 0;
     while (i < body.len) {
@@ -404,7 +438,7 @@ fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta 
         }
         const el = body[oi..elem_end];
         if (m.biome_type == quest.biome_filter_none) {
-            if (xml.propertyValue(el, "biome_filter_type")) |bt| {
+            if (propertyValueVars(el, "biome_filter_type", vars)) |bt| {
                 if (std.mem.eql(u8, bt, "ExcludeBiome")) {
                     m.biome_type = quest.biome_filter_exclude;
                 } else if (std.mem.eql(u8, bt, "OnlyBiome")) {
@@ -412,7 +446,7 @@ fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta 
                 } else if (std.mem.eql(u8, bt, "SameBiome")) {
                     m.biome_type = quest.biome_filter_same;
                 }
-                if (xml.propertyValue(el, "biome_filter")) |bf| {
+                if (propertyValueVars(el, "biome_filter", vars)) |bf| {
                     if (bf.len > 0) m.biome_filter = try arena.dupe(u8, bf);
                 }
             }
@@ -461,10 +495,10 @@ fn parseQuestDefBody(
         target = @as(u16, policy.default_kill_count) + @as(u16, tier) * @as(u16, policy.kill_per_tier);
     }
 
-    // Dukes: stock grants them as casinoCoin Item rewards (no Coin reward type
-    // exists in quests.xml). Fail closed: no casinoCoin reward in the body
+    // Dukes: stock grants them as currency Item rewards (no Coin reward type
+    // exists in quests.xml). Fail closed: no matching reward in the body
     // means the stock quest grants no dukes, so credit 0, not an invented floor.
-    const reward_coin: u32 = sumCoinReward(body);
+    const reward_coin: u32 = sumCoinReward(body, policy.currency_item);
 
     // Fallback quest-marker position when the quest def binds no POI rect:
     // a 50/70 center (ground-ish height) jittered deterministically per quest
@@ -492,7 +526,7 @@ fn parseQuestDefBody(
     const ev_count = parseQuestEvents(arena, body, &event_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);
-    const meta = try scanObjectiveMeta(arena, body);
+    const meta = try scanObjectiveMeta(arena, body, vars[0..var_n]);
 
     return .{
         .id = numeric_id,
@@ -953,9 +987,55 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, policy: q
     const lists_slice = try arena.alloc(quest.QuestList, lists_tmp.items.len);
     @memcpy(lists_slice, lists_tmp.items);
 
+    // `<quest_tier_reward tier="N"><reward type="Quest" id="..."/></...>`:
+    // stock fires the row whose tier the completion newly reaches
+    // (`QuestEventManager.HandleNewCompletedQuest` walks `questTierRewards`
+    // and `QuestTierReward.GiveRewards` grants the quest). The row's quest id
+    // resolves to a catalog def id in document order so the runtime walk is a
+    // plain index lookup; an unresolvable id keeps 0 and never fires. The
+    // rewarded quest is itself parsed like any other: stock has no separate
+    // quest class, so no new loader shape is needed.
+    var tier_rewards_tmp: std.ArrayList(u16) = .empty;
+    defer tier_rewards_tmp.deinit(allocator);
+    {
+        var ti: usize = 0;
+        while (ti < clean.len) {
+            const ri = std.mem.findPos(u8, clean, ti, "<quest_tier_reward") orelse break;
+            const rgt = std.mem.findPos(u8, clean, ri, ">") orelse break;
+            const close = std.mem.findPos(u8, clean, rgt + 1, "</quest_tier_reward>") orelse {
+                ti = rgt + 1;
+                continue;
+            };
+            const rw = std.mem.findPos(u8, clean, rgt + 1, "<reward") orelse {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            };
+            if (rw >= close) {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            }
+            const rid = xml.attr(clean, rw, "id") orelse {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            };
+            var def_id: u16 = 0;
+            for (defs_slice) |d| {
+                if (std.mem.eql(u8, d.name, rid)) {
+                    def_id = d.id;
+                    break;
+                }
+            }
+            try tier_rewards_tmp.append(allocator, def_id);
+            ti = close + "</quest_tier_reward>".len;
+        }
+    }
+    const tier_rewards_slice = try arena.alloc(u16, tier_rewards_tmp.items.len);
+    @memcpy(tier_rewards_slice, tier_rewards_tmp.items);
+
     return .{
         .defs = defs_slice,
         .lists = lists_slice,
+        .tier_rewards = tier_rewards_slice,
         .starter_id = starter_id,
         .starter_name = starter_name,
         .max_tier = max_tier,
@@ -1148,7 +1228,14 @@ test "rally point objective becomes a rally phase without stealing one" {
 }
 
 test "load stock quests.xml when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+    // Both installs carry the same quests.xml (verified byte-identical); the
+    // test pins the table the dedicated server actually serves, falling back
+    // to the client copy when only it is on disk.
+    const path = blk: {
+        const dedi = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+        if (io_fs.fileExists(dedi)) break :blk dedi;
+        break :blk "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
+    };
     if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();
@@ -1157,6 +1244,10 @@ test "load stock quests.xml when present" {
     try std.testing.expect(cat.byName("quest_whiteRiverCitizen1") != null);
     try std.testing.expect(cat.byName("tier1_clear") != null);
     try std.testing.expect(cat.lists.len >= 1);
+    // Six tier rows in document order (tiers 2..7); walk indexes tier-2.
+    try std.testing.expectEqual(@as(usize, 6), cat.tier_rewards.len);
+    try std.testing.expectEqual(cat.byName("quest_tier1complete").?.id, cat.tier_rewards[0]);
+    try std.testing.expectEqual(cat.byName("quest_tier6complete").?.id, cat.tier_rewards[5]);
 }
 
 test "quest template inheritance fills derived quests" {
@@ -1190,19 +1281,25 @@ test "objective write kinds follow objective type" {
         \\    <objective type="Goto" phase="1"/>
         \\    <objective type="TreasureChest" phase="2"/>
         \\    <objective type="POIStayWithin" phase="3"/>
+        \\    <objective type="StayWithin" phase="4"/>
+        \\    <objective type="Time" phase="5"/>
         \\  </quest>
         \\</quests>
     ;
     var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("mixed").?;
-    try std.testing.expectEqual(@as(usize, 3), d.objective_kinds.len);
+    try std.testing.expectEqual(@as(usize, 5), d.objective_kinds.len);
     try std.testing.expectEqual(quest.ObjectiveWireKind.base, d.objective_kinds[0]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.treasure_chest, d.objective_kinds[1]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[2]);
+    // StayWithin is a distinct class from POIStayWithin and also Writes
+    // nothing; Time writes a bare UInt16 instead of the base pair.
+    try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[3]);
+    try std.testing.expectEqual(quest.ObjectiveWireKind.time, d.objective_kinds[4]);
 }
 
-test "reward_coin sums casinoCoin Item rewards and fails closed" {
+test "reward_coin sums currency Item rewards and fails closed" {
     const fixture =
         \\<quests>
         \\  <quest id="payday">
@@ -1213,6 +1310,10 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
         \\  <quest id="freebie">
         \\    <reward type="Exp" value="1000"/>
         \\  </quest>
+        \\  <quest id="altpay">
+        \\    <reward type="Item" id="dukeCoin" value="100"/>
+        \\    <reward type="Item" id="casinoCoin" value="999"/>
+        \\  </quest>
         \\</quests>
     ;
     var cat = try parseCatalog(std.testing.allocator, fixture, .{});
@@ -1221,6 +1322,12 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
     try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
     const free = cat.byName("freebie").?;
     try std.testing.expectEqual(@as(u32, 0), free.reward_coin);
+
+    // traders.xml currency_item override: only matching id rows credit the wallet.
+    var cat2 = try parseCatalog(std.testing.allocator, fixture, .{ .currency_item = "dukeCoin" });
+    defer cat2.deinit();
+    try std.testing.expectEqual(@as(u32, 0), cat2.byName("payday").?.reward_coin);
+    try std.testing.expectEqual(@as(u32, 100), cat2.byName("altpay").?.reward_coin);
 }
 
 test "objective-kinds mapping is data-driven (config spec overrides builtin)" {
@@ -1489,7 +1596,7 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
         \\  <objective type="ReturnToNPC" phase="4"/>
         \\</quest>
     ;
-    const m = try scanObjectiveMeta(arena, body);
+    const m = try scanObjectiveMeta(arena, body, &.{});
     try std.testing.expectEqual(@intFromEnum(quest.QuestTag.clear), m.tags_mask);
     // RandomPOIGoto wins the selector kind; ClearSleepers never does.
     try std.testing.expectEqual(quest.PoiSelectKind.random, m.poi_select);
@@ -1506,7 +1613,7 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
         \\  </objective>
         \\</quest>
     ;
-    const m2 = try scanObjectiveMeta(arena, body2);
+    const m2 = try scanObjectiveMeta(arena, body2, &.{});
     try std.testing.expectEqual(quest.PoiSelectKind.closest, m2.poi_select);
     try std.testing.expectEqual(quest.biome_filter_exclude, m2.biome_type);
     try std.testing.expectEqualStrings("wasteland", m2.biome_filter);
@@ -1515,10 +1622,43 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
     const body3 =
         \\<quest id="q"><objective type="FetchFromContainer" id="1" value="1"/></quest>
     ;
-    const m3 = try scanObjectiveMeta(arena, body3);
+    const m3 = try scanObjectiveMeta(arena, body3, &.{});
     try std.testing.expectEqual(@intFromEnum(quest.QuestTag.fetch), m3.tags_mask);
     try std.testing.expectEqual(quest.PoiSelectKind.none, m3.poi_select);
     try std.testing.expectEqual(quest.biome_filter_none, m3.biome_type);
+
+    // param1 variable substitution: the objective template default is
+    // SameBiome, but the quest's `<variable name="biome_filter_type"
+    // value="AnyBiome"/>` wins (18 stock variables, 8 AnyBiome). AnyBiome is
+    // not a filter spelling, so the kind stays none.
+    const body4 =
+        \\<quest id="q">
+        \\  <variable name="biome_filter_type" value="AnyBiome"/>
+        \\  <objective type="RandomPOIGoto">
+        \\    <property name="biome_filter_type" value="SameBiome" param1="biome_filter_type"/>
+        \\  </objective>
+        \\</quest>
+    ;
+    var vars4: [max_quest_vars]QuestVar = undefined;
+    const vn4 = parseVariables(body4, &vars4);
+    const m4 = try scanObjectiveMeta(arena, body4, vars4[0..vn4]);
+    try std.testing.expectEqual(quest.biome_filter_none, m4.biome_type);
+    // Without the variable the property default applies (SameBiome).
+    const m5 = try scanObjectiveMeta(arena, body4, &.{});
+    try std.testing.expectEqual(quest.biome_filter_same, m5.biome_type);
+
+    // StayWithin carries its radius as a nested property (15 stock rows); the
+    // phase graph must pick it up instead of the policy default.
+    const body6 =
+        \\<quest id="q">
+        \\  <objective type="POIStayWithin" phase="1">
+        \\    <property name="radius" value="25"/>
+        \\  </objective>
+        \\</quest>
+    ;
+    const graph = try buildPhaseGraph(arena, body6, 1, quest.builtin_objective_kinds[0..], .{});
+    try std.testing.expectEqual(@as(usize, 1), graph.phases.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 25), graph.phases[0].radius, 1e-4);
 }
 
 test "SpawnGSEnemy action parses count range and gamestage list" {

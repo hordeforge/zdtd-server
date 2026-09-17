@@ -35,6 +35,15 @@ const chatMsgOk = c2s_text.chatMsgOk;
 /// 1600; the 9999-HP trader class is excluded by the zombie/animal gate).
 const fatal_kill_amount: f32 = 9999;
 
+/// Highest `WireActions` value NetPackageWireToolActions::ProcessPackage
+/// (IL=254) acts on: the switch takes 0 (SetParent) and 1 (RemoveParent) and
+/// returns for anything else, so a higher op never reaches its rebroadcast.
+const wire_tool_max_op: u8 = 1;
+
+/// Exact stock NetPackageEntityPhysics body size: Flags u16 | EntityId i32 |
+/// 13xf32. `GetLength` (IL=2) returns 58, matching the read (IL=74).
+const entity_physics_body_len: usize = 58;
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
@@ -52,9 +61,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 chat_msg,
                 ch.recipients[0..ch.recipient_count],
             ) catch return true;
+            // The sender is included, in both directions. Stock's client does
+            // not add its own line locally: XUiC_Chat sends to the server and
+            // waits for the echo, and it puts its own entity id first in the
+            // party recipient list (XUiC_Chat.il.txt:212-223). The server
+            // broadcast passes allBut = -1 and the targeted loop sends to
+            // every listed ClientInfo, neither excluding the speaker
+            // (GameManager.il.txt:7690-7735). Excluding them here meant a
+            // player never saw their own messages.
             if (ch.recipient_count > 0) {
                 for (ch.recipients[0..ch.recipient_count]) |rid| {
-                    if (rid == c.entity_id) continue;
                     if (self.clientByEntityId(rid)) |rc| {
                         if (rc.peer) |rpeer| {
                             self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
@@ -65,7 +81,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             } else {
-                try self.broadcastExcept("NetPackageChat", stock, c.slot);
+                try self.broadcast("NetPackageChat", stock);
             }
         } else {
             var r: wire_binary.Reader = .{ .data = body };
@@ -132,15 +148,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         };
         // The owning entity must be the sender (a spoofed id would silence a
         // different player instead of the sender); NaN positions are forged.
-        if (snd.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, snd.entity_id, .none)) return true;
         if (!std.math.isFinite(snd.pos[0]) or !std.math.isFinite(snd.pos[1]) or !std.math.isFinite(snd.pos[2])) {
             self.harness.counters.inc(.bounds_rejects);
             return true;
         }
-        relayBodyExcept(self, "NetPackageSoundAtPosition", body, snd.entity_id, "SoundAtPosition");
+        relayBodyExcept(self, "NetPackageSoundAtPosition", body[0..snd.wire_len], snd.entity_id, "SoundAtPosition");
         // No AI-noise leg here: on a dedicated server the relay is audio-only.
         // NetPackageSoundAtPosition.ProcessPackage -> PlaySoundAtPositionServer
         // skips AIDirector.NotifyNoise when IsDedicatedServer (RE protocol
@@ -171,7 +184,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        relayBodyExcept(self, "NetPackageParticleEffect", body, pe.entity_caused, "ParticleEffect");
+        relayBodyExcept(self, "NetPackageParticleEffect", body[0..pe.wire_len], pe.entity_caused, "ParticleEffect");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
@@ -188,16 +201,58 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageEntityStatChanged")) {
+        // Stock body (read IL=24, GetLength 21): entityId i32 (the
+        // NetPackageEntityTargeted base) | instigatorId i32 | enumStat u8 |
+        // value f32 | max f32 | maxModifier f32. A remote client reports its
+        // own stat change through EntityStats.SendStatChangePacket (IL=65,
+        // the world.IsRemote() branch), and stock's ProcessPackage writes the
+        // reported value straight onto the entity's Stat.
+        //
+        // zdtd owns health, stamina, food and water in the sim and
+        // replicates them out through the same package (replicate_health,
+        // join). Applying the client's number would let a peer set its own
+        // health, which is exactly the authority the server keeps (AGENTS
+        // rule 17): validate the body and drop.
+        if (body.len < 21) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageGameEventResponse")) {
+        // Stock body carries a ResponseTypes discriminator plus the event
+        // name / target / extra strings (GetLength 30 is the fixed head).
+        // Stock's ProcessPackage (IL=135) switches on responseType and calls
+        // the matching GameEventManager handler; the one path a stock client
+        // reaches SendToServer on is BlockGameEvent.OnBlockDamaged's
+        // !IsServer branch (responseType 11), where the server would run
+        // SendBlockDamageUpdate(pos) to bump the sequence's "Damaged" event
+        // variable.
+        //
+        // zdtd's game-event support is the request/approve path
+        // (NetPackageGameEventRequest -> gameEventVerdict -> the response
+        // this server *sends*). It keeps no GameEventActionSequence state,
+        // so there is no "Damaged" variable for a client-reported hit to
+        // bump, and every other responseType is a client-side handler.
+        // Validate the head and drop rather than half-applying one arm.
+        if (body.len < 4) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
-        // Stock NetPackageEntityPhysics (read IL=74): Flags u16, EntityId
-        // i32, then 14xf32 (pos 3, quat 4, velocity 3, angular 3, plus two
-        // more singles) = 62 bytes. The entity's physics master reports
-        // pos/rot/velocity so the server mirrors it (ProcessPackage gates on
-        // isPhysicsMaster). zdtd's movement, falling-block and vehicle sims
-        // are server-authoritative (broadcast PosAndRot / VehiclePositions /
-        // EntityVelocity), so the report is a redundant echo: validate the
-        // body and drop.
-        if (body.len < 62) {
+        // Stock NetPackageEntityPhysics (read IL=74, GetLength IL=2 = 58):
+        // Flags u16, EntityId i32, then 13xf32 (pos 3, quat 4, velocity 3,
+        // angular 3) = 58 bytes. The entity's physics master reports
+        // pos/rot/velocity so the server mirrors it (ProcessPackage IL=87
+        // gates on isPhysicsMaster). zdtd's movement, falling-block and
+        // vehicle sims are server-authoritative (broadcast PosAndRot /
+        // VehiclePositions / EntityVelocity), so the report is a redundant
+        // echo (DIVERGENCES.md 1.4): validate the body and drop. The gate was
+        // 62, so every valid 58-byte report was counted c2s_malformed.
+        if (body.len < entity_physics_body_len) {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }
@@ -223,7 +278,33 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        relayBodyExcept(self, "NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
+        // Trim to the parsed body: the flag-gated tails make the length
+        // variable, so a raw relay would forward bytes a peer appended.
+        relayBodyExcept(self, "NetPackageEntityRagdoll", body[0..rg.wire_len], rg.entity_id, "EntityRagdoll");
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackagePlayerLaserSight")) {
+        // Stock ProcessPackage (IL=70): on the server the body is re-sent to
+        // every client except the sender's own entity, so a player sees a
+        // mate's laser dot. Pure relay, no server state.
+        const ls = packages.parseLaserSight(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        // Only speak for your own entity: without this a peer could paint a
+        // dot on anyone. Stock leans on the sender's ClientInfo for the
+        // exclusion; zdtd checks the claimed id directly.
+        if (ls.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // Same rate gate as the other cosmetic relays: the client sends on
+        // aim changes, so an unthrottled loop would fan out for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        relayBodyExcept(self, "NetPackagePlayerLaserSight", body[0..ls.wire_len], ls.entity_id, "PlayerLaserSight");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
@@ -252,9 +333,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {
                     // Fall back to ECD head only. Parse-skip is rare; log once per 100
                     // decode rejects so a broken client is visible without per-packet noise.
-                    if (packages.parsePlayerDataEcdHead(body)) |h| {
-                        _ = h; // pos unreliable (origin-relative); ignore
-                    } else |_| {
+                    // Parsed for validation only: the ECD head proves the body
+                    // is a well-formed PlayerData write, and the save itself
+                    // comes from server state.
+                    if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {
                         self.harness.counters.inc(.decode_rejects);
                         const n = self.harness.counters.get(.decode_rejects);
                         if (n == 1 or n % 100 == 0) {
@@ -266,9 +348,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             }
-        } else if (packages.parsePlayerDataEcdHead(body)) |h| {
-            _ = h; // pos unreliable (origin-relative); ignore
-        } else |_| {}
+        } else if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {}
         // Defer file write to the periodic save tick (no open/rewrite per packet).
         self.players_dirty = true;
         return true;
@@ -287,7 +367,84 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         self.dropClientSlot(c.slot, "quit");
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+    // Accepted and dropped on purpose (phase-gated above, so this is a
+    // deliberate no-op, not an unhandled package). Each is a documented
+    // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
+    // one here.
+    // - NetPackagePlayerStats: stock relays the owning client's own stats blob
+    //   (EntityNetworkStats::ToEntity, RE progression.md 441560ff). Applying it
+    //   would let a client author its level/XP/kill totals, so the server keeps
+    //   its own ledger and sends that instead (AGENTS rule 17).
+    // - NetPackageDiscordIdMappings: Discord rich-presence id map, a client
+    //   social feature with no server-side sim effect.
+    if (std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageAudio")) {
+        // Not a client-local cue. A client's Audio.Manager::BroadcastPlay
+        // falls through to SendToServer when it holds no ServerAudio
+        // (Audio/Manager.il.txt:758-790), and the dedicated server's
+        // ProcessPackage routes into Audio.Server::Play, which relays a fresh
+        // package to every in-range player (Audio/Server.il.txt:13-83 via
+        // Audio.Client::Play at Client.il.txt:16). Doors, storage, switches
+        // and locks all reach it (59 BroadcastPlay call sites), so dropping
+        // it left every other player in silence.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var name_buf: [128]u8 = undefined;
+        const a = packages.parseAudioPlay(body, &name_buf) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (a.sound_group.len == 0) return true; // stock's IsNullOrEmpty early out
+        if (a.play_on_entity and self.rejectIfNotSender(c, peer.local_id, a.entity_id, .none)) return true;
+        // AI noise. Stock's package routes the play through Audio.Server::Play
+        // (NetPackageAudio.il.txt IL_0074), whose first act is
+        // Audio.Manager::SignalAI: it returns unless the instigator is an
+        // EntityPlayer (Manager.il.txt IL=4696) and only the entity form
+        // reaches it (the position form passes a null entity), so a player's
+        // own sound - footsteps, gunfire, doors - folds through sounds.xml into
+        // that player's stealth and heat state. `signalOnly` suppresses the
+        // client relay below, never this leg: it is the "AI stimulus, do not
+        // play" flag, so the old "signalOnly -> drop" path lost exactly the
+        // noises the AI model is built on.
+        if (a.play and a.play_on_entity) {
+            if (self.sim.slotOfNetId(a.entity_id)) |is_| {
+                if (self.sim.mask[is_].player and self.sim.mask[is_].transform) {
+                    if (self.noise_table.getClip(a.sound_group)) |n| {
+                        const t = self.sim.transform[is_];
+                        self.sim.pushStealthNoise(
+                            is_,
+                            t.x,
+                            t.y,
+                            t.z,
+                            n.volume * @min(@max(a.volume_scale, 0), self.max_claimed_noise_scale),
+                            @intFromFloat(n.time * 20.0),
+                            n.muffled_when_crouched,
+                            n.heat_map_strength,
+                        );
+                    }
+                }
+            }
+        }
+        // signalOnly means "AI stimulus, do not play": stock skips the relay
+        // loop entirely for those (Server.il.txt:29, `brtrue` past the loop).
+        if (a.signal_only) return true;
+        // Re-encode rather than relay the raw body, and place the sound at the
+        // sender when it rides an entity.
+        var out_buf: [192]u8 = undefined;
+        const relay = packages.buildAudioPlayBody(&out_buf, a) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const ox: f32 = if (a.play_on_entity) self.sim.transform[ps].x else a.x;
+        const oz: f32 = if (a.play_on_entity) self.sim.transform[ps].z else a.z;
+        self.broadcastNearExcept("NetPackageAudio", relay, ox, oz, self.interest_range, c.slot) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageMapPosition")) {
@@ -309,7 +466,33 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
+    // Second accepted-and-dropped group; see the note above and
+    // docs/DIVERGENCES.md.
+    // - NetPackageBossEvent: client-side boss HUD banner, no sim effect.
+    // - NetPackageEntityStatsBuff: stock applies the client's whole buff blob
+    //   (EntityBuffs.Read IL=76). The server owns the buff set, so accepting it
+    //   would let a client grant itself buffs (AGENTS rule 17). Known cost:
+    //   client-local consume buffs never sync server-side, so the
+    //   dysentery-dependent behaviours miss them - recorded in DIVERGENCES.md.
+    // - NetPackagePlayerInventoryForAI: feeds stock's AIDirector smell/threat
+    //   model from a client-reported bag (RE protocol-packages.md, Process
+    //   IL=23). zdtd's AI reads its own sim state; a client must not be able to
+    //   steer zombie targeting by declaring its inventory.
+    // - NetPackageLobbyRegisterClient: matchmaking-lobby registration, which a
+    //   self-hosted dedicated server does not participate in.
+    if (std.mem.eql(u8, name, "NetPackageInventoryKeepOpen")) {
+        // Stock NetPackageInventoryKeepOpen::ProcessPackage (IL=6) calls
+        // LockManager.ProcessKeepOpen(sender.entityId) (IL=31): a player holding
+        // a lock gets keepOpenTimes refreshed, and LockManager.Update (IL=128)
+        // reaps only a stamp older than 10s. The stock client sends this every
+        // 2.5s from its own LockManager.Update while a window is open (client
+        // branch IL_0182). Dropping it let the stale reaper expire a live
+        // window. The body is empty (read IL=1), so it refreshes a server-owned
+        // timer and carries no client state.
+        self.refreshLocksForPeer(c.slot);
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
@@ -342,21 +525,40 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (eid != c.entity_id) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].inventory) return true;
-        packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch return true;
-        relayBodyExcept(self, "NetPackagePlayerEquipment", body, eid, "PlayerEquipment");
+        const eq_len = packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        // Trim to the parsed body: Equipment is variable length (the version
+        // byte picks the slot count and each slot is either one `0` or a full
+        // ItemValue), so a raw relay would forward appended bytes.
+        relayBodyExcept(self, "NetPackagePlayerEquipment", body[0 .. 4 + eq_len], eid, "PlayerEquipment");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer")) {
-        // No server-side skill sim for these yet; ack silently.
+        // Client-reported XP/score adds are never applied: the server awards XP
+        // itself on the kill and quest paths, so accepting these would let a
+        // client mint XP (AGENTS rule 17; docs/DIVERGENCES.md 1.5). Note this
+        // is a trust decision, not a missing feature - the skill ledger it once
+        // waited on shipped 2026-08-27 and drives the SetSkillLevelServer
+        // handler below. Ack silently.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {
-        // ADR 0023 ledger: the client requests one skill purchase. Body
-        // (sender-addressed, inherited serialization): skill string | level
-        // i32 (RE netpackage-bodies.md). Server-validated; echoes the Client
-        // package on success.
+        // ADR 0023 ledger: the client requests one skill purchase.
+        // NetPackageEntitySetSkillLevelServer derives from
+        // ...SetSkillLevelClient and overrides neither read nor write, so it
+        // inherits that body verbatim: entityId i32 | skill string | level
+        // i32 (NetPackageEntitySetSkillLevelClient.il.txt:37). The leading id
+        // is not optional; skipping it read the skill from the wrong offset.
+        // Server-validated; echoes the Client package on success.
         var r = wire_binary.Reader{ .data = body };
         var skill_buf: [128]u8 = undefined;
+        const req_entity = r.readI32() catch return true;
+        if (req_entity != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         const skill = r.readString(&skill_buf) catch return true;
         const level = r.readI32() catch return true;
         if (skill.len == 0 or level < 1 or level > 255) return true;
@@ -429,6 +631,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         _ = r.readString(&seq_buf) catch "";
         const var_count = r.readByte() catch 0;
         if (self.gameEventVerdict(c.entity_id, event_name, target_eid, @intCast(var_count)) < 0) return true;
+        // A supported sequence runs server side. Stock's client only forwards
+        // the request (GameEventManager::HandleActionClient IL=416 sends
+        // NetPackageGameEventRequest and returns), so this is where the respawn
+        // family's stat restore and buff changes happen. Names that are not
+        // parsed sequences - quest, trader and challenge events included - stay
+        // ack-only.
+        _ = self.runGameEventSequence(c.slot, event_name);
         if (packages.buildGameEventResponse(&self.body_buf, body)) |resp| {
             self.sendGame(peer, "NetPackageGameEventResponse", resp) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
@@ -451,11 +660,26 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
+        // Stock body (RE protocol-packages.md 6.17; read IL at
+        // il/netpackages-v3.2.0/NetPackageQuestEntitySpawn_il.txt IL_0002-001F):
+        // entityType i32 | gamestageGroup string | entityIDQuestHolder i32.
+        // The third field is the quest holder's entity id, not a count. It was
+        // read as one, so a single packet summoned that many zombies with the
+        // client choosing the number. Stock ProcessPackage (IL=37) calls
+        // SpawnQuestEntity exactly once, so there is no per-request cap to
+        // apply: the count is not client-chosen at all.
         var r: wire_binary.Reader = .{ .data = body };
-        _ = r.readI32() catch return true; // player entity id
+        _ = r.readI32() catch return true; // entityType (-1 = resolve from group)
         var gname: [64]u8 = undefined;
-        _ = r.readString(&gname) catch return true;
-        const cnt = r.readI32() catch 1;
+        _ = r.readString(&gname) catch return true; // gamestageGroup
+        const holder_id = r.readI32() catch return true;
+        // The holder is the player whose quest summons. A packet naming another
+        // player would spawn at the sender on someone else's quest, so require
+        // the sender's own entity.
+        if (holder_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
             self.harness.counters.inc(.c2s_rejects);
@@ -464,14 +688,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const t = self.sim.transform[ps];
         const zdef = self.entities.defaultZombie();
         const zclass = self.entityClassOf(zdef);
-        var k: i32 = 0;
-        const summon_cap: i32 = @intCast(self.sim.rules.c2s.quest_summon_per_request);
-        while (k < cnt and k < summon_cap) : (k += 1) {
-            const ang = @as(f32, @floatFromInt(k)) * 1.4;
-            // Stop at the entity cap instead of spinning on null spawns.
-            // A35: spawn the full resolved class so the quest summons carry stats.
-            if (self.sim.spawnZombieDef(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zclass) == null) break;
-        }
+        // A35: spawn the full resolved class so the quest summon carries stats.
+        _ = self.sim.spawnZombieDef(t.x + 6, t.y, t.z, zdef.max_hp, zclass);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageRequestToSpawnEntity")) {
@@ -556,18 +774,63 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // NPC kinds (a spoofed fatal must not one-shot another player).
         var amount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
         if (d.fatal and was_zombie) amount = fatal_kill_amount;
-        // PvP gate + armor mitigation when damaging a player.
+        // PvP gate + resist legs when damaging a player, in stock
+        // EntityAlive::DamageEntity order: GeneralDamageResist (passive 40, all
+        // damage types, every source) then the armor branch of
+        // Equipment.CalcDamage (IL=83), which stock only reaches when
+        // DamageSource::AffectedByArmor (IL=5) holds - that is External (0)
+        // damage. An Internal claim (starvation, dehydration, blood loss)
+        // therefore keeps its GDR but takes no armour branch at all. On the
+        // armour branch, physical types take the physical armor rating and
+        // every other EnumDamageTypes member takes passive 43
+        // ElementalDamageResist scaled by the damage type's tag
+        // (combat-damage.md 2.1).
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
-            if (self.sim.mask[ei].player and self.sim.player[ei].peer_slot >= 0) {
-                // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
-                if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
-                    return true;
-                // Armor mitigation, less the attacker's held-item TargetArmor
-                // penetration (RE GetTotalPhysicalArmorRating IL=47).
-                const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
-                amount *= (1.0 - mit);
+            if (self.sim.mask[ei].player) {
+                amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
+                // Spectral Grace (perkAgilityMastery): the victim's
+                // foreign-gated GDR rows evaluate here, where the attacker
+                // (`other`) is known. The per-tick fold refuses them (no
+                // other in scope), so a passing row lands only on this hit.
+                // A passing Grace also starts the 60 s recharge buff, whose
+                // own start row sets the cvar that closes the gate.
+                const fg = self.foreignGatedResist(ei, actor_slot);
+                if (fg > 0) {
+                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
+                }
+                amount *= 1.0 - fg;
+                // Victim-side hit trigger: the victim's `onOtherAttackedSelf`
+                // rows (concussion/fatigue counters, PackMule display) fire
+                // with the attacker's tags as `other`.
+                self.fireAttackedSelf(ei, actor_slot, d.body_part);
+                // Attacker-side HitLocation gates (onSelfAttackedOther).
+                self.fireAttackedOther(actor_slot, ei, d.body_part);
+                if (self.sim.player[ei].peer_slot >= 0) {
+                    // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
+                    if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
+                        return true;
+                    if (protocol.damageSourceAffectedByArmor(d.source)) {
+                        if (protocol.damageTypeIsPhysical(d.dtype)) {
+                            // Armor mitigation, less the attacker's held-item
+                            // TargetArmor penetration (RE
+                            // GetTotalPhysicalArmorRating IL=47).
+                            const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
+                            amount *= (1.0 - mit);
+                        } else {
+                            // ElementalDamageResist is a percentage on the
+                            // victim; no penetration leg exists for it in stock.
+                            amount *= (1.0 - self.elementalDamageResist(ei, protocol.damageTypeName(d.dtype)));
+                        }
+                    }
+                }
             }
         }
+        // Non-player victims carry no leg in this function: a victim-side class
+        // PhysicalDamageResist (passive 41) belongs in World.damageFrom, which
+        // is where stock's NetPackageDamageEntity ends up (the victim's
+        // EntityAlive.DamageEntity), so an armoured zombie (soldier 50,
+        // demolition 60) takes half whatever the attacker claimed. Only the
+        // *attacker*-side numbers ride the claim verbatim.
         // Wasm-first (AGENTS rule 29): damage directed at a player passes the
         // on_player_damage plugin verdict after the native gate, so plugins
         // express PvP/friendly-fire and damage-scaling policy. <0 deny, 0
@@ -585,7 +848,38 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
+        // A damage-killed supply crate must take its MapObject and NavObject
+        // markers back (EntitySupplyCrate.OnEntityDeath IL=30 +
+        // OnEntityUnload/RemoveSupplyCrate IL=54). damageFrom destroys the
+        // non-Alive entity, so read the flag before the call.
+        const target_was_crate = if (self.sim.slotOfNetId(d.entity_id)) |ts|
+            self.sim.mask[ts].loot_bag and self.sim.loot_bag[ts].supply_crate
+        else
+            false;
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Dismember roll (RE CheckDismember IL=125): the claimed body part
+        // feeds the region/leg gates; the weapon chance comes off the
+        // actor's held item, 0 when it carries no DismemberChance passive;
+        // the attacker's DismemberSelfChance (143) perk/buff fold adds onto
+        // the region multiplier (GetDismemberChance IL=128). The roll sets
+        // crawler/cripple state on the victim and its outcome bits ride the
+        // S2C damage body below.
+        var dismember_bits: u8 = 0;
+        if (self.sim.slotOfNetId(d.entity_id)) |vs| {
+            if (self.sim.mask[vs].health) {
+                // `heldItem()` guards the no-holding sentinel (0xFFFF, a legal
+                // state after the held slot empties): indexing `holding`
+                // directly panicked on a hit that arrived before the attacker
+                // ever selected a toolbelt slot.
+                const held_id = if (self.sim.mask[actor_slot].inventory)
+                    self.sim.inventory[actor_slot].heldItem().item_id
+                else
+                    0;
+                const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
+                const self_bonus = self.dismemberSelfChance(c.slot, actor_slot);
+                dismember_bits = self.sim.rollDismember(vs, d.body_part, dmg.applied, self.sim.health[vs].max_hp, weapon_chance, self_bonus, d.fatal);
+            }
+        }
         // Item durability (GAP "Item durability"): the held tool wears with
         // each landed hit (stock ItemValue.UseTimes; the client shows the
         // durability bar). Zero keeps a broken, repairable stack.
@@ -596,7 +890,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // The item's StaminaLoss passive is the cost; the survival pass
             // picks the deduction up on its next stamina sync.
             if (self.sim.mask[actor_slot].health and self.sim.mask[actor_slot].player) {
-                const held = &self.sim.inventory[actor_slot].slots[self.sim.inventory[actor_slot].holding];
+                const held = self.sim.inventory[actor_slot].heldItem();
                 if (self.items.byId(held.item_id)) |item_def| {
                     if (item_def.stamina_loss > 0) {
                         const cost = item_def.stamina_loss * self.sim.rules.combat.stamina_usage_multiplier;
@@ -633,7 +927,37 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {}
             }
         }
+        // Hit reaction: stock fans the applied damage to the victim's trackers
+        // (EntityAlive.ProcessDamageResponse IL=86: Setup(entityId, response)
+        // via SendPacketToTrackedPlayers for remote-player hits, buff-sourced
+        // damage and the general path). The client plays the hit reaction and
+        // reads the dismember/cripple/crawler bits off it, so without this
+        // send nothing the server computes about a hit is visible.
+        if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
+            if (self.sim.mask[vslot].transform) {
+                const vt = self.sim.transform[vslot];
+                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, dmg.applied))), 65535));
+                if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
+                    // The roll's outcome rides the stock flag bits
+                    // (Setup IL=235: CrippleLegs -> 0x2, Dismember -> 0x8,
+                    // TurnIntoCrawler -> 0x200). Flags sit at bytes 4..8 of
+                    // the pinned body layout (entityId 0..4 first).
+                    if (dismember_bits != 0) {
+                        var fl = std.mem.readInt(u32, db[4..8], .little);
+                        if (dismember_bits & 1 != 0) fl |= packages.dmg_dismember;
+                        if (dismember_bits & 2 != 0) fl |= packages.dmg_turn_into_crawler;
+                        if (dismember_bits & 4 != 0) fl |= packages.dmg_cripple_legs;
+                        std.mem.writeInt(u32, self.body_buf[288 + 4 ..][0..4], fl, .little);
+                    }
+                    self.broadcastNear("NetPackageDamageEntity", db, vt.x, vt.z, self.interest_range) catch {};
+                } else |_| {}
+            }
+        }
         if (dmg.killed) {
+            // The crate is destroyed inside damageFrom, so its marker teardown
+            // runs here on the captured flag (a killed non-Alive entity never
+            // reaches the corpse sweep).
+            if (target_was_crate) self.broadcastSupplyCrateMarkerRemove(d.entity_id);
             // Dead players keep the entity (client runs its own death →
             // respawn flow); EntityRemove would delete the local player.
             const target_is_player = if (self.sim.slotOfNetId(d.entity_id)) |ti| self.sim.mask[ti].player else false;
@@ -669,16 +993,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.questKillForParty(c.slot, vx, vz);
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
-                self.killXpAward(c.slot, self.xpGainFor(d.entity_id), dmg.kill_scale_pct, d.trap_kill_xp);
+                self.killXpAward(c.slot, self.xpGainFor(d.entity_id), dmg.kill_scale_pct, d.trap_kill_xp, d.entity_id);
+                // Stock GameManager.AwardKill: tell the killer's client so its
+                // local EntityKill event fires (kill challenges hang off it).
+                self.awardKillNotify(c.slot, d.entity_id);
                 // AddScoreClient: the character-sheet zombie-kill counter.
                 // Stock EntityAlive.AddScore fires on every zombie kill.
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
-                sendScoreUpdate(self, c);
+                sendScoreUpdate(self, c, 1, 0);
             } else if (target_is_player) {
                 // PvP kill (PlayerKillingMode != 0): the killer's playerKills
                 // counter, stock EntityAlive.AddScore.
                 if (c.player_kills < std.math.maxInt(u16)) c.player_kills += 1;
-                sendScoreUpdate(self, c);
+                sendScoreUpdate(self, c, 0, 1);
             }
             // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
             if (dmg.loot_bag_id > 0) {
@@ -703,34 +1030,31 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 packLockPos(p.x, p.y, p.z)
             else
                 0;
-            // Same TE already locked on another channel by someone else → deny.
-            if (req.locking and pos_key != 0) {
-                for (self.lock_pos_key, 0..) |pk, oi| {
-                    if (oi == ch) continue;
-                    if (pk != pos_key) continue;
-                    const oh = self.lock_channel[oi];
-                    if (oh >= 0 and oh != @as(i32, @intCast(c.slot))) {
-                        const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                        return true;
-                    }
-                }
-            }
             if (req.locking) {
-                const holder = self.lock_channel[ch];
-                if (holder >= 0 and holder != @as(i32, @intCast(c.slot))) {
-                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                // Gate 1 (IL=239): any existing entry for this player is invalid
+                // state. Stock force-unlocks everything the player holds and
+                // returns without granting the new request (the ret at IL_0067).
+                // The RE prose said "then continue"; the IL is the authority and
+                // says otherwise.
+                if (self.peerHoldsLock(c.slot)) {
+                    self.releaseAllLocksForPeer(c.slot);
+                    return true;
+                }
+                // Gate 2 (IL=239): reject null targets and a span longer than 5.
+                // The refusal still replies: stock sets errorMsg and falls
+                // through to a NetPackageLockResponse with success=false
+                // (IL_0263), so the client's pending lock resolves instead of
+                // hanging on a body that was silently dropped here.
+                if (req.has_null_target or req.target_count > packages.max_lock_targets_declared) {
+                    const msg = if (req.has_null_target) "null target" else "too many targets";
+                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, msg);
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                     return true;
                 }
-                self.lock_channel[ch] = @intCast(c.slot);
-                self.lock_holder_entity[ch] = c.entity_id;
-                self.lock_granted_ns[ch] = clock.monoNs();
-                self.lock_pos_key[ch] = pos_key;
-                // Trader open: the LockResponse context carries server TraderData
-                // (stock serializes EntityTraderLockContext into the response;
-                // NetPackageTraderData is ToServer-only). Detect an entity target
-                // whose slot is a trader and build that context.
+                // Parse the targets once. An entity target that is a trader
+                // opens the trader window from the LockResponse context; a
+                // vending position opens the machine. Gate 4 needs this before
+                // the lock table is written.
                 var trader_slot: ?ecs.Slot = null;
                 var vending_pos: ?vending_mod.PosKey = null;
                 if (req.targets_blob.len >= 4) {
@@ -756,15 +1080,43 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         }
                     }
                 }
+                // Gate 4 (IL=239): per-target CanLockOnServer. TEFeatureAbs,
+                // TileEntity and TransactionalInventory return true;
+                // EntityTrader refuses a dead or closed trader. It runs before
+                // the grant, so a refused open leaves no server-side lock: the
+                // old trader-deny path held the channel while telling the client
+                // the lock failed.
                 if (trader_slot) |ts| {
-                    // Stock EntityTrader opens the window only inside the
-                    // trader_info open hours (vending machines and traders
-                    // without hours are always open). Deny outside them.
-                    if (!self.traderIsOpen(ts)) {
+                    if (!self.sim.alive[ts] or !self.traderIsOpen(ts)) {
                         const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "closed");
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
                         return true;
                     }
+                }
+                // Gate 3: the same TE already locked on another channel by
+                // another player, or this channel held by someone else. Gate 1
+                // cleared this player's own channels, so any holder is another.
+                if (pos_key != 0) {
+                    for (self.lock_pos_key, 0..) |pk, oi| {
+                        if (oi == ch) continue;
+                        if (pk != pos_key) continue;
+                        if (self.lock_channel[oi] >= 0) {
+                            const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                            try self.sendGame(peer, "NetPackageLockResponse", resp);
+                            return true;
+                        }
+                    }
+                }
+                if (self.lock_channel[ch] >= 0) {
+                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    return true;
+                }
+                self.lock_channel[ch] = @intCast(c.slot);
+                self.lock_holder_entity[ch] = c.entity_id;
+                self.lock_granted_ns[ch] = clock.monoNs();
+                self.lock_pos_key[ch] = pos_key;
+                if (trader_slot) |ts| {
                     // Stock restock is lazy, triggered by the open: rebuild the
                     // window with fresh rolls when the ResetInterval elapsed.
                     self.maybeRestockTrader(ts);
@@ -777,7 +1129,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
-                        .trader_id = self.sim.network_id[ts].id,
+                        // TraderID indexes traders.xml; entity id leaves TraderInfo null.
+                        .trader_id = self.sim.trader_stock[ts].trader_info_id,
                         .available_money = self.traderMoney(ts),
                         .entries = ent_buf[0..n],
                     });
@@ -910,6 +1263,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // Tool handshake carries one endpoint + player: visual only, no graph
         // mutation (mirrors stock ProcessPackage re-Setup+SendPackage to peers).
+        // read IL=13: currentOperation u8 | tileEntityPosition Vector3i |
+        // entityID i32. ProcessPackage IL=254 opens with
+        // ValidEntityIdForSender(entityID, false) and returns on failure, so a
+        // body naming another player is dropped, not relayed. It also returns
+        // for any operation outside {0,1} before reaching either SendPackage.
+        const tool = packages.parseWireToolActions(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (tool.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (tool.operation > wire_tool_max_op) return true;
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;
     }
@@ -925,17 +1292,44 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        if (body.len < 4) return true;
-        const eid = std.mem.readInt(i32, body[0..4], .little);
-        if (eid != c.entity_id) return true;
-        relayBodyExcept(self, "NetPackageEntityAnimationData", body, eid, "EntityAnimationData");
+        const anim = packages.parseAnimationData(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (anim.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // Trim to the parsed body: the parameter list is variable length, so a
+        // raw relay would forward whatever a peer appended.
+        relayBodyExcept(self, "NetPackageEntityAnimationData", body[0..anim.wire_len], anim.entity_id, "EntityAnimationData");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {
         if (body.len < 12) return true;
-        const x = std.mem.readInt(i32, body[0..4], .little);
-        const y = std.mem.readInt(i32, body[4..8], .little);
-        const z = std.mem.readInt(i32, body[8..12], .little);
+        // Stock's body is `entityType` i32 | pos Vector3 (3 x f32) | rot
+        // Vector3 | ItemValue | `entityThatPlaced` i32 (RE
+        // inventories/netpackage-bodies.md, write IL=24). zdtd also accepts a
+        // compact 12-byte form of three i32 world coordinates for loadgen and
+        // the scenarios. Reading the stock body as that compact form decoded
+        // the float bit patterns as coordinates in the billions, which the
+        // reach gate then rejected: a real client's turret never got placed.
+        const stock = body.len >= 16;
+        const x, const y, const z = if (stock) blk: {
+            const fx: f32 = @bitCast(std.mem.readInt(u32, body[4..8], .little));
+            const fy: f32 = @bitCast(std.mem.readInt(u32, body[8..12], .little));
+            const fz: f32 = @bitCast(std.mem.readInt(u32, body[12..16], .little));
+            if (!std.math.isFinite(fx) or !std.math.isFinite(fy) or !std.math.isFinite(fz)) return true;
+            break :blk .{
+                std.math.lossyCast(i32, @floor(fx)),
+                std.math.lossyCast(i32, @floor(fy)),
+                std.math.lossyCast(i32, @floor(fz)),
+            };
+        } else .{
+            std.mem.readInt(i32, body[0..4], .little),
+            std.mem.readInt(i32, body[4..8], .little),
+            std.mem.readInt(i32, body[8..12], .little),
+        };
         // Same rate gate as SetBlock: a spam loop must not plant turrets
         // faster than the bucket refills and drain the entity table.
         if (!self.takeBlockToken(c)) {
@@ -948,6 +1342,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
             if (self.sim.slotOfNetId(tid)) |ts| {
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
+                // The slot dies with the session; the name is what lets a
+                // restart hand the turret back to whoever placed it.
+                self.sim.turret[ts].setOwnerName(c.name[0..c.name_len]);
                 var gi: ?u16 = null;
                 var i: usize = 0;
                 while (i < self.sim.power.node_n) : (i += 1) {
@@ -1046,13 +1443,19 @@ fn filteredChatText(self: *Game, c: *Client, msg: []const u8, native_buf: []u8, 
     return msg;
 }
 
-/// Push the killer's AddScoreClient (zombie + player kill counters).
-fn sendScoreUpdate(self: *Game, c: *Client) void {
+/// Push the killer's AddScoreClient. Stock's NetPackageEntityAddScoreClient
+/// carries the *increment* for this event, not a running total: the client's
+/// ProcessPackage (IL=25) calls EntityAlive.AddScore(0, zombieKills,
+/// playerKills, ...), and AddScore (IL=97) adds every argument to the entity's
+/// counters. EntityAlive.AwardKill (IL=66) therefore sends 0/1 deltas. Sending
+/// the totals made each receiving client re-add the whole count: after three
+/// kills it showed 1+2+3 = 6.
+fn sendScoreUpdate(self: *Game, c: *Client, zombie_delta: u16, player_delta: u16) void {
     const kpeer = c.peer orelse return;
     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
         .entity_id = c.entity_id,
-        .zombie_kills = c.zombie_kills,
-        .player_kills = c.player_kills,
+        .zombie_kills = zombie_delta,
+        .player_kills = player_delta,
     })) |ab| {
         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
             self.harness.counters.inc(.net_send_errors);

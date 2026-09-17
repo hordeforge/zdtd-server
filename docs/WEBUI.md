@@ -173,7 +173,7 @@ Optional later:
 +----------+-------------------------------------------------------+
 ```
 
-Alpine: tab highlight, auto-refresh toggle (`hx-trigger="every 2s"` when on).
+Alpine: tab highlight, auto-refresh toggle (`hx-trigger="every 1s"` when on).
 HTMX: swap player table and status cards without full reload.
 
 ## Command surface (v1)
@@ -284,10 +284,12 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 ### WU3: UX polish
 
 - [x] Live latency chart on the Performance tab: tick mean/p99 + stacked section means, log-style compressed timescale (toggle) with a faint grid visualizing the compression
+- [x] Chart inspection: keyboard arrows/Escape + pointer drag scrub with screen-reader readout; history window synced to `?history=` (deep-linkable); still frame under `prefers-reduced-motion`
+- [x] Deep-linkable tabs (`#players`, `#console`, …; unknown hash falls back to Status); roving tabindex; no-JS fallback reveals sections and hides dead controls
+- [x] Paper cockpit visual world (docs/DESIGN-webui.md): recompile paper ground + cards + pills + sans/mono split, TMOG cockpit glance band + terminal chart; deep-linkable tabs; stacked ledgers on mobile
 - [ ] Alpine modals for destructive cmds
 - [ ] Player row actions
 - [ ] Item name typeahead (from ItemTable)
-- [ ] Basic CSS (readable dark theme, no framework lock-in)
 - [ ] Embed vendor JS (htmx, alpine) for offline ops
 
 ### WU4: Optional depth (park until asked)
@@ -305,8 +307,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 src/server/webui.zig          # listener, router, auth, snapshot, cmd queue, fragments
 src/server/webui/ts/*.ts      # page JS authored as TypeScript (strict; tsc-pinned)
 src/server/webui/shell.html   # page markup, @embedFile'd (AGENTS rule 12)
-src/server/webui/login.html
-src/server/webui/login_failed.html
+src/server/webui/login.html   # sign-in template (plain + failure states via placeholders)
 src/server/webui/login_lockout.html
 ```
 
@@ -315,7 +316,7 @@ substitution; nothing is read from disk at runtime. Vendor JS/CSS under
 `web/static/` stays a WU3 item (see the roadmap above), not a current path.
 
 The page JS is authored as TypeScript in `src/server/webui/ts/` (one source per
-page; `login.ts` is shared by `login.html` and `login_failed.html`).
+page).
 `scripts/build-webui-ts.sh` compiles it with tsc (pinned `TSC_VERSION`) and
 splices the emitted classic script into each committed page between
 `/* zdtd-ts:<page> */` markers; `zig build` never runs tsc, so the Zig build
@@ -413,8 +414,8 @@ Recorded in [ADR 0018](adr/0018-webui-ops-dashboard.md):
 
 ```html
 <!-- shell -->
-<div id="status" hx-get="/partials/status" hx-trigger="every 2s" hx-swap="innerHTML"></div>
-<div id="players" hx-get="/partials/players" hx-trigger="every 2s"></div>
+<div id="status" hx-get="/partials/status" hx-trigger="every 1s" hx-swap="innerHTML"></div>
+<div id="players" hx-get="/partials/players" hx-trigger="every 1s"></div>
 
 <form hx-post="/api/cmd" hx-target="#console-out" hx-swap="innerHTML">
   <input type="hidden" name="csrf" value="...">

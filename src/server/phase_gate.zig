@@ -38,6 +38,10 @@ const joined_allow: []const []const u8 = &.{
     "NetPackageWorldInitInfoRequest",
     "NetPackageDynamicClientArrive",
     "NetPackagePOIMetadataRequest", // V3.2.0: the client asks during world creation (DynamicPrefabDecorator)
+    // World-folder download (GameManager.worldInfoCo → RequestWorld): the
+    // client asks after WorldInfo when local hashes miss; stock answers with
+    // StartSendingPacketsToClient. Must be legal before the join bundle.
+    "NetPackageWorldFolder",
     "NetPackagePlayerDisconnect",
 };
 
@@ -75,6 +79,8 @@ test "phase allow deny" {
     try std.testing.expect(allowed(.joined, "NetPackageRequestToEnterGame"));
     try std.testing.expect(allowed(.joined, "NetPackageRequestToSpawnPlayer"));
     try std.testing.expect(allowed(.joined, "NetPackageDynamicClientArrive"));
+    try std.testing.expect(allowed(.joined, "NetPackageWorldFolder"));
+    try std.testing.expect(!allowed(.connecting, "NetPackageWorldFolder"));
     try std.testing.expect(!allowed(.connecting, "NetPackageEntityPosAndRot"));
     try std.testing.expect(!allowed(.joined, "NetPackageSetBlock"));
     try std.testing.expect(!allowed(.joined, "NetPackageEntityPosAndRot"));

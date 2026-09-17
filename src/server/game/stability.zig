@@ -48,10 +48,15 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
         while (i < n and cn < cells.len) : (i += 1) {
             const p = fallen[i];
             const raw: u32 = self.world.rawWorld(p.x, p.y, p.z) catch 0;
+            const fell_id: u16 = world_store.typeId(raw);
             self.clearBlockHp(p.x, p.y, p.z);
             self.removeClaimAt(p.x, p.y, p.z);
             self.clearBlockRaw(p.x, p.y, p.z);
-            self.containers.remove(.{ .x = p.x, .y = p.y, .z = p.z });
+            // A collapse is a removal like any other: the bedroll, power,
+            // container and vending consequences are the same, so it goes
+            // through the one place that owns them rather than repeating a
+            // subset here.
+            self.noteBlockRemoved(p.x, p.y, p.z, fell_id);
             self.world.setBlockWorld(p.x, p.y, p.z, 0) catch continue;
             cells[cn] = .{ .x = p.x, .y = p.y, .z = p.z, .raw = raw };
             cn += 1;

@@ -11,7 +11,6 @@ const wire_frame = @import("../wire/frame.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
 const subbiome_noise = @import("../world/subbiome_noise.zig");
-const world_tts = @import("../world/tts.zig");
 const deco_mirror = @import("../world/deco_mirror.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
@@ -36,6 +35,7 @@ const game_deco = @import("game/deco.zig");
 const game_loot = @import("game/loot.zig");
 const game_craft = @import("game/craft.zig");
 const game_chunk_stream = @import("game/chunk_stream.zig");
+const game_game_events = @import("game/game_events.zig");
 const game_chunk_fill = @import("game/chunk_fill.zig");
 const game_weather = @import("game/weather.zig");
 const game_vehicle = @import("game/vehicle.zig");
@@ -62,6 +62,10 @@ const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_signs = @import("../assets/signs.zig");
+const assets_gameevents = @import("../assets/gameevents.zig");
+const assets_placeholders = @import("../assets/blockplaceholders.zig");
+const assets_localization = @import("../assets/localization.zig");
+const world_tts = @import("../world/tts.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
@@ -74,6 +78,7 @@ const assets_npc = @import("../assets/npc.zig");
 const assets_block_textures = @import("../assets/block_textures.zig");
 const assets_painting = @import("../assets/painting.zig");
 const assets_spawning = @import("../assets/spawning.zig");
+const assets_worldglobal = @import("../assets/worldglobal.zig");
 const assets_buffs = @import("../assets/buffs.zig");
 const assets_progression = @import("../assets/progression.zig");
 const assets_vehicles = @import("../assets/vehicles.zig");
@@ -91,6 +96,7 @@ const webui_mod = @import("webui.zig");
 const mcp_mod = @import("mcp_transport.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
+const signs_mod = @import("../world/signs.zig");
 const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
@@ -104,6 +110,7 @@ const guard_policy = @import("guard_policy.zig");
 const ally_mod = @import("ally.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
+const util_game_random = @import("../util/game_random.zig");
 const plugin_mod = @import("../plugin/root.zig");
 
 // Stock body modules via packages facade (leaf files stay importable elsewhere).
@@ -129,6 +136,11 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 }
 
 pub const max_land_claims = game_types.max_land_claims;
+/// How many of a player's land-protection blocks ride the PersistentPlayerState
+/// overlay; the body writer owns the cap and the buffer size derived from it. A
+/// player with more claims keeps every one of them server-side (enforcement
+/// reads `land_claims`, not this list); only the overlay tail is dropped.
+pub const max_lp_blocks_on_wire = packages.stock_inv.max_lp_blocks_on_wire;
 pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
 pub const max_player_coord = @import("game/constants.zig").max_player_coord;
 pub const coordInRange = @import("game/constants.zig").coordInRange;
@@ -156,6 +168,7 @@ pub const default_chunk_stream_radius_max = game_types.default_chunk_stream_radi
 pub const default_chunk_adds_per_stream_tick = game_types.default_chunk_adds_per_stream_tick;
 pub const default_chunk_stream_period_ticks = game_types.default_chunk_stream_period_ticks;
 pub const default_motion_replicate_period_ticks = game_types.default_motion_replicate_period_ticks;
+pub const default_pos_heartbeat_period_ticks = game_types.default_pos_heartbeat_period_ticks;
 pub const default_world_time_send_ticks = game_types.default_world_time_send_ticks;
 pub const default_vehicle_pos_send_ticks = game_types.default_vehicle_pos_send_ticks;
 pub const default_sleeper_tick_ticks = game_types.default_sleeper_tick_ticks;
@@ -182,6 +195,7 @@ pub const default_trader_restock_cap = game_types.default_trader_restock_cap;
 pub const default_trader_restock_refill = game_types.default_trader_restock_refill;
 pub const default_storm_frequency = game_types.default_storm_frequency;
 pub const default_peer_stale_ms = game_types.default_peer_stale_ms;
+pub const default_auth_state_ms = game_types.default_auth_state_ms;
 pub const default_lock_stale_ns = game_types.default_lock_stale_ns;
 pub const default_join_rate_limit_ms = game_types.default_join_rate_limit_ms;
 pub const default_craft_max_times = game_types.default_craft_max_times;
@@ -193,6 +207,11 @@ pub const map_window_radius = game_types.map_window_radius;
 pub const map_window_n = game_types.map_window_n;
 pub const critical_retry_budget_ns = game_types.critical_retry_budget_ns;
 pub const default_view_radius = game_types.default_view_radius;
+
+/// Bound on the spawn-surface descent over blocks whose `CanPlayersSpawnOn` is
+/// false (a tree or vehicle column): a modded world cannot spin the join path
+/// in a loop.
+pub const max_spawn_ground_scan: usize = 32;
 pub const default_max_players = game_types.default_max_players;
 pub const replicate_frame_cap = game_types.replicate_frame_cap;
 pub const speeds_body_off = game_types.speeds_body_off;
@@ -204,6 +223,8 @@ pub const Client = game_types.Client;
 const game_wasm_host = @import("game/wasm_host.zig");
 pub const killVerdict = game_wasm_host.killVerdict;
 pub const withdrawDisabled = game_wasm_host.withdrawDisabled;
+/// World.op_src_withdrawn_fn: is the plugin that queued this op withdrawn?
+pub const opSrcWithdrawn = game_wasm_host.opSrcWithdrawn;
 const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
@@ -218,6 +239,40 @@ pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const sv = g.plugins.playerDamage(-1, victim, @trunc(amount));
     return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @trunc(amount));
+}
+
+/// Foreign-gated victim resist for the ECS damage path (zombie melee /
+/// deferred accumulator): evaluates the victim's `target="other"` GDR rows
+/// against the attacker's real class tags, and starts the Grace recharge
+/// buff when a row passes. Unset hook = no foreign rows.
+pub fn foreignResistHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const vs: ecs.Slot = victim_slot;
+    const as: ecs.Slot = attacker_slot;
+    if (as >= ecs.world.max_entities or !g.sim.alive[as]) return 0;
+    const hash = if (g.sim.class_id[as].hash != 0)
+        g.sim.class_id[as].hash
+    else
+        return 0;
+    const def = g.entities.byHash(hash) orelse return 0;
+    const fg = game_tick.foreignGatedResistTags(g, vs, def.tags);
+    if (fg > 0) {
+        const eid = g.sim.network_id[vs].id;
+        _ = g.addCatalogBuff(eid, vs, "buffSpectersGrace", eid);
+    }
+    return fg;
+}
+
+/// Victim-side hit trigger for the ECS damage path: fires the victim's
+/// `onOtherAttackedSelf` rows with the accumulator's attacker slot.
+pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const vs: ecs.Slot = victim_slot;
+    const as: ecs.Slot = attacker_slot;
+    if (vs >= ecs.world.max_entities or as >= ecs.world.max_entities) return;
+    if (!g.sim.mask[vs].player or !g.sim.alive[as]) return;
+    // ponytail: ECS damage hook has no HitBodyPart yet; wire C2S path passes d.body_part.
+    g.fireAttackedSelf(vs, as, 0);
 }
 
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
@@ -307,6 +362,17 @@ const EntityLookSent = struct {
     gen: u32 = 0,
 };
 
+/// Last attack target published for a slot (RE EntityAlive::SetAttackTarget
+/// IL=70 and the OnUpdateLive expiry clear, both of which fan
+/// NetPackageSetAttackTarget out to tracking players). `id` is the wire value,
+/// so -1 is stock's "no target"; `sent` separates "cleared" from "never sent".
+/// `gen` pins the entry to the slot's current occupant like EntityLookSent.
+const AttackTargetSent = struct {
+    id: i32 = -1,
+    sent: bool = false,
+    gen: u32 = 0,
+};
+
 /// Last-sent TurretSync state (RE EntityTurret.lastTargetEntityId/lastIsOn).
 /// `gen` pins the entry to the slot's current occupant: a stale target/on
 /// pair that coincides with the new turret's initial state must not
@@ -325,6 +391,14 @@ const VelYSent = struct {
     gen: u32 = 0,
 };
 
+/// The run's map seed: the value `Utils.RandomFromSeedOnPos` (IL=2666) folds
+/// into every per-cell stream. The flat default world has no generator, so the
+/// sim's default seed stands in.
+fn worldSeedOf(self: *const Game) i32 {
+    const s: u64 = if (self.world.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed;
+    return @truncate(@as(i64, @bitCast(s)));
+}
+
 pub const Game = struct {
     allocator: std.mem.Allocator,
     net: ln_server.Server = .{},
@@ -339,6 +413,10 @@ pub const Game = struct {
     /// from the world name hash (or the worldgen seed for proc worlds), so a
     /// save decorates identically across joins and restarts.
     sub_noise: subbiome_noise.PerlinNoise = .{},
+    /// Per-deco-chunk cache of POI footprints that suppress world decorations
+    /// (V3.2.0 `AllowDecorations`, RFC 0007). Built lazily by the sampler; the
+    /// prefab list is load-fixed, so no invalidation.
+    deco_suppress: game_deco.SuppressCache = .{},
     /// Host callback context for Wasm guests; callbacks recover *Game from
     /// `data` and live in game.zig, so the plugin layer stays Game-free.
     wasm_ctx: plugin_mod.wasm.HostCtx = undefined,
@@ -419,6 +497,13 @@ pub const Game = struct {
     pvp_mode: u8 = 3,
     /// Gameplay multipliers/settings from serverconfig (percent unless noted).
     xp_multiplier: u16 = 100,
+    /// Sandbox stock-count multipliers for trader windows and vending
+    /// machines (`TraderItemAbundance` / `VendingItemAbundance`, default 1.0;
+    /// stock `TraderInfo::SpawnAllItemsFromList` multiplies each rolled count
+    /// by the matching one, then `FastMax(1, ...)` floors). Float, like the
+    /// parsed sandbox table - LowDefaultHigh is 0.25..2.0.
+    trader_item_abundance: f32 = 1.0,
+    vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -426,6 +511,16 @@ pub const Game = struct {
     /// the [rules.difficulty] ladder drives the AI->player scale).
     incoming_damage_modifier: f32 = 0,
     drop_on_death: u8 = 1,
+    /// serverconfig `BuildCreate` (stock seeds GameStats[18]/[20] from it).
+    build_create: bool = false,
+    /// serverconfig `CameraRestrictionMode` -> GameStats[68].
+    camera_restriction_mode: u8 = 0,
+    /// Sandbox option `AirDropMarker` -> GameStats[53].
+    air_drop_marker: bool = true,
+    /// Sandbox option `DropOnQuit` -> GameStats[34].
+    drop_on_quit: u8 = 0,
+    /// Sandbox option `BiomeProgression` -> GameStats[66].
+    biome_progression: bool = true,
     death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
     land_claim_online_dur: u16 = 4,
@@ -472,10 +567,29 @@ pub const Game = struct {
     /// the relay then passes sound through with no AI noise, matching stock
     /// with no data).
     noise_table: assets_noise.Table = assets_noise.Table.empty(),
+    /// gameevents.xml action sequences (death/respawn families). Empty offline:
+    /// the runner then refuses every sequence rather than inventing one.
+    gameevents: assets_gameevents.Table = assets_gameevents.Table.empty(),
+    /// blockplaceholders.xml: the per-cell target lists the prefab paint pass
+    /// resolves. Empty when the catalog is absent (cells then keep the remap's
+    /// first-target stand-in).
+    placeholder_table: assets_placeholders.Table = assets_placeholders.Table.empty(),
+    /// Merged `Config/Localization.csv` patch set: the base header plus every
+    /// cell the modlets write, shipped as NetPackageLocalization (stock sends
+    /// it between the id mapping and the config files).
+    localization: assets_localization.Table = .{},
+    placeholders_loaded: bool = false,
+    /// Scratch the paint call reads the ctx through (it takes a pointer, so a
+    /// stack local in the caller would not do).
+    placeholder_ctx: world_tts.PlaceholderCtx = undefined,
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
     spawning: assets_spawning.Table = assets_spawning.Table.empty(),
+    /// worldglobal.xml `<environment>` ambient scales (the night floor for
+    /// the stealth/AI ambient leg). Empty without a game dir = the stock
+    /// defaults baked into the table.
+    worldglobal: assets_worldglobal.Table = assets_worldglobal.Table.empty(),
     /// buffs.xml when present, else the builtin subset: buff names must resolve
     /// or C2S buff traffic is rejected wholesale.
     buffs: assets_buffs.Table = assets_buffs.builtin(),
@@ -490,6 +604,10 @@ pub const Game = struct {
     npc: assets_npc.NpcTable = assets_npc.NpcTable.empty(),
     sleepers: sleepers_mod.Store = sleepers_mod.Store.empty(),
     containers: containers_mod.ContainerStore = .{},
+    /// Applied sign texts (world/signs.zig): replayed when a client's chunk
+    /// streams in, so a later joiner sees the authored text. Distinct from
+    /// `signs`, the signs.xml catalog.
+    sign_texts: signs_mod.SignStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
@@ -522,6 +640,10 @@ pub const Game = struct {
     /// sqr-delta gate skips re-sends until the look moves ~0.04 blocks, so
     /// the per-tick look pass is quiet between meaningful target changes.
     entity_look_sent: [ecs.max_entities]EntityLookSent = [_]EntityLookSent{.{}} ** ecs.max_entities,
+    /// Edge detector for NetPackageSetAttackTarget: stock sends on every
+    /// change, so the per-tick target value only goes out when it differs
+    /// from what this slot last published.
+    attack_target_sent: [ecs.max_entities]AttackTargetSent = [_]AttackTargetSent{.{}} ** ecs.max_entities,
     /// Ticks until the next NetPackagePersistentPlayerPositions broadcast
     /// (stock GameManager.playerPositionsCountdownTimer, 6 s cadence).
     player_positions_timer: u16 = 0,
@@ -596,6 +718,9 @@ pub const Game = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    /// PosAndRot heartbeat cadence for idle entities (zdtd.toml [stream]
+    /// pos_heartbeat_period_ticks).
+    pos_heartbeat_period_ticks: u64 = default_pos_heartbeat_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     sleeper_tick_ticks: u64 = default_sleeper_tick_ticks,
@@ -603,6 +728,7 @@ pub const Game = struct {
     save_interval_ticks: u64 = default_save_interval_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
+    max_claimed_noise_scale: f32 = game_types.default_max_claimed_noise_scale,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     max_horizontal_speed_mps: f32 = game_types.default_max_horizontal_speed_mps,
@@ -698,12 +824,19 @@ pub const Game = struct {
             .password = opts.password,
             .pvp_mode = opts.player_killing_mode,
             .xp_multiplier = opts.xp_multiplier,
+            .trader_item_abundance = opts.trader_item_abundance,
+            .vending_item_abundance = opts.vending_item_abundance,
             .block_damage_player = opts.block_damage_player,
             .block_damage_ai = opts.block_damage_ai,
             .block_damage_ai_bm = opts.block_damage_ai_bm,
             .incoming_damage_modifier = opts.incoming_damage_modifier,
             .death_penalty = opts.death_penalty,
             .drop_on_death = opts.drop_on_death,
+            .build_create = opts.build_create,
+            .camera_restriction_mode = opts.camera_restriction_mode,
+            .air_drop_marker = opts.air_drop_marker,
+            .drop_on_quit = opts.drop_on_quit,
+            .biome_progression = opts.biome_progression,
             .land_claim_size = opts.land_claim_size,
             .land_claim_online_dur = opts.land_claim_online_durability_modifier,
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
@@ -730,6 +863,7 @@ pub const Game = struct {
             .chunk_adds_per_stream_tick = opts.chunk_adds_per_stream_tick,
             .chunk_stream_period_ticks = opts.chunk_stream_period_ticks,
             .motion_replicate_period_ticks = opts.motion_replicate_period_ticks,
+            .pos_heartbeat_period_ticks = opts.pos_heartbeat_period_ticks,
             .world_time_send_ticks = opts.world_time_send_ticks,
             .vehicle_pos_send_ticks = opts.vehicle_pos_send_ticks,
             .sleeper_tick_ticks = opts.sleeper_tick_ticks,
@@ -737,6 +871,7 @@ pub const Game = struct {
             .save_interval_ticks = opts.save_interval_ticks,
             .spawn_area_radius_max = opts.spawn_area_radius_max,
             .max_claimed_damage = opts.max_claimed_damage,
+            .max_claimed_noise_scale = opts.max_claimed_noise_scale,
             .max_edit_range = opts.max_edit_range,
             .interest_range = opts.interest_range,
             .max_horizontal_speed_mps = opts.max_horizontal_speed_mps,
@@ -859,6 +994,12 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        self.sim.sight_ctx = self;
+        self.sim.sight_fn = &game_hooks.blockSightBlockedAt;
+        self.world.movement_solid_ctx = self;
+        self.world.movement_solid_fn = &game_hooks.blockMovementSolid;
+        self.world.sight_block_ctx = self;
+        self.world.sight_block_fn = &game_hooks.blockSightBlocked;
         // Falling-block landing -> Fall-event debris drops (game/chunk_fill).
         self.sim.fall_land_ctx = self;
         self.sim.fall_land_fn = &game_chunk_fill.fallBlocksLanded;
@@ -868,6 +1009,11 @@ pub const Game = struct {
         // Door-id oracle for the solid probe: an open door is passable.
         self.world.door_id_ctx = self;
         self.world.door_id_fn = &blockIsDoor;
+        // Water leveler fills: broadcast each filled cell. The chunk dirty
+        // flag is persistence-only, so without this a pour is saved but never
+        // sent and a joined client keeps seeing the dry basin.
+        self.world.water_fill_ctx = self;
+        self.world.water_fill_fn = &broadcastWaterFill;
         // AI sense smell probe: effective radius (stock cSmellRadiusMin / Bleed,
         // the latter bound to buffInjuryBleeding via the buff catalog).
         self.sim.smell_ctx = self;
@@ -898,10 +1044,16 @@ pub const Game = struct {
         self.sim.is_armor_fn = &itemIsArmor;
         self.sim.armor_pdr_ctx = self;
         self.sim.armor_pdr_fn = &game_craft.armorPdr;
+        self.sim.armor_pdr_foreign_ctx = self;
+        self.sim.armor_pdr_foreign_fn = &game_craft.armorPdrForeign;
         self.sim.item_degradation_ctx = self;
         self.sim.item_degradation_fn = &game_craft.itemDegradation;
         self.sim.item_penetration_ctx = self;
         self.sim.item_penetration_fn = &game_craft.itemPenetration;
+        self.sim.barter_buy_ctx = self;
+        self.sim.barter_buy_fn = &game_player.barterBuyScale;
+        self.sim.barter_sell_ctx = self;
+        self.sim.barter_sell_fn = &game_player.barterSellScale;
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;
@@ -947,6 +1099,14 @@ pub const Game = struct {
         self.containers.load(self.world.world_dir) catch |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load containers", e);
+                return e;
+            }
+        };
+        // Sign texts survive restart (signs.zsg): the store is what the chunk
+        // stream replays, so without it every sign comes back blank.
+        self.sign_texts.load(self.world.world_dir) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load sign texts", e);
                 return e;
             }
         };
@@ -1002,7 +1162,12 @@ pub const Game = struct {
         };
         if (opts.map_dir) |md| {
             try self.world.loadStockMap(md);
-            self.world_name = "stock";
+            // WorldInfo.levelName controls the stock client's local raw-world
+            // lookup. Keep the selected stock map name (Navezgane/Pregen…)
+            // instead of the old generic "stock", which made worldInfoCo
+            // request a WorldFolder transfer and then look for a non-existent
+            // `World (src: LocalSave, DeviceLocal)` DTM after receipt.
+            if (opts.world_name) |name| self.world_name = name else self.world_name = "stock";
         } else if (opts.worldgen_seed) |seed| {
             self.world.enableProc(seed);
             self.world_name = "proc";
@@ -1019,6 +1184,10 @@ pub const Game = struct {
             subbiome_noise.stableHash(opts.game_world));
 
         try game_init_assets.loadAssets(self, allocator, opts);
+        // Operator starter kit (zdtd.toml [sim] spawn_starter_kit): resolve the
+        // names once here, where the item catalog is up, into the sim's fixed
+        // table. Null/empty leaves the built-in default kit in place.
+        game_player.parseStarterKit(self, opts.spawn_starter_kit);
         try @import("game/init_world.zig").initWorld(self, allocator, port, opts, had_saved_entities);
         // Trader stock survives restart (traders.zst): initWorld filled the
         // fresh XML rolls; a saved window overrides them by trader name (stock
@@ -1030,6 +1199,60 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Saved container and workstation stacks get the same items.xml cap
+        // the C2S TE writes apply (c2s/inv.zig clampStackSlots). Both stores
+        // load before loadAssets, so this runs here rather than at the load
+        // site, where the catalog is not up yet and the clamp would silently
+        // no-op. Same rule as the player loader: correct only what the
+        // catalog resolves, since an unknown id must keep what was saved
+        // rather than fail closed to 1 and destroy a real stack.
+        self.clampSavedStoreStacks();
+    }
+
+    /// Test hook: scenarios swap the item catalog after construction, so they
+    /// need to re-run the pass the constructor already did.
+    pub fn clampSavedStoreStacksForTest(self: *Game) void {
+        self.clampSavedStoreStacks();
+    }
+
+    /// Bring saved container / workstation stacks down to the current
+    /// items.xml cap. See the call site for why it runs after loadAssets.
+    fn clampSavedStoreStacks(self: *Game) void {
+        for (&self.containers.items, self.containers.used[0..]) |*cont, u| {
+            if (!u) continue;
+            const n = @min(@as(usize, cont.slot_count), cont.slots.len);
+            self.clampKnownStacks(cont.slots[0..n]);
+        }
+        for (&self.workstations.items, self.workstations.used[0..]) |*ws, u| {
+            if (!u) continue;
+            self.clampKnownStacks(ws.fuel[0..]);
+            self.clampKnownStacks(ws.input[0..]);
+            self.clampKnownStacks(ws.tools[0..]);
+            self.clampKnownStacks(ws.output[0..]);
+        }
+        // Vehicle baskets restore from entities.zen, which also loads before
+        // loadAssets, so they need the same pass for the same reason.
+        var vi: usize = 0;
+        while (vi < ecs.max_entities) : (vi += 1) {
+            if (!self.sim.alive[vi] or self.sim.kind[vi] != .vehicle) continue;
+            const v = &self.sim.vehicle[vi];
+            const n = @min(@as(usize, v.basket_n), v.basket.len);
+            self.clampKnownStacks(v.basket[0..n]);
+        }
+    }
+
+    /// Clamp only slots whose item the catalog resolves. Unlike
+    /// `clampStackSlots` (which fails closed to 1 through itemStackFor), an
+    /// unresolved id here keeps its saved count: failing closed is right
+    /// against a client claim and destructive against server-written state.
+    pub fn clampKnownStacks(self: *const Game, slots: []ecs.components.InvSlot) void {
+        for (slots) |*s| {
+            if (s.count == 0 or s.item_id == 0) continue;
+            if (self.items.byId(s.item_id) == null) continue;
+            // Cap through the stock getter: the sandbox MaxStackSize option
+            // scales Stacknumber, and the raw field would clamp it back.
+            s.count = @min(s.count, self.items.stackFor(s.item_id));
+        }
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
@@ -1062,6 +1285,24 @@ pub const Game = struct {
 
     fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
         return game_hooks.blockIsDoor(ctx, id);
+    }
+
+    /// One water-leveler fill: send the cell as a plain SetBlock to observers.
+    /// Stock streams water deltas with NetPackageWaterSimChunkUpdate, but the
+    /// client's Chunk::SetBlockRaw turns an isWater BlockValue into air plus
+    /// SetWater(Full), so a SetBlock renders the same result without modelling
+    /// the native water sim. Best-effort: the store is authoritative and a
+    /// dropped packet only delays the paint until the chunk is re-streamed.
+    fn broadcastWaterFill(ctx: ?*anyopaque, x: i32, y: i32, z: i32, id: u16) void {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        var buf: [96]u8 = undefined;
+        const sb = packages.buildSetBlockBodyRaw(&buf, x, y, z, id, 0, -1, -1) catch {
+            g.harness.counters.inc(.encode_errors);
+            return;
+        };
+        g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), g.interest_range) catch {
+            g.harness.counters.inc(.net_send_errors);
+        };
     }
 
     fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
@@ -1442,12 +1683,48 @@ pub const Game = struct {
         return game_player.awardXp(self, slot, base);
     }
 
+    pub fn awardXpTagged(self: *Game, slot: usize, base: u64, tags: []const u8) void {
+        return game_player.awardXpTagged(self, slot, base, tags);
+    }
+
     pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
         return game_player.purchaseSkill(self, slot, skill, target_level);
     }
 
     pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_level: u8, cost_override: ?u32) bool {
         return game_player.purchaseSkillAtCost(self, slot, skill, target_level, cost_override);
+    }
+
+    /// Fold the opening player's `LootProb` passives onto a tagged loot
+    /// entry's probability (stock `getProbability` -> GetValue(79, tags)).
+    pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const u8, base: f32) f32 {
+        return game_player.lootProbScale(self, peer_slot, ps, tags, base);
+    }
+
+    pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
+        return game_player.addProgressionLevel(self, slot, name, delta);
+    }
+
+    pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
+        return game_player.setProgressionLevelMax(self, slot, name);
+    }
+
+    pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
+        game_player.grantMagazineRead(self, slot, item_id);
+    }
+
+    pub fn appendUnlockedRecipes(self: *const Game, slot: usize, out: [][]const u8) usize {
+        const SlotCtx = struct {
+            var peer: usize = 0;
+            var game: ?*const Game = null;
+            fn level(name: []const u8) u8 {
+                const g = game orelse return 0;
+                return g.skillLevelOf(peer, name);
+            }
+        };
+        SlotCtx.peer = slot;
+        SlotCtx.game = self;
+        return self.recipes.appendUnlockedFor(out, &self.progression_table, SlotCtx.level);
     }
 
     pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
@@ -1490,8 +1767,20 @@ pub const Game = struct {
         return game_player.skillLevelOf(self, slot, skill);
     }
 
-    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
-        return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill);
+    pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot) f32 {
+        return game_player.dismemberSelfChance(self, slot, actor_sim_slot);
+    }
+
+    pub fn namedPassiveFold(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot, name: []const u8) f32 {
+        return game_player.namedPassiveFold(self, slot, actor_sim_slot, name);
+    }
+
+    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool, killed_entity_id: i32) void {
+        return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill, killed_entity_id);
+    }
+
+    pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
+        return game_player.awardKillNotify(self, killer_slot, killed_entity_id);
     }
 
     /// Stock SharedKillServer -> SharedKillClient: an in-range party mate's
@@ -1506,10 +1795,10 @@ pub const Game = struct {
 
     /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
     /// rules so broadcast and sendGameBudget share the same behaviour.
-    /// `budget_ns==null` means no deadline (stream/broadcast). Returns
-    /// error.WindowFull on exhaustion; callers own drop counters/logs and the
-    /// packages_broadcast count (via count_broadcast).
-    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, tag: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
+    /// `budget_ns` is always a real deadline (the only cap the fragment retry
+    /// checks). Returns error.WindowFull on exhaustion; callers own drop
+    /// counters/logs and the packages_broadcast count (via count_broadcast).
+    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, tag: []const u8, framed: []const u8, budget_ns: u64, max_attempts: u32, count_broadcast: bool) !void {
         return game_net.sendReliablePumped(self, peer, tag, framed, budget_ns, max_attempts, count_broadcast);
     }
 
@@ -1521,12 +1810,20 @@ pub const Game = struct {
         return game_player.lootStageOf(self, slot);
     }
 
+    pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32, container_bonus: f32) i32 {
+        return game_player.lootStageWithContainer(self, slot, container_mod, container_bonus);
+    }
+
     pub fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
         return game_player.partyStageAround(self, wx, wz, radius);
     }
 
     pub fn partyHighestGameStage(self: *Game) i32 {
         return game_player.partyHighestGameStage(self);
+    }
+
+    pub fn partyWeightedGameStage(self: *Game) i32 {
+        return game_player.partyWeightedGameStage(self);
     }
 
     pub fn partyLootStage(self: *const Game) i32 {
@@ -1542,6 +1839,10 @@ pub const Game = struct {
         return game_player.lootStageForPlayer(self, peer_slot);
     }
 
+    pub fn lootStageForPlayerWithContainer(self: *Game, peer_slot: usize, container_mod: f32, container_bonus: f32) i32 {
+        return game_player.lootStageForPlayerWithContainer(self, peer_slot, container_mod, container_bonus);
+    }
+
     /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
     /// Food/Water deplete with in-game time (rates from `[sim] rules.progression`,
     /// ADR 0021), starving/dehydrated players take over-time damage and
@@ -1550,6 +1851,37 @@ pub const Game = struct {
     /// world clock already advanced.
     pub fn tickSurvival(self: *Game, dt: f32) void {
         return game_tick.tickSurvival(self, dt);
+    }
+
+    /// Passive 43 (`ElementalDamageResist`) for the victim and one damage type,
+    /// the non-physical branch of `Equipment.CalcDamage` (IL=83). See
+    /// `game/tick.zig` for the fold and its fail-closed ctx rule.
+    pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
+        return game_tick.elementalDamageResist(self, ps, damage_tag);
+    }
+
+    pub fn foreignGatedResist(self: *Game, victim: ecs.Slot, attacker: ecs.Slot) f32 {
+        return game_tick.foreignGatedResist(self, victim, attacker);
+    }
+
+    pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
+        return game_tick.addCatalogBuff(self, entity_id, ps, name, instigator_id);
+    }
+
+    pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
+        return game_tick.fireBuffFinish(self, ps, def_id);
+    }
+
+    pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
+        return game_tick.fireBuffStack(self, ps, def_id);
+    }
+
+    pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part: i16) void {
+        return game_tick.fireAttackedSelf(self, ps, attacker, body_part);
+    }
+
+    pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
+        return game_tick.fireAttackedOther(self, ps, victim, body_part);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS
@@ -1594,6 +1926,10 @@ pub const Game = struct {
         return game_tick.tickEntityLookAt(self);
     }
 
+    pub fn tickAttackTarget(self: *Game) void {
+        return game_tick.tickAttackTarget(self);
+    }
+
     /// Stock PlayerStealth.TickServer S2C: broadcast NetPackageEntityStealth
     /// every 16 ticks when the packed state changed. See game/player.zig.
     pub fn tickStealthBroadcast(self: *Game) void {
@@ -1617,6 +1953,10 @@ pub const Game = struct {
 
     pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
         return game_map.broadcastPlayerBackpack(self, c);
+    }
+
+    pub fn sendOtherPlayerBackpacks(self: *Game, peer: *ln_peer.Peer, joiner: *const Client) !void {
+        return game_map.sendOtherPlayerBackpacks(self, peer, joiner);
     }
 
     /// Block id at world coords (0 = air / unloaded).
@@ -1650,6 +1990,10 @@ pub const Game = struct {
 
     pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.removeClaimAt(self, x, y, z);
+    }
+
+    pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
+        return game_world.repairClaimArea(self, cx, cz);
     }
 
     pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
@@ -1715,6 +2059,21 @@ pub const Game = struct {
         }
     }
 
+    /// Re-map restored turrets to the client slot this player just took, so
+    /// trap kills pay the player who placed them rather than nobody. Same
+    /// shape as `reclaimForName`: the save carries a name because a slot is
+    /// per-session, and login is where a name becomes a slot again.
+    pub fn reclaimTurretsForName(self: *Game, name: []const u8, slot: usize) void {
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!self.sim.alive[i] or self.sim.kind[i] != .turret) continue;
+            const t = &self.sim.turret[i];
+            if (t.owner_name_len != name.len) continue;
+            if (!std.mem.eql(u8, t.owner_name[0..t.owner_name_len], name)) continue;
+            t.owner_slot = @intCast(slot);
+        }
+    }
+
     /// Process pending UDP events (acks free window; data delivered to onData).
     /// Reentrant calls (sendGame / pump_fn mid-onData) only drain control so the
     /// reliable window can free without nested onData corrupting join SM state.
@@ -1733,6 +2092,14 @@ pub const Game = struct {
 
     pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
         return game_world.maxDamageForBlock(self, block_id);
+    }
+
+    /// Quality-lerped durability cap (`ItemClass.get_MaxUseTimesBase`, passive
+    /// 8). 0 = the item has no durability. Used by the loot random-durability
+    /// path, which starts a spawned item 20-80% worn.
+    pub fn itemMaxUseTimes(self: *const Game, item_id: u16, quality: u8) u32 {
+        const d = self.items.byId(item_id) orelse return 0;
+        return game_hooks.maxUseTimes(d, quality);
     }
 
     pub fn wireBlockDamage(self: *const Game, block_id: u16, stored: u16) u16 {
@@ -1771,6 +2138,47 @@ pub const Game = struct {
         return game_world.addBlockDamage(self, x, y, z, dmg);
     }
 
+    /// Run a parsed gameevents.xml sequence for a player (stock runs these
+    /// server side: the client's respawn only forwards the request). False
+    /// when the table is absent, the name is unknown or the sequence needs an
+    /// action this server does not implement.
+    pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) bool {
+        return game_game_events.runGameEventSequence(self, peer_slot, name);
+    }
+
+    /// `game_on_respawn_*` for a DeathPenalty stat value (0 none, 1 default,
+    /// 2 injured, 3 permanent).
+    pub fn respawnSequenceName(penalty: u8) ?[]const u8 {
+        return game_game_events.respawnSequenceName(penalty);
+    }
+
+    /// `game_on_death_*` for a DeathPenalty stat value.
+    pub fn deathSequenceName(penalty: u8) ?[]const u8 {
+        return game_game_events.deathSequenceName(penalty);
+    }
+
+    /// Stock `World::GetLandProtectionHardnessModifier` for one block: the
+    /// divisor a stranger's blast takes inside somebody else's land claim.
+    pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, instigator_entity: i32) f32 {
+        return game_world.landProtectionHardnessModifier(self, wx, wy, wz, instigator_entity);
+    }
+
+    /// One block inside a blast (stock Explosion::AttackBlocks damage formula,
+    /// destroy/downgrade flow). Both blast paths route through it.
+    pub fn blastBlock(
+        self: *Game,
+        wx: i32,
+        wy: i32,
+        wz: i32,
+        id: u16,
+        power: f32,
+        falloff: f32,
+        category_mult: f32,
+        instigator_entity: i32,
+    ) bool {
+        return game_world.blastBlock(self, wx, wy, wz, id, power, falloff, category_mult, instigator_entity);
+    }
+
     pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.clearBlockHp(self, x, y, z);
     }
@@ -1785,6 +2193,14 @@ pub const Game = struct {
     /// the owner's respawn point. See game/world.zig.
     pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
         return game_world.noteBlockRemoved(self, x, y, z, cur_id);
+    }
+
+    pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spill: bool) void {
+        return game_world.noteBlockRemovedEx(self, x, y, z, cur_id, spill);
+    }
+
+    pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
+        return game_world.noteBlockAdded(self, x, y, z, new_id);
     }
 
     /// Drain Demolition explode requests (entity + block AoE). Runs after the
@@ -1837,6 +2253,24 @@ pub const Game = struct {
     pub fn clearLockSlot(self: *Game, ch: usize) void {
         return game_locks.clearLockSlot(self, ch);
     }
+    /// Force-unlock this peer's other channels before a new grant (game/locks.zig).
+    pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) void {
+        return game_locks.releaseOtherLocksForPeer(self, peer_slot, keep_ch);
+    }
+    /// True when this peer holds any lock channel (stock gate 1 validity check).
+    pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
+        return game_locks.peerHoldsLock(self, peer_slot);
+    }
+    /// Refresh this peer's lock stale window (stock LockManager.ProcessKeepOpen).
+    pub fn refreshLocksForPeer(self: *Game, peer_slot: usize) void {
+        return game_locks.refreshLocksForPeer(self, peer_slot);
+    }
+    /// Force-unlock every channel this peer holds, to the peer (stock gate 1 /
+    /// ForceUnlockByPlayer). The caller then refuses the new request.
+    pub fn releaseAllLocksForPeer(self: *Game, peer_slot: usize) void {
+        return game_locks.releaseAllLocksForPeer(self, peer_slot);
+    }
+
     pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
         return game_locks.clearLocksForPeer(self, peer_slot);
     }
@@ -1920,6 +2354,9 @@ pub const Game = struct {
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         return game_trader_wire.handleTrade(self, c, body);
     }
+    pub fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
+        return game_trader_wire.inTradeReach(self, c, bx, by, bz);
+    }
     pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
         return game_trader_wire.applyTraderDataCopyFrom(self, c, td);
     }
@@ -1972,6 +2409,7 @@ pub const Game = struct {
             g: *Game,
             fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
                 const g: *Game = @ptrCast(@alignCast(ctx.?));
+                const prev_id = g.world.blockWorld(bx, by, bz) catch 0;
                 g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
                 // POI reset restores the authored state: pre-damaged cells get
                 // their TTS damage back, pristine cells clear any wear.
@@ -1979,6 +2417,23 @@ pub const Game = struct {
                     g.setBlockHp(bx, by, bz, dmg) catch return;
                 } else {
                     g.clearBlockHp(bx, by, bz);
+                }
+                // Repainting a cell displaces whatever stood there, so the
+                // previous occupant's side state goes with it. Same call the
+                // destruction paths use, rather than a second copy of the
+                // list of stores a removal owes.
+                const new_id = world_store.typeId(raw);
+                if (prev_id != new_id) {
+                    // No spill: the reset restores the POI to its authored
+                    // state, it does not mine it out. Dropping the displaced
+                    // contents would let a player farm a POI's containers by
+                    // re-taking the quest that resets it.
+                    g.noteBlockRemovedEx(bx, by, bz, prev_id, false);
+                    // And the block the reset painted claims what its type
+                    // owns: a POI's authored generator or vending machine is
+                    // as real as a placed one, so restoring it has to restore
+                    // its node too, not just its block.
+                    g.noteBlockAdded(bx, by, bz, new_id);
                 }
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
                     // Best-effort visual broadcast: the world store is already
@@ -1997,7 +2452,9 @@ pub const Game = struct {
             }
         };
         var terr_ctx: TerrCtx = .{ .g = self };
-        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, Ctx.put, self);
+        var ph_holder: world_tts.PlaceholderCtx = undefined;
+        const ph_arg = PlaceholderCtx.slot(self, &ph_holder);
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, ph_arg, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
 
@@ -2092,6 +2549,12 @@ pub const Game = struct {
         return game_config_files.sendLocalConfigFiles(self, peer);
     }
 
+    /// Stock sends the localization patch blob between the id mapping and the
+    /// config files (RequestToEnterGame IL_0222/IL_0242).
+    pub fn sendLocalization(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_config_files.sendLocalization(self, peer);
+    }
+
     /// If feet Y is deep void / far below DTM surface, snap to surface+0.9 and
     /// optionally teleport the peer. Returns new Y when snapped, else null.
     /// Threshold surface-8 (was -24): late-suite mesh float still placeable after
@@ -2117,6 +2580,16 @@ pub const Game = struct {
         bz: f32,
     ) bool {
         return game_guard.rejectIfBeyondEditRange(self, c, peer_local, entity_id, surf, px, py, pz, bx, by, bz);
+    }
+
+    pub fn rejectIfNotSender(
+        self: *Game,
+        c: *Client,
+        peer_local: i32,
+        claimed_entity: i32,
+        surf: evidence_mod.Surface,
+    ) bool {
+        return game_guard.rejectIfNotSender(self, c, peer_local, claimed_entity, surf);
     }
 
     pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
@@ -2247,9 +2720,21 @@ pub const Game = struct {
     pub fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
         const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
         const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
-        const h: i32 = @intCast(h_u16);
-        // heightWorld = top solid; PDF/entity feet use that block Y; entity float y = h+1.
-        const feet_y = @max(h, 1);
+        // heightWorld = top solid; PDF/entity feet use that block Y; entity
+        // float y = h+1.
+        var feet_y: i32 = @max(@as(i32, @intCast(h_u16)), 1);
+        // Stock Chunk::CanPlayersSpawnAtPos IL_0023 requires the block below the
+        // feet to carry CanPlayersSpawnOn (default true; treeMaster and the
+        // vehicle masters declare false), so a forest or parked-vehicle column
+        // walks down to the ground instead of spawning the player on top of it.
+        var scan: usize = 0;
+        while (scan < max_spawn_ground_scan) : (scan += 1) {
+            if (feet_y <= 1) break;
+            const below = self.world.blockWorld(sx, feet_y - 1, sz) catch break;
+            if (below == 0) break; // nothing to stand on: keep the surface
+            if (self.blocks.canPlayersSpawnOn(below)) break;
+            feet_y -= 1;
+        }
         // Live AssignIds resolved at init (A05); the module pin is the offline
         // default until resolveTerrainIds runs, so modded dumps stay correct.
         const dirt = self.world.terrain_ids.dirt;
@@ -2329,7 +2814,7 @@ pub const Game = struct {
         const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
         // Cap always_unlocked list so PlayerId stays under body_buf slice.
         var unlock_names: [64][]const u8 = undefined;
-        const unlock_n = self.recipes.appendAlwaysUnlocked(&unlock_names);
+        const unlock_n = self.appendUnlockedRecipes(c.slot, &unlock_names);
         // Restored inventory (players.zsv v2) rides the join PDF: toolbelt =
         // sim slots 0..9, bag = 10.. (client PDF apply keeps that split).
         var tb_slots: [ecs.components.inv_bag_start]packages.stock_inv.StockSlot = undefined;
@@ -2359,7 +2844,10 @@ pub const Game = struct {
         }
         if (first_join) {
             // PDF pads bag to CarryCapacity (45); leave headroom for unlocks/quests.
-            const pid = try packages.buildPlayerIdBodyInvLoaded(
+            // The character-sheet counters ride the PDF too: they are restored
+            // from players.zsv (ZPV14) so the join does not reset a returning
+            // player's kills/deaths, which stock keeps in PlayerDataFile.
+            const pid = try packages.buildPlayerIdBodyWithOpts(
                 self.body_buf[384..16384],
                 eid,
                 0,
@@ -2367,12 +2855,23 @@ pub const Game = struct {
                 sx2,
                 sy2,
                 sz2,
-                qbuf[0..qn],
-                unlock_names[0..unlock_n],
-                tb_slots[0..tb_n],
-                bag_slots[0..bag_n],
-                true,
-                c.game_stage_born_world_time,
+                .{
+                    .quests = qbuf[0..qn],
+                    .unlocked_recipes = unlock_names[0..unlock_n],
+                    .toolbelt = tb_slots[0..tb_n],
+                    .bag = bag_slots[0..bag_n],
+                    .b_loaded = true,
+                    .game_stage_born_at = c.game_stage_born_world_time,
+                    .player_kills = c.player_kills,
+                    .zombie_kills = c.zombie_kills,
+                    .deaths = c.deaths,
+                    // The client's own character: stock stores the profile it
+                    // sent in RequestToSpawnPlayer on the PDF's ECD, and the
+                    // client applies it with bLoaded=true instead of falling
+                    // back to its local profile.
+                    .profile = if (c.profile_ok) c.profile.view() else null,
+                    .player_name = c.name[0..c.name_len],
+                },
             );
             try self.sendGameCritical(peer, "NetPackagePlayerId", pid);
             // PersistentPlayerState(Login): entityId → name mapping. Without it the
@@ -2390,8 +2889,38 @@ pub const Game = struct {
                 };
                 const primary_id = c.puid_primary.get() orelse fallback;
                 const native_id = c.puid_native.get() orelse primary_id;
+                // lpBlocks: this player's own land-protection blocks (stock
+                // PersistentPlayerData.Write lpBlockCount + Vector3i list, RE
+                // server-lifecycle.md 6.1). owner_entity is re-mapped to the
+                // login entity id by reclaimForName, so match on it. Capped at
+                // the buffer's list budget; a player past it keeps the claims,
+                // only the overlay tail is dropped.
+                var lp_buf: [max_lp_blocks_on_wire][3]i32 = undefined;
+                var lp_n: usize = 0;
+                for (self.land_claims[0..self.land_claims_n]) |*claim| {
+                    if (claim.owner_entity != eid) continue;
+                    if (lp_n >= lp_buf.len) break;
+                    lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
+                    lp_n += 1;
+                }
+                // OwnedVendingMachinePositions: the machines this player still
+                // rents, so the client re-draws their map markers on rejoin
+                // (RE save-region.md, PPD.Write fields 25-28). An expired
+                // rental is not owned any more, so the day check here matches
+                // the one the rent path applies before it clears a machine.
+                var vm_buf: [packages.stock_inv.max_vending_positions_on_wire][3]i32 = undefined;
+                var vm_n: usize = 0;
+                const today: i32 = @intCast(self.sim.director.clock.day);
+                for (&self.vending.items, self.vending.used) |*vm, used| {
+                    if (!used or vm.rental_end_day <= 0) continue;
+                    if (today > vm.rental_end_day) continue;
+                    if (!vm.owner.matches(primary_id)) continue;
+                    if (vm_n >= vm_buf.len) break;
+                    vm_buf[vm_n] = .{ vm.pos.x, vm.pos.y, vm.pos.z };
+                    vm_n += 1;
+                }
                 if (packages.stock_inv.buildPersistentPlayerState(
-                    self.body_buf[8704..9216],
+                    self.body_buf[9728..][0..packages.stock_inv.persistent_player_state_max_len],
                     eid,
                     c.name[0..c.name_len],
                     primary_id,
@@ -2399,12 +2928,18 @@ pub const Game = struct {
                     sx2,
                     sy2,
                     sz2,
+                    lp_buf[0..lp_n],
+                    vm_buf[0..vm_n],
                 )) |pps| {
                     try self.broadcast("NetPackagePersistentPlayerState", pps);
                 } else |_| {}
             }
             try self.sendItemIdMapping(peer);
             try self.sendQuestNavObjects(peer, c.slot, eid);
+            // Stock re-registers the live crates per joining player
+            // (RefreshCrates, join step 11); the crate marker is a server push,
+            // so nothing else would ever put it on this client's map.
+            try self.sendAirDropNavObjects(peer);
             try self.sendHoldingOnly(peer, c);
             try self.sendPlayerVitals(peer, c);
             // Latch IsSpawned before heavy chunk/entity stream (playtest saw
@@ -2431,6 +2966,27 @@ pub const Game = struct {
             // empty; the explicit bundle keeps buff icons across a rejoin).
             try self.sendOwnBuffs(peer, c);
             try self.sendSeatedRiders(peer);
+            // The owner's parked vehicles for their map (stock
+            // UpdateVehicleWaypointsForPlayer; no-op without owned vehicles).
+            try self.sendVehicleWaypoints(peer, c.slot);
+            // This player's dropped-bag markers. They only ever went out on
+            // the events that change them (a death, a collect), so a marker
+            // restored from the player record never reached anyone and the
+            // bag sat on the map unmarked. Stock broadcasts this to every
+            // client rather than the owner alone (RE protocol-packages.md
+            // 2139), which is also what re-arms clients that were connected
+            // through the drop. An empty body is legitimate: it clears stale
+            // markers just as well.
+            try self.broadcastPlayerBackpack(c);
+            // The markers already on the map: every other player's list went
+            // out on an event that predates this peer, so without a replay this
+            // client sees no bag but its own.
+            try self.sendOtherPlayerBackpacks(peer, c);
+            // The ally pairs that already stand. Same reason as the markers
+            // above: the response only goes out on a transition, so pairs
+            // formed before this connection (or loaded from disk at boot)
+            // never reach this client.
+            try self.sendAllySnapshot(peer);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
@@ -2463,6 +3019,7 @@ pub const Game = struct {
             try self.sendHoldingOnly(peer, c);
             try self.sendPlayerVitals(peer, c);
             try self.sendQuestNavObjects(peer, c.slot, eid);
+            try self.sendAirDropNavObjects(peer);
         }
         const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
         try self.sendGame(peer, "NetPackageWorldTime", wt);
@@ -2498,7 +3055,10 @@ pub const Game = struct {
             .blood_moon_enemy_count = self.sim.director.bloodmoon_enemy_count,
             .enemy_difficulty = self.sim.director.enemy_difficulty,
             .day_light_length = @trunc(clk.dusk - clk.dawn),
-            .day_night_length = @trunc(clk.seconds_per_hour * 24.0 / 60.0),
+            // GameStats[72]/[11] come from the clock's configured day length and
+            // its stock integer rate, never derived back out of a float scale
+            // (stock seeds both straight from GamePrefs; server-lifecycle.md:168).
+            .day_night_length = @intCast(clk.day_night_length),
             .blood_moon_day = bloodMoonDayFor(clk),
             .block_damage_player = self.block_damage_player,
             .block_damage_ai = self.block_damage_ai,
@@ -2507,10 +3067,22 @@ pub const Game = struct {
             .death_penalty = self.death_penalty,
             .player_killing_mode = self.pvp_mode,
             .drop_on_death = self.drop_on_death,
+            .drop_on_quit = self.drop_on_quit,
+            .build_create = self.build_create,
+            .camera_restriction_mode = self.camera_restriction_mode,
+            .air_drop_marker = self.air_drop_marker,
+            .biome_progression = self.biome_progression,
             .land_claim_size = self.land_claim_size,
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
+            // The sim already scales every loot roll by this (assets/loot.zig
+            // applyAbundance), so telling the client the struct default while
+            // the server rolls a different rate is a straight divergence.
+            .loot_abundance = @intCast(self.loot.abundance_pct),
+            // Same for the party XP-share radius: player.zig gates the share
+            // on this distance, so the client must hear the value in force.
+            .party_shared_kill_range = @trunc(self.party_shared_kill_range),
             .land_claim_expiry_time = self.land_claim_expiry_days,
             .land_claim_count = self.land_claim_count,
             .land_claim_dead_zone = self.land_claim_dead_zone,
@@ -2524,9 +3096,10 @@ pub const Game = struct {
             else
                 @divTrunc(self.air_drop_interval_hours, 24),
             // Stock TimeOfDayIncPerSec = world-time units per real second
-            // (24000-unit day; live-observed 6 at DayLightLength 18). Derive
-            // from the clock so the wire matches the sim's own rate.
-            .time_of_day_inc_per_sec = @trunc(24000.0 / (clk.seconds_per_hour * 24.0)),
+            // (24000-unit day; live-observed 6 at the default 60 minute day).
+            // The clock's rate *is* this value, so the wire cannot disagree
+            // with the sim (RE server-lifecycle.md:168).
+            .time_of_day_inc_per_sec = @intCast(clk.time_of_day_inc_per_sec),
             .storm_freq = self.storm_frequency,
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,
@@ -2543,6 +3116,11 @@ pub const Game = struct {
     /// Map markers for active journal quests (stock class names only).
     fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
         return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid);
+    }
+
+    /// Markers for the air-drop crates still on the map (game/join.zig).
+    pub fn sendAirDropNavObjects(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendAirDropNavObjects(self, peer);
     }
 
     /// True when quest id is likely present in stock client QuestClass.
@@ -2647,6 +3225,24 @@ pub const Game = struct {
     pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         return g.items.stockTypeFor(item_id);
+    }
+
+    /// The held toolbelt stack in stock wire form, or null when the player
+    /// holds nothing. Every package carrying `holdingItemStack` reads it from
+    /// here so the spawn and stats bodies cannot disagree about what a player
+    /// is holding.
+    pub fn playerHoldingStock(self: *Game, slot: ecs.Slot) ?packages.stock_inv.StockSlot {
+        if (!self.sim.mask[slot].inventory) return null;
+        const inv = &self.sim.inventory[slot];
+        if (inv.holding >= ecs.components.inv_toolbelt) return null;
+        const s = inv.slots[inv.holding];
+        if (s.count == 0 or s.item_id == 0) return null;
+        return .{
+            .type_id = resolveItemType(self, s.item_id),
+            .count = s.count,
+            .quality = s.quality,
+            .meta = s.meta,
+        };
     }
 
     /// Per-player blood-moon-music eligibility (stock EntityPlayer.bloodMoonParty):
@@ -2789,6 +3385,10 @@ pub const Game = struct {
             .attack_damage = self.handItemDamage(d.hand_item),
             .time_stay = d.time_stay,
             .sight_range = d.sight_range,
+            .hurt_target_classes = d.hurt_target_classes,
+            .block_if_alert_only = d.block_if_alert_only,
+            .target_player_see = d.target_player_see,
+            .target_player_hear = d.target_player_hear,
             .sight_light_min = d.sight_light_min,
             .sight_light_max = d.sight_light_max,
             .sleeper_wake_near_min = d.sleeper_wake_near_min,
@@ -2796,6 +3396,8 @@ pub const Game = struct {
             .sleeper_wake_far_min = d.sleeper_wake_far_min,
             .sleeper_wake_far_max = d.sleeper_wake_far_max,
             .is_enemy = d.is_enemy,
+            .ai_attack = d.ai_attack,
+            .ai_tasks = d.ai_tasks,
             .xp_gain = d.xp_gain,
             .explode_threshold = d.explode_threshold,
             .explode_delay_s = d.explode_delay_s,
@@ -2806,6 +3408,11 @@ pub const Game = struct {
             .explosion_bonus_cat = d.explosion.bonus_cat,
             .explosion_bonus_mult = d.explosion.bonus_mult,
             .explosion_bonus_n = d.explosion.bonus_n,
+            .dismember_head = d.dismember_head,
+            .dismember_arms = d.dismember_arms,
+            .dismember_legs = d.dismember_legs,
+            .leg_cripple_scale = d.leg_cripple_scale,
+            .leg_crawler_threshold = d.leg_crawler_threshold,
         };
     }
 
@@ -2849,11 +3456,43 @@ pub const Game = struct {
         return false;
     }
 
+    /// Biome id at (wx,wz) from the world's biome map (`biomes.xml` `<biomemap
+    /// id>`), or null when the world has no biome map. The `InBiome`
+    /// requirement gate reads exactly this id.
+    pub fn biomeIdAt(self: *const Game, wx: i32, wz: i32) ?u8 {
+        const bm = self.world.biomes orelse return null;
+        return bm.atWorld(wx, wz);
+    }
+
     /// True when the world biome at (wx,wz) is the stock radiated biome
     /// (biomes.xml <biomemap name="radiated"/>), which deals damage over time.
+    /// blockplaceholders context for the paint pass: the loaded table, the
+    /// world seed stock's per-cell stream folds in, and the biome name at a
+    /// position. Null when no placeholder table loaded (the paint path then
+    /// keeps whatever id the remap left).
+    pub const PlaceholderCtx = struct {
+        fn at(ctx: ?*anyopaque, wx: i32, wz: i32) []const u8 {
+            const s: *const Game = @ptrCast(@alignCast(ctx.?));
+            const id = s.biomeIdAt(wx, wz) orelse return "";
+            return s.world.biome_layers_table.names[id] orelse "";
+        }
+        /// Fill `holder` (caller-owned, outlives the paint call) and return it,
+        /// or null when no placeholder catalog loaded. The biome callback is
+        /// stock's `WorldBiomes.GetBiome(...).m_sBiomeName` for the cell.
+        fn slot(self: *Game, holder: *world_tts.PlaceholderCtx) ?*const world_tts.PlaceholderCtx {
+            if (!self.placeholders_loaded) return null;
+            holder.* = .{
+                .table = &self.placeholder_table,
+                .world_seed = worldSeedOf(self),
+                .biome_name = @This().at,
+                .biome_ctx = self,
+            };
+            return holder;
+        }
+    };
+
     pub fn isRadiatedAt(self: *const Game, wx: i32, wz: i32) bool {
-        const bm = self.world.biomes orelse return false;
-        const id = bm.atWorld(wx, wz) orelse return false;
+        const id = self.biomeIdAt(wx, wz) orelse return false;
         const name = self.world.biome_layers_table.names[id] orelse return false;
         return std.mem.find(u8, name, "radiat") != null;
     }
@@ -2935,7 +3574,9 @@ pub const Game = struct {
             return .{
                 .index = @intCast(ri),
                 .maxcount = r.maxcount,
-                .respawn_days = r.respawn_days,
+                // Default sandbox column (index 0); the Biome*Respawn sandbox
+                // options select the other columns when they are decoded.
+                .respawn_days = assets_spawning.respawnDays(r.*, 0),
             };
         }
         return .{};
@@ -2955,12 +3596,68 @@ pub const Game = struct {
     }
 
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.
+    /// The pacing fields ride along for the nightly group walk (SetupGroup).
     pub fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const sp = g.gamestages.spawnerByName(spawner) orelse return null;
         const st = sp.getStage(stage) orelse return null;
         const sg = st.spawnGroup(0) orelse return null;
-        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive };
+        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive, .interval = sg.interval, .duration = sg.duration };
+    }
+
+    /// `GameStageDefinition::CalcGameStageAround`: the weighted party level of
+    /// the joined players within `radius` of a point, for the wandering-horde
+    /// ladder (`partyStageAround` is the same primitive the sleeper volumes
+    /// use; stock also filters to the same PrefabInstance, which zdtd cannot
+    /// yet).
+    pub fn pickStageAround(ctx: ?*anyopaque, wx: f32, wz: f32, radius: f32) i32 {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        return g.partyStageAround(wx, wz, radius);
+    }
+
+    /// gamestages.xml spawner ladder → the stage's `<spawn>` row at `index`
+    /// (stock `Stage.GetSpawnGroup`, null past the end - not clamped; the
+    /// walk ends when it returns null). Feeds the nightly group walk.
+    pub fn pickStageGroupAt(ctx: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?ecs.aidirector.StageGroup {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const sp = g.gamestages.spawnerByName(spawner) orelse return null;
+        const st = sp.getStage(stage) orelse return null;
+        if (index >= st.spawns.len) return null;
+        const sg = st.spawns[index];
+        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive, .interval = sg.interval, .duration = sg.duration };
+    }
+
+    /// Blood-moon bonus-loot cadence for the frozen stage
+    /// (`AIDirectorGameStagePartySpawner.SetPartyLevel` IL_0065-007C):
+    /// `bonusLootEvery = max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)`
+    /// with `stageSpawnMax` summing every spawn-group `num` in the stage.
+    /// Pushes the nightly cadence + `LootBonusScale` into the director.
+    /// Falls back to the stock XML defaults when the ladder has no stage
+    /// (offline/builtin tables).
+    ///
+    /// Parameters only: the counter is seeded once at the nightly stage
+    /// freeze (stock InitParty IL_0072-0080). This runs every tick of an
+    /// active blood moon so a ladder loaded mid-night takes effect, and
+    /// re-seeding here reset the progress counter at 20 Hz while it only
+    /// advances per horde spawn, so the bonus drop never fired.
+    pub fn pushBloodMoonBonus(self: *Game, stage: i32) void {
+        const cfg = self.gamestages.config;
+        // No gamestages.xml means no cadence to push. Clamping the absent 0
+        // up to 1 would overwrite the director's stock defaults with "bonus
+        // on every spawn, unscaled", which is the opposite of the intent.
+        if (cfg.loot_bonus_every <= 0) return;
+        var every: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
+        if (self.gamestages.spawnerByName(ecs.aidirector.Director.bloodmoon_spawner)) |sp| {
+            if (sp.getStage(stage)) |st| {
+                var sum: u32 = 0;
+                for (st.spawns) |sg| sum +|= sg.num;
+                const maxc: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_max_count))));
+                const cadence: u32 = @max(sum / maxc, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
+                every = @max(1, cadence);
+            }
+        }
+        const scale: f32 = if (cfg.loot_bonus_scale > 0) cfg.loot_bonus_scale else 1.0;
+        self.sim.director.setBloodMoonBonusParams(every, scale);
     }
 
     /// spawning.xml <entityspawner name=…> → its EntityGroupName property.
@@ -2970,9 +3667,23 @@ pub const Game = struct {
         return s.entitygroup;
     }
 
+    /// spawning.xml <entityspawner name=…> → its TotalPerWave min/max
+    /// (min 0 = unset, caller falls back). Rule 15: the wave size is stock
+    /// data, not a sim default.
+    pub fn pickSpawnerWave(ctx: ?*anyopaque, spawner: []const u8) ecs.aidirector.WaveRange {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const s = g.spawning.spawnerByName(spawner) orelse return .{};
+        return .{ .min = s.total_per_wave, .max = s.total_per_wave_max };
+    }
+
     /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
     pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
         return game_craft.tryCraft(self, peer_slot, recipe_index, times);
+    }
+
+    /// Scrap bag slot via GetScrapableRecipe (InvTx scrap op). Consumes input, grants scrap.
+    pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
+        return game_craft.tryScrap(self, peer_slot, bag_slot, qty);
     }
 
     pub fn coinItemId(self: *const Game) u16 {
@@ -3036,6 +3747,31 @@ pub const Game = struct {
 
     pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         return game_loot.ecsIdFromItemName(self, name);
+    }
+
+    /// Stock `ItemClass::AddGSStats` (IL=100) for a rolled item: the
+    /// gamestage stat entries an item value carries, drawn from a per-item
+    /// stream (`seed ^ index`, like the rest of the loot roll, so a re-roll is
+    /// reproducible). Empty for an item with no `<stats>` rows.
+    pub fn rollItemStats(self: *Game, item_id: u16, quality: u8, loot_stage: i32, seed: u32) struct {
+        stats: [ecs.components.max_item_stats]ecs.components.ItemStat,
+        n: u8,
+    } {
+        var out: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+        var rolled: [ecs.components.max_item_stats]assets_items.RolledGsStat = undefined;
+        const d = self.items.byId(item_id) orelse return .{ .stats = out, .n = 0 };
+        if (d.stats.len == 0) return .{ .stats = out, .n = 0 };
+        var r = util_game_random.GameRandom.init(@bitCast(seed));
+        const n = assets_items.rollGsStats(d.stats, quality, loot_stage, &r, &rolled);
+        var i: usize = 0;
+        while (i < n and i < out.len) : (i += 1) {
+            out[i] = .{
+                .effect = rolled[i].effect,
+                .slot_a = rolled[i].slot_a,
+                .slot_b = rolled[i].slot_b,
+            };
+        }
+        return .{ .stats = out, .n = @intCast(@min(n, out.len)) };
     }
 
     pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {
@@ -3121,12 +3857,18 @@ pub const Game = struct {
         try game_loot.broadcastLootSpawn(self, net_id);
     }
 
+    /// Take back a dead supply crate's MapObject and NavObject markers.
+    pub fn broadcastSupplyCrateMarkerRemove(self: *Game, crate_entity_id: i32) void {
+        game_loot.broadcastSupplyCrateMarkerRemove(self, crate_entity_id);
+    }
+
     /// Stock DropOnDeath (0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete):
     /// spawn the victim's death bag at their position holding the real
     /// inventory range (not a placeholder unit) and mark the dropped-backpack
     /// marker for the death screen / map. Called from the C2S kill path and the
     /// hp-replicate AI-kill detector; the callers coordinate through
-    /// `Client.has_backpack` so a death is never bagged twice.
+    /// `Client.bagged_this_death`, which respawn clears, so one death is never
+    /// bagged twice and the next one still bags.
     pub fn spawnDeathBag(self: *Game, victim_slot: ecs.Slot) void {
         const dod = self.drop_on_death;
         if (dod < 1 or dod > 3) return;
@@ -3142,12 +3884,24 @@ pub const Game = struct {
             else => ecs.components.inv_equip_start,
         };
         if (self.sim.spawnLootBagFrom(t.x, t.y, t.z, &self.sim.inventory[victim_slot], start, end)) |bag_nid| {
+            // A death bag is the Backpack entity class, not the DroppedLootContainer
+            // the block spills use: stock's client creates EntityBackpack in
+            // EntityPlayerLocal.dropBackpack and the server broadcasts the class
+            // it spawned. Set before broadcastLootSpawn so the class is right.
+            if (self.sim.slotOfNetId(bag_nid)) |bs| self.sim.loot_bag[bs].backpack = true;
+            // Stock DropOnDeath MOVES the range into the bag. The copy above
+            // left the victim holding it too, so every death duplicated the
+            // dropped slice: loot your own bag and you had it twice, and the
+            // DropOnDeath setting only chose which slice to duplicate.
+            // Clear after the bag exists, so a spawn failure drops nothing.
+            var ci: usize = start;
+            while (ci < end and ci < ecs.components.max_inv_slots) : (ci += 1) {
+                self.sim.inventory[victim_slot].slots[ci] = .{};
+            }
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
-                vic.has_backpack = true;
-                vic.backpack_x = @trunc(t.x);
-                vic.backpack_y = @trunc(t.y);
-                vic.backpack_z = @trunc(t.z);
+                vic.bagged_this_death = true;
+                vic.addBackpack(@trunc(t.x), @trunc(t.y), @trunc(t.z));
                 self.broadcastPlayerBackpack(vic) catch {};
             }
         }
@@ -3185,8 +3939,28 @@ pub const Game = struct {
         game_chunk_fill.ensurePrefabStorageInChunk(self, ch, cx, cz);
     }
 
-    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
-        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed);
+    /// Drop a broken block's stored items on the ground (game/chunk_fill.zig).
+    /// Called from `noteBlockRemoved`, which is where every removal path meets.
+    pub fn spillStoredItems(self: *Game, x: i32, y: i32, z: i32) void {
+        game_chunk_fill.tryContainerSpill(self, x, y, z);
+        game_chunk_fill.tryWorkstationSpill(self, x, y, z);
+        game_chunk_fill.tryVendingSpill(self, x, y, z);
+    }
+
+    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
+        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed, loot_stage, opener_peer);
+    }
+
+    /// Derive a container's grid from loot.xml without rolling it (the roll
+    /// waits for the first open; `game/chunk_fill.zig`).
+    pub fn setContainerSizeFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8) void {
+        game_chunk_fill.setContainerSizeFromLoot(self, cont, loot_name);
+    }
+
+    /// The roll a container gets when a player opens it (stock
+    /// LootManager.LootContainerOpened + the LootRespawnDays re-roll).
+    pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_peer: usize) void {
+        game_chunk_fill.ensureContainerLoot(self, cont, opener_peer);
     }
 
     /// Stock CheckDestroyTileEntity on container unlock (close): a loot def
@@ -3198,10 +3972,6 @@ pub const Game = struct {
     /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
     /// container re-rolls its contents when the interval since the touch day
     /// has elapsed (game/chunk_fill.zig).
-    pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
-        game_chunk_fill.maybeRespawnContainer(self, cont);
-    }
-
     pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
         return game_chunk_stream.sendContainersInChunk(self, peer, cx, cz);
     }
@@ -3243,6 +4013,14 @@ pub const Game = struct {
 
     pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
         return game_net.broadcastNear(self, name, body, wx, wz, range_blocks);
+    }
+
+    pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs.Slot) !void {
+        return game_net.broadcastKnown(self, name, body, slot);
+    }
+
+    pub fn broadcastNearExcept(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: usize) !void {
+        return game_net.broadcastNearExcept(self, name, body, wx, wz, range_blocks, skip_slot);
     }
 
     pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
@@ -3292,7 +4070,7 @@ pub const Game = struct {
         return game_social.playerBuffBlob(self, peer_slot, buf);
     }
 
-    fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
+    pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
         return game_social.relayBuff(self, entity_id, buff_name, adding, instigator_id, except_slot);
     }
 
@@ -3347,6 +4125,10 @@ pub const Game = struct {
     /// their seats instead of standing on the hull.
     fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
         try game_vehicle.sendSeatedRiders(self, peer);
+    }
+
+    pub fn sendVehicleWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
+        try game_vehicle.sendVehicleWaypoints(self, peer, slot);
     }
 
     pub fn broadcastVehiclePositions(self: *Game) !void {
@@ -3424,6 +4206,10 @@ pub const Game = struct {
 
     pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
         return @import("game/harness.zig").handleAllyRequest(self, c, body);
+    }
+
+    pub fn sendAllySnapshot(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_social.sendAllySnapshot(self, peer);
     }
 
     fn broadcastPartySnapshot(

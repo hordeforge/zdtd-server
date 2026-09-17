@@ -58,8 +58,21 @@ pub const PlayerStatsArgs = struct {
     level: u16,
     exp_to_next: i32,
     skill_points: u16 = 0,
+    /// Stock `EntityNetworkStats.killed`, which `FillFromEntity` (IL=150)
+    /// fills from `EntityAlive.get_Died()` - the number of times this player
+    /// has DIED, not a kill count. `EntityAlive.OnEntityDeath` (IL=146) calls
+    /// `AddScore(1, 0, 0, -1, 0)` on the victim. No default: every send site
+    /// must supply the server's death ledger rather than silently reporting 0
+    /// (or, worse, a kill count).
+    deaths: i32,
     killed_zombies: i32 = 0,
-    held_item: ?stock_inv.StockSlot = null,
+    /// PvP kills (stock `EntityNetworkStats.killedPlayers`). Server-counted on
+    /// the authoritative death path, same as `killed_zombies`.
+    killed_players: i32 = 0,
+    /// The sender's held stack, or null for bare hands. No default: the
+    /// server always knows which it is, and a silent omission here reads on
+    /// the client as the player having stowed their weapon.
+    held_item: ?stock_inv.StockSlot,
 };
 
 /// Progression.Write v3 with an empty values list: version byte + Level u16 +
@@ -73,11 +86,24 @@ pub fn writeMinimalProgression(w: *binary.Writer, level: u16, exp_to_next: i32, 
     try w.writeI32(0); // ExpDeficit
 }
 
+/// NetPackagePlayerStats (RE inventories/netpackage-bodies.md, write IL=8): one
+/// `entityNetworkStats` blob. That blob is EntityNetworkStats.write (IL=104,
+/// 22 fields): `killed` i32 | holdingItemStack | holdingItemIndex u8 |
+/// deathHealth i32 | teamNumber u8 | attachedToEntityId i32 | entityName string
+/// | isPlayer bool | killedZombies i32 | killedPlayers i32 | experience i32 |
+/// level i32 | totalItemsCrafted u32 | distanceWalked f32 | longestLife f32 |
+/// currentLife f32 | totalTimePlayed f32 | vehiclePose i32 | isSpectator bool |
+/// hasProgression bool | progressionsData length i16 + bytes.
+///
+/// The five accumulators (crafted, walked, longestLife, currentLife,
+/// timePlayed) are written as 0 deliberately: stock only relays what the owning
+/// client sent, zdtd drops that blob on the authority rule, and synthesising
+/// them server-side would invent numbers stock never derived (DIVERGENCES 2).
 pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_id);
     // EntityNetworkStats fields, stock write order (IL=104).
-    try w.writeI32(args.killed_zombies); // killed
+    try w.writeI32(args.deaths); // killed (FillFromEntity: get_Died)
     if (args.held_item) |hi| {
         try stock_inv.writeItemStack(&w, hi);
     } else {
@@ -90,9 +116,25 @@ pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     try w.writeString(args.entity_name);
     try w.writeBool(true); // isPlayer
     try w.writeI32(args.killed_zombies); // killedZombies
-    try w.writeI32(0); // killedPlayers
+    try w.writeI32(args.killed_players); // killedPlayers
     try w.writeI32(args.exp_to_next); // experience (stock Setup: ExpToNextLevel)
     try w.writeI32(args.level);
+    // The five accumulator stats below are client-local by design, not gaps.
+    // RE loop.md (EntityPlayerLocal.OnUpdateLive): the *local* player accrues
+    // `currentLife += deltaTime / 60` and tracks `longestLife`/`totalTimePlayed`
+    // in minutes off its own frame delta, and reports them through the
+    // analytics/achievement path - a headless server has no frame delta and
+    // never receives them (the C2S NetPackagePlayerStats blob is accepted and
+    // dropped, since trusting it would let a client author its own stats).
+    // Divergence, recorded rather than papered over: stock's server does carry
+    // real values here, but only by relaying what the owning client sent it
+    // (`EntityNetworkStats::ToEntity` writes them onto the entity, then relays
+    // when IsServer - RE progression.md 441560ff). zdtd drops that C2S blob on
+    // the authority rule (a client must not author its own stats), so it has
+    // nothing truthful to put in these fields and sends 0. Synthesising a
+    // server-side accumulator would invent numbers stock never derived
+    // server-side (rule 3, missing beats fake). Closing this means deciding to
+    // trust the client blob, which is an ADR-level authority change.
     try w.writeU32(0); // totalItemsCrafted
     try w.writeF32(0); // distanceWalked
     try w.writeF32(0); // longestLife
@@ -117,11 +159,16 @@ test "player stats body is the stock EntityNetworkStats shape" {
         .entity_name = "Bot",
         .level = 3,
         .exp_to_next = 1000,
+        .deaths = 2,
         .killed_zombies = 5,
+        .held_item = null,
     });
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entityId
-    try std.testing.expectEqual(@as(i32, 5), try r.readI32()); // killed
+    // killed is the death count (FillFromEntity: get_Died), distinct from
+    // killedZombies. Writing the zombie count here made the client's death
+    // stat equal its zombie kills.
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed = deaths
     try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // empty ItemStack
     try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // holdingItemIndex
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // deathHealth
@@ -160,12 +207,20 @@ test "player stats body is the stock EntityNetworkStats shape" {
 /// running zombie/player kill counters.
 pub const AddScoreArgs = struct {
     entity_id: i32,
+    /// Increments for THIS event, not running totals: the client's
+    /// ProcessPackage (IL=25) hands these to EntityAlive.AddScore, which adds
+    /// them. Stock's EntityAlive.AwardKill (IL=66) sends 0/1 per kill. A
+    /// sender that passed totals made every receiving client re-add the whole
+    /// count. No defaults: a caller must state both legs explicitly.
     zombie_kills: u16,
-    player_kills: u16 = 0,
+    player_kills: u16,
     other_team_number: u16 = 0,
     conditions: i32 = 0,
 };
 
+/// NetPackageEntityAddScoreClient (RE inventories/netpackage-bodies.md, write
+/// IL=27): `entityId` i32 | `zombieKills` i16 | `playerKills` i16 |
+/// `otherTeamNumber` i16 | `conditions` i32.
 pub fn buildAddScoreBody(buf: []u8, args: AddScoreArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_id);
@@ -178,12 +233,12 @@ pub fn buildAddScoreBody(buf: []u8, args: AddScoreArgs) ![]u8 {
 
 test "add score body is the 14-byte stock shape" {
     var buf: [16]u8 = undefined;
-    const body = try buildAddScoreBody(&buf, .{ .entity_id = 42, .zombie_kills = 7 });
+    const body = try buildAddScoreBody(&buf, .{ .entity_id = 42, .zombie_kills = 7, .player_kills = 3 });
     try std.testing.expectEqual(@as(usize, 14), body.len);
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 42), try r.readI32());
     try std.testing.expectEqual(@as(i16, 7), try r.readI16());
-    try std.testing.expectEqual(@as(i16, 0), try r.readI16());
+    try std.testing.expectEqual(@as(i16, 3), try r.readI16());
     try std.testing.expectEqual(@as(i16, 0), try r.readI16());
     try std.testing.expectEqual(@as(i32, 0), try r.readI32());
 }

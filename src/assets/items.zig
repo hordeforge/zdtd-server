@@ -4,10 +4,21 @@ const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed item defs, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock items.xml defines
+/// **1413**, so this runs at 17% and has room to spare, unlike the block cap
+/// next door.
 pub const max_items: usize = 8192;
+
+/// Per-item passive_effect row cap and the pool cap across the whole file.
+/// Measured against V3.2.0 `Data/Config` (2026-09-12): 3255 `<passive_effect`
+/// rows in items.xml, the busiest item carrying 8, so both run far below cap.
+pub const max_passives_per_item: usize = 24;
+pub const max_item_passives_total: usize = 8192;
 
 /// Stock FastTags match between a passive's tag list and a drop row's tag
 /// list: an untagged passive applies to every drop; a tagged passive needs
@@ -55,6 +66,141 @@ fn typeFromBuiltinId(item_id: u16) i32 {
 /// base_set -> base=value, perc_add -> base*(1+value); a quality curve
 /// evaluates at the tool's quality (piecewise-linear, quality 1..6, RE
 /// PassiveEffect.ModValue IL=796).
+/// Per-item cap on parsed `<stat>` rows (stock items.xml peaks at 40 on one
+/// item) and the pool cap across the file.
+pub const max_gs_stats_per_item: usize = 64;
+pub const max_gs_stats_total: usize = 4096;
+
+/// Stock `ItemClass/GSStat` (`min`/`max` are the XML values divided by
+/// `gs_stat_scale` and stored as i16, so the XML precision is 1/200).
+pub const gs_stat_scale: f32 = 0.005;
+/// Stock rejects a row whose |min| or |max| reaches this (GSStatsParseXml
+/// IL_0134-0147) instead of letting the i16 cast overflow.
+pub const gs_stat_limit: f32 = 163.835;
+
+/// One `<stat name="..." value="quality,gameStage,chance,min,max"/>` row of an
+/// item's `<stats>` block (stock `ItemClass::GSStatsParseXml` IL=181). The
+/// effect stays a name: zdtd keys passive effects by name, and the wire's
+/// numeric id is resolved where the stat is written.
+pub const GsStat = struct {
+    effect: []const u8 = "",
+    quality: i16 = 0,
+    game_stage: i16 = 0,
+    chance: f32 = 0,
+    min: i16 = 0,
+    max: i16 = 0,
+};
+
+/// One rolled stat entry in the wire pair shape (`slot_a`/`slot_b`; stock's
+/// `Stat` ctor makes `isBoosted = slot_b > 0`, and the writer emits
+/// `slotA = isBoosted ? 0 : value`, `slotB = isBoosted ? value : 0`).
+pub const RolledGsStat = struct {
+    /// `PassiveEffects` ordinal (`assets/passive_effects.zig`).
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
+};
+
+/// `passive_effects`
+const passive_effects = @import("passive_effects.zig");
+const game_random = @import("../util/game_random.zig");
+
+/// One `FindGSStat` (stock `ItemClass::FindGSStat` IL=90) over the rows of one
+/// effect: the highest-stage row at or below `stage` whose `chance` gate
+/// passes. Null is stock's "not found" sentinel (the returned `quality == -1`),
+/// which the caller distinguishes from a real row by the quality it asks for.
+/// The RNG draw happens only when the matched row's `chance < 1`.
+fn findGsStat(
+    stats: []const GsStat,
+    effect: []const u8,
+    quality: i32,
+    stage_in: i32,
+    r: *game_random.GameRandom,
+) ?GsStat {
+    var stage = stage_in;
+    if (stage < 0) {
+        // Trader path: the stage comes from the first row of that quality.
+        for (stats) |s| {
+            if (!std.mem.eql(u8, s.effect, effect)) continue;
+            if (@as(i32, s.quality) == quality) {
+                stage = s.game_stage;
+                break;
+            }
+        }
+    }
+    var best: i32 = -1;
+    var i: usize = stats.len;
+    while (i > 0) {
+        i -= 1;
+        const s = stats[i];
+        if (!std.mem.eql(u8, s.effect, effect)) continue;
+        if (@as(i32, s.quality) != quality) continue;
+        const cur: i32 = s.game_stage;
+        if (cur > stage) continue;
+        if (best < 0) {
+            best = cur;
+        } else if (cur < best) {
+            return null; // stock breaks out of the loop to its sentinel
+        }
+        if (s.chance < 1) {
+            const roll: f32 = @floatCast(r.nextDouble());
+            if (!(s.chance > roll)) continue;
+        }
+        return s;
+    }
+    return null;
+}
+
+/// Stock `ItemClass::AddGSStats` (IL=100): one entry per distinct effect at
+/// `quality`/`stage`, drawing from `r` in stock's exact order - the base roll
+/// (`FindGSStat(list, 0, 0, r)` then `RandomRange(min, max+1)`), then the
+/// quality roll (`FindGSStat(list, quality, stage, r)`). The result is the
+/// summed value split by `isBoosted = added > 0`, and an entry whose sum is 0
+/// is dropped (stock's `RemoveUnusedStats`). An effect name the enum does not
+/// know is skipped (the wire has no id for it).
+pub fn rollGsStats(
+    stats: []const GsStat,
+    quality: u8,
+    stage: i32,
+    r: *game_random.GameRandom,
+    out: []RolledGsStat,
+) usize {
+    var n: usize = 0;
+    for (stats, 0..) |s, idx| {
+        // First-occurrence order, and one entry per effect (stock's dictionary).
+        var seen = false;
+        for (stats[0..idx]) |prev| {
+            if (std.mem.eql(u8, prev.effect, s.effect)) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+        var base: i32 = 0;
+        if (findGsStat(stats, s.effect, 0, 0, r)) |g0| {
+            if (g0.max >= g0.min) base = r.nextRange(g0.min, @as(i32, g0.max) + 1);
+        }
+        var added: i32 = 0;
+        if (findGsStat(stats, s.effect, quality, stage, r)) |g1| {
+            if (g1.quality > 0 and g1.max >= g1.min) {
+                added = r.nextRange(g1.min, @as(i32, g1.max) + 1);
+            }
+        }
+        if (base + added == 0) continue;
+        const ordinal = passive_effects.idOfName(s.effect) orelse continue;
+        if (n >= out.len) break;
+        // Stock casts the sum to i16 with a wrapping `conv.i2`.
+        const value: i16 = @truncate(base + added);
+        out[n] = .{
+            .effect = ordinal,
+            .slot_a = if (added > 0) 0 else value,
+            .slot_b = if (added > 0) value else 0,
+        };
+        n += 1;
+    }
+    return n;
+}
+
 pub const HarvestOp = enum(u8) { base_add, base_set, perc_add };
 
 pub const HarvestCountRow = struct {
@@ -75,7 +221,14 @@ pub const ItemDef = struct {
     /// Absolute stock ItemValue.type (ItemsStartHere + …). 0 = unknown.
     stock_type: i32 = 0,
     /// items.xml EconomicValue (0 = not tradeable).
-    econ: u16 = 0,
+    econ: f32 = 0,
+    /// items.xml `TraderQualityMod="min,max"` (4 stock rows, toolCookingPot and
+    /// toolCookingGrill variants): the quality price lerp this item uses
+    /// instead of the trader's own `quality_mod` (stock
+    /// `ItemClass.TraderQualityMinMod`/`MaxMod`, XUiM_Trader GetBuyPrice /
+    /// GetSellPrice IL_0127-0168). 0 = not declared -> the trader's pair.
+    trader_quality_min_mod: f32 = 0,
+    trader_quality_max_mod: f32 = 0,
     /// items.xml EconomicSellScale (stock `ItemClass.EconomicSellScale`,
     /// IL default 1.0; the sell price base is EconomicValue * scale, RE
     /// loot-economy.md GetSellPrice). A39.
@@ -91,6 +244,12 @@ pub const ItemDef = struct {
     /// RE items.md §7 + ItemValue.get_PercentUsesLeft (IL=17).
     degradation_min: u32 = 0,
     degradation_max: u32 = 0,
+    /// Stock `ItemClass.HasQuality` (IL=9): true when any `<effect_group>` is
+    /// owner-tiered. `MinEffectGroup.OwnerTiered` defaults to true in the ctor
+    /// and stock items.xml only ever writes `tiered="false"`, so an item has
+    /// quality unless every one of its effect groups opts out. Gates the
+    /// trader stock roll's quality substitution and `TraderMaxTier` clamp.
+    has_quality: bool = false,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
     /// items.xml DamageBlock property (hand-item block chew: zombie hand 8,
@@ -112,15 +271,30 @@ pub const ItemDef = struct {
     /// combat-damage.md). 0 segments = the item carries no row.
     phys_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     phys_resist_n: u8 = 0,
-    /// ElementalDamageResist passive (42), same curve shape. The sim's damage
-    /// chokes are physical-only today, so the PDR leg is the live one.
+    /// ElementalDamageResist passive (43, `Equipment.CalcDamage` IL=83), same
+    /// curve shape. This first-row curve is informational only: the live EDR
+    /// path folds the item's tagged rows on the damage event
+    /// (`Game.elementalDamageResist`), so a `tags="heat,electrical"` row
+    /// resists those types and not cold. The untagged rows in this curve are
+    /// the `-.2,.2` jitter, which applies to every non-physical type.
     elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     elem_resist_n: u8 = 0,
+    /// Every `<passive_effect>` row on the item, with its `effect_group` and
+    /// row gates, parsed through the shared buffs scanner. The survival tick
+    /// folds the tracked names over the equipped and held items (stock
+    /// `EffectManager.GetValue` layers 7/8), so clothing max stats, armor
+    /// resistances and boots' stamina rows apply. Empty = no rows (most items).
+    passives: []const buffs.Passive = &.{},
     /// items.xml `Tags` property (comma list): the item's mod-attachment tag
     /// surface. A mod fits when its installable_tags intersects Tags and its
     /// blocked_tags is disjoint (RE items.md ItemClassModifier suitability).
     /// "" = untagged → no mods can attach (fail closed).
     tags: []const u8 = "",
+    /// items.xml `ArmorGroup` property (stock ships one name per armor item,
+    /// e.g. groupBiker). Equipment::ResetArmorGroups (IL=51) walks worn
+    /// ItemClassArmor slots and records each item's group + quality, so this is
+    /// the tag ArmorGroupLowestQuality matches. "" = not armor-grouped.
+    armor_group: []const u8 = "",
     /// items.xml ModSlots passive (quality curve: value "1,1,1,2,2,3" sits at
     /// quality 1..6; RE items.md CalcModSlotCount IL=29 =
     /// FastMin(255, EffectManager.GetValue(ModSlots, item, Quality-1))). The
@@ -128,6 +302,12 @@ pub const ItemDef = struct {
     /// carries no row → no mods allowed (fail closed).
     mod_slots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     mod_slots_n: u8 = 0,
+    /// items.xml CraftingSmeltTime passive (PassiveEffects 95, perc_add quality
+    /// curve). Forge tools (toolBellows) scale melt duration via
+    /// ItemValue.ModifyValue in HandleMaterialInput. 0 segments = no row →
+    /// identity (scale 1). Values are perc_add deltas (e.g. -.3 → 0.7×).
+    crafting_smelt_time_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    crafting_smelt_time_n: u8 = 0,
     /// items.xml DegradationPerUse passive (base_set, stock
     /// ItemValue.UseTimes wear per use): the durability consumed by one use.
     /// 0 = no row -> the callers' 1.0 default (the pre-XML behavior).
@@ -138,6 +318,13 @@ pub const ItemDef = struct {
     /// normal/power pair (first = normal); the negative quality-curve rows
     /// are recorded, not guessed.
     stamina_loss: f32 = 0,
+    /// items.xml DismemberChance passive (144, first row value): the weapon's
+    /// dismember contribution carried on DamageSource.DismemberChance (RE
+    /// Explosion.AttackEntites IL_04F0 / ItemActionAttack.Hit IL_08E7).
+    /// Stock feeds it into EntityAlive.GetDismemberChance: >= 100 skips the
+    /// roll at flat 100, else chance = value * damagePer * the attacker's
+    /// DismemberSelfChance passive (143). 0 = unset (no dismember from it).
+    dismember_chance: f32 = 0,
     /// items.xml TargetArmor passive (163, perc_add, UNTAGGED rows only):
     /// armor penetration fraction applied to the target's mitigation
     /// (GetTotalPhysicalArmorRating IL=47: passive 163 on the attacking item
@@ -156,6 +343,11 @@ pub const ItemDef = struct {
     /// full EffectManager aggregation over worn items - the recorded
     /// passive-effects-VM non-goal; only the held-tool leg is wired here.
     harvest_rows: []const HarvestCountRow = &.{},
+    /// items.xml `<stats>` rows: the gamestage-scaled stat rolls stock applies
+    /// when the item value is created (`ItemClass::AddGSStats`). Own element
+    /// only - stock parses the item's own `<stats>`, and no stock item inherits
+    /// one (the two apparent inheritors sit in commented-out blocks).
+    stats: []const GsStat = &.{},
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two  -
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -164,6 +356,26 @@ pub const ItemDef = struct {
     place_block_name: []const u8 = "",
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
+    /// items.xml `CraftTimeValue` property (stock `ItemClass.CraftComponentTime`,
+    /// IL_061D): per-unit craft time this ingredient contributes to a recipe's
+    /// derived `craftingTime` (`Recipe::Init` IL=79 sums `time * count`). 0 =
+    /// not declared (no stock item declares it, so every stock derivation is
+    /// 0).
+    craft_component_time: f32 = 0,
+    /// items.xml Weight (forge melt units added per input item; 0 = unset).
+    weight: u16 = 0,
+    /// items.xml MeltTimePerUnit (seconds per weight unit; 0 = stock default 1).
+    melt_time_per_unit: f32 = 0,
+    /// items.xml Material (MadeOfMaterial id, e.g. Mmetal). Empty = none.
+    /// Forge melt resolves materials.xml forge_category through this.
+    material: []const u8 = "",
+    /// items.xml `SellableToTrader` (ItemClass ParseBool, default true,
+    /// inherited through Extends): a trader refuses to buy the item, which is
+    /// what greys the client's sell button and what the server enforces.
+    sellable_to_trader: bool = true,
+    /// items.xml NoScrapping: item cannot be scrap-salvaged
+    /// (GetScrapableRecipe, RE crafting-recipes.md IL=77).
+    no_scrapping: bool = false,
     /// ItemActionEat (Action0 Class=Eat) or name prefix food/drink.
     is_eat: bool = false,
     /// $foodAmountAdd from effect_group (PlayerEntityStats.Food gain).
@@ -172,6 +384,17 @@ pub const ItemDef = struct {
     food_health: f32 = 0,
     /// $waterAmountAdd from effect_group (PlayerEntityStats.Water gain).
     water_amount: f32 = 0,
+    /// items.xml `AddProgressionLevel` on eat (magazines: Unlocks a
+    /// crafting_skill and adds `level`). Empty = not a magazine. Arena-owned.
+    progression_name: []const u8 = "",
+    /// Amount added per use (stock magazines ship 1). 0 = no grant.
+    progression_add: u8 = 0,
+    /// items.xml `SetProgressionLevel` with `level="-1"` (RE minevents.md
+    /// IL=104: set ProgressionClass.MaxLevel). Stock almanacs/journals ship
+    /// one or more perk names; arena-owned slice of interned names.
+    progression_set_max: []const []const u8 = &.{},
+    /// items.xml `GiveExp` on eat (stock magazines ship 50). 0 = no XP.
+    eat_exp: u16 = 0,
     /// items.xml `DistractionTags` (EntityItem distraction; RE EntityItem::SetupDistraction
     /// + ItemClass::get_IsEatDistraction). Bits: 1 = eat, 2 = requires_contact, 4 = zombie.
     /// Stock ships only decoy (`zombie,requires_contact`).
@@ -218,6 +441,20 @@ pub const ItemTable = struct {
     stock_stacks: []const u16 = &.{},
     /// Per-item EconomicSellScale (stock ItemClass field, default 1.0; A39).
     stock_econ_scales: []const f32 = &.{},
+    /// Sandbox `MaxStackSize` option (163 `StackSizeMultiplier`, default 1.0):
+    /// stock's `ItemClass.MaxStackSizeModifier` static, which
+    /// `ItemClass.get_MaxCount()` (IL=10) multiplies into the Stacknumber for
+    /// stackable non-quality items and clamps at 30000. Set from the decoded
+    /// server code at init; 1.0 keeps every raw Stacknumber.
+    stack_size_modifier: f32 = 1,
+    /// Stock `ItemClass.MaxQualityTier` static: the `<items>` root attribute
+    /// `max_quality_tier` when present, else stock's own fallback
+    /// (`ItemClassesFromXml.CreateItems` reads the root attribute into the
+    /// static and assigns 6 when it is absent, `components.max_quality_tiers`).
+    /// V3.2.0 ships no attribute. Bounds every quality axis: the passive folds
+    /// (`itemQualityAxis`), armour PDR curves, the crafting tier clamp and
+    /// `harvestMultiplier`'s quality curve.
+    max_quality_tier: u8 = components.max_quality_tiers,
 
     pub fn deinit(self: *ItemTable) void {
         if (self.arena_ptr) |ap| {
@@ -278,6 +515,17 @@ pub const ItemTable = struct {
         return @trunc(@min(v, 255.0));
     }
 
+    /// Stock HandleMaterialInput tools path (PassiveEffects 95 CraftingSmeltTime):
+    /// ItemValue.ModifyValue with perc_add → duration *= (1 + curve[quality]).
+    /// No row → identity 1. Quality 0 treats as tier 1 (same as ModSlots).
+    pub fn craftingSmeltTimeScale(self: *const ItemTable, item_id: u16, quality: u8) f32 {
+        const d = self.byId(item_id) orelse return 1.0;
+        if (d.crafting_smelt_time_n == 0) return 1.0;
+        const q: usize = if (quality == 0) 1 else quality;
+        const idx = @min(q, @as(usize, d.crafting_smelt_time_n)) - 1;
+        return 1.0 + d.crafting_smelt_time_curve[idx];
+    }
+
     /// Stock ItemValue.type → item name (reverse of stockTypeFor). Walks the
     /// defs; used off the hot path for trust-boundary checks (workstation queue
     /// validation). Builtin rows carry no stock type, so this only resolves
@@ -295,6 +543,67 @@ pub const ItemTable = struct {
         return 0;
     }
 
+    /// One extra item class to register (item_modifiers.xml row): the fields
+    /// the modifier carries as an ItemClass (name, Stacknumber, EconomicValue,
+    /// HasQuality).
+    pub const ItemClassStub = struct {
+        name: []const u8,
+        econ: f32 = 0,
+        stack: u16 = 1,
+        has_quality: bool = false,
+    };
+
+    /// Register extra item classes that stock loads from a sibling catalog.
+    /// `item_modifiers.xml` `<item_modifier>` rows are `ItemClassModifier`
+    /// item classes in the same id space as `<item>` rows: stock runs
+    /// `XmlLoadInfo` 9 (`items`) then 10 (`item_modifiers`) and
+    /// `LateInitItems` -> `assignIdsLinear` -> `assignLeftOverItems` hands the
+    /// leftover ids to the unassigned list in that order (RE items.md
+    /// load-time id assignment). The wire carries installed mods as nested
+    /// `ItemValue`s referring to those ids, so the ECS table and the join
+    /// `IdMapping` have to know them; without this a looted gun's `mods=` roll
+    /// (or a client-attached mod) resolves to nothing and fails closed.
+    ///
+    /// `classes` is item_modifiers.xml document order with each row's econ,
+    /// stack and quality flag (the mod is an ItemClassModifier item class, so
+    /// those item properties apply to it). No-op for the builtin fixture
+    /// catalog, which has no arena and no stock id space. Ownership: the
+    /// caller keeps `classes`; the table dupes the strings into its arena.
+    pub fn addItemClasses(self: *ItemTable, classes: []const ItemClassStub) !void {
+        const ap = self.arena_ptr orelse return;
+        if (classes.len == 0) return;
+        if (self.stock_names.len + classes.len > max_items) return error.TooManyItems;
+        const arena = ap.allocator();
+        var next_id: u16 = 1;
+        for (self.defs) |d| next_id = @max(next_id, d.id +| 1);
+        var next_stock: i32 = stock_first_item_type;
+        for (self.stock_types) |st| next_stock = @max(next_stock, st + 1);
+        const defs = try arena.alloc(ItemDef, self.defs.len + classes.len);
+        @memcpy(defs[0..self.defs.len], self.defs);
+        const sn = try arena.alloc([]const u8, self.stock_names.len + classes.len);
+        @memcpy(sn[0..self.stock_names.len], self.stock_names);
+        const st = try arena.alloc(i32, self.stock_names.len + classes.len);
+        @memcpy(st[0..self.stock_types.len], self.stock_types);
+        for (classes, 0..) |cl, i| {
+            const name = try arena.dupe(u8, cl.name);
+            defs[self.defs.len + i] = .{
+                .id = next_id,
+                .name = name,
+                .stack = cl.stack,
+                .stock_type = next_stock,
+                .econ = cl.econ,
+                .has_quality = cl.has_quality,
+            };
+            sn[self.stock_names.len + i] = name;
+            st[self.stock_types.len + i] = next_stock;
+            next_id +%= 1;
+            next_stock += 1;
+        }
+        self.defs = defs;
+        self.stock_names = sn;
+        self.stock_types = st;
+    }
+
     /// Held-tool HarvestCount multiplier for one drop row (RE GameUtils.
     /// HarvestOnAttack IL=623: count = trunc(rolled * GetValue(141, tool,
     /// 1, holder, null, dropTag))). Rows whose tag set intersects the drop
@@ -310,7 +619,7 @@ pub const ItemTable = struct {
         for (d.harvest_rows) |r| {
             if (!tagsIntersect(r.tags, drop_tags)) continue;
             const v = if (r.curve_n > 0)
-                buffs.curveValueAt(quality, components.max_quality_tiers, r.curve[0..r.curve_n])
+                buffs.curveValueAt(quality, self.max_quality_tier, r.curve[0..r.curve_n])
             else
                 r.value;
             switch (r.op) {
@@ -333,12 +642,37 @@ pub const ItemTable = struct {
         return null;
     }
 
-    /// Max stack for an ECS item id (items.xml Stacknumber when loaded).
+    /// Sandbox `MaxStackSize` (option 163). Stock pushes the decoded value into
+    /// the `ItemClass.MaxStackSizeModifier` static
+    /// (SandboxOptionManager IL_0466-0470); 1.0 is the fast path.
+    pub fn setStackSizeModifier(self: *ItemTable, v: f32) void {
+        self.stack_size_modifier = if (v > 0) v else 1;
+    }
+
+    /// Max stack for an ECS item id: stock `ItemClass.get_MaxCount()` (IL=10).
+    /// With the sandbox modifier at 1 (or an item that has quality, or one that
+    /// cannot stack) the raw Stacknumber is returned; otherwise it is scaled and
+    /// clamped at 30000. Quality items are weapons and tools whose stack of 1
+    /// must not follow the option, which is why the check sits inside the
+    /// non-default path in stock too.
     pub fn stackFor(self: *const ItemTable, item_id: u16) u16 {
-        if (self.byId(item_id)) |d| {
-            if (d.stack > 0) return d.stack;
-        }
-        return 1;
+        const d = self.byId(item_id) orelse return 1;
+        if (!(d.stack > 0)) return 1;
+        if (self.stack_size_modifier == 1) return d.stack;
+        if (d.has_quality) return d.stack;
+        if (!(d.stack > 1)) return d.stack;
+        const scaled = fastRoundToInt(@as(f32, @floatFromInt(d.stack)) * self.stack_size_modifier);
+        if (scaled <= 0) return 1;
+        return @intCast(@min(scaled, max_scaled_stack));
+    }
+
+    /// Stock `ItemClass.HasQuality` (IL=9) for an items.xml name. The trader
+    /// stock roll keys off names, so this is the name-side lookup. An unknown
+    /// name has no quality (fail closed: a rolled quality on a stackable is
+    /// worse than none).
+    pub fn hasQualityByName(self: *const ItemTable, name: []const u8) bool {
+        if (self.byName(name)) |d| return d.has_quality;
+        return false;
     }
 
     /// FuelValue from items.xml (0 if unset / not a fuel item).
@@ -347,6 +681,24 @@ pub const ItemTable = struct {
             if (d.fuel_value > 0) return d.fuel_value;
         }
         return 0;
+    }
+
+    /// Weight from items.xml (forge melt units per input item; 0 if unset).
+    pub fn weightFor(self: *const ItemTable, item_id: u16) u16 {
+        if (self.byId(item_id)) |d| return d.weight;
+        return 0;
+    }
+
+    /// MeltTimePerUnit from items.xml (seconds per weight unit; 0 → stock default 1).
+    pub fn meltTimePerUnitFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| return d.melt_time_per_unit;
+        return 0;
+    }
+
+    /// items.xml Material id (MadeOfMaterial); empty when unset.
+    pub fn materialFor(self: *const ItemTable, item_id: u16) []const u8 {
+        if (self.byId(item_id)) |d| return d.material;
+        return "";
     }
 
     /// True if item is ItemActionEat consumable (or builtin food/medicine).
@@ -372,6 +724,8 @@ pub const ItemTable = struct {
     pub fn isEat(self: *const ItemTable, item_id: u16) bool {
         if (self.byId(item_id)) |d| {
             if (d.is_eat) return true;
+            if (d.progression_add > 0 and d.progression_name.len > 0) return true;
+            if (d.progression_set_max.len > 0) return true;
             if (d.food_amount > 0 or d.water_amount > 0) return true;
             // Offline name heuristic for food*/drink* without parsed Action0.
             // After items.xml load, missing Action0 fails closed (wrong eat
@@ -590,7 +944,133 @@ fn firstCvarAdd(body: []const u8, cvar: []const u8) ?f32 {
     return null;
 }
 
+/// First `AddProgressionLevel` triggered_effect: (progression_name, level).
+/// Magazines ship `level="1"` (add 1, clamped to class max). Absolute
+/// `SetProgressionLevel` rows are collected separately via
+/// `collectProgressionSetMax`.
+fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "AddProgressionLevel")) {
+            i = ti + 10;
+            continue;
+        }
+        const pname = xml.attr(win, 0, "progression_name") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const raw = xml.attr(win, 0, "level") orelse "1";
+        const lvl = xml.parseI32Prefix(raw) orelse 1;
+        if (lvl <= 0) {
+            i = ti + 10;
+            continue;
+        }
+        const add: u8 = if (lvl > 255) 255 else @intCast(lvl);
+        return .{ pname, add };
+    }
+    return null;
+}
+
+/// Collect `SetProgressionLevel` names with `level="-1"` (RE minevents.md
+/// IL=104: set ProgressionClass.MaxLevel). Stock ships only `-1`; other
+/// levels are omitted rather than guessed. Arena owns the returned names.
+fn collectProgressionSetMax(arena: std.mem.Allocator, body: []const u8) ![]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    // Names live in the items arena; only the list storage needs teardown on error.
+    errdefer names.deinit(arena);
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "SetProgressionLevel")) {
+            i = ti + 10;
+            continue;
+        }
+        const pname = xml.attr(win, 0, "progression_name") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const raw = xml.attr(win, 0, "level") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const lvl = xml.parseI32Prefix(raw) orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (lvl != -1) {
+            i = ti + 10;
+            continue;
+        }
+        try names.append(arena, try arena.dupe(u8, pname));
+        i = ti + 10;
+    }
+    if (names.items.len == 0) {
+        names.deinit(arena);
+        return &.{};
+    }
+    return try names.toOwnedSlice(arena);
+}
+
+/// First `GiveExp` triggered_effect exp amount. Magazines ship 50.
+/// Cvar-backed GiveExp is not modelled (stock magazines use a literal).
+fn firstGiveExp(body: []const u8) u16 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "GiveExp")) {
+            i = ti + 10;
+            continue;
+        }
+        const raw = xml.attr(win, 0, "exp") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const n = xml.parseI32Prefix(raw) orelse 0;
+        if (n <= 0) {
+            i = ti + 10;
+            continue;
+        }
+        return if (n > 65535) 65535 else @intCast(n);
+    }
+    return 0;
+}
+
 /// Builtin ECS catalog (stable small ids for sim/save).
+/// Stock's clamp on a sandbox-scaled stack (ItemClass.get_MaxCount IL_003F).
+pub const max_scaled_stack: i32 = 30000;
+
+/// `Utils::FastRoundToInt` (IL=1616): `(int)Math.Round((double)f)`, i.e. .NET's
+/// default midpoint-to-even rounding - not away-from-zero. A 7.5 product is 8
+/// and a 6.5 product is 6, which matters because the stock MaxStackSize
+/// multipliers include .25/.5/.75/1.25/1.5/1.75/2.5.
+fn fastRoundToInt(v: f32) i32 {
+    const f = @floor(v);
+    if (v - f == 0.5) {
+        // Midpoint: the even neighbour wins.
+        return @intFromFloat(if (@mod(f, 2.0) == 0) f else f + 1);
+    }
+    return @intFromFloat(@round(v));
+}
+
 pub const builtin_defs = [_]ItemDef{
     .{ .id = 0, .name = "none", .stack = 0 },
     .{ .id = 1, .name = "scrap", .stack = 60000, .stock_type = 0 },
@@ -628,6 +1108,25 @@ pub fn builtinStockName(item_id: u16) ?[]const u8 {
 
 /// Load items.xml: assign stock types like ItemClass.assignLeftOverItems
 /// (first free id = ItemsStartHere+1, then sequential in document order).
+/// Body of an item element's `<stats>` child, or null when it is absent or
+/// self-closing (stock scans `_element.Elements("stats")`).
+/// `<property value="true"/>`: stock's XML bool for an item property, null
+/// when the text is neither spelling (the caller keeps the default).
+fn boolProp(v: []const u8) ?bool {
+    const t = std.mem.trim(u8, v, " \t\r\n");
+    if (std.ascii.eqlIgnoreCase(t, "true") or std.mem.eql(u8, t, "1")) return true;
+    if (std.ascii.eqlIgnoreCase(t, "false") or std.mem.eql(u8, t, "0")) return false;
+    return null;
+}
+
+fn itemStatsBody(body: []const u8) ?[]const u8 {
+    const si = std.mem.findPos(u8, body, 0, "<stats") orelse return null;
+    const gt = std.mem.findPos(u8, body, si, ">") orelse return null;
+    if (gt == si or body[gt - 1] == '/') return null;
+    const close = std.mem.findPos(u8, body, gt, "</stats>") orelse return null;
+    return body[gt + 1 .. close];
+}
+
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -651,7 +1150,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer own_stacks.deinit(allocator);
     var ext_names: std.ArrayList([]const u8) = .empty;
     defer ext_names.deinit(allocator);
-    var stock_econs: std.ArrayList(u16) = .empty;
+    var stock_econs: std.ArrayList(f32) = .empty;
     defer stock_econs.deinit(allocator);
     var stock_econ_declared: std.ArrayList(bool) = .empty;
     defer stock_econ_declared.deinit(allocator);
@@ -661,6 +1160,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_bundle_declared.deinit(allocator);
     var stock_econ_scales: std.ArrayList(f32) = .empty;
     defer stock_econ_scales.deinit(allocator);
+    var stock_tq_min: std.ArrayList(f32) = .empty;
+    defer stock_tq_min.deinit(allocator);
+    var stock_tq_max: std.ArrayList(f32) = .empty;
+    defer stock_tq_max.deinit(allocator);
+    var stock_tq_declared: std.ArrayList(bool) = .empty;
+    defer stock_tq_declared.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
     var stock_place_names: std.ArrayList([]const u8) = .empty;
@@ -673,6 +1178,26 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_melee_ranges.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
+    var stock_craft_times: std.ArrayList(f32) = .empty;
+    defer stock_craft_times.deinit(allocator);
+    var stock_weights: std.ArrayList(u16) = .empty;
+    defer stock_weights.deinit(allocator);
+    var stock_weight_declared: std.ArrayList(bool) = .empty;
+    defer stock_weight_declared.deinit(allocator);
+    var stock_melt_times: std.ArrayList(f32) = .empty;
+    defer stock_melt_times.deinit(allocator);
+    var stock_melt_declared: std.ArrayList(bool) = .empty;
+    defer stock_melt_declared.deinit(allocator);
+    var stock_materials: std.ArrayList([]const u8) = .empty;
+    defer stock_materials.deinit(allocator);
+    var stock_material_declared: std.ArrayList(bool) = .empty;
+    defer stock_material_declared.deinit(allocator);
+    var stock_no_scrapping: std.ArrayList(bool) = .empty;
+    defer stock_no_scrapping.deinit(allocator);
+    var stock_sellable: std.ArrayList(bool) = .empty;
+    defer stock_sellable.deinit(allocator);
+    var stock_sellable_declared: std.ArrayList(bool) = .empty;
+    defer stock_sellable_declared.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
     defer stock_is_eat.deinit(allocator);
     var stock_food_amt: std.ArrayList(f32) = .empty;
@@ -681,6 +1206,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_food_hp.deinit(allocator);
     var stock_water_amt: std.ArrayList(f32) = .empty;
     defer stock_water_amt.deinit(allocator);
+    var stock_prog_name: std.ArrayList([]const u8) = .empty;
+    defer stock_prog_name.deinit(allocator);
+    var stock_prog_add: std.ArrayList(u8) = .empty;
+    defer stock_prog_add.deinit(allocator);
+    var stock_prog_set_max: std.ArrayList([]const []const u8) = .empty;
+    defer stock_prog_set_max.deinit(allocator);
+    var stock_eat_exp: std.ArrayList(u16) = .empty;
+    defer stock_eat_exp.deinit(allocator);
     var stock_dtags: std.ArrayList(u8) = .empty;
     defer stock_dtags.deinit(allocator);
     var stock_dradius: std.ArrayList(f32) = .empty;
@@ -696,18 +1229,29 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_mslots_curves.deinit(allocator);
     var stock_mslots_n: std.ArrayList(u8) = .empty;
     defer stock_mslots_n.deinit(allocator);
+    var stock_smelt_curves: std.ArrayList([buffs.max_curve_len]f32) = .empty;
+    defer stock_smelt_curves.deinit(allocator);
+    var stock_smelt_n: std.ArrayList(u8) = .empty;
+    defer stock_smelt_n.deinit(allocator);
     var stock_tags: std.ArrayList([]const u8) = .empty;
     defer stock_tags.deinit(allocator);
+    var stock_armor_group: std.ArrayList([]const u8) = .empty;
+    defer stock_armor_group.deinit(allocator);
     var stock_degrad_per_use: std.ArrayList(f32) = .empty;
     defer stock_degrad_per_use.deinit(allocator);
     var stock_stamina_loss: std.ArrayList(f32) = .empty;
     defer stock_stamina_loss.deinit(allocator);
+    var stock_dismember_chance: std.ArrayList(f32) = .empty;
+    defer stock_dismember_chance.deinit(allocator);
     var stock_target_armor: std.ArrayList(f32) = .empty;
     defer stock_target_armor.deinit(allocator);
     var stock_target_armor_tagged: std.ArrayList(f32) = .empty;
     defer stock_target_armor_tagged.deinit(allocator);
     var stock_target_armor_tag: std.ArrayList([]const u8) = .empty;
     defer stock_target_armor_tag.deinit(allocator);
+    var stock_gs_stats: std.ArrayList([]const GsStat) = .empty;
+    defer stock_gs_stats.deinit(allocator);
+    var gs_stats_total: usize = 0;
     var stock_harvest_rows: std.ArrayList([]const HarvestCountRow) = .empty;
     defer stock_harvest_rows.deinit(allocator);
     defer stock_dradius.deinit(allocator);
@@ -721,6 +1265,22 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_degrad_min.deinit(allocator);
     var stock_degrad_max: std.ArrayList(u32) = .empty;
     defer stock_degrad_max.deinit(allocator);
+    var stock_has_quality: std.ArrayList(bool) = .empty;
+    defer stock_has_quality.deinit(allocator);
+    var stock_effect_group_declared: std.ArrayList(bool) = .empty;
+    defer stock_effect_group_declared.deinit(allocator);
+    // Full `<passive_effect>` surface per item (same rows and gates buffs
+    // carry). The survival VM folds the tracked names over the equipped and
+    // held items; the dedicated PDR/EDR curve fields above stay the source for
+    // those two names (armorMitigation owns them).
+    var stock_passive_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer stock_passive_ranges.deinit(allocator);
+    var passives_pool: std.ArrayList(buffs.Passive) = .empty;
+    defer passives_pool.deinit(allocator);
+    var passive_reqs_pool: std.ArrayList(requirements.Requirement) = .empty;
+    defer passive_reqs_pool.deinit(allocator);
+    var passive_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer passive_req_ranges.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -748,10 +1308,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try own_stacks.append(allocator, if (stack_own != null) stack else 0);
             const ext = xml.propertyValue(clean[ii..item_end], "Extends");
             try ext_names.append(allocator, if (ext) |e| try arena.dupe(u8, e) else "");
-            var econ: u16 = 0;
+            // Single, not an integer: stock fields EconomicValue as `Single`
+            // and parses it with ParseFloat (ItemClass IL_0666), so a modlet
+            // can price an item above 65535 or with a fraction. Typing this
+            // u16 turned either into 0, i.e. "not purchasable".
+            var econ: f32 = 0;
             var econ_declared = false;
             if (xml.propertyValue(clean[ii..item_end], "EconomicValue")) |v| {
-                econ = xml.parseU16(v) orelse 0;
+                econ = xml.parseF32(v) orelse 0;
                 econ_declared = true;
             }
             try stock_econs.append(allocator, econ);
@@ -768,6 +1332,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_bundles.append(allocator, bundle);
             try stock_bundle_declared.append(allocator, bundle_declared);
             // A39: EconomicSellScale (default 1.0 = stock ItemClass ctor IL).
+            // TraderQualityMod: a "min,max" pair (or the two separate keys a
+            // modlet may use). Either value present marks the row declared, so
+            // an explicit 1 is honoured over the trader's pair.
+            var tq_min: f32 = 0;
+            var tq_max: f32 = 0;
+            var tq_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMod")) |v| {
+                var it = std.mem.splitScalar(u8, v, ',');
+                if (it.next()) |lo| tq_min = xml.parseF32(std.mem.trim(u8, lo, " \t")) orelse 0;
+                if (it.next()) |hi| tq_max = xml.parseF32(std.mem.trim(u8, hi, " \t")) orelse tq_min;
+                if (tq_max == 0) tq_max = tq_min;
+                tq_declared = true;
+            }
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMinMod")) |v| {
+                tq_min = xml.parseF32(v) orelse tq_min;
+                tq_declared = true;
+            }
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMaxMod")) |v| {
+                tq_max = xml.parseF32(v) orelse tq_max;
+                tq_declared = true;
+            }
+            try stock_tq_min.append(allocator, tq_min);
+            try stock_tq_max.append(allocator, tq_max);
+            try stock_tq_declared.append(allocator, tq_declared);
             var econ_scale: f32 = 1.0;
             if (xml.propertyValue(clean[ii..item_end], "EconomicSellScale")) |v| {
                 econ_scale = xml.parseF32(v) orelse 1.0;
@@ -825,8 +1413,81 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 fuel = xml.parseF32(v) orelse 0;
             }
             try stock_fuels.append(allocator, fuel);
+            // Stock `ItemClass.CraftComponentTime` (IL_061D): the
+            // `CraftTimeValue` property, parsed with TryParseFloat (a bad
+            // value leaves the 0 default, like the FuelValue arm above).
+            var cct: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "CraftTimeValue")) |v| {
+                cct = xml.parseF32(v) orelse 0;
+            }
+            try stock_craft_times.append(allocator, cct);
+            var weight: u16 = 0;
+            var weight_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "Weight")) |v| {
+                weight_declared = true;
+                const w = xml.parseF32(v) orelse 0;
+                if (w > 0 and w <= @as(f32, @floatFromInt(std.math.maxInt(u16)))) {
+                    weight = @trunc(w);
+                }
+            }
+            try stock_weights.append(allocator, weight);
+            try stock_weight_declared.append(allocator, weight_declared);
+            var melt_t: f32 = 0;
+            var melt_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "MeltTimePerUnit")) |v| {
+                melt_declared = true;
+                melt_t = xml.parseF32(v) orelse 0;
+            }
+            try stock_melt_times.append(allocator, melt_t);
+            try stock_melt_declared.append(allocator, melt_declared);
+            // items.xml Material → MadeOfMaterial; forge melt looks up
+            // materials.xml forge_category through this id.
+            var mat_name: []const u8 = "";
+            var mat_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "Material")) |mv| {
+                mat_declared = true;
+                mat_name = try arena.dupe(u8, mv);
+            }
+            try stock_materials.append(allocator, mat_name);
+            try stock_material_declared.append(allocator, mat_declared);
+            // items.xml NoScrapping: GetScrapableRecipe rejects these.
+            var no_scrap = false;
+            if (xml.propertyValue(clean[ii..item_end], "NoScrapping")) |v| {
+                no_scrap = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
+            }
+            try stock_no_scrapping.append(allocator, no_scrap);
+            // items.xml SellableToTrader (ItemClass ParseBool; default true):
+            // the trader refuses to buy these, so the sell path gates on it.
+            var sellable = true;
+            var sellable_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "SellableToTrader")) |v| {
+                sellable = boolProp(v) orelse true;
+                sellable_declared = true;
+            }
+            try stock_sellable.append(allocator, sellable);
+            try stock_sellable_declared.append(allocator, sellable_declared);
             // ItemActionEat: Action0 Class=Eat + effect_group cvars.
             const body = clean[ii..item_end];
+            // Every `<passive_effect>` row on the item, through the buffs
+            // scanner (rows and gates have one shape across both files).
+            // Truncation is silent per item; the total is capped so a crafted
+            // items.xml cannot exhaust the arena. The scanner takes the element
+            // BODY (as buffs passes the `<buff>` body), so the enclosing
+            // `<item>` tag is skipped here; a self-closing `<item/>` has none.
+            {
+                const p0 = passives_pool.items.len;
+                const budget = @min(p0 + max_passives_per_item, max_item_passives_total);
+                if (std.mem.findPos(u8, body, 0, ">")) |igt| {
+                    const inner_start = igt + 1;
+                    if (!(igt > 0 and body[igt - 1] == '/')) {
+                        const inner_end = std.mem.findPos(u8, body, inner_start, "</item>") orelse body.len;
+                        if (budget > p0 and inner_end > inner_start) {
+                            _ = try buffs.scanPassives(allocator, arena, body[inner_start..inner_end], &passives_pool, &passive_reqs_pool, &passive_req_ranges, budget);
+                        }
+                    }
+                }
+                try stock_passive_ranges.append(allocator, .{ p0, passives_pool.items.len - p0 });
+            }
             var is_eat = itemActionClassIs(body, "Eat");
             const food_amt: f32 = firstCvarAdd(body, "$foodAmountAdd") orelse 0;
             // HP on consume: food items carry `foodHealthAmount`; medical
@@ -836,12 +1497,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 firstCvarAdd(body, "medicalRegHealthAmount") orelse 0;
             const water_amt: f32 = firstCvarAdd(body, "$waterAmountAdd") orelse 0;
             if (!is_eat and (food_amt > 0 or water_amt > 0)) is_eat = true;
-            if (!is_eat and (std.mem.startsWith(u8, name, "food") or std.mem.startsWith(u8, name, "drink")))
+            // No name heuristic here: stock's eatability is the presence of an
+            // `ItemActionEat` (ItemClass.Action0/1), and a `food*`/`drink*`
+            // prefix marked four real stock rows eatable - the
+            // `foodCanShamSchematic` unlock, the `foodRawMeatBundle` open-bundle
+            // action and the empty jars (`drinkJarEmpty` collects water,
+            // `drinkJarGrey` has no action) - so moving one on the C2S
+            // inventory path read as a meal and restored hunger/water.
+            var prog_name: []const u8 = "";
+            var prog_add: u8 = 0;
+            if (firstProgressionAdd(body)) |pg| {
+                prog_name = try arena.dupe(u8, pg[0]);
+                prog_add = pg[1];
                 is_eat = true;
+            }
+            const prog_set_max = try collectProgressionSetMax(arena, body);
+            if (prog_set_max.len > 0) is_eat = true;
             try stock_is_eat.append(allocator, is_eat);
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
+            try stock_prog_name.append(allocator, prog_name);
+            try stock_prog_add.append(allocator, prog_add);
+            try stock_prog_set_max.append(allocator, prog_set_max);
+            try stock_eat_exp.append(allocator, firstGiveExp(body));
             // EntityItem distraction (stock decoy: `zombie,requires_contact`).
             var dtags: u8 = 0;
             if (xml.propertyValue(body, "DistractionTags")) |v| {
@@ -897,9 +1576,20 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             }
             try stock_mslots_curves.append(allocator, mslots_curve);
             try stock_mslots_n.append(allocator, mslots_n);
+            // CraftingSmeltTime (PassiveEffects 95, perc_add quality curve):
+            // forge tools (toolBellows) scale melt duration. 0 = no row.
+            var smelt_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var smelt_n: u8 = 0;
+            const smelt_v = xml.passiveEffectValue(body, "CraftingSmeltTime");
+            if (smelt_v) |v| {
+                smelt_n = buffs.parseCurveValue(v, &smelt_curve);
+            }
+            try stock_smelt_curves.append(allocator, smelt_curve);
+            try stock_smelt_n.append(allocator, smelt_n);
             // Tags property: the mod-attachment tag surface (comma list).
             const tags = xml.propertyValue(body, "Tags") orelse "";
             try stock_tags.append(allocator, tags);
+            try stock_armor_group.append(allocator, xml.propertyValue(body, "ArmorGroup") orelse "");
             // DegradationPerUse (base_set): the per-use durability wear.
             // The 3 perc_add rows are the modifier form - recorded.
             var degrad_per_use: f32 = 0;
@@ -933,6 +1623,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 if (xml.attr(row, 0, "value")) |v| stamina_loss = xml.parseF32(v) orelse 0;
             }
             try stock_stamina_loss.append(allocator, stamina_loss);
+            // DismemberChance (144): first row value, same first-match rule
+            // as StaminaLoss above. Perk-tagged rows (e.g. perkMiner69r) are
+            // the attacker's DismemberSelfChance side, not the weapon's, so
+            // they do not belong here; only an untagged row counts.
+            var dismember_chance: f32 = 0;
+            var di: usize = 0;
+            while (di < body.len) {
+                const pi = std.mem.findPos(u8, body, di, "<passive_effect") orelse break;
+                const pname = xml.attr(body, pi, "name") orelse {
+                    di = pi + 15;
+                    continue;
+                };
+                if (!std.mem.eql(u8, pname, "DismemberChance")) {
+                    di = pi + 15;
+                    continue;
+                }
+                if (xml.attr(body, pi, "tags") != null) {
+                    di = pi + 15;
+                    continue;
+                }
+                if (xml.attr(body, pi, "value")) |v| dismember_chance = xml.parseF32(v) orelse 0;
+                break;
+            }
+            try stock_dismember_chance.append(allocator, dismember_chance);
             try stock_target_armor.append(allocator, target_armor);
             try stock_target_armor_tagged.append(allocator, target_armor_tagged);
             try stock_target_armor_tag.append(allocator, target_armor_tag);
@@ -980,6 +1694,63 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             } else {
                 try stock_harvest_rows.append(allocator, &.{});
             }
+            // `<stats>`: the gamestage-scaled stat rows (stock
+            // ItemClass::GSStatsParseXml IL=181). A row needs a name and at
+            // least five comma fields; stock rejects a row whose |min| or |max|
+            // reaches 163.835 rather than overflow the i16 cast, and so does
+            // this parse.
+            var gs_rows: std.ArrayList(GsStat) = .empty;
+            defer gs_rows.deinit(allocator);
+            if (itemStatsBody(body)) |sbody| {
+                var sp: usize = 0;
+                while (sp < sbody.len and gs_rows.items.len < max_gs_stats_per_item and
+                    gs_stats_total < max_gs_stats_total)
+                {
+                    const sti = std.mem.findPos(u8, sbody, sp, "<stat ") orelse break;
+                    const sname = xml.attr(sbody, sti, "name") orelse {
+                        sp = sti + 6;
+                        continue;
+                    };
+                    const sval = xml.attr(sbody, sti, "value") orelse {
+                        sp = sti + 6;
+                        continue;
+                    };
+                    sp = sti + 6;
+                    if (sname.len == 0 or sval.len == 0) continue;
+                    var parts: [5][]const u8 = undefined;
+                    var pn: usize = 0;
+                    var vit = std.mem.splitScalar(u8, sval, ',');
+                    while (vit.next()) |raw| {
+                        if (pn >= parts.len) break;
+                        parts[pn] = std.mem.trim(u8, raw, " \t");
+                        pn += 1;
+                    }
+                    if (pn < parts.len) continue;
+                    const quality = std.fmt.parseInt(i16, parts[0], 10) catch continue;
+                    const game_stage = std.fmt.parseInt(i16, parts[1], 10) catch continue;
+                    const chance = xml.parseF32(parts[2]) orelse continue;
+                    const vmin = xml.parseF32(parts[3]) orelse continue;
+                    const vmax = xml.parseF32(parts[4]) orelse continue;
+                    if (@abs(vmin) >= gs_stat_limit or @abs(vmax) >= gs_stat_limit) continue;
+                    try gs_rows.append(allocator, .{
+                        .effect = try arena.dupe(u8, sname),
+                        .quality = quality,
+                        .game_stage = game_stage,
+                        .chance = chance,
+                        // C# `(short)float` truncates toward zero.
+                        .min = @intFromFloat(@trunc(vmin / gs_stat_scale)),
+                        .max = @intFromFloat(@trunc(vmax / gs_stat_scale)),
+                    });
+                }
+            }
+            if (gs_rows.items.len > 0) {
+                const slice = try arena.alloc(GsStat, gs_rows.items.len);
+                @memcpy(slice, gs_rows.items);
+                gs_stats_total += slice.len;
+                try stock_gs_stats.append(allocator, slice);
+            } else {
+                try stock_gs_stats.append(allocator, &.{});
+            }
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
@@ -1001,6 +1772,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             }
             try stock_degrad_min.append(allocator, dmin);
             try stock_degrad_max.append(allocator, dmax);
+            // ItemClass.HasQuality (IL=9): any owner-tiered effect_group. An
+            // item declaring no effect_group of its own inherits its parent's
+            // answer through the Extends pass below.
+            try stock_has_quality.append(allocator, xml.hasTieredEffectGroup(body));
+            try stock_effect_group_declared.append(allocator, xml.hasEffectGroup(body));
             try stock_dtags.append(allocator, dtags);
             try stock_dradius.append(allocator, dradius);
             try stock_dlifetime.append(allocator, dlifetime);
@@ -1024,16 +1800,50 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     {
         var own_stack_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_stack_map.deinit(allocator);
-        var own_econ_map: std.StringHashMapUnmanaged(u16) = .{};
+        var own_sellable_map: std.StringHashMapUnmanaged(bool) = .{};
+        defer own_sellable_map.deinit(allocator);
+        var own_tq_min_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_tq_min_map.deinit(allocator);
+        var own_tq_max_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_tq_max_map.deinit(allocator);
+        var own_econ_map: std.StringHashMapUnmanaged(f32) = .{};
         defer own_econ_map.deinit(allocator);
         var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_bundle_map.deinit(allocator);
+        var own_weight_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_weight_map.deinit(allocator);
+        var own_melt_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_melt_map.deinit(allocator);
+        var own_material_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer own_material_map.deinit(allocator);
+        // Hand-item Range / DamageBlock and the item Tags list inherit too
+        // (meleeHandZombieFeral takes its parent's Action0 Range; the loot mod
+        // roll and the attachment scrub read the inherited Tags).
+        var own_range_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_range_map.deinit(allocator);
+        var own_dmgblock_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_dmgblock_map.deinit(allocator);
+        var own_tags_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer own_tags_map.deinit(allocator);
         var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
             if (stock_econ_declared.items[idx]) try own_econ_map.put(allocator, n, stock_econs.items[idx]);
+            if (stock_tq_declared.items[idx]) {
+                try own_tq_min_map.put(allocator, n, stock_tq_min.items[idx]);
+                try own_tq_max_map.put(allocator, n, stock_tq_max.items[idx]);
+            }
+            if (stock_sellable_declared.items[idx]) try own_sellable_map.put(allocator, n, stock_sellable.items[idx]);
             if (stock_bundle_declared.items[idx]) try own_bundle_map.put(allocator, n, stock_bundles.items[idx]);
+            if (stock_weight_declared.items[idx]) try own_weight_map.put(allocator, n, stock_weights.items[idx]);
+            if (stock_melt_declared.items[idx]) try own_melt_map.put(allocator, n, stock_melt_times.items[idx]);
+            if (stock_material_declared.items[idx]) try own_material_map.put(allocator, n, stock_materials.items[idx]);
+            // 0 = "unset" for both props (consumers fail closed to the rules
+            // floor), so a declared 0 needs no own-map entry.
+            if (stock_melee_ranges.items[idx] != 0) try own_range_map.put(allocator, n, stock_melee_ranges.items[idx]);
+            if (stock_dmg_blocks.items[idx] != 0) try own_dmgblock_map.put(allocator, n, stock_dmg_blocks.items[idx]);
+            if (stock_tags.items[idx].len > 0) try own_tags_map.put(allocator, n, stock_tags.items[idx]);
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
         const max_hops: usize = 24;
@@ -1043,6 +1853,29 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             while (hops < max_hops) : (hops += 1) {
                 if (own_stack_map.get(cur)) |s| {
                     stock_stacks.items[idx] = s;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_sellable_map.get(cur)) |b| {
+                    stock_sellable.items[idx] = b;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_tq_min_map.get(cur)) |lo| {
+                    stock_tq_min.items[idx] = lo;
+                    stock_tq_max.items[idx] = own_tq_max_map.get(cur) orelse lo;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -1068,6 +1901,102 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Weight / MeltTimePerUnit inherit through Extends (unit_lead → unit_iron).
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_weight_map.get(cur)) |w| {
+                    stock_weights.items[idx] = w;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_melt_map.get(cur)) |m| {
+                    stock_melt_times.items[idx] = m;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Hand-item Range / DamageBlock (Action0 props) inherit through the
+        // chain: only 44 items declare Range, 24 DamageBlock.
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_range_map.get(cur)) |r| {
+                    stock_melee_ranges.items[idx] = r;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_dmgblock_map.get(cur)) |d| {
+                    stock_dmg_blocks.items[idx] = d;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Tags inherit (286 live items declare none of their own: the
+        // schematic masters, melee hands, food masters).
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_tags.items[idx].len > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_tags_map.get(cur)) |t| {
+                    stock_tags.items[idx] = t;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Material (MadeOfMaterial) inherits through Extends like Weight.
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_material_map.get(cur)) |m| {
+                    stock_materials.items[idx] = m;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // HasQuality inherits through Extends: Effects is a property like any
+        // other, so a child declaring no effect_group of its own answers from
+        // the first ancestor that declares one (gunHandgunT1Pistol ->
+        // gunHandgunMaster).
+        {
+            var own_quality_map: std.StringHashMapUnmanaged(bool) = .{};
+            defer own_quality_map.deinit(allocator);
+            for (stock_names.items, 0..) |n, idx| {
+                if (stock_effect_group_declared.items[idx])
+                    try own_quality_map.put(allocator, n, stock_has_quality.items[idx]);
+            }
+            for (stock_names.items, 0..) |n, idx| {
+                var cur = n;
+                var hops: usize = 0;
+                while (hops < max_hops) : (hops += 1) {
+                    if (own_quality_map.get(cur)) |q| {
+                        stock_has_quality.items[idx] = q;
+                        break;
+                    }
+                    cur = ext_map.get(cur) orelse break;
+                }
             }
         }
         // Armor resist curves inherit through the Extends chain like any
@@ -1141,7 +2070,75 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     }
                 }
             }
+            // CraftingSmeltTime inherits through Extends (same as ModSlots).
+            {
+                var own_smelt_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+                defer own_smelt_map.deinit(allocator);
+                var own_smeltn_map: std.StringHashMapUnmanaged(u8) = .{};
+                defer own_smeltn_map.deinit(allocator);
+                for (stock_names.items, 0..) |n, idx| {
+                    if (stock_smelt_n.items[idx] > 0) {
+                        try own_smelt_map.put(allocator, n, stock_smelt_curves.items[idx]);
+                        try own_smeltn_map.put(allocator, n, stock_smelt_n.items[idx]);
+                    }
+                }
+                for (stock_names.items, 0..) |n, idx| {
+                    var cur = n;
+                    var hops: usize = 0;
+                    while (hops < max_hops) : (hops += 1) {
+                        if (own_smeltn_map.get(cur)) |cn| {
+                            stock_smelt_n.items[idx] = cn;
+                            stock_smelt_curves.items[idx] = own_smelt_map.get(cur).?;
+                            break;
+                        }
+                        cur = ext_map.get(cur) orelse break;
+                    }
+                }
+            }
         }
+    }
+
+    // Materialize the item passive pool into the arena and resolve the ranges
+    // through `Extends` first: a child that declares no row inherits its
+    // parent's list (stock property inheritance, same rule the resist curves
+    // above follow). The pool order never changes, so the recorded ranges stay
+    // valid against the arena copy.
+    var item_passives: []const buffs.Passive = &.{};
+    {
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer ext_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
+        }
+        var own_passive_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .{};
+        defer own_passive_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_passive_ranges.items[idx][1] > 0)
+                try own_passive_map.put(allocator, n, stock_passive_ranges.items[idx]);
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_passive_ranges.items[idx][1] > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < 24) : (hops += 1) {
+                if (own_passive_map.get(cur)) |rg| {
+                    stock_passive_ranges.items[idx] = rg;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        const pool = try arena.alloc(buffs.Passive, passives_pool.items.len);
+        @memcpy(pool, passives_pool.items);
+        // One gate range per passive row; a mismatch means the scan and the
+        // append drifted apart (the same invariant buffs.zig checks).
+        if (passive_req_ranges.items.len != pool.len) return error.MalformedItems;
+        const req_pool = try arena.alloc(requirements.Requirement, passive_reqs_pool.items.len);
+        @memcpy(req_pool, passive_reqs_pool.items);
+        for (pool, passive_req_ranges.items) |*p, rg| {
+            p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+        }
+        item_passives = pool;
     }
 
     // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
@@ -1158,8 +2155,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.econ = stock_econs.items[idx];
                 def.econ_bundle_size = stock_bundles.items[idx];
                 def.econ_sell_scale = stock_econ_scales.items[idx];
+                def.trader_quality_min_mod = stock_tq_min.items[idx];
+                def.trader_quality_max_mod = stock_tq_max.items[idx];
                 def.degradation_min = stock_degrad_min.items[idx];
                 def.degradation_max = stock_degrad_max.items[idx];
+                def.has_quality = stock_has_quality.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
@@ -1169,20 +2169,37 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.phys_resist_n = stock_pdr_n.items[idx];
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
+                const prg0 = stock_passive_ranges.items[idx];
+                def.passives = item_passives[prg0[0] .. prg0[0] + prg0[1]];
                 def.tags = try arena.dupe(u8, stock_tags.items[idx]);
+                def.armor_group = try arena.dupe(u8, stock_armor_group.items[idx]);
                 def.mod_slots_curve = stock_mslots_curves.items[idx];
                 def.mod_slots_n = stock_mslots_n.items[idx];
+                def.crafting_smelt_time_curve = stock_smelt_curves.items[idx];
+                def.crafting_smelt_time_n = stock_smelt_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
                 def.stamina_loss = stock_stamina_loss.items[idx];
+                def.dismember_chance = stock_dismember_chance.items[idx];
                 def.target_armor = stock_target_armor.items[idx];
                 def.target_armor_tagged = stock_target_armor_tagged.items[idx];
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
                 def.harvest_rows = stock_harvest_rows.items[idx];
+                def.stats = stock_gs_stats.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
+                def.craft_component_time = stock_craft_times.items[idx];
+                def.weight = stock_weights.items[idx];
+                def.melt_time_per_unit = stock_melt_times.items[idx];
+                def.material = stock_materials.items[idx];
+                def.no_scrapping = stock_no_scrapping.items[idx];
+                def.sellable_to_trader = stock_sellable.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
                 def.food_health = stock_food_hp.items[idx];
                 def.water_amount = stock_water_amt.items[idx];
+                def.progression_name = stock_prog_name.items[idx];
+                def.progression_add = stock_prog_add.items[idx];
+                def.progression_set_max = stock_prog_set_max.items[idx];
+                def.eat_exp = stock_eat_exp.items[idx];
                 // Prefer stock name so byName("casinoCoin") works without alias walk.
                 def.name = n;
                 break;
@@ -1210,34 +2227,53 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .econ = stock_econs.items[idx],
             .econ_bundle_size = stock_bundles.items[idx],
             .econ_sell_scale = stock_econ_scales.items[idx],
+            .trader_quality_min_mod = stock_tq_min.items[idx],
+            .trader_quality_max_mod = stock_tq_max.items[idx],
             .degradation_min = stock_degrad_min.items[idx],
             .degradation_max = stock_degrad_max.items[idx],
+            .has_quality = stock_has_quality.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
             .damage_block = stock_dmg_blocks.items[idx],
             .light_value = stock_light_values.items[idx],
             .melee_range = stock_melee_ranges.items[idx],
             .fuel_value = stock_fuels.items[idx],
+            .craft_component_time = stock_craft_times.items[idx],
+            .weight = stock_weights.items[idx],
+            .melt_time_per_unit = stock_melt_times.items[idx],
+            .material = stock_materials.items[idx],
+            .no_scrapping = stock_no_scrapping.items[idx],
+            .sellable_to_trader = stock_sellable.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
             .food_amount = stock_food_amt.items[idx],
             .food_health = stock_food_hp.items[idx],
             .water_amount = stock_water_amt.items[idx],
+            .progression_name = stock_prog_name.items[idx],
+            .progression_add = stock_prog_add.items[idx],
+            .progression_set_max = stock_prog_set_max.items[idx],
+            .eat_exp = stock_eat_exp.items[idx],
             .distraction_tags = stock_dtags.items[idx],
             .distraction_radius = stock_dradius.items[idx],
             .phys_resist_curve = stock_pdr_curves.items[idx],
             .phys_resist_n = stock_pdr_n.items[idx],
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
+            .passives = item_passives[stock_passive_ranges.items[idx][0] .. stock_passive_ranges.items[idx][0] + stock_passive_ranges.items[idx][1]],
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
+            .armor_group = try arena.dupe(u8, stock_armor_group.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],
             .mod_slots_n = stock_mslots_n.items[idx],
+            .crafting_smelt_time_curve = stock_smelt_curves.items[idx],
+            .crafting_smelt_time_n = stock_smelt_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
             .stamina_loss = stock_stamina_loss.items[idx],
+            .dismember_chance = stock_dismember_chance.items[idx],
             .target_armor = stock_target_armor.items[idx],
             .target_armor_tagged = stock_target_armor_tagged.items[idx],
             .target_armor_tag = stock_target_armor_tag.items[idx],
             .harvest_rows = stock_harvest_rows.items[idx],
+            .stats = stock_gs_stats.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -1265,12 +2301,46 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .stock_types = st,
         .stock_stacks = ss,
         .stock_econ_scales = ssc,
+        .max_quality_tier = rootMaxQualityTier(clean),
     };
+}
+
+/// `<items max_quality_tier="N">`: stock parses it into the static and falls
+/// back to 6 when absent or unparsable. A value outside 1..255 keeps the
+/// default rather than producing a degenerate quality axis.
+fn rootMaxQualityTier(src: []const u8) u8 {
+    const ri = std.mem.findPos(u8, src, 0, "<items") orelse return components.max_quality_tiers;
+    const v = xml.attr(src, ri, "max_quality_tier") orelse return components.max_quality_tiers;
+    const n = xml.parseU8(v) orelse return components.max_quality_tiers;
+    // 0 would collapse every quality axis (stock assigns the parsed value
+    // unchecked and divides by it); fail closed on the default instead.
+    if (n == 0) return components.max_quality_tiers;
+    return n;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
     const paths = @import("paths.zig");
     return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "items inherit Action0 damage and Tags through Extends" {
+    // Range / DamageBlock / Tags used to read the own body only: 1449 items
+    // inherit MaxDamage-style props through Extends and 286 declare no Tags of
+    // their own (schematicNoQualityMaster children), which made the loot mod
+    // roll and the attachment scrub fail closed on them.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // meleeHandZombieFeral extends meleeHandZombie01 (Range 1.6).
+    const feral = t.byName("meleeHandZombieFeral").?;
+    const plain = t.byName("meleeHandZombie01").?;
+    try std.testing.expect(plain.melee_range > 0);
+    try std.testing.expectApproxEqAbs(plain.melee_range, feral.melee_range, 1e-4);
+    // A schematic master child inherits the master's Tags.
+    const schematic = t.byName("ammoArrowStoneSchematic");
+    if (schematic) |d| try std.testing.expect(d.tags.len > 0);
+    try std.testing.expect(t.byName("schematicNoQualityMaster").?.tags.len > 0);
 }
 
 test "builtin items" {
@@ -1297,6 +2367,68 @@ test "ecs offline inventory catalog mirrors builtins" {
     }
     try std.testing.expect(inv.isArmorOffline(11));
     try std.testing.expect(!inv.isArmorOffline(7));
+}
+
+test "sandbox MaxStackSize scales stackable items but never quality ones" {
+    // Stock ItemClass.get_MaxCount (IL=10): with MaxStackSizeModifier != 1 the
+    // Stacknumber is scaled and clamped at 30000, but only for items that
+    // stack and carry no quality (a weapon's stack of 1 must not follow the
+    // option). The option is 163 StackSizeMultiplier, set from the decoded
+    // server code.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="resourceWood">
+        \\    <property name="Stacknumber" value="5" />
+        \\  </item>
+        \\  <item name="resourceScrapIron">
+        \\    <property name="Stacknumber" value="1000" />
+        \\  </item>
+        \\  <item name="gunHandgunT1Pistol">
+        \\    <property name="Stacknumber" value="1" />
+        \\    <effect_group tiered="true" name="quality">
+        \\      <passive_effect name="DamageModifier" operation="perc_add" value=".1" tier="1,6" />
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="thrownRock">
+        \\    <property name="Stacknumber" value="1" />
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const wood = t.byName("resourceWood").?.id;
+    const iron = t.byName("resourceScrapIron").?.id;
+    const pistol = t.byName("gunHandgunT1Pistol").?.id;
+    const rock = t.byName("thrownRock").?.id;
+    try std.testing.expect(t.byName("gunHandgunT1Pistol").?.has_quality);
+    try std.testing.expect(!t.byName("resourceWood").?.has_quality);
+
+    // Default: every raw Stacknumber stands.
+    try std.testing.expectEqual(@as(u16, 5), t.stackFor(wood));
+    try std.testing.expectEqual(@as(u16, 1000), t.stackFor(iron));
+
+    // x2: stackables double, quality and non-stacking items are untouched.
+    t.setStackSizeModifier(2.0);
+    try std.testing.expectEqual(@as(u16, 10), t.stackFor(wood));
+    try std.testing.expectEqual(@as(u16, 2000), t.stackFor(iron));
+    try std.testing.expectEqual(@as(u16, 1), t.stackFor(pistol));
+    try std.testing.expectEqual(@as(u16, 1), t.stackFor(rock));
+
+    // x1.5 on a 5-count stack is a .NET midpoint: Math.Round(7.5) = 8.
+    t.setStackSizeModifier(1.5);
+    try std.testing.expectEqual(@as(u16, 8), t.stackFor(wood));
+    // The clamp is stock's 30000, applied only on the scaled path.
+    t.setStackSizeModifier(100.0);
+    try std.testing.expectEqual(@as(u16, 30000), t.stackFor(iron));
+    // A modifier the decoded code does not carry is not one: 0 falls back to 1.
+    t.setStackSizeModifier(0);
+    try std.testing.expectEqual(@as(u16, 1000), t.stackFor(iron));
 }
 
 test "stock type first item is ItemsStartHere+1" {
@@ -1336,6 +2468,86 @@ test "XML item table fails closed instead of using builtin balance or ids" {
     try std.testing.expectEqual(@as(f32, 15), builtin.foodAmountFor(2));
     try std.testing.expectEqual(@as(u16, 6), builtin.ecsIdByName("casinoCoin"));
     try std.testing.expect(builtin.isEat(2));
+}
+
+test "magazine AddProgressionLevel parses onto the eat item" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="harvestingToolsSkillMagazine">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group tiered="false">
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="AddProgressionLevel" progression_name="craftingHarvestingTools" level="1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="GiveExp" exp="50"/>
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="foodCanBeef">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="ModifyCVar" cvar="$foodAmountAdd" operation="add" value="15"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const mag = t.byName("harvestingToolsSkillMagazine").?;
+    try std.testing.expect(mag.is_eat);
+    try std.testing.expect(t.isEat(mag.id));
+    try std.testing.expectEqualStrings("craftingHarvestingTools", mag.progression_name);
+    try std.testing.expectEqual(@as(u8, 1), mag.progression_add);
+    try std.testing.expectEqual(@as(u16, 50), mag.eat_exp);
+    const food = t.byName("foodCanBeef").?;
+    try std.testing.expectEqual(@as(u8, 0), food.progression_add);
+    try std.testing.expectEqualStrings("", food.progression_name);
+    try std.testing.expectEqual(@as(u16, 0), food.eat_exp);
+    try std.testing.expectEqual(@as(usize, 0), food.progression_set_max.len);
+}
+
+test "almanac SetProgressionLevel level=-1 parses as set-to-max" {
+    // RE minevents.md IL=104: level=-1 sets ProgressionClass.MaxLevel.
+    // Stock ships only -1 (426 rows); non -1 is omitted.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="bookFiremansAlmanacHeat">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group tiered="false">
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkFiremansAlmanacHeat" level="-1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkFiremansAlmanacComplete" level="-1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkIgnoredAbsolute" level="3"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="GiveExp" exp="50"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const book = t.byName("bookFiremansAlmanacHeat").?;
+    try std.testing.expect(book.is_eat);
+    try std.testing.expect(t.isEat(book.id));
+    try std.testing.expectEqual(@as(u8, 0), book.progression_add);
+    try std.testing.expectEqualStrings("", book.progression_name);
+    try std.testing.expectEqual(@as(usize, 2), book.progression_set_max.len);
+    try std.testing.expectEqualStrings("perkFiremansAlmanacHeat", book.progression_set_max[0]);
+    try std.testing.expectEqualStrings("perkFiremansAlmanacComplete", book.progression_set_max[1]);
+    try std.testing.expectEqual(@as(u16, 50), book.eat_exp);
 }
 
 test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
@@ -1503,7 +2715,12 @@ test "load stock items.xml when present" {
     if (t.byId(8)) |axe| {
         try std.testing.expectEqual(@as(u32, 250), axe.degradation_min);
         try std.testing.expectEqual(@as(u32, 500), axe.degradation_max);
+        // A tool carries owner-tiered effect groups, so the trader roll gives
+        // it a quality (ItemClass.HasQuality).
+        try std.testing.expect(axe.has_quality);
     }
+    // Stackable resources carry no effect_group at all: no quality.
+    try std.testing.expect(!t.hasQualityByName("resourceWood"));
     // Non-durable items (no DegradationMax) price full: pul term is 1.
     if (t.byName("resourceWood")) |wood| {
         try std.testing.expectEqual(@as(u32, 0), wood.degradation_max);
@@ -1512,6 +2729,22 @@ test "load stock items.xml when present" {
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expect(gas.fuel_value > 0);
         try std.testing.expectEqual(gas.fuel_value, t.fuelValueFor(gas.id));
+    }
+    // Forge melt inputs: Weight + MeltTimePerUnit from items.xml.
+    if (t.byName("unit_iron")) |iron| {
+        try std.testing.expectEqual(@as(u16, 1), iron.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.25), iron.melt_time_per_unit, 1e-4);
+        try std.testing.expectEqual(iron.weight, t.weightFor(iron.id));
+        try std.testing.expectApproxEqAbs(iron.melt_time_per_unit, t.meltTimePerUnitFor(iron.id), 1e-4);
+    }
+    // unit_lead Extends unit_iron: Weight + MeltTimePerUnit inherit.
+    if (t.byName("unit_lead")) |lead| {
+        try std.testing.expectEqual(@as(u16, 1), lead.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.25), lead.melt_time_per_unit, 1e-4);
+    }
+    if (t.byName("resourceScrapBrass")) |brass| {
+        try std.testing.expectEqual(@as(u16, 1), brass.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.4), brass.melt_time_per_unit, 1e-4);
     }
     // Action1 PlaceAsBlock Blockname: b14 exactly two items place, and the
     // rest (resourceWood etc.) are not placeable.
@@ -1527,7 +2760,7 @@ test "load stock items.xml when present" {
     // EconomicValue resolves through the Extends chain (286 stock items get
     // their econ from a master) and EconomicBundleSize divides the price.
     if (t.byName("armorAssassinBoots")) |boots| {
-        try std.testing.expectEqual(@as(u16, 1000), boots.econ);
+        try std.testing.expectEqual(@as(f32, 1000), boots.econ);
     }
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expectEqual(@as(u16, 100), gas.econ_bundle_size);
@@ -1615,6 +2848,47 @@ test "stock items.xml Stacknumber default and Extends resolution" {
     try std.testing.expectEqual(@as(f32, 1.0), t.byId(8).?.econ_sell_scale);
 }
 
+test "item passive rows parse with their gates and inherit through Extends" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(gd ++ "/Data/Config")) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
+    defer t.deinit();
+    const rowOf = struct {
+        fn f(d: ItemDef, name: []const u8) ?buffs.Passive {
+            for (d.passives) |p| {
+                if (std.mem.eql(u8, p.name, name)) return p;
+            }
+            return null;
+        }
+    }.f;
+    // armorAthleticOutfit carries HealthMax "2,4,6,8,10,20" (a 6-segment tier
+    // curve); the survival VM folds it at the item's quality.
+    const outfit = t.byName("armorAthleticOutfit") orelse return error.SkipZigTest;
+    const hm = rowOf(outfit, "HealthMax") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(u8, 6), hm.curve_len);
+    try std.testing.expectApproxEqAbs(@as(f32, 20), hm.curve[5], 0.001);
+    // armorRangerBoots inherits StaminaMax from its master class (the same
+    // Extends chain the resist curves use).
+    const boots = t.byName("armorRangerBoots") orelse return error.SkipZigTest;
+    const sm = rowOf(boots, "StaminaMax") orelse return error.SkipZigTest;
+    try std.testing.expect(sm.curve_len > 0);
+    // armorEnforcerOutfit's flat GeneralDamageResist row (passive 40), the one
+    // item row the round-2 damage choke consumes.
+    const enforcer = t.byName("armorEnforcerOutfit") orelse return error.SkipZigTest;
+    const gdr = rowOf(enforcer, "GeneralDamageResist") orelse return error.SkipZigTest;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), gdr.value, 0.0001);
+    // The admin items gate their rows on IsEquipped (6 stock rows), which the
+    // item fold answers with Ctx.item_equipped.
+    const shirt = t.byName("toughGuyShirtAdmin") orelse return error.SkipZigTest;
+    var gated = false;
+    for (shirt.passives) |p| {
+        for (p.reqs) |r| {
+            if (r.kind == .is_equipped) gated = true;
+        }
+    }
+    try std.testing.expect(gated);
+}
+
 test "armor resist curves parse from stock items.xml (PDR quality curves)" {
     const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.fileExists(gd ++ "/Data/Config/items.xml")) return error.SkipZigTest;
@@ -1632,9 +2906,13 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
         }
         if (d.phys_resist_n > 0) found += 1;
     }
-    // The XML def table caps at max_items; the armor family (alphabetically
-    // early) carries the bulk of the 134 PDR rows.
-    try std.testing.expect(found >= 50);
+    // Measured against stock V3.2.0 items.xml (2026-09-04): 1413 items, of
+    // which 67 carry a PhysicalDamageResist passive; the parse finds 73 rows
+    // because a def can hold more than one. The old bound was 50 with a note
+    // that max_items might truncate the tail - it cannot: the table runs at
+    // 17% of the cap, so nothing is lost and the bound can be tight enough to
+    // catch a regression instead of tolerating one.
+    try std.testing.expect(found >= 70);
     // DegradationPerUse (base_set) on tools; TargetArmor (perc_add) only on
     // untagged rows (ammo9mmBulletAP, the armor-piercing round).
     var stone_axe = false;
@@ -1674,4 +2952,360 @@ test "StaminaLoss parses as the per-attack cost" {
         }
     }
     try std.testing.expect(found);
+}
+
+test "HasQuality follows owner-tiered effect groups and inherits through Extends" {
+    // ItemClass.HasQuality (IL=9) = Effects != null && IsOwnerTiered(). Effects
+    // is a property, so a child with no effect_group of its own answers from
+    // the first ancestor that declares one.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path, "<items>\n" ++
+        "  <item name=\"gunMaster\">\n" ++
+        "    <effect_group name=\"gunMaster\">\n" ++
+        "      <passive_effect name=\"ModSlots\" operation=\"base_set\" value=\"1,1,1,2,2,3\" tier=\"1,2,3,4,5,6\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"gunChild\">\n" ++
+        "    <property name=\"Extends\" value=\"gunMaster\"/>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"perkBook\">\n" ++
+        "    <effect_group name=\"perkBook\" tiered=\"false\">\n" ++
+        "      <passive_effect name=\"ModSlots\" operation=\"base_set\" value=\"1\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"perkBookChild\">\n" ++
+        "    <property name=\"Extends\" value=\"perkBook\"/>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"resourceWood\">\n" ++
+        "    <property name=\"Stacknumber\" value=\"100\"/>\n" ++
+        "  </item>\n" ++
+        "</items>\n");
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.byName("gunMaster").?.has_quality);
+    try std.testing.expect(t.byName("gunChild").?.has_quality);
+    try std.testing.expect(!t.byName("perkBook").?.has_quality);
+    try std.testing.expect(!t.byName("perkBookChild").?.has_quality);
+    // No effect_group anywhere in the chain: null Effects, no quality.
+    try std.testing.expect(!t.byName("resourceWood").?.has_quality);
+    // Name lookup mirrors the field (the trader roll's resolver); an unknown
+    // name fails closed.
+    try std.testing.expect(t.hasQualityByName("gunChild"));
+    try std.testing.expect(!t.hasQualityByName("noSuchItem"));
+}
+
+test "items root max_quality_tier bounds the quality axes" {
+    // Stock `ItemClassesFromXml.CreateItems` parses the `<items>` root
+    // attribute into the static `ItemClass.MaxQualityTier` and assigns 6 when
+    // it is absent. V3.2.0 ships no attribute; a modlet that sets it (XPath
+    // `/items/@max_quality_tier`) has to move the quality axis with it, or the
+    // server clamps a tier the client accepts.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items max_quality_tier="10">
+        \\  <item name="gunMaster">
+        \\    <property name="Stacknumber" value="1"/>
+        \\    <effect_group name="gunMaster" tiered="true">
+        \\      <passive_effect name="ModSlots" operation="base_set" value="1"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(u8, 10), t.max_quality_tier);
+    // The harvest curve spreads over the table's tier count, not the default.
+    const no_rows = t.harvestMultiplier(t.byName("gunMaster").?.id, 7, "wood");
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), no_rows, 0.001);
+
+    // Absent attribute: stock's 6. A degenerate value keeps it too.
+    try io_fs.writeFile(path, "<items max_quality_tier=\"0\">\n</items>\n");
+    var t2 = try loadFromPath(std.testing.allocator, path);
+    defer t2.deinit();
+    try std.testing.expectEqual(@as(u8, 6), t2.max_quality_tier);
+}
+
+test "EconomicValue keeps stock's float range and fraction" {
+    // Stock fields EconomicValue as `Single` and parses it with ParseFloat
+    // (ItemClass IL_0666). Typing it u16 turned a modlet's 1000000-duke relic
+    // (or a 2.5 value) into 0, which the trader then prices at the
+    // "econ == 0" fallback of buy 5 / sell 1, i.e. not tradeable as authored.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="relic">
+        \\    <property name="EconomicValue" value="1000000"/>
+        \\  </item>
+        \\  <item name="fraction">
+        \\    <property name="EconomicValue" value="2.5"/>
+        \\  </item>
+        \\  <item name="plain"/>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(f32, 1000000), t.byName("relic").?.econ);
+    try std.testing.expectEqual(@as(f32, 2.5), t.byName("fraction").?.econ);
+    // No EconomicValue anywhere: 0, the trader's untradeable marker.
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.econ);
+}
+
+test "items.xml stats rows parse with stock's field grammar and guards" {
+    // Stock ItemClass::GSStatsParseXml IL=181: each `<stat>` needs a name and a
+    // value with at least five comma fields (quality, gameStage, chance, min,
+    // max); |min| or |max| at 163.835 or above is rejected rather than
+    // overflowing the i16 cast, and the stored value is the XML number divided
+    // by 0.005.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_stats.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="gunMaster">
+        \\    <stats>
+        \\      <stat name="EntityDamage" value="0,0,1,0,.1"/>
+        \\      <stat name="DegradationMax" value="0,60,.5,-.1,.2"/>
+        \\    </stats>
+        \\  </item>
+        \\  <item name="badRows">
+        \\    <stats>
+        \\      <stat name="EntityDamage" value="0,0,1,0"/>
+        \\      <stat name="" value="0,0,1,0,.1"/>
+        \\      <stat name="Range" value="0,0,1,0,200"/>
+        \\      <stat name="BlockDamage" value="0,0,1,notanumber,.1"/>
+        \\    </stats>
+        \\  </item>
+        \\  <item name="emptyStats"><stats></stats></item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const gm = t.byName("gunMaster").?;
+    try std.testing.expectEqual(@as(usize, 2), gm.stats.len);
+    try std.testing.expectEqualStrings("EntityDamage", gm.stats[0].effect);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].quality);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].game_stage);
+    try std.testing.expectEqual(@as(f32, 1), gm.stats[0].chance);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].min);
+    try std.testing.expectEqual(@as(i16, 20), gm.stats[0].max); // .1 / .005
+    try std.testing.expectEqualStrings("DegradationMax", gm.stats[1].effect);
+    try std.testing.expectEqual(@as(i16, 60), gm.stats[1].game_stage);
+    try std.testing.expectEqual(@as(f32, 0.5), gm.stats[1].chance);
+    try std.testing.expectEqual(@as(i16, -20), gm.stats[1].min); // -.1 / .005
+    try std.testing.expectEqual(@as(i16, 40), gm.stats[1].max); // .2 / .005
+    // Every malformed row is dropped; the well-formed ones stay.
+    try std.testing.expectEqual(@as(usize, 0), t.byName("badRows").?.stats.len);
+    try std.testing.expectEqual(@as(usize, 0), t.byName("emptyStats").?.stats.len);
+}
+
+test "stock items.xml stats rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // A tool carries the Base_Random_Roll rows; EntityDamage is
+    // "0,0,1,0,.1" (chance 1, min 0, max 20 after the /0.005 scale).
+    const axe = t.byName("meleeToolAxeT1IronFireaxe") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(axe.stats.len >= 4);
+    // Two EntityDamage rows: the quality-0 base roll (chance 1, max .1) and the
+    // quality-1 boosted roll (chance .3, min .1, max .5).
+    var base: ?GsStat = null;
+    var boosted: ?GsStat = null;
+    for (axe.stats) |r| {
+        if (!std.mem.eql(u8, r.effect, "EntityDamage")) continue;
+        if (r.quality == 0) base = r;
+        if (r.quality == 1) boosted = r;
+    }
+    try std.testing.expectEqual(@as(i16, 20), base.?.max);
+    try std.testing.expectEqual(@as(f32, 1), base.?.chance);
+    try std.testing.expectEqual(@as(i16, 20), boosted.?.min);
+    try std.testing.expectEqual(@as(i16, 100), boosted.?.max);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), boosted.?.chance, 0.0001);
+    // An item with no <stats> block stays empty (fail closed, no invented rows).
+    try std.testing.expectEqual(@as(usize, 0), t.byName("resourceWood").?.stats.len);
+}
+
+test "SellableToTrader parses and inherits through Extends" {
+    // Stock `ItemClass` reads SellableToTrader with ParseBool (default true)
+    // and the property dictionary is copied through Extends, so a child of an
+    // unsellable master is unsellable too. 48 stock items declare it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_sell.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="questItemMaster">
+        \\    <property name="SellableToTrader" value="false"/>
+        \\  </item>
+        \\  <item name="questItemChild">
+        \\    <property name="Extends" value="questItemMaster"/>
+        \\  </item>
+        \\  <item name="plainItem"/>
+        \\  <item name="declaredTrue">
+        \\    <property name="SellableToTrader" value="true"/>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(!t.byName("questItemMaster").?.sellable_to_trader);
+    try std.testing.expect(!t.byName("questItemChild").?.sellable_to_trader);
+    // Absent keeps stock's true default.
+    try std.testing.expect(t.byName("plainItem").?.sellable_to_trader);
+    try std.testing.expect(t.byName("declaredTrue").?.sellable_to_trader);
+}
+
+test "stock items.xml SellableToTrader rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // meleeWpnBladeT0BoneKnife carries value="false" (items.xml:40) and the
+    // quest masters inherit it.
+    try std.testing.expect(!t.byName("meleeWpnBladeT0BoneKnife").?.sellable_to_trader);
+    // The default is true for the bulk of the catalog.
+    try std.testing.expect(t.byName("gunHandgunT0PipePistol").?.sellable_to_trader);
+}
+
+test "TraderQualityMod parses and inherits through Extends" {
+    // Stock ItemClass reads the quality price pair
+    // (TraderQualityMinMod/MaxMod, written as the comma pair TraderQualityMod
+    // in items.xml; 4 stock rows, all "1,20") and XUiM_Trader's GetBuyPrice /
+    // GetSellPrice lerp it over (Quality-1)/5, falling back to the trader's
+    // pair when the item declares none.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_tqm.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="cookMaster">
+        \\    <property name="TraderQualityMod" value="1,20"/>
+        \\  </item>
+        \\  <item name="cookChild">
+        \\    <property name="Extends" value="cookMaster"/>
+        \\  </item>
+        \\  <item name="splitKeys">
+        \\    <property name="TraderQualityMinMod" value="2"/>
+        \\    <property name="TraderQualityMaxMod" value="7"/>
+        \\  </item>
+        \\  <item name="plain"/>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(f32, 1), t.byName("cookMaster").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), t.byName("cookMaster").?.trader_quality_max_mod);
+    // Extends carries both halves.
+    try std.testing.expectEqual(@as(f32, 1), t.byName("cookChild").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), t.byName("cookChild").?.trader_quality_max_mod);
+    // The two separate keys work too, and an absent pair stays 0 (the
+    // trader's own pair applies).
+    try std.testing.expectEqual(@as(f32, 2), t.byName("splitKeys").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 7), t.byName("splitKeys").?.trader_quality_max_mod);
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.trader_quality_max_mod);
+}
+
+test "stock items.xml TraderQualityMod rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const pot = t.byName("toolCookingPot") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(f32, 1), pot.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), pot.trader_quality_max_mod);
+    // A normal tool declares no pair: the trader's own quality mod applies.
+    try std.testing.expectEqual(@as(f32, 0), t.byName("meleeToolAxeT1IronFireaxe").?.trader_quality_min_mod);
+}
+
+test "the gamestage stat roll follows stock's draw order" {
+    // The stock axe rows (items.xml meleeToolAxeT1IronFireaxe): a quality-0
+    // base row (chance 1, min 0, max .1) and a quality-1 boosted row
+    // (chance .3, min .1, max .5); the stored i16s are the XML value / 0.005,
+    // so the ranges are 0..20 and 20..100.
+    const rows = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 20 },
+        .{ .effect = "EntityDamage", .quality = 1, .game_stage = 0, .chance = 0.3, .min = 20, .max = 100 },
+        .{ .effect = "DegradationMax", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 0 },
+    };
+    var out: [6]RolledGsStat = undefined;
+
+    // Deterministic: the same seed draws the same entries, and the base roll
+    // stays inside the base row's range.
+    var r1 = game_random.GameRandom.init(1234);
+    const n1 = rollGsStats(&rows, 1, 0, &r1, &out);
+    try std.testing.expect(n1 >= 1);
+    // EntityDamage is the first effect and `None`=0, `EntityDamage`=1.
+    try std.testing.expectEqual(@as(u8, 1), out[0].effect);
+    const value1: i32 = @as(i32, out[0].slot_a) + @as(i32, out[0].slot_b);
+    try std.testing.expect(value1 >= 0 and value1 <= 120);
+    var r2 = game_random.GameRandom.init(1234);
+    var out2: [6]RolledGsStat = undefined;
+    const n2 = rollGsStats(&rows, 1, 0, &r2, &out2);
+    try std.testing.expectEqual(n1, n2);
+    try std.testing.expectEqualSlices(RolledGsStat, out[0..n1], out2[0..n2]);
+
+    // The zero-sum row contributes nothing: an all-zero base row and no
+    // quality row emit no entry (stock's RemoveUnusedStats).
+    const zero_rows = [_]GsStat{
+        .{ .effect = "BlockDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 0 },
+    };
+    var r3 = game_random.GameRandom.init(7);
+    var out3: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&zero_rows, 1, 0, &r3, &out3));
+
+    // A row whose chance gate fails leaves the base roll alone and the added
+    // roll out: chance 0 never passes, so the entry is the base only.
+    const gated = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 5, .max = 5 },
+        .{ .effect = "EntityDamage", .quality = 3, .game_stage = 0, .chance = 0, .min = 50, .max = 60 },
+    };
+    var r4 = game_random.GameRandom.init(99);
+    var out4: [6]RolledGsStat = undefined;
+    const n4 = rollGsStats(&gated, 3, 0, &r4, &out4);
+    try std.testing.expectEqual(@as(usize, 1), n4);
+    // Base 5..5 (RandomRange(5, 6) = 5), no added value, so the value is a
+    // non-boosted slot_a.
+    try std.testing.expectEqual(@as(i16, 5), out4[0].slot_a);
+    try std.testing.expectEqual(@as(i16, 0), out4[0].slot_b);
+
+    // A stage below the row's gameStage skips it (the quality-1 row declares
+    // stage 20: at stage 0 the added roll finds nothing).
+    const staged = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 1, .game_stage = 20, .chance = 1, .min = 40, .max = 40 },
+    };
+    var r5 = game_random.GameRandom.init(3);
+    var out5: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&staged, 1, 0, &r5, &out5));
+    var r6 = game_random.GameRandom.init(3);
+    var out6: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&staged, 1, 0, &r6, &out6));
+    var r7 = game_random.GameRandom.init(3);
+    var out7: [6]RolledGsStat = undefined;
+    const n7 = rollGsStats(&staged, 0, 0, &r7, &out7);
+    try std.testing.expectEqual(@as(usize, 0), n7);
 }

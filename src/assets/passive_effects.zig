@@ -1,0 +1,253 @@
+//! Stock `PassiveEffects` ordinals: the numeric id an `ItemValue` stat entry
+//! carries on the wire (`ItemValue::Write` IL=323 writes `(byte)Stat.type`).
+//!
+//! Generated from the stock enum's declaration order (`None` = 0); regenerate
+//! with `python3 tools/gen_passive_effects.py`. Do not hand-edit.
+
+const std = @import("std");
+
+/// Number of enum members, `Count` (the sentinel) included.
+pub const count: usize = 204;
+
+pub const Entry = struct { name: []const u8, id: u8 };
+
+pub const table = [_]Entry{
+    .{ .name = "None", .id = 0 },
+    .{ .name = "EntityDamage", .id = 1 },
+    .{ .name = "EntityHeal", .id = 2 },
+    .{ .name = "BlockDamage", .id = 3 },
+    .{ .name = "BlockRepairAmount", .id = 4 },
+    .{ .name = "DamageModifier", .id = 5 },
+    .{ .name = "LandClaimDamageModifier", .id = 6 },
+    .{ .name = "DegradationPerUse", .id = 7 },
+    .{ .name = "DegradationMax", .id = 8 },
+    .{ .name = "MagazineSize", .id = 9 },
+    .{ .name = "DamageFalloffRange", .id = 10 },
+    .{ .name = "MaxRange", .id = 11 },
+    .{ .name = "BlockRange", .id = 12 },
+    .{ .name = "WeaponHandling", .id = 13 },
+    .{ .name = "IncrementalSpreadMultiplier", .id = 14 },
+    .{ .name = "BurstRoundCount", .id = 15 },
+    .{ .name = "RoundRayCount", .id = 16 },
+    .{ .name = "RoundsPerMinute", .id = 17 },
+    .{ .name = "AttacksPerMinute", .id = 18 },
+    .{ .name = "ExplosionBlockDamage", .id = 19 },
+    .{ .name = "ExplosionEntityDamage", .id = 20 },
+    .{ .name = "ExplosionRadius", .id = 21 },
+    .{ .name = "ExplosionIncomingDamage", .id = 22 },
+    .{ .name = "ModSlots", .id = 23 },
+    .{ .name = "ModPowerBonus", .id = 24 },
+    .{ .name = "SpreadMultiplierHip", .id = 25 },
+    .{ .name = "SpreadMultiplierAiming", .id = 26 },
+    .{ .name = "SpreadMultiplierRunning", .id = 27 },
+    .{ .name = "SpreadMultiplierWalking", .id = 28 },
+    .{ .name = "SpreadMultiplierCrouching", .id = 29 },
+    .{ .name = "SpreadMultiplierIdle", .id = 30 },
+    .{ .name = "SpreadDegreesVertical", .id = 31 },
+    .{ .name = "SpreadDegreesHorizontal", .id = 32 },
+    .{ .name = "KickDegreesVerticalMin", .id = 33 },
+    .{ .name = "KickDegreesHorizontalMin", .id = 34 },
+    .{ .name = "KickDegreesVerticalMax", .id = 35 },
+    .{ .name = "KickDegreesHorizontalMax", .id = 36 },
+    .{ .name = "SphereCastRadius", .id = 37 },
+    .{ .name = "GrazeDamageMultiplier", .id = 38 },
+    .{ .name = "GrazeStaminaMultiplier", .id = 39 },
+    .{ .name = "GeneralDamageResist", .id = 40 },
+    .{ .name = "PhysicalDamageResist", .id = 41 },
+    .{ .name = "PhysicalDamageResistMax", .id = 42 },
+    .{ .name = "ElementalDamageResist", .id = 43 },
+    .{ .name = "ElementalDamageResistMax", .id = 44 },
+    .{ .name = "HypothermalResist", .id = 45 },
+    .{ .name = "HyperthermalResist", .id = 46 },
+    .{ .name = "FallDamageReduction", .id = 47 },
+    .{ .name = "Tier", .id = 48 },
+    .{ .name = "LightIntensity", .id = 49 },
+    .{ .name = "VehicleFuelMaxPer", .id = 50 },
+    .{ .name = "VehicleFuelUsePer", .id = 51 },
+    .{ .name = "VehicleVelocityMaxPer", .id = 52 },
+    .{ .name = "VehicleMotorTorquePer", .id = 53 },
+    .{ .name = "VehicleCarryCapacity", .id = 54 },
+    .{ .name = "VehicleEntityDamage", .id = 55 },
+    .{ .name = "VehicleBlockDamage", .id = 56 },
+    .{ .name = "VehicleSelfDamage", .id = 57 },
+    .{ .name = "VehicleStrongSelfDamage", .id = 58 },
+    .{ .name = "VehicleSeats", .id = 59 },
+    .{ .name = "VehicleTankSize", .id = 60 },
+    .{ .name = "VehicleHopStrength", .id = 61 },
+    .{ .name = "VehiclePlayerStaminaDrainRate", .id = 62 },
+    .{ .name = "BatteryMaxLoadInVolts", .id = 63 },
+    .{ .name = "BatteryDischargeTimeInMinutes", .id = 64 },
+    .{ .name = "DistractionResistance", .id = 65 },
+    .{ .name = "DistractionRadius", .id = 66 },
+    .{ .name = "DistractionLifetime", .id = 67 },
+    .{ .name = "DistractionStrength", .id = 68 },
+    .{ .name = "DistractionEatTicks", .id = 69 },
+    .{ .name = "ProjectileGravity", .id = 70 },
+    .{ .name = "ProjectileVelocity", .id = 71 },
+    .{ .name = "ProjectileStickChance", .id = 72 },
+    .{ .name = "RecipeTagUnlocked", .id = 73 },
+    .{ .name = "JunkTurretActiveRange", .id = 74 },
+    .{ .name = "JunkTurretActiveCount", .id = 75 },
+    .{ .name = "EconomicValue", .id = 76 },
+    .{ .name = "LockPickTime", .id = 77 },
+    .{ .name = "LockPickBreakChance", .id = 78 },
+    .{ .name = "LootProb", .id = 79 },
+    .{ .name = "LootDropProb", .id = 80 },
+    .{ .name = "LootQuantity", .id = 81 },
+    .{ .name = "Tracking", .id = 82 },
+    .{ .name = "AttributeLevel", .id = 83 },
+    .{ .name = "SkillLevel", .id = 84 },
+    .{ .name = "PerkLevel", .id = 85 },
+    .{ .name = "SkillExpGain", .id = 86 },
+    .{ .name = "PlayerExpGain", .id = 87 },
+    .{ .name = "NoiseMultiplier", .id = 88 },
+    .{ .name = "LightMultiplier", .id = 89 },
+    .{ .name = "CraftingTime", .id = 90 },
+    .{ .name = "CraftingTier", .id = 91 },
+    .{ .name = "CraftingOutputCount", .id = 92 },
+    .{ .name = "ActiveCraftingSlots", .id = 93 },
+    .{ .name = "CraftingSlots", .id = 94 },
+    .{ .name = "CraftingSmeltTime", .id = 95 },
+    .{ .name = "ExpDeficitMaxPercentage", .id = 96 },
+    .{ .name = "ExpDeficitPerDeathPercentage", .id = 97 },
+    .{ .name = "CarryCapacity", .id = 98 },
+    .{ .name = "BagSize", .id = 99 },
+    .{ .name = "RepairTime", .id = 100 },
+    .{ .name = "RepairAmount", .id = 101 },
+    .{ .name = "ReloadSpeedMultiplier", .id = 102 },
+    .{ .name = "WaterRegenRate", .id = 103 },
+    .{ .name = "HealthMax", .id = 104 },
+    .{ .name = "HealthChangeOT", .id = 105 },
+    .{ .name = "HealthGain", .id = 106 },
+    .{ .name = "HealthLoss", .id = 107 },
+    .{ .name = "HealthMaxBlockage", .id = 108 },
+    .{ .name = "StaminaMax", .id = 109 },
+    .{ .name = "StaminaChangeOT", .id = 110 },
+    .{ .name = "StaminaGain", .id = 111 },
+    .{ .name = "StaminaLoss", .id = 112 },
+    .{ .name = "StaminaMaxBlockage", .id = 113 },
+    .{ .name = "FoodMax", .id = 114 },
+    .{ .name = "FoodChangeOT", .id = 115 },
+    .{ .name = "FoodGain", .id = 116 },
+    .{ .name = "FoodLoss", .id = 117 },
+    .{ .name = "FoodLossPerHealthPointLost", .id = 118 },
+    .{ .name = "FoodLossPerStaminaPointGained", .id = 119 },
+    .{ .name = "FoodLossPerHealthPointGained", .id = 120 },
+    .{ .name = "FoodMaxBlockage", .id = 121 },
+    .{ .name = "WaterMax", .id = 122 },
+    .{ .name = "WaterChangeOT", .id = 123 },
+    .{ .name = "WaterGain", .id = 124 },
+    .{ .name = "WaterLoss", .id = 125 },
+    .{ .name = "WaterLossPerHealthPointGained", .id = 126 },
+    .{ .name = "WaterLossPerStaminaPointGained", .id = 127 },
+    .{ .name = "WaterMaxBlockage", .id = 128 },
+    .{ .name = "CoreTempChangeOT", .id = 129 },
+    .{ .name = "CoreTempGain", .id = 130 },
+    .{ .name = "CoreTempLoss", .id = 131 },
+    .{ .name = "JumpStrength", .id = 132 },
+    .{ .name = "WalkSpeed", .id = 133 },
+    .{ .name = "RunSpeed", .id = 134 },
+    .{ .name = "CrouchSpeed", .id = 135 },
+    .{ .name = "Mobility", .id = 136 },
+    .{ .name = "LandMineImmunity", .id = 137 },
+    .{ .name = "ScavengingTime", .id = 138 },
+    .{ .name = "ScavengingTier", .id = 139 },
+    .{ .name = "ScavengingItemCount", .id = 140 },
+    .{ .name = "HarvestCount", .id = 141 },
+    .{ .name = "ScrappingTime", .id = 142 },
+    .{ .name = "DismemberSelfChance", .id = 143 },
+    .{ .name = "DismemberChance", .id = 144 },
+    .{ .name = "TreasureRadius", .id = 145 },
+    .{ .name = "TreasureBlocksPerReduction", .id = 146 },
+    .{ .name = "BreathHoldDuration", .id = 147 },
+    .{ .name = "BarteringBuying", .id = 148 },
+    .{ .name = "BarteringSelling", .id = 149 },
+    .{ .name = "SecretStash", .id = 150 },
+    .{ .name = "LootTier", .id = 151 },
+    .{ .name = "HeatGain", .id = 152 },
+    .{ .name = "MovementFactorMultiplier", .id = 153 },
+    .{ .name = "QuestBonusItemReward", .id = 154 },
+    .{ .name = "QuestRewardOptionCount", .id = 155 },
+    .{ .name = "QuestRewardChoiceCount", .id = 156 },
+    .{ .name = "GameStage", .id = 157 },
+    .{ .name = "TraderStage", .id = 158 },
+    .{ .name = "LootStage", .id = 159 },
+    .{ .name = "LootStageMax", .id = 160 },
+    .{ .name = "DamageBonus", .id = 161 },
+    .{ .name = "InternalDamageModifier", .id = 162 },
+    .{ .name = "TargetArmor", .id = 163 },
+    .{ .name = "FallingBlockDamage", .id = 164 },
+    .{ .name = "SilenceBlockSteps", .id = 165 },
+    .{ .name = "TrackDistance", .id = 166 },
+    .{ .name = "HealthSteal", .id = 167 },
+    .{ .name = "TurretWakeUp", .id = 168 },
+    .{ .name = "ElectricalTrapXP", .id = 169 },
+    .{ .name = "TrapDoorTriggerDelay", .id = 170 },
+    .{ .name = "LandMineTriggerDelay", .id = 171 },
+    .{ .name = "TrapIncomingDamage", .id = 172 },
+    .{ .name = "BlockPickup", .id = 173 },
+    .{ .name = "HeadShotOnly", .id = 174 },
+    .{ .name = "NegateDamageSelf", .id = 175 },
+    .{ .name = "NegateDamageOther", .id = 176 },
+    .{ .name = "DisableItem", .id = 177 },
+    .{ .name = "DisableLoot", .id = 178 },
+    .{ .name = "NoVehicle", .id = 179 },
+    .{ .name = "FlipControls", .id = 180 },
+    .{ .name = "CelebrationKill", .id = 181 },
+    .{ .name = "ShuffledBackpack", .id = 182 },
+    .{ .name = "EnemySearchDuration", .id = 183 },
+    .{ .name = "TwitchViewerPointRate", .id = 184 },
+    .{ .name = "TwitchSpawnMultiplier", .id = 185 },
+    .{ .name = "TwitchAddCooldown", .id = 186 },
+    .{ .name = "TwitchAddPimpPot", .id = 187 },
+    .{ .name = "InfiniteAmmo", .id = 188 },
+    .{ .name = "NoTimeDisplay", .id = 189 },
+    .{ .name = "DisableGameEventNotify", .id = 190 },
+    .{ .name = "NoTrader", .id = 191 },
+    .{ .name = "DisableMovement", .id = 192 },
+    .{ .name = "ExperienceGain", .id = 193 },
+    .{ .name = "CriticalChance", .id = 194 },
+    .{ .name = "BuffProcChance", .id = 195 },
+    .{ .name = "BuffBlink", .id = 196 },
+    .{ .name = "BuffResistance", .id = 197 },
+    .{ .name = "CraftingIngredientCount", .id = 198 },
+    .{ .name = "EntityPenetrationCount", .id = 199 },
+    .{ .name = "BlockPenetrationFactor", .id = 200 },
+    .{ .name = "JunkDroneModCooldown", .id = 201 },
+    .{ .name = "HeadshotDamageModifier", .id = 202 },
+    .{ .name = "Count", .id = 203 },
+};
+
+/// Enum value of `name`, or null when the name is not a member. Stock's
+/// `EnumUtils.Parse<PassiveEffects>(name, false)` is case-sensitive.
+pub fn idOfName(name: []const u8) ?u8 {
+    for (table) |e| {
+        if (std.mem.eql(u8, e.name, name)) return e.id;
+    }
+    return null;
+}
+
+/// Member name of `id`, or null past the end of the enum.
+pub fn nameOfId(id: u8) ?[]const u8 {
+    if (id >= table.len) return null;
+    return table[id].name;
+}
+
+test "stock PassiveEffects ordinals" {
+    // Anchors from the RE dumps: the enum's field order is the ordinal, and
+    // docs/gameplay/items.md pins these five by number.
+    try std.testing.expectEqual(@as(?u8, 0), idOfName("None"));
+    try std.testing.expectEqual(@as(?u8, 1), idOfName("EntityDamage"));
+    try std.testing.expectEqual(@as(?u8, 76), idOfName("EconomicValue"));
+    try std.testing.expectEqual(@as(?u8, 79), idOfName("LootProb"));
+    try std.testing.expectEqual(@as(?u8, 112), idOfName("StaminaLoss"));
+    try std.testing.expectEqual(@as(?u8, 141), idOfName("HarvestCount"));
+    try std.testing.expectEqual(@as(?u8, 163), idOfName("TargetArmor"));
+    // The name lookup is case-sensitive, like stock's Parse(name, false).
+    try std.testing.expectEqual(@as(?u8, null), idOfName("entitydamage"));
+    try std.testing.expectEqual(@as(?u8, null), idOfName("NoSuchEffect"));
+    // Round-trip and the sentinel at the end of the enum.
+    for (table) |e| try std.testing.expectEqualStrings(e.name, nameOfId(e.id).?);
+    try std.testing.expectEqualStrings("Count", nameOfId(@intCast(count - 1)).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), nameOfId(255));
+}

@@ -16,7 +16,9 @@ pub fn coinItemId(self: *const Game) u16 {
 
 pub fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
     if (self.sim.mask[s].trader_stock) {
-        const m = self.sim.trader_stock[s];
+        // Pointer, not a copy: TraderStock is ~540 B (entries [50]StockEntry)
+        // and this is read per trader per replicate pass.
+        const m = &self.sim.trader_stock[s];
         if (m.wallet_default != 0) return m.wallet;
     }
     return self.trader_wallet_dukes;
@@ -121,6 +123,26 @@ pub fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, 
     }
 }
 
+fn resolveItemHasQuality(ctx: ?*anyopaque, name: []const u8) bool {
+    const g: *const Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.hasQualityByName(name);
+}
+
+/// `[rules.trader]` + the items table as stock `TraderInfo::SpawnItem` reads
+/// them: TraderMaxTier, the fallback quality range for `quality`-less entries,
+/// and ItemClass.HasQuality per name. Both roll sites (trader stock, vending
+/// store) build it here so neither carries its own defaults.
+pub fn qualityPolicy(self: *Game) assets_traders.QualityPolicy {
+    const r = self.sim.rules.trader;
+    return .{
+        .max_tier = r.max_tier,
+        .default_min = r.default_quality_min,
+        .default_max = r.default_quality_max,
+        .has_quality = &resolveItemHasQuality,
+        .has_quality_ctx = self,
+    };
+}
+
 /// Deterministic roll seed for a trader's inventory: (world seed, trader
 /// entity, day). Same world + trader + day → same stock; restock on a later
 /// day rolls fresh (sim rule: deterministic inputs).
@@ -139,11 +161,17 @@ pub fn traderRollSeed(self: *const Game, trader_net_id: i32) u64 {
 pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.RolledItem) usize {
     const tt = self.traders;
     var refs: []const assets_traders.ItemRef = &.{};
+    // Only an unresolved trader_info row falls back to traderAlways. A row
+    // that resolved with an empty <trader_items> list is intentionally empty
+    // (traders.xml id 3 player_owned / id 5 rentable vending rows): stocking
+    // it from traderAlways shows items stock leaves off the machine.
+    var resolved_row = false;
     if (self.sim.slotOfNetId(trader_net_id)) |s| {
         if (self.sim.mask[s].trader_stock) {
             const info_id = self.sim.trader_stock[s].trader_info_id;
             if (info_id != 0) {
                 if (tt.traderInfo(info_id)) |ti| {
+                    resolved_row = true;
                     if (ti.refs.len > 0) refs = ti.refs;
                     // Per-trader RestockInterval drives systems.traderRestock
                     // (-1 = never, 0 = daily, N = every N days).
@@ -153,10 +181,12 @@ pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.Roll
             }
         }
     }
-    if (refs.len == 0) refs = tt.trader_always_refs;
+    if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs;
     if (refs.len == 0) return 0;
     var rng = rng_util.XorShift32.initFromU64(traderRollSeed(self, trader_net_id));
-    return tt.rollAllRefs(refs, &rng, out);
+    // Sandbox TraderItemAbundance (default 1.0): stock multiplies each rolled
+    // count before the floor.
+    return tt.rollAllRefs(refs, &rng, qualityPolicy(self), self.trader_item_abundance, out);
 }
 
 pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
@@ -168,16 +198,23 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     const rn = rollStockRefs(self, trader_net_id, &rolled);
     if (rn == 0) return;
     const info_id = self.sim.trader_stock[s].trader_info_id;
-    var buy_markup: f32 = 1.0;
-    var sell_markup: f32 = 0.02;
+    // Per-trader override first, then the traders.xml root row, then the
+    // built-in fallback. Resolved through an optional rather than by
+    // comparing against the fallback value: a `<trader_info>` that declares
+    // an override equal to the fallback used to be mistaken for "unset" and
+    // silently replaced by the root value.
+    var buy_ov: ?f32 = null;
+    var sell_ov: ?f32 = null;
     if (info_id != 0) {
         if (tt.traderInfo(info_id)) |ti| {
-            if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
-            if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+            if (ti.override_buy_markup > 0) buy_ov = ti.override_buy_markup;
+            if (ti.override_sell_markup > 0) sell_ov = ti.override_sell_markup;
         }
     }
-    if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
-    if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
+    const buy_markup: f32 = buy_ov orelse
+        (if (tt.buy_markup > 0) tt.buy_markup else assets_traders.default_buy_markup);
+    const sell_markup: f32 = sell_ov orelse
+        (if (tt.sell_markdown > 0) tt.sell_markdown else assets_traders.default_sell_markdown);
     // Stock GetBuyPrice/GetSellPrice apply the traders.xml quality_mod lerp
     // (QL1 -> min, QL6 -> max) to quality items (asm.il 1830625-1830948).
     const qmin = tt.quality_min_mod;
@@ -186,7 +223,12 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         if (n >= ecs.components.max_stock) break;
         const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
-        const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
+        // Stock `TraderInfo::SpawnItem` IL_022F calls `AddGSStats` with stage
+        // -1 (derived from the first row of the entry's quality) on every
+        // stocked stack. Deterministic per trader + day + entry index, like
+        // the rest of the fill.
+        const srolled = self.rollItemStats(iid, r.quality, -1, @truncate(traderRollSeed(self, trader_net_id) ^ @as(u64, n)));
+        const econ: f32 = if (self.items.byId(iid)) |d| d.econ else 0;
         // A39: the sell base is EconomicValue * EconomicSellScale (stock
         // GetSellPrice; default scale 1.0, a few items mark down to .5).
         const sell_scale: f32 = if (self.items.byId(iid)) |d| d.econ_sell_scale else 1.0;
@@ -197,13 +239,21 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             @floatFromInt(@max(1, d.econ_bundle_size))
         else
             1.0;
-        const qmod = ecs.systems.qualityPriceMod(qmin, qmax, r.quality);
+        // An item's own TraderQualityMod pair wins over the trader's
+        // (XUiM_Trader GetBuyPrice/GetSellPrice IL_0127-0168); the 4 stock rows
+        // are the cooking pot/grill, whose Q6 prices 20x.
+        const idef = self.items.byId(iid);
+        const iqmin = if (idef != null and idef.?.trader_quality_min_mod > 0) idef.?.trader_quality_min_mod else qmin;
+        const iqmax = if (idef != null and idef.?.trader_quality_max_mod > 0) idef.?.trader_quality_max_mod else qmax;
+        const qmod = ecs.systems.qualityPriceMod(iqmin, iqmax, r.quality);
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,
             .quality = r.quality,
             .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle)), 65535)) else 5,
             .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle)), 65535)))) else 1,
+            .stats = srolled.stats,
+            .stats_n = srolled.n,
         };
         n += 1;
     }

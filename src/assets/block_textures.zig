@@ -81,9 +81,94 @@ pub const Table = struct {
         try self.name_tex.put(arena, kn, tex);
     }
 
+    /// Full `Texture` property value of a block, own body first, then the
+    /// Extends chain (stock `CreateProperties` copies the parent's *resolved*
+    /// dictionary, so a block sees its grandparent's row). The starting
+    /// block's Extends `param1` excludes that property from the whole chain
+    /// (own body included) exactly like the blocks.zig walk; depth-capped so a
+    /// corrupt cycle cannot spin.
+    fn textureValue(clean: []const u8, start: usize, name_idx: *const NameIndex) ?[]const u8 {
+        const max_depth: usize = 8;
+        const own = ownTextureValue(clean, start);
+        if (own != null) return own;
+        var p1: []const u8 = "";
+        var ext = extendsValue(clean, start);
+        if (ext) |_| {
+            // The starting block's own param1 excludes the property from the
+            // whole chain (stock CreateProperties).
+            p1 = param1Value(clean, start);
+        } else return null;
+        if (xml.tagListContains(p1, "Texture")) return null;
+        var depth: usize = 0;
+        while (ext) |e| : (depth += 1) {
+            if (depth >= max_depth) return null;
+            const base = name_idx.map.get(e) orelse return null;
+            if (ownTextureValue(clean, base)) |tv| return tv;
+            ext = extendsValue(clean, base);
+        }
+        return null;
+    }
+
+    const NameIndex = struct {
+        map: std.StringHashMapUnmanaged(usize) = .{},
+    };
+
+    fn blockAt(clean: []const u8, pos: usize) bool {
+        return std.mem.startsWith(u8, clean[pos..], "<block ");
+    }
+
+    /// `<property name="Extends" value=...>` of the block starting at `bi`,
+    /// or null when it declares none.
+    fn extendsValue(clean: []const u8, bi: usize) ?[]const u8 {
+        var i = bi;
+        while (i < clean.len) {
+            const pi = std.mem.findPos(u8, clean, i, "<property") orelse return null;
+            if (pi >= blockEnd(clean, bi)) return null;
+            if (std.mem.eql(u8, xml.attr(clean, pi, "name") orelse "", "Extends"))
+                return xml.attr(clean, pi, "value");
+            i = pi + 9;
+        }
+        return null;
+    }
+
+    fn param1Value(clean: []const u8, bi: usize) []const u8 {
+        var i = bi;
+        while (i < clean.len) {
+            const pi = std.mem.findPos(u8, clean, i, "<property") orelse return "";
+            if (pi >= blockEnd(clean, bi)) return "";
+            if (std.mem.eql(u8, xml.attr(clean, pi, "name") orelse "", "Extends"))
+                return xml.attr(clean, pi, "param1") orelse "";
+            i = pi + 9;
+        }
+        return "";
+    }
+
+    fn blockEnd(clean: []const u8, bi: usize) usize {
+        const gt = std.mem.findPos(u8, clean, bi, ">") orelse return clean.len;
+        if (gt > bi and clean[gt - 1] == '/') return gt + 1;
+        return std.mem.findPos(u8, clean, gt, "</block>") orelse clean.len;
+    }
+
+    fn ownTextureValue(clean: []const u8, bi: usize) ?[]const u8 {
+        const end = blockEnd(clean, bi);
+        var i = bi;
+        while (i < end) {
+            const pi = std.mem.findPos(u8, clean, i, "<property") orelse return null;
+            if (pi >= end) return null;
+            if (std.mem.eql(u8, xml.attr(clean, pi, "name") orelse "", "Texture"))
+                return xml.attr(clean, pi, "value");
+            i = pi + 9;
+        }
+        return null;
+    }
+
     pub fn mergeBlocksXml(self: *Table, allocator: std.mem.Allocator, path: []const u8) !void {
         const clean = try xml.readCleanFile(allocator, path);
         defer allocator.free(clean);
+        // Name -> block offset, so the Extends walk below resolves chains
+        // without rescanning the file.
+        var name_idx = NameIndex{};
+        defer name_idx.map.deinit(allocator);
         var i: usize = 0;
         while (i < clean.len) {
             const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
@@ -91,18 +176,16 @@ pub const Table = struct {
                 i = bi + 7;
                 continue;
             };
+            try name_idx.map.put(allocator, name, bi);
             const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
-            var body_end = gt + 1;
-            if (!(gt > bi and clean[gt - 1] == '/')) {
-                const close = std.mem.findPos(u8, clean, gt, "</block>") orelse break;
-                body_end = close;
+            i = blockEnd(clean, bi) + 1;
+            _ = gt;
+        }
+        var it = name_idx.map.iterator();
+        while (it.next()) |e| {
+            if (textureValue(clean, e.value_ptr.*, &name_idx)) |tv| {
+                if (parseTextureValue(tv) != 0) try self.putNameTex(allocator, e.key_ptr.*, parseTextureValue(tv));
             }
-            const body = clean[gt + 1 .. body_end];
-            if (xml.propertyValue(body, "Texture")) |tv| {
-                const packed_t = parseTextureValue(tv);
-                if (packed_t != 0) try self.putNameTex(allocator, name, packed_t);
-            }
-            i = body_end + 1;
         }
     }
 
@@ -161,4 +244,58 @@ test "packFaces and parseTextureValue" {
     // Terrain atlas ids >255 cannot go on the chunk channel (client uses Block.list).
     try std.testing.expectEqual(@as(u64, 0), parseTextureValue("288,570,570,570,570,570"));
     try std.testing.expectEqual(@as(u64, 0), parseTextureValue("570"));
+}
+
+test "Texture resolves through the Extends chain" {
+    // Fixture mirrors the stock shape: masters declare the row, children
+    // carry only Extends; one child opts out through param1, one chain has a
+    // >255 atlas id the channel cannot carry.
+    const src =
+        \\<blocks>
+        \\<block name="woodNoUpgradeMaster">
+        \\  <property name="Texture" value="241" />
+        \\</block>
+        \\<block name="woodMaster">
+        \\  <property name="Extends" value="woodNoUpgradeMaster" />
+        \\</block>
+        \\<block name="oddMulti">
+        \\  <property name="Extends" value="multiBase" />
+        \\</block>
+        \\<block name="multiBase">
+        \\  <property name="Texture" value="78,84,79,84,84,84" />
+        \\</block>
+        \\<block name="atlasOnly">
+        \\  <property name="Extends" value="atlasBase" />
+        \\</block>
+        \\<block name="atlasBase">
+        \\  <property name="Texture" value="288,570,570,570,570,570" />
+        \\</block>
+        \\<block name="signYardSign01">
+        \\  <property name="Extends" value="signBase" param1="Mesh,Texture,MultiBlockDim" />
+        \\</block>
+        \\<block name="signBase">
+        \\  <property name="Texture" value="42" />
+        \\</block>
+        \\</blocks>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks.xml", .{dir});
+    try io_fs.writeFile(path, src);
+    var t: Table = .{};
+    defer t.deinit();
+    try t.mergeBlocksXml(std.testing.allocator, path);
+    try std.testing.expectEqual(@as(u64, 0xF1F1F1F1F1F1), t.name_tex.get("woodMaster").?);
+    const multi = t.name_tex.get("oddMulti").?;
+    try std.testing.expectEqual(@as(u64, 78), multi & 0xff);
+    try std.testing.expectEqual(@as(u64, 79), (multi >> 16) & 0xff);
+    // >255 atlas ids cannot ride the 6xu8 channel: nothing stored.
+    try std.testing.expect(t.name_tex.get("atlasOnly") == null);
+    // param1="...,Texture,..." excludes the property from the whole chain.
+    try std.testing.expect(t.name_tex.get("signYardSign01") == null);
+    // Base rows still resolve on their own.
+    try std.testing.expectEqual(@as(u64, 0x2A2A2A2A2A2A), t.name_tex.get("signBase").?);
 }

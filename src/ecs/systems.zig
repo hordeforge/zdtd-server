@@ -84,8 +84,11 @@ const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
 /// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
 /// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
 fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
-    const solid_fn = w.solid_fn orelse return true; // no terrain hook: sight unblocked
-    const solid_ctx = w.solid_ctx;
+    // Sight uses its own oracle (stock `IsSeeThrough` reads the Collide sight
+    // bit and treats water as opaque); without one it keeps the old movement
+    // predicate, so an offline or fixture world behaves exactly as before.
+    const solid_fn = w.sight_fn orelse (w.solid_fn orelse return true);
+    const solid_ctx = if (w.sight_fn != null) w.sight_ctx else w.solid_ctx;
     const zy2 = zy + 1.6;
     const py2 = py + 1.6;
     const dx = px - zx;
@@ -233,6 +236,14 @@ fn smellRadiusFor(w: *const World, slot: Slot) f32 {
 }
 
 fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
+    // `BlockIf condition=alert e 0` (the hostile-animal template): while the
+    // entity is unalerted the executing BlockIf holds MutexBits=1 over
+    // SetNearestEntityAsTarget, so no fresh sense acquisition. Revenge and
+    // the latched aggro below still run (SetAsTargetIfHurt is priority 1 and
+    // hurt sets alert, which drops this gate). Bit 1 = alert arm parsed.
+    if (w.class_id[zslot].block_if_alert_only & 2 != 0 and !w.zombie_ai[zslot].alert) {
+        return .{ .id = -1, .slot = 0, .d2 = w.rules.ai.sense_dist_sq, .px = zx, .pz = zz };
+    }
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
     var best_d: f32 = w.rules.ai.sense_dist_sq;
@@ -249,8 +260,12 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx
             const smell = smellRadiusFor(w, p.slot);
             // Stealth (RE PlayerStealth NotifyNoise): a crouched player's
             // movement noise is muffled, so the hearing gate shrinks by
-            // crouch_hear_scale.
-            const hear = if (p.crouching) w.rules.ai.hear_range * w.rules.ai.crouch_hear_scale else w.rules.ai.hear_range;
+            // crouch_hear_scale. The AITarget player hear distance wins over
+            // the Rules floor when set (stock `EAISetNearestEntityAsTarget`
+            // hearDistMax; hear 0 reads 50 at parse, so nonzero = declared).
+            const hear_base = w.class_id[zslot].target_player_hear;
+            const hear_rule = if (hear_base != 0) hear_base else w.rules.ai.hear_range;
+            const hear = if (p.crouching) hear_rule * w.rules.ai.crouch_hear_scale else hear_rule;
             if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear, p.light_level)) continue;
             best_d = d;
             best_id = p.id;
@@ -331,6 +346,25 @@ fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s:
         return np;
     }
     if (w.mask[ts].kind and w.mask[s].kind and w.kind[ts] == w.kind[s]) return np;
+    // `SetAsTargetIfHurt class=` filter (entityclasses AITarget-1): a
+    // class-filtered entry retargets only when the attacker's kind is named.
+    // Bit 1 = EntityPlayer (mask.player), bit 3 = EntityEnemyAnimal (animal
+    // kind); bit 2 = EntityBandit, which has no sim entity and never matches.
+    // 0 (no filtered entry, incl. bare entries) keeps the legacy
+    // always-retarget path. Turret attackers have no kind and always pass
+    // (legacy attribution only ever carried player/turret).
+    const hb = w.class_id[s].hurt_target_classes;
+    if (hb & 1 != 0) {
+        const is_player = w.mask[ts].player;
+        const is_enemy_animal = w.mask[ts].kind and w.kind[ts] == .animal;
+        if (is_player and hb & 2 == 0) return np;
+        if (is_enemy_animal and hb & 8 == 0) return np;
+        if (!is_player and !is_enemy_animal) {
+            // Turrets (no kind mask) pass; zombies/bandits do not match any
+            // named stock class here.
+            if (w.mask[ts].kind) return np;
+        }
+    }
     if (ai.revenge_target == np.id) return np;
     const dx = pos[ts].x - w.transform[s].x;
     const dz = pos[ts].z - w.transform[s].z;
@@ -595,7 +629,7 @@ fn fpDamage(fp: u32) f32 {
     return @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
 }
 
-fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
+fn applyDeferredDamage(w: *World, dmg_fp: []const u32, dmg_attacker: []const u16) u32 {
     var applied: u32 = 0;
     // O(live) via the packed alive set. The accumulator is slot-indexed, but
     // only living entities can have been written; scanning the 512-slot table
@@ -616,6 +650,17 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         // deferred accumulator): <0 denies the hit, >0 scales by percent.
         // The attacker is not tracked here, so it reads -1 (unknown).
         var dmg = amount;
+        // Class PhysicalDamageResist (passive 41): the armoured classes
+        // (zombieSoldier 50, zombieDemolition 60, the swarms 20) take that
+        // percent less from every source the SERVER computes. This
+        // accumulator's writers are AI melee and turret fire, so a zombie
+        // victim resolves its own class row here. Immediate hits (C2S claims,
+        // explosions, bots) take the same leg inside World.damageFrom, which
+        // this accumulator never calls.
+        if (w.kind[i] != .player) {
+            const pr = w.classPhysResist(i);
+            if (pr > 0) dmg *= 1.0 - @min(pr, 100.0) / 100.0;
+        }
         if (w.kind[i] == .player) {
             // GameDifficulty (RE `ItemActionAttack.difficultyModifier`,
             // combat-damage.md): a server (AI) attacker hitting a client-
@@ -626,6 +671,33 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
             // mixed-control condition holds by construction. The scale runs
             // before the plugin verdict, matching the C2S path's order.
             dmg = @round(dmg * w.director.damageScale(false, true, &w.rules.difficulty));
+            // Resist legs, in stock `EntityAlive::DamageEntity` order: the
+            // untagged GeneralDamageResist (passive 40, all damage types) then
+            // the physical armor rating (Equipment::CalcDamage). The accumulated
+            // attackers here are AI melee (and turret fire aimed at mobs), whose
+            // HandItem damage types are all in `Equipment.physicalDamageTypes`,
+            // so the armor leg applies. Without this a full-armor player took
+            // exactly the naked damage from a zombie.
+            dmg *= 1.0 - inventory.generalDamageResist(w, i);
+            // Foreign-gated victim rows (Spectral Grace): the accumulator's
+            // attacker kind resolves the `other` filter the per-tick fold
+            // cannot. A passing Grace also starts its recharge buff through
+            // the Game hook (the buff's own start row sets the cvar gate).
+            if (w.foreign_resist_fn) |frf| {
+                dmg *= 1.0 - frf(w.foreign_resist_ctx, i, dmg_attacker[i]);
+            }
+            // Victim-side hit trigger: the victim's `onOtherAttackedSelf`
+            // rows fire with the accumulator's attacker.
+            if (w.attacked_self_fn) |asf| {
+                asf(w.attacked_self_ctx, i, dmg_attacker[i]);
+            }
+            if (w.player[i].peer_slot >= 0) {
+                // Attacker-aware armor (Preacher vs zombies): the Vs form
+                // folds the piece's foreign-gated rows against the
+                // accumulator's attacker; unset attacker = today's armor.
+                const atk: ?Slot = if (dmg_attacker[i] < max_entities) dmg_attacker[i] else null;
+                dmg *= 1.0 - inventory.armorMitigationVs(w, @intCast(w.player[i].peer_slot), atk);
+            }
             if (w.player_damage_verdict_fn) |vdf| {
                 const v = vdf(w.player_damage_verdict_ctx, w.network_id[i].id, dmg);
                 if (v < 0) continue;
@@ -909,6 +981,28 @@ fn failQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
 }
 
 pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
+    return questAcceptWithCode(w, peer_slot, def_id, 0, .{});
+}
+
+/// Accept `def_id` into `peer_slot`'s journal with an explicit stock quest
+/// code and POI placement.
+///
+/// `quest_code == 0` allocates the next code (what a first accept does);
+/// nonzero adopts the caller's code, which is how a party member's copy of a
+/// SHARED quest keeps the owner's code. Stock sends that code to every member
+/// in `NetPackageSharedQuest` (`SharedQuestData.questCode`,
+/// Quest.CodeAssignment = hash(unscaledTime, ID, owner entityId, giverId) -
+/// Quest::SetupQuestCode IL=48), and stock resolves shared-quest traffic by
+/// code alone: `QuestJournal.GetSharedQuest(Int32 questCode)` (IL=33) for
+/// add/remove_shared_member and `RemoveSharedQuestByOwner(Int32 questCode)`
+/// for the owner's remove fan-out. A member entry with a freshly allocated
+/// code could never satisfy those lookups, so the member's client saw the
+/// quest advance while the server journal silently stayed put.
+///
+/// `poi` reuses the owner's placement when valid so both copies of a shared
+/// quest sit in the same POI (the owner's client sends that POI's rect in the
+/// share packet); an unset rect falls through to the normal selection.
+pub fn questAcceptWithCode(w: *World, peer_slot: usize, def_id: u16, quest_code: i32, poi: c.PoiRect) bool {
     const ps = w.playerByPeer(peer_slot) orelse return false;
     if (!w.mask[ps].journal) return false;
     if (w.catalog.byId(def_id) == null) return false;
@@ -922,8 +1016,11 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     var j = &w.journal[ps];
     if (j.hasActive(def_id) or j.hasFailed(def_id)) return false;
     const s = j.findFree() orelse return false;
-    const code = w.next_quest_code;
-    w.next_quest_code +%= 1;
+    const code = if (quest_code != 0) quest_code else blk: {
+        const fresh = w.next_quest_code;
+        w.next_quest_code +%= 1;
+        break :blk fresh;
+    };
     s.* = .{
         .def_id = def_id,
         .quest_code = code,
@@ -932,6 +1029,7 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
         .ready_turn_in = false,
         .progress = 0,
         .phase = 1,
+        .poi = poi,
     };
     const d = w.catalog.byId(def_id).?;
     // Place the quest in a POI so rally objectives and the client's POI marker
@@ -1332,7 +1430,6 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
         w.destroy(i);
         n += 1;
     }
-    if (n > 0) w.markDirty(ps, .{ .inv = true });
     return n;
 }
 
@@ -1380,6 +1477,20 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 unit = @intCast(@max(1, @min(scaled, std.math.maxInt(u32))));
             }
         }
+        // Barter perk (RE GetBuyPrice IL=240): the buyer pays
+        // `unit - unit * BarteringBuying(148)`, ceiled like stock's final
+        // CeilToInt. Applied after the verdict so plugins see the pre-barter
+        // price (verdict is zdtd-native; stock applies barter inside
+        // GetBuyPrice itself). Floor at 1: stock's ceil of a positive
+        // fraction never reaches 0.
+        if (w.barter_buy_fn) |bf| {
+            const scale = bf(w.barter_buy_ctx, player_peer);
+            if (scale < 1) {
+                const disc_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, 1 - scale);
+                const kept: f64 = @max(0, @as(f64, @floatFromInt(unit)) - disc_f);
+                unit = @intCast(@max(1, @as(u64, @ceil(kept))));
+            }
+        }
         // Widen before the multiply: a verdict-scaled unit can sit at u32 max,
         // so unit * qty in u32 wraps (free purchase) or traps on the check.
         const cost_wide: u64 = @as(u64, unit) * @as(u64, qty);
@@ -1400,20 +1511,31 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                     return false;
                 }
             }
-            if (!w.depositItem(ps, item, qty)) {
+            // The bought stack carries the entry's stat roll (stock's trader
+            // ItemStacks are created with `AddGSStats` at fill time): deposit
+            // the whole value, not the stat-less triple.
+            if (!w.inventory[ps].addSlotStacked(.{
+                .item_id = item,
+                .count = qty,
+                .quality = en.quality,
+                .stats = en.stats,
+                .stats_n = en.stats_n,
+            }, w.maxStack(item))) {
                 w.inventory[ps] = inventory_before;
                 return false;
             }
-            w.markDirty(ps, .{ .inv = true });
         }
         en.count -= qty;
         w.wallet[ps].coins -= cost;
         // Stock credits the trader's AvailableMoney with the sale (the
         // wire TraderData shows the live balance). Clamp at i32 max.
         stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
-        // Demand spike: a buy raises the entry's markup to +100
-        // (TraderData/Entry::IncreaseMarkup, asm.il 856828-856866).
-        en.markup = 100;
+        // No markup change on buy: stock's IncreaseMarkup/DecreaseMarkup run
+        // only from the client vending-machine +/- UI actions
+        // (ItemActionEntryMarkup/Markdown), never from buy/sell transactions.
+        // NPC-trader buy price ignores entry markup entirely (GetBuyPrice
+        // applies it only on the PlayerOwned/Rentable path); the markup the
+        // client shows arrives via the TraderData echo zdtd already applies.
         return true;
     } else {
         // Sell: stock GetSellPrice (XUiM_Trader IL=217) prices the SOLD
@@ -1441,7 +1563,17 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         else
             return false;
         if (unit == 0) return false;
-        const qmod = qualityPriceMod(w.trader_quality_min_mod, w.trader_quality_max_mod, sold_quality);
+        // The sold item's own TraderQualityMod pair wins over the trader's
+        // (stock's GetSellPrice lerps the item's pair when declared).
+        var qmin = w.trader_quality_min_mod;
+        var qmax = w.trader_quality_max_mod;
+        if (w.item_quality_mod_fn) |f| {
+            if (f(w.item_quality_mod_ctx, item)) |pair| {
+                qmin = pair[0];
+                qmax = pair[1];
+            }
+        }
+        const qmod = qualityPriceMod(qmin, qmax, sold_quality);
         var scaled: f64 = @as(f64, @floatFromInt(unit)) * qmod;
         if (w.percent_uses_left_fn) |p| {
             scaled *= @as(f64, p(w.percent_uses_left_ctx, item, sold_quality, sold_use_times));
@@ -1453,6 +1585,20 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             unit = 1;
         } else {
             unit = @trunc(@min(scaled, @as(f64, std.math.maxInt(u32))));
+        }
+        // Barter perk (RE GetSellPrice IL=217): the seller gains
+        // `unit + unit * BarteringSelling(149)`. Stock skips it when the
+        // trader overrides the markdown; zdtd has no override surface, so it
+        // always applies - noted in the GAP row.
+        if (w.barter_sell_fn) |bf| {
+            const scale = bf(w.barter_sell_ctx, player_peer);
+            if (scale > 1) {
+                const bonus_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, scale - 1);
+                const raised: f64 = @as(f64, @floatFromInt(unit)) + bonus_f;
+                if (std.math.isFinite(raised)) {
+                    unit = @intCast(@max(1, @min(@as(u64, @ceil(raised)), std.math.maxInt(u32))));
+                }
+            }
         }
         if (unit == 0) return false;
         // Same widening as the buy cost above.
@@ -1476,13 +1622,11 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 w.inventory[ps] = inventory_before;
                 return false;
             }
-            w.markDirty(ps, .{ .inv = true });
         }
         if (entry) |en| {
             en.count += qty;
-            // A sell eases demand: step the entry's markup down by 4
-            // (DecreaseMarkup, asm.il 856828-856866), saturating at i8 min.
-            en.markup -|= 4;
+            // No markup change on sell either (same note as the buy path
+            // above): entry markup is vending-UI state, not a demand signal.
         }
         w.wallet[ps].coins += gain;
         stock.wallet -= @intCast(gain);
@@ -1514,8 +1658,8 @@ pub fn traderRestock(w: *World) void {
             if (stock.entries[e].count < w.trader_restock_cap) {
                 stock.entries[e].count +%= @min(w.trader_restock_refill, w.trader_restock_cap -| stock.entries[e].count);
             }
-            // Fresh entries: demand resets (stock HandleFullReset rebuilds the
-            // inventory, which drops the old markups).
+            // Fresh entries rebuild at neutral markup (stock HandleFullReset
+            // rebuilds the inventory, dropping the old markups).
             stock.entries[e].markup = 0;
         }
         // The money pool regenerates toward its spawn default each restock.
@@ -1717,6 +1861,12 @@ const AiCtx = struct {
     slots: []const Slot,
     /// Fixed-point damage accumulators, one per entity slot (atomic adds).
     dmg_fp: []u32,
+    /// Attacker slot per victim slot, written alongside dmg_fp
+    /// (max_entities = unset; zombie melee writes its own slot, turret fire
+    /// leaves unset since turrets match no victim filter). Lets the apply
+    /// pass resolve victim-side foreign-gated rows (Spectral Grace's
+    /// other=zombie,animal filter) against the attacker's real class tags.
+    dmg_attacker: []u16,
     hits: *std.atomic.Value(u32),
     /// Snapshotted before forRanges so workers never reread a field the
     /// director (or another tick phase) may rewrite on the main thread.
@@ -1930,7 +2080,10 @@ const AiCtx = struct {
             if (ai.decision_cd <= 0) {
                 var chosen: c.TaskId = .none;
                 for (zombie_tasks) |t| {
-                    if (isBestTask(t, ai.active_task) and canExecute(ctx.w, s, t.id, ai, np)) {
+                    if (c.aiTaskAllowed(ctx.w.class_id[s].ai_tasks, t.id) and
+                        isBestTask(t, ai.active_task) and
+                        canExecute(ctx.w, s, t.id, ai, np))
+                    {
                         chosen = t.id;
                         break;
                     }
@@ -1988,6 +2141,13 @@ const AiCtx = struct {
 fn senseDistSq(w: *const World, s: Slot) f32 {
     // A35 per-entity layer first: the def spawns carry SightRange onto the
     // entity, so a class outside the fixed class_table senses as itself too.
+    // The AITarget player see distance wins over SightRange when set (stock
+    // `EAISetNearestEntityAsTarget` targetClasses): a zombie whose row says
+    // see 20 senses players at 20, not at its 27-40 SightRange. A negative
+    // stock value (never target this class) yields a negative square and
+    // denies every range check below.
+    const tp = w.class_id[s].target_player_see;
+    if (tp != 0) return tp * tp;
     const pe = w.class_id[s].sight_range;
     if (pe > 0) return pe * pe;
     const sr = w.class_table[w.class_id[s].id].sight_range;
@@ -1997,6 +2157,7 @@ fn senseDistSq(w: *const World, s: Slot) f32 {
 
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: TargetSnap) bool {
+    if (!c.aiTaskAllowed(w.class_id[s].ai_tasks, id)) return false;
     const sense_d2 = senseDistSq(w, s);
     return switch (id) {
         .break_block => breakBlockCanExecute(w, s, ai, np.id, np.d2, sense_d2),
@@ -2176,13 +2337,15 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
     ai.fear_target = best;
 }
 
-/// Combined gate: AITask-1 RunawayWhenHurt (fresh revenge target) or AITask-2
-/// RunawayFromEntity (fresh fear source). Only passive animals carry either in
-/// stock XML (the animal templates' AITask-1/2), so kind gates the task.
+/// Combined gate: RunawayWhenHurt (fresh revenge target) or RunawayFromEntity
+/// (fresh fear source). Timid templates carry both; wolves also list
+/// RunawayWhenHurt, but is_enemy keeps predators hunting instead of fleeing
+/// unprovoked. Kind still gates: zombies never pick this even when the mask
+/// would allow it (no stock zombie list includes it).
 fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
     if (!w.mask[s].kind or w.kind[s] != .animal) return false;
     // Predators (wolf, bear, coyote, snake, boar) hunt; only passive wildlife
-    // carries the flee tasks (stock animal templates' AITask-1/2).
+    // flees. The XML mask may still list RunawayWhenHurt on a predator.
     if (w.class_id[s].is_enemy) return false;
     if (ai.revenge_target >= 0 and ai.revenge_time > 0 and w.slotOfNetId(ai.revenge_target) != null) return true;
     return ai.fear_target >= 0 and w.slotOfNetId(ai.fear_target) != null;
@@ -2227,10 +2390,13 @@ fn runawayUpdate(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: 
         return;
     }
     // Away from the attacker; a body exactly on top of it picks +x arbitrarily
-    // rather than dividing by zero.
+    // rather than dividing by zero. How far to run is its own knob: the
+    // give-up radius above answers "is the fright over", `flee_distance`
+    // answers "how far away is the goal" (equal at the stock defaults).
+    const run_to = w.rules.ai.flee_distance;
     const inv: f32 = if (d2 > 0.0001) 1.0 / @sqrt(d2) else 0;
-    const fx = w.transform[s].x + (if (inv > 0) dx * inv else 1) * flee;
-    const fz = w.transform[s].z + (if (inv > 0) dz * inv else 0) * flee;
+    const fx = w.transform[s].x + (if (inv > 0) dx * inv else 1) * run_to;
+    const fz = w.transform[s].z + (if (inv > 0) dz * inv else 0) * run_to;
     ai.path_goal_x = fx;
     ai.path_goal_z = fz;
     ai.has_path = true;
@@ -2371,6 +2537,10 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
             } else {
                 const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
+                // Attacker slot for the foreign-gated victim rows; the
+                // victim slot may be shared so the write is best-effort (a
+                // same-tick second attacker wins).
+                ctx.dmg_attacker[np.slot] = s;
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
@@ -2553,6 +2723,16 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
     ai.path_goal_z = w.transform[bs].z;
     ai.has_path = true;
     chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd * ai.active_scale, dt);
+    // EAIApproachDistraction::updatePath recalculates on its own cadence
+    // (pathRecalculateTicks = 20 + rand(20), asm.il updatePath IL_0019/IL_001C),
+    // not the generic chase throttle. Re-arm the cooldown after the shared
+    // follow step so the next distraction solve waits the task's own interval.
+    if (ai.path_replan_cd <= 0) {
+        const base: f32 = @floatFromInt(@max(0, w.rules.ai.distraction_replan_min));
+        const rand_span: f32 = @floatFromInt(@max(0, w.rules.ai.distraction_replan_rand));
+        const ticks = base + rngFrac(ai, ai.distraction) * rand_span;
+        ai.path_replan_cd = ticks / @as(f32, @floatFromInt(protocol.ticks_per_second));
+    }
 }
 
 fn decrementIfPositive(value: *i32) void {
@@ -2639,6 +2819,12 @@ fn tickItemDistractions(w: *World) void {
     }
 }
 
+/// Heat window stock gives every noise-driven heat event: `NotifyNoise` passes
+/// the literal 240 s to `AIDirector::NotifyActivity` (AIDirector.il.txt
+/// IL_00D9); the 4th argument decays in seconds (`AIDirectorChunkData::DecayEvents`
+/// subtracts the tick's seconds), and `Director.notifyActivity` takes ticks.
+const stealth_heat_window_s: f32 = 240.0;
+
 /// Player movement-noise model (RE entity-ai.md PlayerStealth): consumes the
 /// stealth-noise ring pushed by the sound relay, folds each event into the
 /// owning player's stealth state (stock PlayerStealth.NotifyNoise), then runs
@@ -2698,9 +2884,11 @@ fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
         w.pushSleeperVolumeNoise(ev.x, ev.y, ev.z);
     }
     // Heat map (stock AIDirector.NotifyActivity): heatMapStrength x the
-    // (muffled) volumeScale, held for heat_map_time x 10 ticks.
+    // (muffled) volumeScale, held for the fixed window `NotifyNoise` passes
+    // (`ldc.r4 240`, AIDirector.il.txt IL_00D9 - the row's own heat_map_time
+    // never reaches the live path).
     if (ev.heat_map_strength > 0) {
-        w.director.notifyActivity(ev.x, ev.z, ev.heat_map_strength * scale, ev.heat_map_time * 10.0);
+        w.director.notifyActivity(ev.x, ev.z, ev.heat_map_strength * scale, stealth_heat_window_s * 20.0);
     }
 }
 
@@ -2809,6 +2997,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var dmg_attacker: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
     // Positions as of the phase start. Workers write only their own slots, so
     // any cross-slot position read has to come from this copy.
@@ -2820,6 +3009,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
         .pos = &pos_snap,
         .slots = ai_slots[0..ai_n],
         .dmg_fp = dmg_fp[0..],
+        .dmg_attacker = dmg_attacker[0..],
         .hits = &hits_a,
         .zombie_speed_scale = w.zombie_speed_scale,
     };
@@ -2827,7 +3017,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // scanned, and the pool wakeup is skipped while the population is small.
     if (ai_n < 64) AiCtx.work(ctx, 0, ai_n) else parallel.forRanges(ai_n, ctx, AiCtx.work);
     consumeCombatNoise(w);
-    _ = applyDeferredDamage(w, dmg_fp[0..]);
+    _ = applyDeferredDamage(w, dmg_fp[0..], dmg_attacker[0..]);
     return hits_a.load(.monotonic);
 }
 
@@ -2947,8 +3137,17 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
                     const raw: f32 = @min(f.mass_kg * -f.vy * 0.05, 40.0);
                     var dmg: f32 = @floatFromInt(@as(i32, @trunc(raw)));
                     if (kind == .player) {
-                        const mit = inventory.armorMitigation(w, @intCast(w.player[t].peer_slot));
-                        dmg *= 1.0 - mit;
+                        // GeneralDamageResist covers every damage type (stock
+                        // EntityAlive::DamageEntity), so it joins the crush
+                        // before the armor leg.
+                        dmg *= 1.0 - inventory.generalDamageResist(w, t);
+                        // peer_slot is i32 and defaults to -1 for a player
+                        // entity with no attached peer; @intCast traps on it.
+                        const ps = w.player[t].peer_slot;
+                        if (ps >= 0) {
+                            const mit = inventory.armorMitigation(w, @intCast(ps));
+                            dmg *= 1.0 - mit;
+                        }
                     }
                     if (dmg <= 0) continue;
                     const dr = w.damageFrom(nid, dmg, -1);
@@ -3080,13 +3279,16 @@ pub fn systemVehicles(w: *World, dt: f32) void {
 }
 
 /// Kind defaults when vehicles.xml velocityMax missing (A12: XML first, then this).
+/// Stock `velocityMax_turbo` first components (vehicles.xml: bicycle 6,
+/// minibike 7, motorcycle 9.8, 4x4 10, gyro 9); the loader reads the same
+/// field, so offline and XML mode agree.
 pub fn vehicleKindDefaultSpeed(kind: c.VehicleKind) f32 {
     return switch (kind) {
         .bicycle => 6,
-        .minibike => 12,
-        .motorcycle => 18,
-        .four_by_four => 14,
-        .gyrocopter => 20,
+        .minibike => 7,
+        .motorcycle => 9.8,
+        .four_by_four => 10,
+        .gyrocopter => 9,
     };
 }
 
@@ -3279,6 +3481,7 @@ const TurretCtx = struct {
                 t.ammo -%= 1;
                 const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
+                // Turret fire leaves dmg_attacker unset (matches no filter).
                 recordTurretOwner(&ctx.owner_hit[zi], s, t.owner_slot);
             }
         }
@@ -3347,12 +3550,16 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (!w.alive[i] or !w.mask[i].health) continue;
         if (w.kind[i] != .zombie) continue;
         const amount = fpDamage(fp);
+        // Class PhysicalDamageResist (passive 41): turret fire is
+        // server-computed, so the zombie's own class row reduces it here.
+        const pr = w.classPhysResist(i);
+        const applied: f32 = if (pr > 0) amount * (1.0 - @min(pr, 100.0) / 100.0) else amount;
         // Report lists full: stop before a kill nobody would be told about
         // (destroy without EntityRemove leaves a permanent client ghost).
         // Remaining damage re-accumulates next tick, like systemDespawnFar.
-        const would_kill = w.health[i].hp - amount <= 0;
+        const would_kill = w.health[i].hp - applied <= 0;
         if (would_kill and (out.killed_n >= out.killed_ids.len or out.loot_n >= out.loot_bag_ids.len)) break;
-        w.health[i].hp -= amount;
+        w.health[i].hp -= applied;
         if (w.health[i].hp <= 0) {
             const x = if (w.mask[i].transform) w.transform[i].x else 0;
             const y = if (w.mask[i].transform) w.transform[i].y else 0;
@@ -3364,11 +3571,15 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             // Corpse dwell like player kills: the body stays at hp 0 for
             // TimeStayAfterDeath; the tick sweep destroys it later. Fallback
             // is the stock EntityAlive default 5 s (RE entity-ai.md); the XML
-            // values 30/300 flow via class_id.time_stay when declared.
-            const dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
+            // values 30/300 flow via class_id.time_stay when declared. Horde
+            // kills gib 3x faster: stock cuts `timeStayAfterDeath /= 3` on
+            // horde spawns (`AIDirectorBloodMoonParty.SpawnZombie`), so the
+            // night's corpses clear instead of piling up.
+            var dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
                 w.class_id[i].time_stay
             else
                 5.0;
+            if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) dwell /= 3.0;
             w.health[i].hp = 0;
             w.health[i].corpse_seconds = dwell;
             if (w.mask[i].zombie_ai) {
@@ -3397,7 +3608,18 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
 
 /// Remove idle/wandering zombies far from every player. Returns removed ids
 /// (caller broadcasts EntityRemove with Despawned reason).
-pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
+/// Horde zombies never despawn here: stock tags them `bIsChunkObserver` so
+/// they keep their own chunk loaded (`AIDirectorBloodMoonParty.SpawnZombie`,
+/// `AIWanderingHordeSpawner`), and the recount/teleport pass owns their
+/// lifecycle instead (dawn clears the marks, empty parties destroy the
+/// stragglers). zdtd has no chunk-observer refcount, but the lifecycle half
+/// is the same: skip `is_horde` and let the horde passes decide.
+/// `out_slots`, when given, receives the slot each despawned mob occupied at
+/// the moment it was destroyed, parallel to `out_ids`. The net layer scopes
+/// the EntityRemove by it: after `destroy` the id no longer resolves, so the
+/// caller cannot recover the slot. Must be at least as long as `out_ids`.
+pub fn systemDespawnFar(w: *World, out_ids: []i32, out_slots: ?[]Slot) u8 {
+    if (out_slots) |os| std.debug.assert(os.len >= out_ids.len);
     const despawn_dist_sq = w.rules.ai.despawn_dist_sq;
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
@@ -3414,6 +3636,8 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
         // Sleepers stay (POI volumes re-trigger on approach otherwise).
         if (w.mask[i].sleeper) continue;
         if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
+        // Horde members stay however far they roam (see fn doc).
+        if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) continue;
         var near = false;
         for (snaps[0..pn]) |p| {
             const dx = p.x - w.transform[i].x;
@@ -3426,6 +3650,7 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
         if (near) continue;
         if (w.mask[i].network_id) {
             out_ids[n] = w.network_id[i].id;
+            if (out_slots) |os| os[n] = i;
             n += 1;
         }
         w.destroy(i);
@@ -4024,6 +4249,25 @@ test "passive animal flees a feared entity within fleeDistance (RunawayFromEntit
     try std.testing.expect(w.transform[as].x < x0 - 0.1);
 }
 
+test "flee_distance sets how far the runaway goal is placed" {
+    // The knob is an operator rule (GAME_OPTIONS "flee_distance"): raising it
+    // must push the flee goal further from the fear source, independently of
+    // timid_safe_distance, which only decides when the fright ends.
+    var w: World = .{};
+    defer w.deinit();
+    w.rules.ai.flee_distance = 60.0;
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = false;
+    _ = w.spawnZombie(10, 70, 0, 40).?;
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.runaway, w.zombie_ai[as].active_task);
+    // Source at +x, animal at origin: the goal is placed `flee_distance` along
+    // -x, so a 60 m knob must not leave it at the 20 m default.
+    try std.testing.expect(w.zombie_ai[as].path_goal_x < -50.0);
+}
+
 test "passive animal does not flee an entity beyond fleeDistance" {
     var w: World = .{};
     defer w.deinit();
@@ -4066,6 +4310,60 @@ test "timid animal near a player never attacks; a predator does" {
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[ws].active_task);
 }
 
+test "BlockIf animal does not sense while unalerted; hurt removes the block" {
+    // Stock animalTemplateHostile AITarget-2 `BlockIf condition=alert e 0`:
+    // while unalerted the executing BlockIf holds MutexBits=1 over
+    // SetNearestEntityAsTarget, so a wolf next to a player keeps wandering.
+    // Hurting it sets alert via the revenge path, which drops the gate and
+    // the next sense acquires the attacker.
+    var w: World = .{};
+    defer w.deinit();
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = true;
+    w.class_id[as].ai_attack = true;
+    w.class_id[as].block_if_alert_only = 3;
+    w.class_id[as].sight_light_min = -2.0;
+    w.class_id[as].sight_light_max = 150.0;
+    w.ambient_light = 0.5;
+    const p = w.spawnPlayer(0, 70, 8, 0).?;
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[as].alert);
+    try std.testing.expect(w.zombie_ai[as].active_task != c.TaskId.approach_attack);
+    // Hurt it: revenge sets alert, the block drops, sense acquires. The
+    // wander task from the blocked phase holds a decision cooldown, so run
+    // past its expiry (the stop pass drops wander to .none on the first
+    // post-hurt tick, then the re-eval picks the chase).
+    _ = w.damageFrom(a, 5, p);
+    t = 0;
+    while (t < 2.0 and w.zombie_ai[as].active_task != c.TaskId.approach_attack) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[as].alert);
+    try std.testing.expectEqual(p, w.zombie_ai[as].target_id);
+}
+
+test "class without Territorial in its AITask list does not leash home" {
+    // Stock zombieRancher overrides the template AITask blob and drops Territorial
+    // (and DestroyArea). The shared native table used to leash every zombie.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].ai_tasks = c.ai_task_list_set |
+        c.aiTaskBit(.break_block) |
+        c.aiTaskBit(.approach_attack) |
+        c.aiTaskBit(.approach_spot) |
+        c.aiTaskBit(.look) |
+        c.aiTaskBit(.wander);
+    w.transform[zs].x = 40;
+    w.transform[zs].z = 0;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].active_task != c.TaskId.territorial);
+}
+
 test "far animals despawn like zombies; near animals stay" {
     // GAP animals-never-despawn row: systemDespawnFar copied only the zombie
     // kind group, so wildlife accumulated to MaxSpawnedAnimals and held slots
@@ -4079,13 +4377,41 @@ test "far animals despawn like zombies; near animals stay" {
     const alert = w.spawnAnimal(400, 70, 2, 30, 0, "").?;
     const as = w.slotOfNetId(alert).?;
     w.zombie_ai[as].alert = true; // alerted mobs stay (like zombies)
+    // Horde members stay however far they roam: stock pins them with
+    // bIsChunkObserver and the recount/teleport pass owns their lifecycle.
+    const hz = w.spawnZombie(400, 70, 4, 40).?;
+    w.zombie_ai[w.slotOfNetId(hz).?].is_horde = true;
     var ids: [8]i32 = undefined;
-    const n = systemDespawnFar(&w, &ids);
+    const n = systemDespawnFar(&w, &ids, null);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(far, ids[0]);
     try std.testing.expectEqual(@as(?u16, null), w.slotOfNetId(far));
     try std.testing.expect(w.slotOfNetId(near) != null);
     try std.testing.expect(w.slotOfNetId(alert) != null);
+    try std.testing.expect(w.slotOfNetId(hz) != null);
+}
+
+test "horde kills gib 3x faster than ordinary kills" {
+    // Stock SpawnZombie cuts timeStayAfterDeath /= 3 on horde spawns
+    // (AIDirectorBloodMoonParty + AIWanderingHordeSpawner): the night's
+    // corpses clear instead of piling up. Both kill paths (player damage in
+    // world.zig, turret accumulator in systems.zig) divide the dwell.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.class_id[ps].time_stay = 30;
+    const hz = w.spawnZombie(10, 70, 0, 40).?;
+    const hs = w.slotOfNetId(hz).?;
+    w.class_id[hs].time_stay = 30;
+    w.zombie_ai[hs].is_horde = true;
+    const z = w.spawnZombie(20, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].time_stay = 30;
+    _ = w.damageFrom(w.network_id[hs].id, 1000, w.network_id[ps].id);
+    _ = w.damageFrom(w.network_id[zs].id, 1000, w.network_id[ps].id);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), w.health[hs].corpse_seconds, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 30.0), w.health[zs].corpse_seconds, 0.001);
 }
 
 /// Stock decoy distraction state (items.xml resourceRockDecoy): tags
@@ -4136,6 +4462,48 @@ test "approach_distraction walks a decoy across decision re-evals" {
     while (t < 6.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
     try std.testing.expect(w.transform[zs].x > x0);
+}
+
+test "distraction replan cadence follows its own rule, not the chase throttle" {
+    // EAIApproachDistraction::updatePath owns its recalculate interval
+    // (20 + rand(20) ticks); the operator rules distraction_replan_min /
+    // _rand must reach it. A large min must cut solves below what the generic
+    // path_replan_interval_s throttle alone would allow.
+    const cd = struct {
+        /// Run one distraction approach and report the replan cooldown the task
+        /// left armed, in seconds.
+        fn armedFor(min_ticks: i32) !f32 {
+            var w: World = .{};
+            defer w.deinit();
+            w.step_fn = path_mod.openStep;
+            w.step_ctx = null;
+            w.rules.ai.distraction_replan_min = min_ticks;
+            w.rules.ai.distraction_replan_rand = 0; // pin the jitter for the compare
+            const bag = seedDecoy(&w, 40, 0, 10_000);
+            const z = w.spawnZombie(0, 70, 0, 40).?;
+            const zs = w.slotOfNetId(z).?;
+            w.zombie_ai[zs].pending_distraction = bag;
+            w.zombie_ai[zs].pending_distraction_dsq = 1600;
+            w.zombie_ai[zs].active_task = .none;
+            w.zombie_ai[zs].decision_cd = 0;
+            var t: f32 = 0;
+            while (t < 1.0) : (t += 0.05) {
+                w.beginTick();
+                _ = systemZombieAi(&w, 0.05);
+            }
+            try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
+            return w.zombie_ai[zs].path_replan_cd;
+        }
+    };
+    // The knob is in ticks at 20 TPS, so 300 ticks must arm a cooldown near
+    // 15 s, far past the 0.35 s generic path_replan_interval_s that the task
+    // used to inherit. Anything much shorter means the rule never reached it.
+    const slow = try cd.armedFor(300);
+    try std.testing.expect(slow > 10.0);
+    // A short cadence must stay short: the value tracks the rule, not a constant.
+    const fast = try cd.armedFor(20);
+    try std.testing.expect(fast < 1.5);
+    try std.testing.expect(fast < slow);
 }
 
 test "zombie reaches a non-eat decoy and loses interest (clears the latch)" {
@@ -5311,7 +5679,12 @@ test "trader wallet debits on sell, credits on buy and refuses overdraft" {
     try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
 }
 
-test "trade demand markup: buy spikes +100, sell eases -4, restock resets" {
+test "trade leaves entry markup alone; restock resets" {
+    // Stock's IncreaseMarkup/DecreaseMarkup run only from the client
+    // vending-machine +/- UI actions (ItemActionEntryMarkup/Markdown), never
+    // from buy/sell transactions - and NPC-trader buy price ignores entry
+    // markup (GetBuyPrice applies it only on the PlayerOwned/Rentable path).
+    // So neither side of a trade may move the entry's markup.
     var w: World = .{};
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
@@ -5323,15 +5696,55 @@ test "trade demand markup: buy spikes +100, sell eases -4, restock resets" {
     const item = w.trader_stock[ts].entries[0].item;
     w.wallet[ps].coins = 1000;
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
-    // A buy spikes demand to +100 (Entry.IncreaseMarkup).
+    // A buy leaves markup at neutral.
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
-    try std.testing.expectEqual(@as(i8, 100), w.trader_stock[ts].entries[0].markup);
-    // A sell eases demand by 4 (Entry.DecreaseMarkup), saturating at i8 min.
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+    // A sell leaves markup at neutral too.
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
-    try std.testing.expectEqual(@as(i8, 96), w.trader_stock[ts].entries[0].markup);
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
     // A restock rebuilds fresh entries: markup back to neutral.
     traderRestock(&w);
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+}
+
+test "trade applies barter hook scales to buy cost and sell gain" {
+    // Hooked scales stand in for a perked buyer/seller: 0.9x buy, 1.1x sell.
+    // Entry price is edited to 20 so the discount is visible above the
+    // unit-1 floor: ceil(20*0.9)=18 buys, ceil(20*1.1)=22 sells.
+    const S = struct {
+        fn buy(_: ?*anyopaque, _: usize) f32 {
+            return 0.9;
+        }
+        fn sell(_: ?*anyopaque, _: usize) f32 {
+            return 1.1;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    const item = w.trader_stock[ts].entries[0].item;
+    w.trader_stock[ts].entries[0].price = 20;
+    w.trader_stock[ts].entries[0].sell = 20;
+    w.wallet[ps].coins = 1000;
+    // Unhooked (null hooks): full price. Buy 20, wallet 1000 -> 980.
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(@as(u32, 980), w.wallet[ps].coins);
+    // Hooked buy: 18, wallet 980 -> 962.
+    w.barter_buy_fn = &S.buy;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(@as(u32, 962), w.wallet[ps].coins);
+    // Hooked sell: gain 23, not 22 - f32 arithmetic like stock's: 0.1f32 is
+    // 0.10000000149, so 20 + 20*0.1f32 = 22.00000003 and CeilToInt gives 23.
+    // Stock computes the same way (GetSellPrice IL=217), so the +1 rides
+    // along rather than being rounded away.
+    w.inventory[ps].slots[0] = .{ .item_id = item, .count = 5, .quality = 1 };
+    w.barter_sell_fn = &S.sell;
+    const before = w.wallet[ps].coins;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
+    try std.testing.expectEqual(before + 23, w.wallet[ps].coins);
 }
 
 test "traderRestock honors per-trader reset_interval (never vs every N days)" {
@@ -5418,6 +5831,43 @@ test "zombie melee marks the victim hp dirty so replication can see it" {
     try std.testing.expect(w.dirty[ps].hp);
 }
 
+test "class PhysicalDamageResist halves server-computed damage" {
+    // entityclasses `PhysicalDamageResist` (passive 41): zombieSoldier 50,
+    // zombieDemolition 60. This deferred accumulator and the turret apply loop
+    // scale their damage by (1 - resist/100); every immediate hit (C2S claims,
+    // explosions, bots, traps) resolves the same stat inside World.damageFrom
+    // instead, because neither of these two paths goes through it.
+    var w: World = .{};
+    defer w.deinit();
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    const z = w.spawnZombie(0, 70, 0, 200).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].phys_resist = 50;
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    dmg_fp[zs] = 1000; // 10.0 hp -> 5.0 after 50%
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
+    try std.testing.expectEqual(@as(f32, 195.0), w.health[zs].hp);
+    // The class_table row is the fallback when the per-entity stat is unset
+    // (a classe spawned through the plain path).
+    const z2 = w.spawnZombie(2, 70, 2, 200).?;
+    const zs2 = w.slotOfNetId(z2).?;
+    w.class_id[zs2] = .{ .id = 1 }; // zombie kind slot
+    w.class_table[1].phys_resist = 60;
+    dmg_fp[zs] = 0;
+    dmg_fp[zs2] = 1000; // 10.0 -> 4.0
+    _ = applyDeferredDamage(&w, dmg_fp[0..], zk[0..]);
+    try std.testing.expectEqual(@as(f32, 196.0), w.health[zs2].hp);
+    // A plain class (no rows) is unchanged: clear the row the case above set,
+    // since a plain zombie resolves the kind's class_table entry.
+    w.class_table[1].phys_resist = 0;
+    const z3 = w.spawnZombie(4, 70, 4, 200).?;
+    const zs3 = w.slotOfNetId(z3).?;
+    dmg_fp[zs2] = 0;
+    dmg_fp[zs3] = 1000;
+    _ = applyDeferredDamage(&w, dmg_fp[0..], zk[0..]);
+    try std.testing.expectEqual(@as(f32, 190.0), w.health[zs3].hp);
+}
+
 test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     // Death must stay replicable: the hp=0 write is what drives the client death
     // screen, so the dirty bit has to survive the kill branch.
@@ -5428,14 +5878,15 @@ test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     w.health[ps].hp = 1;
     w.dirty[ps] = .{};
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     dmg_fp[ps] = 500; // 5.0 hp
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
     try std.testing.expect(w.alive[ps]);
     try std.testing.expect(w.dirty[ps].hp);
     // A corpse takes no further hits, so nothing re-dirties it.
     w.dirty[ps].hp = false;
-    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expect(!w.dirty[ps].hp);
 }
 
@@ -5460,13 +5911,14 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     const ps = w.slotOfNetId(p).?;
     w.health[ps].hp = 100;
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     dmg_fp[ps] = 800; // 8.0 hp
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
     // Config wins: an operator raising the Adventurer incoming scale lifts it.
     w.rules.difficulty.incoming_damage_1 = 1.25; // difficulty 1 = Adventurer
     w.health[ps].hp = 100;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 90.0), w.health[ps].hp); // 8 x 1.25 = 10
     // AI -> AI (turret fire on a zombie) is unchanged by the difficulty scale.
     const z = w.spawnZombie(1, 70, 0, 40).?;
@@ -5474,9 +5926,61 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     w.health[zs].hp = 100;
     var zfp: [max_entities]u32 = .{0} ** max_entities;
     zfp[zs] = 800;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 92.0), w.health[zs].hp); // 8.0 flat
 }
+
+test "deferred AI damage passes GeneralDamageResist and the armor leg" {
+    // Stock EntityAlive::DamageEntity order: GeneralDamageResist (passive 40,
+    // every damage type) then the physical armor rating (Equipment::CalcDamage).
+    // Before this the deferred choke (zombie melee) applied neither, so armor
+    // and GDR perks did nothing against the most common damage in the game.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.health[ps].hp = 100;
+    var fp: [max_entities]u32 = .{0} ** max_entities;
+    fp[ps] = 800; // 8.0 hp
+    // Bare: no armor, no VM fold -> 8.0 x Adventurer 0.75 = 6.0.
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
+    try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
+    // GeneralDamageResist .25 (perkPainTolerance 5): 6.0 x 0.75 = 4.5.
+    w.buff_general_resist[ps] = 0.25;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
+    try std.testing.expectEqual(@as(f32, 95.5), w.health[ps].hp);
+    // A full resist clamps at 1 (stock min(1, value)): the hit is negated.
+    w.buff_general_resist[ps] = 5;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, fp[0..], zk[0..]));
+    try std.testing.expectEqual(@as(f32, 100.0), w.health[ps].hp);
+    // Negative totals are kept: stock does not clamp at 0, so a vulnerability
+    // row raises the damage taken (6.0 x 1.5 = 9.0).
+    w.buff_general_resist[ps] = -0.5;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
+    try std.testing.expectEqual(@as(f32, 91.0), w.health[ps].hp);
+    // Worn armor joins the same choke (offline pieces-rate floor: one piece =
+    // 0.1), so 8.0 x 0.75 = 6.0 -> x 0.9 = 5.4.
+    w.buff_general_resist[ps] = 0;
+    w.health[ps].hp = 100;
+    try std.testing.expect(inventory.give(&w, 0, 11, 1)); // armor
+    var armor_slot: u16 = 0;
+    for (w.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == 11) {
+            armor_slot = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(inventory.equip(&w, 0, armor_slot, 0));
+    try std.testing.expect(inventory.armorMitigation(&w, 0) >= 0.09);
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
+    try std.testing.expectApproxEqAbs(@as(f32, 94.6), w.health[ps].hp, 0.001);
+}
+
 test "multi-seat: four riders fill a truck, the fifth is refused" {
     var w: World = .{};
     defer w.deinit();
@@ -6708,7 +7212,7 @@ test "stealth noise: a loud clip folds into the player and alerts a zombie" {
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.zombie_ai[zs].alert);
     // pipe_pistol_fire (stock V3.1.4): volume 62, 2 s = 40 ticks, muffle 0.8.
-    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0);
     systemStealth(&w);
     // Radius = min(62 x 0.6, 40) = 37.2 covers 10 m; heard = 108.8 / 6.4 >= 1.
     try std.testing.expect(w.zombie_ai[zs].alert);
@@ -6728,14 +7232,14 @@ test "stealth noise: crouch muffle scales the noise volume" {
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     // stepdirt (V3.1.4): volume 5, muffle 0.507.
-    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
     systemStealth(&w);
     const standing = w.stealth[ps].noise_volume;
     // The entry itself is unfolded (5); the muffle scales the fold.
     try std.testing.expectApproxEqAbs(@as(f32, 5), w.stealth[ps].noises[0].volume, 0.001);
     w.stealth[ps] = .{};
     w.player[ps].crouching = true;
-    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
     systemStealth(&w);
     const crouched = w.stealth[ps].noise_volume;
     try std.testing.expect(crouched < standing);
@@ -6752,7 +7256,7 @@ test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     // Loud: volume 120 → eff = 60 + 60^1.4 ~ 368.5 > 360 → cap + wake.
-    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0);
     systemStealth(&w);
     try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_volume_noise_n);
@@ -6763,7 +7267,7 @@ test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
     try std.testing.expect(w.stealth[ps].sleeper_noise_volume < 360.0);
     // Quiet noise (stepcloth 3 < loud 11) decays immediately: 3 - 2.5 = 0.5.
     w.stealth[ps] = .{};
-    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0);
     systemStealth(&w);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), w.stealth[ps].sleeper_noise_volume, 0.001);
     systemStealth(&w);
@@ -6782,7 +7286,7 @@ test "stealth noise: a sleeping zombie that hears wakes" {
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.sleeper[zs].awake);
     // stepbush (V3.1.4): volume 11 - radius 6.6 covers 5 m, heard ~ 7 >= 1.
-    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0);
     systemStealth(&w);
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
@@ -6791,17 +7295,18 @@ test "stealth noise: a sleeping zombie that hears wakes" {
 
 test "stealth noise: heat rows feed the activity map" {
     // RE AIDirector.NotifyNoise: heat_map_strength > 0 adds activity to the
-    // heat map for the region (x10 ticks, stock AddAudioData heatMapTime).
+    // heat map for the region, held for the fixed 240 s window NotifyNoise
+    // passes (the row's heat_map_time is not read by stock at all).
     var w: World = .{};
     defer w.deinit();
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
-    // Auger_Fire_Start (V3.1.4): heat 1.0 for 90 s.
-    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0, 90);
+    // Auger_Fire_Start (V3.1.4): volume 60, 2 s, heat 1.0.
+    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0);
     systemStealth(&w);
     try std.testing.expectEqual(@as(usize, 1), w.director.heat_n);
     // notifyActivity: activity = value, decay = value / (duration_ticks / 20)
-    // per second - 90 s x 10 ticks = 900 ticks → 1.0 / 45 s.
+    // per second - 240 s = 4800 ticks → 1.0 / 240 s.
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 45.0), w.director.heat[0].decay, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 240.0), w.director.heat[0].decay, 0.0001);
 }

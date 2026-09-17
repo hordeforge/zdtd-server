@@ -62,6 +62,15 @@ safe runtime components:
    `queue`/`sense`/`query`/`json_*`). Unknown or un-exported capabilities
    reject the module at load with a loud error (fail-closed); the vocabulary
    stays in sync with `Hook.names` and the host import table.
+   Amended 2026-09-12 (claim liveness; review `docs/reviews/PLUGIN_COMPOSABILITY.md`
+   F1): an exclusive override-point claim is a coeffect binding, and paper
+   5.1.2 makes a binding available "only while the fiber that installed it is
+   ACTIVE". `WasmHost.claimSlot` now resolves a claim against the claimant's
+   liveness and its export of the point's hook, and the five point dispatches
+   fall through to the ordinary composition loop otherwise. Before this a
+   claimant that trapped kept the point routed to itself and answered
+   `verdict_keep` for every caller, so a user-tier gate claimant that crashed
+   silently lifted the core restriction it had overridden.
 4. **Boundary stays the boundary.** Plugins still mutate the sim only through
    the verbs the server understands; composability is host-side plumbing, not
    a widening of plugin authority. `plugin` remains a leaf package (no ecs
@@ -77,17 +86,52 @@ safe runtime components:
 - Not adopted: the paper's full fiber/provision calculus and dependency
   typing/versioning (§6.6) - overkill for a fixed hook table; revisited only
   if plugins gain mutual provisioning.
-- Reactive coeffects (§3.2): adopted as load-time validation. The paper
-  classifies runtime context changes against the spec to drive activation;
-  zdtd's coeffect context is the host hook/import surface, which is fixed for
-  the process, so a module's declared capabilities cannot disappear at
-  runtime and fail-closed load validation is the complete story.
+- Reactive coeffects (§3.2): adopted as load-time validation plus, since the
+  2026-09-12 amendment, dispatch-time claim liveness. The paper classifies
+  runtime context changes against the spec to drive activation; zdtd's coeffect
+  context is the host hook/import surface, which is fixed for the process, so
+  a module's declared capabilities cannot disappear at runtime and fail-closed
+  load validation covers that half. What can change at runtime is a *provider*:
+  an override-point claimant that traps or runs out of fuel stops providing,
+  which `claimSlot` now resolves. The review records the remaining
+  provider-side gaps (claim re-resolution on reload, reviewed policy
+  interception) as F2/F4.
 - Effect introspection (§3.1.3): the command buffer's src attribution and
   the spawn ring let the host enumerate a module's pending and applied
   effects (`dropFrom`); no further iterator surface is needed.
+  Amended 2026-09-12 (F3): the per-verb withdrawal story is a checked table
+  now, not prose. `ecs/command.zig` classifies every `Op` as `revertible`
+  (`spawn_zombie`, `glide`) or `irrevocable` (`damage`, `say`, `despawn`)
+  through an exhaustive `switch`, so a new verb cannot land without deciding;
+  the drain counts applied irrevocable effects per source and the withdrawal
+  reports them through the `plugin_effects_not_reverted` apm counter, which is
+  where paper 6.1's author obligation becomes visible instead of assumed.
 - Config reconciliation (§5.2.1): not adopted. The paper's loader reconciles
   entry-field changes incrementally; zdtd reads `[plugin]` config once at
   startup and `plugin reload` re-arms the stored budget rather than re-reading
   the config chain (zdtd.toml + mode packs + CLI merge lives in main.zig), so
   a budget edit takes effect on restart. Revisited if per-module config
   entries land.
+  Amended 2026-09-12 (F2): the *per-module declaration* half of §5.2.1 is
+  adopted. `plugin reload` re-reads the module's `manifest.toml` and rebuilds
+  its exclusive point claims (`WasmHost.reconcileClaims`), releasing a claim
+  the replacement no longer declares, installing one it adds, and refusing
+  (fail-closed, logged) a claim whose hook the module does not export or whose
+  point a live module already holds. A legacy `[plugin] modules` path is never
+  reconciled, so a manifest beside it can neither mint nor drop a claim. The
+  config-chain half stays as recorded above: zdtd.toml and mode packs are still
+  read once at startup.
+  Amended 2026-09-12 (F6, contract version): a guest may declare the contract
+  version it was built against with an optional `_zdtd_api() -> i32` export
+  (`mods/plugin_common.zig` exports it for every Zig guest). The host reads it
+  once at load (`Plugin.probeApiVersion`): newer than `api.plugin_api_version`
+  fails closed through the same channel as an unmet `_zdtd_requires`, older is
+  accepted with a log, and a module without the export keeps the permissive
+  path (the shipped C fixtures and any pre-versioning module). The host test
+  "shipped core plugins declare the host contract version" loads the whole
+  shipped set and asserts the guest and host constants match, so name-set
+  linking cannot silently span a semantic change.
+  Amended 2026-09-12 (composition bound): the host table was
+  `max_wasm_plugins = 8` while the tree already ships 14 modules, so a full
+  `[plugin] modules` list lost modules at the cap. The ceiling is 32 and the
+  same test asserts the shipped set fits it.

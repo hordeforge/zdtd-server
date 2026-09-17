@@ -37,4 +37,8 @@ if [ "${#html_files[@]}" -eq 0 ]; then
   exit 1
 fi
 
-bunx "vnu-jar@$vnu_version" --filterfile "$root/vnu-filter.txt" --also-check-css "${html_files[@]}"
+# --bun: the package ships a `#!/usr/bin/env node` shebang and bun honours it
+# by default, so the gate breaks whenever the host node is missing or broken
+# (a system upgrade that drops libada.so.N is enough). bun is the project's
+# declared runtime; --bun makes it run the tool itself instead of delegating.
+bunx --bun "vnu-jar@$vnu_version" --filterfile "$root/vnu-filter.txt" --also-check-css "${html_files[@]}"

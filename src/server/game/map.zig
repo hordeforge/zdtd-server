@@ -12,6 +12,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
+const ln_peer = @import("../../litenet/peer.zig");
 const map_atlas = @import("../../assets/map_atlas.zig");
 const world_store = @import("../../world/store.zig");
 
@@ -80,6 +81,7 @@ pub fn tickMapChunks(self: *Game) void {
         const cx = c.map_middle_x >> 4;
         const cz = c.map_middle_z >> 4;
         var pieces: [map_batch]packages.MapChunkPiece = undefined;
+        var slots: [map_batch]usize = undefined;
         var n: usize = 0;
         var idx: usize = 0;
         while (idx < game_mod.map_window_n and n < map_batch) : (idx += 1) {
@@ -95,13 +97,19 @@ pub fn tickMapChunks(self: *Game) void {
                     @as(i32, @intCast(@as(u32, @bitCast(kz)) & 0xFFFF)),
                 .colors = colors,
             };
-            c.map_chunks_sent[idx] = 1;
+            slots[n] = idx;
             n += 1;
         }
         if (n == 0) continue;
         if (packages.buildMapChunksBody(&self.body_buf, c.entity_id, pieces[0..n])) |body| {
             // Channel 1 + deflate (MapChunks Compress=true), normal budget.
-            _ = self.trySendCompressed(peer, "NetPackageMapChunks", body);
+            // Mark the pieces sent only on a real send: marking first left a
+            // permanent hole in the minimap when the window was full or
+            // compression failed, because the middle never moves to reset the
+            // sent set.
+            if (self.trySendCompressed(peer, "NetPackageMapChunks", body)) {
+                for (slots[0..n]) |i| c.map_chunks_sent[i] = 1;
+            }
         } else |_| {
             self.harness.counters.inc(.encode_errors);
         }
@@ -143,15 +151,32 @@ pub fn tickPlayerPositions(self: *Game) void {
 /// RE EntityBackpack / PersistentPlayerData): one position when the death bag
 /// is live, empty when collected.
 pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
-    var positions: [1][3]i32 = undefined;
-    var n: usize = 0;
-    if (c.has_backpack) {
-        positions[0] = .{ c.backpack_x, c.backpack_y, c.backpack_z };
-        n = 1;
-    }
-    if (packages.buildPlayerSetBackpackPositionBody(&self.body_buf, c.entity_id, positions[0..n])) |body| {
+    if (packages.buildPlayerSetBackpackPositionBody(&self.body_buf, c.entity_id, c.backpacks[0..c.backpack_n])) |body| {
         try self.broadcast("NetPackagePlayerSetBackpackPosition", body);
     } else |_| {
         self.harness.counters.inc(.encode_errors);
+    }
+}
+
+/// Replay the other players' dropped-bag markers to a joining peer. The marker
+/// package only ever goes out on the events that change a list (a death, a
+/// collect), so every one of those predates this peer's connection and its map
+/// would show no bag but its own. Stock has no equivalent send because the
+/// markers ride PersistentPlayerData, which every client holds for every
+/// player. An owner with no bags is skipped rather than sent an empty list:
+/// there is nothing stale on a map that has just been built.
+pub fn sendOtherPlayerBackpacks(self: *Game, peer: *ln_peer.Peer, joiner: *const Client) !void {
+    for (&self.clients) |*other| {
+        if (!other.joined or other.slot == joiner.slot) continue;
+        if (other.backpack_n == 0) continue;
+        const body = packages.buildPlayerSetBackpackPositionBody(
+            &self.body_buf,
+            other.entity_id,
+            other.backpacks[0..other.backpack_n],
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackagePlayerSetBackpackPosition", body);
     }
 }

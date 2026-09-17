@@ -92,7 +92,7 @@ pub fn replicate(self: *Game) !void {
         }
     }
 
-    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    const heartbeat = self.tick_n % self.pos_heartbeat_period_ticks == 0;
     var candidates: ecs.world.AtomicBits = .initEmpty();
     if (!heartbeat) {
         candidates = self.sim.dirty_bits;
@@ -173,7 +173,8 @@ pub fn replicate(self: *Game) !void {
                 .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);
-                    break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
+                    // TraderID indexes traders.xml; entity id leaves TraderInfo null.
+                    break :blk .{ .trader_id = self.sim.trader_stock[i].trader_info_id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
                 } else null,
             })) |spb| {
                 var m = spawn_mask;
@@ -212,7 +213,7 @@ pub fn replicate(self: *Game) !void {
         }
 
         const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
-        if (!interest.needsPosSend(d, self.tick_n)) continue;
+        if (!interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
 
         const viewers = if (self.sim.mask[i].player)
             in_range & ~game_mod.bitOfPeerSlot(self.sim.player[i].peer_slot)
@@ -355,7 +356,7 @@ fn replicateBots(
     obs_r: *const [game_mod.max_clients]i32,
     active: game_mod.ObsMask,
 ) !void {
-    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    const heartbeat = self.tick_n % self.pos_heartbeat_period_ticks == 0;
     var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     for (&self.bots.bots, 0..) |*b, bi| {
         if (!b.alive) {

@@ -23,6 +23,17 @@ const binary = @import("binary.zig");
 
 /// `PlatformUserIdentifierAbs.UserIdentifierVersion` (asm.il 30507). Stock reads
 /// it and pops it, but writes 1, so zdtd writes 1 to stay byte-identical.
+///
+/// Single-form on the wire, audited 2026-09-09. `PlatformUserIdentifierAbs` has
+/// five implementations (Eos, Local, PSN, Steam, Xbl) but none overrides
+/// `WriteCustomData`/`ReadCustomData`, and the base pair is a bare `ret`
+/// (`PlatformUserIdentifierAbs.il.txt:9`, `:12`). The optional custom-data tail
+/// in `PlatformUserIdentifierExtensions::ToStream` (`:34`) is therefore empty
+/// even when requested, and every package and TE site passes
+/// `_inclCustomData = false` anyway (checked: AllyRequest, SetBlock,
+/// PickupBlock, PlayerVendingMachine, SetProp, TEFeatureLockable,
+/// TileEntityComposite). So the flat `present | version | platform | id` form
+/// below covers every subtype; there is no per-platform variant to model.
 pub const user_identifier_version: u8 = 1;
 
 /// PlatformIdentifierString is an `EPlatformIdentifier` name (asm.il 2661453):
@@ -37,6 +48,13 @@ pub const max_id_len = 64;
 /// max_id_len alone overflows for a max-length identity - which at the join
 /// whitelist gate used to fail OPEN (the bufPrint catch skipped the gate).
 pub const max_composite_len = max_platform_len + 1 + max_id_len;
+
+/// Bytes a present identity takes on the wire: two length-prefixed strings at
+/// their caps. Both caps are under 128, so each 7-bit length prefix is one
+/// byte. Callers sizing a body buffer add the two leading marker bytes
+/// (`present`, version) themselves; `write` emits those for an absent identity
+/// too, so they are not part of the string payload this bounds.
+pub const max_stream_len = (1 + max_platform_len) + (1 + max_id_len);
 
 pub const Id = struct {
     /// EPlatformIdentifier name; the client resolves it via FromPlatformAndId
@@ -70,6 +88,10 @@ pub fn skip(r: *binary.Reader) binary.ReadError!void {
 
 pub fn write(w: *binary.Writer, v: ?Id) error{Overflow}!void {
     const u = v orelse return w.writeByte(0);
+    // Both bytes are 1, so no test can pin their order and the wire-order
+    // mutant for this pair is unobservable by construction. The order is
+    // `PlatformUserIdentifierAbs.ToStream` (asm.il 30507): present, then
+    // version. Should either value ever change, the pair becomes testable.
     try w.writeByte(1); // present bool
     try w.writeByte(user_identifier_version);
     try w.writeString(u.platform);

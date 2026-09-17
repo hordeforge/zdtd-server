@@ -73,7 +73,7 @@ save/load test or scenario. Format IDs are the magic in the store files.
 
 | State | Store | Format | Reference |
 |---|---|---|---|
-| Player records (inventory, XP, quests, journal, bedroll, last logout) | `players.zsv` | ZPV10 (reads ZPV2+) | `src/server/persist.zig` |
+| Player records (inventory, XP, quests, journal, bedroll, last logout) | `players.zsv` | ZPV13 (reads ZPV2+) | `src/server/persist.zig` |
 | Persistent entities | `entities.zen` | ZENT1 | `src/server/persist.zig` |
 | Land claims | `claims.zlc` | ZCLC | `src/server/persist.zig` |
 | World clock + blood-moon schedule | `clock.zcl` | ZCL2 | `src/server/game/clock_persist.zig` |

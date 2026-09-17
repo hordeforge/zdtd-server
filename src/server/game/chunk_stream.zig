@@ -12,8 +12,10 @@ const apm = @import("../../apm/root.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const containers_mod = @import("../../world/containers.zig");
+const signs_mod = @import("../../world/signs.zig");
 const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
+const workstations_mod = @import("../../world/workstations.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("../replicate_te.zig");
 const clock = @import("../../util/clock.zig");
@@ -44,6 +46,14 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
         if (cont.pos.x < x0 or cont.pos.x >= x1 or cont.pos.z < z0 or cont.pos.z >= z1) continue;
         try replicate_te.sendStorageTe(self, peer, cont.pos.x, cont.pos.y, cont.pos.z);
     }
+    // Sign texts (world/signs.zig): stock ships a chunk's TE data with the
+    // chunk, so a client that streams the area after the edit still sees the
+    // authored sign.
+    {
+        var s_out: [signs_mod.max_signs]signs_mod.Sign = undefined;
+        const sn = self.sign_texts.inChunk(cx, cz, &s_out);
+        for (s_out[0..sn]) |sgn| try replicate_te.sendSignTe(self, peer, sgn.pos);
+    }
     var vi: usize = 0;
     while (vi < vending_mod.max_vending) : (vi += 1) {
         if (!self.vending.used[vi]) continue;
@@ -57,6 +67,20 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
         const l = &self.light_te.items[li];
         if (l.x < x0 or l.x >= x1 or l.z < z0 or l.z >= z1) continue;
         try replicate_te.sendLightTe(self, peer, l.x, l.y, l.z);
+    }
+    // Workstations are the fourth tile entity in this chunk and were the only
+    // one this stream skipped: their state persists across a restart and is
+    // rebroadcast when it changes, but a joining client was never told the
+    // current one, so a burning forge read as idle until its next change.
+    // sendWorkstationTe holds the geometry gate, so a station whose real
+    // array lengths are still unknown stays unsent rather than resizing the
+    // client's grids.
+    var wi: usize = 0;
+    while (wi < workstations_mod.max_workstations) : (wi += 1) {
+        if (!self.workstations.used[wi]) continue;
+        const w = &self.workstations.items[wi];
+        if (w.x < x0 or w.x >= x1 or w.z < z0 or w.z >= z1) continue;
+        try replicate_te.sendWorkstationTe(self, peer, w.x, w.y, w.z);
     }
 }
 
@@ -214,9 +238,13 @@ pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
         const cz = c.pending_area_cz + cell.dz;
         const key = packages.makeChunkKey(cx, cz);
         if (clientHasStreamed(c, key)) continue;
-        if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
-        clientAddStreamed(self, c, key);
+        // Charge the shared budget per ATTEMPT, not per delivery: a refused
+        // send (full reliable window) has already paid worldgen + encode, so
+        // an untouched budget let one wedged peer walk every ring cell in a
+        // single tick. Stop the pass on refusal; the rest retries next tick.
         budget.* -= 1;
+        if (!try self.sendSpawnChunk(peer, cx, cz)) return;
+        clientAddStreamed(self, c, key);
         // ACK-yield between drain chunks, same as the join core: a bursted
         // batch overflows the reliable window (measured 257 drops without it;
         // loopback RTT ~100 µs, so the 500 µs yield drains the window per
@@ -308,7 +336,11 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 const key = packages.makeChunkKey(cx, cz);
                 // Cap path / race: bitset miss but list still holds key.
                 if (clientHasStreamed(c, key)) continue;
-                if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
+                // Charge the per-pass budget per ATTEMPT (see drainSpawnArea):
+                // a refused send already paid worldgen + encode, and scanning
+                // on past it let one wedged peer walk the whole view square.
+                added += 1;
+                if (!try self.sendSpawnChunk(peer, cx, cz)) break :outer;
                 clientAddStreamed(self, c, key);
                 in_view.set(bit);
                 // Deco for the newly-streamed chunk: the client's
@@ -319,7 +351,6 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 game_join.sendDecoForStreamedChunk(self, c, peer, cx, cz) catch |err| {
                     std.debug.print("zdtd: stream deco failed at {d},{d}: {s}\n", .{ cx, cz, @errorName(err) });
                 };
-                added += 1;
             }
         }
     }

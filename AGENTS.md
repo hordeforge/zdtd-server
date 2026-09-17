@@ -15,7 +15,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
 
-Target: **V3.2.0 b9** (Mono) wire, Zig **0.16+**, **20 TPS** (50 ms) tick. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
+Target: **V3.2.0 b10** (Mono) wire, Zig **0.16+**, **20 TPS** (50 ms) tick. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
 
 ## Principles
 
@@ -67,6 +67,8 @@ Governs every rule below. When in doubt, these decide.
     - **Fixtures** under `assets/fixtures/` are offline tests only.
     - **OK hardcodes:** wire RE constants, Unity hashes from stock **names**, ConfigFile LoadLocal name list (protocol).
 16. **RE before wire.** Field order, types, lengths, and join sequence come from `../7dtd-engine-research/docs`, loadgen goldens, or verified stock `Read`/`Write`. Don't guess layouts. If RE and code disagree, fix code (or update RE with evidence), not the client.
+    - **The IL dumps outrank the prose.** `../7dtd-engine-research/il/full-v3.2.0/` holds the disassembly the narrative docs were written from. When a layout question is not settled there, read the method: `initPropertyDecl` (IL=702) proved the GameStats blob is written in `propertyList` slot order, which is *not* `EnumGameStats` order, and no doc said so.
+    - **A table proves what it is a table of.** The `EnumGameStats` index table documents the enum, not the wire order. An extracted frame capture pins the offsets of *that capture*, not the protocol: a fixed `dPos` offset taken from one held only for `bUseQRotation=0`. Check what a table is a table of before citing it for a layout.
 17. **Server authoritative.** Sim owns blocks, inv, TE, entity HP/alive, quests, locks, time. C2S is a request: validate (bounds, ownership, phase, rates), apply/reject, broadcast **resulting** state. Never blindly apply client world/inv blobs; never let C2S overwrite another player's slots or distant chunks without stock-legal path.
 18. **Join/channel phase gates.** Accept only packages legal for peer's SM state (challenge → ids → login → enter → spawn → playing). Drop/disconnect illegal early/late C2S. Don't send play-world packages before client is ready per stock order.
 19. **Interest, no self-echo.** Entity/chunk/TE/stream updates only to observing peers. Don't echo own movement or redundant full state unless stock does. Serialize-once per tick where interest already does.
@@ -81,7 +83,7 @@ Governs every rule below. When in doubt, these decide.
 28. **Bots stay Wasm plugins (ADR 0026).** All bot brain logic - target selection, aim, movement and combat decisions - lives in the `mods/fps_bot` guest; the host `BotManager` stays a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs + host policy knobs). Never port brain decisions into Zig, and never let the host drive bots without the module.
 29. **Wasm-first for behavioral add-ons (ADR 0020).** Anything that is *technically* expressible over the plugin boundary - `zdtd.sense` / `zdtd.queue` / `zdtd.query` + the hooks and verdicts - ships as a Wasm plugin: bots, chat commands/filters, announcements and kill-feeds, event observers, custom verdicts, admin tooling, reward scaling. Native Zig is for what the boundary *cannot* express: wire encode/emit, LiteNet, interest/replication and the chunk stream, direct sim mutation (ECS authority, inventory, blocks, quests, trading), world store and persistence, config loading, the plugin runtime, APM instrumentation. "It is core" is not a reason to keep something native; prove that the boundary cannot carry it. When a feature needs an affordance the boundary lacks, extend the boundary (an ADR-worthy decision) rather than adding native behavior.
 30. **Spatiotemporal composability for plugins (Cordis paper, adopted 2026-08-20).** Plugins are runtime components, so their lifecycle and effects must be bounded the way the paper's fibers are: (a) **reloadable** - a module can be disposed and reinstantiated in place without a server restart (`plugin reload <name>`; dispose runs `on_shutdown`, reclaims fuel/memory, re-arms the budget, re-activates `on_enable`); (b) **revertible effects** - every `zdtd.queue` command is attributed to its issuing plugin (1-based slot src) and a disabled/trapped module's still-pending effects are withdrawn before the drain; never let a broken module's queued effects execute; (c) **declarative dependencies** - modules export `_zdtd_requires` naming the hooks + host verbs they need, validated fail-closed at load (a typo'd hook must be a loud load rejection, not a silent never-fire). When adding a plugin affordance, keep it compatible with all three; review plugin-runtime changes against `docs/prompts/plugin-composability-review.md`.
-31. **Core plugins are Zig.** Every first-party core plugin under `plugins/` ships a Zig source (`plugins/core_<topic>/core_<topic>.zig` + `main.zig` wrapper, shared `mods/plugin_common.zig`) rebuilt by `scripts/build-plugins.sh`; the committed `.wasm` is its build output. Addons (`fps_bot`, `mcp`, `example_chat_filter`) live under `mods/`; `fps_bot` is C by design (ADR 0026). New core plugins follow the same layout and the naming/manifest rules in `docs/PLUGIN_STANDARDS.md`.
+31. **Core plugins are Zig.** Every first-party core plugin under `plugins/` ships a Zig source (`plugins/core_<topic>/core_<topic>.zig` + `main.zig` wrapper, shared `mods/plugin_common.zig`) rebuilt by `scripts/build-plugins.sh`; the committed `.wasm` is its build output, and `scripts/lint-plugins.sh` (`make lint`) fails when a committed binary no longer matches a fresh rebuild. Addons (`fps_bot`, `mcp`, `example_chat_filter`) live under `mods/`; `fps_bot` is C by design (ADR 0026). New core plugins follow the same layout and the naming/manifest rules in `docs/PLUGIN_STANDARDS.md`.
 
 ## Commands
 
@@ -138,7 +140,7 @@ src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
 src/ecs/rules.zig      sim rule params, overlaid by mode packs (ADR 0021)
 src/server/webui/      webui markup, @embedFile'd (never Zig string literal); linted by scripts/lint-webui.sh (JS) + lint-html.sh (HTML/CSS)
 assets/fixtures/       offline XML and .wasm fixtures for tests
-modes/                 gamemode packs (`--mode <name>`)
+presets/               preset packs (`--preset <name>`; `--mode` is a deprecated alias)
 scripts/               release, lint and smoke gates called by Makefile
 docs/                  STATUS, gaps, plan, APM, wire/map notes; numbered PRD/RFC/ADR series in docs/{prd,rfc,adr}
 worlds/                local save overlays (ZCH3 `.zch`, player data)

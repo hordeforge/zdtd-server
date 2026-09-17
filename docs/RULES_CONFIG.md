@@ -35,8 +35,9 @@ data exists; defaults stay identical (a move is not a retune).
 | `bloodmoon` | `budget_scale` | 1.9 | `aidirector.zig` CanSpawn(1.9f) ceiling (RE) |
 | `bloodmoon` | `wave_frac` | 0.5 | `aidirector.zig` BM wave = enemy_count/2 |
 | `director` | `heat_scout_count` | 2 | `aidirector.zig` scouts per heat event |
-| `director` | `heat_feral_chance` | 0.2 | `aidirector.zig` feral roll (`% 5`, was doc-only) |
-| `director` | `heat_feral_cd_mult` | 2.0 | `aidirector.zig` feral cooldown doubling |
+| `director` | `heat_spawn_chance` | 0.2 | `aidirector.zig` `CheckToSpawn` roll (stock `cSpawnChance` 20%) |
+| `director` | `heat_long_cooldown_seconds` | 1320.0 | `aidirector.zig` region delay after a spawn (stock `SetLongDelay`) |
+| `director` | `heat_neighbor_long_cooldown_seconds` | 720.0 | `aidirector.zig` neighbour delay after a spawn (stock `StartNeighborCooldown(true)`) |
 | `director` | `heat_event_ticks` | 720.0 | `aidirector.zig` const, actually used by `craft.zig` |
 | `vehicle` | `fuel_cap` | 100 | `world.zig` spawn fill + `craft.zig` tank cap |
 | `vehicle` | `refuel_reach` | 3.0 | `craft.zig` InvTx refuel reach |
@@ -66,7 +67,7 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 
 | Candidate | Reason |
 |---|---|
-| `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it - `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 - IS config.) |
+| `store.zig` sea_level 64 | The flat empty-world fill height, used in comptime default literals (`.{sea_level} ** 256`) before the operator rules exist; runtime config would be a structural refactor. Not a stock value (the flat world is zdtd-generated; stock's water surface is the RWG table's `worldgen.water_surface_cell`). The projection surface around it - `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 - IS config and overrides it at init. |
 | `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
 | `dem.zig` elevation mapping, `prefabs.zig` paint cap, `join.zig` mob burst cap 16 | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
 | RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table - not tunables. |

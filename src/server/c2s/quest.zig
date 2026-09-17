@@ -27,14 +27,40 @@ const quest_giver_fallback_y: f32 = 70;
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageLandClaimRepair")) {
-        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
-        // this broadcast out to every connected peer for free (bandwidth DoS).
+        // Stock ProcessPackage (IL=33): resolve the TE at the block position
+        // and, on beginRepair, run RepairAll server-side; ending repair clears
+        // IsRepairing for the owner. It emits nothing, so neither do we: the
+        // old broadcast fanned a stock-silent package to every peer.
         if (!self.takeBlockToken(c)) {
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        _ = packages.parseLandClaimRepair(body) catch return true;
-        try self.broadcast("NetPackageLandClaimRepair", body);
+        const req = packages.parseLandClaimRepair(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (!req.begin_repair) return true;
+        // Only the claim owner may repair it: stock guards the TE through
+        // LocalPlayerIsOwner on the client path, and the server resolves the
+        // claim at the keystone. A request outside any claim, or for someone
+        // else's, is dropped and counted like the other ownership gates.
+        const claim = self.claimCovering(req.x, req.z) orelse {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        };
+        if (claim.owner_entity != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        _ = self.repairClaimArea(req.x, req.z);
+        // Stock answers the repair pass with Setup(blockPos, false) to the
+        // requester (repair coroutine IL_0337), clearing its IsRepairing.
+        if (packages.buildLandClaimRepairBody(&self.body_buf, req.x, req.y, req.z, false)) |done| {
+            self.sendGame(peer, "NetPackageLandClaimRepair", done) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: LandClaimRepair done send failed slot={d}: {s}\n", .{ c.slot, @errorName(err) });
+            };
+        } else |_| {}
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSharedQuest")) {
@@ -59,19 +85,51 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (with == c.entity_id) {
                 try self.sendGame(peer, "NetPackageSharedQuest", body);
             } else {
-                // Forward to target peer if present; otherwise broadcast (party).
-                var sent = false;
+                // Forward to the named peer only. GameManager.QuestShareServer
+                // (IL=37, il/full-v3.2.0/_global/GameManager.il.txt:9081) sends
+                // with _attachedToEntityId = sharedWithEntityID, so exactly one
+                // client receives it and an absent target receives nothing.
+                // The old fallback broadcast the offer to every peer, which let
+                // one client push a quest offer to the whole server by naming
+                // an id nobody holds.
                 for (&self.clients) |*cl| {
                     if (!cl.joined or cl.entity_id != with) continue;
-                    if (cl.peer) |tp| {
-                        try self.sendGame(tp, "NetPackageSharedQuest", body);
-                        sent = true;
-                    }
+                    // Give the target a journal entry carrying the OWNER's
+                    // stock quest code and placement. The share packet already
+                    // told the target's client that code (SharedQuestData.
+                    // questCode), and stock resolves shared-quest traffic by
+                    // code alone (QuestJournal.GetSharedQuest IL=33,
+                    // RemoveSharedQuestByOwner IL=54), so an entry allocated
+                    // with a fresh code would leave the member's objective
+                    // mirrors unresolvable. Placement rides the sender's own
+                    // copy: both instances run the same POI. Only the sender's
+                    // own live instance qualifies, so a code the sender does
+                    // not run (spoofed or stale) creates no member entry.
+                    const own = systems.questFindByCode(&self.sim, c.slot, head.quest_code) orelse {
+                        if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
+                        break;
+                    };
+                    _ = systems.questAcceptWithCode(&self.sim, cl.slot, own.def_id, head.quest_code, own.poi);
+                    if (systems.questFindByCode(&self.sim, cl.slot, head.quest_code)) |ms| ms.is_shared = true;
+                    if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
                     break;
                 }
-                if (!sent) try self.broadcast("NetPackageSharedQuest", body);
             }
         } else if (head.event == .remove_quest) {
+            // Event 1 is sent by the quest OWNER whose client dropped its own
+            // (non-shared) quest (QuestJournal.HandlePartyRemoveQuest client
+            // branch: Setup(questCode, OwnerPlayer.entityId)). Stock's
+            // ProcessPackage case 1 server branch (IL_0076) resolves
+            // sharedByEntityID, requires that player to hold a Party, and
+            // re-broadcasts the remove to every OTHER party member (remote ones
+            // get the package, local ones run RemoveSharedQuestByOwner/Entry);
+            // the sender is excluded. zdtd echoed the body back to the sender
+            // and told the party nothing. Refuse a sender naming someone else
+            // (anti-spoof) before any journal mutation, then fan out.
+            if (head.shared_by_entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
             // Prefer stock Quest.QuestCode; fall back to catalog def_id for old clients.
             if (head.quest_code != 0) {
                 if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |s| {
@@ -84,9 +142,40 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             }
-            try self.sendGame(peer, "NetPackageSharedQuest", body);
+            if (self.parties.partyByMember(head.shared_by_entity_id)) |p| {
+                for (p.members[0..p.n]) |m| {
+                    if (m == head.shared_by_entity_id) continue;
+                    if (self.clientByEntityId(m)) |member| {
+                        if (member.peer) |mp| try self.sendGame(mp, "NetPackageSharedQuest", body);
+                    }
+                }
+            }
         } else {
-            try self.broadcast("NetPackageSharedQuest", body);
+            // add_shared_member (2) / remove_shared_member (3). Stock sends
+            // these from the MEMBER's QuestJournal, not the owner's:
+            // QuestJournal.il passes sharedBy = Quest.SharedOwnerID and
+            // sharedWith = OwnerPlayer.entityId (RemoveQuest IL=74 and the
+            // accept path near IL=420), then ProcessPackage case 2/3
+            // (IL_019D/IL_0340) resolves sharedByEntityID, requires that
+            // player to hold a Party, and delivers the package to
+            // sharedByEntityID's client (SendPackage _attachedToEntityId =
+            // ldloc.1 at IL_028A), which applies Quest.AddSharedWith /
+            // RemoveSharedWith. zdtd required the sender to BE the owner and
+            // echoed the body back to the sender, so a member accepting or
+            // dropping a shared quest was counted ownership_rejects and the
+            // owner never heard about it. Gate on the sender naming itself as
+            // the member (sharedWith) and deliver to the owner (sharedBy).
+            const by = head.shared_by_entity_id;
+            if (head.shared_with_entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+            if (self.parties.partyByMember(by) == null) return true;
+            for (&self.clients) |*cl| {
+                if (!cl.joined or cl.entity_id != by) continue;
+                if (cl.peer) |op| try self.sendGame(op, "NetPackageSharedQuest", body);
+                break;
+            }
         }
         return true;
     }
@@ -136,17 +225,66 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageQuestTreasurePoint")) {
-        // Stock NetPackageQuestTreasurePoint (read IL=54): playerId,
-        // distance, offset, treasureRadius, questCode, position,
-        // useNearby, treasureOffset, blocksPerReduction, ActionType - the
-        // client reports treasure-dig progress. zdtd's fetch/treasure
-        // quests complete through the client's QuestObjectiveUpdate
-        // treasure_complete event (bumpPhase fetch_item), so this parallel
-        // path is a redundant echo: validate and drop.
-        if (body.len < 32) {
+        // This is a REQUEST, not a progress echo. ObjectiveTreasureChest
+        // ::GetPosition (ObjectiveTreasureChest.il.txt:232) only asks the
+        // server when the quest carries neither PositionData TreasurePoint(4)
+        // nor TreasureOffset(8), and zdtd fills only 0..3, so a stock client
+        // always asks. Stock's server resolves a dig site and sends the
+        // package back to that player (ProcessPackage :242, SendPackage
+        // :322); dropping it left the treasure quest with no marker and no
+        // way to finish.
+        const req = packages.parseQuestTreasurePoint(body) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
+        };
+        switch (req.action) {
+            // The client telling us where it dug, and the derived
+            // blocks-per-reduction step. Nothing to answer.
+            packages.quest_point_update_treasure, packages.quest_point_update_blocks => return true,
+            packages.quest_point_get_treasure => {},
+            // GetGotoPoint rides the same package; zdtd already ships the
+            // Location marker in the journal, so the client does not ask.
+            else => return true,
         }
+        if (req.player_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const s = systems.questFindByCode(&self.sim, c.slot, req.quest_code) orelse {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        // Stock scans for a buriable spot around the quest's POI, falling back
+        // to the player. zdtd has no buried-container search, so anchor the
+        // dig site on the same POI the journal already advertises and let the
+        // client's own radius shrink guide the player in.
+        const px = self.sim.transform[ps].x;
+        const pz = self.sim.transform[ps].z;
+        const cx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else px;
+        const cz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else pz;
+        const gy_u = self.world.heightWorld(@trunc(cx), @trunc(cz)) catch {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        const gy: i32 = gy_u;
+        var buf: [64]u8 = undefined;
+        const reply = packages.buildQuestTreasurePointReply(
+            &buf,
+            req.player_id,
+            req.quest_code,
+            req.blocks_per_reduction,
+            @trunc(cx),
+            gy,
+            @trunc(cz),
+            0,
+            0,
+            0,
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.sendGame(peer, "NetPackageQuestTreasurePoint", reply);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {
@@ -210,6 +348,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSharedPartyKill")) {
+        // Stock body (read IL=17): entityTypeID i32 | xp i32 | entityID i32 |
+        // killerID i32. A client reaches SendToServer only through
+        // GameManager.SharedKillServer's !IsServer branch (IL=162), so the
+        // package is a forward of a kill the sender's client already scored.
+        // zdtd computes the party split server-side in killXpAward
+        // (Party.GetPartyXP over GameStats[54] party_shared_kill_range) and
+        // fans the result out itself, so accepting the report would award
+        // the same kill twice. Validate the body and drop.
+        _ = packages.stock_party.readSharedKillBody(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
         // Rate gate: an accepted add relays the buff to every peer
         // (relayBuff broadcastExcept); unthrottled a spam loop fans the
@@ -244,25 +397,39 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .fetch_item),
                 .treasure_radius_break => questTreasureRadiusBreak(self, c.slot, u.quest_code),
             }
-            // Stock mirrors the objective event to the sender's party
-            // (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180: the
-            // server re-broadcasts to every party member, whose HandlePlayer
-            // applies it to the shared quest), so a treasure/block objective
-            // advances for the whole party, not just the reporter.
-            if (self.parties.partyByMember(c.entity_id)) |p| {
-                for (p.members[0..p.n]) |m| {
-                    if (m == c.entity_id) continue;
-                    const member = self.clientByEntityId(m) orelse continue;
-                    switch (u.event_type) {
-                        .block_activated => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate),
-                        .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .fetch_item),
-                        .treasure_radius_break => {},
-                    }
-                    if (member.peer) |mp| {
-                        self.sendGame(mp, "NetPackageQuestObjectiveUpdate", body) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
-                        };
+            // Stock re-broadcasts to the sender's party only for the two
+            // events whose HandlePlayer acts (ProcessPackage IL=180): case 0
+            // treasure_radius_break and case 2 block_activated. Case 1
+            // treasure_complete is server-local and does NOT fan out: the
+            // server calls QuestEventManager.FinishTreasureQuest(questCode,
+            // sender), and HandlePlayer ignores the event entirely (its
+            // switch falls through at IL_0074). The two fan-out Setups differ
+            // on the wire: case 0 uses the 3-arg Setup, which resets blockPos
+            // to Vector3i.zero (Setup IL=14), while case 2 uses the 4-arg
+            // Setup and keeps it. Relaying the raw inbound body would leak the
+            // dig position into the case 0 relay, so rebuild that one.
+            if (u.event_type != .treasure_complete) {
+                if (self.parties.partyByMember(c.entity_id)) |p| {
+                    for (p.members[0..p.n]) |m| {
+                        if (m == c.entity_id) continue;
+                        const member = self.clientByEntityId(m) orelse continue;
+                        if (u.event_type == .block_activated) {
+                            _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate);
+                        }
+                        if (member.peer) |mp| {
+                            const relay: []const u8 = if (u.event_type == .treasure_radius_break)
+                                packages.buildQuestObjectiveUpdate(&self.body_buf, .{
+                                    .sender_entity_id = u.sender_entity_id,
+                                    .quest_code = u.quest_code,
+                                    .event_type = .treasure_radius_break,
+                                }) catch continue
+                            else
+                                body;
+                            self.sendGame(mp, "NetPackageQuestObjectiveUpdate", relay) catch |err| {
+                                self.harness.counters.inc(.net_send_errors);
+                                std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
+                            };
+                        }
                     }
                 }
             }
@@ -288,6 +455,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 tx = self.sim.transform[ni].x;
                 ty = self.sim.transform[ni].y;
                 tz = self.sim.transform[ni].z;
+                // Same reach gate as the trade, the TraderData echo and the
+                // window open ([sim] trader_use_range): the remove_quest arm
+                // below accepts an offer into the journal, so an ungated list
+                // exchange hands out quests from every trader on the map.
+                // An id that names nothing keeps the fallback marker position
+                // and grants nothing, so only a resolved NPC is checked.
+                if (!self.inTradeReach(c, tx, ty, tz)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
             }
         }
         // max_quest_tier (quests.xml root): stock clamps the offered tier
@@ -372,13 +549,44 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
         }
-        if (body.len >= 9 and (body[8] == 0 or body[8] == 1)) {
+        // Exactly 9, not >= 9: a stock ToServer body with isEntity=false and
+        // hasTraderData=false is 14 bytes, and its body[8] is the high byte of
+        // te_y, which is 0 for any real world coordinate. With >= 9 that body
+        // fell through to the trade arm and was decoded as a trade whose qty
+        // came from two te_y bytes.
+        if (body.len == 9 and (body[8] == 0 or body[8] == 1)) {
             try self.handleTrade(c, body);
             return true;
         }
-        systems.questOnTraderOpen(&self.sim, c.slot);
+        // Same reach gate as the trade and the TraderData echo. Opening the
+        // window advances trader_interact phases, turns in a ready quest and
+        // pays its rewards, so without this a player could farm every quest
+        // turn-in on the map by naming targets from spawn. The header decides
+        // what the leading bytes mean: an entity id when isEntity, otherwise
+        // the tile-entity position (a vending machine). The zdtd short open
+        // body carries neither, so it has no position to check.
+        if (packages.parseTraderDataToServer(body) catch null) |open| {
+            if (open.is_entity) {
+                const ni = self.sim.slotOfNetId(open.entity_id) orelse return true;
+                if (!self.sim.mask[ni].transform) return true;
+                const np = self.sim.transform[ni];
+                if (!self.inTradeReach(c, np.x, np.y, np.z)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
+            } else if (!self.inTradeReach(
+                c,
+                @floatFromInt(open.te_x),
+                @floatFromInt(open.te_y),
+                @floatFromInt(open.te_z),
+            )) {
+                self.harness.counters.inc(.bounds_rejects);
+                return true;
+            }
+        }
         // Stock trader quest offers (npc from open body when present).
         const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
+        systems.questOnTraderOpen(&self.sim, c.slot);
         // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
         if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
             for (list.entries) |qid| {
@@ -467,7 +675,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (!self.sim.inventory[ps].removeItem(coins, chunk)) return true;
                     left -= chunk;
                 }
-                self.sim.markDirty(ps, .{ .inv = true });
             }
         }
         self.sim.wallet[ps].coins -= cost;
