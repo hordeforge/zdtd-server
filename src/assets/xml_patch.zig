@@ -849,7 +849,7 @@ fn parseVersionString(s: []const u8) Version {
 /// Null when the operand is neither (the caller then tries the string forms).
 fn versionOperand(text_in: []const u8) ?Version {
     const t = std.mem.trim(u8, text_in, " \t");
-    if (startsWithIgnoreCase(t, "version(")) {
+    if (std.ascii.startsWithIgnoreCase(t, "version(")) {
         const open_paren = std.mem.findScalar(u8, t, '(') orelse return null;
         const close = matchingParen(t, open_paren) orelse return null;
         var v: Version = .{};
@@ -861,7 +861,7 @@ fn versionOperand(text_in: []const u8) ?Version {
         }
         return v;
     }
-    if (startsWithIgnoreCase(t, "mod_version(")) {
+    if (std.ascii.startsWithIgnoreCase(t, "mod_version(")) {
         const open_paren = std.mem.findScalar(u8, t, '(') orelse return null;
         const close = matchingParen(t, open_paren) orelse return null;
         const name = unquote(std.mem.trim(u8, t[open_paren + 1 .. close], " \t"));
@@ -960,7 +960,7 @@ fn evaluateCondition(expr_in: []const u8, base: ?[]const u8) ?bool {
             // xpath('...') == null / != null: an existence test against the
             // document being patched (stock evaluates the NCalc xpath()
             // function on the live XmlDocument).
-            if (startsWithIgnoreCase(cmp.lhs, "xpath(") and isNullLiteral(cmp.rhs)) {
+            if (std.ascii.startsWithIgnoreCase(cmp.lhs, "xpath(") and isNullLiteral(cmp.rhs)) {
                 const doc = base orelse break :blk null;
                 const open_paren = std.mem.findScalar(u8, cmp.lhs, '(') orelse break :blk null;
                 const close = matchingParen(cmp.lhs, open_paren) orelse break :blk null;
@@ -971,13 +971,13 @@ fn evaluateCondition(expr_in: []const u8, base: ?[]const u8) ?bool {
                 break :blk if (cmp.op == .ne) exists else !exists;
             }
         }
-        if (startsWithIgnoreCase(expr, "mod_loaded(")) {
+        if (std.ascii.startsWithIgnoreCase(expr, "mod_loaded(")) {
             const close = std.mem.findScalar(u8, expr, ')') orelse break :blk null;
             const arg = unquote(std.mem.trim(u8, expr["mod_loaded(".len..close], " \t"));
             if (arg.len == 0) break :blk null;
             break :blk mods.isLoaded(arg);
         }
-        if (startsWithIgnoreCase(expr, "mod_version(")) {
+        if (std.ascii.startsWithIgnoreCase(expr, "mod_version(")) {
             // mod_version('X') == '1.2' (also !=).
             const close = std.mem.findScalar(u8, expr, ')') orelse break :blk null;
             const arg = unquote(std.mem.trim(u8, expr["mod_version(".len..close], " \t"));
@@ -995,11 +995,6 @@ fn evaluateCondition(expr_in: []const u8, base: ?[]const u8) ?bool {
     };
     const v = answer orelse return null;
     return if (negate) !v else v;
-}
-
-fn startsWithIgnoreCase(hay: []const u8, prefix: []const u8) bool {
-    if (hay.len < prefix.len) return false;
-    return std.ascii.eqlIgnoreCase(hay[0..prefix.len], prefix);
 }
 
 /// Inner XML of the conditional branch that applies: the first `<if cond=...>`
