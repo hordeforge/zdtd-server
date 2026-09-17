@@ -67,7 +67,7 @@ pub const GroupTable = struct {
         }
         if (sum_mw == 0) return null;
         // Match prior scale: (s % 10000) / 10000 * sum, via integer multiply.
-        const r_mw: u64 = (@as(u64, s % 10000) * sum_mw) / 10000;
+        const r_mw: u64 = @intCast((@as(u128, s % 10000) * sum_mw) / 10000);
         var acc_mw: u64 = 0;
         for (g.entries) |e| {
             if (e.weight <= 0) continue;
@@ -211,6 +211,15 @@ test "pick tolerates a huge modded weight" {
     const nan_groups = [_]Group{.{ .name = "g2", .entries = &nan_entries, .weight_sum = 0 }};
     var t2: GroupTable = .{ .groups = &nan_groups };
     try std.testing.expect(t2.pick("g2", 1) == null);
+}
+
+test "pick roll scales a legal max-weight group without overflow" {
+    var entries = [_]Entry{.{ .name = "zombieA", .weight = max_group_weight }} ** 4096;
+    entries[3108].name = "zombieB";
+    const groups = [_]Group{.{ .name = "g", .entries = &entries, .weight_sum = max_group_weight * 4096 }};
+    const t: GroupTable = .{ .groups = &groups };
+    try std.testing.expectEqualStrings("zombieA", t.pick("g", 0).?);
+    try std.testing.expectEqualStrings("zombieB", t.pick("g", 1).?);
 }
 
 test "load stock entitygroups when present" {
