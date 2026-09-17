@@ -110,8 +110,10 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
 
 ## Validation (once listening)
 
+Run from the sibling `7dtd-loadgen` checkout, targeting LiteNet UDP at the
+server's `--port` plus 2, not the TCP info port. For zdtd `--port 27002`:
+
 ```bash
-# From sibling 7dtd-loadgen (port must match zdtd --port)
 ./src/LoadGen/bin/Release/net8.0/7dtd-loadgen \
   --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
 # LiteNet is ServerPort+2 (zdtd --port 27002 → loadgen --port 27004)
