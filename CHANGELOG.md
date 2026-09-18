@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-18
+
 ### Breaking changes
 
 - The next release is **0.5.0**, not 0.4.1: added features and incompatible
