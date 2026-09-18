@@ -151,13 +151,13 @@ Subcommands of the `bot` admin verb handled by the host servant.
 
 | Import | Defined in | Line |
 |---|---|---|
-| `zdtd.log` | src/plugin/wasm.zig | 1822 |
-| `zdtd.tick` | src/plugin/wasm.zig | 1823 |
-| `zdtd.queue` | src/plugin/wasm.zig | 1824 |
-| `zdtd.sense` | src/plugin/wasm.zig | 1825 |
-| `zdtd.query` | src/plugin/wasm.zig | 1826 |
-| `zdtd.config` | src/plugin/wasm.zig | 1827 |
-| `zdtd.json_parse` | src/plugin/wasm.zig | 1828 |
-| `zdtd.json_str` | src/plugin/wasm.zig | 1829 |
-| `zdtd.json_raw` | src/plugin/wasm.zig | 1830 |
-| `zdtd.json_obj` | src/plugin/wasm.zig | 1831 |
+| `zdtd.log` | src/plugin/wasm.zig | 1824 |
+| `zdtd.tick` | src/plugin/wasm.zig | 1825 |
+| `zdtd.queue` | src/plugin/wasm.zig | 1826 |
+| `zdtd.sense` | src/plugin/wasm.zig | 1827 |
+| `zdtd.query` | src/plugin/wasm.zig | 1828 |
+| `zdtd.config` | src/plugin/wasm.zig | 1829 |
+| `zdtd.json_parse` | src/plugin/wasm.zig | 1830 |
+| `zdtd.json_str` | src/plugin/wasm.zig | 1831 |
+| `zdtd.json_raw` | src/plugin/wasm.zig | 1832 |
+| `zdtd.json_obj` | src/plugin/wasm.zig | 1833 |

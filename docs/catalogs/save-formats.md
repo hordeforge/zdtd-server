@@ -18,22 +18,21 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
 | `ZPV` | src/server/persist.zig | 88 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
 | `ZPV` | src/server/persist.zig | 586 | savePlayers | - |
-| `ZENT` | src/server/persist.zig | 1615 | saveEntities | - |
-| `ZENT` | src/server/persist.zig | 1775 | loadEntities | - |
-| `ZCLC` | src/server/persist.zig | 1939 | saveClaims | - |
-| `ZCLC` | src/server/persist.zig | 1972 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 2001 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 2021 | ztrScanLen | - |
-| `ZTR1` | src/server/persist.zig | 2084 | saveTraders | - |
-| `ZTR1` | src/server/persist.zig | 2161 | loadTraders | - |
+| `ZENT` | src/server/persist.zig | 1613 | saveEntities | - |
+| `ZENT` | src/server/persist.zig | 1773 | loadEntities | - |
+| `ZCLC` | src/server/persist.zig | 1937 | saveClaims | - |
+| `ZCLC` | src/server/persist.zig | 1970 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 2002 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 2022 | ztrScanLen | - |
+| `ZTR1` | src/server/persist.zig | 2085 | saveTraders | - |
 | `ZPV` | src/server/persist.zig | 2265 | zpv2DropName | - |
 | `ZCT2` | src/world/containers.zig | 186 | posFromGuid | - |
 | `ZCT2` | src/world/containers.zig | 204 | posFromGuid | - |
 | `ZCT1` | src/world/containers.zig | 271 | posFromGuid | - |
 | `ZCT2` | src/world/containers.zig | 271 | posFromGuid | - |
 | `ZCT2` | src/world/containers.zig | 272 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 448 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 630 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 454 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 636 | posFromGuid | - |
 | `ZSG1` | src/world/signs.zig | 130 | - | - |
 | `ZSG1` | src/world/signs.zig | 156 | - | - |
 | `ZCH3` | src/world/store.zig | 2083 | biomeNameAt | - |
@@ -41,4 +40,4 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZVNM1` | src/world/vending.zig | 152 | - | - |
 | `ZVNM` | src/world/vending.zig | 159 | - | - |
 | `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |
-| `ZWS1` | src/world/workstations.zig | 806 | commaListAt | - |
+| `ZWS1` | src/world/workstations.zig | 807 | commaListAt | - |

@@ -24,7 +24,7 @@ Only imports of another package directory are counted; single-file imports
 | `server` | `apm` | 10 |
 | `server` | `assets` | 142 |
 | `server` | `ecs` | 106 |
-| `server` | `litenet` | 34 |
+| `server` | `litenet` | 37 |
 | `server` | `plugin` | 10 |
 | `server` | `server/game` | 8 |
 | `server` | `util` | 78 |
