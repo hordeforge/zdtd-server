@@ -42,6 +42,21 @@ or a quoted Zig block no longer matches its source.
 | [map.md](map.md) | reading stock map data: DTM, prefabs, TTS, biomes, water, navigation and sky tables |
 | [worldgen.md](worldgen.md) | procedural terrain synthesis, the biome field and decoration-only subbiome noise |
 | [persistence.md](persistence.md) | what survives a restart: chunk files, player records, the world clock and the save triggers |
+| [sleepers.md](sleepers.md) | sleeper volumes from prefab XML, the authored spawn cells TTS carries, and the wake and re-arm paths |
+| [stability.md](stability.md) | structural support, removal relaxation and collapse for block edits, and what the client is told |
+| [deco.md](deco.md) | the decoration object, the mirror that keeps repeated props coherent, POI suppression and the chunk send path |
+
+## Gameplay systems
+
+| Page | Owns |
+|---|---|
+| [buffs.md](buffs.md) | buff state, stacking and expiry, the buffs XML catalog, the buff wire, and the perk/attribute passive-effects path |
+| [power.md](power.md) | the electric grid, power blocks, and the light and turret tile entities |
+| [director.md](director.md) | the director clock, the blood-moon ladder, gamestage and entitygroup rolls, and sleeper spawn |
+| [crafting.md](crafting.md) | recipe resolve and unlock, ingredient folding with snapshot rollback, scrapping, and loot rolls into bags |
+| [vehicles.md](vehicles.md) | vehicle columns, seats and riders, drive input validation, attach gating and entity persistence |
+| [party.md](party.md) | party membership wire, invite and accept flows, and the ally identity record |
+| [locks.md](locks.md) | POI and claim lock ownership, open and pick validation, and the sleeping-bag interaction |
 
 ## Content and configuration
 
@@ -61,20 +76,9 @@ or a quoted Zig block no longer matches its source.
 | [apm.md](apm.md) | native instrumentation: counters, latency histograms, section timers, tracy zones and the snapshot formats |
 | [util.md](util.md) | the leaf utility layer: mono clock, seeded RNG, filesystem helpers, range parallelism, arenas and the TOML binder |
 
-## Not yet documented
+## Coverage
 
-Subsystems with source but no page of their own:
-buffs and passive effects (`src/ecs/buff.zig`, `src/assets/buffs.zig`),
-power and electric grids (`src/ecs/electric.zig`, `src/ecs/powerblocks.zig`),
-party and allies (`src/ecs/party.zig`, `src/server/ally.zig`),
-AI director and spawn groups (`src/ecs/aidirector.zig`, `src/assets/spawning.zig`),
-POI locks (`src/ecs/poi_lock.zig`),
-vehicles (`src/server/game/vehicle.zig`),
-crafting and loot (`src/server/game/craft.zig`, `src/server/game/loot.zig`,
-`src/assets/recipes.zig`, `src/assets/loot.zig`),
-sleeper volumes (`src/world/sleepers.zig`),
-structural stability (`src/world/stability.zig`),
-decoration (`src/server/game/deco.zig`, `src/world/deco_mirror.zig`).
-[ASSETS.md](../ASSETS.md) carries the XML loader map these depend on,
-[GAMEPLAY.md](../GAMEPLAY.md) the player-visible flows, and
-[STATE_MACHINES.md](../STATE_MACHINES.md) their lifecycles.
+Every subsystem with source in `src/` has a page here. [ASSETS.md](../ASSETS.md)
+carries the XML loader map they depend on, [GAMEPLAY.md](../GAMEPLAY.md) the
+player-visible flows, and [STATE_MACHINES.md](../STATE_MACHINES.md) their
+lifecycles.

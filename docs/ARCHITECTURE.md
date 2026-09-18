@@ -427,7 +427,10 @@ Power (`ecs/electric.zig:PowerGrid`) resolves once per tick in `Game.step` with 
 
 ### 6.2 Queries and groups
 
-```zig
+The call forms below are illustrative shapes of the query API, not a verbatim
+excerpt of one file:
+
+```
 ecs.forEachKind(w, .zombie, ctx, f);
 ecs.forEachWith(w, .{ .player = true, .inventory = true }, ctx, f);
 for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending

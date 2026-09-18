@@ -17,7 +17,7 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
   the `zdtd.queue` import layer (`src/plugin/wasm.zig:507`) has no length cap.
   Bot commands fit in 128 bytes; raise to a named 256 const only as a margin.
 - **Adding `bot` to `components.Kind` forces one exhausting switch arm**:
-  `ecs/world.zig:639` maps Kind → class_table index and has **no `else`**
+  `ecs/world.zig:1172` maps Kind → class_table index and has **no `else`**
   (compile error until an arm exists). All other Kind-conditional code uses
   `==` or `else`, so it is safe by default.
 - **Replication: `.bot` must be added to `is_mob`** at
@@ -88,8 +88,8 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
    command-driven. Keep the pinned-order test (:123-135) untouched unless a
    phase genuinely moves.
 
-**M0 done when:** `zig build` compiles with `.bot` added (the `world.zig:639`
-arm satisfies the exhaustive switch), `bot spawn`/`bot remove`/`bot shoot`
+**M0 done when:** `zig build` compiles with `.bot` added (the
+`src/ecs/world.zig:1172` arm satisfies the exhaustive switch), `bot spawn`/`bot remove`/`bot shoot`
 round-trip through the drain, the LOS march has a unit test, and bots appear
 in replication output (scenario test).
 

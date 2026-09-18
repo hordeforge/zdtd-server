@@ -83,7 +83,8 @@ cannot exist in the tree. The review hunts:
   `@floor` keeps the same conversion and the same deliberate trap on
   NaN/inf/huge (that trap is wire safety, keep it).
 - **Tick path stays cheap.** No new `std.Io.Threaded` per call (its `init`
-  installs SIGIO/SIGPIPE handlers, `Io/Threaded.zig:1652`).
+  installs SIGIO/SIGPIPE handlers, `lib/std/Io/Threaded.zig` line 1652 in the
+  pinned toolchain).
 - **Do not touch the documented residual posix** (`docs/STD_ABSTRACTIONS.md`):
   `posix.setsockopt` REUSEADDR/V6ONLY, `posix.poll` + `accept4`, `posix.read`/
   `system.write`/`system.close`, `posix.system.clock_gettime`/`nanosleep`.
@@ -154,7 +155,7 @@ directly**. More removals are planned."
   table of `docs/STD_ABSTRACTIONS.md`, or (b) a finding: prefer `std.Io`, or
   move to `posix.system` with a documented reason.
 - `Io.net.Server.accept` maps EAGAIN to `errnoBug` (debug panic,
-  `Io/Threaded.zig:12467`), so the documented `poll(0)` + `accept4` stays.
+  `lib/std/Io/Threaded.zig` line 12467), so the documented `poll(0)` + `accept4` stays.
 - No new `std.posix.open/read/write` loops for ordinary files.
 
 ### E. Containers and allocators (changelog "Migration to Unmanaged Containers", allocator entries)
@@ -185,7 +186,8 @@ directly**. More removals are planned."
 ### H. `std.mem` naming (changelog "mem: introduce cut functions; rename 'index of' to 'find'")
 
 - `indexOf*` -> `find*` family (`find`, `findPos`, `findScalar`, `findAny`,
-  `findNone`, ...). The `indexOf*` names remain as aliases (`mem.zig:1414`),
+  `findNone`, ...). The `indexOf*` names remain as aliases (`lib/std/mem.zig`
+  line 1414),
   so they compile; new/touched code must use `find*`.
 - New `cut`/`cutPrefix`/`cutSuffix`/`cutScalar`/`cutLast`/`cutLastScalar` are
   the idiom for split-at-substring; prefer them in new code.

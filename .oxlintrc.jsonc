@@ -33,8 +33,6 @@
   //     max-params (4), max-depth (4), no-negated-condition, no-magic-numbers,
   //     max-nested-callbacks (3 vs the baseline's 4), no-implicit-coercion
   //     with only `!!` allowed.
-  //   * eslint/no-underscore-dangle off: shell.html hangs _hxStart/_hxStop/
-  //     _hxOnce poller handles off elements by design.
   // Baseline entries intentionally absent (not applicable here):
   //   * strict-runtime: node/no-process-env, node/no-path-concat,
   //     node/handle-callback-err (browser env, no node runtime).
@@ -85,7 +83,7 @@
     "no-self-compare": "error",
     "no-constant-condition": "error",
     "no-sequences": "error", // comma-operator chains
-    "no-alert": "error", // shell.html's destructive-cmd window.confirm is a documented inline exception
+    "no-alert": "error", // shell.tsx's destructive-cmd confirm is a documented inline exception
     // ---- correctness of intent ----
     "eqeqeq": ["error", "always"], // no loose ==
     "no-cond-assign": "error",
@@ -139,7 +137,7 @@
     "max-classes-per-file": ["error", 1],
     "max-lines": ["error", { "max": 1500, "skipBlankLines": true, "skipComments": true }],
     "array-callback-return": "error",
-    "no-use-before-define": "error", // hoisting-dependent calls are ordered defs-first in shell.ts
+    "no-use-before-define": "error", // hoisting-dependent calls are ordered defs-first in shell.tsx
     "require-unicode-regexp": "error", // /u flag on every regex literal
     // ---- strict-core baseline offs that these categories would otherwise auto-enable ----
     "promise/always-return": "off", // baseline: off (each then() returning a value is noise here)
@@ -185,11 +183,11 @@
     "unicorn/no-array-for-each": "error", // for...of over forEach
     "unicorn/no-array-callback-reference": "error", // no bare function refs in callbacks
     // ---- strict-core @rikalabs/* runtime/fallback heuristics ----
-    "@rikalabs/no-silent-catch-fallback": "error", // shell.html cmd-form catch is a documented directive exception
+    "@rikalabs/no-silent-catch-fallback": "error", // shell.tsx command forms catch with an inline directive; see the source
     "@rikalabs/no-runtime-compat-fallbacks": "error",
     "@rikalabs/no-catch-return-error-object": "error",
     "@rikalabs/no-unlisted-external-imports": "error",
-    "@rikalabs/no-double-type-assertion": "error", // shell.ts URLSearchParams cast is a documented directive exception
+    "@rikalabs/no-double-type-assertion": "error", // shell.tsx boundary parses carry an inline safety-comment directive
     "@rikalabs/no-json-parse-default-fallback": "error",
     "@rikalabs/no-json-stringify-default-fallback": "error",
     // ---- promise-safety (promise plugin) ----
@@ -258,9 +256,11 @@
     "@rikalabs/no-hardcoded-secrets": "error",
     "@rikalabs/no-sql-string-concat": "error",
     // ---- off, with reason ----
-    "no-underscore-dangle": "off", // shell.html hangs _hxStart/_hxStop/_hxOnce poller handles off elements by design
+    // Narrow exception instead of the rule off: the lockout page's only
+    // double-underscore name is the server-injected global, so allow that one
+    // identifier rather than hiding every dangling underscore in the tree.
+    "no-underscore-dangle": ["error", { "allow": ["__ZDTD_RETRY_S__"] }],
     "no-void": "off", // typescript/no-floating-promises (enforced above) requires the void operator to mark fire-and-forget promises; eslint/no-void would ban it
     "no-implicit-globals": "off", // classic-script pages: top-level functions are the page contract, not accidental globals
-    "@rikalabs/no-single-use-trivial-helpers": "off" // shell.ts createSwap is a 40-line factory; inlining it would blow the 60-line function cap
   }
 }

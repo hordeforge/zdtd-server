@@ -65,8 +65,8 @@ core_announce (join/clock feed), core_adminverbs (custom admin verbs). Addons
 | Pre-trade price verdict | `on_trader_event` fires after a trade | **SHIPPED** - pre-trade price verdict hook (`on_trade_price`: `<0` deny, `>0` percent-adjust buy price); **`plugins/core_pricegate`** (1.5x trader prices per player) + scenario test | "trader prices ×N per player" module (reward/tax policy) |
 
 > Correction: the `on_block_damage` gap was investigated and does NOT exist  -
-> zombie chew (`tick.zig:275,383`) and explosions (`world.zig:313`) already
-> route through the `addBlockDamage` choke point (`world.zig:190`) which applies
+> zombie chew (`tick.zig:275,383`) and explosions (`src/server/game/world.zig:659`) already
+> route through the `addBlockDamage` choke point (`src/server/game/world.zig:299`) which applies
 > the verdict. A "zombies can't break blocks" module works today.
 
 ## Wasm-eligible candidates (no boundary work needed; module + hook)

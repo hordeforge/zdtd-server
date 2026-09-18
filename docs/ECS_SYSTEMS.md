@@ -106,7 +106,9 @@ Production walks cached kind lists. The open `0..max_entities` View scans
 (`forEachKind` / `forEachAlive` / …) stay file-private as the test oracle that
 `groupSlice` must match.
 
-```zig
+Query call shapes, illustrative:
+
+```
 for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending
 var buf: [ecs.max_entities]ecs.Slot = undefined;
 const n = ecs.copyKindInto(w, .zombie, &buf);  // snapshot; for loops that destroy
@@ -127,7 +129,9 @@ trackers) added in `World::SpawnEntityInWorld` and removed in
 `World::unloadEntity` (asm.il:1225261-1225262, :1234230/:1234384,
 :1233956/:1234090); `GetPlayers()` just returns the cached list.
 
-```zig
+Group API shapes, illustrative:
+
+```
 for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending
 ecs.forEachKindGroup(w, .zombie, ctx, f);      // safe under removal, order unspecified then
 var buf: [ecs.max_entities]ecs.Slot = undefined;
@@ -161,7 +165,9 @@ are the live AI set.
 
 ### Tick command buffer (`command.zig`)
 
-```zig
+Queued-op shapes, illustrative:
+
+```
 _ = w.pushCommand(.{ .spawn_zombie = .{ .x, .y, .z, .hp } });
 _ = w.pushCommand(.{ .despawn = .{ .net_id } });
 _ = w.pushCommand(.{ .damage = .{ .net_id, .amount } });

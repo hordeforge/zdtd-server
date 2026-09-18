@@ -135,9 +135,9 @@ WebAssembly runtime written in Zig, so the server takes no C dependency and no
 FFI boundary. Its `minimum_zig_version` is 0.16.0, matching this tree.
 
 The budgets this design requires come from the runtime rather than being bolted
-on:
+on. The types below are quoted from zwasm's own source, not from this tree:
 
-```zig
+```
 pub const Budget = union(enum) { unmetered, limited: u64 };
 pub const InstantiateOpts = struct {
     fuel:             Budget = .{ .limited = 1_000_000_000 },
@@ -354,7 +354,9 @@ never races plugin writes.
 
 ### v1 Static
 
-```zig
+The layout below is illustrative, not a quote of any one file:
+
+```
 // src/plugin/api.zig : experimental types
 // src/plugin/host.zig : fixed registry table
 // src/plugin/sample_hello.zig : in-tree sample

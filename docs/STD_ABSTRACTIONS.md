@@ -58,11 +58,15 @@ flowchart LR
 (`Io.Clock.now(clock, io)`, `Io.sleep`); `std.time.Instant` and `Thread.sleep`
 are gone. Every std time call requires an `Io`, and owning one means
 `Io.Threaded.init`, which calls `getCpuCount()` and installs SIGIO/SIGPIPE
-handlers (`Io/Threaded.zig:1652`) - too heavy and globally racy per packet.
+handlers (`lib/std/Io/Threaded.zig` line 1652 in the pinned Zig 0.16.0
+toolchain, which is not in this checkout) - too heavy and globally racy per
+packet.
 `clock.zig` stays an Io-free leaf: Threaded's posix `.now` is exactly
-`posix.system.clock_gettime` plus a timespec conversion (`Io/Threaded.zig:11428`),
+`posix.system.clock_gettime` plus a timespec conversion
+(`lib/std/Io/Threaded.zig` line 11428),
 so the direct vDSO read is the same call with no context to construct. Sleep is
-analogous: `Io.sleep` lowers to `clock_nanosleep` (`Io/Threaded.zig:11598`); the
+analogous: `Io.sleep` lowers to `clock_nanosleep` (`lib/std/Io/Threaded.zig`
+line 11598); the
 leaf `nanosleep` is the Io-free equivalent. (`Io.Threaded.init_single_threaded`
 is a comptime-const `Io` whose `now` would work since userdata is unused, but it
 is the single-thread fallback global, not the right anchor for a threaded server.)

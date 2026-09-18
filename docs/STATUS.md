@@ -1835,7 +1835,7 @@ GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
-items.md:1097-1140: projectiles are client-side GameObjects, the server
+../../7dtd-engine-research/docs/gameplay/items.md:1097-1140: projectiles are client-side GameObjects, the server
 surface is the DamageEntity C2S claim, which is complete; AI senses shipped
 WORKS - per-class view cone (entityclasses MaxViewAngle, stock 180 default
 halved), block-LOS sight, hearing through walls, and smell with a bleeding

@@ -886,7 +886,7 @@ with the entity, and that `NetPackageEntityMapMarkerRemove` is the land-claim
 path only. `EntityAirDropCrate.OnEntityDeath` (IL=30) says otherwise: it calls
 `World.ObjectOnMapRemove(EnumMapObjectType 13, entityId)` **and** broadcasts
 `NetPackageEntityMapMarkerRemove(13, entityId)` on channel 192 (RE
-aidirector.md:84). Type 13 is SupplyDrop, not LandClaim. The collect path now
+../../7dtd-engine-research/docs/entities/aidirector.md:84). Type 13 is SupplyDrop, not LandClaim. The collect path now
 sends the same removal.
 
 **Why:** `../../7dtd-engine-research/docs/gameplay/map-objects.md` section 8: air-drop crates

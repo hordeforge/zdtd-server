@@ -515,9 +515,11 @@ Prefer **ast-grep** for structural patterns (e.g. all `catch {}` blocks, all
 
 ## Good vs bad examples (zdtd-shaped)
 
+Abridged illustrative sketches, not verbatim quotes of the tree.
+
 ### Comptime table (good)
 
-```zig
+```
 const package_handlers = std.StaticStringMap(Handler).initComptime(.{
     .{ "NetPackageSetBlock", handleSetBlock },
     // …
@@ -526,13 +528,13 @@ const package_handlers = std.StaticStringMap(Handler).initComptime(.{
 
 ### Inline abuse (bad)
 
-```zig
+```
 inline fn buildHugePackage(...) ![]u8 { // 150 lines
 ```
 
 ### Caller buffer (good)
 
-```zig
+```
 pub fn buildWorldTimeBody(buf: []u8, bits: u64) ![]u8 {
     // write into buf, return buf[0..n]
 }
@@ -540,13 +542,13 @@ pub fn buildWorldTimeBody(buf: []u8, bits: u64) ![]u8 {
 
 ### Hidden alloc on send (bad)
 
-```zig
+```
 const body = try allocator.alloc(u8, 64); // per peer per tick
 ```
 
 ### Hot path scratch (good)
 
-```zig
+```
 // Game.body_buf reused every send
 const body = try packages.buildWorldTimeBody(self.body_buf[0..16], bits);
 try self.broadcast("NetPackageWorldTime", body);
@@ -554,7 +556,7 @@ try self.broadcast("NetPackageWorldTime", body);
 
 ### Hot path list grow (bad)
 
-```zig
+```
 var list: std.ArrayList(u32) = .empty;
 defer list.deinit(allocator);
 // … append interested peers every tick …
@@ -562,7 +564,7 @@ defer list.deinit(allocator);
 
 ### Hot path fixed cap (good)
 
-```zig
+```
 var peers: [max_clients]u16 = undefined;
 var n: usize = 0;
 // append only while n < peers.len; else drop furthest
@@ -570,7 +572,7 @@ var n: usize = 0;
 
 ### I/O via std abstraction (good)
 
-```zig
+```
 try io_fs.writeFile(allocator, path, bytes);
 // or, constructed ONCE at startup and the `io` passed down
 // (Threaded.init installs signal handlers; never build one per call):
@@ -582,14 +584,14 @@ try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = bytes });
 
 ### I/O via OS-specific syscalls (bad in app code)
 
-```zig
+```
 const fd = std.os.linux.open(...); // or a project wrapper re-exporting the same
 _ = std.os.linux.getdents64(fd, ...);
 ```
 
 ### Errors (good)
 
-```zig
+```
 const n = parseSetBlockChanges(body, tmp) catch {
     // malformed C2S: drop
     return;
@@ -598,7 +600,7 @@ const n = parseSetBlockChanges(body, tmp) catch {
 
 ### Errors (bad)
 
-```zig
+```
 _ = parse(...) catch {}; // applied nothing, caller thinks success
 ```
 

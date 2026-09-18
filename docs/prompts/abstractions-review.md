@@ -215,7 +215,9 @@ Private function in the same file beats `util/foo.zig` used once.
 
 ### 3. Wrapping std for fashion
 
-```zig
+Illustrative sketch, not a quote of the tree:
+
+```
 // Bad
 pub fn MyFile_readAll(...) { return io_fs.readFileAll(...); }
 ```
@@ -233,7 +235,9 @@ Delete or merge; do not "abstract over both."
 
 ### 5. Hiding hot-path cost
 
-```zig
+Illustrative sketch, not a quote of the tree:
+
+```
 // Bad: looks clean, allocates every tick
 fn interestedPeers(a: Allocator, ...) ![]Peer
 ```

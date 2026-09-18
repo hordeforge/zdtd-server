@@ -403,6 +403,15 @@ pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part
         .ps = attacker,
     };
     ctx.other_live_buff = &other_sink;
+    // `target="other"` rows apply to the attacker as the row passes
+    // (symmetric with the attacker event; today's victim rows are all
+    // self-directed, so this only prevents the next miss).
+    var other_impl: BuffSink = .{
+        .game = self,
+        .entity_id = if (self.sim.mask[attacker].network_id) self.sim.network_id[attacker].id else -1,
+        .ps = attacker,
+    };
+    ctx.other_sink = .{ .ctx = &other_impl, .add_buff = BuffSink.addOther, .remove_buff = BuffSink.removeOther };
     // IsCorpse / IsSleeping target=other (corpseRemoval / NightStalker).
     ctx.other_is_corpse = if (self.sim.mask[attacker].health) self.sim.health[attacker].corpse_seconds > 0 else false;
     ctx.other_is_sleeping = self.sim.mask[attacker].sleeper and !self.sim.sleeper[attacker].awake;
@@ -416,6 +425,7 @@ pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part
         const res = assets_buffs.evaluateTriggered(&self.buffs, id, .other_attacked_self, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+        applyTriggeredBuffsOther(self, attacker, &res, c.entity_id);
     }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
@@ -477,6 +487,7 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
     for (buff_ids[0..n]) |id| {
         const res = assets_buffs.evaluateTriggered(&self.buffs, id, .self_attacked_other, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyKillMods(self, ps, &res);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
         applyTriggeredBuffsOther(self, victim, &res, c.entity_id);
     }
@@ -486,6 +497,7 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
         if (rows.len == 0) continue;
         const res = assets_buffs.evaluateRows(rows, .self_attacked_other, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyKillMods(self, ps, &res);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
         applyTriggeredBuffsOther(self, victim, &res, c.entity_id);
     }
@@ -538,10 +550,13 @@ pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
-/// Apply a kill trigger's immediate ModifyStats rows to the killer's own
+/// Apply a hit/kill trigger's immediate ModifyStats rows to the holder's own
 /// bars. Only Health/Stamina `add` rows apply here; `subtract` rows stay on
 /// their own paths (stage-3 drain) and delayed rows apply immediately (no
-/// stock row on this trigger carries `delay=`).
+/// stock row on these triggers carries `delay=`). Shared by the kill event
+/// (SiphoningStrikes heals) and the attacked event (MachineGunner stamina,
+/// AdrenalineHealing health), whose mods were previously evaluated but never
+/// applied.
 fn applyKillMods(self: *Game, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult) void {
     const h = &self.sim.health[ps];
     for (res.mods[0..res.mod_n]) |m| {

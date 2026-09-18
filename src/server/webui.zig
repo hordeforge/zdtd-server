@@ -490,6 +490,20 @@ pub const Server = struct {
             return;
         }
 
+        if (std.mem.eql(u8, path, "/favicon.svg")) {
+            // Pre-auth like /healthz: the sign-in page links it too, so gating
+            // it would log a 401 for the page every operator actually starts on.
+            if (method != .GET and method != .HEAD) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "GET, HEAD" },
+                });
+                return;
+            }
+            const body_svg: []const u8 = if (method == .HEAD) "" else favicon_svg;
+            try self.httpRespond(&req, .ok, "image/svg+xml; charset=utf-8", body_svg, &.{});
+            return;
+        }
+
         if (std.mem.eql(u8, path, "/readyz")) {
             if (method != .GET and method != .HEAD) {
                 try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
@@ -1437,6 +1451,11 @@ fn embedTrimmed(comptime path: []const u8) []const u8 {
     return comptime if (raw.len > 0 and raw[raw.len - 1] == '\n') raw[0 .. raw.len - 1] else raw;
 }
 
+/// Brand mark for the `favicon.svg` link in all three pages. Served before
+/// auth (a browser requests it for the sign-in page too, and an auth-gated
+/// favicon answers 401 then 404 in the console of every load).
+const favicon_svg = embedTrimmed("webui/favicon.svg");
+
 const login_html = embedTrimmed("webui/login.html");
 const login_lockout_html = embedTrimmed("webui/login_lockout.html");
 const shell_html = embedTrimmed("webui/shell.html");
@@ -2243,6 +2262,29 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     try std.testing.expect(std.mem.find(u8, s.testResp(), "<p class=\"ok\">modlet UiMod disable; restart zdtd to apply</p>") != null);
     // GET is not allowed on the mutating route.
     try testServeHttp(&s, "GET /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
+}
+
+test "favicon is served before auth and mirrors HEAD" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    // No Authorization header, no cookie: the raw capture must be 200 SVG, not
+    // the 401 the auth gate would answer for any other unknown path.
+    try testServeHttp(&s, "GET /favicon.svg HTTP/1.1\r\n\r\n");
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Type: image/svg+xml; charset=utf-8") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "<svg ") != null);
+    try testServeHttp(&s, "HEAD /favicon.svg HTTP/1.1\r\n\r\n");
+    const head_resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, head_resp, "HTTP/1.1 200 ") != null);
+    if (std.mem.find(u8, head_resp, "\r\n\r\n")) |end| {
+        try std.testing.expectEqual(@as(usize, 0), head_resp[end + 4 ..].len);
+    } else {
+        return error.TestUnexpectedResult;
+    }
+    try testServeHttp(&s, "POST /favicon.svg HTTP/1.1\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
 }
 

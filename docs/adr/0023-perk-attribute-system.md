@@ -21,9 +21,9 @@ The gap stopped being purely cosmetic when A34 (this pass) found a kill-XP path
 that depends on it. Stock's `ItemActionAttack.Hit` and
 `ProjectileMoveScript.checkCollision` scale a turret or trap kill's XP by the
 passive effect `PassiveEffects.ElectricalTrapXP`, whose stock default is **0**
-(`buffs.xml:17001`: *"% of trap kill XP that the player gets"*) and which is
+(`$game/Data/Config/buffs.xml` line 17028: *"% of trap kill XP that the player gets"*) and which is
 only raised by `perkAdvancedEngineering` (an Intellect-gated perk,
-`progression.xml:3214`) at levels 1 through 5: .15 / .3 / .45 / .6 / .75.
+`$game/Data/Config/progression.xml` line 3215) at levels 1 through 5: .15 / .3 / .45 / .6 / .75.
 Without a perk system, zdtd cannot compute that fraction per player, so it can
 only apply a **flat floor** (`Rules.progression.trap_kill_xp_frac`, ADR 0021
 decision 5), not the value stock would actually pay a given player. That is

@@ -2774,4 +2774,3 @@ test "AddOrRemoveBuff toggles on its gates" {
     try std.testing.expectEqual(@as(u8, 1), removed.remove_n);
     try std.testing.expectEqualStrings("buffHot", removed.remove_buffs[0]);
 }
-

@@ -4599,7 +4599,12 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     // level itself).
     const boom = g.progression_table.perks;
     var found_pk = false;
-    for (boom) |pk| { if (std.mem.eql(u8, pk.name, "perkBoomstick")) { found_pk = true; break; } }
+    for (boom) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkBoomstick")) {
+            found_pk = true;
+            break;
+        }
+    }
     try std.testing.expect(found_pk);
     cl.skill_levels[0] = .{ .name = g.progression_table.perks[0].name, .level = 1 };
     for (g.progression_table.perks) |pk| {
@@ -4627,6 +4632,104 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     try std.testing.expect(g.sim.buffs[zs].find(stun_id) != null);
     // Attacker does not carry the victim's stun.
     try std.testing.expect(g.sim.buffs[ps].find(stun_id) == null);
+}
+
+test "MachineGunner refunds stamina on hit (attacked ModifyStats)" {
+    // `onSelfAttackedOther` ModifyStats rows were evaluated but never
+    // applied: perkMachineGunner 3 refunds +2 stamina per landed hit (gated
+    // `ItemHasTags tags="perkMachineGunner"` + victim alive).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkMachineGunner")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 3 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.health[ps].stamina = 50;
+    g.sim.health[ps].stamina_max = 100;
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), g.sim.health[ps].stamina, 0.001);
+    // Hold a MachineGunner-tagged item: +2 lands.
+    const gun = g.items.byName("gunMGT0PipeMachineGun") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, gun.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == gun.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = gun.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 52), g.sim.health[ps].stamina, 0.001);
+}
+
+test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
+    // `onSelfAttackedOther` self ModifyCVar rows apply through the shared
+    // evaluator: perkPummelPete adds 1 to .PummelPeteCombo per landed hit,
+    // which the buffPerkPummelPete stack chain reads for its bonus-ready
+    // flag. Victim is a live zombie so IsAlive target=other passes.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPummelPete")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 3 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    // Group gate needs a PummelPete-tagged held item.
+    const club = g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, club.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == club.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".PummelPeteCombo"), 0.001);
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".PummelPeteCombo"), 0.001);
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), cl.cvars.get(".PummelPeteCombo"), 0.001);
 }
 
 test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {

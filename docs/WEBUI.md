@@ -127,6 +127,7 @@ selection is client state carried in the URL hash.
 | `POST /login` | Form body `token=` → **303** + session cookie (missing token **400**, wrong secret **401**, non-form content type **415**, lockout **429**) | config secret |
 | `POST /logout` | Revoke the server session and clear its cookie (CSRF: session token or secret) | session |
 | `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
+| `GET`/`HEAD` `/favicon.svg` | Unauthenticated brand mark linked by all three pages | embedded SVG (`src/server/webui/favicon.svg`) |
 | `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
 | `GET /static/*` | No such route: the CSS is inline and the Preact bundle is spliced into the shell page (ADR 0040) | - |
 
@@ -413,21 +414,3 @@ Recorded in [ADR 0018](adr/0018-webui-ops-dashboard.md):
 
 ---
 
-## Appendix: historical HTMX fragments (superseded by ADR 0040)
-
-```html
-<!-- shell -->
-<!-- Superseded by ADR 0040: the page keeps only the app mount point and the
-     bundled Preact app, which fetches GET /api/state.json. -->
-<div id="app"></div>
-
-<form method="post" action="/api/cmd">
-  <input type="hidden" name="csrf" value="...">
-  <input name="line" placeholder="give 0 2 10" autocomplete="off">
-  <button type="submit">Run</button>
-</form>
-<div id="console-out"></div>
-```
-
-The shipped app posts the same form fields with `Accept: application/json` and
-renders the reply into the console panel; the HTML fragment path stays for tools.

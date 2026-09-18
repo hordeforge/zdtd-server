@@ -146,30 +146,33 @@ Search and read these even on a "whole repo" pass:
 
 ### Concrete pattern examples
 
+Illustrative pseudocode: each block describes the transform to look for, not a
+quote of the tree.
+
 **Distance cull (interest):**
 
-```zig
+```
 // Scalar: for each entity dx*dx+dz*dz < r2
 // SIMD: load x[i..i+8], z[i..i+8], sub player, mul, add, cmp r2, mask store indices
 ```
 
 **Density / height band:**
 
-```zig
+```
 // For each (lx,lz): if y < heights[i] density = terrain else air
 // Vectorize over columns or over y-runs with splat height compare
 ```
 
 **Noise octave sum:**
 
-```zig
+```
 // Multiple lattice evaluations; vectorize coordinates or batch cells 4-8 at a time
 // Keep scalar golden test for determinism
 ```
 
 **Dirty bitset scan:**
 
-```zig
+```
 // u64 words: @ctz / bit scan; word-at-a-time is often enough (not classic SIMD
 // but list as "bit-parallel" win). True SIMD if scanning many bitset arrays.
 ```
@@ -288,9 +291,11 @@ Create/update a dated snapshot **`archive/SIMD_REVIEW_<YYYY-MM-DD>.md`** (per IN
 
 ## Good vs bad
 
+Illustrative sketches, not quotes of the tree.
+
 ### Good target
 
-```zig
+```
 // Clear 256 heights, independent columns
 fn fillDensityFromHeights(out: []u8, heights: *const [256]u8, y: u8) void
 // → process 16-32 columns per vector of compares
@@ -298,7 +303,7 @@ fn fillDensityFromHeights(out: []u8, heights: *const [256]u8, y: u8) void
 
 ### Bad target
 
-```zig
+```
 // Per zombie: path A*, random, attack SM
 fn aiTickOne(z: *Zombie) void
 // → keep scalar; maybe parallel.forRanges only
@@ -306,7 +311,7 @@ fn aiTickOne(z: *Zombie) void
 
 ### Good test
 
-```zig
+```
 test "density simd matches scalar" {
     // fill random heights; compare out_simd vs out_scalar
 }
@@ -314,7 +319,7 @@ test "density simd matches scalar" {
 
 ### Bad "optimization"
 
-```zig
+```
 // SIMD encode of 7-bit length-prefixed strings
 // → reject
 ```

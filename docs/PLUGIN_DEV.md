@@ -278,10 +278,10 @@ behavior, not server.
 | Craft-request policy (which recipes a player may craft, batch caps) | **Plugin already** | `on_craft_request` verdict (added 2026-08-20, `<0` deny / `>0` cap at the `tryCraft` gate, recipe name is the key); `plugins/core_craftgate` is the reference (denies `forbidden_*` recipes) |
 | Loot-roll policy (loot abundance / empty rolls) | **Plugin already** | `on_loot_roll` verdict (added 2026-08-20, `<0` empty / `>0` scale the rolled stack count by percent, at both the bag and container chokepoints); `plugins/core_lootgate` is the reference (50% loot) |
 | Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
-| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 - every block-damage path routes through it) |
+| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`src/server/game/world.zig:20`; also the C2S player-dig delta since 2026-08-20 - every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
-| Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
+| Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`src/server/c2s/join.zig:144`) |
 | Bot brains | **Plugin already** | `mods/fps_bot` (ADR 0026) |
 | Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `plugins/core_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** - technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
@@ -497,7 +497,9 @@ plugins put it in a separate `main.zig` wrapper - see
 [mods/BUILDING.md](../mods/BUILDING.md)). zwasm runs the start section only if
 the module declares one, which ours never do, so `_start` is never invoked.
 
-```zig
+The exported hook body can be empty (illustrative):
+
+```
 export fn on_tick() void { }
 ```
 

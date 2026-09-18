@@ -173,7 +173,9 @@ That is the stage split stock *almost* has, without the single-thread commit tax
 | AI observer-gated | Only tick entities near player observers |
 | Path drain ≤8 / yield | Cap path jobs per step; worker pool for compute |
 
-```zig
+Loop-ownership sketch (illustrative pseudocode, not the shipped loop):
+
+```
 // Pseudocode: tick ownership (not production code)
 const TICK_NS: u64 = 50_000_000;
 

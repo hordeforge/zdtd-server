@@ -234,7 +234,7 @@ wins on conflict about what shipped, not about the arithmetic).
 | [Player progression](#10-player-progression) | 27 | 1 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: the requirement vocabulary is partial (an `instigator` target or a non-tag foreign kind needs an input the per-tick ctx does not carry - plus untracked passive names and the surviving row-action legs; 57 of 57 stock kinds evaluate, `RandomRoll`/`PerksUnlocked`/`IsStatAtMax`/`InSafeZone`/`IsAttachedToEntity` closed 2026-09-15, `ItemHasTags`/`RequirementItemTier`/`HitLocation` closed 2026-09-16, `RequirementItemModTier` closed 2026-09-16, `HoldingItemBroken` closed 2026-09-16, `IsBloodMoon` closed 2026-09-16, `GameStatBool` closed 2026-09-16, `IsDayNumber` closed 2026-09-16, `TimeOfDay` closed 2026-09-16, `IsDay` closed 2026-09-16, `IsMale` closed 2026-09-16, `IsCorpse` closed 2026-09-16, `IsSleeping` closed 2026-09-16, `IsLocalPlayer` closed 2026-09-16, `IsFPV` closed 2026-09-16, `IsItemActive` closed 2026-09-16, `IsSheltered` closed 2026-09-16, `IsHeldItem` closed 2026-09-16, `IsInstigator` closed 2026-09-16, `IsSDCS` closed 2026-09-16, `IsAlly` closed 2026-09-16, `IsOnLadder` closed 2026-09-16, `HasAttachedPrefab` closed 2026-09-16, `HasParticle` closed 2026-09-16, `IsLookingAtBlock` closed 2026-09-16, `IsLookingAtEntity` closed 2026-09-16, `IsIndoors` closed 2026-09-16 (attacker-side `onSelfAttackedOther` fold wires HitLocation at damage time), `EntityTagCompare target=other` evaluates at damage time with the attacker's tags - Spectral Grace deflects zombie hits and starts its 60 s recharge - and a 2026-09-15 survey showed every other unevaluated kind gates only untracked passives, unfired triggers, debug LogMessage rows, or client-side state `IsIndoors` fills false until AmountEnclosed is tracked (closed 2026-09-16)) and the `Equipment` mod layer (13) folds with `ItemHasTags`/`RequirementItemTier`/`RequirementItemModTier` on the item/mod ItemValue (per-mod Quality rides the wire; `CompareItemMetaFloat` still fails closed — named metadata map not stored); perk purchase itself works (stock `GetCalculatedMaxLevel` level_requirements gate, the old parent-skill check that denied every perk is gone) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); round 21 (2026-09-12) closed the buffs.xml gate vocabulary (`EntityTagCompare`, the `Stat::Max`/`Stat::ModifiedMax` family and `IsNight`, so all 43 gated tracked buff rows resolve); rounds 23-24 added the equipped/held item fold and `IsEquipped`, and `EntityHasMovementTag` from the reported movement state; 2026-09-15 added `RandomRoll` (Random seed), `PerksUnlocked` (child-perk sum), `IsStatAtMax` (0.1 threshold), `InSafeZone` (false, no Twitch), `IsAttachedToEntity` (vehicle seats) and `EntityTagCompare target=other` at damage time (Spectral Grace deflects + recharges; Preacher armor gains its zombie-filtered PDR) and `onSelfBuffFinish` at expiry (injury cooldown chains, Grace recharge clear; the remaining finish actions are Twitch/particles/debug with no server consumer) and `AddOrRemoveBuff` as a gate toggle (20 weather/hazard rows) and `onSelfBuffStack` on re-add (93 harvest/ready-flag rows) and `onPerkLevelChanged` on purchase (4 point-chance rows) and `onOtherAttackedSelf` on the victim in both damage paths (19 concussion/fatigue/PackMule rows) and `onSelfKilledOther` on the killer's buff + perk rows at the C2S kill award (DeadEye/Berserker adds, the stamina/health ModifyStats refunds; delayed rows apply immediately, no stock row on this trigger carries `delay=`) and HealthLoss/HealthGain (106/107) scaling on the applied C2S damage leg (`Stat.Tick`: fatigued +.1 takes more, toughness -.5 takes less) and BuffResistance (197) immunity on buff adds (`EntityBuffs::HasImmunity`: PainTolerance resists stuns, deterministic entity+buff draw) and HealthSteal (167) healing on landed C2S hits (`ProcessDamageResponse`: damage x GetValue, NightStalker book behind night/crouch/sleeping-victim gates) and ExperienceGain (193) scaling on kill XP (`AddKillXP`: class XP x the killer's held-item GetValue; no stock held rows ship it, Twitch-only) and PlayerExpGain Kill rows on kill XP (`AddLevelExp` useBonus: TwilightThief +.05 at night; the `IsLocalPlayer` SavageReaper row refuses on a dedi) and `target="other"` victim-directed AddBuff/RemoveBuff rows on the attacker hit event (shotgun stuns, cripples, bleeds land on the victim zombie; parsed into parallel other lists, applied through the victim sink). `ItemHasTags` (98 rows, the top unparsed kind) gates only untracked/weapon-local passives (StaminaLoss, LootProb, DismemberChance, HeadshotDamageModifier), so parsing it changes zero tracked outcomes. Requirement vocabulary closed 2026-09-16 (`57 of 57` stock kinds evaluate, including dedi-false/stub fills for Unity/client-only gates and `IsIndoors` false until AmountEnclosed is tracked). What keeps it PARTIAL is the remaining foreign-target kinds without a supplier (Physician `ProgressionLevel target=instigator` closed 2026-09-16 via BuffInstance.instigator_id → instigator_levels; `addCatalogBuff`/`applyTriggeredBuffs` take instigator_id; `ProgressionLevel target=other` closed 2026-09-16 via other_levels on damage folds (BatterUpMetalChain); `IsAlive target=other` closed 2026-09-16 via other_alive on damage folds; `HasBuff target=other` closed 2026-09-16 via other_live_buff on damage folds; `IsCorpse`/`IsSleeping` target=other closed 2026-09-16 via other_is_corpse/other_is_sleeping on damage folds; other foreign kinds still refuse) and the non-tag foreign kinds (all gate untracked passives, unfired triggers, or attacker-side `target="other"` damage rows like the spear-vs-downed bonus that scale the client's finished damage number the server accepts), the untracked passive names, and the surviving row-action legs (a 2026-09-15 survey: the buff-lifecycle triggers consume AddBuff/RemoveBuff/AddOrRemoveBuff/ModifyCVar/RemoveCVar/ModifyStats; every other action rides item/combat/Twitch/weather triggers with no server-side consumer - magazine eat SetProgressionLevel/GiveExp closed via grantMagazineRead; AddHealth on buff lifecycle closed 2026-09-16; storm/Twitch triggers still unfired; particles/sounds/screens). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); round 21 (2026-09-12) closed the buffs.xml gate vocabulary (`EntityTagCompare`, the `Stat::Max`/`Stat::ModifiedMax` family and `IsNight`, so all 43 gated tracked buff rows resolve); rounds 23-24 added the equipped/held item fold and `IsEquipped`, and `EntityHasMovementTag` from the reported movement state; 2026-09-15 added `RandomRoll` (Random seed), `PerksUnlocked` (child-perk sum), `IsStatAtMax` (0.1 threshold), `InSafeZone` (false, no Twitch), `IsAttachedToEntity` (vehicle seats) and `EntityTagCompare target=other` at damage time (Spectral Grace deflects + recharges; Preacher armor gains its zombie-filtered PDR) and `onSelfBuffFinish` at expiry (injury cooldown chains, Grace recharge clear; the remaining finish actions are Twitch/particles/debug with no server consumer) and `AddOrRemoveBuff` as a gate toggle (20 weather/hazard rows) and `onSelfBuffStack` on re-add (93 harvest/ready-flag rows) and `onPerkLevelChanged` on purchase (4 point-chance rows) and `onOtherAttackedSelf` on the victim in both damage paths (19 concussion/fatigue/PackMule rows) and `onSelfKilledOther` on the killer's buff + perk rows at the C2S kill award (DeadEye/Berserker adds, the stamina/health ModifyStats refunds; delayed rows apply immediately, no stock row on this trigger carries `delay=`) and HealthLoss/HealthGain (106/107) scaling on the applied C2S damage leg (`Stat.Tick`: fatigued +.1 takes more, toughness -.5 takes less) and BuffResistance (197) immunity on buff adds (`EntityBuffs::HasImmunity`: PainTolerance resists stuns, deterministic entity+buff draw) and HealthSteal (167) healing on landed C2S hits (`ProcessDamageResponse`: damage x GetValue, NightStalker book behind night/crouch/sleeping-victim gates) and ExperienceGain (193) scaling on kill XP (`AddKillXP`: class XP x the killer's held-item GetValue; no stock held rows ship it, Twitch-only) and PlayerExpGain Kill rows on kill XP (`AddLevelExp` useBonus: TwilightThief +.05 at night; the `IsLocalPlayer` SavageReaper row refuses on a dedi) and `target="other"` victim-directed AddBuff/RemoveBuff rows on the attacker hit event (shotgun stuns, cripples, bleeds land on the victim zombie; parsed into parallel other lists, applied through the victim sink) and attacked-event ModifyStats refunds (MachineGunner stamina, AdrenalineHealing health: evaluated but never applied until now) and attacked-event self ModifyCVar rows (PummelPete/Gunslinger combo counters rise per hit through the shared evaluator; victim-directed bleedCounter rows stay recorded-only, zombies carry no cvar store) and victim-event symmetry (other-sink + other-apply on the victim hit event; today its rows are all self-directed). `ItemHasTags` (98 rows, the top unparsed kind) gates only untracked/weapon-local passives (StaminaLoss, LootProb, DismemberChance, HeadshotDamageModifier), so parsing it changes zero tracked outcomes. Requirement vocabulary closed 2026-09-16 (`57 of 57` stock kinds evaluate, including dedi-false/stub fills for Unity/client-only gates and `IsIndoors` false until AmountEnclosed is tracked). What keeps it PARTIAL is the remaining foreign-target kinds without a supplier (Physician `ProgressionLevel target=instigator` closed 2026-09-16 via BuffInstance.instigator_id → instigator_levels; `addCatalogBuff`/`applyTriggeredBuffs` take instigator_id; `ProgressionLevel target=other` closed 2026-09-16 via other_levels on damage folds (BatterUpMetalChain); `IsAlive target=other` closed 2026-09-16 via other_alive on damage folds; `HasBuff target=other` closed 2026-09-16 via other_live_buff on damage folds; `IsCorpse`/`IsSleeping` target=other closed 2026-09-16 via other_is_corpse/other_is_sleeping on damage folds; other foreign kinds still refuse) and the non-tag foreign kinds (all gate untracked passives, unfired triggers, or attacker-side `target="other"` damage rows like the spear-vs-downed bonus that scale the client's finished damage number the server accepts), the untracked passive names, and the surviving row-action legs (a 2026-09-15 survey: the buff-lifecycle triggers consume AddBuff/RemoveBuff/AddOrRemoveBuff/ModifyCVar/RemoveCVar/ModifyStats; every other action rides item/combat/Twitch/weather triggers with no server-side consumer - magazine eat SetProgressionLevel/GiveExp closed via grantMagazineRead; AddHealth on buff lifecycle closed 2026-09-16; storm/Twitch triggers still unfired; particles/sounds/screens). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -1186,19 +1186,19 @@ re-arms) with the population count as the quest target.
 
 - **Air-drop crate NavObject markers** `WORKS` `(2026-09-10)`
   The crate marker is one of the two server-push marker cases (RE
-  map-objects.md:306); every other marker family is client-derived from synced
+  ../../7dtd-engine-research/docs/gameplay/map-objects.md:306); every other marker family is client-derived from synced
   state. zdtd pushed it once at the moment of the drop, so a player who joined
   afterwards saw an unmarked crate, and after a restart nobody had a marker at
   all: the crate bag persists in `entities.zen`, the marker did not. Stock
   re-registers the live crates per joining player as its own join step
   (`AIDirectorAirDropComponent.RefreshCrates(entityId)`, step 11 of the join
-  sequence, RE protocol.md:317). `sendAirDropNavObjects` does the same, and the
+  sequence, RE ../../7dtd-engine-research/docs/network/protocol.md:317). `sendAirDropNavObjects` does the same, and the
   crate flag rides the save as a `zen_rec_supply_crate` tag record following its
   bag (a separate record, so older saves stay readable).
   A dead crate takes back **two** markers (round 5, 2026-09-10):
   `EntitySupplyCrate.OnEntityDeath` (IL=30) removes the MapObject
   (`NetPackageEntityMapMarkerRemove`, `removeByType` 0 + entityId +
-  `EnumMapObjectType.SupplyDrop` 13, channel 192; RE aidirector.md:84), and
+  `EnumMapObjectType.SupplyDrop` 13, channel 192; RE ../../7dtd-engine-research/docs/entities/aidirector.md:84), and
   `EntitySupplyCrate.OnEntityUnload` (IL=17, reason Killed) ->
   `AIDirectorAirDropComponent.RemoveSupplyCrate` (IL=54) unregisters the
   NavObject (`NetPackageNavObject` `Setup(Int32)` remove form, client
@@ -1377,7 +1377,7 @@ parsed, and quest offering is unwired.
   1. **A new lock request while the player already holds one** (see gate 1
      above; the request is refused, not re-granted).
   2. **A failed inventory transaction.** `TransactionRequestServer` (IL=46, RE
-     protocol-packages.md:1245) logs and force-unlocks on a failed apply. The
+     ../../7dtd-engine-research/docs/network/protocol-packages.md:1263) logs and force-unlocks on a failed apply. The
      client's window is showing a transaction the server refused, so holding
      the lock keeps it open over a container whose contents no longer match.
   3. **Disconnect**, below.
@@ -1393,7 +1393,7 @@ parsed, and quest offering is unwired.
   the server. Stock sends `NetPackageLockResponse` with `locking = false` and
   `isForceUnlocked = true` from `ForceUnlockByPlayer` (IL=11) on exactly this
   path, plus after a failed inventory transaction (RE
-  dedicated-leftovers.md:167). The `locking = false` branch routes the client
+  ../../7dtd-engine-research/docs/meta/dedicated-leftovers.md:173). The `locking = false` branch routes the client
   to `UnlockResponse(success, errorMsg, isForceUnlocked)` (ProcessPackage
   IL=27), which reads neither the targets nor the context - so the release
   needs only the channel and the server does not have to retain the original
@@ -1421,11 +1421,11 @@ parsed, and quest offering is unwired.
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
   `loadFromPath` scans every `<trader_item_group>` and `expandGroup` resolves
-  child refs recursively with a depth limit and a visited set. The docs are stale
-  here: `GAP_ANALYSIS.md:535` and `:612` say group refs are skipped; they are
-  expanded, with a test against the real stock file.
+  child refs recursively with a depth limit and a visited set. The earlier note
+  here said group refs are skipped; they are expanded, with a test against the
+  real stock file.
   *Anchors:* `src/assets/traders.zig:114-177`, `:54-82`, `:183-201`,
-  `Data/Config/traders.xml:1179-1194`
+  `$game/Data/Config/traders.xml` lines 1179-1194
 
 - **traders.xml `<trader_info>` elements** `WORKS`
   `loadFromPath` now parses every `<trader_info id="N">` block: id,
@@ -1464,7 +1464,7 @@ parsed, and quest offering is unwired.
   by quest tier).
   *Anchors:* `src/assets/traders.zig` root row, `src/server/game/step.zig`
   questRewardStage, `src/server/game.zig`
-  `coinItemId`, `Data/Config/traders.xml:3`, `asm.il:1397236-1397257`,
+  `coinItemId`, `$game/Data/Config/traders.xml` line 3, `asm.il:1397236-1397257`,
   `asm.il:1830625-1830948`
 
 - **Inventory roll (count ranges, prob, unique_only, quality, RNG)** `ROLLED (2026-08-08)`
@@ -1545,7 +1545,7 @@ parsed, and quest offering is unwired.
   so it always applies (noted inline). Daring Adventurer's TraderStage /
   SecretStash / quest-bonus rows stay with the tier/shop-overlay gap, not
   this one.
-  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`,
+  *Anchors:* `$game/Data/Config/progression.xml` lines 3064-3065 and 3084,
   `src/server/game/player.zig` (`namedPassiveFold`, `barterBuyScale`,
   `barterSellScale`), `src/ecs/systems.zig` (`trade` buy/sell arms)
 
@@ -1675,7 +1675,7 @@ parsed, and quest offering is unwired.
   **Owned-machine map markers ship 2026-09-10**: the join
   PersistentPlayerState carries the renter's machine in
   `OwnedVendingMachinePositions` (PPD.Write fields 25-28, RE
-  `save-region.md:982`), which was a hardcoded `0` count, so the client
+  `../../7dtd-engine-research/docs/world/save-region.md:982`), which was a hardcoded `0` count, so the client
   redrew its map without a marker for the machine the player was still
   paying for. Expired rentals are excluded by the same day check the rent
   path applies. The same scenario asserts it on a rejoin.
@@ -1707,7 +1707,7 @@ parsed, and quest offering is unwired.
   branch), `:6760-6766` (place/remove lifecycle), `:9425-9480`
   (`sendVendingTe`/`fillVendingStore`), `src/assets/blocks.zig:124-237`
   (Class/TraderID + Extends), `asm.il:440486` (`TileEntityVendingMachine::write`),
-  `Data/Config/blocks.xml:51104`, `Data/Config/traders.xml:1472`
+  `$game/Data/Config/blocks.xml` line 51104, `$game/Data/Config/traders.xml` line 1472
 
 - **Quest offering via NetPackageNPCQuestList** `WORKS` `(2026-08-22 re-audit)`
   The reply is legal (base direction Both) and the bodies are right; the
@@ -1883,7 +1883,7 @@ encoding is one day high.
   transition, releasing on the falling edge. This is a real S2C
   `NetPackageWeather` change, so a stock client does observe it.
   *Anchors:* `src/world/weather.zig:106`, `:125`, `src/server/game.zig`,
-  `src/assets/biome_layers.zig:757`, `Data/Config/biomes.xml:190`
+  `src/assets/biome_layers.zig:757`, `$game/Data/Config/biomes.xml` line 190
 
 - **Horde spawn composition** `WORKS` (2026-08-20 reconciliation)
   Blood-moon spawns draw from the `BloodMoonHorde` spawner in `gamestages.xml`
@@ -1893,8 +1893,8 @@ encoding is one day high.
   entitygroups.xml into per-class stats. The composition escalates with level
   and day instead of repeating the ordinary night group.
   *Anchors:* `src/ecs/aidirector.zig:400`, `:521`, `:644`, `src/server/game.zig`
-  `pickStageGroup`, `Data/Config/gamestages.xml:4428`,
-  `Data/Config/entitygroups.xml:15809`
+  `pickStageGroup`, `$game/Data/Config/gamestages.xml` line 4428,
+  `$game/Data/Config/entitygroups.xml` line 15809
 
 - **Escalation by gamestage** `WORKS` (was `PARTIAL (waived)`; closed
   2026-09-06 - the waiver predates the stage machine)
@@ -2115,7 +2115,7 @@ encoding is one day high.
   fallback when no SandboxCode is set.
   *Anchors:* `src/server/config.zig:313-340,422-423,459`,
   `src/assets/sandbox.zig:149`, `src/wire/packages.zig:2217`,
-  `asm.il:2501770`, `serverconfig.xml:103`
+  `asm.il:2501770`, `$game/serverconfig.xml` line 103
 
 - **Wandering horde / screamer heat** `WORKS`
   Both components now exist alongside the blood-moon component:
@@ -2124,7 +2124,7 @@ encoding is one day high.
   threshold-25 scout spawns with cooldowns). Residual: the fixed daytime scout
   drip stays as the fallback when no heat source runs; see the two rows below.
   *Anchors:* `src/ecs/aidirector.zig:159`, `:168`, `asm.il:409351`,
-  `Data/Config/gamestages.xml:1582`, `:3458`
+  `$game/Data/Config/gamestages.xml` lines 1582 and 3458
 
 - **Blood-moon death bookkeeping (IsBloodMoonDead)** `WORKS`
   `Player.is_blood_moon_dead` is set when a player dies during an active blood
@@ -2562,7 +2562,7 @@ gamestage, no wandering hordes, and no screamers.
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances at the stock real rate: `time_of_day_inc_per_sec` =
   `24000/(DayNightLength*60)` in integer arithmetic (6 ticks/s at the default 60
-  minute day, RE server-lifecycle.md:168), the same value the GameStats blob and
+  minute day, RE ../../7dtd-engine-research/docs/admin/server-lifecycle.md:168), the same value the GameStats blob and
   the weather countdown read; `isNight` uses dawn 04:00 plus
   DayLightLength; `isBloodMoonNight` honours frequency and range with deterministic
   jitter and probes neighbouring cycles so a jittered day is not missed.
@@ -2716,7 +2716,7 @@ gamestage, no wandering hordes, and no screamers.
   through to zombieBoe, and volumes naming a class directly keep their model.
   *Anchors:* `src/server/game/sleeper.zig:109-110`,
   `src/server/game.zig` resolveSleeperClass,
-  `Data/Config/gamestages.xml:153`, `Data/Prefabs/POIs/*.xml`
+  `$game/Data/Config/gamestages.xml` line 153, `Data/Prefabs/POIs/*.xml`
 
 - **Sleeper wake condition** `WORKS` (2026-08-25):
   AABB volume trigger + per-entity wake, with crouch stealth
@@ -2752,7 +2752,7 @@ gamestage, no wandering hordes, and no screamers.
   rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
   and PathTest have **zero AITask uses** in the stock file.
   *Anchors:* `src/ecs/systems.zig:1341` zombie_tasks,
-  `Data/Config/entityclasses.xml:562-571`, `asm.il` EAI* class list
+  `$game/Data/Config/entityclasses.xml` lines 562-571, `asm.il` EAI* class list
 
 - **Per-class AITask/AITarget lists from entityclasses.xml** `WORKS` `(2026-09-07)`
   The inherited list now drives native task *selection*, not only the attack
@@ -2787,7 +2787,7 @@ gamestage, no wandering hordes, and no screamers.
   path; unprovoked, a timid animal flees or wanders instead of sprinting in.
   *Anchors:* `src/assets/entities.zig` resolvedAiAttacks,
   `src/ecs/systems.zig:1743`, `src/ecs/world.zig:875-905`,
-  `Data/Config/entityclasses.xml:4724-4800`
+  `$game/Data/Config/entityclasses.xml` lines 4724-4800
 
 - **Target sensing** `WORKS` `(2026-08-22 re-audit)`
   The sense surface is complete and stock-faithful: per-class SightRange
@@ -2804,7 +2804,7 @@ gamestage, no wandering hordes, and no screamers.
   fidelity refinements that do not change the client-visible sense surface.
   *Anchors:* `src/ecs/systems.zig:104` canSensePlayer, `:137` viewHalfDeg,
   `:1726` senseDistSq, `:74` losClear,
-  `Data/Config/entityclasses.xml:678-679`, `asm.il:430171`
+  `$game/Data/Config/entityclasses.xml` lines 678-679, `asm.il:430171`
 
 - **Grid A* pathfinding** `WORKS`
   4-neighbour A* with Manhattan heuristic, binary min-heap open set, lazy stale
@@ -2876,7 +2876,7 @@ gamestage, no wandering hordes, and no screamers.
 - **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `WORKS` (2026-08-27 re-audit: the `EnemyAnimals*` night rules ARE consumed - `biomeGroupName` collects every matching animal rule for the spawn biome (day Any WildGameForest + Night wildlife + Night enemy groups), gated by time-of-day and the POI-tag gate, and rotates across them deterministically by the spawn counter, so wolves/bears/snakes appear at night with their full class stats (A35 class_resolve_fn, bear 2500 HP). Documented approximation: the stock random-start scan over up to min(5, count) groups is a deterministic first-matching-rule walk)
   *Anchors:* `src/server/game.zig` biomeGroupName,
   `src/ecs/aidirector.zig:505-575` tickAnimals/spawnAnimalsNearPlayers,
-  `Data/Config/spawning.xml:31-33`
+  `$game/Data/Config/spawning.xml` lines 31-33
 
 - **Vultures / flying entities** `PARTIAL (waived)`
   No flying `EntityKind`/vertical AI; vultures not spawned. Needs vertical
@@ -2930,7 +2930,7 @@ gamestage, no wandering hordes, and no screamers.
   Astar location line with pit-stop commands; zdtd spawns and chases directly.
   *Anchors:* `src/ecs/aidirector.zig` (`wandering_next`, `nextWanderingTime`,
   `spawnWanderingHorde`), `asm.il:419473-419490` (TickNextTime/ChooseNextTime),
-  `asm.il:416218`, `Data/Config/gamestages.xml:1582`, `:3458`
+  `asm.il:416218`, `$game/Data/Config/gamestages.xml` lines 1582 and 3458
 
 - **Screamers and the activity heat map** `WORKS` (heat feed residual)
   `AIDirectorChunkData` heat accumulation per 5x5-chunk region
@@ -2954,7 +2954,7 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/aidirector.zig` (`heat`, `notifyActivity`, `tickHeat`,
   `heatSpawnRolls`, `spawnHeatScouts`), `src/server/game.zig` (workstation heat
   feed), `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
-  `asm.il:416218`, `Data/Config/blocks.xml:28086` (forge 6)
+  `asm.il:416218`, `$game/Data/Config/blocks.xml` line 28086 (forge 6)
 
 - **NetPackageHordeEvent** `N/A (parity)`: see [§6 blood-moon
   NetPackageHordeEvent row](#6-blood-moon): the same verdict applies; this row
@@ -3013,7 +3013,7 @@ gamestage, no wandering hordes, and no screamers.
   `src/ecs/components.zig` (`Health.corpse_seconds`, `ClassId.time_stay`),
   `src/assets/entities.zig` (`TimeStayAfterDeath`), `src/server/game.zig`
   (sweep in tick, kill handler defers the remove), `asm.il:450657-450759`,
-  `Data/Config/entityclasses.xml:692-693`
+  `$game/Data/Config/entityclasses.xml` lines 692-693
 
 - **Zombie health replication to clients** `WORKS`
   The dirty-hp replicate pass now sends `EntityStatChanged(health)` for
@@ -3367,10 +3367,10 @@ unvalidated, and durability, mods and repair do not exist.
   zPack tables instead of 5 scrap iron.
   *Anchors:* `src/assets/entities.zig` load, `src/ecs/world.zig` damage gate,
   `src/ecs/components.zig` `ClassId.drop_prob`,
-  `Data/Config/entityclasses.xml:689`, `Data/Config/loot.xml:9928`
+  `$game/Data/Config/entityclasses.xml` line 689, `$game/Data/Config/loot.xml` line 9928
   *Anchors:* `src/assets/entities.zig:245-247`, `src/server/game.zig`,
-  `src/assets/loot.zig:119-123`, `Data/Config/entityclasses.xml`,
-  `Data/Config/loot.xml:9927`
+  `src/assets/loot.zig:119-123`, `$game/Data/Config/entityclasses.xml`,
+  `$game/Data/Config/loot.xml` line 9927
 
 - **Loot bag drop probability (LootDropProb)** `WORKS`
   `entityclasses.xml` `LootDropProb` parsed in `assets/entities.zig` (`.04`
@@ -3378,7 +3378,7 @@ unvalidated, and durability, mods and repair do not exist.
   and `killXpAward`/turret path both call `rollLootDrop(net_id, drop_prob)` so
   most kills drop nothing; deterministic hash test pins 4% rate.
   *Anchors:* `src/assets/entities.zig:326-332`, `src/ecs/world.zig:856-880`,
-  `src/ecs/systems.zig:2107-2127`, `Data/Config/entityclasses.xml:689`
+  `src/ecs/systems.zig:2107-2127`, `$game/Data/Config/entityclasses.xml` line 689
 
 - **Player death loot bag (DropOnDeath)** `WORKS` `(2026-08-22)`
   Modes 1..3 drop a bag holding the victim's **real inventory range**:
@@ -4200,7 +4200,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   server can now push a buff onto a player and other clients see it.
   Since 2026-09-10 the death clear relays too. Stock's removals all drain
   through the tick that emits the wire (`removeBuff` marks `Remove=true`, RE
-  buffs.md:194), but zdtd's respawn cleared the set directly and discarded the
+  ../../7dtd-engine-research/docs/gameplay/buffs.md:195), but zdtd's respawn cleared the set directly and discarded the
   count, so a `RemoveOnDeath` buff vanished server-side while every client kept
   showing its icon - permanently, since nothing else ever mentions that buff
   again. `clearOnDeath` now reports what it removed, `respawnPlayer` returns it,
@@ -4247,8 +4247,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   water/HP add, capped) is what zdtd applies - documented internal
   difference.
   *Anchors:* `src/ecs/inventory.zig:285-306` applyEatProps,
-  `src/assets/items.zig:444-456`, `Data/Config/items.xml:20015-20029`,
-  `Data/Config/buffs.xml:8477`
+  `src/assets/items.zig:444-456`, `$game/Data/Config/items.xml` lines 20015-20029,
+  `$game/Data/Config/buffs.xml` line 8477
 
 - **Food / water decay over time** `WORKS`
   `tickSurvival` depletes food/water per game hour (`Rules.progression`
@@ -4795,7 +4795,7 @@ a finer server encoding.
   of stock's `GetBiomeOrSubAt`, ported PerlinNoise/GameRandom) and samples that
   subbiome's own list, matching stock's `decorateChunkRandom`.
   *Anchors:* `src/world/subbiome_noise.zig`, `src/server/game/deco.zig:19`,
-  `src/server/game/join.zig:55`, `Data/Config/biomes.xml:489-507`
+  `src/server/game/join.zig:55`, `$game/Data/Config/biomes.xml` lines 489-507
 
 - **Deco rotation** `WORKS`
   Every DecoObject carries a `BiomeBlockDecoration::GetRandomRotation` roll
@@ -4822,8 +4822,8 @@ a finer server encoding.
   DecoUpdate burst. Skipping them matches stock, so the claim that they "never
   appear anywhere" is about the not-yet-implemented dynamic prefab decorator
   (prefabs.xml `<decoration>` placement), tracked separately.
-  *Anchors:* `src/wire/stock_deco.zig:154-159`, `Data/Config/biomes.xml:283`,
-  `:310`, `:494-495`
+  *Anchors:* `src/wire/stock_deco.zig:154-159`, `$game/Data/Config/biomes.xml` lines 283,
+  `310` and `494-495`
 
 - **Deco multiblock mirroring** `WORKS`
   Offsets derived from blocks.xml MultiBlockDim exactly as `Block::Init` builds
@@ -5103,7 +5103,7 @@ a finer server encoding.
   Worth separating from this: stock's *per-source* scaling is on the damage
   side, not the HP side, through `BlockDamagePlayer` / `BlockDamageAI` /
   `BlockDamageAIBM`, and zdtd already implements all three (the `mult` in the
-  chew and dig paths, `GAME_OPTIONS.md:98-100`). So the claim modifier is a
+  chew and dig paths, `docs/GAME_OPTIONS.md:99-101`). So the claim modifier is a
   second, independent axis, and the asymmetry above is real regardless of
   which way stock resolves it: two damage sources against the same block
   disagree about its HP, and the row said nothing about it.
@@ -5530,7 +5530,7 @@ persists so little that a restart visibly damages a built base.
   `peer_stale_ms` is a separate arm.
   *Anchors:* `src/server/game/tick.zig` (`reapStalePeers`),
   `src/server/scenarios.zig` (`a peer that never echoes is reaped past the
-  auth age`), RE `network.md:810`
+  auth age`), RE `../../7dtd-engine-research/docs/network/network.md:810`
 
 - **Connect rate limiting** `WORKS` `(2026-08-21)`
   500 ms/IP (`ConnectionRateLimitMilliseconds = 0x1F4`, asm.il 852995) is now
@@ -5843,7 +5843,7 @@ persists so little that a restart visibly damages a built base.
 - **Steam / EOS master-server registration** `PARTIAL (waived: direct-IP parity)`
   No Steam/EOS lobby registration; direct-IP GSI on ServerPort is the parity path.
   Browser-discoverable hosting is out of scope for this line.
-  *Anchors:* `src/server/serverinfo_tcp.zig`, `serverconfig.xml:16`
+  *Anchors:* `src/server/serverinfo_tcp.zig`, `$game/serverconfig.xml` line 16
 
 - **serverconfig.xml property coverage** `WORKS` `(2026-08-21)`
   41 property names are applied and unknown ones are ignored with an edit-distance
@@ -6136,12 +6136,12 @@ nobody re-opens a closed row from a stale one.
 
 | Doc row | This analysis says |
 |---|---|
-| `GAP_ANALYSIS.md:588-605` and `STATUS.md:143`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
-| `GAP_ANALYSIS.md:535` and `:612`: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
-| `GAP_ANALYSIS.md:339`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` world.zig:764-782), a placed bedroll records the respawn point (c2s/inv.zig:714-721) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
-| `GAP_ANALYSIS.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
-| `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
-| `GAP_ANALYSIS.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
+| Earlier `GAP_ANALYSIS.md` trader-window note and `docs/STATUS.md:2789`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
+| Earlier `GAP_ANALYSIS.md` note: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
+| `docs/GAP_ANALYSIS.md:6470`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` src/ecs/world.zig:891), a placed bedroll records the respawn point (c2s/inv.zig:714-721) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
+| `docs/GAP_ANALYSIS.md:6471`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
+| `docs/STATUS.md:2784`: "Player death → respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
+| `docs/GAP_ANALYSIS.md:7221`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
 | `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
 | `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | CLOSED 2026-09-08. Was correct: StayWithin was missing (fell through to Base) and ObjectiveTime was unmapped. The enum now carries `time` and the XML mapping routes both `StayWithin` and `POIStayWithin` to the zero-byte shape |
 
@@ -6465,7 +6465,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
 | Equipment / armor mitigation | WORKS (equip slots; physical damage takes the equipped armor's summed PhysicalDamageResist percent and every non-physical EnumDamageTypes member takes the tag-matched ElementalDamageResist passive 43 at the choke (2026-09-12); with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog). Equipment swaps reach the server 2026-08-26: the standalone NetPackagePlayerEquipment C2S (sent on every bPlayerEquipmentChanged flip, an armor swap) is applied to the sim's equip slots (applyEquipmentBody, RE Equipment.Read IL=93) + relayed to the other tracked players, so mitigation and the rendered armor stay in sync - previously the package was an accepted no-op and swaps desynced the server) |
 | Item passive routing (DegradationPerUse / TargetArmor) | WORKS (2026-08-25: `DegradationPerUse` base_set values wear the held tool per use (degradeUse hook, stock ItemValue.UseTimes); `TargetArmor` perc_add penetrates armor mitigation at the damage chokes - `armorMitigationVs`, RE GetTotalPhysicalArmorRating IL=47 applies passive 163 on the attacking item to the wearer's passive-41 rating base. The perk-tag-gated rows (perkJavelinMaster etc.) are wired too: the weapon's tagged value applies when the attacker owns the tagged perk (level >= 1), checked at the choke. Recorded, not wired: `BlockDamage` (the client computes its own tool+perk block damage and claims it - server-side re-scaling would double-apply, same finding as the difficulty C2S verbatim-strength path), `HarvestCount` (the item-side harvest count multiplier - **WIRED 2026-08-26** for the held-tool leg: `GameUtils.HarvestOnAttack` IL=623 pins count = trunc(rolled x GetValue(141, tool, 1, holder, null, dropTag)); items.xml rows fold over base 1 as base_add -> 1+X, base_set -> X, perc_add -> 1+Y (quality curves at the tool quality), tag-gated by the drop row's tag; `items.harvestMultiplier` applies it in the dig roll - a wooden club yields 0.25x (55 -> 13 rocks), the auger's untagged perc_add .2 yields 1.2x (55 -> 66), scenario harvest-count. Recorded: the equipped-armor aggregation (farmer/lumberjack/miner/scavenger rows over worn items - the passive-effects-VM non-goal) and the XUiM_Recipes seed/crop/mining/harvest output modifiers (sandbox "harvest output" options, defaults 1.0)), `LootProb` (passive 79 in LootContainer.getProbability IL=192 scales the template/entry prob by the receiving player's equipped LootProb for the looted item's tags; the only stock row - armorFarmerHelmet perc_add curve 2..20 tags=seedSkill - is DATA-INERT: no stock item Tags property or loot.xml entry tag contains seedSkill, so the passive can never intersect the roll's tag context (audited 2026-08-26, loot-economy.md 8.1). A modded items.xml/loot.xml with a matching tag would activate it - recorded, not wired (the equipped-items aggregation is the passive-effects-VM non-goal). **Block-loot drop SHIPPED 2026-08-25**: the 449 LootList blocks are all CompositeTileEntity containers, so a broken container now spills its pre-filled contents into a loot bag at the block (tryContainerSpill mirrors the eviction spill; rolling the list again would double-loot). **Terrain harvest drops SHIPPED 2026-08-26**: the server rolls the broken block's `<drop event="Harvest">` rows at the dig choke (BlockDef.harvest_drops parses count/prob/stick_chance/tool_category/tag from blocks.xml, inherits through Extends per CopyDroppedFrom IL=89 - own wins per item name - and scales prob by the block's ResourceScale property, zero b14 blocks set it); the roll is stock Block.DropItemsOnEvent IL=246 (count RandomRange(min,max+1), skip 0, drop when random < prob; tool_category/tag stored but never read by the roll - the item-side bonus legs) + GameUtils.HarvestOnAttack IL=623 (stacks grant to the breaker's inventory, overflow becomes a ground bag; XP = material.Experience x rolled count). The Fall (587 rows) and Destroy (1,286 rows) debris events stay recorded this slice; the `[recipe]`/`*` drop names appear on no b14 Harvest row and fail closed. Fixing this also fixed a latent P0: the stability plane computes lazily on the first dig AFTER the handler aired the block, so `removed_stab` was 0 and `cur_stab - 1` underflowed (first dig in any fresh chunk panicked in Debug/ReleaseSafe); `removeBlockAt` now guards the u8 underflow. `StaminaLoss` is WIRED: the landed-hit choke drains the held item's items.xml StaminaLoss x `[rules.combat] stamina_usage_multiplier` (RE ItemActionMelee IL: AddStamina(-(GetValue(StaminaLoss) x StaminaUsageMultiplier))); the negative quality-curve rows stay recorded)) |
-| Projectile / ranged combat | WORKS (2026-08-20, RE items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
+| Projectile / ranged combat | WORKS (2026-08-20, RE ../../7dtd-engine-research/docs/gameplay/items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
 | Death / backpack | WORKS (server spawns the death bag on the lethal event - C2S damage and hp-replicate AI-kill paths both call spawnDeathBag - with the victim's real inventory range by DropOnDeath mode (1 all, 2 toolbelt, 3 backpack) at preserved offsets, the "Backpack" entity class (EntityBackpack, not the DroppedLootContainer the block spills use; the class survives a restart via the `zen_rec_backpack` tag), and the backpack map pin relayed; status.md DropOnDeath row) |
@@ -7316,7 +7316,7 @@ LANDED (real, IL-grounded):
   an ally-only waypoint invite arriving from a player the client did not believe
   it was allied with. Stock needs no equivalent send because the registry rides
   the join snapshot (`PersistentPlayerList.NetworkCloneRelevantForPlayer`, RE
-  server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
+  ../../7dtd-engine-research/docs/admin/server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
 
 HONEST GAPS:
 - **Party shared scope (partial).** `NetPackagePartyActions` (asm.il 829049)

@@ -13,10 +13,11 @@ Checks, in this order:
    covered trees has a row (a new page without a budget is a config error, the
    same way a new src file without a provenance row is).
 
-Scope: links are checked across all of docs/. Citations, blocks and budgets are
-checked in the trees listed in CHECKED_TREES plus the single-file entries in
-CHECKED_FILES, so the older hand-written references can be migrated one at a
-time instead of failing the gate on day one.
+Scope: links and the citation/block checks cover all of docs/**/*.md except
+docs/archive/ and the generated docs/provenance.html. Budgets, tree-registry
+rows and the subsystem page contract are narrower (CHECKED_TREES plus the
+single-file entries in CHECKED_FILES), because a budget is opt-in per page
+while a stale citation is a defect anywhere. See CITATION_EXCLUDED_TREES.
 
 Exit status is 1 with a printed report when any check fails.
 
@@ -33,9 +34,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 
-# Trees whose citations, quoted blocks and budgets are enforced.
+# Trees whose budgets, registry rows and subsystem page contract are enforced.
 CHECKED_TREES = ("subsystems", "catalogs", "cookbook", "postmortem")
 CHECKED_FILES = ("AGENTS.md", "glossary.md", "testing.md")
+
+# Citations and quoted blocks are enforced in every docs/**/*.md except the
+# frozen archive and the generated provenance page. The two scopes differ on
+# purpose: a word budget is opt-in per file, because a ceiling has to be
+# authored for a page before it can be enforced, while a `file:LINE` citation
+# that points at nothing (or a quoted block that drifted from the code it
+# claims to quote) is a correctness defect wherever it is written. Keeping
+# citations narrow enough to exclude the older hand-written references would
+# leave exactly the stale citations this check exists to catch.
+CITATION_EXCLUDED_TREES = ("archive",)
+CITATION_EXCLUDED_FILES = ("provenance.html",)
 
 # A path that resolves to one of these is a citation of an external artifact we
 # do not have in this checkout, so only its shape is informational.
@@ -77,6 +89,19 @@ def is_checked(path: Path) -> bool:
     return parts[0] in CHECKED_TREES
 
 
+def is_citation_checked(path: Path) -> bool:
+    """True when citations and quoted blocks are enforced in this page."""
+    try:
+        parts = path.relative_to(DOCS).parts
+    except ValueError:
+        return False
+    if not parts or parts[0] in CITATION_EXCLUDED_TREES:
+        return False
+    if len(parts) == 1 and parts[0] in CITATION_EXCLUDED_FILES:
+        return False
+    return path.suffix == ".md"
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
@@ -109,6 +134,12 @@ def resolve_cited(cited: str) -> tuple[Path | None, str]:
         return direct, "ok"
     if cited.startswith(EXTERNAL_PREFIXES):
         return None, "missing"
+    if cited.endswith(".md"):
+        doc_matches = [p for p in DOCS.rglob(cited) if p.is_file()]
+        if len(doc_matches) == 1:
+            return doc_matches[0], "ok"
+        if len(doc_matches) > 1:
+            return None, "ambiguous"
     matches = [p for p in ROOT.glob(f"src/**/{cited}") if p.is_file()]
     if len(matches) == 1:
         return matches[0], "ok"
@@ -366,7 +397,7 @@ def main() -> int:
             continue
         text = read_text(path)
         links += check_links(text, path, failures)
-        if is_checked(path):
+        if is_citation_checked(path):
             citations += check_citations(text, path, failures)
             blocks += check_blocks(text, path, failures)
     budgets = 0 if only else check_budgets(failures)

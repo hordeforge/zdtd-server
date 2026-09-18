@@ -226,7 +226,7 @@ Re-traced 2026-09-12 against the current tree (read-only, no gates run).
   disposed slot and re-points the moved modules' backlinks and claims. The two
   caveats are F8 (declaration probe) and F11 (config bytes).
 - Withdrawal (prompt check 2): `World.pre_drain_fn` runs `takeWithdrawn`
-  immediately before the drain (`world.zig:1883-1888`), once per disable;
+  immediately before the drain (`src/ecs/world.zig:2033`), once per disable;
   `CommandBuffer.dropFrom` drops pending ops and hands back applied spawns,
   `withdrawPluginSrc` despawns them with `NetPackageEntityRemove`, clears
   `glide_src` matches, reports irreversible residue once

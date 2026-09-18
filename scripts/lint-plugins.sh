@@ -11,13 +11,17 @@
 # committed. Same pattern as the webui page-freshness check in lint-webui.sh
 # and the docs/provenance.html staleness check in the Makefile.
 #
-# The toolchain is deterministic (Zig pinned by .zigversion, clang for the C
-# fixtures), so a byte compare is the right check: same source in, same bytes
-# out. A clang version bump can move the C fixture bytes; rebuild and commit
-# them with the bump.
+# The toolchain is deterministic (Zig pinned by .zigversion, and the C
+# artifacts pinned to clang's major by CLANG_MAJOR in build-plugins.sh), so a
+# byte compare is the right check: same source in, same bytes out. On a host
+# without that clang major the C artifacts are skipped rather than compared
+# against a different compiler's output, which would report staleness no source
+# change caused. A deliberate toolchain bump means CLANG_MAJOR=<major>, rebuild,
+# wasm host tests, and commit the new .wasm bytes with the bump.
 #
-# Requires: the pinned Zig. clang is optional (the C fixtures and addons are
-# skipped without it, exactly as scripts/build-plugins.sh skips them).
+# Requires: the pinned Zig. The pinned clang major is optional (the C fixtures
+# and addons are skipped without it, exactly as scripts/build-plugins.sh skips
+# them); the message says so on stderr.
 
 set -euo pipefail
 
