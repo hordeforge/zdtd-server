@@ -177,7 +177,20 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
     } else packages.stock_entity.class_zombie_default;
     // on_entity_killed verdict >0 scales the kill XP (100 = keep). base is
     // xpGainFor-clamped to i32 range, so the u64 product cannot overflow.
-    const base_scaled: u64 = base * scale_pct / 100;
+    // ExperienceGain (passive 193) scales the class XP by the killer's held
+    // item value (`AddKillXP`: GetValue over the holding ItemValue, base =
+    // class ExperienceValue); no stock held rows ship it, Twitch-only.
+    const held_xp: f32 = blk: {
+        const kps = self.sim.playerByPeer(killer_slot) orelse break :blk 1.0;
+        if (!self.sim.mask[kps].inventory) break :blk 1.0;
+        const held_slot = self.sim.inventory[kps].heldItem();
+        if (held_slot.count == 0) break :blk 1.0;
+        const def = self.items.byId(held_slot.item_id) orelse break :blk 1.0;
+        var counts: requirements.Counts = .{};
+        const ctx: requirements.Ctx = .{ .item_tags = def.tags, .item_quality = held_slot.quality };
+        break :blk assets_buffs.namedPassiveFold("ExperienceGain", def.passives, itemQualityAxis(self, held_slot.quality), ctx, 1.0, &counts);
+    };
+    const base_scaled: u64 = @intFromFloat(@as(f32, @floatFromInt(base * scale_pct / 100)) * held_xp);
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
     // V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
@@ -204,7 +217,9 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         base_scaled * (100 - 10 * @as(u64, in_range)) / 100
     else
         base_scaled;
-    awardXpSilent(self, killer_slot, split);
+    // PlayerExpGain Kill rows (`AddKillXP` useBonus: TwilightThief +.05 at
+    // night) fold on the party-split award, before the silent ledger write.
+    awardXpSilent(self, killer_slot, playerExpGainScale(self, killer_slot, "Kill", split));
     // Stock sends NetPackageEntityAddExpClient (xpType 0 = Kill) so the
     // killer's client shows the XP icon and applies the gain locally; the
     // party split is server-computed, so the killer cannot derive it alone.
@@ -402,6 +417,61 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
         .quest_bonus = qbonus,
         .global_modifier = global_mod,
     });
+}
+
+/// Fold a named GetValue passive for one player's damage legs: the victim's
+/// HealthLoss (107) scales an applied loss, HealthGain (106) an applied
+/// gain (stock `Stat.Tick`: `value = clamp(lastValue +/- GetValue(passive),
+/// 0, BaseMax)`), and the attacker's HealthSteal (167) heals damage x
+/// GetValue on hit (`ProcessDamageResponse`: base 0, `base_add` rows sum).
+/// Same perk/buff/held/equip layers as `stageGlobalModifier`.
+pub fn healthGainLossMult(self: *const Game, peer_slot: usize, comptime passive_name: []const u8) f32 {
+    const base: f32 = if (comptime std.mem.eql(u8, passive_name, "HealthSteal")) 0.0 else 1.0;
+    const ps = self.sim.playerByPeer(peer_slot) orelse return base;
+    var counts: requirements.Counts = .{};
+    var v: f32 = base;
+    const held = heldItemTagsForPeer(self, ps);
+    const broken = holdingItemBrokenForPeer(self, ps);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .held_tags = held,
+            .holding_item_broken = broken,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.namedPassiveFold(passive_name, progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        const inv = &self.sim.inventory[ps];
+        const held_slot = inv.heldItem();
+        if (held_slot.count > 0) {
+            if (self.items.byId(held_slot.item_id)) |def| {
+                v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, held_slot.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0) or !std.math.isFinite(v)) return base;
+    return v;
 }
 
 /// Fold `GlobalGameStageModifier` / `GlobalLootStageModifier` onto base 1.0
@@ -945,10 +1015,13 @@ pub fn lootQtyScale(self: *Game, peer_slot: usize, ps: ecs.Slot, item_name: []co
     return @intCast(@min(@as(u32, @intFromFloat(v)), std.math.maxInt(u16)));
 }
 
-/// Fold PlayerExpGain (87) onto a non-kill XP award — same layers as
+/// Fold PlayerExpGain (87) onto an XP award — same layers as
 /// `lootProbScale` (purchased perks/attrs, active buffs, held + equipped
 /// items), with `held_tags` filled so `HoldingItemHasTags` rows (miner69r)
-/// can pass. Kill XP skips this (`awardXpSilent` / useBonus false).
+/// can pass. Kill XP folds with tags="Kill" (`AddKillXP` passes useBonus:
+/// TwilightThief +.05 at night; the `IsLocalPlayer` SavageReaper row
+/// refuses on a dedi). Unknown entity types (zombies/animals, which have no
+/// client ledger) return the base untouched.
 fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64) u64 {
     const ps = self.sim.playerByPeer(peer_slot) orelse return base;
     var counts: requirements.Counts = .{};
@@ -964,6 +1037,8 @@ fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64
             .tags = tags,
             .held_tags = held,
             .holding_item_broken = broken,
+            .is_night = self.sim.director.clock.isNight(),
+            .is_local_player = false,
         };
         for (c.skill_levels[0..c.skill_level_n]) |sl| {
             if (sl.level == 0) continue;

@@ -4507,6 +4507,218 @@ test "rogue helmet raises loot stage (LootStage passive 159)" {
     try std.testing.expectEqual(@as(i32, 15), g.lootStageOf(cl.slot));
 }
 
+test "PainTolerance resists stun buffs (BuffResistance passive 197)" {
+    // Stock `EntityBuffs::HasImmunity` rolls GetValue(197) over the incoming
+    // buff's NameTag: perkPainTolerance 5 resists
+    // buffInjuryStunned01/02 at 1.0 (always refuses). Level 0 takes it.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInjuryStunned01", cl.entity_id));
+    // Drop it so the later adds re-roll instead of stacking.
+    const stun_id = g.buffs.indexOfName("buffInjuryStunned01").?;
+    _ = ecs_buff.remove(&g.sim.buffs[ps], stun_id);
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkPainTolerance", 5));
+    // Resist 1.0: draw < 1.0 always, refused every time (10/10).
+    var refused: u8 = 0;
+    var k: u8 = 0;
+    while (k < 10) : (k += 1) {
+        if (!g.addCatalogBuff(cl.entity_id + k, ps, "buffInjuryStunned01", cl.entity_id)) refused += 1;
+    }
+    try std.testing.expectEqual(@as(u8, 10), refused);
+}
+
+test "NightStalker steal heals on hit (HealthSteal passive 167)" {
+    // Stock `ProcessDamageResponse` heals the attacker by damage x
+    // GetValue(167): perkNightStalkerComplete carries HealthSteal +.5 behind
+    // night + crouch + sleeping-victim gates. The fold path is exercised
+    // here at unit level (the C2S leg calls the same fold): with the book
+    // owned the fold is nonzero only when the gates could pass, and zero
+    // without it.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), g.healthGainLossMult(cl.slot, "HealthSteal"), 0.0001);
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkNightStalkerComplete", 1));
+    // Night-gated: day keeps it at 0 even with the book owned.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), g.healthGainLossMult(cl.slot, "HealthSteal"), 0.0001);
+}
+
+test "Boomstick stun lands on the victim (target=other AddBuff)" {
+    // `onSelfAttackedOther` AddBuff rows with `target="other"` apply to the
+    // victim (shotgun stuns), not the attacker. perkBoomstick 0 fires
+    // buffInjuryStunned01Shotgun on the zombie the attacker hit.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    // Seed the ledger directly (purchase validation needs attribute
+    // levels; the fold visits owned entries and the row gates check the
+    // level itself).
+    const boom = g.progression_table.perks;
+    var found_pk = false;
+    for (boom) |pk| { if (std.mem.eql(u8, pk.name, "perkBoomstick")) { found_pk = true; break; } }
+    try std.testing.expect(found_pk);
+    cl.skill_levels[0] = .{ .name = g.progression_table.perks[0].name, .level = 1 };
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkBoomstick")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    // The group gate needs a Boomstick-tagged held item. Hand one over.
+    const gun = g.items.byName("gunShotgunT0PipeShotgun") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, gun.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == gun.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = gun.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+
+    g.fireAttackedOther(ps, zs, 0);
+
+    const stun_id = g.buffs.indexOfName("buffInjuryStunned02Shotgun").?;
+    try std.testing.expect(g.sim.buffs[zs].find(stun_id) != null);
+    // Attacker does not carry the victim's stun.
+    try std.testing.expect(g.sim.buffs[ps].find(stun_id) == null);
+}
+
+test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
+    // Stock `AddKillXP` passes useBonus, so PlayerExpGain Kill rows fold:
+    // perkNightStalkerTwilightThief +.05 behind IsNight. Day keeps base.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkNightStalkerTwilightThief", 1));
+    const before = g.clients[cl.slot].xp;
+    g.killXpAward(cl.slot, 200, 100, false, 0);
+    const gained = g.clients[cl.slot].xp - before;
+    if (g.sim.director.clock.isNight()) {
+        try std.testing.expectEqual(@as(u64, 210), gained);
+    } else {
+        try std.testing.expectEqual(@as(u64, 200), gained);
+    }
+}
+
+test "stamina regen scales with water fraction (StaminaOT water gate)" {
+    // Stock `UpdatePlayerStaminaOT` IL=139: the positive leg scales by
+    // max(water%, 0.2). A dehydrated player regens at the 0.2 floor.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].water = 100;
+    g.sim.health[ps].water_max = 100;
+    g.sim.health[ps].stamina = 0;
+    g.sim.health[ps].stamina_max = 100;
+    try g.step();
+    const wet_gain = g.sim.health[ps].stamina;
+    try std.testing.expect(wet_gain > 0);
+    g.sim.health[ps].water = 0;
+    g.sim.health[ps].stamina = 0;
+    try g.step();
+    const dry_gain = g.sim.health[ps].stamina;
+    try std.testing.expect(dry_gain > 0);
+    try std.testing.expect(dry_gain < wet_gain);
+}
+
+test "fatigued victim takes scaled damage (HealthLoss passive 107)" {
+    // Stock `Stat.Tick` scales an applied loss by GetValue(LossPassive):
+    // buffFatigued carries HealthLoss +.1, so a 10.0 hit lands 11.0.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), g.healthGainLossMult(cl.slot, "HealthLoss"), 0.0001);
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffFatigued", cl.entity_id));
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), g.healthGainLossMult(cl.slot, "HealthLoss"), 0.0001);
+}
+
 test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     // Stock `SpawnItem` scales the rolled count by GetValue(81 LootQuantity)
     // over the spawned item's tags (IL_0040). buffRogueSetBonus carries
@@ -4548,6 +4760,52 @@ test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     try std.testing.expectEqual(@as(u16, 21), g.lootQtyScale(cl.slot, ps, "casinoCoin", "", 20));
     // An unrelated item's tags see no row: unchanged.
     try std.testing.expectEqual(@as(u16, 20), g.lootQtyScale(cl.slot, ps, "resourceWood", "", 20));
+}
+
+test "kill trigger fires SiphoningStrikes heal on zombie kill" {
+    // `onSelfKilledOther` rows on the killer's purchased perks: Siphoning
+    // Strikes 1 heals +2 HP on a melee kill (gated `ItemHasTags tags="melee"`
+    // + not starving). Progression rows previously had no kill event at all.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkSiphoningStrikes", 1));
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.health[ps].hp = 50;
+    g.sim.health[ps].max_hp = 100;
+    // Empty hand: the ItemHasTags gate refuses, no heal.
+    g.sim.inventory[ps].holding = ecs.components.inv_no_holding;
+    g.fireKilledOther(ps, zs);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), g.sim.health[ps].hp, 0.001);
+    // Hold a melee-tagged item: +2 HP lands, clamped at max. The give lands
+    // in the bag; move it to the toolbelt hand the held-tags reader checks.
+    const axe = g.items.byName("meleeToolRepairT0StoneAxe") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, axe.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == axe.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = axe.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.fireKilledOther(ps, zs);
+    try std.testing.expectApproxEqAbs(@as(f32, 52), g.sim.health[ps].hp, 0.001);
 }
 
 test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {

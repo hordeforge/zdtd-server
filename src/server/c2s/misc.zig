@@ -814,6 +814,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         }
                     }
                 }
+                // HealthLoss (passive 107) scales the applied loss (stock
+                // `Stat.Tick`: `value = clamp(lastValue - GetValue(107), 0,
+                // BaseMax)`); fatigued takes +10%.
+                amount *= self.healthGainLossMult(@intCast(self.sim.player[ei].peer_slot), "HealthLoss");
             }
         }
         // Non-player victims carry no leg in this function: a victim-side class
@@ -874,6 +878,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
                 const self_bonus = self.dismemberSelfChance(c.slot, actor_slot);
                 dismember_bits = self.sim.rollDismember(vs, d.body_part, dmg.applied, self.sim.health[vs].max_hp, weapon_chance, self_bonus, d.fatal);
+            }
+        }
+        // HealthSteal (passive 167): the attacker's ProcessDamageResponse
+        // heals damage x GetValue(167) on the attacker (NightStalker +.5 at
+        // night, gated sleeping victim). Clamped like the AddHealth leg.
+        {
+            const steal = self.healthGainLossMult(c.slot, "HealthSteal");
+            if (steal > 0 and dmg.applied > 0 and self.sim.mask[actor_slot].health) {
+                const ah = &self.sim.health[actor_slot];
+                if (ah.hp > 0) {
+                    ah.hp = @min(ah.max_hp, ah.hp + dmg.applied * steal);
+                    self.sim.markDirty(actor_slot, .{ .hp = true });
+                }
             }
         }
         // Item durability (GAP "Item durability"): the held tool wears with
@@ -990,6 +1007,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
                 self.killXpAward(c.slot, self.xpGainFor(d.entity_id), dmg.kill_scale_pct, d.trap_kill_xp, d.entity_id);
+                // Killer's `onSelfKilledOther` buff + perk rows (DeadEye /
+                // Berserker adds, stamina/health ModifyStats refunds).
+                if (self.sim.playerByPeer(c.slot)) |kps| {
+                    if (self.sim.slotOfNetId(d.entity_id)) |vs| {
+                        self.fireKilledOther(kps, vs);
+                    }
+                }
                 // Stock GameManager.AwardKill: tell the killer's client so its
                 // local EntityKill event fires (kill challenges hang off it).
                 self.awardKillNotify(c.slot, d.entity_id);

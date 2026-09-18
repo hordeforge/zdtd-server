@@ -1870,6 +1870,10 @@ pub const Game = struct {
         return game_tick.foreignGatedResist(self, victim, attacker);
     }
 
+    pub fn healthGainLossMult(self: *const Game, peer_slot: usize, comptime passive_name: []const u8) f32 {
+        return game_player.healthGainLossMult(self, peer_slot, passive_name);
+    }
+
     pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
         return game_tick.addCatalogBuff(self, entity_id, ps, name, instigator_id);
     }
@@ -1888,6 +1892,10 @@ pub const Game = struct {
 
     pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
         return game_tick.fireAttackedOther(self, ps, victim, body_part);
+    }
+
+    pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
+        return game_tick.fireKilledOther(self, ps, victim);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS

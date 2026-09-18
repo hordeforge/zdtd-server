@@ -1,4 +1,4 @@
-# Server web UI design (HTMX + Alpine.js)
+# Server web UI design (Preact dashboard)
 
 > **What this is:** the operator web dashboard for zdtd, status, players, APM, and admin commands over loopback HTTP. Not a Steam browser clone.
 
@@ -11,7 +11,7 @@ dumps with a browser UI.
 | | |
 |---|---|
 | Status | **WU0–WU2 shipped** (dashboard + console cmds); WU3+ optional |
-| Stack | Server-rendered HTML + inline vanilla JS poller using htmx-style attributes; vendor htmx/alpine embed is WU3 (not shipped) |
+| Stack | Preact dashboard over `GET /api/state.json` ([ADR 0040](adr/0040-webui-preact-json-state.md), superseding the htmx/Alpine plan in [ADR 0018](adr/0018-webui-ops-dashboard.md) decision 2); the bundle is inlined into the committed page by `scripts/build-webui-ts.sh`, login and lockout stay server-rendered |
 | Server | Zig HTTP on a dedicated bind (loopback default) |
 | Related | [APM.md](APM.md), [AUTHORITY.md](AUTHORITY.md), `src/server/admin.zig`, [PLUGIN_API.md](PLUGIN_API.md) |
 
@@ -34,26 +34,29 @@ dumps with a browser UI.
 - Embedding a Node/npm SPA build into the dedi binary.
 - Harmony / ModAPI / Steam browser protocol.
 
-## Why HTMX + Alpine
+## Why Preact over a JSON state endpoint
+
+ADR 0018 chose htmx-style partial swaps with Alpine state. It shipped as a
+hand-rolled poller over server-rendered fragments, which put every field in two
+places (a Zig renderer and the page skeleton) and gave the client no state of
+its own. [ADR 0040](adr/0040-webui-preact-json-state.md) replaced it.
 
 | Choice | Rationale |
 |---|---|
-| **HTMX** | HTML over the wire; server renders fragments; progressive enhancement; fits Zig string templates or simple HTML writers |
-| **Alpine.js** | Tiny client state (modals, tabs, poll toggles) without a bundler |
-| **No SPA** | One binary serves static assets + HTML; no `node_modules` in CI |
-| **CDN or embed** | Ship hashed vendor files under `web/static/` or comptime-embed small JS/CSS |
-
-Zig Zen fit: one obvious way (HTTP + HTML partials), readable handlers, no
-parallel JSON-RPC + REST + GraphQL stacks.
+| **Preact** | Components own rendering; one state endpoint; view state (sort, expanded rows, selection) survives a poll because the client, not the markup, holds it |
+| **JSON state** | `GET /api/state.json` mirrors the `Snapshot` struct at comptime, so a new field needs no second hand-maintained list, and machine clients read the same body the dashboard does |
+| **Bundled once, no runtime dependency** | `bun build` bundles pinned preact into the committed page; the tree tracks no `node_modules`, the Zig build stays offline, and nothing is read from disk at runtime |
+| **Server-rendered auth** | `/login` and the lockout page stay server-rendered so signing in works with JavaScript disabled |
+| **No second authority path** | The dashboard posts to the same `/api/cmd` line parser as admin TCP |
 
 ## Architecture
 
 ```text
   Browser
     |  GET /  (shell)
-    |  GET /partials/*  (HTMX swaps)
-    |  POST /api/cmd    (forms / hx-post)
-    |  GET /api/apm.json  (optional Alpine poll)
+    |  GET /api/state.json  (dashboard state)
+    |  POST /api/cmd    (forms; JSON for the app)
+    |  GET /api/apm.json  (machine clients and tools)
     v
   zdtd  --webui-port 8080  (default 127.0.0.1 only)
     |
@@ -75,7 +78,7 @@ parallel JSON-RPC + REST + GraphQL stacks.
 flowchart TB
     B[Browser] --> W[webui HTTP<br/>src/server/webui.zig<br/>std.http.Server + tcp_listen]
     W --> AUTH[auth middleware]
-    AUTH --> ROUTER[router → handlers<br/>partials + /api/apm.json]
+    AUTH --> ROUTER[router → handlers<br/>/api/state.json + /api/apm.json]
     W --> CMD[admin command<br/>POST /api/cmd → setAdminHandler → runAdminLine]
     W --> SNAP[snapshot reads<br/>WebSnapshot, tick-end copy]
 ```
@@ -100,35 +103,32 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd` and `/logout`) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
-| Audit log | In-memory ring (24 lines) shown via `/partials/console`; file log not implemented |
-| Read vs write | GET partials need auth; POST cmds need auth + CSRF |
+| Audit log | In-memory ring (24 lines) carried in `/api/state.json` as `console`; file log not implemented |
+| Read vs write | GET routes need auth; POST cmds need auth + CSRF |
 
 **Do not** expose webui on public WAN without TLS + strong secret + firewall.
 Document that loudly in README / GAME_OPTIONS.
 
 ## Information architecture (pages)
 
-Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
-`hx-get` / `hx-target`.
+Shell: header and nav plus an app mount point. The Preact app fetches
+`GET /api/state.json` once per poll and renders every panel from it; tab
+selection is client state carried in the URL hash.
 
 | Route | Purpose | Data source |
 |---|---|---|
-| `GET /` | Dashboard shell | static + first partials |
-| `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun, host OS gauges | snapshot |
-| `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
-| `GET /partials/apm` | Counters + section p50/p99 | apm harness |
-| `GET /partials/settings` | Read-only effective server settings (world, limits, ports, auth) | snapshot |
-| `GET /partials/modules` | Loaded wasm plugin modules (name, enabled/disabled) | wasm host roster |
-| `GET /partials/console` | Last N audit log lines (command form lives in the shell) | ops log ring |
-| `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
-| `POST /api/cmd` | Run one admin command; HTML fragment by default, `text/plain` when `Accept: text/plain` or `application/json` | inline → admin parser (same request) |
+| `GET /` | Dashboard shell: document, CSS, the Preact bundle and the app mount point | committed page |
+| `GET /api/state.json` | The whole dashboard state: `tick` (Snapshot scalars), `players`, `modules`, `modlets`, `console`, `csrf`, `apm` | snapshot + wasm roster + ops ring |
+| `POST /api/cmd` | Run one admin command; JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise | inline → admin parser (same request) |
+| `POST /api/modlet` | Enable/disable a modlet; JSON when `Accept: application/json`, HTML fragment otherwise | modlet state file |
+| `GET /partials/*` | Retired by ADR 0040: **404** (the dashboard reads `/api/state.json`) | - |
 | `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools); feeds the dashboard latency chart series | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
 | `POST /login` | Form body `token=` → **303** + session cookie (missing token **400**, wrong secret **401**, non-form content type **415**, lockout **429**) | config secret |
 | `POST /logout` | Revoke the server session and clear its cookie (CSRF: session token or secret) | session |
 | `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
 | `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
-| `GET /static/*` | htmx.min.js, alpine, app.css (not implemented; assets inline) | embed or files |
+| `GET /static/*` | No such route: the CSS is inline and the Preact bundle is spliced into the shell page (ADR 0040) | - |
 
 Status notes: auth runs before routing, so unauthenticated requests get **401**
 even on unknown paths or wrong methods. Authenticated: wrong method on a known
@@ -136,7 +136,7 @@ path returns **405** with `Allow` (not 404); unknown paths return **404**. Unaut
 returns plain `401 unauthorized` plus `WWW-Authenticate: Bearer realm="zdtd-webui"`
 (HTML login form is for browser routes). `/readyz` returns **503** with
 `Retry-After: 1` until the first live tick snapshot. All GET-only routes
-(`/`, `/partials/*`, `/api/apm.json`) also accept `HEAD` (same status and
+(`/`, `/api/state.json`, `/api/apm.json`) also accept `HEAD` (same status and
 headers, empty body), matching `/healthz` and `/readyz`; their `405` responses
 advertise `Allow: GET, HEAD`.
 
@@ -144,14 +144,15 @@ The porting/provenance report is **not** a served route: it is a standalone
 HTML document ([`provenance.html`](provenance.html)) kept with the scorecard
 docs it summarizes (`docs/GAP_ANALYSIS.md` scorecard + `docs/PROVENANCE.md`
 buckets) and opened directly from the repo. The shell dashboard's live ops
-sections (status, apm, players, console) stay server-rendered.
+sections (status, apm, players, console) are rendered client-side by the Preact
+app from `/api/state.json`.
 
 Optional later:
 
 | Route | Purpose |
 |---|---|
-| `/partials/bans` | ban list CRUD |
-| `/partials/config` | effective serverconfig (restart badges) |
+| `GET /api/bans` | ban list CRUD (future; not implemented) |
+| `GET /api/config` | effective serverconfig with restart badges (future; not implemented) |
 
 ## UI sketch (dashboard)
 
@@ -173,8 +174,10 @@ Optional later:
 +----------+-------------------------------------------------------+
 ```
 
-Alpine: tab highlight, auto-refresh toggle (`hx-trigger="every 1s"` when on).
-HTMX: swap player table and status cards without full reload.
+The dashboard polls `/api/state.json` on the active tab's cadence (1 s for
+status, apm and players; 5 s for console, settings and modules) and re-renders
+the affected panels; the auto-refresh toggle and `visibilitychange` pause stop
+the poll entirely.
 
 ## Command surface (v1)
 
@@ -189,11 +192,11 @@ Reuse **exactly** `admin.zig` / `Game` console verbs so TCP and web stay one pat
 | `tp` / `tele` | Form or "TP to spawn" (admin accepts both) |
 | `settime day\|night\|<worldtime>` | Day/night buttons + custom |
 | `say` | Broadcast form |
-| `killall` / spawnentity | Confirm modal (Alpine) |
+| `killall` / spawnentity | Confirm dialog in the app before the POST |
 | `save` / `shutdown` | Confirm + danger class |
 | `help` | Collapsible cheatsheet |
 
-Unknown cmds: show parser error in console partial (same strings as TCP).
+Unknown cmds: show the parser error in the console panel (same strings as TCP).
 
 **Item picker:** typeahead from loaded item **names** (not bare ids) when
 game-dir catalogs present; fail closed if unknown name.
@@ -255,8 +258,8 @@ curl -sS http://127.0.0.1:8080/readyz
 ### WU1: Read-only dashboard
 
 - [x] Tick-end `WebSnapshot` fill (`Game.fillWebuiSnap` → `webui.publishSnap`)
-- [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML)
-- [x] Auto-refresh 2s via small inline poller (no CDN; `hx-get` attributes)
+- [x] Partials: `/partials/status`, `/partials/players`, `/partials/apm` (HTML; retired by ADR 0040 in favour of `/api/state.json`)
+- [x] Auto-refresh via a small inline poller (no CDN), later replaced by the state poll (ADR 0040)
 - [x] `GET /api/apm.json` for scripts
 - [x] Cookie login: POST `/login` form (secret in body, not URL) → `Set-Cookie: zdtd_webui=<HMAC session>` (not the secret)
 - [x] APM counters include tick_overruns / encode_errors / join / pkg / section means
@@ -267,7 +270,7 @@ curl -sS http://127.0.0.1:8080/readyz
 zig-out/bin/zdtd --port 27002 --world worlds/zdtd_default \
   --webui-port 8080 --webui-secret change-me
 # browser: http://127.0.0.1:8080/login (enter secret in the form)
-curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/partials/status
+curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/state.json
 curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 ```
 
@@ -275,7 +278,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 
 - [x] Shared command parse path (admin TCP + web POST via `setAdminHandler` → `runAdminLine`)
 - [x] `POST /api/cmd` form `line`+`csrf`; same-request HTML reply
-- [x] Console section + `/partials/console` audit ring (24 lines in-memory)
+- [x] Console section plus the 24-line in-memory audit ring (now the `console` array in `/api/state.json`)
 - [x] CSRF + session cookie (cookie-only needs csrf=session token (secret also accepted for API tools))
 - [ ] Ops audit log **file** (ring only for now)
 
@@ -287,10 +290,10 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 - [x] Chart inspection: keyboard arrows/Escape + pointer drag scrub with screen-reader readout; history window synced to `?history=` (deep-linkable); still frame under `prefers-reduced-motion`
 - [x] Deep-linkable tabs (`#players`, `#console`, …; unknown hash falls back to Status); roving tabindex; no-JS fallback reveals sections and hides dead controls
 - [x] Paper cockpit visual world (docs/DESIGN-webui.md): recompile paper ground + cards + pills + sans/mono split, TMOG cockpit glance band + terminal chart; deep-linkable tabs; stacked ledgers on mobile
-- [ ] Alpine modals for destructive cmds
+- [ ] In-app modals for destructive cmds
 - [ ] Player row actions
 - [ ] Item name typeahead (from ItemTable)
-- [ ] Embed vendor JS (htmx, alpine) for offline ops
+- [x] Embed the client for offline ops: preact is bundled into the committed page (ADR 0040), no CDN and no `/static/*`
 
 ### WU4: Optional depth (park until asked)
 
@@ -398,26 +401,27 @@ against the operator session.
 Recorded in [ADR 0018](adr/0018-webui-ops-dashboard.md):
 
 1. **std.http.Server** over a hand-rolled full parser (`tcp_listen` + std.http).
-2. **Inline assets** in the binary; vendor htmx/Alpine + `/static/*` optional WU3.
+2. **Inline assets** in the binary. The vendor bundle question was settled later by [ADR 0040](adr/0040-webui-preact-json-state.md): preact is bundled into the page, still no `/static/*`.
 3. **HMAC session cookie** (not raw secret); CSRF = session token (secret OK for API tools).
-4. **Admin line path** for commands; in-memory audit ring for console partial.
+4. **Admin line path** for commands; in-memory audit ring for the console panel (served as the `console` array of `/api/state.json`).
 
 ## Optional later (WU3+)
 
-1. Embed vendor htmx/Alpine + `/static/*` disk override for CSS.
+1. Optional disk override for CSS (no `/static/*` route ships today).
 2. Multi-session map / remote TLS bind hardening beyond reverse-proxy notes.
 3. File-backed ops audit log.
 
 ---
 
-## Appendix: example HTMX fragments (illustrative)
+## Appendix: historical HTMX fragments (superseded by ADR 0040)
 
 ```html
 <!-- shell -->
-<div id="status" hx-get="/partials/status" hx-trigger="every 1s" hx-swap="innerHTML"></div>
-<div id="players" hx-get="/partials/players" hx-trigger="every 1s"></div>
+<!-- Superseded by ADR 0040: the page keeps only the app mount point and the
+     bundled Preact app, which fetches GET /api/state.json. -->
+<div id="app"></div>
 
-<form hx-post="/api/cmd" hx-target="#console-out" hx-swap="innerHTML">
+<form method="post" action="/api/cmd">
   <input type="hidden" name="csrf" value="...">
   <input name="line" placeholder="give 0 2 10" autocomplete="off">
   <button type="submit">Run</button>
@@ -425,4 +429,5 @@ Recorded in [ADR 0018](adr/0018-webui-ops-dashboard.md):
 <div id="console-out"></div>
 ```
 
-Server returns HTML snippets only (no JSON required for v1 UI except `/api/apm.json`).
+The shipped app posts the same form fields with `Accept: application/json` and
+renders the reply into the console panel; the HTML fragment path stays for tools.

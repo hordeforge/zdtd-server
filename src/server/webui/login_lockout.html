@@ -80,30 +80,11 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 <p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:lockout */
-"use strict";
-//! Webui lockout page: count down the remaining wait, then reload /login.
+(()=>{//! Webui lockout page: count down the remaining wait, then reload /login.
 //! `__ZDTD_RETRY_S__` is substituted server-side by webui.zig renderTemplate;
 //! the compiled JS keeps the reference so the substituted seconds reach the
 //! browser. Compiled by scripts/build-webui-ts.sh and injected into
 //! login_lockout.html.
-const message = document.querySelector('#login-err');
-if (message === null) {
-    throw new Error('webui: missing element #login-err');
-}
-const seconds = document.querySelector('#retry-seconds');
-if (seconds === null) {
-    throw new Error('webui: missing element #retry-seconds');
-}
-message.focus();
-let remaining = __ZDTD_RETRY_S__;
-const COUNTDOWN_TICK_MS = 1000;
-const countdown = setInterval(() => {
-    remaining -= 1;
-    seconds.textContent = String(remaining);
-    if (remaining <= 0) {
-        clearInterval(countdown);
-        globalThis.location.replace('/login');
-    }
-}, COUNTDOWN_TICK_MS);
+var n=document.querySelector("#login-err");if(n===null)throw Error("webui: missing element #login-err");var r=document.querySelector("#retry-seconds");if(r===null)throw Error("webui: missing element #retry-seconds");n.focus();var e=__ZDTD_RETRY_S__,t=1000,o=setInterval(()=>{if(e-=1,r.textContent=String(e),e<=0)clearInterval(o),globalThis.location.replace("/login")},t);})();
 /* /zdtd-ts:lockout */
 </script></body></html>

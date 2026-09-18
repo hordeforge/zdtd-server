@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Lint the webui TypeScript sources and the pages compiled from them (make lint).
 #
-# The webui markup is @embedFile'd HTML (AGENTS rule 12); the JS is authored as
-# TypeScript in src/server/webui/ts and compiled into the committed pages by
-# scripts/build-webui-ts.sh. This gate:
-#   1. tsc --noEmit: the type gate (tsc --strict, pinned TSC_VERSION).
+# The webui markup is @embedFile'd HTML (AGENTS rule 12); the dashboards's JS is
+# authored as TypeScript/JSX in src/server/webui/ts and bundled into the
+# committed pages by scripts/build-webui-ts.sh (preact, ADR 0040). This gate:
+#   1. tsc --noEmit in the staged cache project (scripts/webui-ts-project.sh),
+#      where `preact` resolves: the type gate (tsc --strict, pinned TSC_VERSION).
 #   2. oxlint over the .ts sources with the anti-slop + strict rule set in
 #      .oxlintrc.jsonc (warnings fail via --deny-warnings). The config enables
 #      options.typeAware, so oxlint also runs the typescript/* type-aware rules
@@ -31,13 +32,16 @@ oxlint_plugins_version="${OXLINT_PLUGINS_VERSION:-1.79.0}"
 anti_slop_sha="${ANTI_SLOP_SHA:-6d538555cb151d4121ed51a27db81890eacf8ae9}"
 tsc_version="${TSC_VERSION:-5.9.3}"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdtd/oxlint-standards"
-ts_dir="$root/src/server/webui/ts"
 
-# 1. Type check (tsc --strict per tsconfig.json).
+# 1. Type check (tsc --strict per tsconfig.json) in the staged cache project,
+#    where `preact` resolves (ADR 0040; scripts/webui-ts-project.sh).
 # --bun on every bunx call: these packages ship `#!/usr/bin/env node`
 # shebangs and bun honours them by default, so a missing or broken host
 # node breaks the gate. bun is the declared runtime for this repo.
-bunx --bun -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --noEmit
+# shellcheck source=scripts/webui-ts-project.sh
+. "$root/scripts/webui-ts-project.sh"
+webui_ts_project="$(webui_ts_prepare)"
+bunx --bun -p "typescript@$tsc_version" tsc -p "$webui_ts_project/tsconfig.json" --noEmit
 
 # 2. Lint the sources with oxlint. The @rikalabs plugin, the vendored
 #    dmmulroy/anti-slop plugin source (pinned by ANTI_SLOP_SHA; the project is
@@ -103,10 +107,12 @@ if ! bun_add; then
   fi
 fi
 cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
-cd "$cache_dir"
-# tsgolint is not on the user's PATH; oxlint finds it via PATH lookup.
-PATH="$cache_dir/node_modules/.bin:$PATH" \
-  bunx --bun "oxlint@$oxlint_version" --config oxlintrc.jsonc --deny-warnings "$ts_dir"
+# Run from the staged project so the package.json that declares preact is the
+# one oxlint's unlisted-external-imports rule reads, while --config points at
+# the cache copy whose jsPlugins paths resolve beside it. tsgolint is not on
+# the user's PATH; oxlint finds it via PATH lookup.
+( cd "$webui_ts_project" && PATH="$cache_dir/node_modules/.bin:$PATH" \
+    bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc.jsonc" --deny-warnings ./*.ts ./*.tsx )
 
 # 3. Freshness: regenerate into a temp copy of the pages and diff.
 tmp="$(mktemp -d)"

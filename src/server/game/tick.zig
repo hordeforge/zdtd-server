@@ -204,6 +204,7 @@ fn entityClassTags(self: *Game, ps: ecs.Slot) ?[]const u8 {
 /// change to observers (the same contract as syncStageBuffs). Bounded by the
 /// result's fixed arrays; an unknown name is skipped (fail closed).
 fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult, instigator_id: i32) void {
+    applyTriggeredBuffsOther(self, null, res, instigator_id);
     for (res.remove_buffs[0..res.remove_n]) |name| {
         const def_id = self.buffs.indexOfName(name) orelse continue;
         const set = self.sim.buffsMut(ps);
@@ -214,6 +215,24 @@ fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const as
     }
     for (res.add_buffs[0..res.add_n]) |name| {
         _ = addCatalogBuff(self, entity_id, ps, name, instigator_id);
+    }
+}
+
+/// Victim-directed half of a triggered result (`target="other"` rows): apply
+/// the adds/removes to the event's other slot. Zombies carry buff sets too,
+/// so a cripple/bleed/stun proc lands on them; players get the relay.
+/// Null victim = no other in scope (non-damage callers): the other_sink
+/// already applied live, so the recorded lists are dropped.
+fn applyTriggeredBuffsOther(self: *Game, victim: ?ecs.Slot, res: *const assets_buffs.TriggeredResult, instigator_id: i32) void {
+    const vs = victim orelse return;
+    for (res.remove_other_buffs[0..res.remove_other_n]) |name| {
+        const def_id = self.buffs.indexOfName(name) orelse continue;
+        if (!self.sim.mask[vs].buffs) continue;
+        _ = ecs.buff.remove(self.sim.buffsMut(vs), def_id);
+    }
+    for (res.add_other_buffs[0..res.add_other_n]) |name| {
+        const vid = if (self.sim.mask[vs].network_id) self.sim.network_id[vs].id else -1;
+        _ = addCatalogBuff(self, vid, vs, name, instigator_id);
     }
 }
 
@@ -245,6 +264,18 @@ const BuffSink = struct {
         const s: *const BuffSink = @ptrCast(@alignCast(ctx));
         const def_id = s.game.buffs.indexOfName(name) orelse return false;
         return s.game.sim.buffs[s.ps].find(def_id) != null;
+    }
+
+    /// Victim-directed sink half: the same add/remove against the event's
+    /// other slot (the BuffSink already points at the victim).
+    fn addOther(ctx: *const anyopaque, name: []const u8) void {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        if (!s.game.sim.mask[s.ps].buffs) return;
+        applyCommaBuffs(s.game, s.entity_id, s.ps, name);
+    }
+
+    fn removeOther(ctx: *const anyopaque, name: []const u8) void {
+        remove(ctx, name);
     }
 };
 
@@ -283,9 +314,40 @@ fn skillLevelsForSlot(self: *Game, ps: ecs.Slot) ?[]const requirements.NameLevel
     return skillLevelsForEntity(self, self.sim.network_id[ps].id);
 }
 
+/// BuffResistance (passive 197) for one entity against an incoming buff's
+/// NameTag: stock `EntityBuffs::HasImmunity` reads GetValue(197) over the
+/// incoming tag, clamped 0..1 (PainTolerance vs stuns). Buff + perk legs.
+fn buffResist(self: *Game, ps: ecs.Slot, name_tag: []const u8) f32 {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return 0;
+    const c = &self.clients[@intCast(peer_slot)];
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .tags = name_tag,
+    };
+    var v = assets_buffs.namedBuffFold(&self.buffs, &self.sim.buffs[ps], "BuffResistance", 0.0, ctx, &counts);
+    v = assets_progression.namedPerkFold(&self.progression_table, c.skill_levels[0..c.skill_level_n], "BuffResistance", v, ctx, &counts);
+    self.harness.counters.add(.requirement_gates, counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, counts.unsupported);
+    return std.math.clamp(v, 0, 1);
+}
+
 pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
     const def_id = self.buffs.indexOfName(name) orelse return false;
     const def = self.buffs.byId(def_id) orelse return false;
+    // BuffResistance gate: refuse the add when the resist draw wins.
+    // Deterministic draw off entity id + buff id (same hash-roll policy as
+    // the dismember/loot legs); a zero resist never refuses. The query tag
+    // is the buff's own name (NameTag = lowercased buff name at parse).
+    const resist = buffResist(self, ps, def.name);
+    if (resist > 0) {
+        var h: u64 = @bitCast(@as(i64, entity_id));
+        h = h *% 1103515245 +% def_id +% 12345;
+        h = (h >> 16) ^ h;
+        if (@as(f32, @floatFromInt(h % 100000)) / 100000.0 < resist) return false;
+    }
     const set = self.sim.buffsMut(ps);
     // Stock fires `onSelfBuffStack` when AddBuff lands on an instance that
     // is already active (42 buffs / 93 rows, mostly ModifyCVar chains like
@@ -377,6 +439,14 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
     var req_counts: requirements.Counts = .{};
     var ctx = pctx.build(self, c, ps, h, sandbox_groups);
     ctx.other_tags = entityClassTags(self, victim);
+    // `ItemHasTags` reads the attacker's held-item tags (params.ItemValue):
+    // the Boomstick stun rows require a Boomstick-tagged gun in hand.
+    if (self.sim.mask[ps].inventory) {
+        const held = self.sim.inventory[ps].heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| ctx.item_tags = def.tags;
+        }
+    }
     // ProgressionLevel target=other reads the victim's perk ledger.
     ctx.other_levels = skillLevelsForSlot(self, victim);
     // IsAlive target=other reads the victim's alive bit.
@@ -388,6 +458,14 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
         .ps = victim,
     };
     ctx.other_live_buff = &other_sink;
+    // `target="other"` AddBuff/RemoveBuff rows apply to the victim as the
+    // row passes (shotgun stuns, cripples, bleeds).
+    var other_impl: BuffSink = .{
+        .game = self,
+        .entity_id = if (self.sim.mask[victim].network_id) self.sim.network_id[victim].id else -1,
+        .ps = victim,
+    };
+    ctx.other_sink = .{ .ctx = &other_impl, .add_buff = BuffSink.addOther, .remove_buff = BuffSink.removeOther };
     // IsCorpse / IsSleeping target=other (corpseRemoval / NightStalker).
     ctx.other_is_corpse = if (self.sim.mask[victim].health) self.sim.health[victim].corpse_seconds > 0 else false;
     ctx.other_is_sleeping = self.sim.mask[victim].sleeper and !self.sim.sleeper[victim].awake;
@@ -400,6 +478,7 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
         const res = assets_buffs.evaluateTriggered(&self.buffs, id, .self_attacked_other, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+        applyTriggeredBuffsOther(self, victim, &res, c.entity_id);
     }
     // Progression AttackedOther rows (HitLocation-gated perk procs).
     for (c.skill_levels[0..c.skill_level_n]) |sl| {
@@ -408,9 +487,72 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
         const res = assets_buffs.evaluateRows(rows, .self_attacked_other, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+        applyTriggeredBuffsOther(self, victim, &res, c.entity_id);
     }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// Killer-side kill trigger: fires the killer's `onSelfKilledOther` buff +
+/// progression rows when one of its hits kills (DeadEye/Berserker adds, the
+/// stamina/health ModifyStats refunds). Victim tags ride `other_tags` so rows
+/// can filter on them; delayed rows (`delay=`) apply immediately (no stock
+/// row on this trigger carries one — surveyed 2026-09-18).
+pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.other_tags = entityClassTags(self, victim);
+    // `ItemHasTags` reads the killer's held-item tags (params.ItemValue):
+    // the SiphoningStrikes heal requires a melee weapon in hand.
+    if (self.sim.mask[ps].inventory) {
+        const held = self.sim.inventory[ps].heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| ctx.item_tags = def.tags;
+        }
+    }
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .killed_other, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyKillMods(self, ps, &res);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        const rows = progressionTriggeredRows(self, sl.name);
+        if (rows.len == 0) continue;
+        const res = assets_buffs.evaluateRows(rows, .killed_other, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyKillMods(self, ps, &res);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// Apply a kill trigger's immediate ModifyStats rows to the killer's own
+/// bars. Only Health/Stamina `add` rows apply here; `subtract` rows stay on
+/// their own paths (stage-3 drain) and delayed rows apply immediately (no
+/// stock row on this trigger carries `delay=`).
+fn applyKillMods(self: *Game, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult) void {
+    const h = &self.sim.health[ps];
+    for (res.mods[0..res.mod_n]) |m| {
+        if (m.op != .add) continue;
+        if (std.ascii.eqlIgnoreCase(m.stat, "Health")) {
+            if (h.hp > 0) h.hp = @min(h.max_hp, h.hp + m.value);
+        } else if (std.ascii.eqlIgnoreCase(m.stat, "Stamina")) {
+            h.stamina = @min(h.stamina_max, @max(0, h.stamina + m.value));
+        }
+    }
+    self.sim.markDirty(ps, .{ .hp = true });
 }
 
 /// A progression value's `triggered_effect` rows (attributes + perks).
@@ -1174,11 +1316,17 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
-            // Perk/buff/item HealthChangeOT: stock applies the OT rate per second
-            // (perkHealingFactor .011..16, well-rested regen), composing with
-            // the starvation/regen branches above.
+            // Perk/buff/item HealthChangeOT (`UpdatePlayerHealthOT` IL=179):
+            // the positive leg only regens below full HP and scales by water
+            // fraction (regen = OT x water% x dt); the negative leg rides
+            // DamageEntity per contributing buff instead. Composes with the
+            // starvation/regen branches above.
             const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot;
-            if (hp_ot != 0) hp_delta += hp_ot * secs;
+            if (hp_ot > 0 and h.hp < h.max_hp and h.water_max > 0) {
+                hp_delta += hp_ot * (h.water / h.water_max) * secs;
+            } else if (hp_ot < 0) {
+                hp_delta += hp_ot * secs;
+            }
             // Food/Water ChangeOT (`UpdatePlayerFoodOT`/`UpdatePlayerWaterOT`
             // IL=71): EffectManager.GetValue(115/123) * dt joins Stat.regenAmount
             // then Stat.Tick adds it. A negative regen is scaled by
@@ -1267,7 +1415,16 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // StaminaChangeOT buff (stage-3 starvation, modded data) must not
             // drive stamina negative while idle. Walking-tagged OT
             // (armorFarmerHelmet -.0281, armor CVars) joins the regen total.
-            h.stamina = @max(0, @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus + stamina_ot_running) * dt));
+            // `UpdatePlayerStaminaOT` IL=139: the positive leg only regens
+            // below full stamina and scales by max(water%, 0.2); the Rules
+            // floor is the no-row GetValue, so it gates the same way.
+            const stam_ot_total = prog.stamina_regen_per_second + stamina_ot_bonus + stamina_ot_running;
+            if (stam_ot_total > 0 and h.stamina < h.stamina_max and h.water_max > 0) {
+                const wfrac = @max(0.2, h.water / h.water_max);
+                h.stamina = @max(0, @min(h.stamina_max, h.stamina + stam_ot_total * wfrac * dt));
+            } else if (stam_ot_total < 0) {
+                h.stamina = @max(0, @min(h.stamina_max, h.stamina + stam_ot_total * dt));
+            }
         }
         const stamina_changed = h.stamina != stamina_was;
         // Stat-changed observer (ADR 0034): one bounded call per changed

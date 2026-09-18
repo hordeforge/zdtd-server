@@ -4,6 +4,8 @@
 //! TCP: util/tcp_listen (std.Io.net). HTTP parse/respond: std.http.Server.
 //! Polled from Game.step (non-blocking). Snapshot filled on main thread.
 //! POST /api/cmd runs via admin_fn on the poll thread (same path as admin TCP).
+//! GET /api/state.json is the Preact dashboard's whole state (ADR 0040); the
+//! dashboard is the shell page plus the bundled app, with no server-rendered tabs.
 //! Design: docs/WEBUI.md
 
 const std = @import("std");
@@ -30,10 +32,13 @@ pub const max_name: usize = 32;
 /// Max admin line from web console POST /api/cmd.
 pub const max_cmd_line: usize = 256;
 pub const max_cmd_out: usize = 4096;
-// Shell page (compiled TS + CSS inlined) is the largest rendered body; 72 KiB
-// keeps headroom for chrome and the live latency chart. Poll path only: the
-// buffer lives on the tick thread's stack.
-pub const max_shell_html: usize = 72 * 1024;
+// Shell page (bundled Preact app + CSS inlined) is the largest rendered body.
+// The bundle (ADR 0040) put the committed page at about 68 KiB, under 4 KiB
+// below the old 72 KiB cap; 80 KiB keeps room for bundle growth. Poll
+// path only, but not free: serveHttp's `body_buf` and the std.http.Server out
+// buffer (`max_shell_html + 4096`) are both stack frames on the tick thread,
+// so this const is stack cost as well as a cap.
+pub const max_shell_html: usize = 80 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -213,7 +218,8 @@ pub const Server = struct {
     /// Game installs this so POST /api/cmd runs runAdminLine on the poll thread.
     admin_fn: ?AdminFn = null,
     admin_ctx: ?*anyopaque = null,
-    /// Ring of recent console lines for /partials/console (ops audit).
+    /// Ring of recent console lines; the dashboard console pane and the
+    /// `/api/state.json` `console` array both read it (ops audit).
     audit_n: u8 = 0,
     audit_i: u8 = 0,
     audit_lens: [max_audit]u8 = .{0} ** max_audit,
@@ -679,28 +685,14 @@ pub const Server = struct {
                 try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderShell(&body_buf, self.sessionTok()), &.{});
                 return;
             }
-            if (std.mem.eql(u8, path, "/partials/status")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderStatus(&body_buf, &self.snap), &.{});
-                return;
-            }
-            if (std.mem.eql(u8, path, "/partials/players")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderPlayers(&body_buf, &self.snap), &.{});
-                return;
-            }
-            if (std.mem.eql(u8, path, "/partials/modules")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderModules(&body_buf, &self.snap, self.sessionTok()), &.{});
-                return;
-            }
-            if (std.mem.eql(u8, path, "/partials/apm")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderApm(&body_buf, &self.snap), &.{});
-                return;
-            }
-            if (std.mem.eql(u8, path, "/partials/settings")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderSettings(&body_buf, &self.snap), &.{});
-                return;
-            }
-            if (std.mem.eql(u8, path, "/partials/console")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderConsoleLog(&body_buf, self), &.{});
+            if (std.mem.eql(u8, path, "/api/state.json")) {
+                // Fail closed (AGENTS rule 24): a page too small to hold the
+                // document omits it with a 500 instead of shipping cut JSON.
+                const js = renderStateJson(&body_buf, self) catch {
+                    try self.httpRespond(&req, .internal_server_error, "application/json; charset=utf-8", "{\"error\":\"state body too large\"}\n", &.{});
+                    return;
+                };
+                try self.httpRespond(&req, .ok, "application/json; charset=utf-8", js, &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/api/apm.json")) {
@@ -713,11 +705,16 @@ pub const Server = struct {
     }
 
     fn handleCmdPost(self: *Server, req: *http.Server.Request, body: []u8, html_buf: []u8) !void {
-        // Tools that send Accept: text/plain (or application/json) get plain bodies;
-        // browser dashboard (no Accept preference) keeps HTML fragments.
-        const plain = prefersPlainBody(req);
+        // Dashboard (Accept: application/json) gets JSON; tools that send
+        // Accept: text/plain get plain bodies; no Accept keeps HTML fragments.
+        const json = prefersJsonBody(req);
+        const plain = !json and prefersPlainBody(req);
 
         if (!isFormContentType(req.head.content_type)) {
+            if (json) {
+                try self.cmdJsonError(req, .unsupported_media_type, "expected application/x-www-form-urlencoded", &.{});
+                return;
+            }
             try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
             return;
         }
@@ -728,21 +725,21 @@ pub const Server = struct {
             const sess_ok = constantTimeEql(c, self.sessionTok());
             const secret_ok = constantTimeEql(c, self.secret());
             if (!sess_ok and !secret_ok) {
-                try self.cmdClientError(req, plain, .forbidden, "session expired or invalid; reload the dashboard and try again\n", "<pre class=\"err\">Session expired or invalid. Reload the dashboard and try again.</pre>\n");
+                try self.cmdClientError(req, plain, json, .forbidden, "session expired or invalid; reload the dashboard and try again\n", "<pre class=\"err\">Session expired or invalid. Reload the dashboard and try again.</pre>\n");
                 return;
             }
         } else if (!has_valid_auth_header) {
-            try self.cmdClientError(req, plain, .forbidden, "missing security token; reload the dashboard and try again\n", "<pre class=\"err\">Missing security token. Reload the dashboard and try again.</pre>\n");
+            try self.cmdClientError(req, plain, json, .forbidden, "missing security token; reload the dashboard and try again\n", "<pre class=\"err\">Missing security token. Reload the dashboard and try again.</pre>\n");
             return;
         }
 
         const raw_line = formField(body, "line") orelse formField(body, "cmd") orelse {
-            try self.cmdClientError(req, plain, .bad_request, "enter a command in the line field\n", "<pre class=\"err\">Enter a command in the line field.</pre>\n");
+            try self.cmdClientError(req, plain, json, .bad_request, "enter a command in the line field\n", "<pre class=\"err\">Enter a command in the line field.</pre>\n");
             return;
         };
         const line = std.mem.trim(u8, raw_line, " \t\r\n");
         if (line.len == 0 or line.len > max_cmd_line or !adminLineOk(line)) {
-            try self.cmdClientError(req, plain, .bad_request, "command is empty, too long, or contains invalid characters\n", "<pre class=\"err\">Command is empty, too long, or contains invalid characters.</pre>\n");
+            try self.cmdClientError(req, plain, json, .bad_request, "command is empty, too long, or contains invalid characters\n", "<pre class=\"err\">Command is empty, too long, or contains invalid characters.</pre>\n");
             return;
         }
 
@@ -750,7 +747,7 @@ pub const Server = struct {
         var reply_len: usize = 0;
         if (self.admin_fn) |f| {
             const ctx = self.admin_ctx orelse {
-                try self.cmdClientError(req, plain, .service_unavailable, "console is temporarily unavailable; try again in a moment\n", "<pre class=\"err\">Console is temporarily unavailable. Try again in a moment.</pre>\n");
+                try self.cmdClientError(req, plain, json, .service_unavailable, "console is temporarily unavailable; try again in a moment\n", "<pre class=\"err\">Console is temporarily unavailable. Try again in a moment.</pre>\n");
                 return;
             };
             reply_len = f(ctx, line, &reply_buf);
@@ -758,7 +755,11 @@ pub const Server = struct {
             // Single-slot queue full: rate-limit (429), not process-down (503).
             // Aligns with docs/WEBUI.md ("drop + 429 if full").
             if (!self.enqueueCmd(line)) {
-                if (plain) {
+                if (json) {
+                    try self.cmdJsonError(req, .too_many_requests, "server is busy; wait a moment and try again", &.{
+                        .{ .name = "Retry-After", .value = "1" },
+                    });
+                } else if (plain) {
                     try self.httpRespond(req, .too_many_requests, "text/plain; charset=utf-8", "server is busy; wait a moment and try again\n", &.{
                         .{ .name = "Retry-After", .value = "1" },
                     });
@@ -769,7 +770,13 @@ pub const Server = struct {
                 }
                 return;
             }
-            if (plain) {
+            if (json) {
+                var qbuf: [max_cmd_line + 16]u8 = undefined;
+                const qreply = std.fmt.bufPrint(&qbuf, "queued: {s}\n", .{line}) catch "queued\n";
+                var w: std.Io.Writer = .fixed(html_buf);
+                try writeCmdOk(&w, line, qreply);
+                try self.httpRespond(req, .ok, "application/json; charset=utf-8", w.buffered(), &.{});
+            } else if (plain) {
                 var w: std.Io.Writer = .fixed(html_buf);
                 try w.print("queued: {s}\n", .{line});
                 try self.httpRespond(req, .ok, "text/plain; charset=utf-8", w.buffered(), &.{});
@@ -795,7 +802,18 @@ pub const Server = struct {
 
         // Semantic command failures stay HTTP 200 (console contract) but are
         // marked in HTML so the dashboard can style them as errors.
-        if (plain) {
+        if (json) {
+            var w: std.Io.Writer = .fixed(html_buf);
+            // Same predicate as the HTML path (renderCmdReply marks
+            // data-command-error with it): a route that ran and reported a
+            // failure is ok:false, so the pane styles it without parsing text.
+            if (adminReplyLooksFailed(reply)) {
+                try writeCmdFail(&w, reply);
+            } else {
+                try writeCmdOk(&w, line, reply);
+            }
+            try self.httpRespond(req, .ok, "application/json; charset=utf-8", w.buffered(), &.{});
+        } else if (plain) {
             try self.httpRespond(req, .ok, "text/plain; charset=utf-8", reply, &.{});
         } else {
             const html = try renderCmdReply(html_buf, line, reply);
@@ -803,15 +821,34 @@ pub const Server = struct {
         }
     }
 
+    /// Refuse POST /api/cmd with a JSON error object (dashboard path).
+    fn cmdJsonError(self: *Server, req: *http.Server.Request, status: http.Status, msg: []const u8, extra: []const http.Header) !void {
+        var buf: [1024]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&buf);
+        try writeCmdError(&w, msg);
+        try self.httpRespond(req, status, "application/json; charset=utf-8", w.buffered(), extra);
+    }
+
+    /// Refuse POST /api/modlet with a JSON error object (dashboard path).
+    fn modletJsonError(self: *Server, req: *http.Server.Request, status: http.Status, msg: []const u8, extra: []const http.Header) !void {
+        var buf: [1024]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&buf);
+        try writeModletError(&w, msg);
+        try self.httpRespond(req, status, "application/json; charset=utf-8", w.buffered(), extra);
+    }
+
     fn cmdClientError(
         self: *Server,
         req: *http.Server.Request,
         plain: bool,
+        json: bool,
         status: http.Status,
         plain_body: []const u8,
         html_body: []const u8,
     ) !void {
-        if (plain) {
+        if (json) {
+            try self.cmdJsonError(req, status, plain_body, &.{});
+        } else if (plain) {
             try self.httpRespond(req, status, "text/plain; charset=utf-8", plain_body, &.{});
         } else {
             try self.httpRespond(req, status, "text/html; charset=utf-8", html_body, &.{});
@@ -1031,15 +1068,12 @@ fn requestHeaderAuthorizedHttp(req: *const http.Server.Request, secret: []const 
     return false;
 }
 
+/// Routes served for GET/HEAD only. `/partials/*` retired with ADR 0040: they
+/// fall through to the 404 answer like any other unknown path.
 fn isGetOnlyPath(path: []const u8) bool {
     return std.mem.eql(u8, path, "/") or
         std.mem.eql(u8, path, "/index.html") or
-        std.mem.eql(u8, path, "/partials/status") or
-        std.mem.eql(u8, path, "/partials/players") or
-        std.mem.eql(u8, path, "/partials/modules") or
-        std.mem.eql(u8, path, "/partials/apm") or
-        std.mem.eql(u8, path, "/partials/settings") or
-        std.mem.eql(u8, path, "/partials/console") or
+        std.mem.eql(u8, path, "/api/state.json") or
         std.mem.eql(u8, path, "/api/apm.json");
 }
 
@@ -1188,6 +1222,14 @@ fn prefersPlainBody(req: *const http.Server.Request) bool {
     return mediaTypePresent(accept, "text/plain") or mediaTypePresent(accept, "application/json");
 }
 
+/// True when the client asks for JSON (the dashboard's fetch calls, ADR 0040).
+/// Explicit HTML wins, so a browser that lists both keeps the HTML fragment.
+fn prefersJsonBody(req: *const http.Server.Request) bool {
+    const accept = headerFromReq(req, "Accept") orelse return false;
+    if (mediaTypePresent(accept, "text/html")) return false;
+    return mediaTypePresent(accept, "application/json");
+}
+
 fn mediaTypePresent(accept: []const u8, media: []const u8) bool {
     var it = std.mem.splitScalar(u8, accept, ',');
     while (it.next()) |part| {
@@ -1259,6 +1301,15 @@ fn renderCmdReply(buf: []u8, line: []const u8, reply: []const u8) ![]const u8 {
     return w.buffered();
 }
 
+/// Console line `k` of the audit ring, oldest first (0 is the oldest line the
+/// ring still holds). Shared by the console pane renderer and the
+/// `/api/state.json` `console` array so both show the same history.
+fn auditLineAt(s: *const Server, k: usize) []const u8 {
+    const n: usize = s.audit_n;
+    const idx = (@as(usize, s.audit_i) + max_audit - n + k) % max_audit;
+    return s.audit_lines[idx][0..s.audit_lens[idx]];
+}
+
 fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
     // The stable outer region owns focus so polling cannot discard it; tabindex
@@ -1271,9 +1322,7 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
         const n: usize = s.audit_n;
         var k: usize = 0;
         while (k < n) : (k += 1) {
-            const idx = (@as(usize, s.audit_i) + max_audit - n + k) % max_audit;
-            const len = s.audit_lens[idx];
-            const line = s.audit_lines[idx][0..len];
+            const line = auditLineAt(s, k);
             // Match cmd-out failure styling so history is scannable for errors.
             if (adminReplyLooksFailed(line)) {
                 try w.writeAll("<span class=\"err\">");
@@ -1392,6 +1441,14 @@ const login_html = embedTrimmed("webui/login.html");
 const login_lockout_html = embedTrimmed("webui/login_lockout.html");
 const shell_html = embedTrimmed("webui/shell.html");
 
+comptime {
+    // A committed page that no longer fits must fail the build with this
+    // message, not 500 every dashboard request at runtime. `+ 4096` is the
+    // header/capture headroom the response buffers add on top of max_shell_html.
+    if (shell_html.len + 4096 > max_shell_html)
+        @compileError("shell.html no longer fits max_shell_html; raise the const and its stack-cost comment");
+}
+
 /// Sign-in form; `bad_token` swaps the lead for the failure banner and flips
 /// the input's invalid flag + describedby (the old login_failed.html).
 fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
@@ -1483,12 +1540,24 @@ test "renderTemplate leaves an unknown placeholder in place" {
     try std.testing.expectEqualStrings("a __ZDTD_NOPE__ b", out);
 }
 
+test "renderTemplate tolerates a substitution the template does not use" {
+    // The substitution table may carry keys a page edit removed; that must not
+    // be an error (ADR 0040 decision 5), so the table can outlive the page.
+    var buf: [64]u8 = undefined;
+    const subs = [_]Subst{
+        .{ .key = "__ZDTD_CSRF__", .val = "tok" },
+        .{ .key = "__ZDTD_GONE__", .val = "x" },
+    };
+    const out = try renderTemplate(&buf, "plain page", &subs);
+    try std.testing.expectEqualStrings("plain page", out);
+}
+
 test "renderLoginLockout substitutes the real remaining seconds" {
     var buf: [8192]u8 = undefined;
     const out = try renderLoginLockout(&buf, 7);
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
     try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\" aria-live=\"off\">7<") != null);
-    try std.testing.expect(std.mem.find(u8, out, "let remaining = 7;") != null);
+    try std.testing.expect(std.mem.find(u8, out, "var e=7,t=1000") != null);
 }
 
 test "lockoutRemainingS counts down and clamps at zero" {
@@ -1509,262 +1578,16 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
     });
 }
 
-fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
-    const wn = s.world_name[0..s.world_name_len];
-    const hh: u32 = @floor(s.hours);
-    const mm: u32 = @floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0);
-    const bm: []const u8 = if (s.bloodmoon_active) "<span class=\"pill bad\">ACTIVE</span>" else "<span class=\"pill ok\">idle</span>";
-    const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
-    // HTML display only (JSON keeps "set"/"open" for tool stability).
-    const pw: []const u8 = if (s.password_set) "set" else "not set";
-    const wc: []const u8 = if (s.wire_chunks) "on" else "off";
-    const overrun_cls: []const u8 = if (s.tick_overruns > 0) "num warn-text" else "num";
-    var w: std.Io.Writer = .fixed(buf);
-    try w.print(
-        \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d}</b><span>server tick</span></li>
-        \\<li class="stat"><b class="num">d{d} {d:0>2}:{d:0>2}</b><span>world time</span></li>
-        \\<li class="stat"><b>{s}</b><span>blood moon · next in {d}d</span></li>
-        \\<li class="stat"><b class="num">{d}/{d}</b><span>joined / max</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>entered world</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>peers connected</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>chunks in memory</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>tick overruns</span></li>
-        \\</ul>
-    , .{
-        s.tick_n,
-        s.day,
-        hh,
-        mm,
-        bm,
-        s.bloodmoon_in_days,
-        s.joined,
-        s.max_players,
-        s.entered,
-        s.peers_alive,
-        s.chunks,
-        overrun_cls,
-        s.tick_overruns,
-    });
-    try w.print(
-        \\<h3>Entities</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d}/{d}</b><span>zombies / cap</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>animals</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>player entities</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>traders</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>vehicles</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>turrets</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>loot bags</span></li>
-        \\</ul>
-    , .{
-        s.zombies,
-        s.max_spawned_zombies,
-        s.animals,
-        s.players_ent,
-        s.traders,
-        s.vehicles,
-        s.turrets,
-        s.loot_bags,
-    });
-    try w.writeAll(
-        \\<h3>Server</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b>
-    );
-    // World names come from config/CLI; still escape so a crafted path cannot break HTML.
-    if (wn.len == 0) {
-        try w.writeAll("<span class=\"meta\">(unnamed)</span>");
-    } else {
-        try htmlEscape(&w, wn);
-    }
-    try w.print(
-        \\</b><span>world</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>info port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>game port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>webui port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>view radius</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>max streamed chunks</span></li>
-        \\<li class="stat"><b class="num">{d:.0}</b><span>interest range (m)</span></li>
-        \\<li class="stat"><b class="num">{d:.0}</b><span>edit range (m)</span></li>
-        \\<li class="stat"><b>{s}</b><span>authority mode</span></li>
-        \\<li class="stat"><b>{s}</b><span>password</span></li>
-        \\<li class="stat"><b>{s}</b><span>chunk streaming</span></li>
-        \\</ul>
-    , .{
-        s.info_port,
-        s.info_port +% 2,
-        s.webui_port,
-        s.view_radius,
-        s.max_streamed_chunks,
-        s.interest_range,
-        s.max_edit_range,
-        auth,
-        pw,
-        wc,
-    });
-    const up_h: u64 = s.os_uptime_s / (60 * 60);
-    const up_m: u64 = (s.os_uptime_s % (60 * 60)) / 60;
-    try w.print(
-        \\<h3>Host</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d:.2} / {d:.2} / {d:.2}</b><span>load 1 / 5 / 15 min</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} MiB</b><span>ram free+buf / total</span></li>
-        \\<li class="stat"><b class="num">{d:.1}%</b><span>proc cpu (of host uptime)</span></li>
-        \\<li class="stat"><b class="num">{d} MiB</b><span>proc rss peak</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>processes</span></li>
-        \\<li class="stat"><b class="num">{d}h {d}m</b><span>host uptime</span></li>
-        \\</ul>
-    , .{
-        s.os_load_1,
-        s.os_load_5,
-        s.os_load_15,
-        s.os_mem_avail_mb,
-        s.os_mem_total_mb,
-        s.os_proc_cpu_pct,
-        s.os_proc_rss_mb,
-        s.os_procs,
-        up_h,
-        up_m,
-    });
-    return w.buffered();
-}
-
-fn renderSettings(buf: []u8, s: *const Snapshot) ![]const u8 {
-    var w: std.Io.Writer = .fixed(buf);
-    const wn = s.world_name[0..s.world_name_len];
-    const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
-    const pw: []const u8 = if (s.password_set) "set" else "not set";
-    const wc: []const u8 = if (s.wire_chunks) "on" else "off";
-    try w.writeAll("<h3 class=\"flush\">Server</h3><ul class=\"grid\"><li class=\"stat\"><b>");
-    // World names come from config/CLI; still escape so a crafted path cannot break HTML.
-    if (wn.len == 0) {
-        try w.writeAll("<span class=\"meta\">(unnamed)</span>");
-    } else {
-        try htmlEscape(&w, wn);
-    }
-    try w.print(
-        \\</b><span>world</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>max players</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>info port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>game port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>webui port</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>blood moon every (days)</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>view radius</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>max streamed chunks</span></li>
-        \\<li class="stat"><b class="num">{d:.0}</b><span>interest range (m)</span></li>
-        \\<li class="stat"><b class="num">{d:.0}</b><span>edit range (m)</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>max spawned zombies</span></li>
-        \\<li class="stat"><b>{s}</b><span>authority mode</span></li>
-        \\<li class="stat"><b>{s}</b><span>password</span></li>
-        \\<li class="stat"><b>{s}</b><span>chunk streaming</span></li>
-        \\</ul>
-    , .{
-        s.max_players,
-        s.info_port,
-        s.info_port +% 2,
-        s.webui_port,
-        s.bloodmoon_frequency,
-        s.view_radius,
-        s.max_streamed_chunks,
-        s.interest_range,
-        s.max_edit_range,
-        s.max_spawned_zombies,
-        auth,
-        pw,
-        wc,
-    });
-    return w.buffered();
-}
-
-fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
-    var w: std.Io.Writer = .fixed(buf);
-    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Connected players</caption><thead><tr><th scope=\"col\">Slot</th><th scope=\"col\">Name</th><th scope=\"col\">Entity ID</th><th scope=\"col\">Position</th><th scope=\"col\">State</th></tr></thead><tbody>");
-    var any = false;
-    for (s.players) |p| {
-        if (!p.used) continue;
-        any = true;
-        const nm = p.name[0..p.name_len];
-        const st: []const u8 = if (p.entered) "in world" else if (p.joined) "joined" else "connecting";
-        const pill: []const u8 = if (p.entered) "ok" else if (p.joined) "warn" else "";
-        // Names are client-supplied (PlayerLogin); never interpolate raw into HTML.
-        try w.print("<tr><td class=\"num\" data-label=\"Slot\">{d}</td><th scope=\"row\" data-label=\"Name\">", .{p.slot});
-        try htmlEscape(&w, nm);
-        try w.print(
-            \\</th><td class="num" data-label="Entity ID">{d}</td><td class="num" data-label="Position">{d:.0},{d:.0},{d:.0}</td><td data-label="State"><span class="pill {s}">{s}</span></td></tr>
-        , .{ p.entity_id, p.x, p.y, p.z, pill, st });
-    }
-    if (!any) try w.writeAll("<tr><td colspan=\"5\" class=\"empty-note\">No players are connected. They appear here when clients join.</td></tr>");
-    try w.writeAll("</tbody></table>");
-    return w.buffered();
-}
-
-fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
-    var w: std.Io.Writer = .fixed(buf);
-    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Loaded modules</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Module</th><th scope=\"col\">State</th></tr></thead><tbody>");
-    var any = false;
-    for (&s.modules, 0..) |m, i| {
-        if (!m.used) continue;
-        any = true;
-        const nm = m.name[0..m.name_len];
-        // Module names come from the mods/ dir; still escape so a crafted path
-        // cannot break HTML.
-        try w.print("<tr><td class=\"num\" data-label=\"#\">{d}</td><th scope=\"row\" data-label=\"Module\">", .{i});
-        try htmlEscape(&w, nm);
-        const st: []const u8 = if (m.disabled) "disabled" else "enabled";
-        const st_cls: []const u8 = if (m.disabled) "bad" else "ok";
-        try w.print("</th><td data-label=\"State\"><span class=\"pill {s}\">{s}</span></td></tr>", .{ st_cls, st });
-    }
-    if (!any) try w.writeAll("<tr><td colspan=\"3\" class=\"empty-note\">No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.</td></tr>");
-    try w.writeAll("</tbody></table>");
-
-    // XML-only modlets: the operator can enable/disable each one. The state is
-    // a text file next to the world save; a change applies on the next start
-    // (the catalog and the id mapping are built once at init).
-    try w.writeAll("<h3>Game modlets</h3><p class=\"deck-sub\">Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).</p>");
-    const n = modlets.rosterLen();
-    if (n == 0) {
-        try w.writeAll("<p class=\"deck-sub\">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>");
-        return w.buffered();
-    }
-    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Game modlets</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Modlet</th><th scope=\"col\">Version</th><th scope=\"col\">State</th><th scope=\"col\">Action</th></tr></thead><tbody>");
-    var i: usize = 0;
-    while (modlets.rosterAt(i)) |m| : (i += 1) {
-        const off = modlets.isDisabled(m.name);
-        try w.print("<tr><td class=\"num\" data-label=\"#\">{d}</td><th scope=\"row\" data-label=\"Modlet\">", .{i});
-        try htmlEscape(&w, m.name);
-        if (m.has_code) try w.writeAll(" <span class=\"meta\">(code mod: XML only)</span>");
-        try w.writeAll("</th><td class=\"num\" data-label=\"Version\">");
-        try htmlEscape(&w, m.version);
-        const st: []const u8 = if (off) "disabled" else "enabled";
-        const st_cls: []const u8 = if (off) "bad" else "ok";
-        try w.print("</td><td data-label=\"State\"><span class=\"pill {s}\">{s}</span></td><td data-label=\"Action\">", .{ st_cls, st });
-        try w.writeAll("<form method=\"post\" action=\"/api/modlet\" hx-post=\"/api/modlet\" hx-target=\"#modules\" hx-swap=\"innerHTML\">");
-        try w.writeAll("<input type=\"hidden\" name=\"csrf\" value=\"");
-        try htmlEscapeAttr(&w, csrf);
-        try w.writeAll("\"><input type=\"hidden\" name=\"name\" value=\"");
-        try htmlEscapeAttr(&w, m.name);
-        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\" class=\"mod-btn\">{s}<span class=\"sr-only\"> ", .{
-            if (off) "enable" else "disable",
-            if (off) "Enable" else "Disable",
-        });
-        try htmlEscape(&w, m.name);
-        try w.writeAll("</span></button></form></td></tr>");
-    }
-    try w.writeAll("</tbody></table>");
-    if (modlets.statePath()) |sp| {
-        try w.writeAll("<p class=\"deck-sub\">State file: <code>");
-        try htmlEscape(&w, sp);
-        try w.writeAll("</code></p>");
-    }
-    return w.buffered();
-}
-
-/// POST /api/modlet: enable/disable one modlet and re-render the Modules
-/// partial (HTMX target). Same auth/CSRF gate as /api/cmd: it mutates
-/// operator state.
+/// POST /api/modlet: enable/disable one modlet. Same auth/CSRF gate as
+/// /api/cmd: it mutates operator state. The dashboard sends
+/// `Accept: application/json`; other form callers keep the plain or HTML reply.
 fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_buf: []u8) !void {
+    const json = prefersJsonBody(req);
     if (!isFormContentType(req.head.content_type)) {
+        if (json) {
+            try self.modletJsonError(req, .unsupported_media_type, "expected application/x-www-form-urlencoded", &.{});
+            return;
+        }
         try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
         return;
     }
@@ -1773,211 +1596,121 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         const sess_ok = constantTimeEql(c, self.sessionTok());
         const secret_ok = constantTimeEql(c, self.secret());
         if (!sess_ok and !secret_ok) {
+            if (json) {
+                try self.modletJsonError(req, .forbidden, "session expired or invalid; reload the dashboard and try again", &.{});
+                return;
+            }
             try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "session expired or invalid; reload the dashboard and try again\n", &.{});
             return;
         }
     } else if (!requestHeaderAuthorizedHttp(req, self.secret())) {
+        if (json) {
+            try self.modletJsonError(req, .forbidden, "missing security token; reload the dashboard and try again", &.{});
+            return;
+        }
         try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "missing security token; reload the dashboard and try again\n", &.{});
         return;
     }
     const name = formField(body, "name") orelse {
+        if (json) {
+            try self.modletJsonError(req, .bad_request, "missing modlet name", &.{});
+            return;
+        }
         try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing modlet name\n", &.{});
         return;
     };
     const action = formField(body, "action") orelse {
+        if (json) {
+            try self.modletJsonError(req, .bad_request, "missing action", &.{});
+            return;
+        }
         try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing action\n", &.{});
         return;
     };
     if (!std.mem.eql(u8, action, "enable") and !std.mem.eql(u8, action, "disable")) {
+        if (json) {
+            try self.modletJsonError(req, .bad_request, "action must be enable or disable", &.{});
+            return;
+        }
         try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "action must be enable or disable\n", &.{});
         return;
     }
     const disable = std.mem.eql(u8, action, "disable");
     const known = modlets.setDisabled(self.allocator, name, disable) catch |err| {
+        if (json) {
+            try self.modletJsonError(req, .internal_server_error, "could not save the modlet state", &.{
+                .{ .name = "X-Zdtd-Error", .value = @errorName(err) },
+            });
+            return;
+        }
         try self.httpRespond(req, .internal_server_error, "text/plain; charset=utf-8", "could not save the modlet state\n", &.{
             .{ .name = "X-Zdtd-Error", .value = @errorName(err) },
         });
         return;
     };
     if (!known) {
+        if (json) {
+            try self.modletJsonError(req, .not_found, "no such modlet", &.{});
+            return;
+        }
         try self.httpRespond(req, .not_found, "text/plain; charset=utf-8", "no such modlet\n", &.{});
         return;
     }
+    // 256 covers the longest modlet name the roster accepts plus the action.
+    var line_buf: [256]u8 = undefined;
+    const line = std.fmt.bufPrint(&line_buf, "modlet {s} {s}; restart zdtd to apply\n", .{ name, action }) catch "modlet updated\n";
+    if (json) {
+        var w: std.Io.Writer = .fixed(html_buf);
+        try w.writeAll("{\"ok\":true,\"reply\":\"");
+        try jsonEscapeWrite(&w, line);
+        try w.writeAll("\"}\n");
+        try self.httpRespond(req, .ok, "application/json; charset=utf-8", w.buffered(), &.{});
+        return;
+    }
     if (prefersPlainBody(req)) {
-        var line_buf: [256]u8 = undefined;
-        const line = std.fmt.bufPrint(&line_buf, "modlet {s} {s}; restart zdtd to apply\n", .{ name, action }) catch "modlet updated\n";
         try self.httpRespond(req, .ok, "text/plain; charset=utf-8", line, &.{});
         return;
     }
-    try self.httpRespond(req, .ok, "text/html; charset=utf-8", try renderModules(html_buf, &self.snap, self.sessionTok()), &.{});
+    // The Modules partial retired with ADR 0040; the HTML reply is a bare
+    // confirmation for callers that post the form without an Accept header.
+    var w: std.Io.Writer = .fixed(html_buf);
+    try w.writeAll("<p class=\"ok\">modlet ");
+    try htmlEscape(&w, name);
+    try w.writeAll(" ");
+    try htmlEscape(&w, action);
+    try w.writeAll("; restart zdtd to apply</p>\n");
+    try self.httpRespond(req, .ok, "text/html; charset=utf-8", w.buffered(), &.{});
 }
 
-/// Escape a value for an HTML attribute context (quotes included).
-fn htmlEscapeAttr(w: *std.Io.Writer, s: []const u8) !void {
-    for (s) |c| {
-        switch (c) {
-            '&' => try w.writeAll("&amp;"),
-            '<' => try w.writeAll("&lt;"),
-            '>' => try w.writeAll("&gt;"),
-            '"' => try w.writeAll("&quot;"),
-            '\'' => try w.writeAll("&#39;"),
-            else => try w.writeByte(c),
-        }
-    }
+/// Refuse POST /api/modlet with a JSON error object (dashboard path).
+fn writeModletError(w: *std.Io.Writer, msg: []const u8) !void {
+    try w.writeAll("{\"ok\":false,\"error\":\"");
+    try jsonEscapeWrite(w, std.mem.trim(u8, msg, " \t\r\n"));
+    try w.writeAll("\"}\n");
 }
 
-fn us(ns: u64) u64 {
-    return ns / 1000;
-}
-fn ms(ns: u64) u64 {
-    return ns / 1_000_000;
-}
-
-/// Class for a counter value: neutral when zero, warn/err when non-zero so
-/// operators can scan the grid for problems without reading every label.
-fn alertNumClass(n: u64, severe: bool) []const u8 {
-    if (n == 0) return "num";
-    return if (severe) "num err" else "num warn-text";
+/// `{"ok":true,"line":...,"reply":...}` for POST /api/cmd.
+fn writeCmdOk(w: *std.Io.Writer, line: []const u8, reply: []const u8) !void {
+    try w.writeAll("{\"ok\":true,\"line\":\"");
+    try jsonEscapeWrite(w, line);
+    try w.writeAll("\",\"reply\":\"");
+    try jsonEscapeWrite(w, reply);
+    try w.writeAll("\"}\n");
 }
 
-fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
-    var w: std.Io.Writer = .fixed(buf);
-    // Tick budget is 50 ms (20 TPS). Flag p99/max when they breach it.
-    const tick_budget_ns: u64 = 50 * std.time.ns_per_ms;
-    const p99_cls: []const u8 = if (s.tick_p99_ns > tick_budget_ns) "num warn-text" else "num";
-    const max_cls: []const u8 = if (s.tick_max_ns > tick_budget_ns) "num warn-text" else "num";
-    try w.print(
-        \\<h3 class="flush">Latency (tick budget 50 ms)</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d} ms</b><span>tick mean</span></li>
-        \\<li class="stat"><b class="{s}">{d} / {d} ms</b><span>tick p50 / p99</span></li>
-        \\<li class="stat"><b class="{s}">{d} ms</b><span>tick max</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>net mean / p99</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>sim mean / p99</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>repl mean / p99</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>stream mean / p99</span></li>
-        \\<li class="stat"><b class="num">{d} µs</b><span>save mean</span></li>
-        \\</ul>
-    , .{
-        ms(s.tick_mean_ns),
-        p99_cls,
-        ms(s.tick_p50_ns),
-        ms(s.tick_p99_ns),
-        max_cls,
-        ms(s.tick_max_ns),
-        us(s.net_mean_ns),
-        us(s.net_p99_ns),
-        us(s.sim_mean_ns),
-        us(s.sim_p99_ns),
-        us(s.repl_mean_ns),
-        us(s.repl_p99_ns),
-        us(s.stream_mean_ns),
-        us(s.stream_p99_ns),
-        us(s.save_mean_ns),
-    });
-    try w.print(
-        \\<h3>Traffic</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="num">{d}</b><span>packets in</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>packets out</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>bytes in</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>bytes out</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>packages encoded</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>packages sent</span></li>
-        \\<li class="stat"><b class="num">{d}</b><span>entities ticked</span></li>
-        \\</ul>
-    , .{
-        s.net_packets_in,
-        s.net_packets_out,
-        s.net_bytes_in,
-        s.net_bytes_out,
-        s.packages_encoded,
-        s.packages_broadcast,
-        s.entities_ticked,
-    });
-    const join_cls = alertNumClass(s.join_fail, true);
-    try w.print(
-        \\<h3>Errors and rejections</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="{s}">{d}/{d}</b><span>join ok / fail</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>tick overruns</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>encode errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>stream errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>net poll errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>payload errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>send errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>window drops</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>persist errors</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>stale peers reaped</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>phase rejects</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>ownership rejects</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>bounds rejects</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>movement rejects</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>decode rejects</span></li>
-        \\</ul>
-    , .{
-        join_cls,
-        s.join_ok,
-        s.join_fail,
-        alertNumClass(s.tick_overruns, false),
-        s.tick_overruns,
-        alertNumClass(s.encode_errors, true),
-        s.encode_errors,
-        alertNumClass(s.stream_errors, true),
-        s.stream_errors,
-        alertNumClass(s.net_poll_errors, true),
-        s.net_poll_errors,
-        alertNumClass(s.net_payload_errors, true),
-        s.net_payload_errors,
-        alertNumClass(s.net_send_errors, true),
-        s.net_send_errors,
-        alertNumClass(s.reliable_window_drops, false),
-        s.reliable_window_drops,
-        alertNumClass(s.persistence_errors, true),
-        s.persistence_errors,
-        alertNumClass(s.stale_peers_reaped, false),
-        s.stale_peers_reaped,
-        alertNumClass(s.phase_rejects, false),
-        s.phase_rejects,
-        alertNumClass(s.ownership_rejects, false),
-        s.ownership_rejects,
-        alertNumClass(s.bounds_rejects, false),
-        s.bounds_rejects,
-        alertNumClass(s.movement_rejects, false),
-        s.movement_rejects,
-        alertNumClass(s.decode_rejects, false),
-        s.decode_rejects,
-    });
-    // Guard-policy counters in their own grid (the reject grid print is at the
-    // 32-arg format-call cap; split here like renderApmJson does).
-    try w.print(
-        \\<h3>Guard policy</h3>
-        \\<ul class="grid">
-        \\<li class="stat"><b class="{s}">{d}</b><span>guard kicks</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>guard would-kicks</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>guard quarantines</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>quarantine rejects</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>load-shed drops</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>hard-ceiling downgrades</span></li>
-        \\<li class="stat"><b class="{s}">{d}</b><span>evidence events</span></li>
-        \\</ul>
-    , .{
-        alertNumClass(s.guard_kicks, true),
-        s.guard_kicks,
-        alertNumClass(s.guard_would_kicks, false),
-        s.guard_would_kicks,
-        alertNumClass(s.guard_quarantines, false),
-        s.guard_quarantines,
-        alertNumClass(s.quarantine_rejects, false),
-        s.quarantine_rejects,
-        alertNumClass(s.load_shed_drops, false),
-        s.load_shed_drops,
-        alertNumClass(s.hard_ceiling_downgrades, false),
-        s.hard_ceiling_downgrades,
-        alertNumClass(s.evidence_events, false),
-        s.evidence_events,
-    });
-    return w.buffered();
+/// `{"ok":false,"error":...}` for a command that ran and reported a failure
+/// (HTTP 200: the console answered, the command did not succeed).
+fn writeCmdFail(w: *std.Io.Writer, reply: []const u8) !void {
+    try w.writeAll("{\"ok\":false,\"error\":\"");
+    try jsonEscapeWrite(w, std.mem.trim(u8, reply, " \t\r\n"));
+    try w.writeAll("\"}\n");
+}
+
+/// `{"ok":false,"error":...,"reply":""}` for a refused POST /api/cmd.
+fn writeCmdError(w: *std.Io.Writer, msg: []const u8) !void {
+    try w.writeAll("{\"ok\":false,\"error\":\"");
+    try jsonEscapeWrite(w, std.mem.trim(u8, msg, " \t\r\n"));
+    try w.writeAll("\",\"reply\":\"\"}\n");
 }
 
 fn jsonEscapeWrite(w: *std.Io.Writer, s: []const u8) !void {
@@ -1999,9 +1732,17 @@ fn jsonEscapeWrite(w: *std.Io.Writer, s: []const u8) !void {
     }
 }
 
+/// GET /api/apm.json body; the same writer backs the `apm` key of
+/// `/api/state.json`, so the two documents cannot drift.
 fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
-    // Writer.print allows more than 32 args across multiple calls (bufPrint is capped).
     var w: std.Io.Writer = .fixed(buf);
+    try writeApmJson(&w, s);
+    try w.writeAll("\n");
+    return w.buffered();
+}
+
+fn writeApmJson(w: *std.Io.Writer, s: *const Snapshot) !void {
+    // Writer.print allows more than 32 args across multiple calls (bufPrint is capped).
     try w.print(
         \\{{"type":"zdtd_webui_apm","tick":{d},"day":{d},"hours":{d:.2},"bm":{s},"joined":{d},"entered":{d},"peers":{d}
     , .{
@@ -2084,7 +1825,7 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     });
     // World name (same snapshot as status partial; escaped for JSON string safety).
     try w.writeAll(",\"world\":\"");
-    try jsonEscapeWrite(&w, s.world_name[0..s.world_name_len]);
+    try jsonEscapeWrite(w, s.world_name[0..s.world_name_len]);
     try w.writeAll("\"");
     // Host OS gauges (same snapshot as the status Host grid).
     try w.print(
@@ -2134,11 +1875,11 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
             p.y,
             p.z,
         });
-        try jsonEscapeWrite(&w, p.name[0..p.name_len]);
+        try jsonEscapeWrite(w, p.name[0..p.name_len]);
         try w.writeAll("\"}");
     }
     try w.writeAll("]");
-    // Loaded Wasm plugin modules (same roster as the Modules partial).
+    // Loaded Wasm plugin modules (same roster as the modules key).
     try w.writeAll(",\"modules\":[");
     var first_module = true;
     for (&s.modules) |m| {
@@ -2146,13 +1887,126 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
         if (!first_module) try w.writeAll(",");
         first_module = false;
         try w.writeAll("{\"name\":\"");
-        try jsonEscapeWrite(&w, m.name[0..m.name_len]);
+        try jsonEscapeWrite(w, m.name[0..m.name_len]);
         try w.writeAll("\",\"disabled\":");
         try w.writeAll(if (m.disabled) "true" else "false");
         try w.writeAll("}");
     }
-    try w.writeAll("]}\n");
+    try w.writeAll("]}");
+}
+
+/// GET /api/state.json body (ADR 0040): the whole dashboard state in one
+/// document. Writes into `srv`'s session token, snapshot and audit ring; the
+/// returned slice points into `buf`. An error means the document was not built
+/// (never truncated), and the route answers 500 instead.
+fn renderStateJson(buf: []u8, srv: *const Server) ![]const u8 {
+    const s = &srv.snap;
+    var w: std.Io.Writer = .fixed(buf);
+    try w.writeAll("{\"csrf\":\"");
+    try jsonEscapeWrite(&w, srv.sessionTok());
+    // `tick` walks Snapshot at comptime: a new scalar field appears here with
+    // no second list to maintain. The two row arrays have their own keys.
+    try w.writeAll("\",\"tick\":{");
+    var first = true;
+    try writeJsonFields(Snapshot, &w, s, &.{ "players", "modules" }, &first);
+    try w.writeAll("},\"players\":");
+    try writeJsonRows(PlayerRow, &w, &s.players);
+    try w.writeAll(",\"modules\":");
+    try writeJsonRows(ModuleRow, &w, &s.modules);
+    // XML-only modlet roster for the Modules pane. Gated on the global roster,
+    // not on the tick snapshot: the list changes only at scan/reload time.
+    try w.writeAll(",\"modlets\":");
+    try writeModletsJson(&w);
+    // Same ring, same order (oldest first, newest last) as the console pane.
+    try w.writeAll(",\"console\":[");
+    var k: usize = 0;
+    while (k < srv.audit_n) : (k += 1) {
+        if (k != 0) try w.writeAll(",");
+        try w.writeAll("\"");
+        try jsonEscapeWrite(&w, auditLineAt(srv, k));
+        try w.writeAll("\"");
+    }
+    // Nested apm object, not a string: the same bytes GET /api/apm.json writes.
+    try w.writeAll("],\"apm\":");
+    try writeApmJson(&w, s);
+    try w.writeAll("}\n");
     return w.buffered();
+}
+
+/// `"modlets":[...]` roster (assets/modlets.zig), the shape the Preact Modules
+/// pane reads. Every roster entry is populated (rosterLen/rosterAt).
+fn writeModletsJson(w: *std.Io.Writer) !void {
+    try w.writeAll("[");
+    var i: usize = 0;
+    while (modlets.rosterAt(i)) |m| : (i += 1) {
+        if (i != 0) try w.writeAll(",");
+        try w.writeAll("{\"name\":\"");
+        try jsonEscapeWrite(w, m.name);
+        try w.writeAll("\",\"version\":\"");
+        try jsonEscapeWrite(w, m.version);
+        try w.print("\",\"has_code\":{s},\"disabled\":{s}}}", .{
+            if (m.has_code) "true" else "false",
+            if (modlets.isDisabled(m.name)) "true" else "false",
+        });
+    }
+    try w.writeAll("]");
+}
+
+/// True when `name` is in a comptime skip list.
+fn jsonSkipName(comptime name: []const u8, comptime skip: []const []const u8) bool {
+    inline for (skip) |s| {
+        if (comptime std.mem.eql(u8, name, s)) return true;
+    }
+    return false;
+}
+
+/// Write `"field":value` for every field of `T`, comma separated through
+/// `first`. Scalars print as JSON numbers or booleans. A `[N]u8` field prints
+/// as a JSON string over its `<name>_len` sibling, so `world_name` serializes
+/// `world_name_len` bytes and a new name buffer must bring its length field.
+/// `skip` names fields that have their own top-level key.
+fn writeJsonFields(comptime T: type, w: *std.Io.Writer, v: *const T, comptime skip: []const []const u8, first: *bool) !void {
+    inline for (@typeInfo(T).@"struct".fields) |f| {
+        if (comptime jsonSkipName(f.name, skip)) continue;
+        if (!first.*) try w.writeAll(",");
+        first.* = false;
+        try w.print("\"{s}\":", .{f.name});
+        switch (@typeInfo(f.type)) {
+            .int => try w.print("{d}", .{@field(v, f.name)}),
+            // Non-finite floats have no JSON spelling; 0 keeps the document
+            // parseable instead of emitting Infinity, which no parser accepts.
+            .float => {
+                const x = @field(v, f.name);
+                if (std.math.isFinite(x)) try w.print("{d}", .{x}) else try w.writeAll("0");
+            },
+            .bool => try w.writeAll(if (@field(v, f.name)) "true" else "false"),
+            .array => {
+                try w.writeAll("\"");
+                try jsonEscapeWrite(w, @field(v, f.name)[0..@field(v, f.name ++ "_len")]);
+                try w.writeAll("\"");
+            },
+            else => @compileError("webui state JSON: unsupported field " ++ f.name ++ " (add a case or a top-level key)"),
+        }
+    }
+}
+
+/// Write an array of populated rows of `T`. `used` is the discriminator the
+/// snapshot filler sets (src/server/admin_console.zig), not `name_len`: a
+/// joined peer can have an empty name, and a stale name buffer from a previous
+/// tick must not resurrect a row the filler stopped writing.
+fn writeJsonRows(comptime T: type, w: *std.Io.Writer, rows: []const T) !void {
+    try w.writeAll("[");
+    var first_row = true;
+    for (rows) |*row| {
+        if (!row.used) continue;
+        if (!first_row) try w.writeAll(",");
+        first_row = false;
+        try w.writeAll("{");
+        var first = true;
+        try writeJsonFields(T, w, row, &.{}, &first);
+        try w.writeAll("}");
+    }
+    try w.writeAll("]");
 }
 
 test "parseIpv4 loopback and any" {
@@ -2173,10 +2027,12 @@ test "webui IPv4 binding is loopback only" {
 
 test "isGetOnlyPath known dashboard routes" {
     try std.testing.expect(isGetOnlyPath("/"));
+    try std.testing.expect(isGetOnlyPath("/api/state.json"));
     try std.testing.expect(isGetOnlyPath("/api/apm.json"));
-    try std.testing.expect(isGetOnlyPath("/partials/status"));
-    try std.testing.expect(isGetOnlyPath("/partials/settings"));
-    try std.testing.expect(isGetOnlyPath("/partials/modules"));
+    // Retired with ADR 0040: the partials are not GET-only, they are gone.
+    try std.testing.expect(!isGetOnlyPath("/partials/status"));
+    try std.testing.expect(!isGetOnlyPath("/partials/settings"));
+    try std.testing.expect(!isGetOnlyPath("/partials/modules"));
     try std.testing.expect(!isGetOnlyPath("/api/cmd"));
     try std.testing.expect(!isGetOnlyPath("/logout"));
     try std.testing.expect(!isGetOnlyPath("/nope"));
@@ -2317,9 +2173,10 @@ test "malformed request lines are client faults, not internal errors" {
     }
 }
 
-test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
+test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     // The route mutates operator state, so it takes the same CSRF gate as
-    // /api/cmd; a success answers with the refreshed partial (HTMX target).
+    // /api/cmd; a success answers JSON when the caller sends Accept:
+    // application/json (ADR 0040).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -2344,37 +2201,46 @@ test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
     fillSessionToken("s3cr3t", &nonce, &s.session_token);
     s.allocator = std.testing.allocator;
 
-    // The partial lists the modlet with a Disable form.
+    // The retired partial is a 404, not an empty table.
     try testServeHttp(&s, "GET /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "UiMod") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"disable\"") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "<form method=\"post\" action=\"/api/modlet\"") != null);
-    // The action button carries the touch-target class.
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\">Disable<span class=\"sr-only\"> UiMod</span></button>") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 404 ") != null);
 
     const body = "csrf=s3cr3t&name=UiMod&action=disable";
-    var req_buf: [256]u8 = undefined;
-    const req = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    var req_buf: [320]u8 = undefined;
+    const req = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
     try testServeHttp(&s, req);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Type: application/json") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "{\"ok\":true,\"reply\":\"modlet UiMod disable; restart zdtd to apply\\n\"}") != null);
     try std.testing.expect(modlets.isDisabled("UiMod"));
-    // The refreshed partial now offers Enable.
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"enable\"") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\">Enable<span class=\"sr-only\"> UiMod</span></button>") != null);
     const saved = try io_fs.readFileAll(std.testing.allocator, state);
     defer std.testing.allocator.free(saved);
     try std.testing.expect(std.mem.find(u8, saved, "UiMod") != null);
 
-    // A bad CSRF token is refused; an unknown mod name is a 404.
+    // A bad CSRF token is refused (403); an unknown mod name is a 404. Both
+    // answer the JSON error shape, not the old plain body.
     const bad_csrf = "csrf=nope&name=UiMod&action=enable";
-    const req2 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ bad_csrf.len, bad_csrf });
+    const req2 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ bad_csrf.len, bad_csrf });
     try testServeHttp(&s, req2);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"session expired or invalid; reload the dashboard and try again\"}") != null);
     try std.testing.expect(modlets.isDisabled("UiMod"));
     const unknown = "csrf=s3cr3t&name=NoSuchMod&action=enable";
-    const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ unknown.len, unknown });
+    const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ unknown.len, unknown });
     try testServeHttp(&s, req3);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 404 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"no such modlet\"}") != null);
+    // Callers without the JSON Accept keep the plain and HTML replies.
+    const plain_body = "csrf=s3cr3t&name=UiMod&action=enable";
+    const req4 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: text/plain\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ plain_body.len, plain_body });
+    try testServeHttp(&s, req4);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "modlet UiMod enable; restart zdtd to apply\n") != null);
+    const html_body = "csrf=s3cr3t&name=UiMod&action=disable";
+    const req5 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ html_body.len, html_body });
+    try testServeHttp(&s, req5);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Content-Type: text/html") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "<p class=\"ok\">modlet UiMod disable; restart zdtd to apply</p>") != null);
     // GET is not allowed on the mutating route.
     try testServeHttp(&s, "GET /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
@@ -2389,9 +2255,7 @@ test "HEAD accepted on GET-only dashboard routes" {
     // Same contract as /healthz + /readyz: HEAD mirrors GET (200, empty body).
     const cases = [_][]const u8{
         "HEAD / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
-        "HEAD /partials/status HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
-        "HEAD /partials/settings HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
-        "HEAD /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "HEAD /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
         "HEAD /api/apm.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
     };
     for (cases) |req| {
@@ -2419,6 +2283,243 @@ test "GET / serves the full rendered shell and not a truncated capture" {
     try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.endsWith(u8, resp, "</html>"));
     try std.testing.expect(std.mem.find(u8, resp, "__ZDTD_") == null);
+}
+
+/// Test admin thunk: echoes the line so the JSON body has a known reply.
+fn testAdminEcho(ctx: *anyopaque, line: []const u8, out: []u8) usize {
+    _ = ctx;
+    const written = std.fmt.bufPrint(out, "ran {s}\n", .{line}) catch return 0;
+    return written.len;
+}
+
+test "GET /api/state.json carries the frozen dashboard contract" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.snap.tick_n = 7;
+    s.snap.day = 3;
+    s.snap.hours = 14.5;
+    s.snap.bloodmoon_active = true;
+    // World name bytes: Na " v e, to prove the string is JSON-escaped.
+    s.snap.world_name_len = 5;
+    @memcpy(s.snap.world_name[0..5], "Na\"ve");
+    s.snap.players[0] = .{ .used = true, .slot = 2, .entity_id = 41, .joined = true, .entered = true, .x = 1.5, .name_len = 3 };
+    @memcpy(s.snap.players[0].name[0..3], "Ada");
+    s.snap.players[1].used = false;
+    s.snap.modules[0] = .{ .used = true, .disabled = true, .name_len = 7 };
+    @memcpy(s.snap.modules[0].name[0..7], "fps_bot");
+    s.pushAudit("> status");
+    s.pushAudit("Day 3, 14:30");
+
+    try testServeHttp(&s, "GET /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Type: application/json") != null);
+    const head_end = std.mem.find(u8, resp, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, resp[head_end + 4 ..], .{});
+    defer parsed.deinit();
+    const obj = parsed.value.object;
+    for ([_][]const u8{ "csrf", "tick", "players", "modules", "modlets", "console", "apm" }) |key| {
+        try std.testing.expect(obj.get(key) != null);
+    }
+    try std.testing.expectEqualStrings(s.session_token[0..], obj.get("csrf").?.string);
+    // tick walks the Snapshot scalars, under their Zig field names.
+    const tick = obj.get("tick").?.object;
+    try std.testing.expectEqual(@as(i64, 7), tick.get("tick_n").?.integer);
+    try std.testing.expectEqual(@as(i64, 3), tick.get("day").?.integer);
+    try std.testing.expect(tick.get("bloodmoon_active").?.bool);
+    try std.testing.expectEqualStrings("Na\"ve", tick.get("world_name").?.string);
+    try std.testing.expectEqual(@as(i64, 5), tick.get("world_name_len").?.integer);
+    // The row arrays have their own keys, never a duplicate inside tick.
+    try std.testing.expect(tick.get("players") == null);
+    try std.testing.expect(tick.get("modules") == null);
+    // Populated rows only, fields under their Zig names.
+    const players = obj.get("players").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), players.len);
+    try std.testing.expectEqualStrings("Ada", players[0].object.get("name").?.string);
+    try std.testing.expectEqual(@as(i64, 41), players[0].object.get("entity_id").?.integer);
+    try std.testing.expect(players[0].object.get("used").?.bool);
+    const modules = obj.get("modules").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), modules.len);
+    try std.testing.expectEqualStrings("fps_bot", modules[0].object.get("name").?.string);
+    try std.testing.expect(modules[0].object.get("disabled").?.bool);
+    // Console: the audit ring, oldest first.
+    const console = obj.get("console").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), console.len);
+    try std.testing.expectEqualStrings("> status", console[0].string);
+    try std.testing.expectEqualStrings("Day 3, 14:30", console[1].string);
+    // apm is the nested /api/apm.json object, not a string.
+    try std.testing.expect(obj.get("apm").? == .object);
+    try std.testing.expectEqual(@as(i64, 7), obj.get("apm").?.object.get("tick").?.integer);
+    try std.testing.expectEqualStrings("zdtd_webui_apm", obj.get("apm").?.object.get("type").?.string);
+}
+
+test "GET /api/state.json with an idle server has empty arrays" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    try testServeHttp(&s, "GET /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    const resp = s.testResp();
+    const head_end = std.mem.find(u8, resp, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+    const body = resp[head_end + 4 ..];
+    try std.testing.expect(std.mem.find(u8, body, "\"players\":[],\"modules\":[],\"modlets\":[],\"console\":[]") != null);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get("players").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get("console").?.array.items.len);
+}
+
+test "GET /api/state.json carries the modlet roster as a populated array" {
+    // The Modules pane reads `modlets` from the state poll; without it the pane
+    // shows its no-mods note while real XML-only mods are loaded (ADR 0040).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
+    defer std.testing.allocator.free(mods_root);
+    const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/Config", .{mods_root});
+    defer std.testing.allocator.free(cfg_dir);
+    io_fs.mkdirPath(cfg_dir);
+    const mi = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/ModInfo.xml", .{mods_root});
+    defer std.testing.allocator.free(mi);
+    try io_fs.writeFile(mi, "<xml><Name value=\"UiMod\"/><DisplayName value=\"UI Mod\"/><Version value=\"1.0\"/></xml>");
+    const state = try std.fmt.allocPrint(std.testing.allocator, "{s}/modlets_disabled.txt", .{root});
+    defer std.testing.allocator.free(state);
+    _ = try modlets.install(std.testing.allocator, mods_root, state);
+    defer modlets.deinit(std.testing.allocator);
+
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+
+    try testServeHttp(&s, "GET /api/state.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    const head_end = std.mem.find(u8, resp, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, resp[head_end + 4 ..], .{});
+    defer parsed.deinit();
+    const roster = parsed.value.object.get("modlets") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(roster == .array);
+    try std.testing.expectEqual(@as(usize, 1), roster.array.items.len);
+    const entry = roster.array.items[0].object;
+    try std.testing.expectEqualStrings("UiMod", entry.get("name").?.string);
+    try std.testing.expectEqualStrings("1.0", entry.get("version").?.string);
+    try std.testing.expect(entry.get("has_code").? == .bool);
+    try std.testing.expect(entry.get("disabled").? == .bool);
+    try std.testing.expect(!entry.get("disabled").?.bool);
+}
+
+test "renderStateJson reports a buffer too small instead of truncating" {
+    var s: Server = .{};
+    var small: [16]u8 = undefined;
+    try std.testing.expectError(error.WriteFailed, renderStateJson(&small, &s));
+}
+
+test "retired partial routes answer 404" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    const cases = [_][]const u8{
+        "GET /partials/status HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "GET /partials/players HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "GET /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "GET /partials/apm HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "GET /partials/settings HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "GET /partials/console HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+    };
+    for (cases) |req| {
+        try testServeHttp(&s, req);
+        try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 404 ") != null);
+    }
+}
+
+test "POST /api/cmd answers JSON for the dashboard" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.setAdminHandler(&s, testAdminEcho);
+
+    const body = "csrf=s3cr3t&line=status";
+    var req_buf: [320]u8 = undefined;
+    const req = try std.fmt.bufPrint(&req_buf, "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    try testServeHttp(&s, req);
+    var resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Type: application/json") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "{\"ok\":true,\"line\":\"status\",\"reply\":\"ran status\\n\"}") != null);
+
+    // A refused command keeps its status and answers the JSON error shape.
+    const bad = "csrf=nope&line=status";
+    const req2 = try std.fmt.bufPrint(&req_buf, "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ bad.len, bad });
+    try testServeHttp(&s, req2);
+    resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 403 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "{\"ok\":false,\"error\":\"session expired or invalid; reload the dashboard and try again\",\"reply\":\"\"}") != null);
+    const bad_type = "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+    try testServeHttp(&s, bad_type);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 415 ") != null);
+
+    // The plain and HTML paths stay byte-identical for tools and the browser.
+    const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: text/plain\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    try testServeHttp(&s, req3);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Content-Type: text/plain") != null);
+    try std.testing.expect(std.mem.endsWith(u8, s.testResp(), "ran status\n"));
+    const req4 = try std.fmt.bufPrint(&req_buf, "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    try testServeHttp(&s, req4);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Content-Type: text/html") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "<pre class=\"cmd-out\" tabindex=\"0\"><span class=\"in\">&gt; status</span>\nran status\n</pre>") != null);
+}
+
+/// Test admin thunk: answers with a reply the failure predicate recognizes
+/// (`*** ERROR:`, the stock console error shape).
+fn testAdminFailing(ctx: *anyopaque, line: []const u8, out: []u8) usize {
+    _ = ctx;
+    _ = line;
+    const written = std.fmt.bufPrint(out, "*** ERROR: no such player\n", .{}) catch return 0;
+    return written.len;
+}
+
+test "POST /api/cmd answers ok:false in JSON when the admin reply failed" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.setAdminHandler(&s, testAdminFailing);
+
+    const body = "csrf=s3cr3t&line=give";
+    var req_buf: [320]u8 = undefined;
+    const req = try std.fmt.bufPrint(&req_buf, "POST /api/cmd HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    try testServeHttp(&s, req);
+    const resp = s.testResp();
+    // Routed and answered: HTTP 200 with the failure in the body, same as HTML.
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    const head_end = std.mem.find(u8, resp, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, resp[head_end + 4 ..], .{});
+    defer parsed.deinit();
+    try std.testing.expect(!parsed.value.object.get("ok").?.bool);
+    try std.testing.expectEqualStrings("*** ERROR: no such player", parsed.value.object.get("error").?.string);
+
+    // Same route, same JSON Accept, a reply the predicate accepts: ok:true.
+    s.setAdminHandler(&s, testAdminEcho);
+    try testServeHttp(&s, req);
+    const ok_resp = s.testResp();
+    const ok_head_end = std.mem.find(u8, ok_resp, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+    const ok_parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, ok_resp[ok_head_end + 4 ..], .{});
+    defer ok_parsed.deinit();
+    try std.testing.expect(ok_parsed.value.object.get("ok").?.bool);
+    try std.testing.expect(ok_parsed.value.object.get("error") == null);
 }
 
 test "GET /login redirects when session cookie is already valid" {
@@ -2521,16 +2622,11 @@ test "listen refuses header-injectable secret" {
     try std.testing.expectError(error.SecretInvalid, s.listen(.{ .port = 1, .secret = "has;semi" }));
 }
 
-test "render status fits buffer" {
+test "renderApmJson keeps the tool document contract" {
     var s: Snapshot = .{ .tick_n = 42, .day = 3, .hours = 14.5, .joined = 2, .max_players = 8 };
     @memcpy(s.world_name[0..4], "test");
     s.world_name_len = 4;
-    var buf: [4096]u8 = undefined;
-    const html = try renderStatus(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "42") != null);
-    try std.testing.expect(std.mem.find(u8, html, "test") != null);
-    const apm = try renderApm(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, apm, "tick mean") != null);
+    var buf: [8192]u8 = undefined;
     const js = try renderApmJson(&buf, &s);
     try std.testing.expect(std.mem.find(u8, js, "\"tick\":42") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"net_p99_ns\":") != null);
@@ -2549,7 +2645,6 @@ test "render status fits buffer" {
     try std.testing.expect(std.mem.find(u8, js, "\"players\":[") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"webui_port\":") != null);
 }
-
 test "httpReasonPhrase covers early rawRespond statuses" {
     try std.testing.expectEqualStrings("Bad Request", httpReasonPhrase(400));
     try std.testing.expectEqualStrings("Content Too Large", httpReasonPhrase(413));
@@ -2589,25 +2684,6 @@ test "login lockout after repeated failures" {
     // Further attempts while locked must not set a session cookie.
     try testServeHttp(&s, "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t");
     try std.testing.expect(!s.set_cookie);
-}
-
-test "renderPlayers html-escapes client names" {
-    var s: Snapshot = .{};
-    s.players[0] = .{
-        .used = true,
-        .slot = 0,
-        .entity_id = 1,
-        .joined = true,
-        .entered = true,
-        .name_len = 15,
-    };
-    @memcpy(s.players[0].name[0..15], "<img onerror=1>");
-    var buf: [2048]u8 = undefined;
-    const html = try renderPlayers(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "<img") == null);
-    try std.testing.expect(std.mem.find(u8, html, "&lt;img") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<caption class=\"sr-only\">Connected players</caption>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"col\">Name</th>") != null);
 }
 
 const http_fuzz_corpus = [_][]const u8{
@@ -2675,60 +2751,39 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
     try std.testing.expect(std.mem.findScalar(u8, escaped, '"') == null);
 }
 
-test "renderShell exposes console names and status updates" {
+test "renderShell serves the app mount point and the JSON poll" {
+    // ADR 0040: the shell is the document, the CSS tokens, the app mount point
+    // and the bundle marker. Everything else is rendered by the Preact app from
+    // /api/state.json, so this test asserts the stable structure, not the
+    // component markup (that lives in src/server/webui/ts/shell.tsx).
     var buf: [max_shell_html]u8 = undefined;
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x33} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
     const html = try renderShell(&buf, sess[0..]);
-    try std.testing.expect(std.mem.find(u8, html, "<label for=\"cmd-line\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "maxlength=\"256\" required") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-out\" aria-live=\"polite\"") != null);
+    // App mount point and the state endpoint the bundle polls.
+    try std.testing.expect(std.mem.find(u8, html, "id=\"app\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "/api/state.json") != null);
+    // The retired partials must not survive in the committed page.
+    try std.testing.expect(std.mem.find(u8, html, "hx-get=\"/partials/") == null);
+    // Document chrome that must not regress with a page edit.
     try std.testing.expect(std.mem.find(u8, html, "class=\"skip-link\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "href=\"#main-content\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"auto-refresh\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-now\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Dashboard sections\"") != null);
-    // Stable core: shell renders the dashboard and fits the runtime buffer.
-    try std.testing.expect(std.mem.find(u8, html, "id=\"status-section\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "line.split") != null);
-    // Paper cockpit: horizontal tablist, glance band, terminal deck.
     try std.testing.expect(std.mem.find(u8, html, "aria-orientation=\"horizontal\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "class=\"glance-band\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-tick\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-meter-fill\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "class=\"deck\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "updateGlance") != null);
-    try std.testing.expect(std.mem.find(u8, html, "aria-describedby=\"cmd-help-inline\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-help-inline\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-data\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "aria-describedby=\"apm-chart-data apm-chart-live apm-chart-keys\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-keys\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "updatePolling") != null);
-    try std.testing.expect(std.mem.find(u8, html, "panelPolls") != null);
-    // Deep-linkable tabs + keyboard/drag chart scrub + URL history window.
-    try std.testing.expect(std.mem.find(u8, html, "selectInitialTab") != null);
-    try std.testing.expect(std.mem.find(u8, html, "replaceState") != null);
-    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-live\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "stepScrub") != null);
-    try std.testing.expect(std.mem.find(u8, html, "scrubToEvent") != null);
-    try std.testing.expect(std.mem.find(u8, html, "syncHistoryUrl") != null);
-    try std.testing.expect(std.mem.find(u8, html, "touch-action:pan-y") != null);
-    try std.testing.expect(std.mem.find(u8, html, "tabindex=\"0\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"tab-players\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/logout\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-lamp\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-word\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
     // No-JS fallback: sections unhide, dead controls hide (head noscript).
     try std.testing.expect(std.mem.find(u8, html, "section[hidden]{display:block}") != null);
-    // Roving tabindex is correct in static markup, not only after JS runs.
-    try std.testing.expect(std.mem.find(u8, html, "id=\"tab-players\" tabindex=\"-1\"") != null);
-    // Partials use classes, not inline styles.
-    try std.testing.expect(std.mem.find(u8, html, "class=\"flush\"") == null); // partial-only, not shell
-    try std.testing.expect(std.mem.find(u8, html, ".empty-note{") != null);
-    try std.testing.expect(std.mem.find(u8, html, ".flush{") != null);
-    try std.testing.expect(std.mem.find(u8, html, "class=\"mod-btn\"") == null); // partial-only, not shell
+    try std.testing.expect(std.mem.find(u8, html, "class=\"flush\"") == null); // partial-only
+    try std.testing.expect(std.mem.find(u8, html, "class=\"mod-btn\"") == null); // partial-only
     try std.testing.expect(html.len < max_shell_html);
 }
-
 test "renderLogin substitutes banner and input state" {
     var buf: [8192]u8 = undefined;
     const ok = try renderLogin(&buf, false);
@@ -2738,7 +2793,8 @@ test "renderLogin substitutes banner and input state" {
     try std.testing.expect(std.mem.find(u8, ok, "maxlength=\"128\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
-    try std.testing.expect(std.mem.find(u8, ok, "token.type = shown ? 'password' : 'text'") != null);
+    // Show/Hide toggle (compiled from ts/login.ts; minified in the page).
+    try std.testing.expect(std.mem.find(u8, ok, "e.type=n?\"password\":\"text\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
     try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\" aria-invalid=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-describedby=\"login-help\"") != null);
@@ -2762,7 +2818,7 @@ test "renderLogin substitutes banner and input state" {
     // The countdown ticks inside role="alert"; without aria-live=off a screen
     // reader interrupts itself once a second for the whole lockout.
     try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\" aria-live=\"off\"") != null);
-    try std.testing.expect(std.mem.find(u8, locked, "globalThis.location.replace('/login')") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "globalThis.location.replace(\"/login\")") != null);
 }
 
 test "command result marks known failures and is keyboard-scrollable" {
@@ -2806,106 +2862,11 @@ test "command result marks known failures and is keyboard-scrollable" {
     const log_err = try renderConsoleLog(&log_buf, &s);
     try std.testing.expect(std.mem.find(u8, log_err, "<span class=\"err\">") != null);
     try std.testing.expect(std.mem.find(u8, log_err, "unknown command") != null);
-    var sess: [session_token_hex_len]u8 = undefined;
-    const nonce = [_]u8{0x44} ** 32;
-    fillSessionToken("s3cr3t", &nonce, &sess);
-    var shell_buf: [max_shell_html]u8 = undefined;
-    const shell = try renderShell(&shell_buf, sess[0..]);
-    // role= so the aria-label is actually exposed (a bare div has no name),
-    // tabindex=-1 so the poll's focus restore has somewhere to land.
-    try std.testing.expect(std.mem.find(u8, shell, "id=\"console-log\" aria-label=\"Recent commands\" role=\"region\" tabindex=\"-1\"") != null);
+    // The console pane is not a route any more; the same lines reach the
+    // dashboard through the state document, so the ring order must be stable.
+    try std.testing.expectEqualStrings("> frob", auditLineAt(&s, 0));
+    try std.testing.expectEqualStrings("unknown command 'frob'. 'help' for list.", auditLineAt(&s, 1));
 }
-
-test "renderStatus and renderApm use list markup for stat grids" {
-    var snap: Snapshot = .{ .tick_n = 1 };
-    var buf: [8192]u8 = undefined;
-    const status = try renderStatus(&buf, &snap);
-    try std.testing.expect(std.mem.find(u8, status, "<ul class=\"grid\">") != null);
-    try std.testing.expect(std.mem.find(u8, status, "<li class=\"stat\">") != null);
-    try std.testing.expect(std.mem.find(u8, status, "server tick") != null);
-    try std.testing.expect(std.mem.find(u8, status, "not set") != null);
-    try std.testing.expect(std.mem.find(u8, status, "(unnamed)") != null);
-    // Zero overruns stay neutral; non-zero overruns use warn styling.
-    try std.testing.expect(std.mem.find(u8, status, "class=\"num warn-text\"") == null);
-    snap.tick_overruns = 3;
-    const status_warn = try renderStatus(&buf, &snap);
-    try std.testing.expect(std.mem.find(u8, status_warn, "class=\"num warn-text\"") != null);
-    var apm_buf: [8192]u8 = undefined;
-    const apm = try renderApm(&apm_buf, &snap);
-    try std.testing.expect(std.mem.find(u8, apm, "<ul class=\"grid\">") != null);
-    try std.testing.expect(std.mem.find(u8, apm, "<li class=\"stat\">") != null);
-    try std.testing.expect(std.mem.find(u8, apm, "class=\"num warn-text\"") != null);
-    snap.join_fail = 2;
-    const apm_err = try renderApm(&apm_buf, &snap);
-    try std.testing.expect(std.mem.find(u8, apm_err, "class=\"num err\"") != null);
-}
-
-test "renderStatus uses h3 for subsections under shell Status h2" {
-    var s: Snapshot = .{ .tick_n = 1 };
-    var buf: [4096]u8 = undefined;
-    const html = try renderStatus(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "<h2>Status</h2>") == null);
-    try std.testing.expect(std.mem.find(u8, html, "<h3>Entities</h3>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<h3>Server</h3>") != null);
-}
-
-test "renderStatus includes host OS metrics grid" {
-    var s: Snapshot = .{ .tick_n = 1, .os_mem_total_mb = 16384, .os_mem_avail_mb = 8192, .os_load_1 = 0.5, .os_uptime_s = 7200 };
-    var buf: [8192]u8 = undefined;
-    const html = try renderStatus(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "<h3>Host</h3>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "load 1 / 5 / 15 min") != null);
-    try std.testing.expect(std.mem.find(u8, html, "ram free+buf / total") != null);
-    try std.testing.expect(std.mem.find(u8, html, "proc cpu") != null);
-    try std.testing.expect(std.mem.find(u8, html, "proc rss peak") != null);
-    // 7200 s renders as "2h 0m" host uptime.
-    try std.testing.expect(std.mem.find(u8, html, "2h 0m") != null);
-}
-
-test "renderSettings lists effective server policy" {
-    var snap: Snapshot = .{ .tick_n = 1, .max_players = 8, .view_radius = 7, .info_port = 27002, .webui_port = 8080, .max_spawned_zombies = 64, .bloodmoon_frequency = 7 };
-    snap.world_name_len = @intCast("Navezgane".len);
-    @memcpy(snap.world_name[0..snap.world_name_len], "Navezgane");
-    var buf: [8192]u8 = undefined;
-    const settings = try renderSettings(&buf, &snap);
-    try std.testing.expect(std.mem.find(u8, settings, "<ul class=\"grid\">") != null);
-    try std.testing.expect(std.mem.find(u8, settings, "Navezgane") != null);
-    try std.testing.expect(std.mem.find(u8, settings, "max players") != null);
-    try std.testing.expect(std.mem.find(u8, settings, "blood moon every (days)") != null);
-    try std.testing.expect(std.mem.find(u8, settings, "authority mode") != null);
-    try std.testing.expect(std.mem.find(u8, settings, "chunk streaming") != null);
-}
-
-test "renderPlayers identifies each player name as a row header" {
-    var s: Snapshot = .{};
-    s.players[0].used = true;
-    s.players[0].name_len = 3;
-    @memcpy(s.players[0].name[0..3], "Ada");
-    var buf: [4096]u8 = undefined;
-    const html = try renderPlayers(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "<table class=\"stack\">") != null);
-    try std.testing.expect(std.mem.find(u8, html, "data-label=\"Name\">Ada</th>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill ") != null);
-}
-
-test "renderModules lists loaded wasm modules with state" {
-    var s: Snapshot = .{};
-    s.modules[0] = .{ .used = true, .name_len = 7, .disabled = false };
-    @memcpy(s.modules[0].name[0..7], "fps_bot");
-    s.modules[1] = .{ .used = true, .name_len = 13, .disabled = true };
-    @memcpy(s.modules[1].name[0..13], "core_announce");
-    var buf: [4096]u8 = undefined;
-    const html = try renderModules(&buf, &s, "csrf-token");
-    try std.testing.expect(std.mem.find(u8, html, "data-label=\"Module\">fps_bot</th>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill ok\">enabled</span>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill bad\">disabled</span>") != null);
-    // Empty roster gets a hint row, not a bare table.
-    var s2: Snapshot = .{};
-    var buf2: [4096]u8 = undefined;
-    const empty = try renderModules(&buf2, &s2, "csrf-token");
-    try std.testing.expect(std.mem.find(u8, empty, "No modules loaded") != null);
-}
-
 test "renderApmJson includes escaped player names and world" {
     var s: Snapshot = .{ .tick_n = 1, .wire_chunks = false };
     @memcpy(s.world_name[0..5], "Na\"ve");

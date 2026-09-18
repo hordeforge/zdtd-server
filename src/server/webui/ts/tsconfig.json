@@ -1,19 +1,23 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    // module: none would be the literal "classic script" setting, but oxlint's
-    // type-aware loader (tsgolint, see lint-webui.sh) rejects "none". es2022
-    // with default moduleDetection "auto" still treats these import/export-free
-    // files as scripts: tsc emit is byte-identical (verified).
-    "module": "es2022",
+    // ESNext + bundler resolution: shell.tsx imports `preact` and the build
+    // bundles it (ADR 0040); login.ts/lockout.ts stay import-free classic page
+    // scripts and bundle to a tiny IIFE. oxlint's type-aware loader (tsgolint,
+    // see lint-webui.sh) rejects module "none", which is the other reason for
+    // the non-classic module setting.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "lib": ["es2022", "dom", "dom.iterable"],
     "strict": true,
     // Strict beyond `strict`: every flag below was verified against the tree
     // (tsc 5.9.3, 2026-08-23) and passes clean. Diagnostics only: none of them
-    // changes emit, so the committed pages stay byte-identical.
+    // changes emit.
     // noUncheckedIndexedAccess / noPropertyAccessFromIndexSignature were tried
-    // and do NOT pass yet (shell.ts apm-sample and dataset indexing); enable
-    // once the sources are narrowed.
+    // and do NOT pass yet (apm sample and dataset indexing); enable once the
+    // sources are narrowed.
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
@@ -23,5 +27,5 @@
     "noEmitOnError": true,
     "types": []
   },
-  "files": ["login.ts", "lockout.ts", "shell.ts"]
+  "files": ["login.ts", "lockout.ts", "shell.tsx"]
 }

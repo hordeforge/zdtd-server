@@ -443,6 +443,9 @@ pub const Ctx = struct {
     /// Applies a row's `AddBuff`/`RemoveBuff` the moment the row passes (same
     /// stock ordering). Null = record the request only, as before.
     sink: ?TriggeredSink = null,
+    /// Applies a `target="other"` row's AddBuff/RemoveBuff to the event's
+    /// other entity as the row passes. Null = record in the other lists only.
+    other_sink: ?TriggeredSink = null,
     /// `Equipment::GetTotalPhysicalArmorRating`: the worn-armour rating the
     /// `coredamageresist` passive query produces, which `StatCompareCurrent`
     /// StatType 5 and `StatComparePercCurrentToModMax` read. zdtd folds the

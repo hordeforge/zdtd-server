@@ -77,25 +77,10 @@ __ZDTD_LOGIN_BANNER__
 <p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:login */
-"use strict";
-//! Webui login form: show/hide the shared secret.
+(()=>{//! Webui login form: show/hide the shared secret.
 //! Injected into login.html (plain and failure states share the markup; the
 //! banner and input attrs are server-rendered placeholders).
 //! Compiled by scripts/build-webui-ts.sh.
-const token = document.querySelector('#login-token');
-if (token === null) {
-    throw new Error('webui: missing element #login-token');
-}
-const toggle = document.querySelector('#toggle-secret');
-if (toggle === null) {
-    throw new Error('webui: missing element #toggle-secret');
-}
-toggle.addEventListener('click', () => {
-    const shown = token.type === 'text';
-    token.type = shown ? 'password' : 'text';
-    toggle.textContent = shown ? 'Show' : 'Hide';
-    toggle.setAttribute('aria-pressed', String(!shown));
-    token.focus();
-});
+var e=document.querySelector("#login-token");if(e===null)throw Error("webui: missing element #login-token");var t=document.querySelector("#toggle-secret");if(t===null)throw Error("webui: missing element #toggle-secret");t.addEventListener("click",()=>{let n=e.type==="text";e.type=n?"password":"text",t.textContent=n?"Show":"Hide",t.setAttribute("aria-pressed",String(!n)),e.focus()});})();
 /* /zdtd-ts:login */
 </script></body></html>

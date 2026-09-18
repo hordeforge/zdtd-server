@@ -13,6 +13,7 @@ zdtd links or evaluates third-party code through its Zig package manager
 | Package | Version | License | Copyright | Notes |
 |---|---|---|---|---|
 | [zwasm](https://github.com/clojurewasm/zwasm) | 2.5.0 | Apache-2.0 | 2026 zwasm Contributors | WebAssembly runtime for the native plugin host (`src/plugin/wasm.zig`). Hash-pinned in `build.zig.zon`. |
+| [preact](https://github.com/preactjs/preact) | 10.29.8 | MIT | 2015-present Jason Miller | Dashboard client (ADR 0040), bundled by `scripts/build-webui-ts.sh` into the pages embedded in the binary. Version pinned by `PREACT_VERSION`. |
 
 Apache-2.0 section 4 requires that recipients of derivative works receive a
 copy of the license. The full Apache-2.0 text is reproduced below.
@@ -233,3 +234,27 @@ zdtd itself:
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+---
+
+The MIT License (MIT)
+
+Copyright (c) 2015-present Jason Miller
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -41,8 +41,9 @@ Status is one of: **accepted**, **superseded**, **deprecated** - a decision stil
 | [0037](0037-parachute-glide.md) | Parachute glide boundary: sense v4 (vy + wearing_glider), queue verb `glide`, movement-envelope exemption; deceleration stays client-side by design | accepted |
 | [0038](0038-player-persist-platform-identity.md) | Player persist identity is the platform account, not the login name (supersedes 0017) | accepted |
 | [0039](0039-plugin-verb-interception-policy.md) | Plugin queued-verb interception: a module's `manifest.toml deny` plus the operator `[plugin] deny`/`allow` lists, right-biased, enforced at the `zdtd.queue` boundary | accepted |
+| [0040](0040-webui-preact-json-state.md) | WebUI dashboard is a Preact client over `GET /api/state.json`; `/partials/*` retires; the bundle ships inline (supersedes ADR 0018 decision 2) | accepted |
 
-Numbers 0027–0029 were never assigned. Next free number is **0040**.
+Numbers 0027–0029 were never assigned. Next free number is **0041**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),

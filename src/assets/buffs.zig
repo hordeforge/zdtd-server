@@ -124,6 +124,10 @@ pub const Trigger = enum(u8) {
     /// `onOtherAttackedSelf`: fired on the victim when another entity lands
     /// a hit (concussion/fatigue counters, PackMule display buff).
     other_attacked_self,
+    /// `onSelfKilledOther`: fired on the killer's buffs and purchased
+    /// perk/book rows when one of its hits kills (DeadEye/Berserker adds,
+    /// stamina/health ModifyStats refunds).
+    killed_other,
     /// `onSelfAttackedOther`: fired on the attacker when a hit lands
     /// (HitLocation-gated perk/buff rows: headshot/leg procs).
     self_attacked_other,
@@ -165,6 +169,11 @@ pub const Triggered = struct {
     value: f32 = 0,
     /// AddBuff/RemoveBuff target.
     buff: []const u8 = "",
+    /// `target="other"` on AddBuff/RemoveBuff rows: stock applies the buff
+    /// to the event's other entity (victim-directed perk procs: shotgun
+    /// stuns, cripples, bleeds) instead of self. `target="otherAOE"` rows
+    /// are recorded but not applied (no AoE victim set on the event).
+    target_other: bool = false,
     /// ModifyCVar/RemoveCVar target (`cvar=`).
     cvar: []const u8 = "",
     /// ModifyCVar operation (`operation=`); `CVarOperation` defaults to set.
@@ -609,10 +618,12 @@ pub fn scanTriggeredRows(
         const val_cvar = if (act == .modify_cvar and val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
         const roll = act == .modify_cvar and (std.mem.startsWith(u8, val_s, "randomint(") or
             std.mem.startsWith(u8, val_s, "randomfloat("));
+        const target_s = xml.attr(body, ri, "target") orelse "";
         const tr: Triggered = .{
             .trigger = parseTrigger(trig_s),
             .action = if (roll or health_cvar) .other else act,
             .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
+            .target_other = std.mem.eql(u8, target_s, "other"),
             .stat = try arena.dupe(u8, if (is_add_health) "Health" else xml.attr(body, ri, "stat") orelse ""),
             .cvar = try arena.dupe(u8, xml.attr(body, ri, "cvar") orelse ""),
             .cvar_op = cvars.Operation.parse(xml.attr(body, ri, "operation") orelse "set") orelse .set,
@@ -1417,6 +1428,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfProgressionUpdate")) return .progression_update;
     if (std.mem.eql(u8, s, "onPerkLevelChanged")) return .perk_level_changed;
     if (std.mem.eql(u8, s, "onOtherAttackedSelf")) return .other_attacked_self;
+    if (std.mem.eql(u8, s, "onSelfKilledOther")) return .killed_other;
     if (std.mem.eql(u8, s, "onSelfAttackedOther")) return .self_attacked_other;
     if (std.mem.eql(u8, s, "onSelfBuffFinish")) return .finish;
     if (std.mem.eql(u8, s, "onSelfBuffStack")) return .stack;
@@ -1454,6 +1466,13 @@ pub const TriggeredResult = struct {
     add_n: u8 = 0,
     remove_n: u8 = 0,
     truncated: u8 = 0,
+    /// Victim-directed adds (`target="other"`): parallel to add_buffs, same
+    /// order. The caller applies these to the event's other entity.
+    add_other_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_other_n: u8 = 0,
+    /// Victim-directed removes, parallel to remove_buffs.
+    remove_other_buffs: [max_triggered_removes][]const u8 = .{""} ** max_triggered_removes,
+    remove_other_n: u8 = 0,
 };
 
 /// The triggered-effect engine: evaluate one buff's `onSelf*` rows for
@@ -1511,6 +1530,18 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
             },
             .add_buff => {
                 if (tr.buff.len == 0) continue;
+                if (tr.target_other) {
+                    if (out.add_other_n >= out.add_other_buffs.len) {
+                        out.truncated +|= 1;
+                        continue;
+                    }
+                    out.add_other_buffs[out.add_other_n] = tr.buff;
+                    out.add_other_n += 1;
+                    // Victim-directed adds skip the self sink: the caller
+                    // applies them to the event's other entity.
+                    if (ctx.other_sink) |sk| sk.add_buff(sk.ctx, tr.buff);
+                    continue;
+                }
                 if (out.add_n >= out.add_buffs.len) {
                     out.truncated +|= 1;
                     continue;
@@ -1523,6 +1554,16 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
             },
             .remove_buff => {
                 if (tr.buff.len == 0) continue;
+                if (tr.target_other) {
+                    if (out.remove_other_n >= out.remove_other_buffs.len) {
+                        out.truncated +|= 1;
+                        continue;
+                    }
+                    out.remove_other_buffs[out.remove_other_n] = tr.buff;
+                    out.remove_other_n += 1;
+                    if (ctx.other_sink) |sk| sk.remove_buff(sk.ctx, tr.buff);
+                    continue;
+                }
                 if (out.remove_n >= out.remove_buffs.len) {
                     out.truncated +|= 1;
                     continue;
@@ -2733,3 +2774,4 @@ test "AddOrRemoveBuff toggles on its gates" {
     try std.testing.expectEqual(@as(u8, 1), removed.remove_n);
     try std.testing.expectEqualStrings("buffHot", removed.remove_buffs[0]);
 }
+

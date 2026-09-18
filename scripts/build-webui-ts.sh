@@ -1,36 +1,50 @@
 #!/usr/bin/env bash
 # Compile the webui TypeScript sources (src/server/webui/ts) and splice the
 # emitted JS into the committed pages between their `/* zdtd-ts:<page> */`
-# markers. Run this after editing a .ts source and commit the regenerated
+# markers. Run this after editing a .ts/.tsx source and commit the regenerated
 # pages; `make lint` fails when the committed pages are stale.
 #
-# tsc runs through bunx pinned by TSC_VERSION (same convention as oxlint; the
-# repo does not track package.json/node_modules). `zig build` never invokes
-# this script: the pages ship with the compiled JS inline (ADR 0018), so the
-# Zig build stays pure and offline.
-# Override locally: TSC_VERSION=5.9.3 bash scripts/build-webui-ts.sh
+# The dashboard is a Preact app (ADR 0040): shell.tsx is JSX and imports
+# `preact`, so the sources are bundled rather than emitted file-by-file.
+# scripts/webui-ts-project.sh stages the pinned toolchain and dependency in a
+# cache project (no package.json/node_modules in the tree); this script then
+# runs `bun build --format=iife` per page entry. The bundle is what ships
+# inline, so the Zig build stays pure and offline and nothing is read from disk
+# at runtime (AGENTS rule 12).
+# Override locally: PREACT_VERSION=10.29.8 bash scripts/build-webui-ts.sh
 #
 # Usage: scripts/build-webui-ts.sh [--dest DIR]   (default: src/server/webui)
 #
-# Requires: bun (bunx), python3 (already a make check requirement).
+# Requires: bun, python3.
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tsc_version="${TSC_VERSION:-5.9.3}"
-ts_dir="$root/src/server/webui/ts"
 dest="$root/src/server/webui"
 if [ "${1:-}" = "--dest" ]; then
   dest="$2"
 fi
 
+# shellcheck source=scripts/webui-ts-project.sh
+. "$root/scripts/webui-ts-project.sh"
+project="$(webui_ts_prepare)"
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Emit one classic script .js per source into $tmp (tsconfig: module none).
-# --bun: the package shebang is `#!/usr/bin/env node`; bun honours it by
-# default, so a broken host node breaks the build. Run it under bun.
-bunx --bun -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --outDir "$tmp"
+# Bundle one IIFE per page entry. `--define process.env.NODE_ENV` selects
+# preact's production branches; --minify keeps the embedded page small (the
+# readable source is the .tsx file, not the committed page).
+for entry in login lockout shell; do
+  input="$project/$entry.ts"
+  [ -f "$input" ] || input="$project/$entry.tsx"
+  bun build "$input" \
+    --outfile "$tmp/$entry.js" \
+    --format=iife \
+    --target=browser \
+    --minify \
+    --define 'process.env.NODE_ENV="production"'
+done
 
 python3 - "$tmp" "$dest" <<'PY'
 import pathlib
@@ -39,7 +53,7 @@ import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 
-# Compiled file per marker name; the login marker takes login.js.
+# Compiled bundle per marker name.
 MARKER_JS = {
     "login": "login.js",
     "lockout": "lockout.js",
