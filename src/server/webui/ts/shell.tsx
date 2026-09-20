@@ -741,6 +741,9 @@ function SettingsPanel({ tick, visible }: { tick: TickState; visible: boolean })
     return (
         <section id="settings-section" role="tabpanel" tabindex={0} aria-labelledby="tab-settings" hidden={!visible}>
             <h2 id="settings-heading">Settings</h2>
+            <p class="deck-sub">
+                Read-only snapshot of the running server. Change these in <code>zdtd.toml</code> or the process flags, then restart.
+            </p>
             <div id="settings" aria-live="polite" aria-atomic="true">
                 <StatGrid heading="Server" stats={settingsCells(tick)} flush />
             </div>
@@ -843,9 +846,37 @@ function ModletTable({
     );
 }
 
-function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: boolean; reload: () => Promise<void> }): ComponentChildren {
+function confirmModletDisable(name: string): boolean {
+    // oxlint-disable-next-line no-alert -- deliberate: disabling a modlet needs a restart to take effect
+    return globalThis.confirm(`Disable "${name}"? The change is saved now and applies after a server restart.`);
+}
+
+function modletSavedNote(name: string, action: string): string {
+    const verb = action === "disable" ? "Disabled" : "Enabled";
+    return `${verb} ${name}. Restart the server for the change to take effect.`;
+}
+
+function ModletFeedback({ failure, success }: { failure: string | null; success: string | null }): ComponentChildren {
+    return (
+        <Fragment>
+            {failure === null ? null : (
+                <p class="err modlet-err" role="alert">
+                    {failure}
+                </p>
+            )}
+            {success === null ? null : (
+                <p class="ok modlet-ok" role="status">
+                    {success}
+                </p>
+            )}
+        </Fragment>
+    );
+}
+
+function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: boolean; reload: () => Promise<boolean> }): ComponentChildren {
     const [pending, setPending] = useState<string | null>(null);
     const [failure, setFailure] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const modlets = state.modlets ?? [];
     const csrf = state.csrf;
 
@@ -853,8 +884,12 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
         if (pending !== null) {
             return;
         }
+        if (action === "disable" && !confirmModletDisable(name)) {
+            return;
+        }
         setPending(name);
         setFailure(null);
+        setSuccess(null);
         const post = await postModlet(csrf, name, action);
         setPending(null);
         if (post.kind === "redirect") {
@@ -864,7 +899,11 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
             setFailure(post.note);
             return;
         }
-        await reload();
+        if (!(await reload())) {
+            setFailure("Modlet change was saved, but the dashboard could not refresh. Reload the page to confirm the new state.");
+            return;
+        }
+        setSuccess(modletSavedNote(name, action));
     };
 
     return (
@@ -876,11 +915,7 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
                 <p class="deck-sub">
                     Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).
                 </p>
-                {failure === null ? null : (
-                    <p class="err modlet-err" role="alert">
-                        {failure}
-                    </p>
-                )}
+                <ModletFeedback failure={failure} success={success} />
                 {modlets.length === 0 ? (
                     <p class="deck-sub">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>
                 ) : (
@@ -901,10 +936,10 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
 const QUICK_COMMANDS: ReadonlyArray<{ line: string; label: string }> = [
     { line: "help", label: "help" },
     { line: "status", label: "status" },
-    { line: "lp", label: "players" },
-    { line: "save", label: "save" },
-    { line: "settime day", label: "day" },
-    { line: "settime night", label: "night" },
+    { line: "lp", label: "list players" },
+    { line: "save", label: "save world" },
+    { line: "settime day", label: "set day" },
+    { line: "settime night", label: "set night" },
 ];
 
 const DESTRUCTIVE_VERBS = new Set(["shutdown", "killall", "ka", "kick", "kickall", "ban", "wipeplayer"]);
@@ -1049,7 +1084,7 @@ function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren 
     );
 }
 
-function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: Array<string>; visible: boolean; reload: () => Promise<void> }): ComponentChildren {
+function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: Array<string>; visible: boolean; reload: () => Promise<boolean> }): ComponentChildren {
     const inputRef = useRef<HTMLInputElement>(null);
     const [pending, setPending] = useState(false);
     const [outcome, setOutcome] = useState<CommandOutcome | null>(null);
@@ -1230,14 +1265,16 @@ function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: numb
     const [state, setState] = useState<StateJson | null>(null);
     const [failed, setFailed] = useState(false);
 
-    const reload = useCallback(async (): Promise<void> => {
+    /** Returns true when a fresh snapshot was applied. */
+    const reload = useCallback(async (): Promise<boolean> => {
         const next = await fetchState();
         if (next === null) {
             setFailed(true);
-            return;
+            return false;
         }
         setFailed(false);
         setState(next);
+        return true;
     }, []);
 
     useEffect(() => {
@@ -1290,7 +1327,7 @@ function Panels({ state, activeTab, failed, reload }: {
     state: StateJson;
     activeTab: TabSlug;
     failed: boolean;
-    reload: () => Promise<void>;
+    reload: () => Promise<boolean>;
 }): ComponentChildren {
     return (
         <Fragment>
@@ -1358,9 +1395,13 @@ function App(): ComponentChildren {
     const runRefresh = useCallback(async (): Promise<void> => {
         refreshNowEl.disabled = true;
         setRefreshNote("Refreshing…");
-        await reload();
+        const ok = await reload();
         refreshNowEl.disabled = false;
         refreshNowEl.focus();
+        if (!ok) {
+            setRefreshNote("Refresh failed - check the connection");
+            return;
+        }
         setRefreshNote(autoRefreshEl.checked ? "Refreshed (auto-refresh on)" : "Refreshed (auto-refresh paused)");
     }, [reload]);
 
@@ -1372,18 +1413,22 @@ function App(): ComponentChildren {
     }, [runRefresh]);
 
     const banner = failed ? (
-        <p class="err" role="alert">
+        <p class="err banner-err" role="alert">
             Live data is unavailable. Check the connection; retrying automatically.
         </p>
     ) : null;
+    let body: ComponentChildren;
+    if (state !== null) {
+        body = <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />;
+    } else if (failed) {
+        body = <p class="meta" role="status">Waiting for the server…</p>;
+    } else {
+        body = <p class="meta" role="status" aria-live="polite">Loading dashboard…</p>;
+    }
     return (
         <Fragment>
             {banner}
-            {state === null ? (
-                <p class="meta" role="status" aria-live="polite">Loading dashboard…</p>
-            ) : (
-                <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />
-            )}
+            {body}
         </Fragment>
     );
 }

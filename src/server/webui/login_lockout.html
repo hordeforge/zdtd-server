@@ -64,6 +64,7 @@ input[data-invalid=true]:focus{outline-color:var(--err)}
 button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:1rem;cursor:pointer}
 button:hover{background:var(--acc-ink)}
 button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:wait}
 .secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--edge);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
 .secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
 .secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
@@ -88,7 +89,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" data-invalid="true" aria-invalid="true" aria-describedby="login-err login-help" disabled>
 <button type="submit" disabled>Sign in</button>
 </form>
-<p class="hint"><a href="/login">Try signing in again</a>. This page will refresh when the wait is over.</p>
+<p class="hint">Sign-in stays locked until the countdown finishes. This page refreshes automatically when you can try again.</p>
 <p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:lockout */

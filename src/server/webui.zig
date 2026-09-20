@@ -327,9 +327,9 @@ pub const Server = struct {
 
     /// Whole seconds until `login_lock_until_ns`, rounded up (never advertise
     /// less wait than actually remains). 0 once unlocked. Used so a lockout
-    /// page loaded partway through the window (reload, second tab, the page's
-    /// own "Try signing in again" link) shows the real remaining wait instead
-    /// of restarting a fresh count from `login_lockout_ns` every time.
+    /// page loaded partway through the window (reload, second tab) shows the
+    /// real remaining wait instead of restarting a fresh count from
+    /// `login_lockout_ns` every time.
     fn lockoutRemainingS(self: *const Server) u32 {
         if (self.login_lock_until_ns == 0) return 0;
         const now = clock.monoNs();

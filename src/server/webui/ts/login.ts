@@ -23,3 +23,17 @@ toggle.addEventListener('click', () => {
     toggle.setAttribute('aria-pressed', String(!shown));
     token.focus();
 });
+
+// Prevent a second submit while the browser is posting: double-clicks on a
+// slow link would otherwise send two tokens and burn lockout attempts.
+const form = token.closest('form');
+if (form !== null) {
+    form.addEventListener('submit', () => {
+        const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+        if (submit !== null) {
+            submit.disabled = true;
+            submit.textContent = 'Signing in…';
+        }
+        token.readOnly = true;
+    });
+}
