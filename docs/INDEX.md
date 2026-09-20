@@ -23,23 +23,24 @@ roughly 3500 lines in the NetPackage region.
 
 New to the project, or picking up work:
 
-1. [STATUS.md](STATUS.md) what works now, with the current gates.
-2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 295 features scored
+1. [../CONTRIBUTING.md](../CONTRIBUTING.md) clone → `make help` → edit-test → PR gate.
+2. [STATUS.md](STATUS.md) what works now, with the current gates.
+3. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 295 features scored
    WORKS / PARTIAL / MISSING with anchors (293 / 2 / 0).
-3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
-4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
-5. [../TODO.md](../TODO.md) open backlog first; shipped log below the fold.
-6. [RELEASES.md](RELEASES.md) version, compatibility, support, release policy.
-7. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
-8. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
-9. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
+4. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
+5. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
+6. [../TODO.md](../TODO.md) open backlog first; shipped log below the fold.
+7. [RELEASES.md](RELEASES.md) version, compatibility, support, release policy.
+8. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
+9. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
+10. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
    the stock game (file map 201/201 + constants ledger; gated by
    `tools/provenance_scan.py` in `make check`). Re-run the review with
    [provenance-review.md](provenance-review.md) (copy-paste agent prompt:
    method, gates, honesty rules; picked up by `~/review-prompts`).
-10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
+11. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
-11. [AGENTS.md](AGENTS.md) the documentation standard (tier map, writing rules,
+12. [AGENTS.md](AGENTS.md) the documentation standard (tier map, writing rules,
    gates), and [subsystems/](subsystems/README.md) the per-subsystem reference
    pages. Both are checked by `tools/check_docs.py` in `make lint`.
 

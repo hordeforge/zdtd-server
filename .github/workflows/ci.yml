@@ -52,17 +52,20 @@ jobs:
           shellcheck --version
 
       # lint-webui runs oxlint through bunx at a pinned version; the runner
-      # preinstalls node, but not bun.
-      - name: Install bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: '1.4.2'
-      - name: Read toolchain pin
+      # preinstalls node, but not bun. Pin lives in .bun-version (scripts/bun-pin.sh).
+      - name: Read toolchain pins
         id: pin
         run: |
           set -euo pipefail
           zig="$(bash scripts/zig-pin.sh)"
+          bun="$(bash scripts/bun-pin.sh)"
           echo "zig=$zig" >> "$GITHUB_OUTPUT"
+          echo "bun=$bun" >> "$GITHUB_OUTPUT"
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ steps.pin.outputs.bun }}
 
       - name: Install Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -70,8 +73,11 @@ jobs:
           # Single source of truth: .zigversion (also enforced by make release-check).
           version: ${{ steps.pin.outputs.zig }}
 
-      - name: Verify workflow toolchain pin
-        run: test "$(zig version)" = "$(bash scripts/zig-pin.sh)"
+      - name: Verify workflow toolchain pins
+        run: |
+          set -euo pipefail
+          test "$(zig version)" = "$(bash scripts/zig-pin.sh)"
+          test "$(bun --version)" = "$(bash scripts/bun-pin.sh)"
 
       # Zig's cache is content-addressed, so restoring a stale entry is safe;
       # keying on github.sha keeps a rolling cache (always save, restore latest

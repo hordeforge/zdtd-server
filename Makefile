@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs
+.PHONY: all help build test test-one fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs plugins
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -16,6 +16,8 @@ OPTIMIZE ?= Debug
 # The published artifact is named linux-x86_64 in CI, so do not let the
 # machine running `make release` silently choose a different target ABI.
 RELEASE_TARGET ?= x86_64-linux-gnu
+# Substring for `make test-one` (zig -Dtest-filter). Empty fails closed.
+FILTER ?=
 
 # Shared missing-compiler check (used by every target that invokes Zig).
 need-zig:
@@ -40,12 +42,34 @@ need-python3:
 
 # Webui JS gate: tsc type-check + oxlint over src/server/webui/ts, then page
 # freshness (scripts/lint-webui.sh). tsc/oxlint run through bunx (version pins:
-# scripts/lint-webui.sh, scripts/build-webui-ts.sh).
+# scripts/lint-webui.sh, scripts/build-webui-ts.sh). Bun itself is pinned in
+# .bun-version (scripts/bun-pin.sh; same file CI installs).
 need-oxlint:
 	@command -v bunx >/dev/null || { \
-	  echo "zdtd: missing required tool: bunx (bun; for the webui TS/JS lint)" >&2; \
+	  echo "zdtd: missing required tool: bunx (install bun $(shell bash scripts/bun-pin.sh 2>/dev/null || echo 'see .bun-version'); for the webui TS/JS lint)" >&2; \
 	  exit 127; \
 	}
+
+# Contributor entry point: the targets a human is expected to run day to day.
+help:
+	@echo "zdtd contributor targets (see README Build + CONTRIBUTING.md):"
+	@echo "  make / make build              Debug binary → zig-out/bin/zdtd"
+	@echo "  make test                      full unit + scenario suite"
+	@echo "  make test-one FILTER='name'    one substring filter (edit-test loop)"
+	@echo "  make fuzz                      fuzz entry (also part of make check)"
+	@echo "  make lint                      fmt check, shellcheck, architecture, docs, webui"
+	@echo "  make fmt                       zig fmt write"
+	@echo "  make check                     full local gate (same intent as CI validate)"
+	@echo "  make check-clean-build         cold-cache exe build (catch stale-cache misses)"
+	@echo "  make release                   stripped linux-x86_64 ReleaseSafe + sidecars"
+	@echo "  make smoke                     release + scripts/smoke-release.sh (CI release smoke)"
+	@echo "  make smoke-modlet              fixture modlet boot smoke"
+	@echo "  make repro                     byte-identical release rebuild (tag CI only)"
+	@echo "  make webui-ts                  regenerate committed webui pages from TS"
+	@echo "  make plugins                   rebuild committed plugin .wasm from source"
+	@echo "  make docs-catalogs             regenerate docs/catalogs from source"
+	@echo "  make clean                     zig-out, .zig-cache, .zdtd_cfg_cache"
+	@echo "Toolchain: Zig from .zigversion; Bun from .bun-version; override with make ZIG=..."
 
 lint-webui: need-oxlint need-python3
 	bash scripts/lint-webui.sh
@@ -95,6 +119,17 @@ check-clean-build: need-zig
 
 test: need-zig
 	$(ZIG) build test -Doptimize=$(OPTIMIZE)
+
+# Focused edit-test loop. FILTER is a substring of the test name (same as
+# `zig build test -Dtest-filter=...`). Still runs CLI checks and shared
+# plugin-helper tests. For several substrings, call zig directly with repeated
+# -Dtest-filter flags. Run unfiltered `make test` before relying on coverage.
+test-one: need-zig
+	@test -n "$(FILTER)" || { \
+	  echo "zdtd: make test-one requires FILTER='substring' (example: make test-one FILTER='frame roundtrip')" >&2; \
+	  exit 2; \
+	}
+	$(ZIG) build test -Doptimize=$(OPTIMIZE) -Dtest-filter='$(FILTER)' --summary all
 
 fuzz: need-zig
 	$(ZIG) build fuzz -Doptimize=$(OPTIMIZE)

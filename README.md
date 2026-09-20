@@ -102,8 +102,9 @@ thin POSIX calls contained in `src/util/` (see
 [`docs/STD_ABSTRACTIONS.md`](docs/STD_ABSTRACTIONS.md)). Canonical validation
 and release builds use the exact compiler in `.zigversion`; `make check`
 enforces that pin. For `make check`, also provide Python 3.10+, `rg` (ripgrep),
-ShellCheck, Bun (`bun` and `bunx`; CI uses 1.4.2), Node.js (oxlint's plugin
-host), Java (CI uses JRE 21), curl, tar/gzip, and standard GNU shell utilities.
+ShellCheck, Bun (`bun` and `bunx`; pin in [`.bun-version`](.bun-version), same
+file CI installs via `scripts/bun-pin.sh`), Node.js (oxlint's plugin host),
+Java (CI uses JRE 21), curl, tar/gzip, and standard GNU shell utilities.
 If Clang is installed, the plugin gate also rebuilds C fixtures and addons;
 it needs the Wasm target and `wasm-ld`. `make release` requires `sha256sum`.
 
@@ -119,6 +120,7 @@ fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 
 ```bash
 cd zdtd-server
+make help            # list day-to-day contributor targets
 make                 # Debug binary → zig-out/bin/zdtd
 make test
 make check           # pin + lint + provenance/XML audits + build + test + fuzz (serial; safe under -j)
@@ -126,17 +128,18 @@ make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licen
 # or: zig build / zig build test (dev builds use the native host target)
 ```
 
-For a focused edit-test loop, use the existing substring filter (repeat
-`-Dtest-filter` to select several names):
+For a focused edit-test loop, use a substring filter (Makefile wrapper or
+repeated `-Dtest-filter` to select several names):
 
 ```bash
-zig build test -Dtest-filter='frame roundtrip pos body size' --summary all
+make test-one FILTER='frame roundtrip pos body size'
+# or: zig build test -Dtest-filter='frame roundtrip pos body size' --summary all
 ```
 
 This still runs the CLI checks and shared plugin-helper tests. Run unfiltered
 `make test` before relying on suite-wide coverage. Before a PR, `make check &&
 make smoke` reproduces CI's validation, release build, and release smoke steps;
-tag releases additionally run `make repro`.
+tag releases additionally run `make repro`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Layout
 
