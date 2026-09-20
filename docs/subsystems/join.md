@@ -136,7 +136,7 @@ logged and dropped before the gate (dispatch.zig:20-24).
 6. `RequestToSpawnPlayer` parses `chunkViewDim` (clamped to 8, c2s/join.zig:31)
    and the client's profile (c2s/join.zig:456), spawns or revives the sim player
    (c2s/join.zig:461-550), streams the spawn area before the bundle
-   (c2s/join.zig:563), then calls `sendJoinBundle` (c2s/join.zig:570).
+   (c2s/join.zig:552), then calls `sendJoinBundle` (c2s/join.zig:561).
 
 Two stock paths are deliberately unanswered: `DynamicClientArrive` after enter,
 where stock reconciles a dynamic mesh, is a no-op (c2s/join.zig:404-408), and
@@ -162,7 +162,7 @@ end with `WorldTime`, `GameStats`, blood-moon music when eligible, and `Weather`
 only on a re-bundle (game.zig:3024-3039).
 
 Must-deliver sends use `sendGameCritical` under a per-peer deadline armed by the
-caller (c2s/join.zig:251, c2s/join.zig:416, c2s/join.zig:568) with a 1 s budget,
+caller (c2s/join.zig:240, c2s/join.zig:407, c2s/join.zig:559) with a 1 s budget,
 bounding the worst case stall of the single tick thread rather than one join
 (types.zig:167-176). The synchronous spawn area is capped to the collision-mesh
 core, outer rings draining at `chunk_adds_per_stream_tick` per tick

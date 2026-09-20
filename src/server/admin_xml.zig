@@ -10,10 +10,10 @@
 //! AdminBlacklist.BannedUser.TryParse (unbandate DateTime) - pinned in
 //! 7dtd-engine-research docs/dedicated-misc-systems.md.
 //!
-//! Divergence: stock hot-reloads the file via a file watcher
-//! (InitFileWatcher -> OnFileChanged -> Load); zdtd applies it at startup,
-//! so a serveradmin.xml edit takes effect on restart. Tracked in the
-//! GAP_ANALYSIS bans row.
+//! Hot-reload: stock watches the file (InitFileWatcher -> OnFileChanged ->
+//! Load); zdtd polls mtime every 5 s in `tickServerAdminReload` and re-applies
+//! only the XML-sourced entries so an edit takes effect without a restart.
+//! The .zsv list files remain the runtime-persisted form.
 
 const std = @import("std");
 const xml = @import("../assets/xml_util.zig");

@@ -861,7 +861,7 @@ fn firePhaseActions(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef)
 }
 
 /// Current phase objective satisfied: advance to the next actionable phase, or
-/// finish at the highest phase. Mirrors Quest.AdvancePhase (asm.il 982816).
+/// finish at the highest phase. Mirrors Quest.AdvancePhase (asm.il 986686).
 fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
     // A completed ClearSleepers phase suppresses the quest POI's sleeper
     // volumes (stock QuestEvent_SleepersCleared removes the POI's sleeper

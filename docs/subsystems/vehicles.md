@@ -88,10 +88,10 @@ player receives their parked hulls as an `EntityWaypointList` with list type `Ve
 
 The client drives with a zdtd-shaped 13-byte body carried under the stock `NetPackageVehicleSpawn`
 name. The handler gates on that exact length, so a real stock body (entity type, position, rotation,
-ItemValue, placing entity) can never be decoded as this one (`src/server/c2s/misc.zig:1232-1233`,
-`src/wire/packages.zig:6104-6115`). The op byte selects enter, exit or drive, and only seat 0
-steers (`src/server/c2s/misc.zig:1236-1245`). The parser rejects non-finite throttle or steer values
-(`src/wire/packages.zig:6116-6127`):
+ItemValue, placing entity) can never be decoded as this one (`src/server/c2s/misc.zig:1247`,
+`src/wire/packages.zig:6103-6108`). The op byte selects enter, exit or drive, and only seat 0
+steers (`src/server/c2s/misc.zig:1251-1257`). The parser rejects non-finite throttle or steer values
+(`src/wire/packages.zig:6089`):
 
 ```zig
 pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, throttle: f32, steer: f32 } {
@@ -99,13 +99,13 @@ pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, t
 
 `NetPackageVehicleDataSync` is relayed, not applied: the sender must name its own entity, the named
 vehicle must be a live vehicle, and the sender must be that vehicle's driver, after which the opaque
-sync blob is forwarded to every other peer (`src/server/c2s/misc.zig:1221-1231`).
+sync blob is forwarded to every other peer (`src/server/c2s/misc.zig:1236-1244`).
 `NetPackageEntityAttach` is sender-gated the same way; a detach type resolves the hull from server
 state because the stock detach carries vehicle id `-1`, and an attach type resolves the claimed
-vehicle id before asking the sim for a seat (`src/server/c2s/misc.zig:1248-1265`).
+vehicle id before asking the sim for a seat (`src/server/c2s/misc.zig:1263-1265`).
 
 Drive physics is `rules.vehicle`, which is zdtd-owned because the stock dedicated server has no
-vehicle sim (`src/ecs/rules.zig:595-618`):
+vehicle sim (`src/ecs/rules.zig:598-618`):
 
 ```zig
 pub const Vehicle = struct {
@@ -119,11 +119,11 @@ pub const Vehicle = struct {
 
 `vehicleControl` requires a live vehicle with a seated driver, clamps speed to `max_speed` or the
 per-kind default when the XML value is missing, scales yaw by speed fraction and input, and burns
-fuel per block travelled for every kind except the bicycle (`src/ecs/systems.zig:3306-3333`). Kind
+fuel per block travelled for every kind except the bicycle (`src/ecs/systems.zig:3315-3333`). Kind
 defaults are the stock `velocityMax_turbo` first components: bicycle 6, minibike 7, motorcycle 9.8,
-4x4 10, gyrocopter 9 (`src/ecs/systems.zig:3292-3304`). `vehicleTickHeld` re-applies the last input
+4x4 10, gyrocopter 9 (`src/ecs/systems.zig:3305-3313`). `vehicleTickHeld` re-applies the last input
 every sim tick, because the stock client may send drive packages sparsely
-(`src/ecs/systems.zig:3335-3344`).
+(`src/ecs/systems.zig:3345-3354`).
 
 ## Sim tick
 

@@ -332,7 +332,7 @@ pub const QuestDef = struct {
     events: [max_quest_events]QuestEventSpec = [_]QuestEventSpec{.{}} ** max_quest_events,
     event_n: u8 = 0,
     /// Ordered phase graph (index i == phase i+1). Empty = legacy single-kind path
-    /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 982816).
+    /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 986686).
     phases: []const PhaseSpec = &.{},
     /// max objective `phase` attribute == phases.len; 0 = legacy. QuestClass.HighestPhase.
     highest_phase: u8 = 0,

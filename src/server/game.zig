@@ -434,7 +434,7 @@ pub const Game = struct {
     /// P4 guard policy switches (zdtd.toml [authority]). Default log-only.
     guard: guard_policy.Policy = .{},
     /// Ally relationships keyed on platform identity (stock AllyStore).
-    /// In-memory only: stock persists these, zdtd does not yet.
+    /// Persisted to `{world_dir}/allies.zal` across restarts.
     allies: ally_mod.Store = .{},
     /// Per-session party groups keyed on runtime entity id (stock PartyManager;
     /// RE parties-factions.md §2). Session only, thrown away on disband.

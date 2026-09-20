@@ -99,7 +99,7 @@ The materialize step is atomic, so a crash or full disk mid-write cannot corrupt
     });
 ```
 
-The rest of the surface is deliberate and narrow: `mkdirPath` (`:66`), `listFileNames` and `listDirNames`, both sorted so filesystem readdir order cannot leak into deterministic behaviour (`:101`, `:120`, `:132`), `readFileAll`/`readFileInto` (`:160`, `:169`), `fileExists`, `fileMtimeNanos`, `dirExists` (`:178`, `:190`, `:201`), `deleteFile`, `removeDirTree`, `readLinkAbsolute` (`:211`, `:224`, `:236`). The one tick-path call is the stock `serveradmin.xml` hot reload, which polls `fileMtimeNanos` every 100 ticks and re-applies the XML only when the stamp moves (`src/server/game/tick.zig:1805`, `:1810`, `:1812`). Nothing else opens a file per tick.
+The rest of the surface is deliberate and narrow: `mkdirPath` (`:66`), `listFileNames` and `listDirNames`, both sorted so filesystem readdir order cannot leak into deterministic behaviour (`:101`, `:120`, `:132`), `readFileAll`/`readFileInto` (`:160`, `:169`), `fileExists`, `fileMtimeNanos`, `dirExists` (`:178`, `:190`, `:201`), `deleteFile`, `removeDirTree`, `readLinkAbsolute` (`:211`, `:224`, `:236`). The one tick-path call is the stock `serveradmin.xml` hot reload, which polls `fileMtimeNanos` every 100 ticks and re-applies the XML only when the stamp moves (`src/server/game/tick.zig:2766`, `:2767`, `:2768`). Nothing else opens a file per tick.
 
 `entryKind` resolves unknown directory-entry types through directory-relative metadata without following symlinks (`src/util/io_fs.zig:244`). File/directory listings and prefab sign discovery use it so filesystems returning `DT_UNKNOWN` do not silently omit content; metadata errors propagate.
 

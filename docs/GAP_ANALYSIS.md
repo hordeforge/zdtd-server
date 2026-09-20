@@ -6134,7 +6134,7 @@ nobody re-opens a closed row from a stale one.
 | `docs/GAP_ANALYSIS.md:6471`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
 | `docs/STATUS.md:2784`: "Player death → respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
 | `docs/GAP_ANALYSIS.md:7221`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
-| `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
+| `src/ecs/quest.zig` comment: `Quest::AdvancePhase` at 982816 | CLOSED: comments now cite AdvancePhase ending at asm.il 986686 |
 | `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | CLOSED 2026-09-08. Was correct: StayWithin was missing (fell through to Base) and ObjectiveTime was unmapped. The enum now carries `time` and the XML mapping routes both `StayWithin` and `POIStayWithin` to the zero-byte shape |
 
 ### Method caveats that apply everywhere
@@ -6163,7 +6163,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 
 | Item | Status | Notes |
 |---|---|---|
-| UDP bind / poll | HAVE | `litenet/linux_udp.zig` |
+| UDP bind / poll | HAVE | `litenet/udp_socket.zig` |
 | ConnectRequest/Accept (game ordinals) | HAVE | property ids match game LiteNet |
 | Reliable ordered channel | WORKS (2026-08-26 re-audit: window/retransmit + ACK-pumped multi-frag + the out-of-order reliable hold buffer for ordered delivery (peer.zig hold_len/hold_data, window-bounded) all ship - the 'ordered hold buffer deferred' residual was stale) |
 | Unreliable / sequenced channels | WORKS (2026-08-26 re-audit: the unreliable send path ships (sendUnreliable, Property.unreliable) with the high-frequency frames routed to it (PosAndRot/RelPosAndRot/Rotation/Speeds, droppable during play, retry budget on join); the chunk/map packages ride the sequenced channel 1) |

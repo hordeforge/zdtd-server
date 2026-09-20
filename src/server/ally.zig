@@ -1,7 +1,5 @@
 //! Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`).
 //!
-//! Ally relationships keyed on PlatformUserIdentifierAbs (stock `AllyStore`).
-//!
 //! Pure state + transition table over identities. No Game import: the caller
 //! decodes `NetPackageAllyRequest`, hands both identities here, and broadcasts
 //! the returned transition as `NetPackageAllyResponse`. Only the persist
