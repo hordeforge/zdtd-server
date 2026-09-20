@@ -726,27 +726,7 @@ fn evalHasBuff(r: Requirement, ctx: Ctx) Verdict {
 /// carries no tags, so any-of is false and all-of is vacuously true only for an
 /// empty tag list (a malformed row).
 fn evalHoldingItemHasTags(r: Requirement, ctx: Ctx) Verdict {
-    var matched = r.has_all; // any-of starts false, all-of starts true
-    const held = ctx.held_tags;
-    var seen = false;
-    var it = std.mem.splitScalar(u8, r.list, ',');
-    while (it.next()) |seg| {
-        const tag = std.mem.trim(u8, seg, " \t");
-        if (tag.len == 0) continue;
-        seen = true;
-        const hit = held.len > 0 and tagListHas(held, tag);
-        if (r.has_all) {
-            if (!hit) {
-                matched = false;
-                break;
-            }
-        } else if (hit) {
-            matched = true;
-            break;
-        }
-    }
-    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
-    return verdict(matched, r.negated);
+    return verdict(matchTagList(ctx.held_tags, r.list, r.has_all), r.negated);
 }
 
 /// `ItemHasTags::IsValid` (IL=43): same any-of/all-of match as HoldingItemHasTags,
@@ -756,51 +736,12 @@ fn evalHoldingItemHasTags(r: Requirement, ctx: Ctx) Verdict {
 /// row's list. The block-damage path supplies the damaged block's tags.
 fn evalTriggerHasTags(r: Requirement, ctx: Ctx) Verdict {
     const tags = ctx.trigger_tags orelse return .unsupported;
-    var matched = r.has_all; // any-of starts false, all-of starts true
-    var seen = false;
-    var it = std.mem.splitScalar(u8, r.list, ',');
-    while (it.next()) |seg| {
-        const tag = std.mem.trim(u8, seg, " \t");
-        if (tag.len == 0) continue;
-        seen = true;
-        const hit = tags.len > 0 and tagListHas(tags, tag);
-        if (r.has_all) {
-            if (!hit) {
-                matched = false;
-                break;
-            }
-        } else if (hit) {
-            matched = true;
-            break;
-        }
-    }
-    // Empty list: same as HoldingItemHasTags / ItemHasTags (any-of false, all-of true).
-    if (!seen) matched = r.has_all;
-    return verdict(matched, r.negated);
+    return verdict(matchTagList(tags, r.list, r.has_all), r.negated);
 }
 
 fn evalItemHasTags(r: Requirement, ctx: Ctx) Verdict {
     const tags = ctx.item_tags orelse return .unsupported;
-    var matched = r.has_all;
-    var seen = false;
-    var it = std.mem.splitScalar(u8, r.list, ',');
-    while (it.next()) |seg| {
-        const tag = std.mem.trim(u8, seg, " \t");
-        if (tag.len == 0) continue;
-        seen = true;
-        const hit = tags.len > 0 and tagListHas(tags, tag);
-        if (r.has_all) {
-            if (!hit) {
-                matched = false;
-                break;
-            }
-        } else if (hit) {
-            matched = true;
-            break;
-        }
-    }
-    if (!seen) matched = r.has_all;
-    return verdict(matched, r.negated);
+    return verdict(matchTagList(tags, r.list, r.has_all), r.negated);
 }
 
 /// `RequirementItemTier::IsValid` (IL=36): compares `params.ItemValue.Quality`
@@ -1210,26 +1151,7 @@ fn evalIsInstigator(r: Requirement, ctx: Ctx) Verdict {
 /// with no movement state refuses rather than guessing a tag.
 fn evalEntityHasMovementTag(r: Requirement, ctx: Ctx) Verdict {
     const tags = ctx.movement_tags orelse return .unsupported;
-    var matched = r.has_all; // any-of starts false, all-of starts true
-    var seen = false;
-    var it = std.mem.splitScalar(u8, r.list, ',');
-    while (it.next()) |seg| {
-        const tag = std.mem.trim(u8, seg, " \t");
-        if (tag.len == 0) continue;
-        seen = true;
-        const hit = tags.len > 0 and tagListHas(tags, tag);
-        if (r.has_all) {
-            if (!hit) {
-                matched = false;
-                break;
-            }
-        } else if (hit) {
-            matched = true;
-            break;
-        }
-    }
-    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
-    return verdict(matched, r.negated);
+    return verdict(matchTagList(tags, r.list, r.has_all), r.negated);
 }
 
 /// `EntityTagCompare::IsValid` IL=43: `target.HasAnyTags` (any-of) or
@@ -1238,26 +1160,7 @@ fn evalEntityHasMovementTag(r: Requirement, ctx: Ctx) Verdict {
 /// dispatch (the tick ctx carries one entity).
 fn evalEntityTagCompare(r: Requirement, ctx: Ctx) Verdict {
     const entity_tags = ctx.entity_tags orelse return .unsupported;
-    var matched = r.has_all; // any-of starts false, all-of starts true
-    var seen = false;
-    var it = std.mem.splitScalar(u8, r.list, ',');
-    while (it.next()) |seg| {
-        const tag = std.mem.trim(u8, seg, " \t");
-        if (tag.len == 0) continue;
-        seen = true;
-        const hit = entity_tags.len > 0 and tagListHas(entity_tags, tag);
-        if (r.has_all) {
-            if (!hit) {
-                matched = false;
-                break;
-            }
-        } else if (hit) {
-            matched = true;
-            break;
-        }
-    }
-    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
-    return verdict(matched, r.negated);
+    return verdict(matchTagList(entity_tags, r.list, r.has_all), r.negated);
 }
 
 /// `WornItems::IsValid` IL=54: `compareValues(count, op, value)` where `count`
@@ -1386,6 +1289,31 @@ fn tagListHas(list: []const u8, tag: []const u8) bool {
         if (std.mem.eql(u8, std.mem.trim(u8, seg, " \t"), tag)) return true;
     }
     return false;
+}
+
+/// Any-of / all-of match of `needle_list` (comma tags) against `haystack`.
+/// Empty needle list: any-of false, all-of true (stock empty-list rule).
+fn matchTagList(haystack: []const u8, needle_list: []const u8, has_all: bool) bool {
+    var matched = has_all;
+    var seen = false;
+    var it = std.mem.splitScalar(u8, needle_list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = haystack.len > 0 and tagListHas(haystack, tag);
+        if (has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    if (!seen) matched = has_all;
+    return matched;
 }
 
 /// A leaf gate, counted once per evaluated requirement. A group node counts its

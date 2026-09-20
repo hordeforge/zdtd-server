@@ -153,6 +153,57 @@ fn rollChaseDay(def: EntityClass, x: f32, z: f32) f32 {
     return out;
 }
 
+/// Copy resolved EntityClass stats onto a live entity ClassId (A35). Keeps
+/// `id` (kind-default or table index). Rolls day chase once via rollChaseDay.
+/// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
+fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void {
+    cid.hash = def.hash;
+    cid.loot_list = def.loot_list;
+    cid.drop_prob = def.drop_prob;
+    cid.time_stay = def.time_stay;
+    cid.chase_speed = def.chase_speed;
+    cid.chase_speed_day = rollChaseDay(def, x, z);
+    cid.wander_speed = def.wander_speed;
+    cid.wander_speed_night = def.wander_speed_night;
+    cid.move_speed_rand_min = def.move_speed_rand_min;
+    cid.move_speed_rand_max = def.move_speed_rand_max;
+    cid.attack_damage = def.attack_damage;
+    cid.phys_resist = def.phys_resist;
+    cid.block_chew = def.block_chew;
+    cid.melee_range = def.melee_range;
+    cid.sight_range = def.sight_range;
+    cid.hurt_target_classes = def.hurt_target_classes;
+    cid.block_if_alert_only = def.block_if_alert_only;
+    cid.target_player_see = def.target_player_see;
+    cid.target_player_hear = def.target_player_hear;
+    cid.sight_light_min = def.sight_light_min;
+    cid.sight_light_max = def.sight_light_max;
+    cid.sleeper_wake_near_min = def.sleeper_wake_near_min;
+    cid.sleeper_wake_near_max = def.sleeper_wake_near_max;
+    cid.sleeper_wake_far_min = def.sleeper_wake_far_min;
+    cid.sleeper_wake_far_max = def.sleeper_wake_far_max;
+    cid.view_angle_deg = def.view_angle_deg;
+    cid.is_enemy = def.is_enemy;
+    cid.ai_attack = def.ai_attack;
+    cid.ai_tasks = def.ai_tasks;
+    cid.xp_gain = def.xp_gain;
+    cid.explode_threshold = def.explode_threshold;
+    cid.explode_delay_s = def.explode_delay_s;
+    cid.explosion_radius = def.explosion_radius;
+    cid.explosion_radius_e = def.explosion_radius_e;
+    cid.explosion_block_dmg = def.explosion_block_dmg;
+    cid.explosion_entity_dmg = def.explosion_entity_dmg;
+    cid.explosion_bonus_cat = def.explosion_bonus_cat;
+    cid.explosion_bonus_mult = def.explosion_bonus_mult;
+    cid.explosion_bonus_n = def.explosion_bonus_n;
+    cid.dismember_head = def.dismember_head;
+    cid.dismember_arms = def.dismember_arms;
+    cid.dismember_legs = def.dismember_legs;
+    cid.leg_cripple_scale = def.leg_cripple_scale;
+    cid.leg_crawler_threshold = def.leg_crawler_threshold;
+    cid.bonus_loot = false;
+}
+
 pub const EntityClass = struct {
     /// Class name for logging/debug. Must point to static/indefinite-lifetime
     /// data (comptime literal or binary-embedded table). Never assign an
@@ -1242,48 +1293,7 @@ pub const World = struct {
     pub fn spawnZombieDef(self: *World, x: f32, y: f32, z: f32, hp: f32, def: EntityClass) ?NetId {
         const id = self.spawnZombie(x, y, z, hp) orelse return null;
         if (self.slotOfNetId(id)) |s| {
-            self.class_id[s].hash = def.hash;
-            self.class_id[s].loot_list = def.loot_list;
-            self.class_id[s].drop_prob = def.drop_prob;
-            self.class_id[s].time_stay = def.time_stay;
-            self.class_id[s].chase_speed = def.chase_speed;
-            self.class_id[s].chase_speed_day = rollChaseDay(def, x, z);
-            self.class_id[s].wander_speed = def.wander_speed;
-            self.class_id[s].wander_speed_night = def.wander_speed_night;
-            self.class_id[s].attack_damage = def.attack_damage;
-            self.class_id[s].phys_resist = def.phys_resist;
-            self.class_id[s].block_chew = def.block_chew;
-            self.class_id[s].melee_range = def.melee_range;
-            self.class_id[s].sight_range = def.sight_range;
-            self.class_id[s].hurt_target_classes = def.hurt_target_classes;
-            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
-            self.class_id[s].target_player_see = def.target_player_see;
-            self.class_id[s].target_player_hear = def.target_player_hear;
-            self.class_id[s].sight_light_min = def.sight_light_min;
-            self.class_id[s].sight_light_max = def.sight_light_max;
-            self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
-            self.class_id[s].sleeper_wake_near_max = def.sleeper_wake_near_max;
-            self.class_id[s].sleeper_wake_far_min = def.sleeper_wake_far_min;
-            self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
-            self.class_id[s].is_enemy = def.is_enemy;
-            self.class_id[s].ai_attack = def.ai_attack;
-            self.class_id[s].ai_tasks = def.ai_tasks;
-            self.class_id[s].xp_gain = def.xp_gain;
-            self.class_id[s].explode_threshold = def.explode_threshold;
-            self.class_id[s].explode_delay_s = def.explode_delay_s;
-            self.class_id[s].explosion_radius = def.explosion_radius;
-            self.class_id[s].explosion_radius_e = def.explosion_radius_e;
-            self.class_id[s].explosion_block_dmg = def.explosion_block_dmg;
-            self.class_id[s].explosion_entity_dmg = def.explosion_entity_dmg;
-            self.class_id[s].explosion_bonus_cat = def.explosion_bonus_cat;
-            self.class_id[s].explosion_bonus_mult = def.explosion_bonus_mult;
-            self.class_id[s].explosion_bonus_n = def.explosion_bonus_n;
-            self.class_id[s].dismember_head = def.dismember_head;
-            self.class_id[s].dismember_arms = def.dismember_arms;
-            self.class_id[s].dismember_legs = def.dismember_legs;
-            self.class_id[s].leg_cripple_scale = def.leg_cripple_scale;
-            self.class_id[s].leg_crawler_threshold = def.leg_crawler_threshold;
-            self.class_id[s].bonus_loot = false;
+            applyEntityClassStats(&self.class_id[s], def, x, z);
         }
         return id;
     }
@@ -1343,31 +1353,7 @@ pub const World = struct {
     pub fn spawnAnimalDef(self: *World, x: f32, y: f32, z: f32, def: EntityClass) ?NetId {
         const id = self.spawnAnimal(x, y, z, def.max_hp, def.hash, def.loot_list) orelse return null;
         if (self.slotOfNetId(id)) |s| {
-            self.class_id[s].drop_prob = def.drop_prob;
-            self.class_id[s].time_stay = def.time_stay;
-            self.class_id[s].chase_speed = def.chase_speed;
-            self.class_id[s].chase_speed_day = rollChaseDay(def, x, z);
-            self.class_id[s].wander_speed = def.wander_speed;
-            self.class_id[s].wander_speed_night = def.wander_speed_night;
-            self.class_id[s].attack_damage = def.attack_damage;
-            self.class_id[s].block_chew = def.block_chew;
-            self.class_id[s].phys_resist = def.phys_resist;
-            self.class_id[s].melee_range = def.melee_range;
-            self.class_id[s].sight_range = def.sight_range;
-            self.class_id[s].hurt_target_classes = def.hurt_target_classes;
-            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
-            self.class_id[s].target_player_see = def.target_player_see;
-            self.class_id[s].target_player_hear = def.target_player_hear;
-            self.class_id[s].sight_light_min = def.sight_light_min;
-            self.class_id[s].sight_light_max = def.sight_light_max;
-            self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
-            self.class_id[s].sleeper_wake_near_max = def.sleeper_wake_near_max;
-            self.class_id[s].sleeper_wake_far_min = def.sleeper_wake_far_min;
-            self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
-            self.class_id[s].is_enemy = def.is_enemy;
-            self.class_id[s].ai_attack = def.ai_attack;
-            self.class_id[s].ai_tasks = def.ai_tasks;
-            self.class_id[s].xp_gain = def.xp_gain;
+            applyEntityClassStats(&self.class_id[s], def, x, z);
         }
         return id;
     }
@@ -2443,6 +2429,44 @@ test "MoveSpeedRand rolls the day chase per entity, deterministically" {
         .move_speed_rand_max = 0.25,
     }).?;
     try std.testing.expectEqual(@as(f32, 1.2), w.class_id[w.slotOfNetId(dog).?].chase_speed_day);
+}
+
+test "spawn*Def copies MaxViewAngle and explosion stats onto the entity" {
+    // A35: class_table index stays the kind default; per-entity ClassId fields
+    // must carry MaxViewAngle / ExplosionData so sense and demolition read them.
+    var w: World = .{};
+    defer w.deinit();
+    const zdef = EntityClass{
+        .name = "zombieCop",
+        .hash = 7,
+        .kind = .zombie,
+        .view_angle_deg = 90,
+        .explode_threshold = 0.75,
+        .explode_delay_s = 0.5,
+        .explosion_radius = 5,
+        .dismember_head = 1.5,
+    };
+    const z = w.spawnZombieDef(0, 70, 0, 40, zdef).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expectEqual(@as(f32, 90), w.class_id[zs].view_angle_deg);
+    try std.testing.expectEqual(@as(f32, 0.75), w.class_id[zs].explode_threshold);
+    try std.testing.expectEqual(@as(f32, 5), w.class_id[zs].explosion_radius);
+    try std.testing.expectEqual(@as(f32, 1.5), w.class_id[zs].dismember_head);
+
+    const adef = EntityClass{
+        .name = "animalWolf",
+        .hash = 9,
+        .kind = .animal,
+        .view_angle_deg = 120,
+        .explode_threshold = 0.5,
+        .dismember_legs = 2,
+        .is_enemy = true,
+    };
+    const a = w.spawnAnimalDef(1, 70, 1, adef).?;
+    const aslot = w.slotOfNetId(a).?;
+    try std.testing.expectEqual(@as(f32, 120), w.class_id[aslot].view_angle_deg);
+    try std.testing.expectEqual(@as(f32, 0.5), w.class_id[aslot].explode_threshold);
+    try std.testing.expectEqual(@as(f32, 2), w.class_id[aslot].dismember_legs);
 }
 
 test "beginTick clears locals" {

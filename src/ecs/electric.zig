@@ -272,8 +272,11 @@ pub const PowerGrid = struct {
                 self.next_id = cand + 1;
                 break :blk cand;
             }
+            // node_n < max_nodes and ids are unique ⇒ a free id exists in
+            // [0, max_nodes]. Bound the scan so a broken invariant cannot spin.
             var i: u16 = 0;
-            while (true) : (i +%= 1) {
+            const scan_cap: u16 = @intCast(max_nodes + 1);
+            while (i < scan_cap) : (i += 1) {
                 var held = false;
                 for (self.nodes[0..self.node_n]) |n| {
                     if (n.id == i) {
@@ -283,6 +286,7 @@ pub const PowerGrid = struct {
                 }
                 if (!held) break :blk i;
             }
+            @panic("power grid free id exhausted");
         };
         // Fuel/capacity/burn left 0 unless caller applies stock props (powerblocks.Resolved).
         self.nodes[self.node_n] = .{
