@@ -698,15 +698,28 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
 /// around the player (quests.xml: chance 0.25, 1-3 SleeperGSList enemies).
 /// Deterministic per (world time, quest code, step); the Game spawn hook owns
 /// the gamestage resolution.
+///
+/// Idempotent against redelivery: the same world-time report is dropped, and
+/// steps are capped at stock `DefaultTreasureRadius` (9) so a spammy client
+/// cannot unbounded-spawn ambushes for one dig.
 fn questTreasureRadiusBreak(self: *Game, peer_slot: usize, quest_code: i32) void {
     const s = systems.questFindByCode(&self.sim, peer_slot, quest_code) orelse return;
     const d = self.sim.catalog.byId(s.def_id) orelse return;
+    const wt = self.sim.director.clock.worldTimeBits();
+    // Same world-time redelivery (client retry before the clock advances).
+    if (s.treasure_radius_steps > 0 and s.last_treasure_radius_wt == wt) return;
+    // Stock ObjectiveTreasureChest ctor (~982843): DefaultTreasureRadius = 9,
+    // blocksPerReduction = 1.
+    const max_treasure_radius_steps: u8 = 9;
+    if (s.treasure_radius_steps >= max_treasure_radius_steps) return;
+    s.treasure_radius_steps += 1;
+    s.last_treasure_radius_wt = wt;
     var i: usize = 0;
     while (i < @min(@as(usize, d.event_n), ecs.quest.max_quest_events)) : (i += 1) {
         const ev = d.events[i];
         if (ev.spawn_list.len == 0) continue;
         var rng = rng_util.XorShift32.initFromNetId(
-            @bitCast(@as(u32, @truncate(self.sim.director.clock.worldTimeBits())) ^ @as(u32, @bitCast(quest_code))),
+            @bitCast(@as(u32, @truncate(wt)) ^ @as(u32, @bitCast(quest_code)) ^ (@as(u32, s.treasure_radius_steps) << 16)),
         );
         const roll = @as(f32, @floatFromInt(rng.nextBounded(1000))) / 1000.0;
         if (ev.chance > 0 and roll >= ev.chance) continue;

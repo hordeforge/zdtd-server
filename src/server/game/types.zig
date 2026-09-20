@@ -582,6 +582,12 @@ pub const Client = struct {
     /// onSelfEnteredGame fired for this client (stock fires it when the player
     /// entity enters the game; the buff catalog's check buffs carry the rows).
     entered_game_fired: bool = false,
+    /// Same-tick dedup for gameevent sequences that SpawnEntity: a redelivered
+    /// NetPackageGameEventRequest (or a second CallGameEvent in the same tick)
+    /// must not spawn another horde. Hash is of the sequence name; tick is
+    /// Game.tick_n. Bounded to one name per tick (no growing ledger).
+    last_spawn_seq_tick: u64 = std.math.maxInt(u64),
+    last_spawn_seq_hash: u64 = 0,
     /// Per-player blood-moon-music eligibility edge state (stock
     /// EntityPlayer.bloodMoonParty): the horde music plays while the player's
     /// own party's horde is alive, not for every player on a multi-party

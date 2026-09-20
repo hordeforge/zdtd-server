@@ -5705,6 +5705,10 @@ test "church-bell ring spawns the aggressive horde" {
     try std.testing.expect(seq.supported);
     _ = g.runGameEventSequence(cl.slot, "block_bell_spawn");
     try std.testing.expect(g.sim.countKind(.zombie) > before);
+    // Same-tick re-run must not spawn a second horde.
+    const after_first = g.sim.countKind(.zombie);
+    try std.testing.expect(!g.runGameEventSequence(cl.slot, "block_bell_spawn"));
+    try std.testing.expectEqual(after_first, g.sim.countKind(.zombie));
 }
 
 test "heal-health cvar add heals per update" {

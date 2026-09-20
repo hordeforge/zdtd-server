@@ -59,6 +59,25 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
     // Sequence-level RandomRoll (church-bell LTE 99): fail closed means the
     // sequence does not run, not that the server errors.
     if (seq.has_random_roll and !sequenceRollHolds(self, ps, seq)) return false;
+    // SpawnEntity is not naturally idempotent: a redelivered request or a
+    // buff CallGameEvent that already fired this tick must not spawn again.
+    // Dedup is per (peer, sequence name, tick) so a later tick can still ring
+    // the bell; the state is two scalars on Client (no growing ledger).
+    var spawns = false;
+    for (seq.actions) |a| {
+        if (a.class == .spawn_entity) {
+            spawns = true;
+            break;
+        }
+    }
+    if (spawns) {
+        if (peer_slot >= self.clients.len) return false;
+        const cl = &self.clients[peer_slot];
+        const name_hash = std.hash.Wyhash.hash(0, name);
+        if (cl.last_spawn_seq_tick == self.tick_n and cl.last_spawn_seq_hash == name_hash) return false;
+        cl.last_spawn_seq_tick = self.tick_n;
+        cl.last_spawn_seq_hash = name_hash;
+    }
     // Client legs ride one ClientSequenceAction response each, keyed
     // `Name<index>` off the parsed order (SetActionKeyData), which is how stock
     // hands the work back to the client that asked for the sequence

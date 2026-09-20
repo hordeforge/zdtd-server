@@ -890,6 +890,7 @@ fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef
 fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: quest.PhaseKind, n: u16) void {
     if (d.objectives.len > 0) {
         var advanced = false;
+        var newly: bool = false;
         for (d.objectives, 0..) |o, i| {
             if (o.kind != kind) continue;
             if (o.phase != s.phase and o.phase != 0) continue;
@@ -906,10 +907,15 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
                     if (live > 0) req = live;
                 }
             }
-            s.obj_progress[i] = @min(@as(u16, s.obj_progress[i]) +| n, req);
+            const before = s.obj_progress[i];
+            s.obj_progress[i] = @min(before +| n, req);
+            if (s.obj_progress[i] > before) newly = true;
             advanced = true;
         }
         if (!advanced) return;
+        // Already at req for this kind: a redelivered client objective event
+        // must not re-run advancePhaseGraph (phase-entry SpawnGSEnemy, etc.).
+        if (!newly) return;
         // Mirror the old single-progress semantics for the wire/tests: the
         // advancing phase objective's progress.
         var max_p: u16 = 0;
@@ -938,6 +944,9 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
     }
     const spec = currentPhaseSpec(d, s) orelse return;
     if (spec.kind != kind) return;
+    // Same redelivery guard as the objective path: do not re-finish a phase
+    // whose progress already met required.
+    if (s.progress >= spec.required) return;
     s.progress +|= n;
     if (s.progress >= spec.required) advancePhaseGraph(w, ps, s, d);
 }
@@ -5456,6 +5465,41 @@ test "rally phase blocks until the marker is activated" {
     try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code));
     try std.testing.expectEqual(@as(u8, 2), s.phase);
     try std.testing.expectEqual(@as(u16, 0), s.progress);
+}
+
+test "questObjectiveEvent redelivery does not re-finish a completed phase" {
+    // Client NetPackageQuestObjectiveUpdate can arrive twice for the same
+    // activation; the second must not re-run finishPhaseGraph / completeQuest.
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .block_activate, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 55,
+        .kind = .block_activate,
+        .title = "Activate",
+        .target_count = 1,
+        .reward_coin = 10,
+        .phases = &phases,
+        .highest_phase = 1,
+        .turn_in = true,
+    }};
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &defs, .starter_id = 55, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 55));
+    const s = questFindActive(&w, 0, 55).?;
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    try std.testing.expect(questObjectiveEvent(&w, 0, s.quest_code, .block_activate));
+    try std.testing.expect(s.ready_turn_in);
+    try std.testing.expectEqual(@as(u16, 1), s.progress);
+    // Redelivery: progress already met required, so bumpPhase returns without
+    // touching the ring or re-entering finishPhaseGraph.
+    const completed_before = w.completed_quests_n;
+    try std.testing.expect(questObjectiveEvent(&w, 0, s.quest_code, .block_activate));
+    try std.testing.expectEqual(completed_before, w.completed_quests_n);
+    try std.testing.expect(s.ready_turn_in);
+    try std.testing.expectEqual(@as(u16, 1), s.progress);
 }
 
 test "rally phase stays scaffolding without a poi rect" {

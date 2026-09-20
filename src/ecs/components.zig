@@ -660,6 +660,14 @@ pub const QuestProgress = struct {
     /// Stock Quest.RallyMarkerActivated (asm.il 989046): the marker block is
     /// spent for this quest and BlockRallyMarker stops offering activation.
     rally_activated: bool = false,
+    /// Treasure dig radius reductions already processed for this quest.
+    /// Stock `ObjectiveTreasureChest` starts at `DefaultTreasureRadius = 9`
+    /// with `blocksPerReduction = 1` (quests-challenges.md ~982843), so a
+    /// quest can fire at most that many `TreasureRadiusReduction` ambushes.
+    treasure_radius_steps: u8 = 0,
+    /// World-time bits of the last accepted `treasure_radius_break`. A
+    /// redelivered report at the same world time must not spawn again.
+    last_treasure_radius_wt: u64 = 0,
     /// POI this quest instance runs in; unset (zero size) for quests the server
     /// could not place, which keeps their rally objectives as scaffolding.
     poi: PoiRect = .{},

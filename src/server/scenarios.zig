@@ -8738,6 +8738,11 @@ test "scenario treasure radius break fires the quest TreasureRadiusReduction amb
     try std.testing.expectEqual(@as(f32, 33), call.pz);
     // The event is an ambush, not a phase advance: quest stays active.
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, d.id));
+    // Redelivery at the same world time must not fire a second ambush.
+    call.fired = false;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", ub));
+    try std.testing.expect(!call.fired);
+    try std.testing.expectEqual(@as(u8, 1), fq.treasure_radius_steps);
     std.debug.print("PASS treasure-radius-break: TreasureRadiusReduction ambush fired 1-3 SleeperGSList at ({d},{d})\n", .{ call.px, call.pz });
 }
 
