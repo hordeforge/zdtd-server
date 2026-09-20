@@ -148,6 +148,23 @@ fi
 # version, and the changelog must already contain that version's section.
 # Explicit -l + pattern so we never enter create-tag mode on odd git versions.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  # docs/RELEASES.md must name the newest product tag as the latest release.
+  # v0.* only: v3.1.0 is a stock-wire alias (same commit as v0.1.1), not a
+  # product release, and would otherwise sort ahead of every 0.x tag.
+  latest_product_tag=$(git tag -l 'v0.*' --sort=-v:refname 2>/dev/null | head -n1 || true)
+  if [[ -n "$latest_product_tag" ]]; then
+    # Soft-wrapped prose may split the sentence across lines; match on
+    # collapsed whitespace.
+    releases_prose=$(tr '\n' ' ' < docs/RELEASES.md)
+    if [[ "$releases_prose" != *"\`${latest_product_tag}\` is the latest release"* ]]; then
+      echo "release-check: docs/RELEASES.md must say \`${latest_product_tag}\` is the latest release" >&2
+      exit 1
+    fi
+    if [[ "$releases_prose" != *"Product tags:"*"\`${latest_product_tag}\`"* ]]; then
+      echo "release-check: docs/RELEASES.md product tags list must include \`${latest_product_tag}\`" >&2
+      exit 1
+    fi
+  fi
   # Prefer annotated/lightweight tags that point exactly at HEAD.
   mapfile -t head_tags < <(git tag -l 'v*' --points-at HEAD 2>/dev/null || true)
   if ((${#head_tags[@]} > 1)); then

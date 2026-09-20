@@ -5,6 +5,22 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Hitting a church bell with the Duke note spawns the stock horde.** Block
+  `Tags`, `TriggerHasTags`, and `onSelfDamagedBlock` now feed the
+  `block_bell_spawn` game-event sequence; `SpawnEntity` and the sequence
+  `RandomRoll` gate run so a `churchBell` damage with `buffDukeNote` present
+  spawns the aggressive sleeper list the way stock does.
+
+### Fixed
+
+- **Offline wire captures stay byte-stable under DST.** Pre-auth challenge
+  Guids used OS entropy even when the sim seed was fixed, so the same run
+  seed produced divergent challenge bytes on every capture. Under DST the
+  challenge is filled from the run seed + slot + peer id; production still
+  uses the CSPRNG.
+
 ## [0.6.0] - 2026-09-20
 
 ### Breaking changes
