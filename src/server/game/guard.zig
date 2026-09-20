@@ -8,6 +8,19 @@ const evidence_mod = @import("../evidence.zig");
 const guard_policy = @import("../guard_policy.zig");
 const packages = @import("../../wire/packages.zig");
 
+/// True when (px,py,pz) is within `max_edit_range` of (bx,by,bz). Single
+/// reach predicate shared by reject-and-count and silent gate callers.
+pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
+    return editRangeDistanceSq(px, py, pz, bx, by, bz) <= self.max_edit_range * self.max_edit_range;
+}
+
+fn editRangeDistanceSq(px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) f32 {
+    const dx = px - bx;
+    const dy = py - by;
+    const dz = pz - bz;
+    return dx * dx + dy * dy + dz * dz;
+}
+
 /// One edit-range policy: reach check, bounds counter, and evidence record.
 /// True means the action is out of range and the caller must drop it.
 pub fn rejectIfBeyondEditRange(
@@ -23,10 +36,7 @@ pub fn rejectIfBeyondEditRange(
     by: f32,
     bz: f32,
 ) bool {
-    const dx = px - bx;
-    const dy = py - by;
-    const dz = pz - bz;
-    const d2 = dx * dx + dy * dy + dz * dz;
+    const d2 = editRangeDistanceSq(px, py, pz, bx, by, bz);
     if (d2 <= self.max_edit_range * self.max_edit_range) return false;
     self.harness.counters.inc(.bounds_rejects);
     noteEvidence(self, c, peer_local, entity_id, .bounds, .strong, surf, @sqrt(d2), self.max_edit_range);

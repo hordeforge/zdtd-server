@@ -232,11 +232,7 @@ pub const Table = struct {
     }
 
     pub fn deinit(self: *Table) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = .{};
     }
 

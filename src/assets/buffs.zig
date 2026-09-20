@@ -332,14 +332,10 @@ pub const Table = struct {
     }
 
     pub fn deinit(self: *Table) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            self.defs = &.{};
-            self.passive_pool = &.{};
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        self.defs = &.{};
+        self.passive_pool = &.{};
+        arena_util.destroyHolder(&self.arena_ptr);
+
         self.* = .{};
     }
 

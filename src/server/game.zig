@@ -46,7 +46,6 @@ const game_rate_limits = @import("game/rate_limits.zig");
 const game_blockmeta = @import("game/blockmeta.zig");
 const game_clock_persist = @import("game/clock_persist.zig");
 const game_locks = @import("game/locks.zig");
-const game_bans = @import("game/bans.zig");
 const game_trader_wire = @import("game/trader_wire.zig");
 const game_send_extra = @import("game/send_extra.zig");
 const game_rescue = @import("game/rescue.zig");
@@ -2343,7 +2342,7 @@ pub const Game = struct {
     }
 
     pub fn isBanned(self: *const Game, ip: u32) bool {
-        return game_bans.isBanned(self, ip);
+        return game_net.isBanned(self, ip);
     }
 
     pub fn banIp(self: *Game, ip: u32) void {
@@ -2617,7 +2616,7 @@ pub const Game = struct {
         return game_rescue.rescueDeepVoid(self, peer, entity_id, x, y, z, do_teleport);
     }
     pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
-        return game_rescue.withinEditReach(self, px, py, pz, bx, by, bz);
+        return game_guard.withinEditReach(self, px, py, pz, bx, by, bz);
     }
 
     pub fn rejectIfBeyondEditRange(

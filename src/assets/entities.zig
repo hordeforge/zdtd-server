@@ -186,12 +186,7 @@ pub const EntityTable = struct {
     source: enum { builtin, xml } = .builtin,
 
     pub fn deinit(self: *EntityTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = builtin();
     }
 
@@ -1182,7 +1177,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         }
         try list.append(allocator, .{
             .name = name,
-            .hash = unity_hash.unityStringHash(name),
+            .hash = unity_hash.getStableHashCode(name),
             .tags = if (tags.len > 0) try arena.dupe(u8, tags) else "",
             .max_hp = max_hp,
             .kind = kind,
@@ -1283,8 +1278,8 @@ test "xml catalog without zombies does not fall back to builtin HP" {
 }
 
 test "unity hash matches known playerMale" {
-    try std.testing.expectEqual(unity_hash.class_player_male, unity_hash.unityStringHash("playerMale"));
-    try std.testing.expectEqual(unity_hash.class_zombie_boe, unity_hash.unityStringHash("zombieBoe"));
+    try std.testing.expectEqual(unity_hash.class_player_male, unity_hash.getStableHashCode("playerMale"));
+    try std.testing.expectEqual(unity_hash.class_zombie_boe, unity_hash.getStableHashCode("zombieBoe"));
 }
 
 test "load stock entityclasses when present" {

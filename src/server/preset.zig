@@ -6,6 +6,7 @@
 //! field via `[rules.*]` sections (ADR 0021 decision 3).
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const toml_bind = @import("../util/toml_bind.zig");
 const rules_mod = @import("../ecs/rules.zig");
@@ -103,12 +104,7 @@ pub const Preset = struct {
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Preset) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
     }
 };
 

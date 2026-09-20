@@ -511,6 +511,15 @@ pub fn peerIpKey(peer: *const ln_peer.Peer) u32 {
     };
 }
 
+pub fn isBanned(self: *const Game, ip: u32) bool {
+    if (ip == 0) return false;
+    var i: usize = 0;
+    while (i < self.ban_n) : (i += 1) {
+        if (self.ban_ip[i] == ip) return true;
+    }
+    return false;
+}
+
 pub fn banIp(self: *Game, ip: u32) void {
     if (ip == 0 or ip == 0x7f000001) return;
     for (self.ban_ip[0..self.ban_n]) |banned| if (banned == ip) return;

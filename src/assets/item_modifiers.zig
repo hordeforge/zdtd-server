@@ -17,6 +17,7 @@
 //! installable tags reject the attachment.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const xml = @import("xml_util.zig");
@@ -60,13 +61,9 @@ pub const ModTable = struct {
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *ModTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-            self.defs = &.{};
-        }
+        self.defs = &.{};
+        arena_util.destroyHolder(&self.arena_ptr);
+
     }
 
     pub fn byName(self: *const ModTable, name: []const u8) ?ModDef {

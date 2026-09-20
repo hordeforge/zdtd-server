@@ -27,11 +27,7 @@ pub const NpcTable = struct {
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *NpcTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = .{};
     }
 

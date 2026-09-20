@@ -3120,9 +3120,7 @@ test "inventory transaction request body is the compact zdtd order" {
 }
 
 /// Stock-compatible player inventory body (NetPackagePlayerInventory.write fields).
-pub fn buildInventoryBodyStock(buf: []u8, inv: *const components.Inventory) ![]u8 {
-    return stock_inv.buildFromEcs(buf, inv);
-}
+pub const buildInventoryBodyStock = stock_inv.buildFromEcs;
 
 /// NetPackagePlayerInventory (RE protocol-packages.md 5.4, write IL=107):
 /// `toolbelt` present bool (+ ItemStack[] if set) | `bag` present bool
@@ -3131,14 +3129,7 @@ pub fn buildInventoryBodyStock(buf: []u8, inv: *const components.Inventory) ![]u
 /// present bool (+ ItemStack). The body-inventory table shows the cosmetics
 /// list as a top-level field; the narrative places it inside the equipment
 /// block, which is where stock_inv.writeEquipment puts it.
-pub fn buildInventoryBodyStockResolved(
-    buf: []u8,
-    inv: *const components.Inventory,
-    resolve: ?stock_inv.TypeResolver,
-    ctx: ?*anyopaque,
-) ![]u8 {
-    return stock_inv.buildFromEcsResolved(buf, inv, resolve, ctx);
-}
+pub const buildInventoryBodyStockResolved = stock_inv.buildFromEcsResolved;
 
 /// NetPackageIdMapping body: name string + i32 len + bytes, matching
 /// `NetPackageIdMapping::write` (IL=18: `Write(String)`, `Write(Int32)`,
@@ -3179,15 +3170,7 @@ pub fn buildNameIdMappingPayload(buf: []u8, entries: []const IdMappingEntry) ![]
 /// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
 /// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
 /// u8. Body written by stock_inv.writeHoldingItem.
-pub fn buildHoldingBodyResolved(
-    buf: []u8,
-    entity_id: i32,
-    inv: *const components.Inventory,
-    resolve: ?stock_inv.TypeResolver,
-    ctx: ?*anyopaque,
-) ![]u8 {
-    return stock_inv.buildHoldingFromEcsResolved(buf, entity_id, inv, resolve, ctx);
-}
+pub const buildHoldingBodyResolved = stock_inv.buildHoldingFromEcsResolved;
 
 /// zdtd's own compact transaction request: op:u8 | a:u16 | b:u16 | qty:u16 |
 /// entity_id:i32. **Not the stock body.** Stock writes
@@ -4834,9 +4817,7 @@ pub const SpawnPointEntry = stock_entity.SpawnPointEntry;
 
 /// NetPackageWorldSpawnPoints body = SpawnPointList.Write (one stock shape).
 /// Per-point payload = 26 bytes (stock GetLength lies with count*20).
-pub fn buildWorldSpawnPoints(buf: []u8, points: []const stock_entity.SpawnPointEntry) ![]u8 {
-    return stock_entity.buildWorldSpawnPointsBody(buf, points);
-}
+pub const buildWorldSpawnPoints = stock_entity.buildWorldSpawnPointsBody;
 
 test "world spawn points stock wire" {
     var buf: [128]u8 = undefined;
@@ -5611,15 +5592,7 @@ pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
 /// NetPackageNPCQuestList, S2C FetchList with QuestPacketEntry offers (stock
 /// trader UI): npc i32 | player i32 | eventType u8 | tier i32 | entry count i32
 /// | count x QuestPacketEntry. Empty offers: pass `entries` as `&.{}`.
-pub fn buildNpcQuestListFetch(
-    buf: []u8,
-    npc_entity_id: i32,
-    player_entity_id: i32,
-    tier_level: i32,
-    entries: []const stock_quest.QuestPacketEntry,
-) ![]u8 {
-    return stock_quest.buildNpcQuestListFetch(buf, npc_entity_id, player_entity_id, tier_level, entries);
-}
+pub const buildNpcQuestListFetch = stock_quest.buildNpcQuestListFetch;
 
 // --- Stock NetPackageQuestObjectiveUpdate (V3.x) ---
 // senderEntityID i32 | questCode i32 | eventType u8 | blockPos Vector3i

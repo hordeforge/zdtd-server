@@ -5,6 +5,7 @@
 //! carried; fog/water/inside rows stay client render state.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
@@ -33,12 +34,7 @@ pub const Table = struct {
     }
 
     pub fn deinit(self: *Table) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = .{};
     }
 

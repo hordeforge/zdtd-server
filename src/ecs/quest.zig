@@ -2,6 +2,7 @@
 //! Runtime journal/wallet live as SoA components; mutations are in systems.zig.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const c = @import("components.zig");
 
 pub const max_journal = c.max_journal;
@@ -496,12 +497,7 @@ pub const Catalog = struct {
             // Builtin defs are static: no arena to free, no fields to clear.
             return;
         }
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = Catalog.builtin();
     }
 

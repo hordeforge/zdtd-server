@@ -474,12 +474,7 @@ pub const ItemTable = struct {
     max_quality_tier: u8 = components.max_quality_tiers,
 
     pub fn deinit(self: *ItemTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = builtin();
     }
 

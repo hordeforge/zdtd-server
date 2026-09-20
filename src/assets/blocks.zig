@@ -236,12 +236,7 @@ pub const BlockTable = struct {
     source: enum { builtin, xml } = .builtin,
 
     pub fn deinit(self: *BlockTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = builtin();
     }
 

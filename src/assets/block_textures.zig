@@ -56,14 +56,10 @@ pub const Table = struct {
     }
 
     pub fn deinit(self: *Table) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            self.by_id = .{};
-            self.name_tex = .{};
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        self.by_id = .{};
+        self.name_tex = .{};
+        arena_util.destroyHolder(&self.arena_ptr);
+
         self.* = .{};
     }
 

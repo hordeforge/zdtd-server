@@ -26,10 +26,3 @@ pub fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, 
     }
     return min_y;
 }
-
-pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
-    const dx = px - bx;
-    const dy = py - by;
-    const dz = pz - bz;
-    return dx * dx + dy * dy + dz * dz <= self.max_edit_range * self.max_edit_range;
-}

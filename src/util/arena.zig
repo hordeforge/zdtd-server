@@ -15,3 +15,15 @@ pub fn ensureLazyArena(arena_ptr: *?*std.heap.ArenaAllocator, allocator: std.mem
     arena_ptr.* = ap;
     return ap.allocator();
 }
+
+/// Release a holder created by `newArenaHolder` / `ensureLazyArena`.
+/// Idempotent: a null pointer is a no-op.
+pub fn destroyHolder(arena_ptr: *?*std.heap.ArenaAllocator) void {
+    if (arena_ptr.*) |ap| {
+        const child = ap.child_allocator;
+        ap.deinit();
+        child.destroy(ap);
+        arena_ptr.* = null;
+    }
+}
+

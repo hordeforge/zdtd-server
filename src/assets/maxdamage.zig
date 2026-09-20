@@ -169,45 +169,40 @@ pub const Table = struct {
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            // hashmaps use arena for keys; just free arena
-            self.by_name = .{};
-            self.by_id = .{};
-            self.storage_ids = .{};
-            self.storage_names = .{};
-            self.loot_list_by_name = .{};
-            self.loot_list_by_id = .{};
-            self.loot_stage_mod_by_name = .{};
-            self.loot_stage_bonus_by_name = .{};
-            self.loot_stage_mod_by_id = .{};
-            self.loot_stage_bonus_by_id = .{};
-            self.id_by_name = .{};
-            self.name_by_id = .{};
-            self.power_watts_by_name = .{};
-            self.power_class_by_name = .{};
-            self.sleeper_class_names = .{};
-            self.power_max_fuel_by_name = .{};
-            self.power_output_per_fuel_by_name = .{};
-            self.power_output_per_charge_by_name = .{};
-            self.power_output_per_stack_by_name = .{};
-            self.material_max = .{};
-            self.material_exp = .{};
-            self.material_stability_support = .{};
-            self.stability_explicit = .{};
-            self.material_explosion_resist = .{};
-            self.material_collidable = .{};
-            self.material_can_destroy = .{};
-            self.material_movement_factor = .{};
-            self.material_light_opacity = .{};
-            self.stage2_health = .{};
-            self.block_material = .{};
-            self.distant_deco = .{};
-            self.multi_block_dim = .{};
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        self.by_name = .{};
+        self.by_id = .{};
+        self.storage_ids = .{};
+        self.storage_names = .{};
+        self.loot_list_by_name = .{};
+        self.loot_list_by_id = .{};
+        self.loot_stage_mod_by_name = .{};
+        self.loot_stage_bonus_by_name = .{};
+        self.loot_stage_mod_by_id = .{};
+        self.loot_stage_bonus_by_id = .{};
+        self.id_by_name = .{};
+        self.name_by_id = .{};
+        self.power_watts_by_name = .{};
+        self.power_class_by_name = .{};
+        self.sleeper_class_names = .{};
+        self.power_max_fuel_by_name = .{};
+        self.power_output_per_fuel_by_name = .{};
+        self.power_output_per_charge_by_name = .{};
+        self.power_output_per_stack_by_name = .{};
+        self.material_max = .{};
+        self.material_exp = .{};
+        self.material_stability_support = .{};
+        self.stability_explicit = .{};
+        self.material_explosion_resist = .{};
+        self.material_collidable = .{};
+        self.material_can_destroy = .{};
+        self.material_movement_factor = .{};
+        self.material_light_opacity = .{};
+        self.stage2_health = .{};
+        self.block_material = .{};
+        self.distant_deco = .{};
+        self.multi_block_dim = .{};
+        arena_util.destroyHolder(&self.arena_ptr);
+
         self.* = .{};
     }
 

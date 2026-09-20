@@ -5,6 +5,7 @@
 //! World XZ center origin (same as DTM): img_x = wx + W/2.
 
 const std = @import("std");
+const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const paths = @import("../assets/paths.zig");
@@ -32,12 +33,7 @@ pub const ColorTable = struct {
     }
 
     pub fn deinit(self: *ColorTable) void {
-        if (self.arena_ptr) |ap| {
-            const child = ap.child_allocator;
-            ap.deinit();
-            child.destroy(ap);
-            self.arena_ptr = null;
-        }
+        arena_util.destroyHolder(&self.arena_ptr);
         self.* = .{};
     }
 
