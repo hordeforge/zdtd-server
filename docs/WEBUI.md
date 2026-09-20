@@ -100,7 +100,7 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 |---|---|
 | Bind | IPv4 loopback only; remote access requires a TLS reverse proxy |
 | Auth | Shared secret header or POST `/login` form; cookie is an HMAC session token with a fresh random nonce per login (not the secret). Server-side expiry is 12 hours. Login replaces the shared browser session; logout and restart invalidate it, requiring sign-in again |
-| CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd` and `/logout`) |
+| CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd`, `/api/modlet`, and `/logout`) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
 | Audit log | In-memory ring (24 lines) carried in `/api/state.json` as `console`; file log not implemented |
@@ -121,7 +121,7 @@ selection is client state carried in the URL hash.
 | `GET /` | Dashboard shell: document, CSS, the Preact bundle and the app mount point | committed page |
 | `GET /api/state.json` | The whole dashboard state: `tick` (Snapshot scalars), `players`, `modules`, `modlets`, `console`, `csrf`, `apm` | snapshot + wasm roster + ops ring |
 | `POST /api/cmd` | Run one admin command; JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise | inline → admin parser (same request) |
-| `POST /api/modlet` | Enable/disable a modlet; JSON when `Accept: application/json`, HTML fragment otherwise | modlet state file |
+| `POST /api/modlet` | Enable/disable a modlet; JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise (errors use the same Accept negotiation as `/api/cmd`) | modlet state file |
 | `GET /partials/*` | Retired by ADR 0040: **404** (the dashboard reads `/api/state.json`) | - |
 | `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools); feeds the dashboard latency chart series | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |

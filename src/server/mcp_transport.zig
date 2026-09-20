@@ -10,9 +10,10 @@
 //! There are no extra threads, no queues, and no condvars; a slow or flooding
 //! client only stalls the poll step, bounded by the per-request caps.
 //!
-//! Fail closed: wrong path/method, malformed framing, an oversized frame, and
-//! a missing token are HTTP errors; a guest that replies with nothing is
-//! answered 202 (MCP notification semantics), never a fake body (ADR 0014).
+//! Fail closed: wrong path/method, malformed framing, a non-JSON content
+//! type, an oversized frame, and a missing token are HTTP errors; a guest
+//! that replies with nothing is answered 202 (MCP notification semantics),
+//! never a fake body (ADR 0014).
 
 const std = @import("std");
 const tcp = @import("../util/tcp_listen.zig");
@@ -217,7 +218,16 @@ pub const Transport = struct {
             return;
         }
         if (self.token_len > 0 and !requestAuthorized(&req, self.token())) {
-            try self.httpRespond(&req, .unauthorized, "text/plain; charset=utf-8", "unauthorized\n", &.{});
+            // Same Bearer challenge shape as webui /api/* (machine clients).
+            try self.httpRespond(&req, .unauthorized, "text/plain; charset=utf-8", "unauthorized\n", &.{
+                .{ .name = "WWW-Authenticate", .value = "Bearer realm=\"zdtd-mcp\"" },
+            });
+            return;
+        }
+        // JSON-RPC frames only: refuse form/text/empty types the same way
+        // webui refuses a non-form body on POST /api/cmd (415).
+        if (!isJsonContentType(req.head.content_type)) {
+            try self.httpRespond(&req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/json\n", &.{});
             return;
         }
         const body = self.recv_buf[in_r.seek..in_r.end];
@@ -240,7 +250,7 @@ pub const Transport = struct {
             // Notification / no reply: MCP says 202 Accepted with no body.
             try self.httpRespond(&req, .accepted, "", "", &.{});
         } else {
-            try self.httpRespond(&req, .ok, "application/json", resp_buf[0..n], &.{});
+            try self.httpRespond(&req, .ok, "application/json; charset=utf-8", resp_buf[0..n], &.{});
         }
     }
 
@@ -337,6 +347,7 @@ fn httpReasonPhrase(status: u16) []const u8 {
         405 => "Method Not Allowed",
         406 => "Not Acceptable",
         413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
         503 => "Service Unavailable",
@@ -370,6 +381,15 @@ fn headerFromReq(req: *const http.Server.Request, name: []const u8) ?[]const u8 
         if (std.ascii.eqlIgnoreCase(h.name, name)) return h.value;
     }
     return null;
+}
+
+/// True for `application/json` (optional `; charset=...`). Missing or any
+/// other media type is refused at the HTTP layer before the guest sees it.
+fn isJsonContentType(value: ?[]const u8) bool {
+    const raw = value orelse return false;
+    const semicolon = std.mem.findScalar(u8, raw, ';') orelse raw.len;
+    const media_type = std.mem.trim(u8, raw[0..semicolon], " \t");
+    return std.ascii.eqlIgnoreCase(media_type, "application/json");
 }
 
 fn requestAuthorized(req: *const http.Server.Request, token: []const u8) bool {
@@ -456,7 +476,7 @@ test "mcp transport: zero reply is a 202 (notification semantics)" {
     t.setFrameHandler(&t, Stub.frameFn);
     Stub.resp = "";
     defer Stub.resp = "";
-    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 202 ") != null);
 }
 
@@ -470,7 +490,7 @@ test "mcp transport: deinit drops the frame handler" {
     t.deinit();
     try std.testing.expect(t.frame_fn == null);
     try std.testing.expect(t.frame_ctx == null);
-    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 503 ") != null);
 }
 
@@ -480,23 +500,30 @@ test "mcp transport: path, method and token gates fail closed" {
     Stub.resp = "{}";
     defer Stub.resp = "";
     // Wrong path is 404.
-    try testServeHttp(&t, "POST /nope HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /nope HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 404 ") != null);
     // GET is 405.
     try testServeHttp(&t, "GET /mcp HTTP/1.1\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 405 ") != null);
-    // With a token configured, an anonymous request is 401.
+    // With a token configured, an anonymous request is 401 + Bearer challenge
+    // (auth runs before Content-Type, matching webui /api/*).
     @memcpy(t.token_buf[0..6], "s3cr3t");
     t.token_len = 6;
-    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 401 ") != null);
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "WWW-Authenticate: Bearer realm=\"zdtd-mcp\"") != null);
     // The right bearer token passes.
-    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 200 ") != null);
     // A wrong token is 401.
-    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nAuthorization: Bearer wrong\r\nContent-Length: 2\r\n\r\n{}");
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nAuthorization: Bearer wrong\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 401 ") != null);
     t.token_len = 0;
+    // Missing or non-JSON Content-Type is 415 once past auth.
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 415 ") != null);
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n{}");
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 415 ") != null);
 }
 
 test "mcp transport: oversized frame and transfer encoding are rejected" {
@@ -510,7 +537,7 @@ test "mcp transport: oversized frame and transfer encoding are rejected" {
     var body: [max_frame + 1024]u8 = undefined;
     @memset(&body, 'x');
     var req_buf: [max_req]u8 = undefined;
-    const head = try std.fmt.bufPrint(&req_buf, "POST /mcp HTTP/1.1\r\nContent-Length: {d}\r\n\r\n", .{body.len});
+    const head = try std.fmt.bufPrint(&req_buf, "POST /mcp HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n", .{body.len});
     @memcpy(req_buf[head.len..][0..body.len], &body);
     try testServeHttp(&t, req_buf[0 .. head.len + body.len]);
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 413 ") != null);

@@ -728,11 +728,7 @@ pub const Server = struct {
         const plain = !json and prefersPlainBody(req);
 
         if (!isFormContentType(req.head.content_type)) {
-            if (json) {
-                try self.cmdJsonError(req, .unsupported_media_type, "expected application/x-www-form-urlencoded", &.{});
-                return;
-            }
-            try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
+            try self.cmdClientError(req, plain, json, .unsupported_media_type, "expected application/x-www-form-urlencoded\n", "<pre class=\"err\">Expected application/x-www-form-urlencoded.</pre>\n");
             return;
         }
 
@@ -863,6 +859,25 @@ pub const Server = struct {
     ) !void {
         if (json) {
             try self.cmdJsonError(req, status, plain_body, &.{});
+        } else if (plain) {
+            try self.httpRespond(req, status, "text/plain; charset=utf-8", plain_body, &.{});
+        } else {
+            try self.httpRespond(req, status, "text/html; charset=utf-8", html_body, &.{});
+        }
+    }
+
+    /// Same Accept negotiation as cmdClientError for POST /api/modlet errors.
+    fn modletClientError(
+        self: *Server,
+        req: *http.Server.Request,
+        plain: bool,
+        json: bool,
+        status: http.Status,
+        plain_body: []const u8,
+        html_body: []const u8,
+    ) !void {
+        if (json) {
+            try self.modletJsonError(req, status, plain_body, &.{});
         } else if (plain) {
             try self.httpRespond(req, status, "text/plain; charset=utf-8", plain_body, &.{});
         } else {
@@ -1702,74 +1717,43 @@ fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
 /// `Accept: application/json`; other form callers keep the plain or HTML reply.
 fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_buf: []u8) !void {
     const json = prefersJsonBody(req);
+    const plain = !json and prefersPlainBody(req);
     if (!isFormContentType(req.head.content_type)) {
-        if (json) {
-            try self.modletJsonError(req, .unsupported_media_type, "expected application/x-www-form-urlencoded", &.{});
-            return;
-        }
-        try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
+        try self.modletClientError(req, plain, json, .unsupported_media_type, "expected application/x-www-form-urlencoded\n", "<pre class=\"err\">Expected application/x-www-form-urlencoded.</pre>\n");
         return;
     }
     const csrf = formField(body, "csrf") orelse formField(body, "token");
     const has_valid_auth_header = requestHeaderAuthorizedHttp(req, self.secret());
     if (csrf) |c| {
         if (!csrfTokenOk(c, self.sessionTok(), self.secret(), has_valid_auth_header)) {
-            if (json) {
-                try self.modletJsonError(req, .forbidden, "session expired or invalid; reload the dashboard and try again", &.{});
-                return;
-            }
-            try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "session expired or invalid; reload the dashboard and try again\n", &.{});
+            try self.modletClientError(req, plain, json, .forbidden, "session expired or invalid; reload the dashboard and try again\n", "<pre class=\"err\">Session expired or invalid. Reload the dashboard and try again.</pre>\n");
             return;
         }
     } else if (!has_valid_auth_header) {
-        if (json) {
-            try self.modletJsonError(req, .forbidden, "missing security token; reload the dashboard and try again", &.{});
-            return;
-        }
-        try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "missing security token; reload the dashboard and try again\n", &.{});
+        try self.modletClientError(req, plain, json, .forbidden, "missing security token; reload the dashboard and try again\n", "<pre class=\"err\">Missing security token. Reload the dashboard and try again.</pre>\n");
         return;
     }
     const name = formField(body, "name") orelse {
-        if (json) {
-            try self.modletJsonError(req, .bad_request, "missing modlet name", &.{});
-            return;
-        }
-        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing modlet name\n", &.{});
+        try self.modletClientError(req, plain, json, .bad_request, "missing modlet name\n", "<pre class=\"err\">Missing modlet name.</pre>\n");
         return;
     };
     const action = formField(body, "action") orelse {
-        if (json) {
-            try self.modletJsonError(req, .bad_request, "missing action", &.{});
-            return;
-        }
-        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing action\n", &.{});
+        try self.modletClientError(req, plain, json, .bad_request, "missing action\n", "<pre class=\"err\">Missing action.</pre>\n");
         return;
     };
     if (!std.mem.eql(u8, action, "enable") and !std.mem.eql(u8, action, "disable")) {
-        if (json) {
-            try self.modletJsonError(req, .bad_request, "action must be enable or disable", &.{});
-            return;
-        }
-        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "action must be enable or disable\n", &.{});
+        try self.modletClientError(req, plain, json, .bad_request, "action must be enable or disable\n", "<pre class=\"err\">Action must be enable or disable.</pre>\n");
         return;
     }
     const disable = std.mem.eql(u8, action, "disable");
     const known = modlets.setDisabled(self.allocator, name, disable) catch {
         // Do not echo @errorName to the client: operators get a fixed message;
         // the concrete failure stays in the process log if the caller adds one.
-        if (json) {
-            try self.modletJsonError(req, .internal_server_error, "could not save the modlet state", &.{});
-            return;
-        }
-        try self.httpRespond(req, .internal_server_error, "text/plain; charset=utf-8", "could not save the modlet state\n", &.{});
+        try self.modletClientError(req, plain, json, .internal_server_error, "could not save the modlet state\n", "<pre class=\"err\">Could not save the modlet state.</pre>\n");
         return;
     };
     if (!known) {
-        if (json) {
-            try self.modletJsonError(req, .not_found, "no such modlet", &.{});
-            return;
-        }
-        try self.httpRespond(req, .not_found, "text/plain; charset=utf-8", "no such modlet\n", &.{});
+        try self.modletClientError(req, plain, json, .not_found, "no such modlet\n", "<pre class=\"err\">No such modlet.</pre>\n");
         return;
     }
     // 256 covers the longest modlet name the roster accepts plus the action.
@@ -1783,7 +1767,7 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         try self.httpRespond(req, .ok, "application/json; charset=utf-8", w.buffered(), &.{});
         return;
     }
-    if (prefersPlainBody(req)) {
+    if (plain) {
         try self.httpRespond(req, .ok, "text/plain; charset=utf-8", line, &.{});
         return;
     }
@@ -2391,6 +2375,13 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     try testServeHttp(&s, req5);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "Content-Type: text/html") != null);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "<p class=\"ok\">modlet UiMod disable; restart zdtd to apply</p>") != null);
+    // Errors without Accept follow the same HTML negotiation as /api/cmd.
+    const html_err = "csrf=nope&name=UiMod&action=enable";
+    const req6 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ html_err.len, html_err });
+    try testServeHttp(&s, req6);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Content-Type: text/html") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "<pre class=\"err\">Session expired or invalid. Reload the dashboard and try again.</pre>") != null);
     // GET is not allowed on the mutating route.
     try testServeHttp(&s, "GET /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);

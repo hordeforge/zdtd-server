@@ -66,9 +66,10 @@ one connection and one complete request per `poll()` call, processed
 synchronously through the frame handler.
 
 - **Listener:** `util/tcp_listen` + `std.http.Server`; only `POST /mcp` is
-  served. Wrong path/method, transfer encoding, an oversized frame
-  (`max_frame_kib`), and a missing token are HTTP errors, never a half-read
-  frame.
+  served. Wrong path/method, transfer encoding, a non-`application/json`
+  Content-Type (**415**), an oversized frame (`max_frame_kib`), and a missing
+  token (**401** + `WWW-Authenticate: Bearer realm="zdtd-mcp"`) are HTTP
+  errors, never a half-read frame.
 - **Auth:** `--mcp-token` (empty = loopback only, no token) is checked against
   `Authorization: Bearer` and `X-Zdtd-Secret` in constant time
   (`util/secret.zig`); default bind is `127.0.0.1`. No new trust boundary
