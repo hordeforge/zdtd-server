@@ -18,7 +18,7 @@ const inventory = @import("inventory.zig");
 const parallel = @import("../util/parallel.zig");
 const rng_util = @import("../util/rng.zig");
 
-/// Fixed-point damage unit (1.0 hp = 100).
+/// Fixed-point damage unit (1.0 hp = 100). zdtd-owned structural scale.
 const dmg_scale: u32 = 100;
 
 fn lodScale(w: *const World, d2: f32) f32 {

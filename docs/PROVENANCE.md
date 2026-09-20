@@ -18,7 +18,7 @@ What counts: **every `src/**/*.zig` file** (file-level provenance) and **every
 file-scope typed constant** in every src file (value-level provenance). The
 value-coverage gate scans the whole tree (test/fuzz/harness scaffolding
 excluded): each constant carries an inline provenance comment (stock source,
-RE cite, or explicit zdtd-owned marker). The 27 highlighted rows below are the
+RE cite, or explicit zdtd-owned marker). The highlighted rows below are the
 behavioral values that diverge or carry the system's load; the gate covers
 everything else. Struct-field defaults carry block-level inline provenance
 (rules.zig per-field; LevelCurve/PerkDef/WorldClock/QuestDef/Turret blocks
@@ -162,7 +162,7 @@ survives by construction. That was a third of the tree (356 pairs down to 270)
 and it was hiding real findings behind noise.
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 201/201 (100%).** Every row below carries a bucket and a
+- **File coverage: 214/214 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
@@ -172,9 +172,9 @@ Coverage targets, all enforced by the scan:
 
 | Bucket | Meaning | Count |
 |---|---|---|
-| **A** stock data | Loaded from the operator install (`Data/Config` / world assets / AssignIds); provenance = the stock file | 27 |
-| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-engine-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 103 |
-| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 58 |
+| **A** stock data | Loaded from the operator install (`Data/Config` / world assets / AssignIds); provenance = the stock file | 35 |
+| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-engine-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 119 |
+| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 61 |
 
 ### File provenance map
 
@@ -439,11 +439,14 @@ field-by-field provenance.
 |---|--:|:-:|---|
 | `bm_parties_cap` | 8 | R | Blood-moon party array cap (RE: aidirector.md) |
 | `game.zig playerBloodMoonMusic` | party_join_dist | R | Per-player horde-music eligibility: true while the horde is active and the player's own blood-moon party focus (within party_join_dist) has alive horde zombies (stock EntityPlayer.bloodMoonParty; the old global bool was the multi-party approximation) |
-| `wandering_horde_size` | 6 | R | **Approximation**: stock per-horde size is gamestage-group driven (live-observed 2026-08-11: `Party of 1, GS 1 ... enemy max 5`); fixed 6 here (aidirector.md wandering section) |
+| `wandering_horde_size` | 6 | Z | **Approximation**: stock per-horde size is gamestage-group driven (live-observed 2026-08-11: `Party of 1, GS 1 ... enemy max 5`); fixed 6 here (aidirector.md wandering section) |
 | `wandering_spawn_dist` | 92.0 | R | `AIDirectorHordeComponent.FindTargets` inline start offset `RandomOnUnitCircle * 92f` (IL_018B; aidirector.md placement constants) |
 | `wander_min_gap` / `wander_max_gap` | 12-24 in-game hours | R | `ChooseNextTime` `Random(12000, 24000)` world-time units (12-24 in-game hours; aidirector.md wandering schedule; live-verified 2026-08-11) |
-| `heat_cooldown_seconds` | 120 | Z | **Diverges**: stock `AIDirectorChunkData.FindBestEventAndReset` region cooldown is **240 s** (aidirector.md 2026-08-07; audit A41) |
-| `heat_neighbor_cooldown_seconds` | 60 | Z | **Diverges**: stock `StartCooldownOnNeighbors` 180 s / 720 s (aidirector.md; audit A41) |
+| `heat_cooldown_seconds` | 240 | R | Stock `AIDirectorChunkData.FindBestEventAndReset` (IL=44) `cCooldownDelay = 240` s (entities/aidirector.md; aligned 2026-09-12, was 120) |
+| `heat_long_cooldown_seconds` | 1320 | R | Stock `SetLongDelay` (IL=4) `cCooldownLongDelay = 1320` s after a heat spawn (entities/aidirector.md; aligned 2026-09-12) |
+| `heat_neighbor_cooldown_seconds` | 180 | R | Stock `StartNeighborCooldown(false)` `cCooldownNeighborDelay = 180` s (entities/aidirector.md; aligned 2026-09-12, was 60) |
+| `heat_neighbor_long_cooldown_seconds` | 720 | R | Stock `StartCooldownOnNeighbors(true)` `cCooldownNeighborLongDelay = 720` s (entities/aidirector.md; aligned 2026-09-12) |
+| `heat_spawn_chance` | 0.2 | R | Stock `CheckToSpawn` (IL=46) `cSpawnChance = 0.2` (entities/aidirector.md; aligned 2026-09-12) |
 | `heat_spawn_threshold` | 25.0 | R | Heat threshold for spawner events (RE: aidirector.md chunk-data cooldowns) |
 | `default_max_alive_zombies` | 24 | A | Stock MaxSpawnedZombies default (serverconfig). NOTE: stock applies CanSpawn priority multipliers (blood moon ×1.9, sleeper ×2.1, biome ×1.0; `AIDirector.CanSpawn` IL=10, aidirector.md/spawning.md, live-verified 2026-08-11); zdtd uses the flat cap - a simplification |
 | `WorldClock.hours` boot | 07:00 | R | Stock dedicated boot time, live-observed 2026-08-11 (`gettime` reads "Day 1, 07:00" on a fresh paused server) |
@@ -467,8 +470,8 @@ field-by-field provenance.
 
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
-| `max_horizontal_speed_mps` | 20.0 | R | Soft cap above sprint (~6 m/s) + vehicle margin; no stock key (audit B29); `[authority]` tunable (2026-08-27) |
-| `max_vertical_speed_mps` | 25.0 | R | Vertical envelope cap: rejects Y-only teleports (fly hacking) the horizontal clamp cannot see; above stock jump/fall (~7.5/9.8 m/s); `[authority]` tunable (2026-08-27) |
+| `max_horizontal_speed_mps` | 20.0 | Z | Soft cap above sprint (~6 m/s) + vehicle margin; no stock key (audit B29); `[authority]` tunable (2026-08-27) |
+| `max_vertical_speed_mps` | 25.0 | Z | Vertical envelope cap: rejects Y-only teleports (fly hacking) the horizontal clamp cannot see; above stock jump/fall (~7.5/9.8 m/s); `[authority]` tunable (2026-08-27) |
 
 ### 3.6 Guard policy (`src/server/guard_policy.zig`)
 
@@ -478,9 +481,9 @@ field-by-field provenance.
 
 ### 3.7 Survival / weather / power / quest (tracked divergences)
 
-| Location | Value | R | Stock source |
+| Location | Value | B | Stock source |
 |---|--:|:-:|---|
-| `ecs/electric.zig` power tick | 20 Hz (every step) | R | **Diverges**: zdtd resolves the grid every tick (step.zig `power.tick`) vs stock `PowerManager` ~6.25 Hz Unity Update (tile-entities-power.md); faster, deterministic switching, not wire-visible |
+| `ecs/electric.zig` power tick | 20 Hz (every step) | Z | **Diverges**: zdtd resolves the grid every tick (step.zig `power.tick`) vs stock `PowerManager` ~6.25 Hz Unity Update (tile-entities-power.md); faster, deterministic switching, not wire-visible |
 | `world/weather.zig` storm/blood-moon | - | R | RE: weather-environment.md (server-authoritative storm state machine) |
 | `ecs/poi_lock.zig` `unlock_grace` | 2000 | R | QuestEventManager `PrefabInstance.lockInstance` (QuestLockInstance, asm.il 1001892+) |
 | `ecs/party.zig` | max 8, flat XP | R | Party max 8 per parties-factions.md §2; NOTE the stock shared-XP reduction `startingXP*(1-0.1*inRange)` is NOT yet implemented - zdtd grants flat XP with the XPMultiplier only (partial) |
@@ -633,7 +636,7 @@ below is therefore the surviving record of the final live statuses.
 |---|---|
 | Level curve, attribute/perk catalog (names, max levels, costs) | `progression.xml` via `src/assets/progression.zig` (A: stock file loaded at runtime) |
 | XP/level/gamestage math | RE: `../7dtd-engine-research/docs/gameplay/progression.md` (AddLevelExp → recursive level-up → skill points → RefreshPerks); `src/server/game/player.zig` |
-| Perk requirement graphs / effect application | **Not built yet**: planned as `docs/adr/0023-perk-attribute-system.md`; zdtd has no perk system, so no provenance claim is made until the ADR lands (rules.zig `Progression.*` are placeholders, WORK_PLAN T16) |
+| Perk requirement graphs / effect application | **Partial**: [ADR 0023](adr/0023-perk-attribute-system.md) accepted; catalog + XP math ship (rows above); per-player perk levels, spend, and requirement graphs remain WORK_PLAN (T16+). `Rules.Progression.*` floors stand in until the resolver lands |
 
 | B38 | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | zdtd engineering (Z), documented as fixed-size architecture |
 | B39 | `game.zig:352` | `sleeper_party_radius` (default 100.0), now a single `[sim]`-bound field (deduped; was duplicated at game.zig:3969 + game/sleeper.zig:13) | R: CalcGameStageAround radius (asm.il ~1093363) |
@@ -642,7 +645,7 @@ below is therefore the surviving record of the final live statuses.
 ## 4. Coverage and maintenance
 
 - **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **201/201 (100%)**; a new src file without a ledger
+  File coverage must stay **214/214 (100%)**; a new src file without a ledger
   row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
 - **Constants:** the ledger covers the behavioral values; the authoritative
   field-by-field provenance for the rules surface lives inline in
@@ -653,9 +656,9 @@ below is therefore the surviving record of the final live statuses.
 - **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
   table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
 
-- `python3 tools/provenance_scan.py` gates **file coverage 201/201** and ledger
+- `python3 tools/provenance_scan.py` gates **file coverage 214/214** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
-  file exists). Wire it into `make check` after the first green run.
+  file exists).
 - After a game update: re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,
   then re-verify the R rows against the new pin (see RE_GAP_CLOSURE §4).
 - Divergences are tracked in GAP_ANALYSIS / WORK_PLAN; the audit's per-finding
@@ -669,7 +672,7 @@ below is therefore the surviving record of the final live statuses.
 | `bot.bot_spawn_spread` / `bot_spawn_y` | 2.0 / 70 | Z | zdtd-owned `[bots]` config defaults (ADR 0026 host policy knobs; `spawn_spread`/`spawn_y` binder keys) |
 | `bot.sense_kind_bot` | 2 | R | Sense contract kind tag for bots (RFC 0001 §3: 0 player, 1 zombie, 2 bot; the guest reads it in the ZBS3 records) |
 | `bot.sense_kind_bot_info` | 4 | R | Sense record kind for the host-assigned weapon info row (RFC 0001 §3) |
-| `systems.dmg_scale` | 100 | R | Fixed-point damage unit (1.0 hp = 100); the sim's internal damage integer |
+| `systems.dmg_scale` | 100 | Z | Fixed-point damage unit (1.0 hp = 100); structural accumulator scale, not a stock constant |
 | `worldgen.noise_weight` / `y_scale` | 0.85 / 2.0 | Z | zdtd-owned procedural worldgen shaping (non-goal #8; the demo fallback density field) |
 | `sys_metrics.load_scale` | 65536 | Z | sysinfo load-average fixed-point fraction (16-bit); zdtd-owned metrics |
 | `buffs.zig TrackedDeltas` / `effectTotals` | tracked surface | R | Revertible passive-effects VM: folds the tracked buffs.xml effect rows (Health/Food/Water/Stamina ChangeOT + max, resist percents) into additive deltas, recompute-from-set on the active BuffSet (stock EffectManager.GetValue fold; bounded: `max_buffs_per_entity`, no allocation). `perc_*` keep the raw XML fraction; `base_set` on tracked names is omitted (no per-entity base - recorded) |

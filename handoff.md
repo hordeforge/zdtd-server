@@ -10,7 +10,7 @@
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
 - `zig build` + `zig build test` green (1493 passed / 1 skipped, measured 2026-08-30).
 - `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **295** features (**294 WORKS / 1 PARTIAL / 0 MISSING**, recounted 2026-08-30 from the live markers; the one PARTIAL row is the 08-29 join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded inline; the chunk-pointer stability gap closed 2026-08-30 by the pointer-stable store; the remaining PARTIAL labels are ad-hoc waived rows not counted).
-- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (201/201 files, 58 constants ledgered) + `make check-xml-audit`.
+- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (214/214 files, 68 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
 
 ## Waves 56-86 (2026-08-27 gap-review sweep)
@@ -161,7 +161,7 @@
 zig build                           # compiles clean (0 warnings)
 zig build test                       # exit 0; 1493 passed / 1 skipped (2026-08-30)
 bash scripts/lint-architecture.sh   # expect "lint-architecture: clean"
-python3 tools/provenance_scan.py    # expect 201/201
+python3 tools/provenance_scan.py    # expect 214/214
 ```
 
 Architecture rule: every new `src/server/game/*.zig` shard must be imported via `src/server/root.zig` and referenced in its `test { _ = game_*; }` block, otherwise `lint-architecture.sh` fails on forbidden `@import`.

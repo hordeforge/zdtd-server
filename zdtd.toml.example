@@ -6,7 +6,7 @@
 # Web UI secret: env ZDTD_WEBUI_SECRET; MCP token: env ZDTD_MCP_TOKEN (see .env.example).
 # Never put either secret in this file.
 # Unknown keys and malformed assignments abort startup.
-# See docs/reviews/HARDCODE_AUDIT.md and docs/GAME_OPTIONS.md.
+# See docs/archive/HARDCODE_AUDIT_2026-08-08.md and docs/GAME_OPTIONS.md.
 
 [stream]
 max_streamed_chunks = 169
