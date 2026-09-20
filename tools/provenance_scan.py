@@ -209,7 +209,7 @@ def main():
     files = src_files()
     parsed = ledger_rows()
     if parsed is None:
-        print(f"FAIL: {LEDGER} missing")
+        print(f"FAIL: {LEDGER} missing", file=sys.stderr)
         return 1
     file_rows, const_rows = parsed
     # 3. VALUE COVERAGE: every file-scope behavioral constant in the sim files
@@ -247,9 +247,12 @@ def main():
             if not annotated:
                 unannotated.append(f"{rel}:{i+1} {name}")
     if unannotated:
-        print(f"FAIL: behavioral constants without provenance comment ({len(unannotated)}):")
+        print(
+            f"FAIL: behavioral constants without provenance comment ({len(unannotated)}):",
+            file=sys.stderr,
+        )
         for u in unannotated[:12]:
-            print("  " + u)
+            print("  " + u, file=sys.stderr)
         return 1
 
     # 4. AUDIT LINKAGE: every finding id the (removed) live audit named at its
@@ -263,7 +266,10 @@ def main():
             covered.add(f"{pre}{n:02d}")
     missing_findings = [f for f in audit_finding_ids() if f not in covered]
     if missing_findings:
-        print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
+        print(
+            f"FAIL: audit findings not linked in ledger: {missing_findings}",
+            file=sys.stderr,
+        )
         return 1
 
     # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-engine-research/docs/<file>.md
@@ -272,11 +278,17 @@ def main():
     if research_docs.is_dir():
         bad_cites = research_citation_errors(ROOT, research_docs)
     else:
-        print(f"SKIP: research citations not checked (missing {research_docs})")
+        print(
+            f"SKIP: research citations not checked (missing {research_docs})",
+            file=sys.stderr,
+        )
     if bad_cites:
-        print(f"FAIL: research-doc citations that do not resolve ({len(bad_cites)}):")
+        print(
+            f"FAIL: research-doc citations that do not resolve ({len(bad_cites)}):",
+            file=sys.stderr,
+        )
         for c in sorted(set(bad_cites))[:10]:
-            print("  " + c)
+            print("  " + c, file=sys.stderr)
         return 1
 
     # extra = ledger rows whose src file does not exist in the working tree at
@@ -860,7 +872,7 @@ def main():
 
     if failures:
         for f in failures:
-            print("FAIL:", f)
+            print("FAIL:", f, file=sys.stderr)
         return 1
     print(
         f"OK: {len(files)} files covered (100%), {len(const_rows)} constants ledgered, "

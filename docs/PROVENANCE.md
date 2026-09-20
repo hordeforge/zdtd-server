@@ -489,6 +489,7 @@ field-by-field provenance.
 
 | Constant | Value | B | Stock source |
 |---|---|:-:|---|
+| `util/sim.zig` `challenge_mix` | `0xC4A11E46_E5EED` | Z | Domain tag XOR'd into `fillChallenge` so DST challenge streams stay distinct from other `initFromU64` call sites that share the run seed; zdtd-owned (not a stock Guid mix) |
 | `assets/gamestages.zig ticks_per_day` | 24000 | A | Stock sim day length (24000 ticks @ 20 TPS); gamestages.xml stage math uses it |
 | `ecs/electric.zig default_trigger_pulse_s` | 0.5 | R | Trigger pulse width (RE: PowerItemTypes; tile-entities-power.md) |
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |

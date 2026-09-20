@@ -606,7 +606,9 @@ pub const World = struct {
     touch_seq: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
-        io_fs.mkdirPath(world_dir);
+        // Fail closed: a world dir we cannot create would only surface later as
+        // a save AccessDenied stack dump from main. Surface it at construct.
+        try io_fs.mkdirPathStatus(world_dir);
         return .{
             .chunks = .empty,
             .world_dir = try allocator.dupe(u8, world_dir),

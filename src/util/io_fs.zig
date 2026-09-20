@@ -63,15 +63,24 @@ fn ioThreaded() std.Io.Threaded {
     return std.Io.Threaded.init(std.heap.page_allocator, .{});
 }
 
-pub fn mkdirPath(rel: []const u8) void {
+/// Create `rel` and parents. Idempotent for an existing directory.
+/// Returns the OS error on permission / full-disk / not-a-directory so callers
+/// that own a path (world dir) can fail closed instead of logging and drifting.
+pub fn mkdirPathStatus(rel: []const u8) !void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    // createDirPath is idempotent for existing dirs; surface real failures
-    // (permission, full disk) so later writes are not mysterious.
     std.Io.Dir.cwd().createDirPath(io, rel) catch |err| switch (err) {
         error.PathAlreadyExists => {},
-        else => util_log.err("zdtd: mkdir '{s}' failed: {s}\n", .{ rel, @errorName(err) }),
+        else => return err,
+    };
+}
+
+/// Best-effort mkdir: log and continue. Prefer `mkdirPathStatus` when a later
+/// write to the same path would otherwise fail with a cryptic stack trace.
+pub fn mkdirPath(rel: []const u8) void {
+    mkdirPathStatus(rel) catch |err| {
+        util_log.err("zdtd: mkdir '{s}' failed: {s}\n", .{ rel, @errorName(err) });
     };
 }
 

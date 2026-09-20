@@ -71,7 +71,8 @@ const help_text =
     \\  zdtd --worldgen-seed 42 --once
     \\  zdtd --quiet --once --port 0
     \\
-    \\Exit codes: 0 success, 1 runtime error (config load, startup), 2 usage error.
+    \\Exit codes: 0 success, 1 runtime error (config load, startup), 2 usage error,
+    \\            141 broken pipe (stdout closed early, e.g. zdtd --help | head).
     \\
 ;
 
@@ -236,11 +237,34 @@ fn editDistance(a: []const u8, b: []const u8) usize {
     return prev[b.len];
 }
 
-/// Nearest known flag within edit distance 2, for typo hints. Tokens shorter
-/// than three characters never get one: every "-x" is within distance 2 of
-/// every short flag, so a guess there is noise ("-x" would suggest "-V").
+/// True when `name` looks like GNU-style clustered shorts (`-qh`, `-hv`) rather
+/// than a long-flag typo (`-world`). Only the letters that have real short
+/// forms here (`-h`/`-q`/`-v`/`-V`) count, so `-world` still gets a `--world`
+/// suggestion via edit distance.
+fn looksLikeClusteredShorts(name: []const u8) bool {
+    if (name.len < 3 or name[0] != '-' or name[1] == '-') return false;
+    for (name[1..]) |c| {
+        if (c != 'h' and c != 'q' and c != 'v' and c != 'V') return false;
+    }
+    return true;
+}
+
+/// Nearest known flag for typo hints. Prefers a unique proper-prefix match
+/// (e.g. `--config` → `--config-dir`) before Levenshtein distance ≤ 2.
+/// Tokens shorter than three characters never get one: every "-x" is within
+/// distance 2 of every short flag, so a guess there is noise ("-x" → "-V").
 fn suggestFlag(name: []const u8) ?[]const u8 {
     if (name.len < 3) return null;
+    // Prefix of a longer flag: pick the shortest so `--config` prefers
+    // `--config-dir` over `--config-overrides`.
+    var prefix_best: ?[]const u8 = null;
+    for (known_flags) |f| {
+        if (f.len > name.len and std.mem.startsWith(u8, f, name)) {
+            if (prefix_best == null or f.len < prefix_best.?.len) prefix_best = f;
+        }
+    }
+    if (prefix_best) |p| return p;
+
     var best: ?[]const u8 = null;
     var best_d: usize = 3;
     for (known_flags) |f| {
@@ -427,6 +451,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
             writeStdout(help_text);
             return;
         } else if (std.mem.startsWith(u8, a, "-")) {
+            // `-qh` / `-hv` look like clustered shorts (zdtd does not support that);
+            // say so instead of suggesting a single letter that is only half the intent.
+            if (looksLikeClusteredShorts(name)) {
+                usageError(
+                    "unknown option '{s}' (short options cannot be clustered; pass them separately)",
+                    .{name},
+                );
+            }
             if (suggestFlag(name)) |s| {
                 usageError("unknown option '{s}' (did you mean '{s}'?)", .{ name, s });
             }
@@ -1025,8 +1057,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
         );
     }
 
-    const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| {
-        fatal("cannot start server: {s} (world '{s}', port {d})", .{ @errorName(err), world_dir, port });
+    const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| switch (err) {
+        // World.mkdirPathStatus failed: say so instead of a generic "cannot start".
+        error.AccessDenied => fatal(
+            "cannot create world dir '{s}': AccessDenied (check --world permissions)",
+            .{world_dir},
+        ),
+        else => fatal("cannot start server: {s} (world '{s}', port {d})", .{ @errorName(err), world_dir, port }),
     };
     // The module path list is owned by main (split below); Game does not retain it.
     if (init_opts.plugin_modules.len > 0) gpa.free(init_opts.plugin_modules);
@@ -1140,7 +1177,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (max_ticks == 0) {
-        try g.run();
+        // Never let a Zig error return dump leak to the operator: map to the
+        // same exit-1 `zdtd:` line used for other runtime failures.
+        g.run() catch |err| fatal("server run failed: {s}", .{@errorName(err)});
         // Only reached on a clean exit (admin "shutdown" / running=false).
         // The absence of this line after a stop is how an operator tells a
         // killed/crashed process from a graceful one.
@@ -1152,10 +1191,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     } else {
         var i: u64 = 0;
         while (i < max_ticks) : (i += 1) {
-            try g.step();
+            g.step() catch |err| fatal("tick failed at {d}: {s}", .{ i, @errorName(err) });
             g.fillWebuiSnap();
         }
-        try g.world.saveAll();
+        g.world.saveAll() catch |err| fatal(
+            "cannot save world '{s}': {s}",
+            .{ world_dir, @errorName(err) },
+        );
         const snap = g.harness.snapshot();
         var buf: [apm.report.max_text_bytes]u8 = undefined;
         var w: std.Io.Writer = .fixed(&buf);
@@ -1211,10 +1253,18 @@ test "typo suggestion finds nearest flag" {
     try std.testing.expectEqualStrings("--port", suggestFlag("--prot").?);
     try std.testing.expectEqualStrings("--ticks", suggestFlag("--tick").?);
     try std.testing.expectEqualStrings("--world", suggestFlag("-world").?);
+    // Proper prefix of a longer flag (common truncation / half-typed form).
+    try std.testing.expectEqualStrings("--config-dir", suggestFlag("--config").?);
+    try std.testing.expectEqualStrings("--port", suggestFlag("--por").?);
     // Two-character tokens never suggest: any short flag is within distance 2.
     try std.testing.expect(suggestFlag("-v") == null);
     try std.testing.expect(suggestFlag("-x") == null);
     try std.testing.expect(suggestFlag("--zzzzzzzz") == null);
+    try std.testing.expect(looksLikeClusteredShorts("-qh"));
+    try std.testing.expect(looksLikeClusteredShorts("-hv"));
+    try std.testing.expect(!looksLikeClusteredShorts("-world"));
+    try std.testing.expect(!looksLikeClusteredShorts("-h"));
+    try std.testing.expect(!looksLikeClusteredShorts("--quiet"));
     try std.testing.expectEqual(@as(usize, 0), editDistance("--map", "--map"));
     try std.testing.expectEqual(@as(usize, 2), editDistance("ab", "ba"));
 }

@@ -209,13 +209,19 @@ def audit_coverage(game_dir, audit_path):
     ok = True
     if missing_in_doc:
         ok = False
-        print("check_xml_audit: XML on disk but NOT audited in %s:" % audit_path)
+        print(
+            "check_xml_audit: XML on disk but NOT audited in %s:" % audit_path,
+            file=sys.stderr,
+        )
         for f in sorted(missing_in_doc):
-            print("  - %s" % f)
+            print("  - %s" % f, file=sys.stderr)
     if stale_in_doc:
-        print("check_xml_audit: audit doc lists files absent from Data/Config:")
+        print(
+            "check_xml_audit: audit doc lists files absent from Data/Config:",
+            file=sys.stderr,
+        )
         for f in sorted(stale_in_doc):
-            print("  - %s" % f)
+            print("  - %s" % f, file=sys.stderr)
     return ok
 
 
@@ -298,7 +304,10 @@ def main():
 
     config_dir = os.path.join(args.game_dir, "Data", "Config")
     if not os.path.isdir(config_dir):
-        print("check_xml_audit: game dir not found (%s); skipped" % config_dir)
+        print(
+            "check_xml_audit: game dir not found (%s); skipped" % config_dir,
+            file=sys.stderr,
+        )
         return 0
 
     ok = audit_coverage(config_dir, args.audit)
@@ -308,19 +317,28 @@ def main():
     violations = scan_src(args.src, stock_names)
     if violations:
         ok = False
-        print("check_xml_audit: stock XML names used as literals outside loaders:")
+        print(
+            "check_xml_audit: stock XML names used as literals outside loaders:",
+            file=sys.stderr,
+        )
         for rel, lineno, lit in violations:
-            print("  %s:%d  %s" % (rel, lineno, lit))
+            print("  %s:%d  %s" % (rel, lineno, lit), file=sys.stderr)
 
     value_violations = scan_values(args.src)
     if value_violations:
         ok = False
-        print("check_xml_audit: stock XML numeric literals outside loaders/allowlist:")
+        print(
+            "check_xml_audit: stock XML numeric literals outside loaders/allowlist:",
+            file=sys.stderr,
+        )
         for rel, lineno, lit, why in value_violations:
-            print("  %s:%d  %s  (%s)" % (rel, lineno, lit, why))
+            print(
+                "  %s:%d  %s  (%s)" % (rel, lineno, lit, why),
+                file=sys.stderr,
+            )
 
     if not ok:
-        print("check_xml_audit: FAIL")
+        print("check_xml_audit: FAIL", file=sys.stderr)
         return 1
     print("check_xml_audit: OK")
     return 0

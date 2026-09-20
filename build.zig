@@ -138,6 +138,36 @@ pub fn build(b: *std.Build) void {
     default_collision.expectStdErrEqual("zdtd: AdminPort/TelnetPort 26902 collides with ServerPort (TCP GameServerInfo)\n");
     cli_test_step.dependOn(&default_collision.step);
 
+    // Uncreatable --world must fail closed at startup (exit 1, no Zig dump).
+    const bad_world = b.addRunArtifact(exe);
+    bad_world.addArgs(&.{ "--world", "/nonexistent/zdtd_cli_world", "--once", "--port", "0", "--quiet" });
+    bad_world.expectExitCode(1);
+    bad_world.expectStdOutEqual("");
+    bad_world.expectStdErrEqual(
+        "zdtd: cannot create world dir '/nonexistent/zdtd_cli_world': AccessDenied (check --world permissions)\n",
+    );
+    cli_test_step.dependOn(&bad_world.step);
+
+    // Truncated/unknown option: suggest the nearest known flag on stderr, exit 2.
+    const config_typo = b.addRunArtifact(exe);
+    config_typo.addArgs(&.{"--config"});
+    config_typo.expectExitCode(2);
+    config_typo.expectStdOutEqual("");
+    config_typo.expectStdErrEqual(
+        "zdtd: unknown option '--config' (did you mean '--config-dir'?)\nzdtd: try 'zdtd --help'\n",
+    );
+    cli_test_step.dependOn(&config_typo.step);
+
+    // Clustered shorts are not supported; do not suggest a half-match like `-q`.
+    const clustered = b.addRunArtifact(exe);
+    clustered.addArgs(&.{"-qh"});
+    clustered.expectExitCode(2);
+    clustered.expectStdOutEqual("");
+    clustered.expectStdErrEqual(
+        "zdtd: unknown option '-qh' (short options cannot be clustered; pass them separately)\nzdtd: try 'zdtd --help'\n",
+    );
+    cli_test_step.dependOn(&clustered.step);
+
     // mods/plugin_common.zig is the shared guest helper (Buf, Config) that the
     // core plugins compile against for wasm32-freestanding. It is not part of
     // the server's import graph, so its tests would never run under the unit
