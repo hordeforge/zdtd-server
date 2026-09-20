@@ -5,6 +5,67 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-20
+
+### Breaking changes
+
+- The `[wire] profile` configuration key is gone. zdtd emits only the stock
+  256-tall chunk dialect (the byte-pinned V3.2.0 format a stock client reads),
+  so there is no `tall-512` synthetic dialect and no paired-client-mod surface;
+  the `WireProfile` struct survives only as the save and chunk carry of the
+  fixed stock height. Before upgrading, remove the `[wire] profile` line (and
+  the `#profile = "stock"` example block) from `zdtd.toml` and custom preset
+  packs: the startup unknown-key validation now rejects it. World saves that
+  carry a non-stock `y_dim` still fail closed at load, as before.
+- The in-tree sample plugin and its `enable_sample_plugin` knob are removed
+  (`src/plugin/sample_hello.zig`, the `InitOption`, the preset pack key and the
+  static-host auto-registration). A preset pack or `zdtd.toml` carrying
+  `enable_sample_plugin` is rejected by the same unknown-key validation; remove
+  the line before upgrading. Wasm plugins are the one live mechanism: configure
+  them with `[plugin] modules` (`docs/PLUGIN_DEV.md`).
+- New gameplay behaviour and config cleanup below are compiled into the same
+  binary and gated by the existing keys; no additional migration is needed.
+
+### Added
+
+- **The dashboard is a Preact app over one state document.** GET
+  `/api/state.json` returns the dashboard state as JSON (`csrf`, the snapshot
+  scalars, players, plugins, modlets, console, apm) and the client renders it
+  (ADR 0040, superseding the server-rendered partial swap stack): tabs with
+  hash routing, per-tab poll cadence, a visibility pause, a poll-failure
+  banner and a churn flash, with the chart painting on a canvas against the
+  same tick history. Login and lockout stay server-rendered so signing in
+  works without JavaScript. All six `/partials/*` routes retired (404).
+
+- **Buff-Store custom variables now exist per entity.** Non-client entities
+  (zombies) carry the same CVar store stock's `EntityBuffs` uses, so
+  victim-directed `ModifyCVar` rows write real state instead of being dropped
+  (`cvars.zig` fixed-capacity store; `assets/cvars.zig` re-exports the shared
+  types). This is what the DeepCuts/PummelPete/PistolPete bleed escalation
+  gates read back through `CVarCompare target=other`.
+
+### Changed
+
+- **Core plugins build from one shared wrapper.** The twelve core plugins
+  under `plugins/core_*` no longer each carry a `main.zig` build entry: a
+  shared `plugins/core_main.zig` (referencing the per-plugin root module,
+  wired per plugin by `scripts/build-plugins.sh`) builds them all, and
+  `sample_hello.zig` is deleted. This changes how a source build reproduces
+  the committed `.wasm` binaries (`mods/BUILDING.md`); users of the shipped
+  binaries are unaffected.
+
+- **Consumable items and ranged skills complete their stock trigger surfaces.**
+  The eat path fires `onSelfPrimaryActionEnd` (food/water/HP pool restores,
+  beer/caffeine buffs, dysentery cure, the fire-extinguisher contract, Grandpa's
+  Forgetting Elixir respec with the skill-point refund), the held weapon's
+  `ranged` tag routes hits through `onSelfPrimaryActionRayHit`, and
+  `ModifyCVar value` curves index their `valueList` by the changed perk's
+  level. Buff-lifecycle events cover combat entry, fall impact and
+  death-path cleanup; `ModifyStats` rows apply their immediate Health, Food,
+  Water and Stamina deltas on buff start and update instead of folding only
+  the passive-value reads, so the buffs' direct drains and heals land in the
+  entity's pools like stock's `EffectManager` execute path.
+
 ## [0.5.0] - 2026-09-18
 
 ### Breaking changes
