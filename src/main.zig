@@ -955,20 +955,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // height-plane fill (the plane is u8 in every profile).
     if (rules_eff.worldgen.validate()) |msg| fatal("{s}", .{msg});
     if (rules_eff.geometry.validate()) |msg| fatal("{s}", .{msg});
-    // Effective wire geometry profile (ADR geometry/wire-profiles): `[wire]
-    // profile` from zdtd.toml; unknown names fail closed. A non-stock profile
-    // changes the chunk wire dialect (needs a paired client mod) and the save
-    // format; proc worldgen stays 256-tall, so seed+non-stock is refused.
-    var wire_profile: protocol.WireProfile = .{};
-    if (toml_owned) |*tf| {
-        wire_profile = protocol.profileForName(tf.wire.profile) orelse
-            fatal("unknown [wire] profile '{s}' (known: stock, tall-512)", .{tf.wire.profile});
-        if (!wire_profile.validate()) fatal("[wire] profile '{s}' failed structural validation", .{tf.wire.profile});
-        if (!wire_profile.isStock() and init_opts.worldgen_seed != null) {
-            fatal("[wire] profile '{s}' cannot combine with a proc worldgen seed (proc gen is 256-tall)", .{tf.wire.profile});
-        }
-    }
-    init_opts.wire_profile = wire_profile;
+    // Wire geometry is fixed stock: 256-tall columns, 64 layers (ADR
+    // geometry/wire-profiles). zdtd never emits a non-stock dialect.
+    init_opts.wire_profile = protocol.stock_profile;
     // Effective quest policy: preset pack < zdtd.toml (same precedence as
     // rules); defaults = builtin stock values (QuestPolicy{}).
     var qpol: ecs_mod.quest.QuestPolicy = .{};

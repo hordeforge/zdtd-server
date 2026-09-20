@@ -6690,7 +6690,6 @@ test "scenario plugin disable withdraws pending commands before drain" {
 
     const modules = [_][]const u8{"assets/fixtures/plugin_hello.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -8053,7 +8052,6 @@ test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel
         "assets/fixtures/plugin_looper.wasm",
     };
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_wasm", 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
         // Small fuel: the looper is cut off in microseconds, not seconds.
         .plugin_budget = .{ .fuel = 200_000 },
@@ -8144,122 +8142,6 @@ test "scenario mode pack rules overlay changes sim behaviour" {
         "PASS mode-rules: pack attack_damage=42 melee hp {d}->{d}\n",
         .{ hp0, g.sim.health[ps].hp },
     );
-}
-
-test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 saves" {
-    // Layer B seam proof (ADR geometry/wire-profiles): a non-stock wire profile
-    // flows from Game options into the block store (column height + plane
-    // sizing), the chunk wire body (layer band count + plane stride) and the
-    // save format (ZCH4 carrying the column height). Flat world + y_dim=512.
-    // No stock client can read this dialect (a paired client mod is required);
-    // the seam is proven with our own chunk + wire + save round-trips plus the
-    // production join stream (chunk_fill uses the same profile-aware builder).
-    freshScenarioDir("worlds/zdtd_sc_tall");
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
-    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_tall", 0, .{
-        .wire_profile = .{ .y_dim = 512 },
-    });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
-
-    // Profile on the block store; chunks adopt the column height + plane size.
-    try std.testing.expectEqual(@as(u32, 512), g.world.profile.y_dim);
-    try std.testing.expect(g.world.profile.validate());
-    try std.testing.expectEqual(@as(u32, 128), g.world.profile.layers());
-    try std.testing.expectEqual(@as(u32, 256 * 512), g.world.profile.planeCells());
-    const pos: world_store.ChunkPos = .{ .x = 0, .z = 0 };
-    const ch = try g.world.getOrCreate(pos);
-    try std.testing.expectEqual(@as(u32, 512), ch.y_dim);
-    try std.testing.expectEqual(@as(usize, 16 * 512 * 16), ch.planeCells());
-    try std.testing.expect(ch.blocks != null);
-    try std.testing.expectEqual(@as(u16, 64), ch.heightAt(0, 0)); // flat sea surface
-
-    // Wire: the chunk body encodes y_dim/4 = 128 layers, not 64. The same flat
-    // chunk encoded with the stock layer count is smaller (every extra air
-    // band still costs its presence byte + channel slots).
-    const TallCtx = struct {
-        ch: *world_store.Chunk,
-        fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32 {
-            const s: *const @This() = @ptrCast(@alignCast(ctx.?));
-            return s.ch.rawAt(lx, y, lz);
-        }
-        fn tex(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u64 {
-            const s: *const @This() = @ptrCast(@alignCast(ctx.?));
-            return s.ch.texAt(lx, y, lz);
-        }
-    };
-    var tctx: TallCtx = .{ .ch = ch };
-    var wire_buf: [1024 * 1024]u8 = undefined;
-    const body = try packages.stock_chunk.buildNetPackageChunkNew(&wire_buf, .{
-        .cx = 0,
-        .cz = 0,
-        .heights = &ch.heights,
-        .layers = 128,
-        .y_dim = 512,
-        .block_at = TallCtx.at,
-        .block_ctx = &tctx,
-        .tex_at = TallCtx.tex,
-    });
-    var stock_buf: [1024 * 1024]u8 = undefined;
-    const stock_body = try packages.stock_chunk.buildNetPackageChunkNew(&stock_buf, .{
-        .cx = 0,
-        .cz = 0,
-        .heights = &ch.heights,
-        .layers = 64,
-        .y_dim = 512,
-        .block_at = TallCtx.at,
-        .block_ctx = &tctx,
-        .tex_at = TallCtx.tex,
-    });
-    try std.testing.expect(body.len > stock_body.len);
-
-    // Production join stream: the real chunk_fill builder (profile-aware)
-    // sends a NetPackageChunk for the tall world without overflowing. The
-    // test Capture truncates full chunk bodies at 8 KiB, so the proof is the
-    // streamed-chunk tracking (clientAddStreamed only runs after chunk_fill's
-    // sendGame delivered) plus the direct 128-vs-64-layer body check above.
-    var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    try g.streamChunksForClient(c);
-    try std.testing.expect(c.streamed_n > 0);
-    // The stream inserted many chunks; the store's HashMap may have rehashed,
-    // invalidating the earlier `ch` pointer. Re-fetch before the save tests.
-    const ch2 = try g.world.getOrCreate(pos);
-
-    // Two blocks high in the tall column (above the stock 256 ceiling) so the
-    // reload below proves the u32 block plane survived, not just the heights.
-    try ch2.setBlock(g.world.allocator, 1, 300, 2, 7);
-    try ch2.setBlock(g.world.allocator, 3, 500, 4, 9);
-
-    // Save: ZCH4 with the column height in the header; validate + reload into
-    // a same-profile chunk round-trips; a stock chunk rejects the record.
-    const img = try world_store.World.encodeChunk(ch2, gpa);
-    defer gpa.free(img);
-    try std.testing.expectEqual(@as(u8, '4'), img[3]);
-    const saved_y = std.mem.readInt(u32, img[16..20], .little);
-    try std.testing.expectEqual(@as(u32, 512), saved_y);
-    try world_store.World.validateChunkBytes(img, pos);
-    try g.world.saveChunk(ch2);
-    var other = world_store.Chunk.generateFlat(pos);
-    other.y_dim = 512;
-    // loadChunk allocates the block plane into this stack chunk; it is not
-    // owned by the store, so the test frees it.
-    defer other.deinitBlocks();
-    try g.world.loadChunk(&other);
-    try std.testing.expectEqual(@as(u16, 64), other.heightAt(0, 0));
-    // The block plane, not just the heights: encodeChunk writes it for ZCH4
-    // as well, so loadChunk has to read it back. Gating the read on ZCH3 threw
-    // the plane away and then read the topsoil tail out of the middle of it.
-    try std.testing.expectEqual(@as(u16, 7), other.blockAt(1, 300, 2));
-    try std.testing.expectEqual(@as(u16, 9), other.blockAt(3, 500, 4));
-    var stock_chunk = world_store.Chunk.generateFlat(pos);
-    try std.testing.expectError(error.ReadFailed, g.world.loadChunk(&stock_chunk));
-
-    std.debug.print("PASS tall-wire-profile: y_dim=512 planes={d} wire={d}B vs {d}B ZCH4\n", .{ ch2.planeCells(), body.len, stock_body.len });
 }
 
 test "scenario restart does not re-seed the starter chest" {
@@ -8398,7 +8280,6 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     };
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -11659,7 +11540,6 @@ test "scenario core_announce broadcasts join via the say verb" {
 
     const modules = [_][]const u8{"plugins/core_announce/core_announce.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_announce", 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -11722,7 +11602,6 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     const modules = [_][]const u8{"plugins/core_rewardgate/core_rewardgate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -11776,7 +11655,6 @@ test "scenario core_pricegate scales trader buy prices (1.5x)" {
 
     const modules = [_][]const u8{"plugins/core_pricegate/core_pricegate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pricegate", 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -11816,7 +11694,6 @@ test "scenario core_damagegate halves incoming player damage (0.5x)" {
 
     const modules = [_][]const u8{"plugins/core_damagegate/core_damagegate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_damagegate", 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -11854,7 +11731,6 @@ test "scenario core_adminverbs wave verb spawns zombies" {
 
     const modules = [_][]const u8{"plugins/core_adminverbs/core_adminverbs.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminverbs", 0, .{
-        .enable_sample_plugin = false,
         .plugin_modules = &modules,
     });
     defer {
@@ -13729,7 +13605,6 @@ test "scenario mods AC4/AC5: exclusive core override point routes only to the cl
     // loot to 300%.
     freshScenarioDir("worlds/zdtd_sc_mods_claim");
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim", 0, .{
-        .enable_sample_plugin = false,
         .plugin_plan = &plan,
     });
     defer {
@@ -13772,7 +13647,6 @@ test "scenario mods: a claim without the mapped hook is refused, not installed" 
 
     freshScenarioDir("worlds/zdtd_sc_mods_claim_no_hook");
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_no_hook", 0, .{
-        .enable_sample_plugin = false,
         .plugin_plan = &plan,
     });
     defer {
@@ -13812,7 +13686,6 @@ test "scenario mods: a disabled claimant releases its exclusive point" {
 
     freshScenarioDir("worlds/zdtd_sc_mods_claim_release");
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_release", 0, .{
-        .enable_sample_plugin = false,
         .plugin_plan = &plan,
     });
     defer {
@@ -13864,7 +13737,6 @@ test "scenario mods AC6: override = name replaces the official mod" {
 
     freshScenarioDir("worlds/zdtd_sc_mods_replace");
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_replace", 0, .{
-        .enable_sample_plugin = false,
         .plugin_plan = &plan,
     });
     defer {
@@ -13922,7 +13794,6 @@ test "scenario mods AC8: discovered mods run under the standard budget and attri
     freshScenarioDir("worlds/zdtd_sc_mods_budget");
     // Small fuel so the looper burns out in microseconds (like the T9 proof).
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_budget", 0, .{
-        .enable_sample_plugin = false,
         .plugin_plan = &plan,
         .plugin_budget = .{ .fuel = 200_000 },
     });

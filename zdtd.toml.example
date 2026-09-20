@@ -155,11 +155,6 @@ block_id_mapping = true
 # trader_band_1 = 500
 # trader_band_2 = 1500
 
-# Column-height wire dialect (ADR 0036): stock (256-tall, byte-pinned by
-# goldens) or tall-512 (non-stock worlds; needs a paired client mod).
-# [wire]
-# profile = "stock"
-
 # Procedural terrain (docs/WORLDGEN.md). Not stock RWG. CLI --worldgen-seed
 # wins; ignored when --map is set. Unset keeps the flat/baked default.
 # [worldgen]

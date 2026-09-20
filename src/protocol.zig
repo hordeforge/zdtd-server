@@ -30,37 +30,36 @@ pub const content_len_entity_rel_pos_and_rot_no_q: usize = 22;
 
 /// Wire geometry profile: the chunk-format constants a server+client pair must
 /// agree on (WorldConstants ChunkBlockYDim family; research
-/// 7dtd-engine-research/docs/world/terrain-height.md). `stock` = today's exact
-/// values, byte-pinned by golden tests. A non-stock profile requires a paired
-/// client mod (RealEarth-style engine expand: stock clients cannot read it).
-/// XZ (`ChunkAreaDim`) never expands; only the column height grows.
+/// 7dtd-engine-research/docs/world/terrain-height.md). zdtd emits only the
+/// stock dialect; the struct survives for persistence (save stores `y_dim`)
+/// and wire code that reads a height from a save. Stock = today's exact
+/// values, byte-pinned by golden tests. XZ (`ChunkAreaDim`) never expands.
 ///
 /// One source of truth: only `y_dim` is stored; `layers`, `cMaxHeight` and
 /// `planeCells` derive from it, so a profile cannot disagree with itself.
-/// The block-plane index stride is the fixed `ChunkAreaDim` 256 in every
-/// dialect (`x + z*16 + y*256`); only the cell count grows with the height.
+/// The block-plane index stride is the fixed `ChunkAreaDim` 256
+/// (`x + z*16 + y*256`).
 pub const WireProfile = struct {
-    /// Column height (ChunkBlockYDim). 256 stock, 16384 RealEarth-expanded.
+    /// Column height (ChunkBlockYDim). 256 stock.
     y_dim: u32 = 256,
-    /// Layer height in blocks. Fixed 4 in stock and expanded dumps.
+    /// Layer height in blocks. Fixed 4.
     layer_height: u32 = 4,
 
-    /// ChunkBlockLayers = y_dim / layer_height (64 stock, 4096 expanded).
+    /// ChunkBlockLayers = y_dim / layer_height (64 stock).
     pub fn layers(self: WireProfile) u32 {
         return self.y_dim / self.layer_height;
     }
-    /// ChunkBlockYPow = log2(y_dim) (8 stock, 14 expanded). Validated at load.
+    /// ChunkBlockYPow = log2(y_dim) (8 stock).
     pub fn yPow(self: WireProfile) u8 {
         return @intCast(@ctz(self.y_dim));
     }
-    /// cMaxHeight = y_dim - 1 (255 stock, 16383 expanded).
+    /// cMaxHeight = y_dim - 1 (255 stock).
     pub fn cMaxHeight(self: WireProfile) u32 {
         return self.y_dim - 1;
     }
-    /// Dense block-plane cell count: ChunkAreaDim × y_dim = 256 × y_dim
-    /// (65536 stock, 131072 at 512). The plane INDEX stride is the fixed
-    /// ChunkAreaDim 256 (`x + z*16 + y*256`) in every dialect - only the cell
-    /// count and the layer band count grow with the column height.
+    /// Dense block-plane cell count: ChunkAreaDim × y_dim = 256 × 256 (65536
+    /// stock). The plane INDEX stride is the fixed ChunkAreaDim 256
+    /// (`x + z*16 + y*256`).
     pub fn planeCells(self: WireProfile) u32 {
         return 256 * self.y_dim;
     }
@@ -81,33 +80,6 @@ pub const WireProfile = struct {
 /// Byte-pinned by golden tests; never change these values.
 pub const stock_profile: WireProfile = .{};
 
-/// Named wire dialects for config/operator use (`[wire] profile` in
-/// zdtd.toml). Non-stock dialects need a paired client mod; stock clients
-/// cannot read them. `tall-512` is the seam-proof dialect (synthetic).
-pub const known_profiles = [_]struct { name: []const u8, profile: WireProfile }{
-    .{ .name = "stock", .profile = .{} },
-    .{ .name = "tall-512", .profile = .{ .y_dim = 512 } },
-};
-
-/// Resolve a `[wire] profile` name; null = unknown (fail closed at startup).
-pub fn profileForName(name: []const u8) ?WireProfile {
-    for (known_profiles) |k| {
-        if (std.mem.eql(u8, name, k.name)) return k.profile;
-    }
-    return null;
-}
-
-test "known wire profiles resolve and validate" {
-    const p = profileForName("stock").?;
-    try std.testing.expect(p.validate());
-    try std.testing.expect(p.isStock());
-    const t = profileForName("tall-512").?;
-    try std.testing.expect(t.validate());
-    try std.testing.expectEqual(@as(u32, 128), t.layers());
-    try std.testing.expectEqual(@as(u32, 256 * 512), t.planeCells());
-    try std.testing.expect(profileForName("bogus") == null);
-}
-
 test "WireProfile stock derives the RE constants" {
     try std.testing.expect(stock_profile.validate());
     try std.testing.expect(stock_profile.isStock());
@@ -115,16 +87,6 @@ test "WireProfile stock derives the RE constants" {
     try std.testing.expectEqual(@as(u8, 8), stock_profile.yPow());
     try std.testing.expectEqual(@as(u32, 255), stock_profile.cMaxHeight());
     try std.testing.expectEqual(@as(u32, 65536), stock_profile.planeCells());
-
-    // Expanded (RealEarth-style): 16384 / 8 / 4096 layers; the plane grows
-    // 256 × y_dim while the index stride stays the fixed ChunkAreaDim 256.
-    const tall: WireProfile = .{ .y_dim = 16384 };
-    try std.testing.expect(tall.validate());
-    try std.testing.expectEqual(@as(u32, 4096), tall.layers());
-    try std.testing.expectEqual(@as(u8, 14), tall.yPow());
-    try std.testing.expectEqual(@as(u32, 16383), tall.cMaxHeight());
-    try std.testing.expectEqual(@as(u32, 256 * 16384), tall.planeCells());
-    try std.testing.expect(!tall.isStock());
 
     // Invalid profiles are rejected.
     const non_pow2: WireProfile = .{ .y_dim = 300 };
