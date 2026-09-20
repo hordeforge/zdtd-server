@@ -534,6 +534,11 @@ pub fn step(self: *Game) !void {
         self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
         self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
         self.saveEntities() catch |e| game_mod.logPersistErr(self, "save entities", e);
+        // Same order as persist.saveAllStores: traders and sleeper markers
+        // must ride the periodic tick, not only admin `.save` / `.saveworld`.
+        self.saveTraders() catch |e| game_mod.logPersistErr(self, "save traders", e);
+        self.sleepers.saveCleared(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-cleared", e);
+        self.sleepers.saveTriggered(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-triggered", e);
         self.allies.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save allies", e);
         self.saveBlockMeta() catch |e| game_mod.logPersistErr(self, "save block meta", e);
         self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);

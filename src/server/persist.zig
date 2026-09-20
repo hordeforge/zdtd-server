@@ -41,10 +41,14 @@ pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     }
 }
 
-/// One canonical ladder over every zdtd-owned store, so an operator-triggered
-/// save covers exactly what the autosave tick covers. Each store is attempted
-/// even when an earlier one failed; returns false if any failed (already
-/// logged), so callers never report success over a disk error.
+/// One canonical ladder over every zdtd-owned store. Admin `.save` /
+/// `.saveworld` and the periodic autosave tick (Game.step) and graceful
+/// shutdown (lifecycle.deinit) all write the same set: chunks, TE stores,
+/// traders, sleeper markers, allies, block meta, weather, clock, and players.
+/// Each store is attempted even when an earlier one failed; returns false if
+/// any failed (already logged), so callers never report success over a disk
+/// error. The tick path still skips `savePlayers` when `players_dirty` is
+/// false; this ladder always flushes players.
 pub fn saveAllStores(self: *Game) bool {
     var ok = true;
     const note = struct {
@@ -1045,7 +1049,10 @@ pub fn savePlayers(self: *Game) !void {
 
 /// Remove all players.zsv records whose login name equals `name`.
 /// Returns how many records were dropped. FileNotFound → 0 (no-op).
-/// Does not log the name (operator reply only).
+/// Does not log the name (operator reply only). Before rewriting, copies the
+/// prior file to `players.zsv.bak` in the same world dir so a fat-finger wipe
+/// can be undone by restoring that file over `players.zsv` (instance still
+/// present). Fails closed if the `.bak` write cannot complete.
 pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
     if (name.len == 0 or name.len > 32) return 0;
     var path_buf: [512]u8 = undefined;
@@ -1058,6 +1065,9 @@ pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
     const filtered = try zpv2DropName(self.allocator, data, name);
     defer if (filtered.blob) |b| self.allocator.free(b);
     if (filtered.removed == 0) return 0;
+    var bak_buf: [520]u8 = undefined;
+    const bak = try std.fmt.bufPrint(&bak_buf, "{s}.bak", .{path});
+    try io_fs.writeFile(bak, data);
     try io_fs.writeFile(path, filtered.blob.?);
     return filtered.removed;
 }
@@ -2330,6 +2340,41 @@ test "player save upgrades offline v15 inventory slots" {
     const again = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(again);
     try std.testing.expectEqualSlices(u8, saved, again);
+}
+
+test "wipePlayerRecordsByName writes players.zsv.bak before rewrite" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = try playersPath(g, &path_buf);
+    // Minimal ZPV2 single-record file (name "a", zeros for the rest of the
+    // fixed prefix) so wipe has something to remove without a live client.
+    var data: std.ArrayList(u8) = .empty;
+    defer data.deinit(std.testing.allocator);
+    try data.appendSlice(std.testing.allocator, "ZPV2\x01\x00\x00\x00");
+    try data.appendSlice(std.testing.allocator, "\x01a");
+    try data.appendNTimes(std.testing.allocator, 0, 16); // pos + coins
+    try data.append(std.testing.allocator, 0); // inv_n
+    try data.append(std.testing.allocator, 0); // jn
+    try io_fs.writeFile(path, data.items);
+    const removed = try wipePlayerRecordsByName(g, "a");
+    try std.testing.expectEqual(@as(u32, 1), removed);
+    var bak_buf: [520]u8 = undefined;
+    const bak = try std.fmt.bufPrint(&bak_buf, "{s}.bak", .{path});
+    const bak_blob = try io_fs.readFileAll(std.testing.allocator, bak);
+    defer std.testing.allocator.free(bak_blob);
+    try std.testing.expectEqualSlices(u8, data.items, bak_blob);
+    const after = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(after);
+    try std.testing.expect(after.len >= 8);
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, after[4..8], .little));
 }
 
 test "player save preserves full inventory journal and buffs" {

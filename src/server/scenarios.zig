@@ -10801,6 +10801,46 @@ test "scenario trader stock persists across restart (traders.zst)" {
     }
 }
 
+test "scenario autosave tick writes traders.zst without admin save" {
+    // Crash / kill between operator saves used to lose trader stock because
+    // Game.step omitted saveTraders. Prove the periodic path writes the file.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_traderautosave");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traderautosave", 0, .{
+        .save_interval_ticks = 1,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var ts: ?ecs.Slot = null;
+    var s: usize = 0;
+    while (s < ecs.max_entities) : (s += 1) {
+        if (g.sim.alive[s] and g.sim.mask[s].trader_stock and
+            std.mem.eql(u8, g.sim.trader_stock[s].name, "Trader Jen"))
+        {
+            ts = @intCast(s);
+            break;
+        }
+    }
+    const t = ts orelse return error.TestUnexpectedResult;
+    g.sim.trader_stock[t].wallet = 4242;
+    try g.step();
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{g.world.world_dir});
+    const blob = try io_fs.readFileAll(gpa, p);
+    defer gpa.free(blob);
+    try std.testing.expect(blob.len >= 8);
+    g.sim.trader_stock[t].wallet = 0;
+    try persist.loadTraders(g);
+    try std.testing.expectEqual(@as(i32, 4242), g.sim.trader_stock[t].wallet);
+    std.debug.print("PASS trader-autosave: periodic tick persists traders.zst\n", .{});
+}
+
 test "scenario a trader entry with an unresolvable item does not shift the saved record" {
     // An entry whose item id this build cannot name is dropped on save rather
     // than written as a stub. The record's entry-count byte therefore has to
