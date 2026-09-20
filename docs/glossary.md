@@ -77,9 +77,9 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
   optional planes ([world-store.md](subsystems/world-store.md)).
 - **ZCH4**: The non-stock wire-profile variant of ZCH3 that carries the column
   height in the header; a stock loader rejects it (`src/world/store.zig:1385`).
-- **ZPV16**: The player record format, widened in v16 with per-slot `ItemValue`
-  stat entries (`src/server/persist.zig:115`).
-- **ZCT2, ZSG1, ZVNM, ZWS1**: The container, sign, vending machine and
+- **ZPV17**: The player record format; v16 added per-slot `ItemValue` stats and
+  v17 appends `flags`/`mod_n`/`mod_qualities` (`src/server/persist.zig:124`).
+- **ZCT3, ZSG1, ZVNM, ZWS1**: The container, sign, vending machine and
   workstation store formats (`src/world/containers.zig:186`,
   `src/world/signs.zig:122`, `src/world/vending.zig:159`,
   `src/world/workstations.zig:708`).

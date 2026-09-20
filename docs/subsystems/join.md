@@ -241,7 +241,7 @@ dead-peer arm of `clientFor` does call `dropClientSlot`, with a comment naming
 the ghost-player bug the inline reset used to leave behind (net.zig:449-453).
 
 What survives a restart is the player record, not the session. `savePlayers`
-writes `players.zsv` (ZPV16, merge-write so offline records are carried over:
+writes `players.zsv` (ZPV17, merge-write so offline records are carried over:
 persist.zig:1, persist.zig:573) and `tryRestorePlayer` reads it back into the
 `Client` at login (persist.zig:1067, called at c2s/join.zig:230 and
 c2s/join.zig:257). Claims and turret ownership are keyed by login name and

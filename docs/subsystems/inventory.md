@@ -164,10 +164,11 @@ Loot fill writes the rolled stacks straight into a bag entity's inventory: the b
 
 ## Persistence and the tick path
 
-Join carries the restored inventory in the player-id package: toolbelt from sim slots `0..9` and bag from `inv_bag_start` onward are encoded as stock slots, and the packet is only marked loaded on a first join (src/server/game.zig:2818, 2850, 2863). The equipment section of that same PDF is written as twelve empty item values and zero cosmetics (src/wire/packages.zig:622), so equipment slots are not restored from the join PDF as of this reading; that is a gap, not a stock behaviour. Client `NetPackagePlayerData` applies the same PDF layout over the live inventory, clamps it, and sets `players_dirty` so the file write happens on the periodic save rather than per packet (src/server/c2s/misc.zig:314, 353). The slot stride is versioned and the current record is 52 bytes (src/server/persist.zig:126):
+Join carries the restored inventory in the player-id package: toolbelt from sim slots `0..9` and bag from `inv_bag_start` onward are encoded as stock slots, and the packet is only marked loaded on a first join (src/server/game.zig:2818, 2850, 2863). The equipment section of that same PDF is written as twelve empty item values and zero cosmetics (src/wire/packages.zig:622), so equipment slots are not restored from the join PDF as of this reading; that is a gap, not a stock behaviour. Client `NetPackagePlayerData` applies the same PDF layout over the live inventory, clamps it, and sets `players_dirty` so the file write happens on the periodic save rather than per packet (src/server/c2s/misc.zig:314, 353). The slot stride is versioned and the current record is 58 bytes (`src/server/persist.zig:134`):
 
 ```zig
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 17) return ecs.components.inv_slot_persist_stride; // 52 + flags + mod_n + 4 qualities
     if (version >= 16) return 52; // 21 + stats_n u8 + 6 x (effect u8, two i16) (ZPV16)
     if (version >= 12) return 21; // 13 + 4 mod ids (ZPV12)
     if (version >= 10) return 13;
@@ -175,7 +176,7 @@ pub fn zpvSlotStride(version: u8) usize {
 }
 ```
 
-`savePlayers` writes a full slot record per occupied slot (src/server/persist.zig:867) and `tryRestorePlayer` reads it back into the ECS array (src/server/persist.zig:1067, 1124). The stride comment names what is not yet in it: `flags` and `mod_qualities` persist as their defaults, so a reloaded slot loses the activated flag and per-mod quality (src/ecs/components.zig:730, 753). The ledger is not part of that record.
+`savePlayers` writes a full slot record per occupied slot (src/server/persist.zig:905) and `tryRestorePlayer` reads it back into the ECS array via `InvSlot.readPersist`. ZPV17 carries `flags`, `mod_n`, and `mod_qualities` after the stats block so an activated item and per-mod quality tiers survive a relog. The ledger is not part of that record.
 
 Per-tick work is minimal by construction. No inventory system runs in the 50 ms tick for its own sake: the only scheduled inventory-adjacent work is the workstation craft step, on the sleeper cadence rather than every tick (src/server/game/step.zig:255; src/server/game/craft.zig:596). Loot bag collection is request-driven and funnels through `inventory.collectBagFull`, the single transfer rule the C2S collect arm calls and `systems.collectLootNear` shares (src/server/c2s/move.zig:93; src/ecs/systems.zig:1413). Tool wear happens on the attack and dig call sites through `degradeUse`, not on a tick (src/ecs/inventory.zig:302). Everything else is request-driven: a C2S arm applies a change, then broadcasts the resulting state or a holding echo.
 

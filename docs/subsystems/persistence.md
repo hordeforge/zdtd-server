@@ -23,7 +23,7 @@ The periodic autosave in `Game.step` and graceful shutdown in `lifecycle.deinit`
 
 Nothing else is durable and none of it is meant to be: peer and interest caches, reliable windows and per-session client state reset on reconnect; the plugin runtime reloads and its budgets re-arm with no persisted plugin state; apm counters and histograms are per-process; admin TCP is a fresh connection per attach (`docs/prd/0004-hot-restart.md:61`). Inside a chunk, the per-block stability plane is derived state that is explicitly never persisted (`src/world/store.zig:135`), and the `te_scanned` and `power_scanned` flags are runtime-only, so the storage-TE scan and the power-grid rebuild repeat on first touch after a restart (`src/world/store.zig:137`, `src/server/game/chunk_fill.zig:52`).
 
-Every format here is zdtd-owned: the magics are `ZPV<version>`, `ZENT`, `ZCLC`, `ZCL2`, `ZWTH1`, `ZBM2`, `ZCT2`, `ZWS1` and `ZCH3`/`ZCH4`. None of these files is the stock dedicated server's region or PlayerDataFile format, and nothing in the read paths emits one; the persistence inventory is the contract the PRD tracks, not a stock-save compatibility claim (`docs/prd/0004-hot-restart.md:69`).
+Every format here is zdtd-owned: the magics are `ZPV<version>`, `ZEN2` (legacy `ZENT` still loads), `ZCLC`, `ZCL2`, `ZWTH1`, `ZBM2`, `ZCT3` (legacy `ZCT1`/`ZCT2` still load), `ZWS1` and `ZCH3`/`ZCH4`. None of these files is the stock dedicated server's region or PlayerDataFile format, and nothing in the read paths emits one; the persistence inventory is the contract the PRD tracks, not a stock-save compatibility claim (`docs/prd/0004-hot-restart.md:69`).
 
 ## Files on disk
 
@@ -35,7 +35,7 @@ Paths are built by `fmt.bufPrint` into a caller stack buffer per store, keyed on
     }
 ```
 
-Player records live in `players.zsv` under the same directory (`src/server/persist.zig:545`). The world clock is a fixed 28-byte record with its own reader that accepts the older 12-byte form; `saveClock` (`src/server/game/clock_persist.zig:12`):
+Player records live in `players.zsv` under the same directory (`src/server/persist.zig:576`). The world clock is a fixed 28-byte record with its own reader that accepts the older 12-byte form; `saveClock` (`src/server/game/clock_persist.zig:12`):
 
 ```zig
 pub fn saveClock(self: *const Game) !void {
@@ -116,7 +116,7 @@ The topsoil tail is appended last and is optional on read, so a pre-topsoil file
 
 ## Player records
 
-`players.zsv` is a header plus a record per player; the header count is patched in last from the records actually appended, because a count predicted up front drifts when a joined client has no ECS player slot (`src/server/persist.zig:599`). The written magic byte is `'G'`, that is ZPV16, and older files stay readable (`src/server/persist.zig:602`). The record layout, as documented next to `playersPath` (`src/server/persist.zig:549`):
+`players.zsv` is a header plus a record per player; the header count is patched in last from the records actually appended, because a count predicted up front drifts when a joined client has no ECS player slot (`src/server/persist.zig:629`). The written magic byte is `'H'`, that is ZPV17, and older files stay readable (`src/server/persist.zig:632`). The record layout, as documented next to `playersPath` (`src/server/persist.zig:576`):
 
 ```zig
 /// Record layout (v5+): magic ZPVN | n:u32 | records…
@@ -129,10 +129,11 @@ The topsoil tail is appended last and is optional on read, so a pre-topsoil file
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
 ```
 
-The version this build writes and the stride each generation used are one pair of functions, so a reader for an old file and the writer cannot disagree (`src/server/persist.zig:124`, `src/server/persist.zig:126`):
+The version this build writes and the stride each generation used are one pair of functions, so a reader for an old file and the writer cannot disagree (`src/server/persist.zig:132`, `src/server/persist.zig:134`):
 
 ```zig
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 17) return ecs.components.inv_slot_persist_stride; // 52 + flags + mod_n + 4 qualities
     if (version >= 16) return 52; // 21 + stats_n u8 + 6 x (effect u8, two i16) (ZPV16)
     if (version >= 12) return 21; // 13 + 4 mod ids (ZPV12)
     if (version >= 10) return 13;

@@ -723,6 +723,12 @@ pub const Wallet = struct {
     coins: u32 = 0,
 };
 
+/// On-disk InvSlot stride for the current save writers (ZPV17 / ZEN2 / ZCT3).
+/// Layout: v12 head (21) + stats_n + 6 stats (31) + flags + mod_n + 4
+/// mod_qualities (6) = 58. Older strides (7/11/13/21/52) stay readable via
+/// `InvSlot.readPersist`.
+pub const inv_slot_persist_stride: usize = 58;
+
 pub const InvSlot = struct {
     item_id: u16 = 0,
     count: u16 = 0,
@@ -737,25 +743,95 @@ pub const InvSlot = struct {
     /// not the seed).
     seed: u16 = 0,
     /// Stock ItemValue.Flags (V3.2.0 bitfield). Bit 0 = Activated
-    /// (`get_Activated`); used by `IsItemActive`. Not in ZPV16 slot stride yet —
-    /// persist reloads as 0 (ponytail: add when save format bumps).
+    /// (`get_Activated`); used by `IsItemActive`. Persisted since ZPV17.
     flags: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 covers the
     /// stock slot counts). The mods' stat effects are client-side; the ids
     /// persist so a modded weapon survives a relog. 0 = empty slot.
     mods: [4]u16 = .{0} ** 4,
-    /// Active mod count (<= mods.len).
+    /// Active mod count (<= mods.len). Persisted since ZPV17 (older loads
+    /// derive it from the first contiguous non-zero mod ids).
     mod_n: u8 = 0,
     /// Per-mod ItemValue.Quality (parallel to `mods`). Wire nested ItemValue
     /// carries it; RequirementItemModTier compares it. 0 with a non-zero mod
     /// id means "unset" and folds as stock's nested default of 1.
-    /// ponytail: not in ZPV16 slot stride yet — persist reloads as 1.
+    /// Persisted since ZPV17.
     mod_qualities: [4]u8 = .{0} ** 4,
     /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
     /// deltas a client-created item carries. Kept as the wire pair so an echo
     /// round-trips exactly (stock's `Stat` ctor sets `isBoosted = slot_b > 0`).
     stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
     stats_n: u8 = 0,
+
+    /// Encode this slot into `out` at `inv_slot_persist_stride` bytes so every
+    /// store (players.zsv, entities.zen, containers.zct) shares one shape.
+    pub fn writePersist(self: InvSlot, out: []u8) void {
+        std.debug.assert(out.len >= inv_slot_persist_stride);
+        @memset(out[0..inv_slot_persist_stride], 0);
+        std.mem.writeInt(u16, out[0..2], self.item_id, .little);
+        std.mem.writeInt(u16, out[2..4], self.count, .little);
+        out[4] = self.quality;
+        std.mem.writeInt(u16, out[5..7], self.meta, .little);
+        std.mem.writeInt(u32, out[7..11], @as(u32, @bitCast(self.use_times)), .little);
+        std.mem.writeInt(u16, out[11..13], self.seed, .little);
+        var mz: usize = 0;
+        while (mz < self.mods.len) : (mz += 1) {
+            std.mem.writeInt(u16, out[13 + mz * 2 ..][0..2], self.mods[mz], .little);
+        }
+        out[21] = self.stats_n;
+        var sz: usize = 0;
+        while (sz < self.stats.len) : (sz += 1) {
+            out[22 + sz * 5] = self.stats[sz].effect;
+            std.mem.writeInt(i16, out[23 + sz * 5 ..][0..2], self.stats[sz].slot_a, .little);
+            std.mem.writeInt(i16, out[25 + sz * 5 ..][0..2], self.stats[sz].slot_b, .little);
+        }
+        out[52] = self.flags;
+        out[53] = self.mod_n;
+        @memcpy(out[54..58], self.mod_qualities[0..4]);
+    }
+
+    /// Decode a slot from a versioned persist stride. Unknown lengths fail
+    /// closed to an empty slot (callers must only pass known strides).
+    pub fn readPersist(in: []const u8) InvSlot {
+        var s: InvSlot = .{};
+        if (in.len < 7) return s;
+        s.item_id = std.mem.readInt(u16, in[0..2], .little);
+        s.count = std.mem.readInt(u16, in[2..4], .little);
+        s.quality = in[4];
+        s.meta = std.mem.readInt(u16, in[5..7], .little);
+        if (in.len >= 11) s.use_times = @bitCast(std.mem.readInt(u32, in[7..11], .little));
+        if (in.len >= 13) s.seed = std.mem.readInt(u16, in[11..13], .little);
+        if (in.len >= 21) {
+            var mz: usize = 0;
+            while (mz < s.mods.len) : (mz += 1) {
+                const mod_id = std.mem.readInt(u16, in[13 + mz * 2 ..][0..2], .little);
+                s.mods[mz] = mod_id;
+                if (mod_id != 0) s.mod_n = @intCast(mz + 1);
+            }
+        }
+        if (in.len >= 52) {
+            const sn = @min(in[21], s.stats.len);
+            s.stats_n = @intCast(sn);
+            var sz: usize = 0;
+            while (sz < sn) : (sz += 1) {
+                s.stats[sz] = .{
+                    .effect = in[22 + sz * 5],
+                    .slot_a = std.mem.readInt(i16, in[23 + sz * 5 ..][0..2], .little),
+                    .slot_b = std.mem.readInt(i16, in[25 + sz * 5 ..][0..2], .little),
+                };
+            }
+        }
+        if (in.len >= 58) {
+            s.flags = in[52];
+            const stored_mod_n = in[53];
+            @memcpy(s.mod_qualities[0..4], in[54..58]);
+            // Prefer the stored count. A widened ZPV16 record zero-fills
+            // mod_n while still carrying mod ids: fall back to the derived
+            // prefix length from the mods block above.
+            if (stored_mod_n > 0 or s.mod_n == 0) s.mod_n = stored_mod_n;
+        }
+        return s;
+    }
 };
 
 /// Stock items carry at most five distinct stat effects; see
@@ -1455,4 +1531,59 @@ test "Turret.setOwnerName truncates on a UTF-8 codepoint boundary" {
     try std.testing.expectEqual(@as(u8, 30), t.owner_name_len);
     try std.testing.expect(std.unicode.utf8ValidateSlice(t.owner_name[0..t.owner_name_len]));
     try std.testing.expectEqualStrings("名" ** 10, t.owner_name[0..t.owner_name_len]);
+}
+
+test "InvSlot persist round-trips flags mod_n qualities and stats" {
+    const original: InvSlot = .{
+        .item_id = 42,
+        .count = 3,
+        .quality = 5,
+        .meta = 7,
+        .use_times = 12.5,
+        .seed = 99,
+        .flags = 1,
+        .mods = .{ 10, 11, 0, 0 },
+        .mod_n = 2,
+        .mod_qualities = .{ 4, 6, 0, 0 },
+        .stats_n = 1,
+        .stats = .{
+            .{ .effect = 3, .slot_a = 1, .slot_b = 2 },
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+        },
+    };
+    var buf: [inv_slot_persist_stride]u8 = undefined;
+    original.writePersist(&buf);
+    const got = InvSlot.readPersist(&buf);
+    try std.testing.expectEqual(original.item_id, got.item_id);
+    try std.testing.expectEqual(original.count, got.count);
+    try std.testing.expectEqual(original.quality, got.quality);
+    try std.testing.expectEqual(original.meta, got.meta);
+    try std.testing.expectEqual(original.use_times, got.use_times);
+    try std.testing.expectEqual(original.seed, got.seed);
+    try std.testing.expectEqual(original.flags, got.flags);
+    try std.testing.expectEqual(original.mod_n, got.mod_n);
+    try std.testing.expectEqualSlices(u16, &original.mods, &got.mods);
+    try std.testing.expectEqualSlices(u8, &original.mod_qualities, &got.mod_qualities);
+    try std.testing.expectEqual(original.stats_n, got.stats_n);
+    try std.testing.expectEqual(original.stats[0].effect, got.stats[0].effect);
+    try std.testing.expectEqual(original.stats[0].slot_a, got.stats[0].slot_a);
+    try std.testing.expectEqual(original.stats[0].slot_b, got.stats[0].slot_b);
+}
+
+test "InvSlot readPersist derives mod_n from a widened ZPV16 stride" {
+    // 52-byte ZPV16 shape: mods present, trailing flags/mod_n zero-filled on
+    // upgrade so the reader must recover mod_n from the ids.
+    var buf: [52]u8 = .{0} ** 52;
+    std.mem.writeInt(u16, buf[0..2], 8, .little);
+    std.mem.writeInt(u16, buf[2..4], 1, .little);
+    std.mem.writeInt(u16, buf[13..15], 20, .little);
+    std.mem.writeInt(u16, buf[15..17], 21, .little);
+    const got = InvSlot.readPersist(&buf);
+    try std.testing.expectEqual(@as(u8, 2), got.mod_n);
+    try std.testing.expectEqual(@as(u16, 20), got.mods[0]);
+    try std.testing.expectEqual(@as(u16, 21), got.mods[1]);
 }

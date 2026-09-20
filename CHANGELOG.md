@@ -15,6 +15,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- **Inventory slot extras survive a restart.** Player, entity, and container
+  saves shared three different InvSlot widths, so `flags`, `mod_n`,
+  `mod_qualities`, and (for bags/chests) `stats` were dropped on reload even
+  though the wire and ECS already carried them. ZPV17 / ZEN2 / ZCT3 write the
+  one shared stride; older magics still load.
+
 - **Offline wire captures stay byte-stable under DST.** Pre-auth challenge
   Guids used OS entropy even when the sim seed was fixed, so the same run
   seed produced divergent challenge bytes on every capture. Under DST the

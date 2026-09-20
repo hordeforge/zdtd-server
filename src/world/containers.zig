@@ -12,7 +12,7 @@ pub const max_container_slots: usize = 54; // 9x6 common chest
 /// alone has thousands of loot containers and a hard cap truncates the tail  -
 /// every container past it comes back empty).
 pub const max_containers: usize = 4096;
-const persisted_container_size: usize = 20 + max_container_slots * 7 + 4 + 2; // + touched_day u32 + size_x/size_y u8 (ZCT2)
+const persisted_container_size: usize = 20 + max_container_slots * components.inv_slot_persist_stride + 4 + 2; // + touched_day u32 + size_x/size_y u8 (ZCT3)
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
 pub const PosKey = struct {
@@ -36,7 +36,8 @@ pub const Container = struct {
     /// Grid size the client observed for this container (loot.xml
     /// LootContainer size_x/size_y on the stock client's TE write). 0/0 =
     /// unknown -> the wire writer synthesizes 2xN (or 9x6 above 18 slots).
-    /// Persisted in ZCT2 so a restarted container keeps its real grid shape.
+    /// Persisted in ZCT3 so a restarted container keeps its real grid shape
+    /// (ZCT2 still loads with the same size fields).
     size_x: u8 = 0,
     size_y: u8 = 0,
     touched: bool = false,
@@ -183,12 +184,12 @@ pub const ContainerStore = struct {
         }
     }
 
-    /// Persist file: magic "ZCT2" | u16 count | per container:
+    /// Persist file: magic "ZCT3" | u16 count | per container:
     /// pos xyz i32*3 | block_id i32 | slot_count u16 | touched u8 | player u8 |
-    /// slot_count * (item_id u16 | count u16 | quality u8 | meta u16) |
-    /// touched_day u32 | size_x u8 | size_y u8. ZCT1 (no touched_day tail,
-    /// no sizes) still loads; ZCT2 keeps the observed grid shape across
-    /// restarts.
+    /// slot_count * InvSlot persist stride (same shape as ZPV17/ZEN2) |
+    /// touched_day u32 | size_x u8 | size_y u8. ZCT1 (7-byte slots, no
+    /// touched_day/sizes) and ZCT2 (7-byte slots + day + sizes) still load;
+    /// ZCT3 keeps mods, stats, flags, and durability across restarts.
     ///
     /// Records are sorted by world pos so bytes are independent of sparse slot
     /// assignment order (needed for DST fault injection / mid-save replay).
@@ -201,7 +202,7 @@ pub const ContainerStore = struct {
         const buf = try allocator.alloc(u8, save_capacity);
         defer allocator.free(buf);
         var o: usize = 0;
-        @memcpy(buf[0..4], "ZCT2");
+        @memcpy(buf[0..4], "ZCT3");
         o = 6; // count patched below
 
         // Collect used indices, sort by (x,y,z). max_containers is fixed.
@@ -224,13 +225,14 @@ pub const ContainerStore = struct {
         }.less);
 
         var count: u16 = 0;
+        const slot_stride = components.inv_slot_persist_stride;
         for (idxs[0..n_idx]) |ii| {
             const c = &self.items[ii];
             // Must cover everything the body below writes: header, slots,
-            // touched_day u32 AND the ZCT2 size_x/size_y pair. save_capacity
-            // budgets the full 404-byte record, so this never trips today, but
+            // touched_day u32 AND the size_x/size_y pair. save_capacity
+            // budgets the full record, so this never trips today, but
             // a guard that under-counts what it guards is a latent overrun.
-            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 + 2 > buf.len) break;
+            if (o + 20 + @as(usize, c.slot_count) * slot_stride + 4 + 2 > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
             std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.pos.z, .little);
@@ -241,18 +243,14 @@ pub const ContainerStore = struct {
             o += 20;
             var s: usize = 0;
             while (s < c.slot_count) : (s += 1) {
-                const sl = c.slots[s];
-                std.mem.writeInt(u16, buf[o..][0..2], sl.item_id, .little);
-                std.mem.writeInt(u16, buf[o + 2 ..][0..2], sl.count, .little);
-                buf[o + 4] = sl.quality;
-                std.mem.writeInt(u16, buf[o + 5 ..][0..2], sl.meta, .little);
-                o += 7;
+                c.slots[s].writePersist(buf[o..][0..slot_stride]);
+                o += slot_stride;
             }
             // touched_day u32 appended after the slots; older saves omit it and
             // load as 0 (no immediate respawn).
             std.mem.writeInt(u32, buf[o..][0..4], c.touched_day, .little);
             o += 4;
-            // size_x/size_y u8 each (ZCT2): the observed grid shape.
+            // size_x/size_y u8 each: the observed grid shape.
             buf[o] = c.size_x;
             buf[o + 1] = c.size_y;
             o += 2;
@@ -262,14 +260,18 @@ pub const ContainerStore = struct {
         try io_fs.writeFile(p, buf[0..o]);
     }
 
-    /// Decode a ZCT1/ZCT2 buffer (magic | count | records). Used by load and
-    /// fuzz. ZCT2 records carry the observed grid size (size_x/size_y u8) after
-    /// touched_day; ZCT1 records end after the slots and load sizes as 0
+    /// Decode a ZCT1/ZCT2/ZCT3 buffer (magic | count | records). Used by load and
+    /// fuzz. ZCT3 slots use the shared InvSlot persist stride; ZCT1/ZCT2 keep
+    /// the legacy 7-byte head. ZCT2/ZCT3 carry size_x/size_y after touched_day;
+    /// ZCT1 records end after the slots and load sizes as 0
     /// (the wire writer synthesizes the grid).
     pub fn loadFromSlice(self: *ContainerStore, buf: []const u8) !void {
         const len = buf.len;
-        if (len < 6 or !(std.mem.eql(u8, buf[0..4], "ZCT1") or std.mem.eql(u8, buf[0..4], "ZCT2"))) return error.ReadFailed;
-        const with_size = std.mem.eql(u8, buf[0..4], "ZCT2");
+        if (len < 6) return error.ReadFailed;
+        const full_slots = std.mem.eql(u8, buf[0..4], "ZCT3");
+        const with_size = full_slots or std.mem.eql(u8, buf[0..4], "ZCT2");
+        if (!full_slots and !with_size and !std.mem.eql(u8, buf[0..4], "ZCT1")) return error.ReadFailed;
+        const slot_stride: usize = if (full_slots) components.inv_slot_persist_stride else 7;
         const count = std.mem.readInt(u16, buf[4..6], .little);
         var o: usize = 6;
         var ci: u16 = 0;
@@ -285,8 +287,8 @@ pub const ContainerStore = struct {
             const touched = buf[o + 18] != 0;
             const player = buf[o + 19] != 0;
             o += 20;
-            if (o + @as(usize, slot_count) * 7 > len) return error.ReadFailed;
-            if (with_size and o + @as(usize, slot_count) * 7 + 6 > len) return error.ReadFailed;
+            if (o + @as(usize, slot_count) * slot_stride > len) return error.ReadFailed;
+            if (with_size and o + @as(usize, slot_count) * slot_stride + 6 > len) return error.ReadFailed;
             // A record can be dropped (table full of player storage), but it
             // still has to be consumed whole: the slots AND the touched_day +
             // size tail below. Skipping only the slots would leave the cursor
@@ -300,15 +302,10 @@ pub const ContainerStore = struct {
             while (s < slot_count) : (s += 1) {
                 if (maybe_c) |c| {
                     if (s < max_container_slots) {
-                        c.slots[s] = .{
-                            .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
-                            .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
-                            .quality = buf[o + 4],
-                            .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
-                        };
+                        c.slots[s] = components.InvSlot.readPersist(buf[o..][0..slot_stride]);
                     }
                 }
-                o += 7;
+                o += slot_stride;
             }
             // touched_day appended after the slots in ZCT2; a ZCT1 record ends
             // at the last slot and loads touched_day as 0.

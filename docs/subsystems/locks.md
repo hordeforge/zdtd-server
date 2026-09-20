@@ -129,7 +129,7 @@ An unlock the requester may not perform answers with `success = false` and an em
 
 ## Persistence
 
-Quest POI locks are not persisted: the table lives on the sim world, so a restart begins with no locks because there are no active questers to hold them. Container channel locks are session state on `Game`, cleared on disconnect and never written. Land claims are the one durable part, saved to `{world_dir}/claims.zlc` with a four-byte magic `ZCLC`, a `u16` count, then one 49-byte record per claim: the three coordinates, the owner name length, the 32-byte owner name and the last-seen day (`src/server/persist.zig:1932`):
+Quest POI locks are not persisted: the table lives on the sim world, so a restart begins with no locks because there are no active questers to hold them. Container channel locks are session state on `Game`, cleared on disconnect and never written. Land claims are the one durable part, saved to `{world_dir}/claims.zlc` with a four-byte magic `ZCLC`, a `u16` count, then one 49-byte record per claim: the three coordinates, the owner name length, the 32-byte owner name and the last-seen day (`src/server/persist.zig:1907`):
 
 ```zig
 pub fn saveClaims(self: *Game) !void {
@@ -138,7 +138,7 @@ pub fn saveClaims(self: *Game) !void {
     // ...
 ```
 
-The owner entity is deliberately not stored, because it is reassigned across restarts; a restored claim has no live owner until its player logs in, and the name keys the re-map (`src/server/persist.zig:1991`, `src/server/game.zig:2065`). The preserved last-seen day keeps the offline expiry math honest across a restart, so a claim cannot be kept alive by a server that was down (`src/server/persist.zig:1957`). Loading fails closed: a bad magic or an out-of-range count is an error rather than a partial restore, a short record is `error.Truncated`, and a missing file is a fresh world (`src/server/persist.zig:1970`, `:1972`, `:1977`). Claims are also dropped when their owner is wiped, and the file is rewritten immediately so the login name does not survive on disk after an administrative erasure (`src/server/admin_console.zig:1458`).
+The owner entity is deliberately not stored, because it is reassigned across restarts; a restored claim has no live owner until its player logs in, and the name keys the re-map (`src/server/persist.zig:1966`, `src/server/game.zig:2065`). The preserved last-seen day keeps the offline expiry math honest across a restart, so a claim cannot be kept alive by a server that was down (`src/server/persist.zig:1924`). Loading fails closed: a bad magic or an out-of-range count is an error rather than a partial restore, a short record is `error.Truncated`, and a missing file is a fresh world (`src/server/persist.zig:1945`, `:1947`, `:1952`). Claims are also dropped when their owner is wiped, and the file is rewritten immediately so the login name does not survive on disk after an administrative erasure (`src/server/admin_console.zig:1458`).
 
 ## See also
 
