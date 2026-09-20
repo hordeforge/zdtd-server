@@ -49,6 +49,7 @@ Related prompts (do not conflate):
 | `ecs-soa-review.md` | State ownership + SoA layout; fix layout there **before** SIMD here |
 | `zig-0.16-changelog-review.md` | 0.16 conformance; authority for Zig 0.16 API facts |
 | `net-send-review.md` | Reliable-send classification, retry shape, WindowFull handling |
+| `plugin-composability-review.md` | Wasm reload / withdrawal / `_zdtd_requires` |
 | **this file** | Vector width work on dense loops, after SoA is correct |
 
 ## Read first

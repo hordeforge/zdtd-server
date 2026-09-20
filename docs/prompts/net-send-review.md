@@ -40,8 +40,9 @@ shape itself should exist), **not** the hardcoded-data audit
 (`hardcoded-data-review.md`, package/id hardcodes on the send path), **not**
 the 0.16 changelog conformance review (`zig-0.16-changelog-review.md`), **not**
 the language best-practices review (`zig-best-practices-review.md`), **not**
-the ECS/SoA review (`ecs-soa-review.md`), and **not** the SIMD pass
-(`simd-review.md`). Focus on: which packages are droppable vs must-deliver,
+the ECS/SoA review (`ecs-soa-review.md`), **not** the SIMD pass
+(`simd-review.md`), and **not** the plugin composability review
+(`plugin-composability-review.md`). Focus on: which packages are droppable vs must-deliver,
 how WindowFull is retried, how the enter bundle is sequenced, and whether a
 wedged peer can stall the 50 ms tick.
 

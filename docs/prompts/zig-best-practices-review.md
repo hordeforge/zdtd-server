@@ -37,9 +37,10 @@ abstraction lifecycle review (`abstractions-review.md`, when helpers or layers
 should be built or deleted), **not** the ECS/SoA review (`ecs-soa-review.md`,
 state ownership and SoA layout), **not** the hardcoded-data audit
 (`hardcoded-data-review.md`, stock XML/AssignIds vs zdtd config vs OK
-constants), **not** the SIMD pass (`simd-review.md`), and **not** the send-path
-review (`net-send-review.md`, reliable-send classification and retry shape).
-Skip findings that belong to those prompts; cite and move on.
+constants), **not** the SIMD pass (`simd-review.md`), **not** the send-path review (`net-send-review.md`,
+reliable-send classification and retry shape), and **not** the plugin
+composability review (`plugin-composability-review.md`, reload / withdrawal /
+`_zdtd_requires`). Skip findings that belong to those prompts; cite and move on.
 
 ## Ground truth
 

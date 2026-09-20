@@ -105,7 +105,9 @@ A coverage gate proves ledger coverage, not the truth of the stock claims.
 - No em dashes; no AI attribution; mark honest statuses (verified/inferred/
   diverges/blocked).
 - Keep evidence and classification here; stock-data loader/config ownership
-  belongs to docs/prompts/hardcoded-data-review.md. Do not duplicate that audit
+  belongs to docs/prompts/hardcoded-data-review.md. Standing AGENTS.md /
+  docs/AGENTS.md path and gate drift belongs to
+  docs/prompts/agentrules-review.md. Do not duplicate those audits
   or modify sibling repositories to make a citation pass.
 
 # Done looks like

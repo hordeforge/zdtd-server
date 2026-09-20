@@ -49,6 +49,7 @@ This is complementary to:
 | `zig-best-practices-review.md` | Layout, naming, comptime discipline, builtin choice, zero-cost habits |
 | `hardcoded-data-review.md` | Stock XML vs config hardcodes |
 | `net-send-review.md` | Reliable-send classification, retry shape, WindowFull handling |
+| `plugin-composability-review.md` | Wasm reload / withdrawal / `_zdtd_requires` |
 
 **Do not** adopt a third-party ECS core (Bevy-style archetypes, flecs, etc.).
 zdtd keeps **dense Slot + SoA columns + Mask + systems as functions**. Steal

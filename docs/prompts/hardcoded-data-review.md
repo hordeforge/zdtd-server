@@ -49,6 +49,9 @@ This is complementary to (do not conflate):
 | `ecs-soa-review.md` | State ownership (ECS vs resource vs world), SoA layout |
 | `simd-review.md` | Dense-loop vectorization after SoA is correct |
 | `net-send-review.md` | Reliable-send classification, retry shape, WindowFull handling |
+| `plugin-composability-review.md` | Wasm reload / withdrawal / `_zdtd_requires` invariants |
+| `docs/provenance-review.md` | Stock-claim evidence and PROVENANCE ledger honesty |
+| `agentrules-review.md` | AGENTS.md / docs/AGENTS.md path and gate drift |
 | **this file** | Bucket A (stock XML/AssignIds) vs Bucket B (zdtd config) vs OK constants |
 
 ## Scope modes (user may pick one)

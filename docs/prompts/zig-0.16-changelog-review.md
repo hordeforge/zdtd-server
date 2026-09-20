@@ -41,8 +41,9 @@ the abstraction lifecycle review (`abstractions-review.md`), **not** the
 SIMD pass (`simd-review.md`), **not** the language best-practices review
 (`zig-best-practices-review.md`), **not** the ECS/SoA state-ownership review
 (`ecs-soa-review.md`), **not** the hardcoded-data audit
-(`hardcoded-data-review.md`), and **not** the send-path review
-(`net-send-review.md`). Focus only on 0.16 conformance: API names,
+(`hardcoded-data-review.md`), **not** the send-path review
+(`net-send-review.md`), and **not** the plugin composability review
+(`plugin-composability-review.md`). Focus only on 0.16 conformance: API names,
 interface shape, and removed/deprecated surface. Style and hot-path rules from
 AGENTS.md still apply where they interact (tick path, no em dashes).
 
@@ -205,29 +206,32 @@ directly**. More removals are planned."
 - Unit test timeouts, `--error-style`, `--multiline-errors` are opt-in; do not
   add unless useful.
 
-## Known suspects (pre-scanned, start here; re-verify line numbers)
+## Known suspects (start from recipes; re-verify every hit)
 
-Drift confirmed at scan time (all compile, all deprecated/renamed per the
-changelog). Line numbers rot; re-verify each pin before citing or fixing:
+Do **not** trust a frozen line list. Prior pins (metrics `@ceil`, packages
+`@intFromFloat(bd)`, sleepers `@floor`, interest `std.meta.Int`, report
+`indexOf`) are already migrated. Re-run the Search recipes below and classify
+each live hit. Clusters that still compile as deprecated/renamed (re-verify):
 
 ```text
-src/apm/metrics.zig:153          @intFromFloat(@ceil(...))        -> @ceil(...) int result
-src/wire/packages.zig:2646       @intFromFloat(bd)                -> @trunc(bd)
-src/world/sleepers.zig:70-71     @intFromFloat(@floor(x/z))       -> @floor(x/z) int result
-src/ecs/interest.zig:53          std.meta.Int(.unsigned, lanes)   -> @Int(.unsigned, lanes)
-src/apm/report.zig:143-159       std.mem.indexOf (tests)          -> std.mem.find
+src/util/game_random.zig         @intFromFloat on sample spans     -> @trunc / int result
+src/server/game/player.zig       @intFromFloat XP / clamp paths    -> keep NaN trap; rename
+src/ecs/systems.zig              @intFromFloat scaled clamps       -> @trunc/@min form
+src/assets/loot.zig              @intFromFloat count/pct/mult      -> int-result builtins
+src/wire/stock_sign.zig          @intFromFloat float fields        -> @trunc; keep trap
+src/server/webui.zig             std.mem.indexOf (tests/HTTP)      -> std.mem.find*
+src/assets/blocks.zig            std.mem.indexOf in tests          -> std.mem.find
 ```
 
-Comments to sweep when fixing: `src/wire/packages.zig:685` and
-`src/wire/stock_entity.zig:232` describe the deliberate NaN trap of
-`@intFromFloat`; the semantics survive the rename (the new conversions still
-trap), so update the comment wording, keep the behavior.
+NaN/inf trap comments (keep behavior, update wording when renaming): search
+`@intFromFloat` and `traps on NaN` in `src/wire/` and `src/server/game/player.zig`.
 
-Already clean (spot-check only, do not re-search for hours): no `@Type(`,
-no `@cImport`, no `std.time.Instant/Timer/timestamp`, no `Thread.Pool` /
+Already clean (spot-check only; recipe must still return empty for these): no
+`@Type(`, no `@cImport`, no `std.time.Instant/Timer/timestamp`, no `Thread.Pool` /
 `spawnWg`, no `ArrayHashMap*`, no `getAppDataDir`, no `process.getCwd`, no
 `GenericReader`/`AnyReader`/`FixedBufferStream`, no `std.io` old namespace, no
 `Thread.Mutex/Condition` in code (one doc comment, see recipe), no `{D}` format.
+`std.meta.Int` should be gone; any new hit is P1.
 
 ## Search recipes (run early)
 

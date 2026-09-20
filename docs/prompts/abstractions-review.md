@@ -44,6 +44,7 @@ This is complementary to:
 | `simd-review.md` | Dense-loop vectorization after SoA is correct |
 | `hardcoded-data-review.md` | Stock data vs config hardcodes |
 | `net-send-review.md` | Reliable-send classification, retry shape, WindowFull handling |
+| `plugin-composability-review.md` | Wasm reload / withdrawal / `_zdtd_requires` (not helper existence) |
 
 Do **not** invent enterprise frameworks. Prefer **fewer, thinner, named**
 abstractions that match stock boundaries and stdlib.

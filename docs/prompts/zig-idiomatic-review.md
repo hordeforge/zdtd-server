@@ -42,7 +42,8 @@ dense-loop vectorization, use `simd-review.md`. For removed/deprecated API
 names per the 0.16 release notes, use `zig-0.16-changelog-review.md`. For
 layout/naming/builtin choice/zero-cost abstractions, use
 `zig-best-practices-review.md`. For reliable-send classification, retry shape
-and WindowFull handling, use `net-send-review.md`.
+and WindowFull handling, use `net-send-review.md`. For Wasm plugin reload /
+withdrawal / `_zdtd_requires`, use `plugin-composability-review.md`.
 
 ## Read first
 
