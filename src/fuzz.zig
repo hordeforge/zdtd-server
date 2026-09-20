@@ -1,7 +1,7 @@
 //! Coverage-guided fuzz targets for remote wire parsing boundaries and
 //! other untrusted-input surfaces (admin lines, map XML, COG headers,
 //! config XML patches, quest catalogs, GSI text builders, save formats,
-//! signable TE bodies, ZSG1 sign texts).
+//! signable TE bodies, ZSG1 sign texts, spawning.xml).
 
 const std = @import("std");
 const packet = @import("litenet/packet.zig");
@@ -31,6 +31,7 @@ const quests_xml = @import("assets/quests.zig");
 const biome_layers = @import("assets/biome_layers.zig");
 const gamestages_xml = @import("assets/gamestages.zig");
 const loot = @import("assets/loot.zig");
+const spawning = @import("assets/spawning.zig");
 const dtm = @import("world/dtm.zig");
 const dem = @import("world/dem.zig");
 const water = @import("world/water.zig");
@@ -231,6 +232,32 @@ const package_corpus = [_][]const u8{
     &.{ 1, 1, 3, 'E', 'O', 'S', 2, 'i', 'd', 0, 0 },
     // PUID with an overlong 7-bit string length
     &.{ 1, 1, 0xff, 0xff, 0xff, 0xff, 0x0f },
+    // RequestToSpawnPlayer: dim=4 | PlayerProfile v5 with short names
+    &.{
+        4, 0, // chunkViewDim
+        5, 0, 0, 0, // profile version
+        1, 'A', // archetype
+        1, // is_male
+        1, 'R', // race
+        1, // variant
+        0, 0, // hair, hair_color
+        0, 0, 0, // mustache, chops, beard
+        1, 'E', // eye_color
+    },
+    // RequestToSpawnPlayer: overlong 7-bit name after version (must fail closed)
+    &.{ 4, 0, 5, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0x0f },
+    // RequestToSpawnPlayer: unsupported profile version 0
+    &.{ 4, 0, 0, 0, 0, 0 },
+    // laser sight inactive (5 bytes)
+    &.{ 106, 0, 0, 0, 0 },
+    // laser sight active + Vector3
+    &.{ 106, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // wire tool actions: op | xyz | entity
+    &.{ 1, 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 0, 0, 106, 0, 0, 0 },
+    // item action effects: eid | slot | action | firing | no vectors | user_data
+    &.{ 106, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    // item action effects with start/direction Vector3 tails
+    &([_]u8{ 106, 0, 0, 0, 0, 0, 1, 1 } ++ ([_]u8{0} ** 24) ++ [_]u8{ 7, 0, 0, 0 }),
 };
 
 test "fuzz variable-length C2S package decoders" {
@@ -410,6 +437,29 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         if (login.internalId().get()) |id| try std.testing.expect(id.id.len <= platform_user.max_id_len);
     } else |_| {}
     _ = packages.parseAllyRequest(input) catch null;
+
+    // Join-path PlayerProfile: every owned name length must stay inside the
+    // fixed profile_name_cap buffers (a longer wire string is reject, not truncate).
+    if (packages.parseRequestToSpawnProfile(input)) |prof| {
+        const v = prof.view();
+        try std.testing.expect(v.archetype.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.race_name.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.hair_name.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.hair_color.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.mustache_name.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.chops_name.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.beard_name.len <= stock_entity.profile_name_cap);
+        try std.testing.expect(v.eye_color.len <= stock_entity.profile_name_cap);
+    } else |_| {}
+    // Cosmetic / tool C2S relays: consumed wire_len must never exceed the body.
+    if (packages.parseLaserSight(input)) |ls| {
+        try std.testing.expect(ls.wire_len <= input.len);
+        if (!ls.active) try std.testing.expectEqual(@as(usize, 5), ls.wire_len);
+    } else |_| {}
+    if (packages.parseItemActionEffects(input)) |fx| {
+        try std.testing.expect(fx.wire_len <= input.len);
+    } else |_| {}
+    _ = packages.parseWireToolActions(input) catch null;
 }
 
 /// Minimal NetPackageTileEntity outer header (handle | xyz | block | pay_len).
@@ -2250,4 +2300,59 @@ fn fuzzSleeperStores(_: void, smith: *std.testing.Smith) !void {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try sleeperLoadBoth(dir, storage[0..len]);
+}
+
+const spawning_xml_corpus = [_][]const u8{
+    "",
+    "<spawning/>",
+    \\<spawning>
+    \\  <biome name="pine_forest">
+    \\    <spawn entitygroup="ZombiesAll" maxcount="3" time="Any" respawndelay="1"/>
+    \\    <spawn entitygroup="AnimalsAll" maxcount="2" time="Day" type="Animal" tags="wilderness" notags="trader"/>
+    \\  </biome>
+    \\  <entityspawner name="Screamer">
+    \\    <property name="EntityGroupName" value="ZombieScreamer"/>
+    \\    <property name="TotalAlive" value="1"/>
+    \\    <property name="TotalPerWave" value="1,3"/>
+    \\  </entityspawner>
+    \\</spawning>
+    ,
+    // unclosed biome / spawn
+    "<spawning><biome name=\"a\"><spawn entitygroup=\"g\"",
+    // self-closing entityspawner without EntityGroupName (skipped)
+    "<spawning><entityspawner name=\"x\"/></spawning>",
+    // hostile numeric attrs and truncated lists
+    "<spawning><biome name=\"b\"><spawn entitygroup=\"g\" maxcount=\"999\" respawndelay=\"1,2,3,4,5,6,7\"/></biome></spawning>",
+    "<spawning><entityspawner name=\"s\"><property name=\"EntityGroupName\" value=\"g\"/><property name=\"TotalPerWave\" value=\"255,999\"/></entityspawner></spawning>",
+    // nested junk / comment / overlong attribute
+    "<!-- x --><spawning><biome name=\"" ++ ("A" ** 64) ++ "\"><spawn entitygroup=\"g\"/></biome></spawning>",
+    "<spawning><biome name=\"x\"><spawn entitygroup=\"y\" tags=\"" ++ ("t," ** 40) ++ "\"/></biome></spawning>",
+};
+
+test "fuzz spawning.xml parser" {
+    try std.testing.fuzz({}, fuzzSpawningXml, .{ .corpus = &spawning_xml_corpus });
+}
+
+fn fuzzSpawningXml(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var t = spawning.loadFromSlice(std.testing.allocator, storage[0..len]) catch return;
+    defer t.deinit();
+
+    try std.testing.expect(t.rules.len <= spawning.max_rules);
+    for (t.rules) |r| {
+        try std.testing.expect(r.biome.len <= len);
+        try std.testing.expect(r.entitygroup.len <= len);
+        try std.testing.expect(r.tags.len <= len);
+        try std.testing.expect(r.notags.len <= len);
+        _ = spawning.respawnDays(r, smith.value(usize));
+    }
+    for (t.spawners) |s| {
+        try std.testing.expect(s.name.len <= len);
+        try std.testing.expect(s.entitygroup.len <= len);
+    }
+    var out: [32]spawning.Rule = undefined;
+    _ = t.rulesForBiome(storage[0..@min(len, 16)], &out);
+    _ = t.spawnerByName(storage[0..@min(len, 16)]);
 }
