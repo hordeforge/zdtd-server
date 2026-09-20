@@ -45,22 +45,27 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
         else
             @min(budget_ns, peer.critical_budget_deadline_ns - now);
     }
-    self.sendReliablePumped(peer, pkg_name, framed, retry_budget, 960, false) catch |err| switch (err) {
+    // Same attempt ladder as sendGameBudget (Chunk 4000 / droppable 64 / else 960).
+    const droppable = !critical and game_net.isDroppablePackage(pkg_name);
+    const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
+        4000
+    else if (droppable)
+        64
+    else
+        960;
+    self.sendReliablePumped(peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
         error.WindowFull => {
-            // 960 = the net.zig sendReliablePumped attempt ladder's non-chunk,
-            // non-droppable default (Chunk 4000 / droppable 64 / else 960);
-            // the budget_ns deadline is the real cap, attempts are the ceiling.
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
             if (n == 1 or n % 100 == 0) {
                 var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} reliable window drop pkg={s} (framed) n={d}\n", .{ clock.wallStamp(&ts), pkg_name, n });
+                std.debug.print("zdtd: {s} reliable window drop pkg={s} (framed) droppable={} n={d}\n", .{ clock.wallStamp(&ts), pkg_name, droppable, n });
             }
             // Same droppable rule as sendGameBudget: a droppable package
             // (NetPackageChunk/SignDataResponse ride this compressed path)
             // must not turn WindowFull into a hard error, or a single full
             // window aborts the caller mid-join before the critical bundle sends.
-            if (!critical and game_net.isDroppablePackage(pkg_name)) return;
+            if (droppable) return;
             return error.WindowFull;
         },
         else => return err,

@@ -15,7 +15,6 @@ const packages = @import("../../wire/packages.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const c2s_text = @import("../c2s_text.zig");
 const prefabs_mod = @import("../../world/prefabs.zig");
-const game_net = @import("../game/net.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const phase_gate = @import("../phase_gate.zig");
@@ -46,7 +45,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const gsi = try self.buildLoginGsiText(self.body_buf[4096..8192]);
         if (c.joined and c.entity_id > 0) {
             const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
-            try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
+            try self.sendGameCritical(peer, "NetPackagePlayerLoginAnswer", ans);
             const spawned = try packages.buildSpawnedBody(
                 self.body_buf[256..384],
                 @intFromEnum(packages.RespawnType.join_multiplayer),
@@ -195,7 +194,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
         }
         const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
-        try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
+        try self.sendGameCritical(peer, "NetPackagePlayerLoginAnswer", ans);
         // Stock AuthFinalizer.Authorize (IL=10): the last authorizer step
         // sends an empty AuthConfirmation, which the client echoes back
         // (ProcessPackage IL_002E, SendToServer). The echo arm below already
@@ -365,7 +364,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // silently never shipped - 2026-08-29 soak find). body_buf is
             // 512 KiB and idle here (the request arrives after the configs).
             const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..262144], records[0..n]);
-            try game_net.sendGameBudget(self, peer, "NetPackagePOIMetadataResponse", body_out, game_mod.window_retry_budget_ns, false);
+            // Join wait: DynamicPrefabDecorator blocks until the response; a
+            // silent WindowFull under the 16 ms stream budget wedges createWorld.
+            try self.sendGameCritical(peer, "NetPackagePOIMetadataResponse", body_out);
         }
         return true;
     }
@@ -376,7 +377,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // restart createWorld and leave the client on Creating player.
         if (c.entered) return true;
         const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
-        try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
+        try self.sendGameCritical(peer, "NetPackageWorldInitInfo", wi);
         std.debug.print("zdtd: WorldInitInfoRequest -> empty entity={d}\n", .{c.entity_id});
         // Stream from here, not at spawn. The client needs collision meshes
         // for the spawn chunk and its 8 neighbours before
@@ -409,7 +410,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
         } else {
             const wi = try packages.buildWorldInitInfoEmpty(self.body_buf[0..16]);
-            try self.sendGame(peer, "NetPackageWorldInitInfo", wi);
+            try self.sendGameCritical(peer, "NetPackageWorldInitInfo", wi);
             std.debug.print("zdtd: DynamicClientArrive -> WorldInitInfo empty (pre-spawn) entity={d}\n", .{c.entity_id});
             // Head start on the spawn area. createWorld posts this package, so
             // the client's ChunkCache exists and will keep these. The client

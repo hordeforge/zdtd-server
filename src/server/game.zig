@@ -2532,9 +2532,10 @@ pub const Game = struct {
     /// All or nothing. A partial blob is worse than none: `LoadFromArray` swallows
     /// the exception (asm.il 1178553-1178629), leaves `Block.nameIdMapping`
     /// non-null, and `assignIdsFromMapping` + `assignLeftOverBlocks` then silently
-    /// renumber every block the blob failed to name. So any validation failure,
-    /// an empty dump, or a compressed size that does not fit `send_buf` all skip
-    /// the package entirely and leave today's LoadLocal behaviour in place.
+    /// renumber every block the blob failed to name. With the feature on and a
+    /// dump loaded, measure/frame/deflate/send failures abort the enter bundle
+    /// (`error`) so the client does not proceed under local ids. An empty dump
+    /// (no AssignIds data) still skips and leaves LoadLocal behaviour.
     pub fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         if (!self.block_id_mapping) return;
         const nameid = packages.stock_nameid;
@@ -2545,8 +2546,8 @@ pub const Game = struct {
         }
         const summary = nameid.measure(self.maxdamage.idNameIterator(), &self.nameid_seen) catch |err| {
             var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping skipped ({s}); client keeps local ids\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return;
+            std.debug.print("zdtd: {s} blocks IdMapping measure failed ({s})\n", .{ clock.wallStamp(&ts), @errorName(err) });
+            return err;
         };
 
         // NetPackageIdMapping body: name | i32 dataLen | data (asm.il 822416-822438).
@@ -2562,7 +2563,7 @@ pub const Game = struct {
         fr.begin(&self.body_buf, &self.deflate_window, 0, packages.idOf("NetPackageIdMapping").?, body_len) catch |err| {
             var ts: [19]u8 = undefined;
             std.debug.print("zdtd: {s} blocks IdMapping frame init failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return;
+            return err;
         };
         const w = fr.writer();
         const ok = blk: {
@@ -2575,15 +2576,15 @@ pub const Game = struct {
         if (!ok) {
             var ts: [19]u8 = undefined;
             std.debug.print(
-                "zdtd: {s} blocks IdMapping does not fit body_buf ({d} raw bytes); client keeps local ids\n",
+                "zdtd: {s} blocks IdMapping does not fit body_buf ({d} raw bytes)\n",
                 .{ clock.wallStamp(&ts), summary.bytes },
             );
-            return;
+            return error.Overflow;
         }
         const framed = fr.finish() catch |err| {
             var ts: [19]u8 = undefined;
             std.debug.print("zdtd: {s} blocks IdMapping deflate failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return;
+            return err;
         };
         self.sendFramedReliable(peer, "NetPackageIdMapping", framed, critical_retry_budget_ns, true) catch |err| {
             var ts: [19]u8 = undefined;

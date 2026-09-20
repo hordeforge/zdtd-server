@@ -104,7 +104,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
         // sits inside the `loadedDecos != null` branch, so without it the
         // client keeps retrying local generation it cannot do.
         const body = try deco.buildDecoUpdate(&self.body_buf, true, &.{});
-        try self.sendGame(peer, "NetPackageDecoUpdate", body);
+        try self.sendGameCritical(peer, "NetPackageDecoUpdate", body);
         std.debug.print(
             "zdtd: DecoUpdate first=true objs=0 (deco_trees={s} biomemap={s} biome_decos={s})\n",
             .{
@@ -156,7 +156,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
                 // render, or the two disagree until the next edit.
                 if (self.deco_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
                 if (pw.full()) {
-                    try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+                    try self.sendGameCritical(peer, "NetPackageDecoUpdate", try pw.take());
                     self.pollNetOnce();
                 }
                 try pw.push(o);
@@ -166,7 +166,9 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
     }
     // Always send a final package, even with 0 objects: the client needs at
     // least one firstPackage=true to allocate + drain + mark decorated.
-    try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+    // Join deco shares the enter-bundle critical budget: no client retry, and
+    // a 16 ms normal budget under window pressure aborted the whole enter.
+    try self.sendGameCritical(peer, "NetPackageDecoUpdate", try pw.take());
     // Track the deco chunks the burst covered so the stream path does not
     // regenerate them (the client's HashSet dedupes, but this avoids the work).
     var mark_z = deco.worldToDecoChunk(window.z0);

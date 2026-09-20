@@ -298,6 +298,9 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
         }
         return err;
     };
+    const droppable = isDroppablePackage(name);
+    const max_attempts: u32 = if (droppable) 64 else 960;
+    var hard_fail = false;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
@@ -309,14 +312,15 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
             const dz = self.sim.transform[ps].z - wz;
             if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
         }
-        sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
+        sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, max_attempts, true) catch |err| switch (err) {
             error.WindowFull => {
                 self.harness.counters.inc(.reliable_window_drops);
                 const d = self.harness.counters.get(.reliable_window_drops);
                 if (d == 1 or d % 100 == 0) {
                     var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcastNear local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, p.local_id, d });
+                    std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcastNear droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
                 }
+                if (!droppable) hard_fail = true;
             },
             else => {
                 self.harness.counters.inc(.net_send_errors);
@@ -325,9 +329,11 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
                     var ts: [19]u8 = undefined;
                     std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
                 }
+                hard_fail = true;
             },
         };
     }
+    if (hard_fail) return error.WindowFull;
 }
 
 pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
@@ -340,6 +346,9 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
         }
         return err;
     };
+    const droppable = isDroppablePackage(name);
+    const max_attempts: u32 = if (droppable) 64 else 960;
+    var hard_fail = false;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
@@ -347,20 +356,22 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
         if (isUnreliablePackage(name) and framed.len <= p.singleUserLimit()) {
             p.sendUnreliable(&self.net.sock, framed) catch {
                 self.harness.counters.inc(.net_send_errors);
+                hard_fail = true;
                 continue;
             };
             self.harness.counters.add(.net_packets_out, 1);
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         } else {
-            sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
+            sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, max_attempts, true) catch |err| switch (err) {
                 error.WindowFull => {
                     self.harness.counters.inc(.reliable_window_drops);
                     const d = self.harness.counters.get(.reliable_window_drops);
                     if (d == 1 or d % 100 == 0) {
                         var ts: [19]u8 = undefined;
-                        std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcast local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, p.local_id, d });
+                        std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcast droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
                     }
+                    if (!droppable) hard_fail = true;
                 },
                 else => {
                     self.harness.counters.inc(.net_send_errors);
@@ -369,10 +380,12 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
                         var ts: [19]u8 = undefined;
                         std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
                     }
+                    hard_fail = true;
                 },
             };
         }
     }
+    if (hard_fail) return error.WindowFull;
 }
 
 /// Process pending UDP events (acks free window; data delivered to onData).
@@ -625,6 +638,29 @@ test "reliable send pumping defers queued game payloads" {
     g.pumping = true;
     try sendReliablePumped(g, peer, "test", "outbound", 0, 1, false);
     try std.testing.expect(g.pumping);
+}
+
+test "broadcast soft-drops only droppable packages under WindowFull" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const peer = c.peer.?;
+    peer.capture = null;
+    for (0..ln_packet.window_size) |_| try peer.sendReliable(&g.net.sock, "pending");
+
+    // Droppable: soft-drop (no error).
+    try broadcastExcept(g, "NetPackageWorldTime", &.{ 1, 2, 3, 4, 5, 6, 7, 8 }, null);
+
+    // Must-deliver: WindowFull propagates after the fan-out attempt.
+    try std.testing.expectError(error.WindowFull, broadcastExcept(g, "NetPackageSetBlock", &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }, null));
 }
 
 test "chunk removal retries without forgetting the client chunk" {
