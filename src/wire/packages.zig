@@ -6698,7 +6698,7 @@ pub fn buildAllyResponseBody(
 test "player login body parses stock field order" {
     var body: [256]u8 = undefined;
     var w: binary.Writer = .{ .buf = &body };
-    try w.writeString("maci");
+    try w.writeString("Alice");
     try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
     try w.writeString("native-ticket");
     try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
@@ -6709,7 +6709,7 @@ test "player login body parses stock field order" {
 
     var name_buf: [32]u8 = undefined;
     const login = try parsePlayerLogin(w.written(), &name_buf);
-    try std.testing.expectEqualStrings("maci", login.name);
+    try std.testing.expectEqualStrings("Alice", login.name);
     try std.testing.expectEqualStrings("Steam", login.native.get().?.platform);
     try std.testing.expectEqualStrings("76561198000000001", login.native.get().?.id);
     try std.testing.expectEqualStrings("EOS", login.crossplatform.get().?.platform);

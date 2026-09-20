@@ -20,6 +20,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Stock world ticks per in-game day (asm.il get_gameStage IL_0012, 0x5dc0).
 pub const ticks_per_day: u64 = 24000;
@@ -427,7 +428,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("gamestages.xml", Table, loadFromPath, allocator, game_dir, config_dir);
 }
 
-const stock_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/gamestages.xml";
+const stock_path = stock_paths.configFile("gamestages.xml");
 
 test "cleanName covers the four stock shapes" {
     var buf: [max_name_len]u8 = undefined;

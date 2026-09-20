@@ -27,6 +27,9 @@ pub fn build(b: *std.Build) void {
     // wall of undefined-symbol errors from the same mistake.
     const build_opts = b.addOptions();
     build_opts.addOption(bool, "tracy_enabled", tracy and tracy_src != null);
+    // Test/offline stock paths resolve from $HOME so sources never embed a
+    // personal home directory (see src/util/stock_paths.zig).
+    build_opts.addOption([]const u8, "home_dir", b.graph.environ_map.get("HOME") orelse "");
 
     // Loud failure beats a silent shim: a no-op -Dtracy build would let an
     // operator believe they were profiling when they were not.

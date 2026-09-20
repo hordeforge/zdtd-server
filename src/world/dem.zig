@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const cog_header_len: usize = 64 * 1024;
 /// Copernicus GLO-30 COG decode tile edge, 1024 px (dem.zig header).
@@ -163,7 +164,7 @@ pub fn elevToBlockY(elev_m: f32) u8 {
 
 test "cog header parses live GLO-30 sample" {
     // Sample fetched 2026-07-22 (first 64KiB); skip when absent (offline CI).
-    const path = "/home/maci/.cache/zdtd-scratch/glo30_head.bin";
+    const path = stock_paths.scratch("/glo30_head.bin");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     const raw = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(raw);

@@ -4,6 +4,7 @@ const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const Entry = struct {
     name: []const u8 = "",
@@ -223,7 +224,7 @@ test "pick roll scales a legal max-weight group without overflow" {
 }
 
 test "load stock entitygroups when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entitygroups.xml";
+    const path = stock_paths.configFile("entitygroups.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -234,7 +235,7 @@ test "load stock entitygroups when present" {
 }
 
 test "stock entitygroups keeps the whole file, tail groups included" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entitygroups.xml";
+    const path = stock_paths.configFile("entitygroups.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

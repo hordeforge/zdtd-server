@@ -40,6 +40,7 @@ const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
 const game_craft = @import("../game/craft.zig");
 const parallel = @import("../../util/parallel.zig");
+const stock_paths = @import("../../util/stock_paths.zig");
 const zpv2DropName = game.zpv2DropName;
 
 test "peerIpKey covers ipv4 mapped ipv6 and pure ipv6" {
@@ -1912,7 +1913,7 @@ test "deco suppression follows the prefab AllowDecorations property" {
     // inside a POI footprint unless the prefab sets AllowDecorations="true".
     // The sampler's per-deco-chunk cache is built from the real Navezgane
     // decoration list, so this exercises the data path, not a fixture.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map_dir = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map_dir)) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -2726,7 +2727,7 @@ test "a latched switch comes back on after a restart, not off" {
 }
 
 test "trader POIs spawn their NPC classes on a stock map" {
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     io_fs.mkdirPath(".zdtd_cfg_cache");
@@ -2753,7 +2754,7 @@ test "trader POIs spawn their NPC classes on a stock map" {
 }
 
 test "POI reset restores baked blocks over player edits" {
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     // Own throwaway world dir: a `.zdtd_cfg_cache/poi_reset` world left by an
@@ -2835,7 +2836,7 @@ test "POI reset restores baked blocks over player edits" {
 }
 
 test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     io_fs.mkdirPath(".zdtd_cfg_cache");
@@ -2879,8 +2880,8 @@ test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
 }
 
 test "per-trader stock and hours come from trader_info + npc.xml" {
-    const traders_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
-    const npc_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/npc.xml";
+    const traders_path = stock_paths.configFile("traders.xml");
+    const npc_path = stock_paths.configFile("npc.xml");
     if (!io_fs.fileExists(traders_path)) return error.SkipZigTest;
     const tt = try assets_traders.loadFromPath(std.testing.allocator, traders_path);
     if (!io_fs.fileExists(npc_path)) return error.SkipZigTest;
@@ -2953,7 +2954,7 @@ test "biome gamestage and lootstage modifiers apply from biomes.xml" {
     // (progression.md 5): snow has gamestage_modifier=3 / bonus=30 and
     // lootstage_modifier=1.5 / bonus=15, pine_forest 0/0. The same player in
     // the snow biome must read a higher stage than in the forest.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     io_fs.mkdirPath(".zdtd_cfg_cache");
@@ -4227,7 +4228,7 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     // in requirement_unsupported), so this buff dealt no health damage at all.
     // The entity class `Tags` (entityclasses.xml, inherited through `extends`)
     // now decide it and the tick feeds them through Ctx.entity_tags.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4289,7 +4290,7 @@ test "equipped item passives fold into the survival VM (stock data)" {
     // armorAthleticOutfit HealthMax "2,4,6,8,10,20" (Q6 = +20) and
     // armorEnforcerOutfit's flat GeneralDamageResist 0.05. Before this the item
     // rows were parsed for the resist curves only, so armor gave no max stats.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4356,7 +4357,7 @@ test "rogue armor quiets stealth noise while crouching (NoiseMultiplier)" {
     // `CVarCompare _crouching`, which the server mirrors from the move flags;
     // perkFromTheShadows level 5 folds -.5 untagged. The survival tick caches
     // the product for the stealth legs.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4411,7 +4412,7 @@ test "rogue armor dims stealth light in the dark (LightMultiplier)" {
     // gated `_lightlevel` LTE 65; the broadcast mirrors the pre-blend light
     // x100 into that cvar (IL_00B9), and perkNightStalkerSilentNight folds an
     // ungated -.05. The survival tick caches the product for the sight legs.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4482,7 +4483,7 @@ test "rogue helmet raises loot stage (LootStage passive 159)" {
     // Stock `EntityPlayer.GetLootStage` multiplies the floored total by
     // GetValue(159 LootStage) (IL_00E1). armorRogueHelmet carries an ungated
     // tiered row (Q6 +.2); perkLuckyLooter level 5 folds +.25 on top.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4529,7 +4530,7 @@ test "PainTolerance resists stun buffs (BuffResistance passive 197)" {
     // Stock `EntityBuffs::HasImmunity` rolls GetValue(197) over the incoming
     // buff's NameTag: perkPainTolerance 5 resists
     // buffInjuryStunned01/02 at 1.0 (always refuses). Level 0 takes it.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4567,7 +4568,7 @@ test "NightStalker steal heals on hit (HealthSteal passive 167)" {
     // here at unit level (the C2S leg calls the same fold): with the book
     // owned the fold is nonzero only when the gates could pass, and zero
     // without it.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4594,7 +4595,7 @@ test "held torch burn proc lands on the victim" {
     // buffBurningElement to the victim on a hit (RandomRoll ≤ 30 per hit +
     // `_underwater` gate; `_underwater` unset reads 0 → passes). Sweep hits
     // like the Dentist test; the victim sink applies the target=other add.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4639,7 +4640,7 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     // `onSelfAttackedOther` AddBuff rows with `target="other"` apply to the
     // victim (shotgun stuns), not the attacker. perkBoomstick 0 fires
     // buffInjuryStunned01Shotgun on the zombie the attacker hit.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4702,7 +4703,7 @@ test "MachineGunner refunds stamina on hit (attacked ModifyStats)" {
     // `onSelfAttackedOther` ModifyStats rows were evaluated but never
     // applied: perkMachineGunner 3 refunds +2 stamina per landed hit (gated
     // `ItemHasTags tags="perkMachineGunner"` + victim alive).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4752,7 +4753,7 @@ test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
     // evaluator: perkPummelPete adds 1 to .PummelPeteCombo per landed hit,
     // which the buffPerkPummelPete stack chain reads for its bonus-ready
     // flag. Victim is a live zombie so IsAlive target=other passes.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4801,7 +4802,7 @@ test "victim-directed cvar writes land on player victims" {
     // victim is a player: PistolPeteComplete's bleedCounter add fires on a
     // player victim (zombie victims stay recorded-only, no cvar store).
     // Held 9mm pistol gates the group; victim in range.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4851,7 +4852,7 @@ test "zombie fist infection lands on player victim" {
     // Attacker class hand_item rows: meleeHandZombie01's ungated
     // onSelfAttackedOther ModifyCVar add 10 to infectionCounter on the
     // target=other (the player victim), remapped onto the player's store.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4886,7 +4887,7 @@ test "zombie victim carries bleedCounter through the cvar column" {
     // (LT 1 gate passes on 0), and the next hit's GT 0 gate lands the bleed
     // buff on the zombie. Previously zombies carried no store and the rows
     // were recorded-only.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4938,7 +4939,7 @@ test "BarBrawling rage grants on taking a hit (onOtherDamagedSelf)" {
     // damage: perkBarBrawling6RageMode grants the rage buff when holding a
     // perkBrawler weapon (knuckles). The damage-apply event was previously
     // unfired.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4985,7 +4986,7 @@ test "combat entry grants the magnum criminal-pursuit buff" {
     // (a landed hit after the idle window): holding the 44 magnum with
     // Enforcer Criminal Pursuit 1 grants its 20 s stamina buff. Previously
     // the trigger was never fired.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5036,7 +5037,7 @@ test "fall impact escalates the leg-injury counter" {
     // check buff: the `_fallSpeed`-gated rows add to $legHurtCounter and grant
     // buffPlayerFallingDamage. The rising counter is the server's leg-injury
     // escalation stock applies on bad landings.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5071,7 +5072,7 @@ test "zombie fist applies exactly one wound per hit (fireOneBuff)" {
     // The zombie hand's AddBuff row is `fireOneBuff="true"` with 7 weighted
     // wound buffs: stock picks ONE by cumulative weight, not all. Seed the
     // group gate, hit, and assert only one of the seven is active.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5106,7 +5107,7 @@ test "buffInfectionMain escalates the infection counter" {
     // buffInfectionMain's update row adds `@_InfectionRate` to
     // infectionCounter every update tick: the infection worsens over time
     // server-side, gating the stage buffs and cure logic.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5141,7 +5142,7 @@ test "victim PackMule display buff fires on being hit" {
     // may refuse; the row path is what this proves, so retry a few hits).
     // Before this the victim event only evaluated buff rows, never the
     // victim's own perk rows.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5187,7 +5188,7 @@ test "victim PackMule display buff fires on being hit" {
 test "died rows set infectionCounter on player death" {
     // `onSelfDied` fires in the hp-replicate death path: buffInfection04's
     // row sets infectionCounter to 1 on the dead player's cvars.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5220,7 +5221,7 @@ test "leave-game rows clear harvest buff on disconnect" {
     // `onSelfLeaveGame` fires in the session-drop path before the entity is
     // destroyed: buffHarvest's self-remove row flags it. Assert the flag
     // (the reap that follows never runs on a destroyed entity).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5249,7 +5250,7 @@ test "CharismaticNature shares level with party member" {
     // `target="selfOtherPlayers"` fan-out: buying CharismaticNature writes
     // CharismaticNatureLevel onto party members' cvars and grants the group
     // buff, so their own buff rows scale.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5290,7 +5291,7 @@ test "multi-name RemoveBuff fans out (splint ladder)" {
     // removes sprained+splinted+broken together. The recorded-list applier
     // must split too (previously the whole comma string failed lookup and
     // nothing was removed).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5323,7 +5324,7 @@ test "delayed kill stamina lands after 1s" {
     // `delay=` ModifyStats rows defer: JavelinMaster 1 kill refunds +10
     // stamina after 1.0 s (20 ticks), not immediately. Gated ItemHasTags
     // perkJavelinMaster + victim alive.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5378,7 +5379,7 @@ test "power-attack kill refunds stamina via IsSecondaryAttack" {
     // (the heavy attack), which IL=65 resolves to `Actions[1] != null` — a
     // weapon shape, not the swing type. Without the supplier the group
     // refused and a club kill scored no refund.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5430,7 +5431,7 @@ test "cure-all flags typed buffs only" {
     // `RemoveAllNegativeBuffs` clears buffs whose DamageType is set and
     // leaves untyped ones: abrasion (Bashing) flags, the berserker buff
     // (no type) stays. Driven through the regen start row.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5467,7 +5468,7 @@ test "bleeding drains HP via cvar-scaled HealthChangeOT" {
     // `value="@$bleedAmount"`: the start row sets $bleedAmount =
     // bleedCounter / 2, so a 4-stack bleed drains 2 HP per second through
     // the active-buff fold.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5499,7 +5500,7 @@ test "spawn-heal finish restores bars" {
     // Finish-event stat restores: buffEntitySpawnHeal's finish rows add 30000
     // Health/Stamina (clamped to max). Previously applyTriggeredBuffs dropped
     // res.mods, so finish stats never applied.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5532,7 +5533,7 @@ test "church-bell ring spawns the aggressive horde" {
     // now supported with SpawnEntity + the RandomRoll gate - spawns 4
     // SleeperGSList zombies around the player. Roll the 99% gate; run the
     // sequence directly with the Duke note present.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5567,7 +5568,7 @@ test "heal-health cvar add heals per update" {
     // `value="@cvar"` Health adds resolve at execute time: buffHealHealth's
     // update row adds @medRegHealthIncSpeed per due update while the medical
     // pool lasts. Seed the pool like a bandage use would.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5604,7 +5605,7 @@ test "ranged ray-hit bleeds the victim (onSelfPrimaryActionRayHit)" {
     // melee-vs-ranged, so the held weapon's `ranged` tag picks the ray-hit
     // path; a melee club takes the onSelfAttackedOther path and does not
     // bleed through this row.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5659,7 +5660,7 @@ test "level-curved ModifyCVar indexes the perk's level" {
     // Execute picks valueList[CalculatedLevel-1], so level 2 must write 2.5,
     // not the first segment 2.0. Feeding the changed perk's level into the
     // ctx resolves it.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5691,7 +5692,7 @@ test "forgetting elixir resets progression and refunds points" {
     // row: stock Progression::ResetProgression refunds CalculatedCostForLevel
     // for every perk/attribute level above base, then attribute->1 / perk->0.
     // The eat-path item rows now fire it, so the respec lands server-side.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5741,7 +5742,7 @@ test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
     // buff, fire-extinguish, coffee, drugs). The eat path now fires them with
     // the pool cvars suppressed (EatProps owns food/water/HP), so the buffs
     // land without double-restoring.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5791,7 +5792,7 @@ test "consumable buff expires when its duration cvars drain" {
     // $MetabolismDuration/2), and the buff's RemoveBuff row gates on
     // `$buffBeerDuration LTE 0`. With the duration seeded by the eat path,
     // the buff wears off server-side after enough updates.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5848,7 +5849,7 @@ test "infection04 start subtract kills instantly" {
     // Immediate Health subtract: buffInfection04's start row subtracts
     // 99999999 once (the infection kill blow at max counter). Previously only
     // Health adds applied; the kill blow never touched the bar.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5875,7 +5876,7 @@ test "infection04 start subtract kills instantly" {
 test "radiation pool drains 20 stamina per update" {
     // Immediate Stamina ModifyStats: buffRadiationPool's update row subtracts
     // 20 stamina per due update (previously parsed but never applied).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5913,7 +5914,7 @@ test "puking start drains 50 water immediately" {
     // Immediate Food/Water ModifyStats: buffPuking01's start row subtracts 50
     // water once (previously only Health adds applied; the drain was parsed
     // but never touched the bars).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5945,7 +5946,7 @@ test "MotherLode penalizes harvest XP via Harvesting tag" {
     // Harvest passes `"Harvesting"` through awardXpTagged so the
     // PlayerExpGain perc_add rows scale it: perkMotherLode 1 is -10%
     // (SalvageOps/MotherLode mining penalty; night-stalker coffee -5%).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5980,7 +5981,7 @@ test "MotherLode penalizes harvest XP via Harvesting tag" {
 test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
     // Stock `AddKillXP` passes useBonus, so PlayerExpGain Kill rows fold:
     // perkNightStalkerTwilightThief +.05 behind IsNight. Day keeps base.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6010,7 +6011,7 @@ test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
 test "stamina regen scales with water fraction (StaminaOT water gate)" {
     // Stock `UpdatePlayerStaminaOT` IL=139: the positive leg scales by
     // max(water%, 0.2). A dehydrated player regens at the 0.2 floor.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6045,7 +6046,7 @@ test "stamina regen scales with water fraction (StaminaOT water gate)" {
 test "fatigued victim takes scaled damage (HealthLoss passive 107)" {
     // Stock `Stat.Tick` scales an applied loss by GetValue(LossPassive):
     // buffFatigued carries HealthLoss +.1, so a 10.0 hit lands 11.0.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6072,7 +6073,7 @@ test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     // over the spawned item's tags (IL_0040). buffRogueSetBonus carries
     // tiered dukes rows (Equals N lowest quality -> +.05..+.3); with four
     // Q1 rogue pieces the Equals-1 row folds, so a 20-dukes stack lands 21.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6114,7 +6115,7 @@ test "kill trigger fires SiphoningStrikes heal on zombie kill" {
     // `onSelfKilledOther` rows on the killer's purchased perks: Siphoning
     // Strikes 1 heals +2 HP on a melee kill (gated `ItemHasTags tags="melee"`
     // + not starving). Progression rows previously had no kill event at all.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6161,7 +6162,7 @@ test "morale start otherAOE cripples nearby zombies" {
     // time (stock centers the range cube on Self): adding
     // buffSledgeSaga3CrippledMorale cripples living zombies within 3 m of the
     // killer. A distant zombie stays clean.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6195,7 +6196,7 @@ test "kill trigger grants Dentist silver on tagged zombie kill" {
     // walker/crawler/bandit kills (5% RandomRoll gate may refuse, so sweep a
     // few kills like the PackMule test). Proves the kill-event foreign-tag
     // fill resolves instead of refusing.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6263,7 +6264,7 @@ test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
     // `onSelfKilledOther` RemoveBuff rows: perkFortitudeMastery clears
     // buffInjuryBleeding on the killer (ungated first row). The kill event
     // applies removes through the same path as adds.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6301,7 +6302,7 @@ test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
 test "kill trigger grants Berserker on club kill at Strength 5" {
     // Kill-event self-gated AddBuff: StrengthMastery 5 + club-family held
     // item grants buffBerserker on kill (ItemHasTags multi-tag list).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6348,7 +6349,7 @@ test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
     // The survival tick feeds the client's reported movement state as the
     // CurrentMovementTag set, so the row folds while walking or running and
     // drops at idle, which is not in the row's tag list.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6385,7 +6386,7 @@ test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     // with an empty tag set. The survival tick's untagged VM fold now caches it
     // per entity so every player-damage choke consumes it; before this the row
     // folded into a TrackedDeltas field nothing read.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6417,7 +6418,7 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     // perkFortitudeMastery HealthMax is level="4,5" value="50,100": with the
     // perk at level 5 the survival pass recomputes max_hp = 100 + 100 = 200;
     // dropping the perk restores the 100 base (recompute-from-set).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6454,7 +6455,7 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     // recomputes to 150. The tagged row is a sprint modifier: an untagged query
     // never matches it (PassiveEffect::hasMatchingTag IL=53), so idle regen is
     // the plain 8/s and the row no longer inflates it.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6496,7 +6497,7 @@ test "sprint drain consumes running-tagged StaminaChangeOT (perkRuleOneCardio)" 
     // Rules floor is 12/s. Cardio L5 adds StaminaChangeOT perc_add 0.3 tags=running,
     // so sprint drain becomes 12 - 0.3*stamina_max/100 per second. At max 150 that
     // is 12 - 0.45 = 11.55/s. Idle must still ignore the tagged row (covered above).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6535,7 +6536,7 @@ test "walk regen consumes walking-tagged StaminaChangeOT (armorFarmerHelmet)" {
     // -.0281 tags=walking, so walk regen becomes 8 + (-.0281)*stamina_max/100.
     // At max 150 that is 8 - 0.04215 = 7.95785/s. Idle (move_tag=.idle) must
     // ignore the tagged row (same gate as the cardio idle test).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6584,7 +6585,7 @@ test "FoodChangeOT and WaterChangeOT join the survival totals" {
     // VM OT composes on top. Stock messmeup FoodChangeOT base_subtract 10 and
     // buffBurningEnvironment WaterChangeOT base_subtract .3. use_buff needs the
     // stock survival table (buffStatusCheck01), so keep game-dir buffs intact.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6640,7 +6641,7 @@ test "HungerMultiplier scales negative FoodChangeOT (loss sandbox modifier)" {
     // {0,.25,.5,.75,1,1.25,1.5,1.75,2}, so index 6 ("G") = 1.5 and
     // index 8 ("I") = 2.0. use_buff needs the stock survival table, so keep
     // game-dir buffs intact and wipe only the player's BuffSet.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6686,7 +6687,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     // revoked by the LTE 3 row. The tier value is the buff's own
     // PhysicalDamageResist row gated on ArmorGroupLowestQuality. All of it is
     // data: items.xml ArmorGroup, buffs.xml rows.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6763,7 +6764,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
 test "the survival pass reads the held item's tags for HoldingItemHasTags" {
     // The tick fills the ctx from the held toolbelt slot, so a row gated
     // HoldingItemHasTags (IL=37) folds only while a matching item is in hand.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6811,7 +6812,7 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     // requirement ctx, so SandboxOptionBool (IL=18) reads the operator's
     // setting. A hand-built perk row with a literal value makes the gate
     // visible in max_hp, unlike buffStatusCheck01's @cvar rows.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6871,7 +6872,7 @@ test "crafting tier follows the stock crafting-skill rows" {
     // skill rows whose tags match the recipe's tag set (which includes the
     // recipe name), at the skill's purchased level. craftingRepairTools'
     // claw-hammer row is base_add 1,2,3,4,5,5 at levels 8,12,16,20,25,50.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6908,7 +6909,7 @@ test "crafting consumes tier-scaled ingredients and yields a tier-quality item" 
     // recipe's CraftingIngredientCount at the crafting tier, so armorPrimitive
     // Helmet's base 5 fibers/wood becomes 15 at tier 3 (row level 2,3,4,5,6 =
     // +5,+10,+15,+20,+30). The crafted item then carries the tier as quality.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6963,7 +6964,7 @@ test "the survival pass folds the armor query into buff_phys_resist" {
     // coredamageresist-tagged one. Equipment::GetTotalPhysicalArmorRating
     // (IL=887) queries passive 41 with that tag, so the per-tick cache the
     // armor fold fills is 400. Before the tag split it was the untagged 200.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7015,7 +7016,7 @@ test "a gated perk row stops folding when its requirement fails" {
     // survival pass resolves that gate against the live BuffSet, so a starving
     // or dehydrated player must not get the regen. Before the requirement
     // evaluator existed the row folded unconditionally.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7087,7 +7088,7 @@ test "every active buff fires its onSelfBuffStart rows once" {
     // buffShocked's onSelfBuffStart rows write $buffShockedDamage (the row that
     // matches its gates) and $buffShockedDisplay. Before the lifecycle sweep only
     // buffStatusCheck01/02 were driven at all, so no other buff's start rows ran.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7126,7 +7127,7 @@ test "the armour status buffs gate on the worn-armour rating" {
     // `StatCompareCurrent stat="Armor"`, which resolves since the rating reached
     // the gate ctx. A bare player (rating 0) is "broken armour": the LTE 0.1 row
     // applies, the 0.25/0.75 ones do not.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7156,7 +7157,7 @@ test "an entity can hold a full stock buff set, not just eight" {
     // tracker, and a real player also carries the check buffs, an injury and a
     // weather buff. At the old cap of 8 the thirst stages (added last) fell off
     // the end of the fixed set and were re-added every tick.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7201,7 +7202,7 @@ test "the entity class Buffs list parses from entityclasses.xml" {
     // The parsed list is the input stock applies to the class when it enters the
     // game; activating it in the server (and the survival dynamics that shift
     // with check01's own passives folding) is the next step, not this one.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7243,7 +7244,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
     // `multiply @.ArmorLightWorn`. Before WornItems existed the first row refused
     // closed, so the whole chain (and the `PhysicalDamageResist = @.ArmorLightTotal`
     // passive it feeds) read 0.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7291,7 +7292,7 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     // durations as CVars and adds buffBiomeProgressionCheck/buffCheckScreenEffects.
     // zdtd fires the event once per client session now; before this the CVar
     // store did not exist and onSelfEnteredGame never ran.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7344,7 +7345,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     // stage-3 buffs, and eating/drinking back to full must drop them again
     // (stock clears the stages from the healing buffs' onSelfBuffStart rows;
     // zdtd drives the same removal from the thresholds).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7778,7 +7779,7 @@ test "a destroyed authored light does not come back on the next TE scan" {
     // store entry, and the next restart re-scanned the prefab and put it
     // straight back on a cell that is now air - the chunk stream then shipped
     // a light for a block nobody can see.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     io_fs.mkdirPath(".zdtd_cfg_cache");
@@ -7833,7 +7834,7 @@ test "a mined-out prefab container does not come back on the next TE scan" {
     // So every prefab chest a player mined out returned on the next restart,
     // with a fresh loot roll. The seed chest has its own placement in
     // init_world and does not need that fallback.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     io_fs.mkdirPath(".zdtd_cfg_cache");
@@ -8107,7 +8108,7 @@ test "loot prob passives scale tagged entries (stock perkDeadEye)" {
     // fold answers a tagged entry's probabilty from the opener's purchased
     // perk rows, so a Dead Eye 5 player sees +10% on rifle-tagged loot and an
     // unrelated tag is untouched.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8161,7 +8162,7 @@ test "loot entry mods install on the spawned gun" {
     // entries use 0.5 / 1. The modifiers are item classes in the same id space
     // as items.xml (`ItemTable.addItemClasses`), so the installed id resolves
     // back to the modifier catalog and encodes on the wire.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8226,7 +8227,7 @@ test "loot bag fill carries the rolled quality, stackables stay quality 1" {
     // A death/airdrop bag is a stock LootContainer roll, so the rolled quality
     // (and random-durability wear) belongs on the deposited stack; a stackable
     // keeps quality 1 like every other deposit path.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8277,7 +8278,7 @@ test "loot bag fill carries the rolled quality, stackables stay quality 1" {
 test "container loot starts a random-durability item worn" {
     // Stock LootContainer: when `random_durability="true"` and the item has a
     // MaxUseTimes, UseTimes = (int)(max * RandomRange(0.2, 0.8)); otherwise 0.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8329,7 +8330,7 @@ test "container loot applies entry buffs to the opener" {
     // Buffs.AddBuff). The fill path routes the entry's list through a sink into
     // the catalog add, which is what makes a bookworm success chime reach the
     // client. An unknown name fails closed (stock ships one typo'd row).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8375,7 +8376,7 @@ test "progression update rows write $perkBookwormChance (stock data)" {
     // `perkIntellectMastery` rows fire on `onSelfProgressionUpdate` and set
     // `$perkBookwormChance` to 25 at level >= 2, 0 at <= 1. The purchase and
     // add level paths both run them, so the cvar tracks the perk.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8531,7 +8532,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     // parsed, so a modded armour piece defended no better than a bare one:
     // modArmorInsulatedLiner's `ElementalDamageResist +1 tags=heat,electrical`
     // and modRadiationReady's `+50% tags=radiation` did nothing server-side.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

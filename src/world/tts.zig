@@ -19,6 +19,7 @@ const std = @import("std");
 const assets_placeholders = @import("../assets/blockplaceholders.zig");
 const io_fs = @import("../util/io_fs.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// TTS block-paint blockId bitfield: child flag (RE: tts.zig header, Prefab.readBlockData).
 pub const child_bit: u32 = 0x4000_0000;
@@ -533,7 +534,7 @@ test "rotateRawY cycles the 45 degree band and leaves unknown rotations alone" {
 }
 
 test "tts load abandoned_house block types if present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
+    const p = stock_paths.prefabs ++ "/POIs/abandoned_house_01.tts";
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var t = try loadBlocks(std.testing.allocator, p);

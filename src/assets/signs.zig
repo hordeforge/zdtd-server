@@ -7,6 +7,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_signs: usize = 4096;
 /// Cap on layers per sign (stock Default Sign carries ~30; groups nest).
@@ -605,7 +606,7 @@ test "guid net order" {
 }
 
 test "default [D] sign library loads from Data/Config/signs.xml" {
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     if (!io_fs.dirExists(gd)) return error.SkipZigTest;
     var path_buf: [2048]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Prefabs", .{gd});
@@ -669,7 +670,7 @@ test "prefab sign libraries parse deep nesting and enum values" {
     // does not: 3-deep group nesting, shapeMode/offsetTarget/colorMode
     // enums, and named layers with fonts. part_billboard_beanthere carries
     // all three.
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Prefabs/Parts/part_billboard_beanthere_signs.xml";
+    const p = stock_paths.steam_client ++ "/Data/Prefabs/Parts/part_billboard_beanthere_signs.xml";
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     const raw = try io_fs.readFileAll(std.testing.allocator, p);
     defer std.testing.allocator.free(raw);

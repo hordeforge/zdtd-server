@@ -8,6 +8,7 @@ const components = @import("../ecs/components.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const util_log = @import("../util/log.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed recipes, a zdtd bound rather than a stock rule: stock
 /// has no limit. Measured against V3.2.0 `Data/Config` (2026-09-04): stock
@@ -423,7 +424,7 @@ test "recipe tags, ingredient modifier and CraftingIngredientCount" {
     // matches. Recipe.CanCraft folds CraftingIngredientCount (198) per
     // ingredient at the crafting tier when UseIngredientModifier (default
     // true; `use_ingredient_modifier="false"` opts out).
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    const path = stock_paths.configFile("recipes.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -480,7 +481,7 @@ test "builtin recipes" {
 }
 
 test "load stock recipes when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    const path = stock_paths.configFile("recipes.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -491,7 +492,7 @@ test "load stock recipes when present" {
 }
 
 test "craft_time defaults to the -1 sentinel and resolves like Recipe::Init" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    const path = stock_paths.configFile("recipes.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -541,7 +542,7 @@ test "craft_time defaults to the -1 sentinel and resolves like Recipe::Init" {
 }
 
 test "craft_exp_gain parses the declared 0 and defaults undeclared to -1" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    const path = stock_paths.configFile("recipes.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

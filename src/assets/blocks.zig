@@ -11,6 +11,7 @@ const assignids = @import("assignids_comptime.zig");
 /// enters the leftover-id path. Production passes the resolver in as a
 /// callback, so the dependency stays one-way.
 const maxdamage_dep = @import("maxdamage.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed block defs, a zdtd bound rather than a stock rule:
 /// stock assigns ids dynamically and the wire id space is 16 bits
@@ -1168,7 +1169,7 @@ test "block Tags parses for TriggerHasTags gates" {
     // (`TriggerHasTags churchbell`): blocks.xml Tags feed the block def.
     // churchBellHanging extends churchBell with no own Tags, so inheritance
     // must carry the parent's churchbell tag.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
     defer t.deinit();
@@ -1319,7 +1320,7 @@ test "the stock leftover block ids match Block.assignLeftOverBlocks" {
     // bases: they are the `*Shapes` shape masters plus cntChickenCoop and
     // oldWoodDoorNoHonk, which is why a modded client and this server agree on
     // where a mod's first block lands.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     const cpath = game ++ "/Data/Config/blocks.xml";
     if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -1865,7 +1866,7 @@ test "the stock Collide rows match BlocksFromXml" {
     // the absent default 255; glassBusinessCTRSheet itself inherits
     // "movement,melee,bullet,arrow,rocket" = 2+16+4+32+8 = 62 from
     // glassBusinessSheet.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     const cpath = game ++ "/Data/Config/blocks.xml";
     if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
     const Ctx = struct {
@@ -1888,7 +1889,7 @@ test "material collidable=false clears the undeclared Collide default" {
     // materials (Mair/Mwater/Mtallgrass/Mweb) clear the default; declared
     // masks (including explicit 0) are untouched by the fixup, which runs at
     // Game init - here it is driven directly with a synthetic material map.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     const cpath = game ++ "/Data/Config/blocks.xml";
     if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
     const Ctx = struct {

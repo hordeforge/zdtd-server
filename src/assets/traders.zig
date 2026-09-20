@@ -17,6 +17,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const rng_util = @import("../util/rng.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_groups: usize = 256;
 pub const max_expand: usize = 64;
@@ -584,7 +585,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 }
 
 test "trader table parses stock traderAlways and group refs with attrs" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
+    const path = stock_paths.configFile("traders.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -617,7 +618,7 @@ test "trader table parses stock traderAlways and group refs with attrs" {
 }
 
 test "trader table parses trader_info blocks with per-trader items and attrs" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/traders.xml";
+    const path = stock_paths.configFile("traders.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

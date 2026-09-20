@@ -6,6 +6,7 @@
 const std = @import("std");
 const dtm = @import("dtm.zig");
 const prefabs_mod = @import("prefabs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 pub const prefabs = prefabs_mod;
 const water_mod = @import("water.zig");
 const biomes_mod = @import("biomes.zig");
@@ -2121,7 +2122,7 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
 }
 
 test "stock map heights via DTM if Navezgane present" {
-    const map = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const map = stock_paths.navezgane;
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
 
     io_fs.mkdirPath("worlds");
@@ -2238,7 +2239,7 @@ test "evict then reload of a queued key reads the newest bytes" {
 test "navezgane spawn chunk carries its POI blocks" {
     // The stock client saw only terrain where abandoned_house_07 stands, so the
     // POI must survive the whole store path, not just the prefab index.
-    const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const map_dir = stock_paths.navezgane;
     if (!io_fs.fileExists(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
 
     var w = try World.init(std.testing.allocator, "worlds/zdtd_poi_test");
@@ -2291,7 +2292,7 @@ test "navezgane heights agree with the blocks in the same column" {
     // The client stood in mid air with no collider under it while the server
     // held it several blocks above the terrain top, which is what a heights
     // plane that disagrees with the painted blocks looks like.
-    const map_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const map_dir = stock_paths.navezgane;
     if (!io_fs.fileExists(map_dir ++ "/prefabs.xml")) return error.SkipZigTest;
 
     var w = try World.init(std.testing.allocator, "worlds/zdtd_height_test");

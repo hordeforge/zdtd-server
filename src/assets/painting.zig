@@ -5,6 +5,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed paint entries, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock painting.xml
@@ -103,7 +104,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 }
 
 test "load painting.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/painting.xml";
+    const p = stock_paths.configFile("painting.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     const t = try loadFromPath(std.testing.allocator, p);
     defer {

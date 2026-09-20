@@ -7,7 +7,7 @@
 **Date pin:** 2026-08-06
 **Game line:** stock client **V3.1.0 b14**, EAC off, Navezgane, direct IP.
 **Version pin:** target is stock **V3.1.0 b14**; IL citations `asm.il:NNNN` refer to the V3.1.0 dump whose identity (size, line count, MD5) is recorded in [`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md). Mentions of V3.0.1 are provenance only; pre-2026-08-06 line numbers may drift by roughly 3500 lines in the NetPackage region.
-**IL reference:** `/home/maci/.cache/zdtd-scratch/asm.il` (2026-08-05 dump). Line
+**IL reference:** `$HOME/.cache/zdtd-scratch/asm.il` (2026-08-05 dump). Line
 numbers in this document refer to **that** dump. Older ranges quoted in
 [GAP_ANALYSIS.md](GAP_ANALYSIS.md) drift by roughly 3500 lines in the
 NetPackage region; re-check before trusting a cited line from an older doc.

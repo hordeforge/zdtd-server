@@ -5,6 +5,7 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 const signs = @import("../assets/signs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const SignEntry = signs.SignEntry;
 
@@ -285,7 +286,7 @@ test "sign layer encode round-trips the stock field order" {
 test "sign batches carry the stock layered catalog" {
     // The [D] Default Sign parses ~30 layers; the batcher must emit it with
     // a nonzero layer count and correct is_last, not split or drop it.
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     if (!@import("../util/io_fs.zig").dirExists(gd)) return error.SkipZigTest;
     var path_buf: [2048]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Prefabs", .{gd});

@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const requirements = @import("requirements.zig");
 const sandbox = @import("sandbox.zig");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 // zdtd storage bounds, not stock rules; stock caps neither. Measured against
 // V3.2.0 `Data/Config` (2026-09-04): loot.xml defines 1015 lootgroups (50% of
@@ -1441,7 +1442,7 @@ test "builtin loot roll" {
 }
 
 test "load stock loot when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1600,7 +1601,7 @@ test "stock loot item entries leave quality to the template" {
     // <lootqualitytemplate>, never on an <item>. This pins that fact and the
     // template path it implies: the parsed entries carry no override, and the
     // template still resolves a quality for them.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var lt = try loadFromPath(std.testing.allocator, path);
     defer lt.deinit();
@@ -1844,7 +1845,7 @@ test "loot_stage_count_mod grows the count with the loot stage" {
 test "stock loot entries carry loot_stage_count_mod on ammo groups" {
     // Guards the attribute name/parse against a stock update: group9mmSmall's
     // rounds carry the 0.01 stage growth.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var lt = try loadFromPath(std.testing.allocator, path);
     defer lt.deinit();
@@ -2013,7 +2014,7 @@ test "count=all groups spawn every entry; force_prob gates independently" {
 }
 
 test "stock groups parse past the old 32-entry cap (perkBooks)" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2042,7 +2043,7 @@ test "loot rolls stay deterministic for a given stage and seed" {
 }
 
 test "stock loot prob templates load and band the real items" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2148,7 +2149,7 @@ test "container group rolls are prob-weighted, not uniform" {
 }
 
 test "stock loot.xml container flags parse" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var lt = try loadFromPath(std.testing.allocator, path);
     defer lt.deinit();
@@ -2167,7 +2168,7 @@ test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
     // "@$perkBookwormChance">` child. Stock evaluates the roll against the cvar
     // (absent without perkBookworm = 0, so the gate refuses); the entry has no
     // `prob`, i.e. 1.0, so ignoring the requirement put a book in every crate.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var lt = try loadFromPath(std.testing.allocator, path);
     defer lt.deinit();
@@ -2236,7 +2237,7 @@ test "stock loot: a Biome-gated entry rolls in its biome, omitted elsewhere" {
     // biomes="wasteland"/></item>` next to a RandomRoll-gated book group. The
     // biome gate is answerable at roll time (the container's own biome), so it
     // resolves; the RandomRoll stays omitted until its cvar exists.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var lt = try loadFromPath(std.testing.allocator, path);
     defer lt.deinit();
@@ -2489,7 +2490,7 @@ test "abundance_type scales the group's counts from the sandbox code" {
 }
 
 test "stock loot groups drop the seven client-conditional holiday entries" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    const path = stock_paths.configFile("loot.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

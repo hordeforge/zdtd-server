@@ -5,6 +5,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_entries: usize = 4096;
 
@@ -101,7 +102,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Map {
 }
 
 test "load abandoned_house blocks.nim if present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
+    const p = stock_paths.prefabs ++ "/POIs/abandoned_house_01.blocks.nim";
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var m = try loadFromPath(std.testing.allocator, p);

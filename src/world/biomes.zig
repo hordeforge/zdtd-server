@@ -8,6 +8,7 @@ const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const paths = @import("../assets/paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Offline biomemap id for pine_forest (stock V3.1 AssignIds pin). Used when
 /// biomes.xml is not loaded, never when the stock file resolved the id.
@@ -94,7 +95,7 @@ test "biomemap name table resolves stock ids" {
     // The height-band and no-map paths key on stock biome names; the ids come
     // from the file's `<biomemap id name>` rows (snow 01, wasteland 08, ...),
     // never from literals in the consumer.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var t = (tryLoadColorTable(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     try std.testing.expectEqual(@as(?u8, 1), t.idForName("snow"));
@@ -431,7 +432,7 @@ test "colorToId stock keys" {
 }
 
 test "load navezgane biomes.png if present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane/biomes.png";
+    const p = stock_paths.navezgane ++ "/biomes.png";
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
 
     var m = try loadPngR(std.testing.allocator, p);

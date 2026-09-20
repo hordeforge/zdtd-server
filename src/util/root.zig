@@ -14,6 +14,7 @@ pub const rng = @import("rng.zig");
 pub const game_random = @import("game_random.zig");
 pub const secret = @import("secret.zig");
 pub const sim = @import("sim.zig");
+pub const stock_paths = @import("stock_paths.zig");
 pub const sys_metrics = @import("sys_metrics.zig");
 pub const tcp_listen = @import("tcp_listen.zig");
 pub const toml_bind = @import("toml_bind.zig");
@@ -28,6 +29,7 @@ test {
     _ = game_random;
     _ = secret;
     _ = sim;
+    _ = stock_paths;
     _ = sys_metrics;
     _ = tcp_listen;
     _ = toml_bind;

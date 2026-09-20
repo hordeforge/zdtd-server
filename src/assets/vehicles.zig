@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const components = @import("../ecs/components.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed vehicle defs, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock vehicles.xml
@@ -263,7 +264,7 @@ test "missing velocityMax fails closed to 0" {
 }
 
 test "load vehicles.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/vehicles.xml";
+    const p = stock_paths.configFile("vehicles.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -340,7 +341,7 @@ test "seat count edge cases: absent, non contiguous, self closing, over cap" {
 }
 
 test "stock vehicles.xml seat counts match Vehicle::SetSeats" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/vehicles.xml";
+    const p = stock_paths.configFile("vehicles.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();

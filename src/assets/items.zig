@@ -7,6 +7,7 @@ const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed item defs, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock items.xml defines
@@ -2469,7 +2470,7 @@ test "items inherit Action0 damage and Tags through Extends" {
     // inherit MaxDamage-style props through Extends and 286 declare no Tags of
     // their own (schematicNoQualityMaster children), which made the loot mod
     // roll and the attachment scrub fail closed on them.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    const path = stock_paths.configFile("items.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2842,7 +2843,7 @@ test "HarvestCount held-tool rows parse and fold over base 1" {
 }
 
 test "load stock items.xml when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/items.xml";
+    const path = stock_paths.steam_client ++ "/Data/Config/items.xml";
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2954,7 +2955,7 @@ test "load stock items.xml when present" {
 }
 
 test "stock items.xml Stacknumber default and Extends resolution" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    const path = stock_paths.configFile("items.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2990,7 +2991,7 @@ test "stock items.xml Stacknumber default and Extends resolution" {
 }
 
 test "item passive rows parse with their gates and inherit through Extends" {
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     if (!io_fs.dirExists(gd ++ "/Data/Config")) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
     defer t.deinit();
@@ -3031,7 +3032,7 @@ test "item passive rows parse with their gates and inherit through Extends" {
 }
 
 test "armor resist curves parse from stock items.xml (PDR quality curves)" {
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     if (!io_fs.fileExists(gd ++ "/Data/Config/items.xml")) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
     defer t.deinit();
@@ -3081,7 +3082,7 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
 }
 
 test "StaminaLoss parses as the per-attack cost" {
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     if (!io_fs.fileExists(gd ++ "/Data/Config/items.xml")) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
     defer t.deinit();
@@ -3258,7 +3259,7 @@ test "items.xml stats rows parse with stock's field grammar and guards" {
 }
 
 test "stock items.xml stats rows load" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    const path = stock_paths.configFile("items.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -3318,7 +3319,7 @@ test "SellableToTrader parses and inherits through Extends" {
 }
 
 test "stock items.xml SellableToTrader rows load" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    const path = stock_paths.configFile("items.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -3372,7 +3373,7 @@ test "TraderQualityMod parses and inherits through Extends" {
 }
 
 test "stock items.xml TraderQualityMod rows load" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    const path = stock_paths.configFile("items.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

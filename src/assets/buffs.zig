@@ -9,6 +9,7 @@ const requirements = @import("requirements.zig");
 const cvars = @import("cvars.zig");
 const sandbox = @import("sandbox.zig");
 const components = @import("../ecs/components.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed buff defs, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock buffs.xml defines
@@ -2399,7 +2400,7 @@ test "an effect_group gate applies to its triggered rows and its passives" {
 }
 
 test "load buffs.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const p = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -2408,7 +2409,7 @@ test "load buffs.xml when present" {
 }
 
 test "survival numbers resolve from the shipped buffs.xml" {
-    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const gd = stock_paths.dedicated_server;
     var t = (tryLoad(std.testing.allocator, gd, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     const sv = survival(&t);
@@ -2636,7 +2637,7 @@ test "a buff passive folds only under its effect_group requirement" {
     // `!HasBuff buffHealWaterMax` and 0.1 gated `HasBuff buffHealWaterMax`.
     // Both folded before the buff parser honoured effect_group requirements, so
     // a coffee drinker got 0.3 instead of one of the two rows.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2685,7 +2686,7 @@ test "SandboxOptionBool gates a passive on the decoded sandbox option" {
 }
 
 test "the stock SandboxOptionBool gates resolve instead of refusing" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2706,7 +2707,7 @@ test "duration-anchored buff rows ramp with the elapsed seconds" {
     // the anchors), so the folded delta is negative. The parser used to read
     // only `level=`, so the row fell into the anchor-less branch and folded a
     // constant, and the fold had no duration axis at all.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2742,7 +2743,7 @@ test "HoldingItemHasTags gates the hold-breath stamina rows" {
     // time, plus four rows gated `HoldingItemHasTags tags="perkDeadEye"` with
     // `ProgressionLevel Equals 3/4/5/1`. All four used to join the untagged sum
     // (+0.75) and before the duration axis both duration rows folded together.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2777,7 +2778,7 @@ test "an unworn armor group refuses every biker tier" {
     // armor worn the group reads quality 0 (the stock lookup's missing-key
     // branch), so every tier refuses. All six used to fold unconditionally, so
     // a bare player read 1+2+3+4+5+6 = 21.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -2797,7 +2798,7 @@ test "the stock coredamageresist armor rows fold only under the armor query" {
     // point PhysicalDamageResist row and a `coredamageresist`-tagged one, so the
     // untagged query sees 200 and the armor query sees both (400); the tick's
     // armor leg must use the armor query.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -3143,7 +3144,7 @@ test "ModifyStats target=other flags the victim mod" {
 
 test "damage_type element parses onto the def" {
     // `<damage_type value>` drives RemoveAllNegativeBuffs matching.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -3155,7 +3156,7 @@ test "damage_type element parses onto the def" {
 test "cure-all row evaluates on regen start" {
     // The regen cure row is gated PlayerLevel LT 6; level 1 passes and the
     // result flags remove_all_negative.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    const path = stock_paths.configFile("buffs.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

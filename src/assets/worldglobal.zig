@@ -8,6 +8,7 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Day/night pair from a `"day, night"` property value.
 pub const DayNight = struct {
@@ -101,7 +102,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 }
 
 test "worldglobal environment scales parse with stock defaults" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/worldglobal.xml";
+    const p = stock_paths.configFile("worldglobal.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();

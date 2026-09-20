@@ -4,7 +4,7 @@ Prompt: `docs/prompts/zig-idiomatic-review.md`
 Mode: **review only** (session override: read-only on `src/`, `build.zig`, `mods/`,
 `plugins/`; no fixes applied; no repo-wide gates run).
 Revision under review: `3d4089048b892c03e37a0db5f518196414f48ff0` (`3d408904`).
-Toolchain: Zig 0.16.0 (`/home/maci/.zvm/0.16.0/lib`).
+Toolchain: Zig 0.16.0 (`$HOME/.zvm/0.16.0/lib`).
 
 Applicability gate: working tree is zdtd (`src/`, `docs/prompts/` present, 203
 `src/**/*.zig` files). Passed.

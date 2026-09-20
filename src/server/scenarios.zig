@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const game_mod = @import("game.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 const Client = game_mod.Client;
 const game_bot = @import("game/bot.zig");
 const game_player = @import("game/player.zig");
@@ -1311,7 +1312,7 @@ test "scenario land claim: a stranger's blast meets the claim hardness" {
         g.deinit();
         gpa.destroy(g);
     }
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -1947,7 +1948,7 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
     // Offline maxdamage has the AssignIds dump but no blocks.xml, so the
     // upgrade ladder is empty: load the stock blocks.xml and swap it in (same
     // pattern the trader tests use for traders.xml / npc.xml).
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -1994,7 +1995,7 @@ test "scenario downgrade swap: DowngradeBlock target accepted, break turns into 
     }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -2054,7 +2055,7 @@ test "scenario multi-block SetBlock places anchor + ischild children" {
     }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -2366,7 +2367,7 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     const c = try g.attachJoinedClient(&peer_cap);
     // Stock blocks.xml + materials.xml so block -> Material -> damage_category
     // resolves (offline builtin table has no material chain).
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -2732,7 +2733,7 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
     }
 }
 
-const navezgane_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+const navezgane_path = stock_paths.navezgane;
 
 fn stockMapPresent() bool {
     return io_fs.dirExists(navezgane_path) or io_fs.fileExists(navezgane_path);
@@ -2780,7 +2781,7 @@ test "scenario deco streams beyond the join window as chunks stream" {
     // entered chunks (the world is not bald beyond spawn). Teleporting the
     // player to a fresh region must generate + send the new deco chunks.
     if (!stockMapPresent()) return error.SkipZigTest;
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_decostream");
@@ -2985,7 +2986,7 @@ test "scenario always-on radius effect: radiated barrel grants buffRadiation01" 
     // grant their ActiveRadiusEffects buff to players within radius; the
     // per-player local 7x7x7 scan applies them each tick. Real game-dir
     // blocks/buffs. Skipped without the game dir.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4388,7 +4389,7 @@ test "scenario explosion damages entities and credits the kill" {
     // terrStone is 500 HP with no explosionresistance; keystoneBlock is Msteel
     // (0.5 resistance, 7000 HP). The old path deleted every block in the
     // sphere regardless of material.
-    const game_blocks = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_blocks = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game_blocks, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -8224,7 +8225,7 @@ test "scenario proc world streams deco from the W3 biome field" {
     // stream past the join window: both the join burst and the streamed
     // chunks ship deco objects, not the empty firstPackage.
     if (!stockMapPresent()) return error.SkipZigTest;
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     freshScenarioDir("worlds/zdtd_sc_procdeco");
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -8746,7 +8747,7 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
     // quest completes (Auto) or parks ready_turn_in and a trader open finishes
     // it. Proves no stock quest is stuck behind an unmapped/.auto phase or a
     // missing trigger. Skipped when the stock game dir is absent.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8826,7 +8827,7 @@ test "scenario vending rent state machine (loot-economy §6)" {
     // authoritatively: only the sender's own identity may act, the rent costs
     // TraderInfo.RentCost currency, the term is rent_time in-game days, one
     // machine per player, and an expired rental returns to unowned.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -8981,7 +8982,7 @@ test "scenario TraderData copy-back: out-of-reach ignored, in-reach applied" {
     // the live EntityTrader / TileEntityVendingMachine (loot-economy.md 5), so
     // the echo is applied stock-faithfully - but only from a sender within
     // trade reach, so a remote peer cannot rewrite the shared economy.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -9117,7 +9118,7 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
     // TE composite C2S (the mirror of TileEntityVendingMachine::write). The
     // server applies them only for the machine's owner; ownership and the
     // rental term stay server-owned (the rent SM applies them).
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -9415,7 +9416,7 @@ test "scenario quest reward items carry the stock stat roll" {
     // quest-reward stack. The payout grants through `giveRewardItem`, so a
     // reward naming a stats-carrying item must land with stats_n > 0. Full
     // stock game-dir run: the fixture table has no <stats> rows.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -9772,7 +9773,7 @@ test "scenario container loot respawns after LootRespawnDays" {
 }
 
 test "scenario loot container size comes from the loot.xml size attr" {
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir)) return error.SkipZigTest;
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootsize");
@@ -11799,7 +11800,7 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     // breaker's inventory. terrStone carries one Harvest row:
     // resourceRockSmall count="55" prob=1 → exactly 55 on the floor of the
     // deterministic roll. Skipped when the stock game dir is absent.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -11857,7 +11858,7 @@ test "scenario harvest count scales by the held tool's HarvestCount passive" {
     // 0.25) yields trunc(55 x .25) = 13 rocks; the auger (untagged perc_add
     // .2 -> 1.2) yields 55 x 1.2 = 66. The bare hand has no rows -> 55
     // (covered by the harvest-drop scenario). Skipped without the game dir.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -11926,7 +11927,7 @@ test "scenario fall-event drops re-place debris at landing (terrDirt)" {
     // re-places the debris via the stick path - terrDirt's own Fall row is
     // count=1 stick_chance=1 (prob is never consulted on stick rows), so
     // the re-placement is deterministic. Skipped without the game dir.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -11981,7 +11982,7 @@ test "scenario destroy-event drops roll the bag at the blast (bathroomStallDoor)
     // overall_prob 1.0 the roll is fully deterministic (no range draw, no
     // prob gate, no overall gate). overall_prob 0.0 brackets the gate: every
     // stack is blocked. Skipped without the game dir.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -12097,7 +12098,7 @@ test "scenario forge completion dings NetPackageSoundAtPosition" {
     // Logarithmic, 100, 1). Real blocks.xml (game-dir) so the forge block
     // resolves by name; a direct-driven workstation queue completes one
     // craft and the ding reaches nearby peers. Skipped without the game dir.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18128,7 +18129,7 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
     // armorPrimitiveHelmet carries `ElementalDamageResist 8,12.3
     // tags="heat,electrical"`, so heat and electric damage are resisted at the
     // quality tier while cold only sees the untagged jitter row.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18218,7 +18219,7 @@ test "scenario mob spawn ground follows blocks.xml CanMobsSpawnOn" {
     // through blockMobSpawnGround; this drives the wired hook against the real
     // blocks.xml on a stock map: terrain allows, a player-built concrete floor
     // does not.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -18274,7 +18275,7 @@ test "scenario PassThroughDamage walks the downgrade chain" {
     }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
     g.maxdamage.deinit();
@@ -18337,7 +18338,7 @@ test "scenario sign data request serves the layered catalog" {
     // worldInfoCo blocks on SignDataResponse(isLastBatch=true). The request
     // must serve the layered stock catalog through the batcher: at least one
     // batch, the last flagged, carrying a nonzero layer count.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18396,7 +18397,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     // ProgressionLevel(agility >= 4) + !attached + other(zombie,animal) gates
     // GeneralDamageResist 1. The per-tick fold refuses the group (no other),
     // so the damage path evaluates it with the attacker's tags.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18476,7 +18477,7 @@ test "scenario buff finish chains the injury cooldown" {
     // buffInjuryKnockdown01 (4 s) fires onSelfBuffFinish -> AddBuff
     // buffInjuryKnockdown01Cooldown. The finish path relays Adds through the
     // same sink as the start/update paths.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18522,7 +18523,7 @@ test "scenario preacher armor resists zombie hits more" {
     // armorPreacherOutfit: PhysicalDamageResist .02..15 by tier, gated on
     // other=zombie. A zombie melee hit through the accumulator takes the
     // foreign row; the same hit with no attacker kind takes today's armor.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18650,7 +18651,7 @@ test "scenario comma buff lists apply each name" {
 test "scenario buff stack fires its rows" {
     // buffHarvest: start sets $buffHarvestBonus .5, each stack adds .5.
     // Re-adding the active buff fires onSelfBuffStack through the live ctx.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -18680,7 +18681,7 @@ test "scenario buff stack fires its rows" {
 test "scenario victim hit fires concussion counter" {
     // buffInjuryConcussion's onOtherAttackedSelf rows add $concussionCounter
     // on every landed hit. Two AI melee hits raise the counter twice.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

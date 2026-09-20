@@ -21,6 +21,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const Stat = enum { food, water, health, stamina, unknown };
 
@@ -518,7 +519,7 @@ test "gameevents respawn sequences parse into runnable actions" {
 }
 
 test "stock gameevents.xml respawn family parses when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/gameevents.xml";
+    const p = stock_paths.configFile("gameevents.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();

@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed entity classes, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock entityclasses.xml
@@ -1287,7 +1288,7 @@ test "unity hash matches known playerMale" {
 }
 
 test "load stock entityclasses when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    const path = stock_paths.configFile("entityclasses.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1587,7 +1588,7 @@ test "stock Demolition Explosion class parses (zombieFatCop tiers)" {
     // class="Explosion"> ships RadiusBlocks 5 / RadiusEntities 6 / BlockDamage
     // 500 / EntityDamage 150 with DamageBonus earth -> 0; the feral and
     // radiated tiers override only the damages.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    const path = stock_paths.configFile("entityclasses.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1681,7 +1682,7 @@ test "stock dismember and leg tuning parses (template, feral, radiated)" {
     // DismemberMultiplier 1/1/1, LegCrippleScale 2, LegCrawlerThreshold 0;
     // the feral tier overrides the multipliers to .7 and the radiated tier
     // to .4, inheriting the leg pair through Extends.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    const path = stock_paths.configFile("entityclasses.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

@@ -2,7 +2,7 @@
 //!
 //! Every formatter here takes plain data, never `*Game`, so the exact bytes an
 //! operator tool parses can be asserted against the decompiled client IL without
-//! building a world. Literals are cited to /home/maci/.cache/zdtd-scratch/asm.il
+//! building a world. Literals are cited to `$HOME/.cache/zdtd-scratch/asm.il`
 //! (V3.1.0 b14); do not "tidy" a string without re-reading the IL.
 
 const std = @import("std");

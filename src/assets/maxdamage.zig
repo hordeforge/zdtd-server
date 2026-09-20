@@ -8,6 +8,7 @@ const io_fs = @import("../util/io_fs.zig");
 const arena_util = @import("../util/arena.zig");
 const blocks_nim = @import("blocks_nim.zig");
 const components = @import("../ecs/components.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Bundled V3.1.4 full client AssignIds dump (ZDTD_DUMP_BLOCK_IDS Postfix).
 /// Pins verified: treeDeadTree02=24626, cntWoodenChestClosed=18671. No stale saves.
@@ -1302,7 +1303,7 @@ fn mergeMaterialsLogged(tbl: *Table, allocator: std.mem.Allocator, path: []const
 }
 
 test "load blocks.xml MaxDamage when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1322,13 +1323,13 @@ test "load blocks.xml MaxDamage when present" {
     try std.testing.expectEqual(@as(f32, 0.15), ts.burst_fire_rate);
     try std.testing.expectEqual(@as(u16, 15), ts.burst_rounds);
     // Merge nim map
-    const nim = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
+    const nim = stock_paths.prefabs ++ "/POIs/abandoned_house_01.blocks.nim";
     try t.mergeNim(std.testing.allocator, nim);
     try std.testing.expect(t.by_id.count() > 0);
 }
 
 test "blocks.xml LootList resolves per block after the AssignIds merge" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1357,7 +1358,7 @@ test "blocks.xml Shape=DistantDecoTree resolves the 45 degree rotation band" {
     // BlockShape::Has45DegreeRotations (IL=6), and stock's treeMaster declares
     // that shape, so every tree inherits it. The placeholder random-rotation
     // band keys on this fact (BlockPlaceholderMap IL_027D-02AD).
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1379,7 +1380,7 @@ test "blocks.xml properties inherit through Extends with param1 exclusions" {
     // Material and Stage2Health used to be read from the own body only:
     // 318 blocks declare MaxDamage, 1449 inherit it, and 5693 blocks with
     // neither rely on the Material default (Block.il IL_136C-138E).
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1494,7 +1495,7 @@ test "MultiBlockDim parse rejects malformed dims" {
 }
 
 test "stock blocks.xml deco facts when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1517,7 +1518,7 @@ test "stock blocks.xml deco facts when present" {
     try std.testing.expect(!t.showModelOnFall("cntAmmoPileSmall"));
     // Falling massKg via materials.xml: Mcobblestone H1/M10 -> FastMin(10,10)*8
     // = 80; Mtrash H1/M5 -> 40.
-    const mat_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    const mat_path = stock_paths.configFile("materials.xml");
     if (io_fs.fileExists(mat_path)) {
         try t.mergeMaterialsXml(std.testing.allocator, mat_path);
         try std.testing.expectEqual(@as(f32, 80.0), t.fallingMassKg("cobblestoneMaster"));
@@ -1531,7 +1532,7 @@ test "every placeable blocks.xml name resolves in the AssignIds dump" {
     // falls through to assignLeftOverBlocks for server data. Skip rows that
     // stock itself never assigns an id: shape groups (shapes="All") and
     // non-placeable blocks (CreativeMode None / player crafting collector).
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1608,7 +1609,7 @@ test "material StabilitySupport and explosionresistance resolve per block" {
     // declare StabilitySupport takes MaterialBlock.StabilitySupport (23 stock
     // material rows, 19 false). Explosion::AttackBlocks IL_03D0-040E scales
     // blast damage by `1 - explosionresistance` and divides by Hardness.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     t.tryMergeBundledAssignIds(std.testing.allocator);
@@ -1636,7 +1637,7 @@ test "material StabilitySupport and explosionresistance resolve per block" {
 }
 
 test "materials.xml MaxDamage fills hayBaleSquare" {
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     t.tryMergeBundledAssignIds(std.testing.allocator);
@@ -1705,11 +1706,11 @@ test "explosion DamageBonus category resolves per block from materials.xml" {
     // cop: earth -> 0, so terrain survives the blast). The chain block id ->
     // block name -> Material ref -> damage_category must resolve for a real
     // terrain block id from the bundled AssignIds dump.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
-    const mat_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    const mat_path = stock_paths.configFile("materials.xml");
     try t.mergeMaterialsXml(std.testing.allocator, mat_path);
     t.tryMergeBundledAssignIds(std.testing.allocator);
     if (t.idNameCount() == 0) return error.SkipZigTest;
@@ -1726,7 +1727,7 @@ test "Class=Sleeper resolves through Extends (infestedSleeper included)" {
     // Block.IsSleeperBlock = Extends-resolved Class "Sleeper" (asm.il
     // 133430-133460): the stock set is 34 blocks, 16 of them named
     // infestedSleeper*, which a "sleeper" name prefix misses.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const path = stock_paths.configFile("blocks.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();
@@ -1857,8 +1858,8 @@ test "materials.xml CanDestroy gates block damage" {
 }
 
 test "stock materials.xml only bedrock refuses destruction" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
-    const mats = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    const path = stock_paths.configFile("blocks.xml");
+    const mats = stock_paths.configFile("materials.xml");
     if (!io_fs.fileExists(path) or !io_fs.fileExists(mats)) return error.SkipZigTest;
     var t = try loadFromBlocksXml(std.testing.allocator, path);
     defer t.deinit();

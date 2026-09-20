@@ -1229,7 +1229,7 @@ test "persistent player state body layout" {
     const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
     const lp = [_][3]i32{ .{ 10, 64, -20 }, .{ 300, 70, 512 } };
     const vm = [_][3]i32{.{ -44, 68, 91 }};
-    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449, &lp, &vm);
+    const body = try buildPersistentPlayerState(&buf, 107, "Alice", primary, native, -273, 61, 449, &lp, &vm);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
@@ -1246,7 +1246,7 @@ test "persistent player state body layout" {
     try std.testing.expectEqualStrings("76561190000000000", try r.readString(&sbuf));
     try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // playGroup Standard
     try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // AuthoredText present
-    try std.testing.expectEqualStrings("maci", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("Alice", try r.readString(&sbuf));
     // author PUID is the PrimaryId again (asm.il 1885235)
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     _ = try r.readByte();

@@ -9,6 +9,7 @@ const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("xml_util.zig");
 const quest = @import("../ecs/quest.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_list_entries: usize = 64;
 
@@ -1232,9 +1233,9 @@ test "load stock quests.xml when present" {
     // test pins the table the dedicated server actually serves, falling back
     // to the client copy when only it is on disk.
     const path = blk: {
-        const dedi = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+        const dedi = stock_paths.configFile("quests.xml");
         if (io_fs.fileExists(dedi)) break :blk dedi;
-        break :blk "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
+        break :blk stock_paths.steam_client ++ "/Data/Config/quests.xml";
     };
     if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path, .{});
@@ -1418,7 +1419,7 @@ test "rewards parse kinds, item names and values in document order" {
 }
 
 test "stock quests.xml template quests parse non-empty" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+    const path = stock_paths.configFile("quests.xml");
     if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();

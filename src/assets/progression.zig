@@ -12,6 +12,7 @@ const paths = @import("paths.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const cvars = @import("cvars.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 // zdtd storage bounds, not stock rules; stock has no limit on either. Measured
 // against V3.2.0 `Data/Config` (2026-09-04): progression.xml defines 8
@@ -919,7 +920,7 @@ test "expForLevel matches stock GetExpForNextLevel golden values" {
 }
 
 test "load progression.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const p = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -936,7 +937,7 @@ test "perk parent and per-attribute overrides parse from stock progression.xml" 
     // old walk-back resolved every perk to the file's last <attribute>.
     // (b) attBooks/attCrafting/attGeneralPerks carry their own
     // min_level/max_level/base_skill_point_cost overrides.
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const p = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -979,7 +980,7 @@ test "perk parent and per-attribute overrides parse from stock progression.xml" 
 }
 
 test "crafting skill unlock_entry gates parse and resolve tiers" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const path = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -998,7 +999,7 @@ test "progression triggered rows parse (perkIntellectMastery bookworm cvar)" {
     // two `onSelfProgressionUpdate` rows set 25 at level >= 2 and 0 at level
     // <= 1. Without them the 63 loot RandomRoll gates that read the cvar can
     // only ever fail, so the parse is the first half of that behaviour.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const path = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1038,7 +1039,7 @@ test "crafting-skill passive_effect rows parse (CraftingTier)" {
     // carries the row's tag (the output item name), and RecipeTagUnlocked (73)
     // is the learn gate. Before this they were parsed as display/unlock entries
     // only, so a crafted item always came out at tier 1.
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const path = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1068,7 +1069,7 @@ test "crafting-skill passive_effect rows parse (CraftingTier)" {
 }
 
 test "perk/attribute passive_effect rows parse (the 649-row surface)" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const path = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, path);
     defer t.deinit();
@@ -1395,7 +1396,7 @@ test "a def stops at max_passives_per_def rows" {
 }
 
 test "stock level_requirements parse and gate the calculated max level" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    const path = stock_paths.configFile("progression.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadTableFromPath(std.testing.allocator, path);
     defer t.deinit();

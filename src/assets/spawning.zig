@@ -5,6 +5,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_rules: usize = 512;
 
@@ -253,7 +254,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 }
 
 test "load spawning.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    const p = stock_paths.configFile("spawning.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -267,7 +268,7 @@ test "load spawning.xml when present" {
 test "respawndelay parses the full 6-column list (BiomeSpawningFromXml IL_015D)" {
     // Stock splits on comma and scales each element by 24000 world ticks;
     // the pine_forest dz01 row carries 2.9,5.075,3.915,2.9,1.885,1.015.
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    const p = stock_paths.configFile("spawning.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -292,7 +293,7 @@ test "respawndelay parses the full 6-column list (BiomeSpawningFromXml IL_015D)"
 }
 
 test "stock entityspawners feed the gamestage scout thresholds" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    const p = stock_paths.configFile("spawning.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
@@ -329,7 +330,7 @@ test "entityspawner parse tolerates malformed rows" {
 }
 
 test "spawning.xml rule tags/notags parse" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    const p = stock_paths.configFile("spawning.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();

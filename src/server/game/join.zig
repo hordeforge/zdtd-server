@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
+const stock_paths = @import("../../util/stock_paths.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
@@ -762,7 +763,7 @@ test "quest nav class names exist in stock nav_objects.xml" {
     // identifiers from stock names, like block/item names; the file's sprite
     // settings are client-side rendering config the server never reads).
     const io_fs = @import("../../util/io_fs.zig");
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/nav_objects.xml";
+    const path = stock_paths.configFile("nav_objects.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     const buf = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
     defer std.testing.allocator.free(buf);

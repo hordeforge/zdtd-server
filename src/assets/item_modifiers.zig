@@ -22,6 +22,7 @@ const requirements = @import("requirements.zig");
 const xml = @import("xml_util.zig");
 const paths = @import("paths.zig");
 const io_fs = @import("../util/io_fs.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const ModDef = struct {
     /// Mod item name (items.xml id for the mod; must point at static or
@@ -222,7 +223,7 @@ test "modifier rows carry econ, stack and quality from Extends" {
     // modGeneralMaster, inherited by every live row), Stacknumber 1 and the
     // owner-tiered HasQuality flag (35 live tier= rows) belong to it. Without
     // these the trader priced a mod at the 5-duke unknown fallback.
-    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game = stock_paths.dedicated_server;
     var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     const base = t.byName("modGeneralMaster").?;
@@ -288,7 +289,7 @@ test "item_modifiers parses installable/blocked/modifier gates" {
 }
 
 test "item_modifiers loads the stock catalog when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/item_modifiers.xml";
+    const path = stock_paths.configFile("item_modifiers.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();

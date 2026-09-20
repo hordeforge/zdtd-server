@@ -580,7 +580,7 @@ residual bare consts and new drift, not the already-extracted keys.
 - Steam or machine-local paths in **non-test** code → fix (game-dir relative)
 - Same paths inside `test` blocks with `SkipZigTest` if missing → OK
 - Example smell: `world/sleepers.zig` tests embedding
-  `/home/maci/.local/share/Steam/...` (tests only is fine; production never)
+  `$HOME/.local/share/Steam/...` (tests only is fine; production never)
 
 ### Builtin production leakage
 

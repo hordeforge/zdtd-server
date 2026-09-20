@@ -7,6 +7,7 @@ const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_volumes: usize = 8192;
 pub const max_group_classes: usize = 4;
@@ -609,7 +610,7 @@ pub fn loadFromPrefabs(
 }
 
 test "parse abandoned_house sleeper volumes if present" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_paths.prefabs;
     if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.xml")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
         .name = "abandoned_house_01",
@@ -636,7 +637,7 @@ test "parse abandoned_house sleeper volumes if present" {
 }
 
 test "abandoned_house authored sleeper spawn points inside volumes if present" {
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_paths.prefabs;
     if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
     if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.blocks.nim")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
@@ -651,7 +652,7 @@ test "abandoned_house authored sleeper spawn points inside volumes if present" {
     }};
     // Class=Sleeper marker test from the stock blocks.xml (the Game wires the
     // same predicate through init_world; offline builds fall back to null).
-    var md = (maxdamage.tryLoad(std.testing.allocator, "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server", null) catch null) orelse return error.SkipZigTest;
+    var md = (maxdamage.tryLoad(std.testing.allocator, stock_paths.dedicated_server, null) catch null) orelse return error.SkipZigTest;
     defer md.deinit();
     const IsSleeper = struct {
         fn check(ctx: ?*anyopaque, name: []const u8) bool {
@@ -771,7 +772,7 @@ test "part_ ambulance wreck carries its authored sleeper volume" {
     // authored sleeper volumes; the caller used to exclude parts entirely, so
     // those sleepers never spawned. A part ref must load its volumes like a
     // full POI (prefabs_root Parts subdir).
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_paths.prefabs;
     if (!io_fs.fileExists(root ++ "/Parts/part_ambulance_01.xml")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
         .name = "part_ambulance_01",
@@ -795,7 +796,7 @@ test "sleeper volume group ids parse per volume (TouchGroup cascade)" {
     // AAA_utility_waterworks: 10 volumes, group ids 0,0,0,0,0,1,1,0,0,0 and
     // origins from the placement ref. Volumes 5 and 6 share id 1, so waking
     // one must cascade to the other (TouchGroup IL=52).
-    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    const root = stock_paths.prefabs;
     if (!io_fs.fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
     const decos = [_]PrefabRef{.{
         .name = "AAA_utility_waterworks",

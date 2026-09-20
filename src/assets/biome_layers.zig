@@ -9,6 +9,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("maxdamage.zig");
 const assignids = @import("assignids_comptime.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_layers: usize = 8;
 pub const max_biomemap_id: usize = 50;
@@ -1154,7 +1155,7 @@ test "a biome's own layers win over the first subbiome's" {
 }
 
 test "load stock biomes.xml when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/biomes.xml";
+    const p = stock_paths.configFile("biomes.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p, testId, null, null);
     defer t.deinit();
@@ -1209,7 +1210,7 @@ test "stock biomes.xml subbiomes carry the dense tree lists (GAP 18)" {
     // treeDeadPineLeaf .08) while the top-level list is .001-.007, so a cell
     // that resolves a subbiome gets stock-like density instead of ~3 objects
     // per join window. Real ids come from the maxdamage table.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var md = (try maxdamage.tryLoad(std.testing.allocator, game_dir, null)) orelse return error.SkipZigTest;
     defer md.deinit();

@@ -9,6 +9,7 @@
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const xml_util = @import("../assets/xml_util.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 pub const Heightmap = struct {
     width: i32,
@@ -282,7 +283,7 @@ test "SIMD chunk heights match scalar for interior and edge chunks" {
 }
 
 test "load live Navezgane if present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const path = stock_paths.navezgane;
     if (!io_fs.fileExists(path ++ "/dtm.raw")) return error.SkipZigTest;
     var hm = try loadFromWorldDir(std.testing.allocator, path);
     defer hm.deinit();

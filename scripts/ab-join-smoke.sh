@@ -11,12 +11,12 @@
 # Prints the join-stage lines of both legs and leaves the full logs in out-dir.
 set -u
 
-WS=/home/maci/Desktop/hordeforge
+WS=${HORDEFORGE_ROOT:-${WS:-$(cd "$(dirname "$0")/../.." && pwd)}}
 ZD=$WS/zdtd-server
 INSTANCE=${1:-ab-mods}
 LEG=${3:-both}
 INST=$WS/7dtd-sandbox/instances/$INSTANCE
-OUT=${2:-/tmp/ab-join-smoke}
+OUT=${2:-${TMPDIR:-/tmp}/ab-join-smoke}
 LG=$WS/7dtd-loadgen/src/LoadGen/bin/Release/net8.0/7dtd-loadgen.dll
 SB=$WS/7dtd-sandbox/scripts/sb
 

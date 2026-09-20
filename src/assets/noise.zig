@@ -16,6 +16,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// One `<Noise>` element (RE `Audio.NoiseData` + `AIDirectorData/Noise`).
 pub const Noise = struct {
@@ -226,7 +227,7 @@ test "noise scan survives a self-closing node and matches tags case-insensitivel
 }
 
 test "load sounds.xml noise table when present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/sounds.xml";
+    const p = stock_paths.configFile("sounds.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();

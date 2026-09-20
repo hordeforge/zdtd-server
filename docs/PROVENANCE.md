@@ -346,6 +346,7 @@ Coverage targets, all enforced by the scan:
 | `src/util/root.zig` | Z | Shared process utilities (no game domain). |
 | `src/util/secret.zig` | Z | Secret comparison helpers shared by every credential check (LiteNet connect key, webui secret, telnet admin password) |
 | `src/util/sim.zig` | Z | Deterministic simulation mode: virtual clock + serial parallel ranges + DST fault injection lifecycle + seed-stable fillChallenge for pre-auth Guids. Enable at the start of a DST harness so |
+| `src/util/stock_paths.zig` | Z | `$HOME`-derived Steam dedicated/client and scratch paths for offline stock-XML/prefab tests; keeps personal home directories out of committed sources |
 | `src/util/sys_metrics.zig` | Z | Host OS gauges for the ops dashboard (sysinfo + getrusage, no /proc reads): load 1/5/15, RAM free+buf/total, proc CPU/RSS/uptime |
 | `src/util/tcp_listen.zig` | Z | Non-blocking TCP listen helper via Zig 0.16 `std.Io.net` listen + thin posix accept/read/write. No `std.os.linux` in callers (admin, GSI, webui) |
 | `src/util/toml_bind.zig` | Z | toml_bind.zig: comptime-reflected TOML-subset binder (ADR 0021 decision 1). |

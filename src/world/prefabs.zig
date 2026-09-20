@@ -11,6 +11,7 @@ const xml_util = @import("../assets/xml_util.zig");
 const deco_mirror = @import("deco_mirror.zig");
 const tts = @import("tts.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
+const stock_paths = @import("../util/stock_paths.zig");
 
 /// Quest-facing data from the prefab's `<name>.xml` (stock PrefabManager keeps
 /// the same per-POI index): the QuestTags activity list and the DifficultyTier
@@ -902,7 +903,7 @@ fn fillSizesFromTts(idx: *Index) !void {
 }
 
 /// Local stock install; tests needing real POI/Parts data skip when absent.
-const stock_prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+const stock_prefab_root = stock_paths.prefabs;
 
 /// Test-only paint callback counting non-zero blocks written to a chunk.
 const TestPaintCount = struct {
@@ -955,7 +956,7 @@ test "parse decoration line" {
 }
 
 test "tts size read abandoned_house if present" {
-    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.tts";
+    const p = stock_paths.prefabs ++ "/POIs/abandoned_house_01.tts";
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var sx: i32 = 0;
     var sy: i32 = 0;
@@ -1071,7 +1072,7 @@ test "stock cave_07 stamps its body below the declared ground" {
 test "navezgane paints a real POI into its chunk" {
     // Regression: the client saw only terrain where abandoned_house_07 stands,
     // so a POI that the index lists must actually reach the paint callback.
-    const world_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Worlds/Navezgane";
+    const world_dir = stock_paths.navezgane;
     const prefab_root = stock_prefab_root;
     if (!io_fs.fileExists(world_dir ++ "/prefabs.xml")) return error.SkipZigTest;
     if (!io_fs.fileExists(prefab_root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
@@ -1352,7 +1353,7 @@ test "multi-block children regenerate from the parent's MultiBlockDim" {
     // the rest at load): beds, tables, double doors and gun safes used to
     // render as a single walk-through cell. After the remap, ischild children
     // must exist where the parent's blocks.xml MultiBlockDim says.
-    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const game_dir = stock_paths.dedicated_server;
     const root = game_dir ++ "/Data/Prefabs";
     if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_07.tts")) return error.SkipZigTest;
     var table = (maxdamage.tryLoad(std.testing.allocator, game_dir, null) catch null) orelse return error.SkipZigTest;
