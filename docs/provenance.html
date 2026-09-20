@@ -8,14 +8,16 @@
    mirrors docs/GAP_ANALYSIS.md (scorecard + per-category features, recounted
    from the live markers) and docs/PROVENANCE.md (A/R/Z buckets); STATUS.md
    wins on conflict. */
-:root{color-scheme:dark;--bg:#12141a;--card:#1c2030;--sunken:#141824;--line:#2a3144;--edge:#6a738c;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--ok:#82d68b;--warn:#f0b64f;--err:#ff8585;--sans:system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--fs-micro:0.8125rem;--fs-sm:0.875rem;--fs-lead:1.125rem;--fs-title:1.25rem}
-*{box-sizing:border-box}body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.45}
-:focus-visible{outline:3px solid var(--warn);outline-offset:3px}
-header{padding:1rem 1.25rem;border-bottom:1px solid var(--line);background:var(--bg)}
-header h1{font-size:var(--fs-title);margin:0;font-weight:600;letter-spacing:0.02em}header .meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro)}
+/* Paper cockpit tokens (DESIGN.md): same signal green / warm paper as the
+   operator console. No second accent; dark surfaces stay off this page. */
+:root{color-scheme:light;--bg:#f7f5f0;--card:#fffdf8;--sunken:#efece4;--line:#e2ddd0;--edge:#5f686f;--fg:#1a1d21;--muted:#4d545c;--acc:#0f5c37;--acc-ink:#0c4a2d;--ok:#0f5c37;--ok-soft:#dcefe1;--warn:#6b4a00;--warn-soft:#f2dbaa;--err:#8a2318;--err-soft:#f5c9c2;--on-acc:#fff;--shadow:0 1px 2px rgba(26,29,33,.06),0 8px 24px -12px rgba(26,29,33,.18);--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;--fs-micro:0.8125rem;--fs-sm:0.875rem;--fs-lead:1.125rem;--fs-title:1.25rem;--r:10px;--r-chip:6px}
+*{box-sizing:border-box}body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.45;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+header{padding:1rem 1.25rem;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:var(--fs-title);margin:0;font-weight:700;letter-spacing:-0.01em}header .meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro)}
 main{padding:1rem 1.25rem;display:grid;gap:1rem;max-width:64rem;width:100%;margin-inline:auto}
-section{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid var(--line)}
-section h2{font-size:var(--fs-sm);color:var(--acc);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin:0 0 0.6rem}
+section{background:var(--card);border-radius:var(--r);padding:0.85rem 1rem;border:1px solid var(--line);box-shadow:var(--shadow)}
+section h2{font-size:var(--fs-sm);color:var(--acc-ink);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0 0 0.6rem}
 h3{font-size:var(--fs-micro);color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin:1rem 0 0.5rem}
 table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}th,td{text-align:left;padding:0.35rem 0.5rem;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
 td{font-family:var(--mono);font-variant-numeric:tabular-nums}.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -25,14 +27,14 @@ td{font-family:var(--mono);font-variant-numeric:tabular-nums}.num{font-family:va
 .defrag{display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin:0 0 0.8rem}
 @media(max-width:60rem){.defrag{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:36rem){.defrag{grid-template-columns:1fr}}
-.mapcat{display:flex;flex-direction:column;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}
+.mapcat{display:flex;flex-direction:column;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-chip);padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}
 .mapcat:hover,.mapcat:focus-visible{border-color:var(--edge)}
 .mapcat.on{border-color:var(--acc)}
 /* Categories with open work keep a warm edge so the eye lands on them first. */
-.mapcat:not(.clean){border-color:var(--warn)}
+.mapcat:not(.clean){border-color:#cbab72}
 .maphead{display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-bottom:0.4rem}
 .mapname{font-family:var(--sans);font-size:var(--fs-sm)}
-.badge{font-family:var(--mono);font-size:var(--fs-micro);color:var(--bg);background:var(--warn);border-radius:999px;padding:0.05rem 0.45rem;white-space:nowrap}
+.badge{font-family:var(--mono);font-size:var(--fs-micro);color:var(--warn);background:var(--warn-soft);border:1px solid #cbab72;border-radius:999px;padding:0.05rem 0.45rem;white-space:nowrap}
 .badge.done{color:var(--muted);background:transparent;border:1px solid var(--line)}
 .mapfoot{font-family:var(--mono);font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums;margin-top:0.4rem}
 .cells{display:flex;flex-wrap:wrap;gap:2px;align-content:flex-start;flex:1}
@@ -41,31 +43,32 @@ td{font-family:var(--mono);font-variant-numeric:tabular-nums}.num{font-family:va
    squares among ~300 green ones vanish on hue alone, and are gone entirely
    for red/green colour vision deficiency. */
 .cell.PARTIAL,.cell.MISSING{width:0.8rem;height:0.8rem;border-radius:2px;margin:-0.125rem 0;box-shadow:0 0 0 2px var(--sunken),0 0 0 3px currentColor}
-.cell.PARTIAL{background:var(--warn);color:var(--warn)}
-.cell.MISSING{background:var(--err);color:var(--err)}
+.cell.PARTIAL{background:var(--warn-soft);color:var(--warn)}
+.cell.MISSING{background:var(--err-soft);color:var(--err)}
 @media(forced-colors:active){.cell{outline:1px solid CanvasText;outline-offset:-1px}.cell.PARTIAL,.cell.MISSING{outline:2px solid Highlight}}
 .toolbar{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0 0 0.6rem}
-.toolbar input[type=search]{flex:1;min-width:12rem;background:var(--sunken);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:0.4rem 0.6rem;font:inherit}
+.toolbar input[type=search]{flex:1;min-width:12rem;background:var(--card);border:1.5px solid var(--edge);color:var(--fg);border-radius:var(--r-chip);padding:0.4rem 0.6rem;font:inherit}
+.toolbar input[type=search]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
 .chips{display:flex;gap:0.35rem;flex-wrap:wrap}
-.chip{background:var(--sunken);border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:0.2rem 0.7rem;font-size:var(--fs-micro);cursor:pointer;font-family:var(--mono)}
-.chip[aria-pressed=true]{color:var(--bg);border-color:transparent}
-.chip[aria-pressed=true].chip-w{background:var(--ok)}.chip[aria-pressed=true].chip-p{background:var(--warn)}.chip[aria-pressed=true].chip-m{background:var(--err)}.chip[aria-pressed=true].chip-a{background:var(--acc)}
+.chip{background:var(--card);border:1px solid var(--edge);color:var(--muted);border-radius:999px;padding:0.2rem 0.7rem;font-size:var(--fs-micro);cursor:pointer;font-family:var(--mono)}
+.chip[aria-pressed=true]{border-color:transparent}
+.chip[aria-pressed=true].chip-w{background:var(--ok);color:var(--on-acc)}.chip[aria-pressed=true].chip-p{background:var(--warn-soft);color:var(--warn);border:1px solid #cbab72}.chip[aria-pressed=true].chip-m{background:var(--err-soft);color:var(--err);border:1px solid #d59f96}.chip[aria-pressed=true].chip-a{background:var(--acc);color:var(--on-acc)}
 .cat{cursor:pointer}
 .cat:hover,.cat:focus-visible{background:var(--sunken)}
-.cat.open th{color:var(--acc)}
-.cat.open::after{content:"▾";color:var(--acc);padding-left:0.4rem}
+.cat.open th{color:var(--acc-ink)}
+.cat.open::after{content:"▾";color:var(--acc-ink);padding-left:0.4rem}
 .cat:not(.open)::after{content:"▸";color:var(--muted);padding-left:0.4rem}
 .feat-row td{background:var(--sunken);padding:0.4rem 0.6rem}
-.feat-wrap{max-height:22rem;overflow:auto;border:1px solid var(--line);border-radius:6px}
+.feat-wrap{max-height:22rem;overflow:auto;border:1px solid var(--line);border-radius:var(--r-chip)}
 table.feat td{font-family:var(--sans);border-bottom:1px solid var(--line)}
 table.feat .st{font-family:var(--mono);font-size:var(--fs-micro);white-space:nowrap;width:7rem}
-.st.WORKS{color:var(--ok)}.st.PARTIAL{color:var(--warn)}.st.MISSING{color:var(--err)}.st.ad-hoc{color:var(--acc)}
+.st.WORKS{color:var(--ok)}.st.PARTIAL{color:var(--warn)}.st.MISSING{color:var(--err)}.st.ad-hoc{color:var(--acc-ink)}
 th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
 th.sortable:hover{color:var(--fg)}th.sortable::after{content:"⇅";opacity:0.4;padding-left:0.25rem}th.sortable.asc::after{content:"▲"}th.sortable.desc::after{content:"▼"}
 .count-line{color:var(--muted);font-size:var(--fs-micro);margin:0.25rem 0 0}
-footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
+footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro);border-top:1px solid var(--line);background:var(--card)}
 @media(max-width:36rem){main,header,footer{padding-left:0.75rem;padding-right:0.75rem}section{padding:0.75rem}}
-@media(forced-colors:active){:root{--bg:Canvas;--card:Canvas;--sunken:Canvas;--line:CanvasText;--edge:ButtonText;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}body,section{background:Canvas;color:CanvasText;border-color:CanvasText}:focus-visible{outline:3px solid Highlight}}
+@media(forced-colors:active){:root{--bg:Canvas;--card:Canvas;--sunken:Canvas;--line:CanvasText;--edge:ButtonText;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--acc-ink:LinkText;--ok:CanvasText;--ok-soft:Canvas;--warn:Highlight;--warn-soft:Canvas;--err:MarkText;--err-soft:Canvas;--on-acc:Canvas}body,section,header,footer{background:Canvas;color:CanvasText;border-color:CanvasText;box-shadow:none}:focus-visible{outline:3px solid Highlight}}
 </style></head>
 <body>
 <header><h1>zdtd</h1><span class="meta">Porting and provenance dashboard · standalone (not served by the server) · regenerated by scripts/gen_provenance.py</span></header>

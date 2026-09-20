@@ -26,6 +26,8 @@ job-file record. The console is one section down, not one tab away.
 - **Paper by day, no dark mode.** The scene is daylight ops on a laptop
   next to the game client; the pinned direction chose paper ground with
   the chart as the single terminal. `forced-colors` remaps everything.
+  The provenance scorecard uses the same paper tokens (no dark shell, no
+  second accent).
 - **Sans reads, mono is the machine.** Headings, labels, buttons, stats,
   table cells are sans; ids, source, listings, key names are mono.
   Tabular numerals on every comparable number.

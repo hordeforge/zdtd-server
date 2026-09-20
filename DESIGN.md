@@ -158,6 +158,9 @@ says so rather than filling the space.
 - State is a word in a pill; colour is confirmation, never the message.
 - Gutters and hairlines instead of boxes and shadows: the layout is a ruled table.
 - Numbers are monospaced and tabular; labels are small, uppercase, and letter-spaced.
+- The standalone provenance scorecard (`docs/provenance.html`, via
+  `scripts/gen_provenance.py`) shares the same paper tokens and signal green;
+  it never introduces a second accent or a full-page dark shell.
 
 ## Colors
 
