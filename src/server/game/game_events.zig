@@ -56,6 +56,9 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
     if (!seq.supported) return false;
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].health) return false;
+    // Sequence-level RandomRoll (church-bell LTE 99): fail closed means the
+    // sequence does not run, not that the server errors.
+    if (seq.has_random_roll and !sequenceRollHolds(self, ps, seq)) return false;
     // Client legs ride one ClientSequenceAction response each, keyed
     // `Name<index>` off the parsed order (SetActionKeyData), which is how stock
     // hands the work back to the client that asked for the sequence
@@ -77,6 +80,8 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
                 // from the parsed table is what goes in.
                 _ = cl.cvars.apply(a.cvar, op, a.value);
             },
+            .spawn_entity => spawnEventGroup(self, ps, a),
+            .rage_zombies => rageNearbyZombies(self, ps, a),
             // Item actions and AddXPDeficit have no server-side work; the
             // response above is the whole server leg.
             .remove_items, .add_starting_items, .add_items, .add_xp_deficit => {},
@@ -106,6 +111,7 @@ fn sendClientSequenceAction(self: *Game, peer_slot: usize, seq_name: []const u8,
 }
 
 const assets_cvars = @import("../../assets/cvars.zig");
+const rng_util = @import("../../util/rng.zig");
 
 /// `<property name="operation">` of a ModifyCVar action.
 fn assetOp(name: []const u8) ?assets_cvars.Operation {
@@ -118,6 +124,91 @@ fn assetOp(name: []const u8) ?assets_cvars.Operation {
     if (std.ascii.eqlIgnoreCase(name, "percent_add")) return .percent_add;
     if (std.ascii.eqlIgnoreCase(name, "percent_subtract")) return .percent_subtract;
     return null;
+}
+
+/// Sequence-level RandomRoll (same FastLerp compare as requirements.RandomRoll).
+fn sequenceRollHolds(self: *Game, ps: ecs.Slot, seq: *const assets_gameevents.Sequence) bool {
+    const seed: u32 = @truncate(@as(u64, @bitCast(@as(i64, self.sim.network_id[ps].id))) ^ self.tick_n ^ 0x9e3779b9);
+    var rng = rng_util.XorShift32.init(seed);
+    const f = @as(f32, @floatFromInt(rng.next() >> 8)) / 16777216.0;
+    const rolled = seq.roll_min + (seq.roll_max - seq.roll_min) * f;
+    return switch (seq.roll_op) {
+        .gt => rolled > seq.roll_value,
+        .gte => rolled >= seq.roll_value,
+        .lt => rolled < seq.roll_value,
+        .lte => rolled <= seq.roll_value,
+        .equals => rolled == seq.roll_value,
+        .not_equals => rolled != seq.roll_value,
+        .unknown => false,
+    };
+}
+
+/// `SpawnEntity`: pick `spawn_count` names from the stock entity group and
+/// spawn them in an arc `[min_distance, max_distance]` from the player. The
+/// church-bell horde (SleeperGSList x4, aggressive WanderingHorde) uses this.
+fn spawnEventGroup(self: *Game, ps: ecs.Slot, a: assets_gameevents.Action) void {
+    if (a.entity_group.len == 0 or a.spawn_count == 0) return;
+    if (!self.sim.mask[ps].transform) return;
+    const px = self.sim.transform[ps].x;
+    const py = self.sim.transform[ps].y;
+    const pz = self.sim.transform[ps].z;
+    const player_id = self.sim.network_id[ps].id;
+    const stage: i32 = @max(0, self.partyStageAround(px, pz, self.sleeper_party_radius));
+    const stage_spawn = self.gamestages.sleeperEntityGroup(a.entity_group, stage);
+    var rng = rng_util.XorShift32.initFromNetId(
+        @bitCast(@as(u32, @truncate(self.sim.director.clock.worldTimeBits())) ^ @as(u32, @bitCast(player_id))),
+    );
+    const min_d = a.min_distance;
+    const max_d = if (a.max_distance > min_d) a.max_distance else min_d;
+    var n: u8 = 0;
+    while (n < a.spawn_count) : (n += 1) {
+        const def = self.resolveSleeperClass(a.entity_group, stage_spawn, rng.next());
+        const ang = @as(f32, @floatFromInt(rng.nextBounded(6283))) / 1000.0;
+        const span = max_d - min_d;
+        const dist = min_d + if (span > 0)
+            @as(f32, @floatFromInt(rng.nextBounded(1000))) / 1000.0 * span
+        else
+            0;
+        const ox = px + @cos(ang) * dist;
+        const oz = pz + @sin(ang) * dist;
+        const oy = self.sim.groundY(ox, oz) orelse py;
+        const nid = self.sim.spawnZombieDef(ox, oy, oz, def.max_hp, self.entityClassOf(def)) orelse continue;
+        if (!a.aggressive) continue;
+        if (self.sim.slotOfNetId(nid)) |zs| {
+            if (self.sim.mask[zs].zombie_ai) {
+                self.sim.zombie_ai[zs].state = .chase;
+                self.sim.zombie_ai[zs].target_id = player_id;
+                self.sim.zombie_ai[zs].alert = true;
+            }
+        }
+    }
+}
+
+/// `RageZombies`: send nearby zombies into chase and scale their chase speed
+/// by `speed_percent` (church-bell phase 2 is 1.5). Duration is not timed yet.
+fn rageNearbyZombies(self: *Game, ps: ecs.Slot, a: assets_gameevents.Action) void {
+    if (!self.sim.mask[ps].transform) return;
+    const px = self.sim.transform[ps].x;
+    const pz = self.sim.transform[ps].z;
+    const player_id = self.sim.network_id[ps].id;
+    const scale = if (a.speed_percent > 0) a.speed_percent else 1;
+    // Cover the bell spawn ring plus a little margin so phase-1 spawns rage.
+    const range_sq: f32 = 40 * 40;
+    for (self.sim.kind_groups.slice(.zombie)) |zs| {
+        if (!self.sim.alive[zs] or !self.sim.mask[zs].transform or !self.sim.mask[zs].zombie_ai) continue;
+        const dx = self.sim.transform[zs].x - px;
+        const dz = self.sim.transform[zs].z - pz;
+        if (dx * dx + dz * dz > range_sq) continue;
+        self.sim.zombie_ai[zs].state = .chase;
+        self.sim.zombie_ai[zs].target_id = player_id;
+        self.sim.zombie_ai[zs].alert = true;
+        if (self.sim.mask[zs].class_id) {
+            if (self.sim.class_id[zs].chase_speed > 0)
+                self.sim.class_id[zs].chase_speed *= scale;
+            if (self.sim.class_id[zs].chase_speed_day > 0)
+                self.sim.class_id[zs].chase_speed_day *= scale;
+        }
+    }
 }
 
 /// `ModifyEntityStat`: `SetMax` sets the stat to its current maximum, `Set`

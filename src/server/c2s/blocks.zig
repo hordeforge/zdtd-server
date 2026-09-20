@@ -220,6 +220,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // forged edit. Drop this block's entry and keep the rest of the
                 // batch.
                 if (!self.maxdamage.canDestroyFor(base_cur)) continue;
+                // `onSelfDamagedBlock` only when damage rose (not repair /
+                // no-op sync); tags feed TriggerHasTags (church-bell gate).
+                if (abs > cur_dmg) {
+                    if (self.sim.playerByPeer(c.slot)) |bps| self.fireBlockDamaged(bps, base_cur);
+                }
                 var max_hp = self.maxDamageForBlock(base_cur);
                 if (self.claimCovering(b.x, b.z)) |claim| {
                     if (claim.owner_entity == editor_ent) {

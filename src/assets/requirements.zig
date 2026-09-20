@@ -148,6 +148,9 @@ pub const Kind = enum(u8) {
     is_secondary_attack,
     in_biome,
     holding_item_has_tags,
+    /// `TriggerHasTags`: the event's tag set (a damaged block's tags; the
+    /// church-bell spawn row gates on it). Supplied by the block-damage path.
+    trigger_has_tags,
     /// `HoldingItemBroken`: true when the held ItemValue's PercentUsesLeft
     /// is 0 (`UseTimes >= MaxUseTimes`). Empty hand / no durability fails
     /// closed (not broken). Null Ctx refuses (no inventory fold in scope).
@@ -357,6 +360,8 @@ pub const Ctx = struct {
     /// no ItemValue in scope (buff/perk fold), which refuses rather than
     /// matching the held hand; empty = empty ItemValue / unknown class (fail).
     item_tags: ?[]const u8 = null,
+    /// The event's tag set for `TriggerHasTags` (a damaged block's tags).
+    trigger_tags: ?[]const u8 = null,
     /// `params.ItemValue.Quality` for `RequirementItemTier` (IL=36). Null = no
     /// ItemValue in scope (buff/perk fold), which refuses; 0 is a valid quality
     /// and still evaluates (IL compares the uint as float).
@@ -562,6 +567,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "IsAttachedToEntity")) return .is_attached_to_entity;
     if (std.mem.eql(u8, name, "IsSecondaryAttack")) return .is_secondary_attack;
     if (std.mem.eql(u8, name, "InBiome")) return .in_biome;
+    if (std.mem.eql(u8, name, "TriggerHasTags")) return .trigger_has_tags;
     if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
     if (std.mem.eql(u8, name, "HoldingItemBroken")) return .holding_item_broken;
     if (std.mem.eql(u8, name, "ItemHasTags")) return .item_has_tags;
@@ -746,6 +752,33 @@ fn evalHoldingItemHasTags(r: Requirement, ctx: Ctx) Verdict {
 /// `ItemHasTags::IsValid` (IL=43): same any-of/all-of match as HoldingItemHasTags,
 /// but against `params.ItemValue`'s ItemClass tags. Null `item_tags` = no
 /// ItemValue in scope (buff/perk fold) → refuse; empty = empty ItemValue → fail.
+/// `TriggerHasTags` IL=33: the event's own tag set (params.Tags) overlaps the
+/// row's list. The block-damage path supplies the damaged block's tags.
+fn evalTriggerHasTags(r: Requirement, ctx: Ctx) Verdict {
+    const tags = ctx.trigger_tags orelse return .unsupported;
+    var matched = r.has_all; // any-of starts false, all-of starts true
+    var seen = false;
+    var it = std.mem.splitScalar(u8, r.list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = tags.len > 0 and tagListHas(tags, tag);
+        if (r.has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    // Empty list: same as HoldingItemHasTags / ItemHasTags (any-of false, all-of true).
+    if (!seen) matched = r.has_all;
+    return verdict(matched, r.negated);
+}
+
 fn evalItemHasTags(r: Requirement, ctx: Ctx) Verdict {
     const tags = ctx.item_tags orelse return .unsupported;
     var matched = r.has_all;
@@ -1462,6 +1495,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .is_secondary_attack => return verdict(ctx.is_secondary_attack, r.negated),
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
         .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
+        .trigger_has_tags => return evalTriggerHasTags(r, ctx),
         .holding_item_broken => return evalHoldingItemBroken(r, ctx),
         .item_has_tags => return evalItemHasTags(r, ctx),
         .requirement_item_tier => return evalRequirementItemTier(r, ctx),
@@ -2891,6 +2925,25 @@ test "EntityTagCompare target=other reads the other tags" {
     counts = .{};
     const alive_other = Requirement{ .kind = .is_alive, .target = .other };
     try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{alive_other}, .{ .other_tags = "zombie" }, &counts));
+}
+
+test "TriggerHasTags reads the event tag set" {
+    // IL=33: params.Tags overlaps the row's list; the bell spawn row gates
+    // on the damaged block's `churchbell` tag.
+    const bell = Requirement{ .kind = .trigger_has_tags, .list = "churchbell" };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{bell}, .{}, &counts));
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{bell}, .{ .trigger_tags = "wood,churchbell,metal" }, &counts));
+    counts = .{};
+    const miss = evaluate(&.{bell}, .{ .trigger_tags = "wood,stone" }, &counts);
+    try std.testing.expectEqual(Verdict.fail, miss);
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{bell}, .{}, &counts));
+    try std.testing.expectEqual(@as(u32, 1), counts.resolved);
+    // Empty tag list: any-of fails, all-of vacuous true (same as ItemHasTags).
+    const empty = Requirement{ .kind = .trigger_has_tags, .list = "" };
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{empty}, .{ .trigger_tags = "churchbell" }, &counts));
+    const empty_all = Requirement{ .kind = .trigger_has_tags, .list = "", .has_all = true };
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{empty_all}, .{ .trigger_tags = "churchbell" }, &counts));
 }
 
 test "all() is the AND over an empty and a multi-gate list" {

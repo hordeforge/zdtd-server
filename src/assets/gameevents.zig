@@ -49,6 +49,11 @@ pub const Class = enum {
     /// `AddItems`: same client-performed shape (`ActionAddItems::OnClientPerform`
     /// only; Dentist silver/gold grant a nugget). Server leg is the response.
     add_items,
+    /// `SpawnEntity`: spawn a stock entity group near the player (the
+    /// church-bell horde: SleeperGSList x4, aggressive, 10-20 m).
+    spawn_entity,
+    /// `RageZombies`: alert nearby zombies and scale chase speed (bell phase 2).
+    rage_zombies,
 };
 
 pub const Action = struct {
@@ -70,6 +75,14 @@ pub const Action = struct {
     req_op: CmpOp = .unknown,
     req_value: f32 = 0,
     has_requirement: bool = false,
+    // SpawnEntity
+    entity_group: []const u8 = "",
+    spawn_count: u8 = 0,
+    min_distance: f32 = 0,
+    max_distance: f32 = 0,
+    aggressive: bool = false,
+    /// RageZombies `speed_percent` (1.5 on the church bell).
+    speed_percent: f32 = 1,
 };
 
 pub const Sequence = struct {
@@ -78,6 +91,14 @@ pub const Sequence = struct {
     /// False when the sequence holds an element this server cannot execute.
     /// The runner refuses the whole sequence (`runGameEventSequence`).
     supported: bool = true,
+    /// Sequence-level `RandomRoll` gate (church-bell `block_bell_spawn` is
+    /// LTE 99 on 0..100). Evaluated at run; other sequence requirements still
+    /// refuse the whole sequence.
+    has_random_roll: bool = false,
+    roll_min: f32 = 0,
+    roll_max: f32 = 100,
+    roll_op: CmpOp = .lte,
+    roll_value: f32 = 0,
 };
 
 pub const Table = struct {
@@ -122,6 +143,8 @@ fn classOf(name: []const u8) ?Class {
     if (std.mem.eql(u8, name, "RemoveItems")) return .remove_items;
     if (std.mem.eql(u8, name, "AddStartingItems")) return .add_starting_items;
     if (std.mem.eql(u8, name, "AddItems")) return .add_items;
+    if (std.mem.eql(u8, name, "SpawnEntity")) return .spawn_entity;
+    if (std.mem.eql(u8, name, "RageZombies")) return .rage_zombies;
     return null;
 }
 
@@ -133,7 +156,7 @@ fn classOf(name: []const u8) ?Class {
 pub fn isClientAction(c: Class) bool {
     return switch (c) {
         .modify_entity_stat, .modify_cvar, .add_xp_deficit, .remove_items, .add_starting_items, .add_items => true,
-        .remove_death_buffs, .add_buff => false,
+        .remove_death_buffs, .add_buff, .spawn_entity, .rage_zombies => false,
     };
 }
 
@@ -145,6 +168,66 @@ fn cmpOf(name: []const u8) CmpOp {
     if (std.mem.eql(u8, name, "Equals")) return .equals;
     if (std.mem.eql(u8, name, "NotEquals")) return .not_equals;
     return .unknown;
+}
+
+/// Walk sequence-level `<requirement>` elements (outside `<action>` bodies).
+/// RandomRoll is recorded for the runner; any other class returns false so the
+/// sequence is refused. Nested action requirements are skipped.
+fn absorbSequenceRequirements(
+    body: []const u8,
+    has_roll: *bool,
+    roll_min: *f32,
+    roll_max: *f32,
+    roll_op: *CmpOp,
+    roll_value: *f32,
+) bool {
+    var p: usize = 0;
+    while (p < body.len) {
+        const ri = std.mem.findPos(u8, body, p, "<requirement") orelse break;
+        // Skip requirements nested inside an action (AddBuff CVar gate).
+        if (insideAction(body, ri)) {
+            p = ri + 12;
+            continue;
+        }
+        const rclass = xml.attr(body, ri, "class") orelse return false;
+        if (!std.mem.eql(u8, rclass, "RandomRoll")) return false;
+        const rgt = std.mem.findPos(u8, body, ri, ">") orelse return false;
+        const self_closing = rgt > ri and body[rgt - 1] == '/';
+        const rend = if (self_closing) rgt else (std.mem.findPos(u8, body, rgt, "</requirement>") orelse return false);
+        const rbody: []const u8 = if (self_closing) "" else body[rgt + 1 .. rend];
+        const mm = xml.propertyValue(rbody, "min_max") orelse "0,100";
+        var it = std.mem.splitScalar(u8, mm, ',');
+        const lo = xml.parseF32(std.mem.trim(u8, it.next() orelse "0", " \t")) orelse 0;
+        const hi = xml.parseF32(std.mem.trim(u8, it.next() orelse "0", " \t")) orelse 0;
+        has_roll.* = true;
+        roll_min.* = lo;
+        roll_max.* = hi;
+        roll_op.* = cmpOf(xml.propertyValue(rbody, "operation") orelse "LTE");
+        roll_value.* = if (xml.propertyValue(rbody, "value")) |v| xml.parseF32(v) orelse 0 else 0;
+        if (roll_op.* == .unknown) return false;
+        p = rend + 1;
+    }
+    return true;
+}
+
+fn insideAction(body: []const u8, pos: usize) bool {
+    // Walk backward for the nearest `<action` / `</action>` open count.
+    var depth: i32 = 0;
+    var i: usize = 0;
+    while (i < pos) {
+        if (std.mem.startsWith(u8, body[i..], "<action ")) {
+            depth += 1;
+            i += 8;
+            continue;
+        }
+        if (std.mem.startsWith(u8, body[i..], "</action>")) {
+            depth -= 1;
+            i += 9;
+            continue;
+        }
+        i += 1;
+    }
+    return depth > 0;
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
@@ -181,13 +264,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         var acts: std.ArrayListUnmanaged(Action) = .empty;
         var supported = true;
         var p: usize = 0;
-        var last_end: usize = 0;
         while (p < body.len) {
             const ai = std.mem.findPos(u8, body, p, "<action ") orelse break;
-            // A sequence-level `<requirement>` gates the whole sequence: this
-            // runner does not evaluate those, so it refuses the sequence
-            // instead of running the actions unconditionally.
-            if (std.mem.findPos(u8, body[p..ai], 0, "<requirement") != null) supported = false;
+            // Sequence-level requirements are parsed after the action walk
+            // (RandomRoll is modelled; other classes refuse). Do not refuse
+            // here or the church-bell gate would never stay supported.
             const agt = std.mem.findPos(u8, body, ai, ">") orelse break;
             const self_closing = agt > ai and body[agt - 1] == '/';
             const aend = if (self_closing)
@@ -268,12 +349,42 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                     a.value = if (xml.propertyValue(abody, "value")) |v| xml.parseF32(v) orelse 0 else 0;
                     if (a.cvar.len == 0 or a.cvar_op.len == 0) supported = false;
                 },
+                .spawn_entity => {
+                    a.entity_group = try arena.dupe(u8, xml.propertyValue(abody, "entity_group") orelse "");
+                    if (a.entity_group.len == 0) supported = false;
+                    if (xml.propertyValue(abody, "spawn_count")) |v| {
+                        const sv: u32 = @intFromFloat(@min(xml.parseF32(v) orelse 0, 64));
+                        a.spawn_count = @intCast(sv);
+                    }
+                    a.min_distance = if (xml.propertyValue(abody, "min_distance")) |v| xml.parseF32(v) orelse 0 else 0;
+                    a.max_distance = if (xml.propertyValue(abody, "max_distance")) |v| xml.parseF32(v) orelse 0 else 0;
+                    // The bell's spawn is aggressive (WanderingHorde); keep the
+                    // flag on the action for the runner.
+                    if (xml.propertyValue(abody, "is_aggressive")) |v| {
+                        a.aggressive = v.len > 0 and (v[0] == 't' or v[0] == 'T' or v[0] == '1');
+                    }
+                    if (a.max_distance <= 0) supported = false;
+                },
+                .rage_zombies => {
+                    a.speed_percent = if (xml.propertyValue(abody, "speed_percent")) |v|
+                        xml.parseF32(v) orelse 1
+                    else
+                        1;
+                    // `time` is stock's duration; zdtd applies the scale once
+                    // (no timed un-rage column yet). Missing beats a fake timer.
+                },
             }
             try acts.append(arena, a);
             p = aend + 1;
-            last_end = aend + 1;
         }
-        if (last_end < body.len and std.mem.findPos(u8, body[last_end..], 0, "<requirement") != null) {
+        var has_random_roll = false;
+        var roll_min: f32 = 0;
+        var roll_max: f32 = 100;
+        var roll_op: CmpOp = .lte;
+        var roll_value: f32 = 0;
+        // Sequence-level `<requirement>` before/between actions: RandomRoll is
+        // modelled (church-bell gate); any other class refuses the sequence.
+        if (!absorbSequenceRequirements(body, &has_random_roll, &roll_min, &roll_max, &roll_op, &roll_value)) {
             supported = false;
         }
         // A gate anywhere in the sequence (or in its property block) means the
@@ -282,7 +393,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
         const kn = try arena.dupe(u8, name);
         const acts_slice = try arena.dupe(Action, acts.items);
-        try list.append(allocator, .{ .name = kn, .actions = acts_slice, .supported = supported });
+        try list.append(allocator, .{
+            .name = kn,
+            .actions = acts_slice,
+            .supported = supported,
+            .has_random_roll = has_random_roll,
+            .roll_min = roll_min,
+            .roll_max = roll_max,
+            .roll_op = roll_op,
+            .roll_value = roll_value,
+        });
         i = close + 18;
     }
 

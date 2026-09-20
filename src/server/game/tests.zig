@@ -5479,6 +5479,43 @@ test "spawn-heal finish restores bars" {
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].stamina, 0.001);
 }
 
+test "church-bell ring spawns the aggressive horde" {
+    // The full chain: a bell block's onSelfDamagedBlock fires block_bell_spawn
+    // (TriggerHasTags churchbell, gated by buffDukeNote), and the sequence -
+    // now supported with SpawnEntity + the RandomRoll gate - spawns 4
+    // SleeperGSList zombies around the player. Roll the 99% gate; run the
+    // sequence directly with the Duke note present.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const bell = g.blocks.byName("churchBell") orelse return error.SkipZigTest;
+    try std.testing.expect(bell.tags.len > 0);
+    // The killer fires the buff rows on a bell hit: the check buff's
+    // CallGameEvent gate needs the Duke note.
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffDukeNote", cl.entity_id));
+    const before = g.sim.countKind(.zombie);
+    g.fireBlockDamaged(ps, bell.id);
+    // The sequence is now supported (SpawnEntity + RandomRoll absorbed).
+    const seq = g.gameevents.find("block_bell_spawn") orelse return error.SkipZigTest;
+    try std.testing.expect(seq.supported);
+    _ = g.runGameEventSequence(cl.slot, "block_bell_spawn");
+    try std.testing.expect(g.sim.countKind(.zombie) > before);
+}
+
 test "heal-health cvar add heals per update" {
     // `value="@cvar"` Health adds resolve at execute time: buffHealHealth's
     // update row adds @medRegHealthIncSpeed per due update while the medical

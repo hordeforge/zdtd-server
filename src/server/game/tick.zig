@@ -1026,6 +1026,32 @@ pub fn fireFallImpact(self: *Game, ps: ecs.Slot, impact_speed: f32) void {
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
+/// The block-damage event: fire the killer's `onSelfDamagedBlock` buff rows
+/// with the damaged block's tags (`TriggerHasTags`; the church-bell spawn).
+pub fn fireBlockDamaged(self: *Game, ps: ecs.Slot, block_id: u16) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const block_tags = if (self.blocks.byId(block_id)) |bd| bd.tags else "";
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.trigger_tags = block_tags;
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .block_damaged, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
 pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
     const peer_slot = self.sim.player[ps].peer_slot;
     if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;

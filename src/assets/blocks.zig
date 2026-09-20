@@ -105,6 +105,10 @@ pub const BlockDef = struct {
     id: u16 = 0,
     name: []const u8 = "",
     solid: bool = true,
+    /// blocks.xml `Tags` property (519/6653 stock rows): the block's tag set,
+    /// feeding `TriggerHasTags` on the block-damage events (the church-bell
+    /// spawn gate). "" = no tags declared.
+    tags: []const u8 = "",
     /// Block Class property (engine class name, e.g. "VendingMachine"). 0
     /// length = not parsed / unknown.
     class: []const u8 = "",
@@ -542,6 +546,7 @@ pub fn loadFromPath(
         id: u16,
         name: []const u8,
         class: ?[]const u8 = null,
+        tags: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -634,6 +639,7 @@ pub fn loadFromPath(
         var extends_param1: []const u8 = "";
         var trader_onoff = false;
         var block_tag: ?[]const u8 = null;
+        var tags: ?[]const u8 = null;
         var signable = false;
         var lp_hardness_scale: f32 = 1;
         var lp_declared = false;
@@ -732,6 +738,8 @@ pub fn loadFromPath(
             };
             if (std.mem.eql(u8, pname, "Class")) {
                 class = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Tags")) {
+                tags = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "BlockTag")) {
                 // Stock tags the openables with `BlockTag="Door"` (bit 2 of the
                 // code-side FastTag set; `EAIBreakBlock` IL_003D,
@@ -860,6 +868,7 @@ pub fn loadFromPath(
             .terrain = terrain,
             .name = kn,
             .class = class,
+            .tags = if (tags) |t| try arena.dupe(u8, t) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -929,6 +938,7 @@ pub fn loadFromPath(
         var own_pass_through_declared = pb.pass_through_declared;
         var own_signable = pb.signable;
         var own_tag = pb.block_tag;
+        var own_tags = pb.tags;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
         var own_drops = pb.harvest_drops;
@@ -995,6 +1005,10 @@ pub fn loadFromPath(
             // explicitly-tagged row never changes the result down-chain, so
             // one walk covers it.
             if (own_tag == null) own_tag = base_p.block_tag;
+            // Tags (TriggerHasTags / church-bell gate): churchBellHanging
+            // extends churchBell and declares no Tags of its own, so the
+            // parent's `churchbell` tag must follow the chain.
+            if (own_tags == null and !xml.tagListContains(p1, "Tags")) own_tags = base_p.tags;
             // LPHardnessScale follows the chain like every other blocks.xml
             // property the loader copies (the default is not an override).
             if (!own_lp_declared) {
@@ -1017,6 +1031,7 @@ pub fn loadFromPath(
         pb.mesh = own_mesh;
         pb.material = own_material;
         pb.block_tag = own_tag;
+        pb.tags = own_tags;
         pb.is_door = own_tag != null and std.ascii.eqlIgnoreCase(own_tag.?, "Door");
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
@@ -1082,6 +1097,7 @@ pub fn loadFromPath(
             .name = pb.name,
             .solid = isSolidName(pb.name),
             .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
+            .tags = if (pb.tags) |t| try arena.dupe(u8, t) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,
             .is_door = pb.is_door,
@@ -1145,6 +1161,21 @@ fn loadLogged(allocator: std.mem.Allocator, path: []const u8, id_by_name: IdByNa
         }
         return null;
     };
+}
+
+test "block Tags parses for TriggerHasTags gates" {
+    // The church-bell spawn gate needs the damaged block's tags
+    // (`TriggerHasTags churchbell`): blocks.xml Tags feed the block def.
+    // churchBellHanging extends churchBell with no own Tags, so inheritance
+    // must carry the parent's churchbell tag.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    const bell = t.byName("churchBell") orelse return error.SkipZigTest;
+    try std.testing.expect(std.mem.indexOf(u8, bell.tags, "churchbell") != null);
+    const hanging = t.byName("churchBellHanging") orelse return error.SkipZigTest;
+    try std.testing.expect(std.mem.indexOf(u8, hanging.tags, "churchbell") != null);
 }
 
 test "signable composite flag parses and follows Extends" {

@@ -1919,6 +1919,10 @@ pub const Game = struct {
         game_tick.fireFallImpact(self, ps, impact_speed);
     }
 
+    pub fn fireBlockDamaged(self: *Game, ps: ecs.Slot, block_id: u16) void {
+        game_tick.fireBlockDamaged(self, ps, block_id);
+    }
+
     pub fn heldWeaponIsRanged(self: *Game, ps: ecs.Slot) bool {
         return game_tick.heldWeaponIsRanged(self, ps);
     }
