@@ -81,10 +81,6 @@ pub const Set = struct {
         return self.entries[i].value;
     }
 
-    pub fn entriesSlice(self: *const Set) []const CVar {
-        return self.entries[0..self.n];
-    }
-
     /// `EntityBuffs::SetCustomVar` IL=130. Returns whether the value changed
     /// (stock's `changed`, which is false only for a `set` that writes the
     /// value already there). Names must outlive the store (they are arena-owned

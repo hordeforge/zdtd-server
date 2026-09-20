@@ -215,11 +215,11 @@ broadcast it - no self-echo, no redundant blobs.
 - **Ids:** bots allocate net ids from the shared sim counter
   (`Game.allocBotNetId` → `World.next_net_id`), so they never collide with ECS
   entity ids.
-- **Config:** `BotDef` / `BotDefDefault` / `applySkillFloor` (Q3/Doom 3 skill
-  preset: aim skill, reaction time, vision range/angle, fire throttle,
-  strafe/dodge chance, aggression / self-preservation) are shared config in
-  `src/ecs/components.zig`, used by the BotManager. A `Rules` value is the
-  floor; per-bot data overrides it (stock-fidelity principle, ADR 0010).
+- **Config:** `BotDef` / `BotDefDefault` (aim skill, reaction time, vision
+  range/angle, fire throttle, strafe/dodge chance, aggression /
+  self-preservation) are shared config in `src/ecs/components.zig`, used by
+  the BotManager. A `Rules` value is the floor; per-bot data overrides it
+  (stock-fidelity principle, ADR 0010).
 - **Lifecycle:** spawn via `bot spawn` / `bot count` (population floor),
   destroyed via `bot remove <id|all>` or death. **Players can kill bots:** the
   C2S `NetPackageDamageEntity` handler resolves a non-ECS target through

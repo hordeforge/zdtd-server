@@ -459,10 +459,6 @@ pub const Peer = struct {
         return self.deliver_buf[0..self.deliver_len];
     }
 
-    pub fn inFlight(self: *const Peer) u16 {
-        return @intCast(relSeq(@as(i32, self.local_seq) - @as(i32, self.local_window_start)));
-    }
-
     /// Copy a user payload into the peer extra queue (survives the recv buffer
     /// being overwritten). Used by Merged multipacket handling and by
     /// Server.drainControl so mid-send ACK drains do not drop game packages.

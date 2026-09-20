@@ -24,10 +24,6 @@ pub fn setQuiet(on: bool) void {
     quiet = on;
 }
 
-pub fn isQuiet() bool {
-    return quiet;
-}
-
 /// Stock Log.Level backing the `loglevel` admin verb (0..4, 4 = off).
 pub fn level() u8 {
     return min_level;
@@ -68,12 +64,9 @@ fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void 
 }
 
 test "quiet gates info output" {
-    try std.testing.expect(!isQuiet());
     setQuiet(true);
-    try std.testing.expect(isQuiet());
     info("this line must not print\n", .{});
     setQuiet(false);
-    try std.testing.expect(!isQuiet());
 }
 
 test "warn and error always emit with a timestamp and severity tag" {

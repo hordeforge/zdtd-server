@@ -939,15 +939,6 @@ pub const World = struct {
         self.kind_groups.insert(self.kind[slot], slot);
     }
 
-    /// Teleport a live entity to a world position, keeping yaw. The sanctioned
-    /// teleport funnel: raw transform[] writes from c2s would bypass the
-    /// markDirty relay and delay the pos broadcast to observers.
-    pub fn teleportTo(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
-        if (slot >= max_entities or !self.mask[slot].transform) return;
-        self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = self.transform[slot].yaw };
-        self.markDirty(slot, .{ .pos = true });
-    }
-
     /// Respawn a dead player slot: un-kill (reviveSlot), full heal to the
     /// player default max (100, matching spawnPlayer), drop the death buffs,
     /// clear IsBloodMoonDead and place at (x, y, z) with yaw 0. The single

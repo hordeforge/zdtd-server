@@ -115,7 +115,7 @@ stores the 1-based volume link used later for the re-arm recount
 (`src/server/game/sleeper.zig:177-183`, `src/ecs/world.zig:1363`).
 
 The wake itself is an ECS transition. The per-entity component is
-(`src/ecs/components.zig:1048`):
+(`src/ecs/components.zig:1037`):
 
 ```zig
 pub const Sleeper = struct {
@@ -126,7 +126,7 @@ pub const Sleeper = struct {
 ```
 
 The AI and damage paths push a wake request into a bounded ring, 16 entries, so a POI full of
-sleepers cannot stall the tick (`src/ecs/components.zig:1173-1183`, `src/ecs/world.zig:1015-1029`,
+sleepers cannot stall the tick (`src/ecs/components.zig:1162-1172`, `src/ecs/world.zig:1015-1029`,
 `src/ecs/systems.zig:1962-1965`).
 Drain happens on the tick path (`src/server/game/tick.zig:1880`):
 

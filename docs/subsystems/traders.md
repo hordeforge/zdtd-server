@@ -10,7 +10,7 @@ Sources: [`src/server/game/trader.zig`](../../src/server/game/trader.zig), [`src
 
 One `TraderStock` component instance per trader slot holds the live window. `name` must point at static data because the component outlives any arena, and `trader_info_id` is the `traders.xml` `<trader_info>` id that selects stock, hours and pricing. The per-row price and sell fields are computed once at fill time, not per trade.
 
-The trader stock record (src/ecs/components.zig:989):
+The trader stock record (src/ecs/components.zig:978):
 
 ```zig
 pub const TraderStock = struct {
@@ -40,7 +40,7 @@ pub const TraderStock = struct {
 };
 ```
 
-One stock row (src/ecs/components.zig:957), the sim-side owner of the wire entry:
+One stock row (src/ecs/components.zig:946), the sim-side owner of the wire entry:
 
 ```zig
 pub const StockEntry = struct {
@@ -120,15 +120,15 @@ The roll is a port of stock `TraderInfo::Spawn` with a caller-seeded RNG, so the
 
 `rollStockRefs` picks the ref list (own `trader_items`, else `traderAlways` only when the `trader_info` row did not resolve), copies `reset_interval` onto the sim stock and rolls with `XorShift32` seeded by `traderRollSeed` = (world seed, trader net id, day) (src/server/game/trader.zig:149-190). `fillTraderFromXml` then turns each rolled item into a priced row.
 
-The price assignment (src/server/game/trader.zig:249-257):
+The price assignment (src/server/game/trader.zig:253-260):
 
 ```zig
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,
             .quality = r.quality,
-            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle)), 65535)) else 5,
-            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle)), 65535)))) else 1,
+            .price = if (econ > 0) ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle, 5) else 5,
+            .sell = if (econ > 0) @max(1, ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle, 1)) else 1,
             .stats = srolled.stats,
             .stats_n = srolled.n,
         };

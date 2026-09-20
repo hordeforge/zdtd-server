@@ -456,17 +456,6 @@ pub const BotDef = struct {
 /// Default BotDef used by BotManager.spawn (a Rules floor; per-bot overrides win).
 pub const BotDefDefault = BotDef{};
 
-/// Apply the Q3/Doom 3 skill preset (0 bot .. 4 nightmare) to a BotDef:
-/// reaction shrinks, vision and dodge grow with skill. Mirrors the reference
-/// Difficulty presets; does not touch aggression/self-preservation (left for
-/// the addon). Called at spawn; `bot cfg` overrides fields directly after.
-pub fn applySkillFloor(d: *BotDef) void {
-    d.skill = @min(d.skill, 4);
-    d.reaction_s = @max(0.08, 0.6 - 0.11 * @as(f32, @floatFromInt(d.skill)));
-    d.vision_range = 25 + 8 * @as(f32, @floatFromInt(d.skill));
-    d.dodge_chance = 0.2 + 0.11 * @as(f32, @floatFromInt(d.skill));
-}
-
 /// Placed-turret combat stats from the block (blocks.xml autoTurret family:
 /// MaxDistance, EntityDamage, BurstFireRate, BurstRoundCount). Zero fields
 /// stay unset - callers fall back to the component defaults. Pure shape

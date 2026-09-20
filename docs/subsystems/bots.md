@@ -66,7 +66,7 @@ pub const BotManager = struct {
 
 `max_bots` is `16` (src/server/game/bot.zig:17). Per-bot weapon profiles are `damage`, `range`, `pellets`, a bounded `tag` and `tag_len`, with a builtin six-gun pool and a config-parsed pool of up to eight (src/server/game/bot.zig:63, 78, 206).
 
-The per-bot record, verbatim including the name setter (src/server/game/bot.zig:121):
+The per-bot record, verbatim including the name setter (src/server/game/bot.zig:122):
 
 ```zig
 pub const Bot = struct {
@@ -104,10 +104,11 @@ pub const Bot = struct {
     src: i16 = 0,
 
     /// Set the display name, copying at most name.len-1 bytes (NUL-terminated).
-    /// An empty name falls back to the default "Bot".
+    /// An empty name falls back to the default "Bot". Cap is a UTF-8 byte
+    /// budget: never split a multi-byte codepoint (spawn body is UTF-8).
     fn setName(self: *Bot, name: []const u8) void {
         const n = if (name.len == 0) default_bot_name else name;
-        const cap = @min(n.len, self.name.len - 1);
+        const cap = utf8_util.truncLen(n, self.name.len - 1);
         @memcpy(self.name[0..cap], n[0..cap]);
         self.name[cap] = 0;
         self.name_len = cap;

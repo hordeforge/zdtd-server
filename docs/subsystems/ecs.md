@@ -39,7 +39,7 @@ The generation is not a separate counter: `spawnBase` bumps `slot_gen[s]` and co
 
 ## Component columns and the mask
 
-Components are plain data with no behaviour (`src/ecs/components.zig:1`). Presence is a packed 32-bit word, `Mask`, one bool per column (`src/ecs/components.zig:1352`):
+Components are plain data with no behaviour (`src/ecs/components.zig:1`). Presence is a packed 32-bit word, `Mask`, one bool per column (`src/ecs/components.zig:1341`):
 
 ```zig
 pub const Mask = packed struct(u32) {
@@ -134,20 +134,20 @@ The columns `World` declares, with the component that holds their state:
 | `player` | `Player` | `src/ecs/components.zig:57` |
 | `class_id` | `ClassId` | `src/ecs/components.zig:76` |
 | `zombie_ai` | `ZombieAi` | `src/ecs/components.zig:261` |
-| `vehicle` | `Vehicle` | `src/ecs/components.zig:506` |
-| `turret` | `Turret` | `src/ecs/components.zig:562` |
-| `journal` | `Journal` | `src/ecs/components.zig:678` |
-| `wallet` | `Wallet` | `src/ecs/components.zig:723` |
-| `inventory` | `Inventory` | `src/ecs/components.zig:795` |
-| `trader_stock` | `TraderStock` | `src/ecs/components.zig:989` |
-| `loot_bag` | `LootBag` | `src/ecs/components.zig:1015` |
-| `sleeper` | `Sleeper` | `src/ecs/components.zig:1048` |
-| `falling` | `FallingBlocks` | `src/ecs/components.zig:1196` |
-| `flags` | `Flags` | `src/ecs/components.zig:1241` |
-| `dirty` | `Dirty` | `src/ecs/components.zig:1246` |
-| `buffs` | `BuffSet` | `src/ecs/components.zig:1326` |
+| `vehicle` | `Vehicle` | `src/ecs/components.zig:495` |
+| `turret` | `Turret` | `src/ecs/components.zig:551` |
+| `journal` | `Journal` | `src/ecs/components.zig:667` |
+| `wallet` | `Wallet` | `src/ecs/components.zig:712` |
+| `inventory` | `Inventory` | `src/ecs/components.zig:784` |
+| `trader_stock` | `TraderStock` | `src/ecs/components.zig:978` |
+| `loot_bag` | `LootBag` | `src/ecs/components.zig:1004` |
+| `sleeper` | `Sleeper` | `src/ecs/components.zig:1037` |
+| `falling` | `FallingBlocks` | `src/ecs/components.zig:1185` |
+| `flags` | `Flags` | `src/ecs/components.zig:1230` |
+| `dirty` | `Dirty` | `src/ecs/components.zig:1235` |
+| `buffs` | `BuffSet` | `src/ecs/components.zig:1315` |
 
-`Dirty` is the replication request set, and only four bits are read by the net pass: `pos`, `rot`, `flags`, `hp` (`src/ecs/components.zig:1246`). `spawnBase` sets a minimal mask for every entity (`transform`, `health`, `network_id`, `kind`, `flags`, `dirty`, `class_id`) and each spawn helper adds its own bits: `spawnPlayer` sets `player`, `journal`, `wallet`, `inventory` (`src/ecs/world.zig:1389`), `spawnZombie` and `spawnAnimalDef` set `zombie_ai` (`src/ecs/world.zig:1440`, `src/ecs/world.zig:1292`), loot bags set `loot_bag` plus `inventory` (`src/ecs/world.zig:1591`), and traders, vehicles and turrets set `trader_stock`, `vehicle` and `turret` respectively (`src/ecs/world.zig:1687`, `src/ecs/world.zig:1703`, `src/ecs/world.zig:1739`). `buffs` is the exception: it is attached lazily by `buffsMut`, which zeroes the column on first use so a recycled slot cannot inherit the previous entity's buffs (`src/ecs/world.zig:758`). The `stealth` and the various request-ring columns (noise, stealth noise, sleeper volume noise, explode, dig, sleeper wake) are `World`-level fixed rings rather than components, and parallel AI workers push into them atomically (`src/ecs/world.zig:276`, `src/ecs/world.zig:933`).
+`Dirty` is the replication request set, and only four bits are read by the net pass: `pos`, `rot`, `flags`, `hp` (`src/ecs/components.zig:1235`). `spawnBase` sets a minimal mask for every entity (`transform`, `health`, `network_id`, `kind`, `flags`, `dirty`, `class_id`) and each spawn helper adds its own bits: `spawnPlayer` sets `player`, `journal`, `wallet`, `inventory` (`src/ecs/world.zig:1389`), `spawnZombie` and `spawnAnimalDef` set `zombie_ai` (`src/ecs/world.zig:1440`, `src/ecs/world.zig:1292`), loot bags set `loot_bag` plus `inventory` (`src/ecs/world.zig:1591`), and traders, vehicles and turrets set `trader_stock`, `vehicle` and `turret` respectively (`src/ecs/world.zig:1687`, `src/ecs/world.zig:1703`, `src/ecs/world.zig:1739`). `buffs` is the exception: it is attached lazily by `buffsMut`, which zeroes the column on first use so a recycled slot cannot inherit the previous entity's buffs (`src/ecs/world.zig:758`). The `stealth` and the various request-ring columns (noise, stealth noise, sleeper volume noise, explode, dig, sleeper wake) are `World`-level fixed rings rather than components, and parallel AI workers push into them atomically (`src/ecs/world.zig:276`, `src/ecs/world.zig:933`).
 
 Per-domain state that lives in these columns has its own page or doc section: inventory and equipment (`Inventory`/`InvSlot`), quests (`Journal`/`Wallet` plus the quest catalog), buffs (`BuffSet` plus `ecs/buff.zig`), and power (`electric.zig` `PowerGrid`).
 

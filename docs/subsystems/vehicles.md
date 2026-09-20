@@ -24,7 +24,7 @@ Sources: [`src/server/game/vehicle.zig`](../../src/server/game/vehicle.zig),
 ## The vehicle component
 
 A vehicle is one ECS slot with `mask.vehicle` set, holding a `Vehicle` column entry. The kind set is
-closed and matches the stock vehicle list (`src/ecs/components.zig:480`):
+closed and matches the stock vehicle list (`src/ecs/components.zig:469`):
 
 ```zig
 pub const VehicleKind = enum(u8) {
@@ -37,7 +37,7 @@ pub const VehicleKind = enum(u8) {
 ```
 
 Seat storage is a fixed array of rider net ids, so the component has no heap and no unbounded rider
-list (`src/ecs/components.zig:506`):
+list (`src/ecs/components.zig:495`):
 
 ```zig
 pub const Vehicle = struct {
@@ -52,11 +52,11 @@ pub const Vehicle = struct {
 ```
 
 `max_seats` is 6, the widest stock base seat block (`Truck4x4` declares `seat0..seat5`), and
-`driver_seat` is 0 (`src/ecs/components.zig:488-504`). `usableSeats` re-clamps a corrupt
+`driver_seat` is 0 (`src/ecs/components.zig:477-493`). `usableSeats` re-clamps a corrupt
 `seat_count` into `1..max_seats`, so a bad config can never produce a seatless hull
-(`src/ecs/components.zig:545-547`). `owner_slot` exists for the parked-vehicle waypoint list, but
+(`src/ecs/components.zig:534-536`). `owner_slot` exists for the parked-vehicle waypoint list, but
 both spawn paths are worldgen and the admin console, so every live vehicle is unowned and the
-waypoint list is empty (`src/ecs/components.zig:534-538`, `src/server/game/vehicle.zig:84`).
+waypoint list is empty (`src/ecs/components.zig:523-527`, `src/server/game/vehicle.zig:84`).
 
 ## Seats and riders
 

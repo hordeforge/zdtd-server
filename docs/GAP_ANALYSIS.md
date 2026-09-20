@@ -1527,7 +1527,7 @@ parsed, and quest offering is unwired.
   remaining notes resolved - `TraderBuyLimit` has zero uses in the V3.1.0 b14
   traders.xml (nothing for the client to observe), and the restock timer is
   wired (the Restock timer row went WORKS).
-  *Anchors:* `src/ecs/components.zig:757` TraderStock,
+  *Anchors:* `src/ecs/components.zig:746` TraderStock,
   `src/ecs/systems.zig:1201` (trade), `:1288` (traderRestock),
   `src/server/game/trader_wire.zig`, `asm.il:861697`
 
@@ -3896,8 +3896,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - **`onSelfBuffUpdate` is a general per-buff event (round 29).** The last
     hardcoded pair in the survival pass is gone: every active buff fires its own
     update rows when `buff.tick` marks the due tick (`<update_rate>` is seconds,
-    `* 20` ticks; check01 40, check02 44), so `survivalCheckId`/`armorCheckId`
-    are no longer used by the server. `syncStageBuffs` is removal-only, the
+    `* 20` ticks; check01 40, check02 44), so `survivalCheckId`
+    is no longer used by the server. `syncStageBuffs` is removal-only, the
     engine's own rows supply the stage adds, and the check-buff scenarios wait
     the real rates through `stepTicks`.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
@@ -4191,7 +4191,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   ECS with stack rules and 20 Hz timers, and buff changes reach the client over
   the stock wire. Open: the triggered_effect VM, cvar sync, immunity and
   damage-type gates, and persistence across sessions (see WORK_PLAN T5).
-  *Anchors:* `src/ecs/components.zig:538-560`, `src/assets/buffs.zig:57-69`,
+  *Anchors:* `src/ecs/components.zig:527-549`, `src/assets/buffs.zig:57-69`,
   `output_log_client_zdtd_connect.txt:21110`, `:27206`
 
 - **NetPackageAddRemoveBuff relay and emission** `WORKS` (2026-08-06)
@@ -6230,7 +6230,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | `NetPackageEntitySpawn` stock body + class id | WORKS (2026-08-26 re-audit: the row's own text documents all six ECD branches - zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player (male/female) - plus the junk-drone tail, all implemented + tested, fail-closed on a missing payload; the PARTIAL label was stale) |
 | `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
-| `NetPackageEntityTeleport` | HAVE (respawn at world spawn, admin teleportplayer/goto, void-fall recovery all send the stock body; `World.teleportTo` sim funnel) |
+| `NetPackageEntityTeleport` | HAVE (respawn at world spawn, admin teleportplayer/goto, void-fall recovery all send the stock body; sim via `World.setPos`) |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | PARTIAL (2026-08-09): hit knockback shoves zombies/animals (8 blocks/s, 0.3 s, away from the attacker) and broadcasts `NetPackageEntityVelocity` (bAdd=true); `EntitySpeeds` ships in the motion frames (movementState + fwd/strafe). EntityPhysics re-scoped 2026-08-26: the package is the physics-master optimization (PhysicsMasterSetupBroadcast IL=31, sent on view-entry when the entity moved >0.05u/1 deg, one client runs the physics) - a client-interpolation nicety, not an authoritative sim channel; the PosAndRot frames carry the motion, and momentum-driven ragdoll is client-visual, so the residual is recorded not blocking |
 | `NetPackageEntityRotation` | SHIPPED (2026-08-26 re-audit: the PosAndRot motion frames carry the full rotation (rx/ry/rz, replicate.zig), so a turning entity's rotation rides the same channel - the dedicated package is the client's local-only rotation for itself, no separate server role) |
 | `NetPackageEntityAnimationData` | SHIPPED (2026-08-26: client-originated avatar anim params (the local AvatarController broadcasts; stock ProcessPackage IL=64 relays) - the server re-broadcasts the raw body to the entity's tracked players, gated on the sender's own entity id + rate-limited) |

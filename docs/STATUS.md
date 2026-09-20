@@ -311,8 +311,8 @@ reads through it.
 
 With that, the last hardcoded pair in the survival pass is gone: every active
 buff fires its own `onSelfBuffUpdate` rows on its own rate (`<update_rate>` is
-seconds * 20 ticks: check01 40, check02 44), `survivalCheckId`/`armorCheckId`
-are unused by the server, `syncStageBuffs` is removal-only, and the check-buff
+seconds * 20 ticks: check01 40, check02 44), `survivalCheckId`
+is unused by the server, `syncStageBuffs` is removal-only, and the check-buff
 scenarios wait the real rates. At level 1 the accounted max HP is 150: the
 tracker sets `$LastPlayerLevel` to 1, check01 sets `$PlayerLevelBonus` to 1 and
 subtracts 1, so `HealthMax` gains 0.

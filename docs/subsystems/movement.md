@@ -166,7 +166,7 @@ gets current occupancy replayed (`src/server/game/vehicle.zig:14-71`). The sim c
 hull transform onto every seated rider each tick, offset by 1 in Y, because the client
 parents the rider to the seat itself; a rider whose entity is gone frees the seat, and
 freeing seat 0 stops the vehicle (`src/ecs/systems.zig:3260-3277`). The movement-relevant
-field subset, interior fields trimmed, is (`src/ecs/components.zig:506-521`):
+field subset, interior fields trimmed, is (`src/ecs/components.zig:495-510`):
 
 ```zig
 pub const Vehicle = struct {
@@ -242,7 +242,7 @@ path restores the transform with the same floor and yaw 0
 (`src/server/persist.zig:1282-1290`). Vehicles persist kind, position, yaw, fuel,
 `seat_count` and `max_speed` in `entities.zen` (`src/server/persist.zig:1618-1632`); seat
 occupancy does not persist, and `owner_slot` is set by no production path, which leaves
-the parked-vehicle waypoint list empty (`src/ecs/components.zig:533-538`).
+the parked-vehicle waypoint list empty (`src/ecs/components.zig:522-527`).
 
 Stock fidelity here rests on package shapes, not on a proven behavioural match; a round
 trip through zdtd's own encode and decode shows self-consistency only. The envelope has no

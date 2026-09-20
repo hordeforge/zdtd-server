@@ -6,7 +6,7 @@ Sources: [`src/ecs/buff.zig`](../../src/ecs/buff.zig), [`src/ecs/components.zig`
 
 ## Runtime state and its bounds
 
-The buff clock is 20 ticks per second, matching the component comment that a deviation expires HUD timers at the wrong moment (`src/ecs/components.zig:1264`), and one entity carries at most 32 concurrent buffs (`src/ecs/components.zig:1274`). The cap is a zdtd bound, not a stock rule: stock's `ActiveBuffs` list is unbounded, while a fixed set keeps the component plain data and bounds what one client can push at the server (`src/ecs/components.zig:1266`). One entry copies the class fields the tick needs at add time, because stock reads them off a shared `BuffClass` that `set_DurationMax` mutates process-wide, a behavior the sim refuses to model (`src/ecs/components.zig:1298`):
+The buff clock is 20 ticks per second, matching the component comment that a deviation expires HUD timers at the wrong moment (`src/ecs/components.zig:1253`), and one entity carries at most 32 concurrent buffs (`src/ecs/components.zig:1263`). The cap is a zdtd bound, not a stock rule: stock's `ActiveBuffs` list is unbounded, while a fixed set keeps the component plain data and bounds what one client can push at the server (`src/ecs/components.zig:1255`). One entry copies the class fields the tick needs at add time, because stock reads them off a shared `BuffClass` that `set_DurationMax` mutates process-wide, a behavior the sim refuses to model (`src/ecs/components.zig:1287`):
 
 ```zig
 pub const BuffInstance = struct {
@@ -28,7 +28,7 @@ pub const BuffInstance = struct {
     instigator_z: i32 = 0,
 ```
 
-The flags byte is wire-visible: `BuffValue::Write` emits it verbatim, so the bit order is pinned by the stock layout (`src/ecs/components.zig:1281`).
+The flags byte is wire-visible: `BuffValue::Write` emits it verbatim, so the bit order is pinned by the stock layout (`src/ecs/components.zig:1270`).
 
 ```zig
 pub const BuffFlags = packed struct(u8) {
@@ -47,7 +47,7 @@ pub const BuffFlags = packed struct(u8) {
 };
 ```
 
-The six stock bits are the ones the tick switch reads; the last two are bookkeeping for the triggered-row pass and never cross the wire (`src/ecs/components.zig:1290`). The set itself is one flat array with a linear lookup and a count (`src/ecs/components.zig:1326`):
+The six stock bits are the ones the tick switch reads; the last two are bookkeeping for the triggered-row pass and never cross the wire (`src/ecs/components.zig:1279`). The set itself is one flat array with a linear lookup and a count (`src/ecs/components.zig:1315`):
 
 ```zig
 pub const BuffSet = struct {
@@ -113,7 +113,7 @@ pub fn tick(set: *BuffSet, dead: bool, out: []Removed) u8 {
         if (e.duration_max > 0 and e.durationSeconds() >= e.duration_max) e.flags.finished = true;
 ```
 
-Both counters advance with wrapping addition because stock's unchecked add wraps, so saturating here would diverge (`src/ecs/buff.zig:152`). The `update` flag is set and cleared inside the same tick from the class update rate; with no triggered-effect evaluator in the tick, it is only ever observed clear (`src/ecs/buff.zig:145`). `durationSeconds` divides the tick count by the 20 Hz buff clock (`src/ecs/components.zig:1320`). Death clears the buffs the client drops on its own, and each cleared one is reported so the net layer can relay the removal; a removal the clients never hear about leaves the icon on their HUD forever (`src/ecs/buff.zig:163`).
+Both counters advance with wrapping addition because stock's unchecked add wraps, so saturating here would diverge (`src/ecs/buff.zig:152`). The `update` flag is set and cleared inside the same tick from the class update rate; with no triggered-effect evaluator in the tick, it is only ever observed clear (`src/ecs/buff.zig:145`). `durationSeconds` divides the tick count by the 20 Hz buff clock (`src/ecs/components.zig:1309`). Death clears the buffs the client drops on its own, and each cleared one is reported so the net layer can relay the removal; a removal the clients never hear about leaves the icon on their HUD forever (`src/ecs/buff.zig:163`).
 
 ## The buff phase in the tick
 

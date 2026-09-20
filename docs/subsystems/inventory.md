@@ -6,7 +6,7 @@ Sources: [`src/ecs/inventory.zig`](../../src/ecs/inventory.zig), [`src/ecs/inv_l
 
 ## Slot model
 
-One `Inventory` component covers toolbelt, bag, and equipment; the split is pure indexing. The layout constants and their comptime invariants (src/ecs/components.zig:595):
+One `Inventory` component covers toolbelt, bag, and equipment; the split is pure indexing. The layout constants and their comptime invariants (src/ecs/components.zig:584):
 
 ```zig
 /// Toolbelt 0..9, bag 10..54, equipment 55..66 (armor slots), total 67 -
@@ -22,7 +22,7 @@ pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 67
 pub const inv_no_holding: u16 = 0xFFFF;
 ```
 
-A comptime block below those constants fails the build if the bag stops being contiguous with the toolbelt or if `max_inv_slots` diverges from the equip end (src/ecs/components.zig:609). The slot record itself (src/ecs/components.zig:727):
+A comptime block below those constants fails the build if the bag stops being contiguous with the toolbelt or if `max_inv_slots` diverges from the equip end (src/ecs/components.zig:598). The slot record itself (src/ecs/components.zig:716):
 
 ```zig
 pub const InvSlot = struct {
@@ -40,7 +40,7 @@ pub const InvSlot = struct {
     seed: u16 = 0,
 ```
 
-The remaining fields are `flags: u8`, `mods: [4]u16`, `mod_n: u8`, `mod_qualities: [4]u8`, `stats: [max_item_stats]ItemStat`, `stats_n: u8` (src/ecs/components.zig:743). The component adds only the held index and the open container (src/ecs/components.zig:795):
+The remaining fields are `flags: u8`, `mods: [4]u16`, `mod_n: u8`, `mod_qualities: [4]u8`, `stats: [max_item_stats]ItemStat`, `stats_n: u8` (src/ecs/components.zig:732). The component adds only the held index and the open container (src/ecs/components.zig:784):
 
 ```zig
 pub const Inventory = struct {
@@ -51,7 +51,7 @@ pub const Inventory = struct {
     open_container: i32 = -1,
 ```
 
-`setHolding` accepts only `0..inv_toolbelt-1` and folds an empty slot to `inv_no_holding` (src/ecs/components.zig:811); `takeFromSlot` does the same when the held slot empties (src/ecs/components.zig:906). Stack caps come from the catalog through `World.maxStack`, which calls the `stack_fn` hook and falls back to the offline builtin table only when no catalog is wired (src/ecs/world.zig:711; src/ecs/components.zig:776). `addSlotStacked` is all-or-nothing: it sums room across `slots[0..inv_equip_start]` first and returns false without mutating when the whole deposit will not fit, because callers refund on failure and a partial deposit would duplicate items (src/ecs/components.zig:836). Merging requires `item_id`, `quality`, and `meta` to match, so tool tiers and worn durability never blend (src/ecs/components.zig:842); a fresh slot takes the whole value, keeping stats, mods, and `use_times` (src/ecs/components.zig:868). `moveSlot` has three outcomes: place into an empty slot, merge when quality and meta match and there is room, otherwise swap whole stacks only, and it keeps `holding` pointing at the moved stack (src/ecs/components.zig:926). `World.depositItem` is the preferred production deposit because it honors the catalog cap (src/ecs/world.zig:729); `Inventory.addItem` is the catalog-free variant (src/ecs/components.zig:824).
+`setHolding` accepts only `0..inv_toolbelt-1` and folds an empty slot to `inv_no_holding` (src/ecs/components.zig:800); `takeFromSlot` does the same when the held slot empties (src/ecs/components.zig:895). Stack caps come from the catalog through `World.maxStack`, which calls the `stack_fn` hook and falls back to the offline builtin table only when no catalog is wired (src/ecs/world.zig:711; src/ecs/components.zig:765). `addSlotStacked` is all-or-nothing: it sums room across `slots[0..inv_equip_start]` first and returns false without mutating when the whole deposit will not fit, because callers refund on failure and a partial deposit would duplicate items (src/ecs/components.zig:825). Merging requires `item_id`, `quality`, and `meta` to match, so tool tiers and worn durability never blend (src/ecs/components.zig:831); a fresh slot takes the whole value, keeping stats, mods, and `use_times` (src/ecs/components.zig:857). `moveSlot` has three outcomes: place into an empty slot, merge when quality and meta match and there is room, otherwise swap whole stacks only, and it keeps `holding` pointing at the moved stack (src/ecs/components.zig:915). `World.depositItem` is the preferred production deposit because it honors the catalog cap (src/ecs/world.zig:729); `Inventory.addItem` is the catalog-free variant (src/ecs/components.zig:813).
 
 Durability is `use_times`, counting uses consumed upward from 0. `degradeUse` adds the item's `items.xml` `DegradationPerUse` through the `item_degradation_fn` hook, or the caller's amount when no row exists, and stops once the percent-uses-left resolver reads 0 so a broken tool does not run the counter up forever (src/ecs/inventory.zig:302). The comment on that function records that a previous subtract-toward-zero version was a permanent no-op, because every item enters the world at 0 and the clamp branch always won (src/ecs/inventory.zig:288). Stock keeps the broken stack present and repairable, and so does this path.
 
@@ -175,7 +175,7 @@ pub fn zpvSlotStride(version: u8) usize {
 }
 ```
 
-`savePlayers` writes a full slot record per occupied slot (src/server/persist.zig:867) and `tryRestorePlayer` reads it back into the ECS array (src/server/persist.zig:1067, 1124). The stride comment names what is not yet in it: `flags` and `mod_qualities` persist as their defaults, so a reloaded slot loses the activated flag and per-mod quality (src/ecs/components.zig:741, 753). The ledger is not part of that record.
+`savePlayers` writes a full slot record per occupied slot (src/server/persist.zig:867) and `tryRestorePlayer` reads it back into the ECS array (src/server/persist.zig:1067, 1124). The stride comment names what is not yet in it: `flags` and `mod_qualities` persist as their defaults, so a reloaded slot loses the activated flag and per-mod quality (src/ecs/components.zig:730, 753). The ledger is not part of that record.
 
 Per-tick work is minimal by construction. No inventory system runs in the 50 ms tick for its own sake: the only scheduled inventory-adjacent work is the workstation craft step, on the sleeper cadence rather than every tick (src/server/game/step.zig:255; src/server/game/craft.zig:596). Loot bag collection is request-driven and funnels through `inventory.collectBagFull`, the single transfer rule the C2S collect arm calls and `systems.collectLootNear` shares (src/server/c2s/move.zig:93; src/ecs/systems.zig:1413). Tool wear happens on the attack and dig call sites through `degradeUse`, not on a tick (src/ecs/inventory.zig:302). Everything else is request-driven: a C2S arm applies a change, then broadcasts the resulting state or a holding echo.
 

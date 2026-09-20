@@ -97,7 +97,7 @@ meaningful. Tile-entity broadcasts use a separate
 The grid is derived per entity from current positions, so nothing rebuilds when
 a player walks. What gates work is the per-entity dirty word: four live bits,
 with the padding documented as reclaimed space rather than free bits
-(src/ecs/components.zig:1246):
+(src/ecs/components.zig:1235):
 ```zig
 pub const Dirty = packed struct(u8) {
     pos: bool = false,

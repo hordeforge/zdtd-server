@@ -31,7 +31,7 @@ pub fn disable() void {
 }
 ```
 
-`enable` sets virtual time plus forced serial, and `enableSeeded` also records the process-wide run seed (`src/util/sim.zig:39`, `:45`); `getSeed`/`formatSeed` let a failure log name the value that reproduces the run (`src/util/sim.zig:67`, `:73`). Two constants matter to callers: the default virtual epoch is 1 s so age math that subtracts from `monoNs` cannot underflow (`src/util/sim.zig:23`), and `tick_ns` repeats the 20 TPS formula locally because util cannot import `protocol` (`src/util/sim.zig:31`). `advanceTick`/`advanceTicks` step the virtual clock by whole ticks (`src/util/sim.zig:85`, `:90`); the game step calls `advanceTick` after a completed tick (`src/server/game/step.zig:38`) and uses `isEnabled` to attach the seed to a failure line (`src/server/game/step.zig:51`).
+`enable` sets virtual time plus forced serial, and `enableSeeded` also records the process-wide run seed (`src/util/sim.zig:39`, `:45`); `getSeed`/`formatSeed` let a failure log name the value that reproduces the run (`src/util/sim.zig:67`, `:73`). Two constants matter to callers: the default virtual epoch is 1 s so age math that subtracts from `monoNs` cannot underflow (`src/util/sim.zig:23`), and `tick_ns` repeats the 20 TPS formula locally because util cannot import `protocol` (`src/util/sim.zig:31`). `advanceTick` steps the virtual clock by one tick (`src/util/sim.zig:85`); the game step calls it after a completed tick (`src/server/game/step.zig:38`) and uses `isEnabled` to attach the seed to a failure line (`src/server/game/step.zig:51`).
 
 The fault hooks live in `io_fs` but are part of this lifecycle, because `sim.disable` clears them (`src/util/io_fs.zig:23`):
 

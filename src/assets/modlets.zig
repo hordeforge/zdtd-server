@@ -106,11 +106,6 @@ pub fn disabledCount() usize {
     return disabled.items.len;
 }
 
-/// The state file in use, for the webui note. Null when no mods root is loaded.
-pub fn statePath() ?[]const u8 {
-    return state_path;
-}
-
 /// Result of a mods-root scan; all strings owned.
 pub const Scan = struct {
     mods: []Mod,

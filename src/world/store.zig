@@ -241,12 +241,6 @@ pub const Chunk = struct {
         return @intCast((16 * self.y_dim * 16 + 7) / 8);
     }
 
-    /// Biome-aware column fill when layers are set on the owning World.
-    pub fn generateColumnIds(h: u16, stack: biome_layers.Stack, out: *[256]u16) void {
-        const hc: u8 = if (h > 255) 255 else @intCast(h);
-        biome_layers.Table.fillColumn(stack, hc, out);
-    }
-
     pub fn deinitBlocks(self: *Chunk) void {
         if (self.blocks) |b| {
             if (self.allocator) |a| a.free(b);

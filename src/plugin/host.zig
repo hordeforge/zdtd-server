@@ -296,15 +296,6 @@ pub const PluginHost = struct {
     pub fn count(self: *const PluginHost) usize {
         return self.n;
     }
-
-    pub fn enabledCount(self: *const PluginHost) usize {
-        var c: usize = 0;
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (self.enabled[i]) c += 1;
-        }
-        return c;
-    }
 };
 
 test "host rejects duplicate and caps" {

@@ -140,10 +140,6 @@ pub const GameRandom = struct {
     pub fn rangeInt(self: *GameRandom, max_exclusive: i32) i32 {
         return self.nextBelow(max_exclusive);
     }
-
-    pub fn rangeIntBetween(self: *GameRandom, min_value: i32, max_exclusive: i32) i32 {
-        return self.nextBelow(max_exclusive - min_value) + min_value;
-    }
 };
 
 /// `Utils::RandomFromSeedOnPos(Int32 _x, Int32 _y, Int32 _z, Int32 _seed)`

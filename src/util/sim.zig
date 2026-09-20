@@ -87,12 +87,6 @@ pub fn advanceTick() void {
     clock.advanceNs(tick_ns);
 }
 
-/// Advance by `n` main-loop ticks (no-op when not virtual).
-pub fn advanceTicks(n: u32) void {
-    if (n == 0) return;
-    clock.advanceNs(tick_ns *% @as(u64, n));
-}
-
 /// Domain tag mixed into fillChallenge so challenge streams stay distinct from
 /// other initFromU64 call sites that share the run seed.
 const challenge_mix: u64 = 0xC4A11E46_E5EED;
@@ -130,7 +124,9 @@ test "sim advanceTick steps 50ms" {
     enable(default_start_ns);
     advanceTick();
     try std.testing.expectEqual(default_start_ns + tick_ns, clock.monoNs());
-    advanceTicks(3);
+    advanceTick();
+    advanceTick();
+    advanceTick();
     try std.testing.expectEqual(default_start_ns + tick_ns * 4, clock.monoNs());
 }
 

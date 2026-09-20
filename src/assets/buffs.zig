@@ -1916,14 +1916,6 @@ pub fn survivalCheckId(t: *const Table) ?u16 {
     return t.indexOfName("buffStatusCheck01");
 }
 
-/// The armor-status buff the entity classes carry beside buffStatusCheck01
-/// (entityclasses.xml `Buffs=`): its `onSelfBuffUpdate` rows grant and revoke
-/// the armor-set bonuses (`ArmorGroupCount` gates, `ArmorGroupLowestQuality`
-/// tiers). Selection key only; every value stays in buffs.xml.
-pub fn armorCheckId(t: *const Table) ?u16 {
-    return t.indexOfName("buffStatusCheck02");
-}
-
 /// Health lost per real second by a buff's `ModifyStats Health subtract`
 /// triggered row (stock applies it once per update_rate; this is value / the
 /// update interval in seconds, the same conversion healthLossPerSecond used).
