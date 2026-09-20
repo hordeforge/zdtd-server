@@ -351,6 +351,7 @@ Coverage targets, all enforced by the scan:
 | `src/util/sys_metrics.zig` | Z | Host OS gauges for the ops dashboard (sysinfo + getrusage, no /proc reads): load 1/5/15, RAM free+buf/total, proc CPU/RSS/uptime |
 | `src/util/tcp_listen.zig` | Z | Non-blocking TCP listen helper via Zig 0.16 `std.Io.net` listen + thin posix accept/read/write. No `std.os.linux` in callers (admin, GSI, webui) |
 | `src/util/toml_bind.zig` | Z | toml_bind.zig: comptime-reflected TOML-subset binder (ADR 0021 decision 1). |
+| `src/util/utf8.zig` | Z | UTF-8 codepoint-boundary truncation for fixed buffers and display caps (wire and .NET strings count bytes; a mid-sequence cut corrupts keys and JSON) |
 | `src/version.zig` | Z | Product and compatibility versions reported to operators |
 | `src/wire/binary.zig` | R | Little-endian readers/writers matching .NET BinaryReader/Writer (7-bit strings) |
 | `src/wire/frame.zig` | R | Game channel envelope + inner packages (stock NetConnectionSimple layout) |

@@ -17,6 +17,7 @@ const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
 const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
+const utf8_util = @import("../util/utf8.zig");
 const game_types = @import("game/types.zig");
 const platform_user = @import("../wire/platform_user.zig");
 const max_land_claims = game_mod.max_land_claims;
@@ -241,7 +242,7 @@ fn emitZpv11Skills(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*
     try out.appendSlice(allocator, &tmp);
     try out.append(allocator, @intCast(@min(levels.len, std.math.maxInt(u8))));
     for (levels[0..@min(levels.len, std.math.maxInt(u8))]) |sl| {
-        const nl = @min(sl.name.len, 63);
+        const nl = utf8_util.truncLen(sl.name, 63);
         try out.append(allocator, @intCast(nl));
         try out.appendSlice(allocator, sl.name[0..nl]);
         try out.append(allocator, sl.level);

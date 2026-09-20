@@ -225,7 +225,7 @@ pub fn fillWebuiSnap(self: *Game) void {
             .joined = cl.joined,
             .entered = cl.entered,
         };
-        const nl = @min(cl.name_len, webui_mod.max_name);
+        const nl = c2s_text.utf8TruncLen(cl.name[0..cl.name_len], webui_mod.max_name);
         @memcpy(row.name[0..nl], cl.name[0..nl]);
         row.name_len = @intCast(nl);
         if (cl.entity_id > 0) {
@@ -246,7 +246,7 @@ pub fn fillWebuiSnap(self: *Game) void {
     for (0..@min(wp.n, s.modules.len)) |i| {
         const p = &wp.slots[i];
         var row: webui_mod.ModuleRow = .{ .used = true, .disabled = p.disabled };
-        const nl = @min(p.name.len, row.name.len);
+        const nl = c2s_text.utf8TruncLen(p.name, row.name.len);
         @memcpy(row.name[0..nl], p.name[0..nl]);
         row.name_len = @intCast(nl);
         s.modules[i] = row;

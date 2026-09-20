@@ -2,9 +2,13 @@
 //! Pure helpers (no Game / net types). Extracted from game.zig for navigability.
 
 const std = @import("std");
+const utf8_util = @import("../util/utf8.zig");
 
 /// Max UTF-8 bytes in a player Global chat message (stock UI is short; caps flood payload).
 pub const max_chat_msg_len: usize = 256;
+
+/// Re-export: fixed buffers and display caps cut on a codepoint boundary.
+pub const utf8TruncLen = utf8_util.truncLen;
 
 /// True when `s` equals any of the given alternatives (console verb aliases).
 pub fn eqAny(s: []const u8, alts: []const []const u8) bool {
@@ -33,13 +37,17 @@ pub fn sanitizePlayerName(dst: []u8, src: []const u8) usize {
             i += cp_len; // C0 control / DEL (multi-byte leads are >= 0xC0): drop, keep scanning
             continue;
         }
-        // Bidi embeddings, overrides and isolates (U+202A-202E, U+2066-2069)
-        // reorder every character after them until a terminator, so a name
-        // carrying one rewrites the rest of the operator line it lands in
-        // (kick/ban confirmations, the webui player table). LRM/RLM/ALM marks
-        // are kept: those are legitimate content inside an RTL name.
+        // Format / invisible codepoints that pad or reorder identity text:
+        // - Bidi embeddings/overrides/isolates (U+202A-202E, U+2066-2069)
+        //   rewrite the rest of an operator line (kick/ban, webui table).
+        // - Zero-width space / word joiner / BOM / soft hyphen let two peers
+        //   look identical while comparing unequal for reclaim/ban-by-name
+        //   (e.g. "Admin" vs "Admin\u{200b}").
+        // LRM/RLM/ALM and ZWJ (emoji sequences) are kept as content.
         if (std.unicode.utf8Decode(src[i..][0..cp_len])) |cp| {
-            if ((cp >= 0x202A and cp <= 0x202E) or (cp >= 0x2066 and cp <= 0x2069)) {
+            if ((cp >= 0x202A and cp <= 0x202E) or (cp >= 0x2066 and cp <= 0x2069) or
+                cp == 0x00AD or cp == 0x200B or cp == 0x2060 or cp == 0xFEFF)
+            {
                 i += cp_len;
                 continue;
             }
@@ -55,17 +63,6 @@ pub fn sanitizePlayerName(dst: []u8, src: []const u8) usize {
         i += cp_len;
     }
     return w;
-}
-
-/// Largest `n <= cap` that keeps `s[0..n]` from ending inside a UTF-8 sequence.
-/// Fixed-size operator surfaces (webui world name, admin reply sink) cut long
-/// text; a cut between the bytes of one codepoint puts invalid UTF-8 into a
-/// UTF-8 response body, which browsers render as U+FFFD.
-pub fn utf8TruncLen(s: []const u8, cap: usize) usize {
-    if (s.len <= cap) return s.len;
-    var n = cap;
-    while (n > 0 and s[n] & 0xc0 == 0x80) n -= 1; // step back over continuation bytes
-    return n;
 }
 
 /// Global chat body bounds: non-empty, length-capped, no C0/DEL (log/UI
@@ -176,14 +173,24 @@ test "sanitizePlayerName drops bidi overrides but keeps RTL content" {
     try std.testing.expectEqualStrings("\u{200f}محمد", buf[0..n2]);
 }
 
+test "sanitizePlayerName drops zero-width padding used as a second identity" {
+    var buf: [32]u8 = undefined;
+    // U+200B ZWSP between letters: looks like "Admin" but was a distinct key.
+    const n = sanitizePlayerName(&buf, "Ad\u{200b}min\u{feff}");
+    try std.testing.expectEqualStrings("Admin", buf[0..n]);
+    // Soft hyphen and word joiner likewise.
+    const n2 = sanitizePlayerName(&buf, "Bo\u{00ad}t\u{2060}");
+    try std.testing.expectEqualStrings("Bot", buf[0..n2]);
+    // ZWJ in an emoji ZWJ sequence is kept (not padding).
+    const n3 = sanitizePlayerName(&buf, "A\u{200d}B");
+    try std.testing.expectEqualStrings("A\u{200d}B", buf[0..n3]);
+}
+
 test "utf8TruncLen never cuts inside a codepoint" {
     try std.testing.expectEqual(@as(usize, 3), utf8TruncLen("abc", 8));
     try std.testing.expectEqual(@as(usize, 2), utf8TruncLen("abc", 2));
-    // "日本" is 3 bytes per codepoint: caps 3..5 keep exactly one.
     try std.testing.expectEqual(@as(usize, 3), utf8TruncLen("日本", 5));
-    try std.testing.expectEqual(@as(usize, 3), utf8TruncLen("日本", 3));
-    try std.testing.expectEqual(@as(usize, 0), utf8TruncLen("日本", 2));
-    try std.testing.expectEqual(@as(usize, 6), utf8TruncLen("日本", 6));
+    try std.testing.expectEqual(@as(usize, 0), utf8TruncLen("\u{1f680}", 3));
 }
 
 test "chatMsgOk length and control bounds" {

@@ -15,6 +15,7 @@ const tcp = @import("../util/tcp_listen.zig");
 const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 const version = @import("../version.zig");
 const clock = @import("../util/clock.zig");
+const utf8_util = @import("../util/utf8.zig");
 const plugin_mod = @import("../plugin/root.zig");
 const modlets = @import("../assets/modlets.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -250,7 +251,9 @@ pub const Server = struct {
 
     fn pushAudit(self: *Server, line: []const u8) void {
         const i = self.audit_i % max_audit;
-        const n = @min(line.len, max_audit_line);
+        // Cap is a UTF-8 byte budget; cutting mid-codepoint poisons the JSON
+        // audit feed (browsers show U+FFFD for the broken sequence).
+        const n = utf8_util.truncLen(line, max_audit_line);
         if (n > 0) @memcpy(self.audit_lines[i][0..n], line[0..n]);
         self.audit_lens[i] = @intCast(n);
         self.audit_i = @intCast((@as(usize, self.audit_i) + 1) % max_audit);
@@ -811,10 +814,10 @@ pub const Server = struct {
         const reply = if (reply_len > 0) reply_buf[0..reply_len] else "ok\n";
         var audit_line: [max_audit_line]u8 = undefined;
         const al = std.fmt.bufPrint(&audit_line, "> {s}", .{line}) catch line;
-        self.pushAudit(al);
+            self.pushAudit(al);
         if (reply_len > 0) {
             const first = std.mem.findScalar(u8, reply, '\n') orelse reply.len;
-            self.pushAudit(reply[0..@min(first, max_audit_line)]);
+            self.pushAudit(reply[0..utf8_util.truncLen(reply[0..first], max_audit_line)]);
         }
 
         // Semantic command failures stay HTTP 200 (console contract) but are

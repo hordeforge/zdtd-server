@@ -13,6 +13,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
 const packages = @import("../../wire/packages.zig");
+const utf8_util = @import("../../util/utf8.zig");
 
 const max_land_claims = game_mod.max_land_claims;
 
@@ -53,7 +54,7 @@ pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) voi
     var owner_name_len: u8 = 0;
     for (&self.clients) |*c| {
         if (c.entity_id != owner_entity) continue;
-        const n = @min(c.name_len, owner_name.len);
+        const n = utf8_util.truncLen(c.name[0..c.name_len], owner_name.len);
         @memcpy(owner_name[0..n], c.name[0..n]);
         owner_name_len = @intCast(n);
         break;

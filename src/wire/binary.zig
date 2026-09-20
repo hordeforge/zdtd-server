@@ -1,6 +1,7 @@
 //! Little-endian readers/writers matching .NET BinaryReader/Writer (7-bit strings).
 
 const std = @import("std");
+const utf8_util = @import("../util/utf8.zig");
 
 pub const ReadError = error{ EndOfStream, InvalidString, Overflow };
 
@@ -89,10 +90,7 @@ pub const Reader = struct {
     pub fn readStringTruncating(self: *Reader, buf: []u8) ReadError![]const u8 {
         const len = try self.readStringLen();
         if (self.pos + len > self.data.len) return error.EndOfStream;
-        var keep = @min(len, buf.len);
-        if (keep < len) {
-            while (keep > 0 and self.data[self.pos + keep] & 0xc0 == 0x80) keep -= 1;
-        }
+        const keep = utf8_util.truncLen(self.data[self.pos..][0..len], buf.len);
         @memcpy(buf[0..keep], self.data[self.pos..][0..keep]);
         self.pos += len;
         return buf[0..keep];

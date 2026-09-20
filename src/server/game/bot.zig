@@ -12,6 +12,7 @@
 const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
+const utf8_util = @import("../../util/utf8.zig");
 
 /// Fixed bot capacity (ADR 0026 MaxBots-style cap; bounded array, no heap).
 pub const max_bots: usize = 16;
@@ -153,10 +154,11 @@ pub const Bot = struct {
     src: i16 = 0,
 
     /// Set the display name, copying at most name.len-1 bytes (NUL-terminated).
-    /// An empty name falls back to the default "Bot".
+    /// An empty name falls back to the default "Bot". Cap is a UTF-8 byte
+    /// budget: never split a multi-byte codepoint (spawn body is UTF-8).
     fn setName(self: *Bot, name: []const u8) void {
         const n = if (name.len == 0) default_bot_name else name;
-        const cap = @min(n.len, self.name.len - 1);
+        const cap = utf8_util.truncLen(n, self.name.len - 1);
         @memcpy(self.name[0..cap], n[0..cap]);
         self.name[cap] = 0;
         self.name_len = cap;
@@ -765,6 +767,17 @@ fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
         if (z_free) b.z = nz;
     }
     b.y = g.groundHeight(@floor(b.x), @floor(b.z));
+}
+
+test "Bot.setName truncates on a UTF-8 codepoint boundary" {
+    // name[] is 24 bytes with a trailing NUL, so the payload budget is 23.
+    // Eight CJK ideographs are 24 bytes; a byte @min would keep a dangling
+    // lead and put invalid UTF-8 into the player-mesh spawn body.
+    var b: Bot = .{};
+    b.setName("名" ** 8);
+    try std.testing.expectEqual(@as(usize, 21), b.name_len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(b.name[0..b.name_len]));
+    try std.testing.expectEqualStrings("名" ** 7, b.name[0..b.name_len]);
 }
 
 test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {

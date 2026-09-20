@@ -1,6 +1,7 @@
 //! All sim component types (plain data; no behavior). SoA columns live on World.
 
 const std = @import("std");
+const utf8_util = @import("../util/utf8.zig");
 
 pub const Kind = enum(u8) {
     player,
@@ -576,10 +577,11 @@ pub const Turret = struct {
     owner_name_len: u8 = 0,
 
     /// Record the placing player's name alongside the slot. A name longer
-    /// than the field is truncated rather than rejected: the login re-map
-    /// compares the stored prefix, so a truncated name still matches itself.
+    /// than the field is truncated on a UTF-8 codepoint boundary rather than
+    /// rejected: the login re-map compares the stored prefix, so a truncated
+    /// name still matches itself, and a split codepoint would corrupt the key.
     pub fn setOwnerName(self: *Turret, name: []const u8) void {
-        const n = @min(name.len, max_owner_name);
+        const n = utf8_util.truncLen(name, max_owner_name);
         @memcpy(self.owner_name[0..n], name[0..n]);
         self.owner_name_len = @intCast(n);
     }
@@ -1455,4 +1457,14 @@ test "durationSeconds divides by the stock 20 Hz buff clock" {
     try std.testing.expectEqual(@as(f32, 1), b.durationSeconds());
     b.duration_ticks = 90;
     try std.testing.expectEqual(@as(f32, 4.5), b.durationSeconds());
+}
+
+test "Turret.setOwnerName truncates on a UTF-8 codepoint boundary" {
+    // max_owner_name is 32; eleven CJK codepoints are 33 bytes. A byte cut
+    // would leave a dangling lead in the persisted reclaim key.
+    var t: Turret = .{};
+    t.setOwnerName("名" ** 11);
+    try std.testing.expectEqual(@as(u8, 30), t.owner_name_len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(t.owner_name[0..t.owner_name_len]));
+    try std.testing.expectEqualStrings("名" ** 10, t.owner_name[0..t.owner_name_len]);
 }
