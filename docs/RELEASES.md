@@ -3,7 +3,7 @@
 > **What this is:** the version and compatibility policy - what SemVer means here, what is covered by compat promises (stock client, Zig, config, saves, wire), and the gate for tagging a release.
 > **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
 
-zdtd is pre-1.0 research software. `0.6.0` (src/version.zig + build.zig.zon,
+zdtd is pre-1.0 research software. `0.7.0` (src/version.zig + build.zig.zon,
 drift-checked by `make check`) is the development line; `v0.5.0` is the latest
 release. A minor bump may land any time and does not signal a stable API
 commitment. Product tags: `v0.1.0`,
