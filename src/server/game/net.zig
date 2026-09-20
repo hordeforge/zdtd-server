@@ -21,6 +21,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const ln_packet = @import("../../litenet/packet.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
+const util_sim = @import("../../util/sim.zig");
 const persist = @import("../persist.zig");
 const ecs = @import("../../ecs/root.zig");
 
@@ -468,14 +469,20 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
         if (c.peer == null) {
             c.* = .{ .peer = peer, .slot = i };
             // Pre-auth challenge: stock derives the 16 bytes from
-            // Guid.NewGuid() (asm.il 852999, 853010-853025); a monotonic
-            // counter would make the echo predictable, so use the Io CSPRNG
-            // (Zig 0.16 `Io.random`). Per-connection init is allowed (accept
-            // path, not the tick). Nested Threaded is paired init/deinit so
-            // it can sit inside a bound UDP socket Threaded.
-            var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-            defer threaded.deinit();
-            threaded.io().random(&c.challenge);
+            // Guid.NewGuid() (asm.il 852999, 853010-853025). Production keeps
+            // the Io CSPRNG so the echo is unpredictable. Under DST the OS
+            // entropy would make every wire capture diverge for the same
+            // seed, so fill from the run seed + slot + peer id instead.
+            if (util_sim.isEnabled()) {
+                util_sim.fillChallenge(&c.challenge, i, peer.local_id);
+            } else {
+                // Per-connection init is allowed (accept path, not the tick).
+                // Nested Threaded is paired init/deinit so it can sit inside a
+                // bound UDP socket Threaded.
+                var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+                defer threaded.deinit();
+                threaded.io().random(&c.challenge);
+            }
             // Auth-state StartTime: the sweep reaps peers that never echo
             // past MaxDurationInAuthState (10 s).
             c.challenge_ns = clock.monoNs();

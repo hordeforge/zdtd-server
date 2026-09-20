@@ -16,6 +16,7 @@
 const clock = @import("clock.zig");
 const io_fs = @import("io_fs.zig");
 const parallel = @import("parallel.zig");
+const rng = @import("rng.zig");
 const std = @import("std");
 
 /// Default virtual epoch for harnesses (1 s). Avoid 0 so age/stale math that
@@ -92,6 +93,27 @@ pub fn advanceTicks(n: u32) void {
     clock.advanceNs(tick_ns *% @as(u64, n));
 }
 
+/// Domain tag mixed into fillChallenge so challenge streams stay distinct from
+/// other initFromU64 call sites that share the run seed.
+const challenge_mix: u64 = 0xC4A11E46_E5EED;
+
+/// Fill a pre-auth challenge Guid from the process run seed + slot + peer id.
+/// Under DST this replaces OS entropy so wire captures replay byte-for-byte;
+/// production still uses the Io CSPRNG (stock Guid.NewGuid unpredictability).
+pub fn fillChallenge(out: *[16]u8, slot: usize, local_id: i32) void {
+    var stream = rng.XorShift32.initFromU64(
+        getSeed() ^ (@as(u64, @intCast(slot)) << 40) ^ (@as(u64, @bitCast(@as(i64, local_id))) << 8) ^ challenge_mix,
+    );
+    var i: usize = 0;
+    while (i < 16) : (i += 4) {
+        const w = stream.next();
+        out[i] = @truncate(w);
+        out[i + 1] = @truncate(w >> 8);
+        out[i + 2] = @truncate(w >> 16);
+        out[i + 3] = @truncate(w >> 24);
+    }
+}
+
 test "sim enable couples clock and serial" {
     defer disable();
     enable(1_000);
@@ -136,4 +158,21 @@ test "sim disable clears leftover I/O fault injection" {
     disable();
     try std.testing.expectEqual(@as(u32, 0), io_fs.pendingWriteFailures());
     try std.testing.expectEqual(@as(u32, 0), io_fs.pendingReadFailures());
+}
+
+test "fillChallenge is seed-stable and differs by slot" {
+    defer disable();
+    enableSeeded(default_start_ns, 0xBAD_5EED);
+    var a: [16]u8 = undefined;
+    var b: [16]u8 = undefined;
+    var c: [16]u8 = undefined;
+    fillChallenge(&a, 0, 1);
+    fillChallenge(&b, 0, 1);
+    fillChallenge(&c, 1, 1);
+    try std.testing.expectEqualSlices(u8, &a, &b);
+    try std.testing.expect(!std.mem.eql(u8, &a, &c));
+    setSeed(0xBAD_5EED + 1);
+    var d: [16]u8 = undefined;
+    fillChallenge(&d, 0, 1);
+    try std.testing.expect(!std.mem.eql(u8, &a, &d));
 }

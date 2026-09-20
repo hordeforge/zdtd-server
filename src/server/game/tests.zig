@@ -1637,6 +1637,49 @@ test "same seed replays identical outbound wire history (byte diff)" {
     }
 }
 
+test "offline challenge Guid replays from the DST run seed" {
+    // Under sim mode the pre-auth challenge must not sample OS entropy: it
+    // rides the first outbound Capture slot and would break byte-for-byte
+    // wire replay for the same seed.
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const ts = clock.monoNs();
+    var dir_a_buf: [128]u8 = undefined;
+    var dir_b_buf: [128]u8 = undefined;
+    const dir_a = std.fmt.bufPrint(&dir_a_buf, ".zdtd_cfg_cache/dst_chal_a_{d}", .{ts}) catch unreachable;
+    const dir_b = std.fmt.bufPrint(&dir_b_buf, ".zdtd_cfg_cache/dst_chal_b_{d}", .{ts}) catch unreachable;
+    defer io_fs.removeDirTree(dir_a);
+    defer io_fs.removeDirTree(dir_b);
+
+    var ch_a: [16]u8 = undefined;
+    var ch_b: [16]u8 = undefined;
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
+            .worldgen_seed = 0xC4A11E46,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&cap);
+        ch_a = cl.challenge;
+        try std.testing.expect(!std.mem.eql(u8, &ch_a, &[_]u8{0} ** 16));
+    }
+    {
+        const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
+            .worldgen_seed = 0xC4A11E46,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&cap);
+        ch_b = cl.challenge;
+    }
+    try std.testing.expectEqualSlices(u8, &ch_a, &ch_b);
+}
+
 test "ban expiry under virtual wall is seed-stable" {
     // Offline Game enables the virtual clock: wallSeconds must not sample host
     // REALTIME or ban add/expire cannot replay from a seed.

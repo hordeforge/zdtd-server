@@ -189,14 +189,13 @@ test "scenario a peer that never echoes is reaped past the auth age" {
     try std.testing.expect(peer.alive);
 
     // Age the challenge past the cap while keeping RX warm: reaped anyway.
-    // The virtual clock makes the age exact (wall time would also do, but a
-    // slow CI box must not flake the boundary).
-    clock.enableVirtual(1_000_000_000);
+    // Offline Game already armed the virtual clock; pin absolute time so the
+    // auth-age math is exact without tearing sim mode down mid-test.
+    clock.setVirtualNs(1_000_000_000);
     c.challenge_ns = 0; // issued at virtual t=0
     peer.last_recv_ns = clock.monoNs(); // RX warm right now
     clock.advanceNs((game_mod.default_auth_state_ms *| 1_000_000) + 1);
     g.reapStalePeers();
-    clock.disableVirtual();
     try std.testing.expectEqual(reaped_before + 1, g.harness.counters.get(.stale_peers_reaped));
     try std.testing.expect(!peer.alive);
 }
