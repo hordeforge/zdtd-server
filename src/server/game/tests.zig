@@ -3239,6 +3239,12 @@ test "entity award kill server is handled without re-crediting kills" {
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
 
+    // Seed known credit state so a silent re-credit is observable. The C2S
+    // report must not bump kills or XP (already credited on the death path).
+    ca.zombie_kills = 3;
+    ca.player_kills = 1;
+    ca.xp = 9001;
+
     // killerEntityId i32 | killedEntityId i32 (a client kill report; the
     // server already credited the kill at the death path, so the handler
     // validates and drops instead of double-crediting).
@@ -3250,6 +3256,9 @@ test "entity award kill server is handled without re-crediting kills" {
     const unhandled_before = g.harness.counters.get(.c2s_unhandled);
     try g.injectFramed(ca, framed);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+    try std.testing.expectEqual(@as(u16, 3), ca.zombie_kills);
+    try std.testing.expectEqual(@as(u16, 1), ca.player_kills);
+    try std.testing.expectEqual(@as(u64, 9001), ca.xp);
 }
 
 test "platform-id ban rejects a rejoin with the same identity" {
@@ -3475,8 +3484,10 @@ test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
         \\</adminTools>
     ;
     try io_fs.writeFile(sa_path, xml_v2);
-    // Ensure the mtime advances past the initial load's snapshot.
-    clock.sleepNs(10 * std.time.ns_per_ms);
+    // Offline Game runs under the virtual clock, so sleepNs only advances sim
+    // time and cannot move filesystem mtime. Force the poll to see a change
+    // instead of depending on host mtime granularity.
+    g.serveradmin_mtime = 0;
     g.serveradmin_reload_timer = 0;
     g.tickServerAdminReload();
     try std.testing.expect(!g.ban_list.bannedId("Steam", "5001", 1893427199)); // replaced
@@ -3548,14 +3559,20 @@ test "particle effects relay to all clients except the causing owner; stealth is
     try std.testing.expect(!a_got);
     try std.testing.expect(b_got);
 
-    // EntityStealth: handled without falling to the unhandled counter.
-    var sb: [24]u8 = undefined;
+    // EntityStealth: handled without applying the client's claimed stealth
+    // bits (server owns crouch/smell). A non-zero data word must not flip
+    // crouching or raise unhandled.
+    const ps_a = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const crouch_before = g.sim.player[ps_a].crouching;
+    var sb: [6]u8 = undefined;
     std.mem.writeInt(i32, sb[0..4], ca.entity_id, .little);
+    std.mem.writeInt(u16, sb[4..6], 0xffff, .little);
     var framed2: [128]u8 = undefined;
     const f2 = try packages.framed(&framed2, "NetPackageEntityStealth", &sb);
     const unhandled_before = g.harness.counters.get(.c2s_unhandled);
     try g.injectFramed(ca, f2);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+    try std.testing.expectEqual(crouch_before, g.sim.player[ps_a].crouching);
 }
 
 test "quest goto/treasure point reports are handled without double-completion" {
@@ -3570,20 +3587,50 @@ test "quest goto/treasure point reports are handled without double-completion" {
     }
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    // Plant a journal row directly: join may already hold the starter, and
+    // catalog ids are not stable enough for a hard-coded accept. The C2S
+    // arms must not flip completed / progress / phase on this entry.
+    try std.testing.expect(g.sim.mask[ps].journal);
+    const slot = g.sim.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    const code: i32 = 4242;
+    slot.* = .{
+        .def_id = 65000,
+        .quest_code = code,
+        .active = true,
+        .completed = false,
+        .ready_turn_in = false,
+        .progress = 2,
+        .phase = 1,
+        .poi = .{},
+    };
+    const progress_before = slot.progress;
+    const phase_before = slot.phase;
+
     var frame_buf: [256]u8 = undefined;
     const unhandled_before = g.harness.counters.get(.c2s_unhandled);
     // GotoPoint report (traderId + playerId + questCode + padding).
     var gb: [48]u8 = undefined;
+    @memset(&gb, 0);
     std.mem.writeInt(i32, gb[0..4], 1, .little);
     std.mem.writeInt(i32, gb[4..8], ca.entity_id, .little);
+    std.mem.writeInt(i32, gb[8..12], code, .little);
     const f1 = try packages.framed(&frame_buf, "NetPackageQuestGotoPoint", &gb);
     try g.injectFramed(ca, f1);
-    // TreasurePoint report (playerId + padding).
+    // TreasurePoint update (action 2): dig telemetry only, no dig-site reply.
     var tb: [48]u8 = undefined;
-    std.mem.writeInt(i32, tb[0..4], ca.entity_id, .little);
+    @memset(&tb, 0);
+    tb[0] = packages.quest_point_update_treasure;
+    std.mem.writeInt(i32, tb[1..5], code, .little);
     const f2 = try packages.framed(&frame_buf, "NetPackageQuestTreasurePoint", &tb);
     try g.injectFramed(ca, f2);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+
+    try std.testing.expect(slot.active);
+    try std.testing.expect(!slot.completed);
+    try std.testing.expectEqual(progress_before, slot.progress);
+    try std.testing.expectEqual(phase_before, slot.phase);
+    try std.testing.expectEqual(code, slot.quest_code);
 }
 
 test "entity physics report is handled without touching the sim" {
@@ -3598,13 +3645,34 @@ test "entity physics report is handled without touching the sim" {
     }
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
-    var body: [80]u8 = undefined;
-    std.mem.writeInt(i32, body[8..12], ca.entity_id, .little);
+    const ps = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const x0 = g.sim.transform[ps].x;
+    const y0 = g.sim.transform[ps].y;
+    const z0 = g.sim.transform[ps].z;
+
+    // Stock 58-byte body with an impossible claimed pose. Applying it would
+    // teleport the player; the handler must validate and drop.
+    var body: [58]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeU16(0); // Flags
+    try w.writeI32(ca.entity_id);
+    try w.writeF32(9999); // pos
+    try w.writeF32(9999);
+    try w.writeF32(9999);
+    var i: usize = 0;
+    while (i < 10) : (i += 1) try w.writeF32(0); // quat + velocity + angular
+    try std.testing.expectEqual(@as(usize, 58), w.written().len);
+
     var frame_buf: [128]u8 = undefined;
-    const framed = try packages.framed(&frame_buf, "NetPackageEntityPhysics", &body);
+    const framed = try packages.framed(&frame_buf, "NetPackageEntityPhysics", w.written());
     const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    const malformed_before = g.harness.counters.get(.c2s_malformed);
     try g.injectFramed(ca, framed);
     try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+    try std.testing.expectEqual(malformed_before, g.harness.counters.get(.c2s_malformed));
+    try std.testing.expectEqual(x0, g.sim.transform[ps].x);
+    try std.testing.expectEqual(y0, g.sim.transform[ps].y);
+    try std.testing.expectEqual(z0, g.sim.transform[ps].z);
 }
 
 test "entity ragdoll relays to other clients, not the owner" {
