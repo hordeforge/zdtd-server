@@ -2054,6 +2054,18 @@ pub const World = struct {
         });
     }
 
+    /// After a plugin slot is dropped and later slots compact, decrement every
+    /// applied glide attribution above `dropped` so a later `withdrawPluginSrc`
+    /// still matches the compacted 1-based slot (paper 3.1; mirrors
+    /// `CommandBuffer.shiftSrcsAfter` / `BotManager.shiftSrcsAfter`). Native
+    /// src 0 is never shifted. Called from the failed `plugin reload` path.
+    pub fn shiftGlideSrcsAfter(self: *World, dropped: i16) void {
+        if (dropped <= 0) return;
+        for (&self.player) |*pl| {
+            if (pl.glide_src > dropped) pl.glide_src -= 1;
+        }
+    }
+
     pub fn netId(self: *const World, slot: Slot) NetId {
         return self.network_id[slot].id;
     }

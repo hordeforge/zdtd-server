@@ -578,10 +578,11 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
         const n_before = self.wasm_plugins.n;
         const ok = self.wasm_plugins.reload(idx, path);
         // A failed reload drops the slot and later modules compact: remap
-        // remaining command/bot srcs so later withdrawal still matches.
+        // remaining command/bot/glide srcs so later withdrawal still matches.
         if (!ok and self.wasm_plugins.n < n_before) {
             self.sim.commands.shiftSrcsAfter(src);
             self.bots.shiftSrcsAfter(src);
+            self.sim.shiftGlideSrcsAfter(src);
         }
         self.adminReply(if (ok) "plugin reloaded\n" else "plugin reload failed; see server log\n");
         return;

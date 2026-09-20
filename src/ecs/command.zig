@@ -645,3 +645,24 @@ test "glide op arms and clears the player glide window (ADR 0037)" {
     const dr = w.commands.drain(&w);
     try std.testing.expectEqual(@as(u32, 0), dr.applied);
 }
+
+test "shiftGlideSrcsAfter remaps applied glide attribution after a slot drop" {
+    // Failed middle-plugin reload compact the slot table; an applied glide
+    // from a surviving plugin must follow so withdrawPluginSrc still clears it.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const nid = w.spawnPlayer(0, 70, 0, 0) orelse return error.MissingSpawn;
+    const s = w.slotOfNetId(nid).?;
+    w.player[s].glide_until_tick = 100;
+    w.player[s].glide_src = 3;
+    w.shiftGlideSrcsAfter(2);
+    try std.testing.expectEqual(@as(i16, 2), w.player[s].glide_src);
+    // Native / equal-or-lower srcs are untouched; non-positive dropped is a no-op.
+    w.player[s].glide_src = 1;
+    w.shiftGlideSrcsAfter(2);
+    try std.testing.expectEqual(@as(i16, 1), w.player[s].glide_src);
+    w.player[s].glide_src = 2;
+    w.shiftGlideSrcsAfter(0);
+    try std.testing.expectEqual(@as(i16, 2), w.player[s].glide_src);
+}
