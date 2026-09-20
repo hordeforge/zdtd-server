@@ -92,6 +92,19 @@ jobs:
           restore-keys: |
             zig-cache-${{ runner.os }}-${{ steps.pin.outputs.zig }}-
 
+      # make lint (webui/html) stages pinned bunx packages and the anti-slop
+      # plugin under ~/.cache/zdtd, and bunx itself under ~/.bun/install/cache.
+      # Without this, every CI run re-fetches those pins over the network.
+      - name: Cache webui lint toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/zdtd
+            ~/.bun/install/cache
+          key: webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-${{ hashFiles('scripts/lint-webui.sh', 'scripts/lint-html.sh', 'scripts/webui-ts-project.sh', 'scripts/build-webui-ts.sh', '.oxlintrc.jsonc') }}
+          restore-keys: |
+            webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-
+
       - name: Run validation gate
         run: make check
 

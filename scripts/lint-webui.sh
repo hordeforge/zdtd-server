@@ -64,7 +64,12 @@ bunx --bun -p "typescript@$tsc_version" tsc -p "$webui_ts_project/tsconfig.json"
 #    plugin API the anti-slop source imports; without it the plugin cannot load.
 mkdir -p "$cache_dir"
 if [ ! -d "$cache_dir/anti-slop-src" ]; then
-  curl -fsSL "https://github.com/dmmulroy/anti-slop/archive/$anti_slop_sha.tar.gz" -o "$cache_dir/anti-slop.tar.gz"
+  # --retry: cold CI without a warm ~/.cache/zdtd hits GitHub over the
+  # network; a transient blip must not fail make lint the way bun_add below
+  # already guards registry installs.
+  curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+    "https://github.com/dmmulroy/anti-slop/archive/$anti_slop_sha.tar.gz" \
+    -o "$cache_dir/anti-slop.tar.gz"
   got_sha256="$(sha256sum "$cache_dir/anti-slop.tar.gz" | cut -d' ' -f1)"
   if [ "$got_sha256" != "$anti_slop_sha256" ]; then
     rm -f "$cache_dir/anti-slop.tar.gz"
