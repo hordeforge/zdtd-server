@@ -650,14 +650,13 @@ pub const Server = struct {
                 try self.httpRespond(&req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
                 return;
             }
-            // CSRF: session token (browser form) or shared secret (API tools), same as /api/cmd.
+            // CSRF: session token for cookie sessions; shared secret only with
+            // header auth (machine clients). Same gate as /api/cmd.
             const csrf = formField(body, "csrf") orelse {
                 try self.httpRespond(&req, .forbidden, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n", &.{});
                 return;
             };
-            const sess_ok = constantTimeEql(csrf, self.sessionTok());
-            const secret_ok = constantTimeEql(csrf, self.secret());
-            if (!sess_ok and !secret_ok) {
+            if (!csrfTokenOk(csrf, self.sessionTok(), self.secret(), requestHeaderAuthorizedHttp(&req, self.secret()))) {
                 try self.httpRespond(&req, .forbidden, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n", &.{});
                 return;
             }
@@ -740,9 +739,7 @@ pub const Server = struct {
         const csrf = formField(body, "csrf") orelse formField(body, "token");
         const has_valid_auth_header = requestHeaderAuthorizedHttp(req, self.secret());
         if (csrf) |c| {
-            const sess_ok = constantTimeEql(c, self.sessionTok());
-            const secret_ok = constantTimeEql(c, self.secret());
-            if (!sess_ok and !secret_ok) {
+            if (!csrfTokenOk(c, self.sessionTok(), self.secret(), has_valid_auth_header)) {
                 try self.cmdClientError(req, plain, json, .forbidden, "session expired or invalid; reload the dashboard and try again\n", "<pre class=\"err\">Session expired or invalid. Reload the dashboard and try again.</pre>\n");
                 return;
             }
@@ -1171,6 +1168,17 @@ fn requestHeaderAuthorizedHttp(req: *const http.Server.Request, secret: []const 
         if (constantTimeEql(std.mem.trim(u8, v, " \t"), secret)) return true;
     }
     return false;
+}
+
+/// CSRF check for mutating POSTs. The per-session HMAC token always works.
+/// The shared webui secret is accepted only when the request also carries
+/// header auth (Bearer / X-Zdtd-Secret): machine clients that already proved
+/// the secret. Cookie-only browser sessions must use the session CSRF so a
+/// leaked `--webui-secret` (visible in `ps`) cannot forge POSTs against an
+/// operator's auto-sent session cookie.
+fn csrfTokenOk(csrf: []const u8, session_token: []const u8, secret: []const u8, header_auth: bool) bool {
+    if (constantTimeEql(csrf, session_token)) return true;
+    return header_auth and constantTimeEql(csrf, secret);
 }
 
 /// Routes served for GET/HEAD only. `/partials/*` retired with ADR 0040: they
@@ -1703,10 +1711,9 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         return;
     }
     const csrf = formField(body, "csrf") orelse formField(body, "token");
+    const has_valid_auth_header = requestHeaderAuthorizedHttp(req, self.secret());
     if (csrf) |c| {
-        const sess_ok = constantTimeEql(c, self.sessionTok());
-        const secret_ok = constantTimeEql(c, self.secret());
-        if (!sess_ok and !secret_ok) {
+        if (!csrfTokenOk(c, self.sessionTok(), self.secret(), has_valid_auth_header)) {
             if (json) {
                 try self.modletJsonError(req, .forbidden, "session expired or invalid; reload the dashboard and try again", &.{});
                 return;
@@ -1714,7 +1721,7 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
             try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "session expired or invalid; reload the dashboard and try again\n", &.{});
             return;
         }
-    } else if (!requestHeaderAuthorizedHttp(req, self.secret())) {
+    } else if (!has_valid_auth_header) {
         if (json) {
             try self.modletJsonError(req, .forbidden, "missing security token; reload the dashboard and try again", &.{});
             return;
@@ -1747,16 +1754,14 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         return;
     }
     const disable = std.mem.eql(u8, action, "disable");
-    const known = modlets.setDisabled(self.allocator, name, disable) catch |err| {
+    const known = modlets.setDisabled(self.allocator, name, disable) catch {
+        // Do not echo @errorName to the client: operators get a fixed message;
+        // the concrete failure stays in the process log if the caller adds one.
         if (json) {
-            try self.modletJsonError(req, .internal_server_error, "could not save the modlet state", &.{
-                .{ .name = "X-Zdtd-Error", .value = @errorName(err) },
-            });
+            try self.modletJsonError(req, .internal_server_error, "could not save the modlet state", &.{});
             return;
         }
-        try self.httpRespond(req, .internal_server_error, "text/plain; charset=utf-8", "could not save the modlet state\n", &.{
-            .{ .name = "X-Zdtd-Error", .value = @errorName(err) },
-        });
+        try self.httpRespond(req, .internal_server_error, "text/plain; charset=utf-8", "could not save the modlet state\n", &.{});
         return;
     };
     if (!known) {
@@ -2233,6 +2238,40 @@ test "browser session rejects revoked and renewed cookies" {
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
     s.session_expires_ns = 0;
     try std.testing.expect(!s.sessionValid());
+}
+
+test "cookie session rejects shared secret as CSRF" {
+    // A leaked --webui-secret must not forge POSTs against an operator's
+    // browser cookie; only the per-session CSRF (or header auth) may.
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
+    s.setAdminHandler(&s, testAdminEcho);
+
+    var req_buf: [384]u8 = undefined;
+    const body = "csrf=s3cr3t&line=status";
+    const forged = try std.fmt.bufPrint(
+        &req_buf,
+        "POST /api/cmd HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}",
+        .{ s.session_token, body.len, body },
+    );
+    try testServeHttp(&s, forged);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
+
+    // Same cookie with the session CSRF still works.
+    var body2_buf: [80]u8 = undefined;
+    const body2 = try std.fmt.bufPrint(&body2_buf, "csrf={s}&line=status", .{s.session_token});
+    const ok = try std.fmt.bufPrint(
+        &req_buf,
+        "POST /api/cmd HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}",
+        .{ s.session_token, body2.len, body2 },
+    );
+    try testServeHttp(&s, ok);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "\"ok\":true") != null);
 }
 
 test "POST /login sets session cookie only on valid token" {

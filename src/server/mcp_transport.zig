@@ -229,8 +229,12 @@ pub const Transport = struct {
             try self.httpRespond(&req, .service_unavailable, "text/plain; charset=utf-8", "no mcp module\n", &.{});
             return;
         };
+        // Zero the response scratch before the handler runs so a buggy
+        // FrameFn that returns a length past what it wrote cannot leak
+        // prior stack contents (Heartbleed-class bleed on this buffer).
         var resp_buf: [max_resp]u8 = undefined;
-        const n = ff(self.frame_ctx orelse return error.NoFrameHandler, body, &resp_buf);
+        @memset(&resp_buf, 0);
+        const n = @min(ff(self.frame_ctx orelse return error.NoFrameHandler, body, &resp_buf), resp_buf.len);
         self.served += 1;
         if (n == 0) {
             // Notification / no reply: MCP says 202 Accepted with no body.
@@ -248,13 +252,21 @@ pub const Transport = struct {
         body: []const u8,
         extra: []const http.Header,
     ) !void {
-        var hdrs: [8]http.Header = undefined;
+        var hdrs: [12]http.Header = undefined;
         var n: usize = 0;
         if (content_type.len > 0) {
             hdrs[n] = .{ .name = "Content-Type", .value = content_type };
             n += 1;
         }
         hdrs[n] = .{ .name = "Cache-Control", .value = "no-store" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Content-Type-Options", .value = "nosniff" };
+        n += 1;
+        hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
+        n += 1;
+        hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
+        n += 1;
+        hdrs[n] = .{ .name = "Content-Security-Policy", .value = "default-src 'none'; frame-ancestors 'none'" };
         n += 1;
         hdrs[n] = .{ .name = "Connection", .value = "close" };
         n += 1;
@@ -279,10 +291,10 @@ pub const Transport = struct {
 
     /// Early raw response before std.http.Server is set up.
     fn rawRespond(self: *Transport, status: u16, body: []const u8) void {
-        var hdr: [384]u8 = undefined;
+        var hdr: [512]u8 = undefined;
         const h = std.fmt.bufPrint(
             &hdr,
-            "HTTP/1.1 {d} {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {d} {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
             .{ status, httpReasonPhrase(status), body.len },
         ) catch return;
         const fd = self.client_fd;
@@ -432,6 +444,8 @@ test "mcp transport: POST /mcp round-trips a frame and the response" {
     }
     try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 40\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}");
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "X-Content-Type-Options: nosniff") != null);
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "X-Frame-Options: DENY") != null);
     try std.testing.expect(std.mem.find(u8, t.testResp(), Stub.resp) != null);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", Stub.seen[0..Stub.seen_len]);
     try std.testing.expectEqual(@as(u64, 1), t.served);
