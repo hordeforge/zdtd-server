@@ -1,8 +1,8 @@
 # ADR 0018: Operator WebUI (WU0–WU2 shipped shape)
 
-- **Status:** accepted
+- **Status:** accepted (decision 2 superseded by [0040](0040-webui-preact-json-state.md), 2026-09-18)
 - **Date:** 2026-08-05
-- **Related:** [WEBUI.md](../WEBUI.md), [AUTHORITY.md](../AUTHORITY.md), [APM.md](../APM.md)
+- **Related:** [WEBUI.md](../WEBUI.md), [AUTHORITY.md](../AUTHORITY.md), [APM.md](../APM.md), [0040](0040-webui-preact-json-state.md)
 
 ## Context
 
@@ -16,6 +16,9 @@ implementation settled them.
    custom full HTTP parser beyond accept buffering.
 2. **Assets:** **inline** HTML/CSS/JS in the binary for single-binary ops. Vendor
    htmx/Alpine embed and `/static/*` are WU3 optional; not required for WU0–WU2.
+   **Superseded for the dashboard by [ADR 0040](0040-webui-preact-json-state.md):**
+   the shell is a Preact client over `GET /api/state.json`; `/partials/*` is retired.
+   Decisions 1 and 3–6 below still stand.
 3. **Session:** per-secret **HMAC session token** (not the shared secret) in a
    cookie; form CSRF = same token (shared secret still accepted for API tools).
    The token derives deterministically from the secret (`HMAC(secret, fixed

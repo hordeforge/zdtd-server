@@ -16,7 +16,7 @@ start from [TEMPLATE.md](TEMPLATE.md).
 | [0004](0004-hot-restart.md) | Server hot restart: persistence + operator-session continuity | shipped (v1) |
 | [0005](0005-mod-tiers-and-override.md) | Module tiers and mod override (core vs official vs user mods) | shipped (ADR 0032) |
 | [0006](0006-honk-doors.md) | Vehicle horn opens trader doors | draft (design: RFC 0006) |
-| [0007](0007-deco-suppression.md) | Decoration suppression (AllowDecorations) | draft (design: RFC 0007) |
+| [0007](0007-deco-suppression.md) | Decoration suppression (AllowDecorations) | shipped (2026-09-12; RFC 0007) |
 
 Numbering: 4-digit, zero-padded, never reused - next is **PRD 0008**. PRD and
 RFC numbers pair by addon: the design answering PRD NNNN lives in

@@ -19,12 +19,12 @@ players and the world. It is what quests' `<action type=GameEvent>` elements
 invoke, what challenge reward redemption runs through, and what fires
 blood-moon boss encounters.
 
-zdtd's current implementation of the C2S/S2C surface is a pure echo:
-`src/server/c2s/misc.zig` handles `NetPackageGameEventRequest` by calling
+At the time of this ADR, zdtd's C2S/S2C GameEvent surface was a pure echo:
+`src/server/c2s/misc.zig` handled `NetPackageGameEventRequest` by calling
 `buildGameEventResponse` and sending back exactly what came in, with no
 sequence, no phase machine, no action dispatch anywhere in the tree. The
 `GAP_ANALYSIS.md` row for this ("Game events (GameEventRequest/Response) |
-PARTIAL (ack path)") undersells that: there is no engine at all underneath
+PARTIAL (ack path)") undersold that: there was no engine at all underneath
 the ack.
 
 The forcing question this ADR answers: given 1141 method bodies of stock

@@ -1,17 +1,18 @@
 # Decoration suppression (AllowDecorations) - Product Requirements (PRD 0007)
 
 **Number:** PRD 0007
-**Status:** implemented 2026-09-12
+**Status:** shipped (2026-09-12)
 
 ## 1. Background and problem
 
 Stock V3.2.0 (changelog-3.2.0 §4.5) separates the world-deco-inside-POI
 opt-in from the TraderArea setting: a new prefab `AllowDecorations`
 property (replacing the removed `AllowTopSoilDecorations`) controls whether
-biome world decorations spawn inside the POI's footprint. zdtd already
-parses `AllowDecorations` into prefab quest data (2026-08-28), but the
-deco sampler (`sendDecoAroundSpawn` / the streamed-deco path) has no POI
-footprint gate, so biome trees can currently spawn inside POI buildings.
+biome world decorations spawn inside the POI's footprint. Before this PRD
+shipped, zdtd already parsed `AllowDecorations` into prefab quest data
+(2026-08-28), but the deco sampler (`sendDecoAroundSpawn` / the
+streamed-deco path) had no POI footprint gate, so biome trees could spawn
+inside POI buildings.
 
 ## 2. Personas
 
@@ -52,11 +53,11 @@ See [RFC 0007](../rfc/0007-deco-suppression.md).
 
 G1 -> RFC 0007 §4; G2 -> RFC 0007 §4; G3 -> RFC 0007 §4.
 
-**Status:** implemented 2026-09-12 (see [RFC 0007 §6](../rfc/0007-deco-suppression.md) for the realization; the acceptance criteria below are met, with the lazy per-deco-chunk build in place of the eager map).
+**Status:** shipped 2026-09-12 (see [RFC 0007 §6](../rfc/0007-deco-suppression.md) for the realization; the acceptance criteria below are met, with the lazy per-deco-chunk build in place of the eager map).
 
 ## 7. Open questions
 
-See [RFC 0007 §5](../rfc/0007-deco-suppression.md).
+Resolved; see [RFC 0007 §5](../rfc/0007-deco-suppression.md).
 
 ## 8. Acceptance criteria
 

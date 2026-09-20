@@ -714,11 +714,13 @@ cheap, but re-auditing every claim is a separate, much larger task.
 > The three named consumers re-scoped away: challenges are client-tracked
 > (no server-required challenge wire, scorecard WORKS 2026-08-21), quest
 > `<action type=GameEvent>` elements have zero stock uses, and blood-moon
-> hordes already run through the native director. Per AGENTS rule 29 the
-> remaining execution policy is plugin territory: the boundary now carries
+> hordes already run through the native director. Per AGENTS rule 29
+> discretionary execution policy is plugin territory: the boundary carries
 > the on_game_event verdict hook, and the stock IL=211 sender/party gate
-> landed in the native handler. No native phase machine is built (missing
-> beats fake). The task text below is historical.
+> landed in the native handler. A later carve-out (ADR 0035 amended) runs
+> the stock-required death/respawn subset native from `gameevents.xml`; no
+> general 132-verb phase machine is built (missing beats fake). The task
+> text below is historical.
 
 **Why:** [ADR 0025](adr/0025-gameevent-scoped-interpreter.md). The entire
 `NetPackageGameEventRequest` handler is an echo (`src/server/c2s/misc.zig`

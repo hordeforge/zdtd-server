@@ -1,7 +1,7 @@
 # Decoration suppression (AllowDecorations) - Technical Proposal (RFC 0007)
 
 **Number:** RFC 0007
-**Status:** implemented (2026-09-12), with one realization change
+**Status:** decided (shipped 2026-09-12), with one realization change
 **Source:** `PRD 0007` - the requirements this answers
 
 ## 1. Decision to make
@@ -10,15 +10,15 @@ Which spatial structure gates the deco sampler against POI footprints so
 the V3.2.0 `AllowDecorations` behavior lands without blowing the 50 ms
 tick / join-burst budget?
 
-## 2. Current state
+## 2. Current state (at proposal time)
 
 `AllowDecorations` is parsed into `QuestData` (`world/prefabs.zig`,
-2026-08-28). The deco sampler (`sendDecoAroundSpawn` and the streamed-deco
-path in `server/game/join.zig`) calls a biome species callback per sample
-cell with no POI awareness. The prefab index has `boundsXZ(i)` (O(1) per
-decoration) and a linear `items` walk; a stock map ships ~1500 POIs, and
-the join burst samples thousands of cells, so a per-cell linear scan is
-O(cells x POIs) and out of budget.
+2026-08-28). Before this RFC shipped, the deco sampler (`sendDecoAroundSpawn`
+and the streamed-deco path in `server/game/join.zig`) called a biome species
+callback per sample cell with no POI awareness. The prefab index has
+`boundsXZ(i)` (O(1) per decoration) and a linear `items` walk; a stock map
+ships ~1500 POIs, and the join burst samples thousands of cells, so a
+per-cell linear scan is O(cells x POIs) and out of budget.
 
 ## 3. Options considered
 
@@ -71,12 +71,13 @@ burst.
 
 ## 5. Open questions
 
+Resolved in §6 (2026-09-12):
+
 - Does the stock sampler test the full AABB or the rotated footprint?
-  The 3.2.0 `IsDecorationSuppressedAt` signature is RE-pinned; the exact
-  containment (axis-aligned vs rotated) needs a research check
-  (world-generation.md deco section).
+  Answered by existing `boundsXZ`, which swaps axes for rotations 1/3; the
+  AABB is the rotated footprint as stock's decorator uses it.
 - Should the gate apply to the streamed-deco path identically to the join
-  burst (it should, both go through the same species callback)?
+  burst? Yes: both go through the single `decoSpeciesAt` resolver.
 
 ## 6. What shipped (2026-09-12)
 

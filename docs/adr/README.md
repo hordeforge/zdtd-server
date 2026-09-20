@@ -22,7 +22,7 @@ Status is one of: **accepted**, **superseded**, **deprecated** - a decision stil
 | [0015](0015-ecs-item-id-vs-stock-type.md) | ECS item_id vs stock absolute type (mapping, not dual space) | accepted |
 | [0016](0016-fixedsizecc-false-stream-cgo.md) | fixedSizeCC=false + stream radius for CGO / terrain | accepted |
 | [0017](0017-player-identity-login-name.md) | Player persist identity is login name | superseded by 0038 |
-| [0018](0018-webui-ops-dashboard.md) | Operator WebUI WU0–WU2 shape | accepted |
+| [0018](0018-webui-ops-dashboard.md) | Operator WebUI WU0–WU2 shape | accepted (decision 2 superseded by 0040) |
 | [0019](0019-validation-triad.md) | Validation triad: loadgen + stock client + zdtd apm | accepted |
 | [0020](0020-wasm-only-plugin-api.md) | Wasm-only plugin API | accepted |
 | [0021](0021-config-driven-game-modes.md) | Config-driven game modes: reflected binder, `Rules` struct, hooks for logic | accepted (extends 0010) |
@@ -36,7 +36,7 @@ Status is one of: **accepted**, **superseded**, **deprecated** - a decision stil
 | [0032](0032-module-tiers-and-override.md) | Module tiers and override: core / official mod / user mod, discovery, exclusive override points, mod-replaces-mod | accepted |
 | [0033](0033-perk-spend-verdict.md) | on_perk_spend verdict hook: plugins gate/scale perk spending; the VM stat deltas stay native | accepted |
 | [0034](0034-stat-changed-observer.md) | on_stat_changed observer: plugins observe player stats (survival pass + XP); the sim stays the single authority | accepted |
-| [0035](0035-game-event-verdict.md) | on_game_event verdict hook: plugins gate/customize GameEvents; the IL=211 sender/party gate lands native (supersedes ADR 0025's execution location) | accepted |
+| [0035](0035-game-event-verdict.md) | on_game_event verdict hook: plugins gate/customize GameEvents; the IL=211 sender/party gate lands native; death/respawn sequences run native from `gameevents.xml` (supersedes ADR 0025's execution location for discretionary events) | accepted (amended: death/respawn carve-out) |
 | [0036](0036-malleable-world-geometry.md) | Malleable world geometry: `[rules.geometry]` elevation projection (meters → column, identity at stock) + `[wire] profile` column-height dialects (chunk store/wire/save follow it; non-stock needs a paired client mod) | accepted |
 | [0037](0037-parachute-glide.md) | Parachute glide boundary: sense v4 (vy + wearing_glider), queue verb `glide`, movement-envelope exemption; deceleration stays client-side by design | accepted |
 | [0038](0038-player-persist-platform-identity.md) | Player persist identity is the platform account, not the login name (supersedes 0017) | accepted |
