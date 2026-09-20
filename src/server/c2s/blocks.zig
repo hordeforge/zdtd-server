@@ -389,9 +389,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
             }
             self.noteBlockAdded(b.x, b.y, b.z, place_id);
+            // Sparse block_raw is a write-through mirror of the chunk plane
+            // (GAP 13). Any place that does not store a fresh client raw must
+            // drop a prior hit so blockRawAt cannot echo stale rotation/meta
+            // for a bare-id or downgrade write.
             if (place_id != 0 and b.raw != 0 and place_down_raw == 0) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);
-            } else if (place_id == 0) {
+            } else {
                 self.clearBlockRaw(b.x, b.y, b.z);
             }
             if (cur_id != place_id) {
@@ -512,6 +516,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         //    load puts it back, and it still blocks placement and pathing.
         try self.world.setBlockRawWorld(pk.x, pk.y, pk.z, repl_raw);
         self.clearBlockHp(pk.x, pk.y, pk.z);
+        // Invalidate the sparse raw mirror: the picked cell's prior rotation
+        // must not outlive the chunk write (GAP 13).
+        if (repl_raw != 0) {
+            self.setBlockRaw(pk.x, pk.y, pk.z, repl_raw);
+        } else {
+            self.clearBlockRaw(pk.x, pk.y, pk.z);
+        }
         if (repl_raw == 0) {
             self.noteBlockRemoved(pk.x, pk.y, pk.z, cur_id);
             self.removeClaimAt(pk.x, pk.y, pk.z);

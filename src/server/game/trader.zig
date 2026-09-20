@@ -105,13 +105,17 @@ pub fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, 
                 const meta = packages.blockMeta(raw);
                 const new_meta: u8 = if (closed) meta & ~@as(u8, 0x2) else meta | 0x2;
                 if (new_meta == meta) continue;
-                self.setBlockRaw(bx, y, bz, packages.withBlockMeta(raw, new_meta));
+                const new_raw = packages.withBlockMeta(raw, new_meta);
+                self.setBlockRaw(bx, y, bz, new_raw);
+                // Chunk plane is SoT (GAP 13); keep it aligned with the mirror
+                // so a streamed chunk and a later blockRawAt miss agree.
+                self.world.setBlockRawWorld(bx, y, bz, new_raw) catch {};
                 if (packages.buildSetBlockBodyRaw(
                     self.body_buf[0..96],
                     bx,
                     y,
                     bz,
-                    packages.withBlockMeta(raw, new_meta),
+                    new_raw,
                     0,
                     -1,
                     -1,

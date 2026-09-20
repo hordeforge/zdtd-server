@@ -207,6 +207,12 @@ pub fn broadcastPowerVisuals(self: *Game) void {
         if (n.powered) meta |= packages.block_meta_powered;
         const raw = packages.withBlockMeta(base, meta);
         self.setBlockRaw(n.x, n.y, n.z, raw);
+        // Write through to the chunk plane (GAP 13 SoT): the sparse mirror
+        // alone left streamed chunks and blockRawAt-after-eviction without
+        // the powered/on bits the S2C echo already advertised.
+        self.world.setBlockRawWorld(n.x, n.y, n.z, raw) catch {
+            self.harness.counters.inc(.encode_errors);
+        };
         const dmg = self.getBlockHp(n.x, n.y, n.z);
         const sb = packages.buildSetBlockBodyRaw(self.body_buf[0..96], n.x, n.y, n.z, raw, dmg, -1, -1) catch continue;
         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(n.x), @floatFromInt(n.z), self.interest_range) catch {

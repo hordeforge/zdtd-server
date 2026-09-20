@@ -951,6 +951,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         if (r.ok and r.place_block != 0) {
             try self.world.setBlockWorld(r.place_x, r.place_y, r.place_z, r.place_block);
+            // Drop any prior sparse raw at this cell so a re-place cannot
+            // echo stale rotation/meta over the bare placed id (GAP 13).
+            self.clearBlockRaw(r.place_x, r.place_y, r.place_z);
             // A placed bedroll becomes the player's respawn point (stock
             // bedroll blocks set EntityPlayer.spawnPoint on placement).
             if (self.isBedrollId(r.place_block)) {

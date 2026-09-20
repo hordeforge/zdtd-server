@@ -2283,6 +2283,10 @@ pub fn actuatePoweredDoors(self: *Game) void {
             if (open == n.powered) continue;
             const new_raw = packages.withBlockMeta(raw, if (n.powered) packages.block_meta_on else 0);
             self.world.setBlockRawWorld(n.x, yy, n.z, new_raw) catch continue;
+            // Keep the sparse block_raw mirror coherent with the chunk plane
+            // (GAP 13): a prior SetBlock can leave a closed-door hit that would
+            // otherwise outrank the chunk on the next blockRawAt.
+            self.setBlockRaw(n.x, yy, n.z, new_raw);
             if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], n.x, yy, n.z, new_raw, 0, -1, -1)) |sb| {
                 self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(n.x), @floatFromInt(n.z), self.interest_range) catch {};
             } else |_| {}
@@ -2418,6 +2422,9 @@ pub fn tickZombieBlockDamage(self: *Game) void {
                     if ((packages.blockMeta(raw) & packages.block_meta_on) != 0) continue;
                     const open_raw = packages.withBlockMeta(raw, packages.block_meta_on);
                     self.world.setBlockRawWorld(bx, yy, bz, open_raw) catch continue;
+                    // Same mirror write-through as actuatePoweredDoors: chunk is
+                    // SoT, but a stale sparse hit must not report the door closed.
+                    self.setBlockRaw(bx, yy, bz, open_raw);
                     if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], bx, yy, bz, open_raw, 0, -1, -1)) |sb| {
                         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
                     } else |_| {}

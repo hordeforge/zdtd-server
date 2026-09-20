@@ -177,10 +177,12 @@ pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_m
 pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
 pub const default_interest_range = game_types.default_interest_range;
-/// Sparse block-meta caps: `block_raw` mirrors the chunk raw plane (its
-/// eviction is a cache miss - the chunk is the source of truth, GAP 13).
-/// Partial block damage lives in the chunk damage plane (world/store.zig),
-/// persisted by ZCH3, so it has no game-level cap.
+/// Sparse block-meta caps: `block_raw` is a write-through mirror of the chunk
+/// raw plane (GAP 13). `blockRawAt` prefers a resident chunk over a mirror hit
+/// so a plane-only write cannot serve stale rotation/meta; eviction of a
+/// mirror entry is a cache miss, not content loss. Partial block damage lives
+/// in the chunk damage plane (world/store.zig), persisted by ZCH3, so it has
+/// no game-level cap.
 pub const max_block_raw_entries: usize = 256;
 pub const max_chat_msg_len = game_types.max_chat_msg_len;
 pub const default_min_chat_gap_ns = game_types.default_min_chat_gap_ns;
@@ -630,7 +632,9 @@ pub const Game = struct {
     ban_n: usize = 0,
     /// Sparse BlockValue.rawData (rotation/meta bits) for door/shape fidelity.
     /// The chunk plane is the source of truth (GAP 13); this cache mirrors the
-    /// hot path and its eviction is a cache miss, not content loss.
+    /// hot path write-through. `blockRawAt` prefers a resident chunk over a
+    /// hit so a plane-only writer cannot serve stale meta; eviction is a
+    /// cache miss, not content loss.
     block_raw_key: [max_block_raw_entries]u64 = .{0} ** max_block_raw_entries,
     block_raw: [max_block_raw_entries]u32 = .{0} ** max_block_raw_entries,
     block_raw_n: usize = 0,

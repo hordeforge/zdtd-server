@@ -2102,12 +2102,15 @@ test "power visuals rewrite block meta once per state change" {
     );
 
     // Nothing flipped: the second pass must not touch the block or emit a
-    // packet. blockRawAt falls back to the chunk raw plane on a mirror miss
-    // (see game/world.zig), so the observable is the absence of meta bits, not
-    // a zero raw.
+    // packet. Power visuals write through to the chunk plane (GAP 13), so
+    // clearing the sparse mirror alone leaves the powered bits on the chunk;
+    // the observable is that those bits stay put without a second write.
     g.clearBlockRaw(8, 70, 8);
     replicate_te.broadcastPowerVisuals(g);
-    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
+    try std.testing.expectEqual(
+        packages.block_meta_on | packages.block_meta_powered,
+        packages.blockMeta(g.blockRawAt(8, 70, 8)),
+    );
 
     // Losing power is an edge, so it writes meta 0 again.
     g.sim.power.nodes[ni].powered = false;

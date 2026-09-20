@@ -722,20 +722,23 @@ pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
 }
 
 /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
-/// without meta. The sparse mirror is a bounded cache (oldest entries are
-/// evicted), so on a miss fall back to the chunk raw plane, which is the
-/// source of truth for rotation/meta; reading it keeps a resend or a TE
-/// replicate from reporting a bare id for a rotated block. Resident-only
+/// without meta. The chunk raw plane is the source of truth (GAP 13); the
+/// sparse mirror is a write-through hot path. Prefer a resident chunk over a
+/// mirror hit so a write that updates only the plane cannot leave readers on
+/// a stale rotation/meta. When the chunk is not resident, fall back to the
+/// mirror (warmed by setBlockRaw / blockmeta.zbm). Resident-only
 /// (`chunkAt`, not `getOrCreate`) so a read cannot generate a chunk.
 pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
+    const t = world_store.World.worldToChunk(x, z);
+    if (self.world.chunkAt(t.pos)) |c| {
+        return c.rawAt(t.lx, y, t.lz);
+    }
     const key = packBlockKey(x, y, z);
     var i: usize = 0;
     while (i < self.block_raw_n) : (i += 1) {
         if (self.block_raw_key[i] == key) return self.block_raw[i];
     }
-    const t = world_store.World.worldToChunk(x, z);
-    const c = self.world.chunkAt(t.pos) orelse return 0;
-    return c.rawAt(t.lx, y, t.lz);
+    return 0;
 }
 
 pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
@@ -839,4 +842,29 @@ pub fn findCover(self: *Game, from: [3]f32, threat: [3]f32, dist: f32) ?[3]f32 {
         }
     }
     return best;
+}
+
+test "blockRawAt prefers resident chunk over a stale sparse mirror" {
+    // GAP 13: a plane-only write (door actuate, zombie open) used to leave a
+    // prior SetBlock hit in block_raw that outranked the chunk. Preferring
+    // the resident plane keeps readers coherent even when a write site
+    // forgets the mirror.
+    const io_fs = @import("../../util/io_fs.zig");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/block_raw_cohere", 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const wx: i32 = 4;
+    const wy: i32 = 70;
+    const wz: i32 = 4;
+    const closed = packages.withBlockMeta(world_store.block_stone, 0);
+    const open = packages.withBlockMeta(world_store.block_stone, packages.block_meta_on);
+    try g.world.setBlockRawWorld(wx, wy, wz, closed);
+    g.setBlockRaw(wx, wy, wz, closed);
+    try g.world.setBlockRawWorld(wx, wy, wz, open);
+    // Deliberately leave the mirror on `closed` (the pre-fix door path).
+    try std.testing.expectEqual(open, g.blockRawAt(wx, wy, wz));
+    try std.testing.expectEqual(packages.block_meta_on, packages.blockMeta(g.blockRawAt(wx, wy, wz)));
 }

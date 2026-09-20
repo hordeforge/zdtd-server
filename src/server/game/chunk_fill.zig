@@ -914,6 +914,7 @@ fn tryPlaceStuckDrop(
     // A stuck drop is a placement like any other: whatever its type owns is
     // claimed here rather than left for a later chunk rescan. Debris rows are
     // rarely powered, but the rule is the placement, not the block id.
+    self.clearBlockRaw(x, y, z);
     self.noteBlockAdded(x, y, z, bid);
     if (packages.buildSetBlockBody(self.body_buf[0..64], x, y, z, bid) catch null) |sb| {
         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
