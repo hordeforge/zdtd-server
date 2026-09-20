@@ -137,7 +137,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }
     }
     if (merged_mod_dirs.items.len > 0) {
-        assets_paths.setModDirs(allocator, merged_mod_dirs.items);
+        assets_paths.setModDirs(allocator, merged_mod_dirs.items) catch |err| {
+            util_log.err("zdtd: setModDirs failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
     }
     assets_paths.setOverrideDirs(opts.config_overrides);
     if (opts.config_overrides.len > 0) {

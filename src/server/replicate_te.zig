@@ -222,7 +222,9 @@ pub fn broadcastPowerVisuals(self: *Game) void {
 pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
     const ni = self.sim.power.indexOfPosition(x, y, z) orelse return;
     const node = self.sim.power.nodes[ni];
-    const block_id = self.world.blockWorld(x, y, z) catch return;
+    // World read failure is not "no TE": propagate so callers do not treat a
+    // dropped update as a successful broadcast.
+    const block_id = try self.world.blockWorld(x, y, z);
     const props = self.power_registry.lookup(block_id) orelse return;
     const tt = props.trigger_type orelse return;
     // Wire list is the child edges zdtd tracks; the parent link is undirected
@@ -447,8 +449,9 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
     const l = self.light_te.get(.{ .x = x, .y = y, .z = z }) orelse return;
     // ProcessPackage drops the package when teBlockId disagrees with the
     // block the client holds at the position, so send the real world block
-    // rather than a placeholder.
-    const block_id = self.world.blockWorld(x, y, z) catch return;
+    // rather than a placeholder. Propagate world-read errors (do not report
+    // success after skipping the send).
+    const block_id = try self.world.blockWorld(x, y, z);
     const body = try stock_te.buildLightTeBody(
         self.body_buf[0..4096],
         255,

@@ -330,7 +330,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         }
         {
             const p0 = passives_list.items.len;
-            _ = buffs.scanPassives(
+            // Propagate: a swallowed OOM left recipes without CraftingIngredientCount
+            // / effect_group rows while the catalog still looked loaded.
+            _ = try buffs.scanPassives(
                 arena,
                 arena,
                 body,
@@ -338,7 +340,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
                 &reqs_list,
                 &req_ranges,
                 std.math.maxInt(usize),
-            ) catch {};
+            );
             try ranges.append(arena, .{ p0, passives_list.items.len - p0 });
         }
         // Self-closing or open body tag both mark forge scrap stubs.

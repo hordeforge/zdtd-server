@@ -698,19 +698,36 @@ pub const Table = struct {
                 // beside the binary, so neither the cwd-relative repo paths above
                 // nor the zig-out/bin/../.. walk below can find it.
                 if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ bin_dir, bundled_assignids_name })) |p| {
-                    self.mergeAssignIdsDump(allocator, p) catch {};
+                    // I/O misses are logged/returned inside merge; remaining
+                    // errors (OOM) must not vanish mid-probe.
+                    self.mergeAssignIdsDump(allocator, p) catch |err| {
+                        std.debug.print(
+                            "zdtd: bundled assignids merge {s} failed: {s}\n",
+                            .{ p, @errorName(err) },
+                        );
+                    };
                     if (self.id_by_name.count() > 0) return;
                 } else |_| {}
                 if (std.fs.path.dirname(bin_dir)) |out_dir| {
                     if (std.fs.path.dirname(out_dir)) |root| {
                         if (std.fmt.bufPrint(&path_buf, "{s}/src/assets/{s}", .{ root, bundled_assignids_name })) |p| {
                             // Best-effort bundled dump; missing path is fine (logged inside on real I/O errors).
-                            self.mergeAssignIdsDump(allocator, p) catch {};
+                            self.mergeAssignIdsDump(allocator, p) catch |err| {
+                                std.debug.print(
+                                    "zdtd: bundled assignids merge {s} failed: {s}\n",
+                                    .{ p, @errorName(err) },
+                                );
+                            };
                             if (self.id_by_name.count() > 0) return;
                         } else |_| {}
                         if (std.fmt.bufPrint(&path_buf, "{s}/assets/fixtures/assignids_v314.txt", .{root})) |p| {
                             // Best-effort fixture dump when not under src/assets layout.
-                            self.mergeAssignIdsDump(allocator, p) catch {};
+                            self.mergeAssignIdsDump(allocator, p) catch |err| {
+                                std.debug.print(
+                                    "zdtd: bundled assignids merge {s} failed: {s}\n",
+                                    .{ p, @errorName(err) },
+                                );
+                            };
                         } else |_| {}
                     }
                 }

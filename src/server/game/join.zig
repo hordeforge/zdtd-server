@@ -714,7 +714,9 @@ pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
     if (n == 0) return;
     var map_buf: [2048]u8 = undefined;
     const payload = try packages.buildNameIdMappingPayload(&map_buf, rows[0..n]);
-    const body = packages.buildIdMappingBody(&self.body_buf, "items", payload) catch return;
+    // Critical join package: a silent `catch return` here reported success to
+    // the join SM while the client never received the item id map.
+    const body = try packages.buildIdMappingBody(&self.body_buf, "items", payload);
     try self.sendGameCritical(peer, "NetPackageIdMapping", body);
 }
 

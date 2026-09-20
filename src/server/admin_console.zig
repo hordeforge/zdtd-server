@@ -449,7 +449,12 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
         if (peer_i >= 0) self.resetMoveEnvelopePeer(@intCast(peer_i), cx, cy, cz);
     }
     const entity_id = self.sim.netId(ps);
-    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch return;
+    // Sim already moved above; encode failure must not look like a successful
+    // tele (operator would assume the client followed).
+    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch {
+        out.line("teleport encode failed (sim position updated; client may desync)");
+        return;
+    };
     self.broadcast("NetPackageEntityTeleport", body) catch {};
     out.linef("teleported to {d:.0} {d:.0} {d:.0}", .{ cx, cy, cz });
 }

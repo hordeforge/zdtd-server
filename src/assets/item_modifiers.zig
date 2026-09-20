@@ -161,7 +161,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
         const stack = if (xml.propertyValue(body, "Stacknumber")) |v| xml.parseU16(v) orelse 1 else 1;
         const has_quality = xml.hasTieredEffectGroup(body);
         const p0 = passives_list.items.len;
-        _ = buffs.scanPassives(
+        // Match items.xml / buffs.xml: fail the load instead of shipping mods
+        // whose effect_group rows were silently dropped mid-parse.
+        _ = try buffs.scanPassives(
             arena,
             arena,
             clean[gt + 1 .. end],
@@ -169,7 +171,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
             &reqs_list,
             &req_ranges,
             std.math.maxInt(usize),
-        ) catch {};
+        );
         try ranges.append(arena, .{ p0, passives_list.items.len - p0 });
         try defs.append(arena, .{
             .name = try arena.dupe(u8, name),

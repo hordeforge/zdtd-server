@@ -41,23 +41,28 @@ fn freeOwnedModDirs(allocator: std.mem.Allocator, owned: []mods.ModDir, n: usize
     allocator.free(owned);
 }
 
-pub fn setModDirs(allocator: std.mem.Allocator, dirs: []const mods.ModDir) void {
-    deinitModDirs(allocator);
-    if (dirs.len == 0) return; // deinitModDirs already cleared the vars
-    const owned = allocator.alloc(mods.ModDir, dirs.len) catch return;
+/// Install the modlet Config/ dir list used by patched catalog loads.
+/// Clears any previous list. On allocation failure the previous list is left
+/// intact (fail closed): a silent empty `mod_dirs` would drop every modlet
+/// patch and still look like a clean boot.
+pub fn setModDirs(allocator: std.mem.Allocator, dirs: []const mods.ModDir) !void {
+    if (dirs.len == 0) {
+        deinitModDirs(allocator);
+        return;
+    }
+    const owned = try allocator.alloc(mods.ModDir, dirs.len);
+    errdefer allocator.free(owned);
     var filled: usize = 0;
+    errdefer freeOwnedModDirs(allocator, owned, filled);
     for (dirs, 0..) |d, idx| {
-        owned[idx].config_dir = allocator.dupe(u8, d.config_dir) catch {
-            freeOwnedModDirs(allocator, owned, filled);
-            return;
-        };
-        owned[idx].mod_path = allocator.dupe(u8, d.mod_path) catch {
+        owned[idx].config_dir = try allocator.dupe(u8, d.config_dir);
+        owned[idx].mod_path = allocator.dupe(u8, d.mod_path) catch |err| {
             allocator.free(owned[idx].config_dir);
-            freeOwnedModDirs(allocator, owned, filled);
-            return;
+            return err;
         };
         filled = idx + 1;
     }
+    deinitModDirs(allocator);
     mod_dirs_owned = owned;
     mod_dirs = owned;
 }
@@ -209,4 +214,21 @@ test "resolveConfigXml prefers config_dir" {
     try std.testing.expectEqualStrings("/cfg/blocks.xml", p);
     const p2 = resolveConfigXml(&buf, "blocks.xml", "/game", null).?;
     try std.testing.expectEqualStrings("/game/Data/Config/blocks.xml", p2);
+}
+
+test "setModDirs leaves prior list intact on OOM" {
+    const a = std.testing.allocator;
+    defer deinitModDirs(a);
+    const first = [_]mods.ModDir{.{ .config_dir = "/a/Config", .mod_path = "/a" }};
+    try setModDirs(a, &first);
+    try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
+    try std.testing.expectEqualStrings("/a/Config", mod_dirs[0].config_dir);
+
+    // FailAllocator rejects every allocation: setModDirs must not clear the
+    // installed list when it cannot install the replacement.
+    var failing = std.testing.FailingAllocator.init(a, .{ .fail_index = 0 });
+    const second = [_]mods.ModDir{.{ .config_dir = "/b/Config", .mod_path = "/b" }};
+    try std.testing.expectError(error.OutOfMemory, setModDirs(failing.allocator(), &second));
+    try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
+    try std.testing.expectEqualStrings("/a/Config", mod_dirs[0].config_dir);
 }

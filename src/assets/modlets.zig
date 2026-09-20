@@ -219,26 +219,53 @@ fn parseModInfo(folder: []const u8, info: []const u8) ?struct {
 
 /// Load the disabled list from `path` (replacing the in-memory set). Missing
 /// file = nothing disabled. Malformed lines are skipped, not fatal: the file
-/// is operator-editable.
+/// is operator-editable. On I/O or OOM failure the previous list is left
+/// intact (fail closed): clearing first then aborting would re-enable every
+/// disabled modlet with no operator signal.
 fn loadDisabled(allocator: std.mem.Allocator, path: []const u8) void {
     disabled_lock.lock();
     defer disabled_lock.unlock();
     const al = state_alloc orelse allocator;
-    for (disabled.items) |d| al.free(d);
-    disabled.clearRetainingCapacity();
-    const raw = io_fs.readFileAll(allocator, path) catch return;
+    const raw = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
+        error.FileNotFound => {
+            for (disabled.items) |d| al.free(d);
+            disabled.clearRetainingCapacity();
+            return;
+        },
+        else => {
+            util_log.err(
+                "zdtd: load modlet disabled list {s} failed: {s}\n",
+                .{ path, @errorName(err) },
+            );
+            return;
+        },
+    };
     defer allocator.free(raw);
+
+    var next: std.ArrayListUnmanaged([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, raw, '\n');
     while (it.next()) |line_raw| {
         const line = std.mem.trim(u8, line_raw, " \t\r");
         if (line.len == 0 or line[0] == '#') continue;
         if (isDisabledLocked(line)) continue;
-        const dup = al.dupe(u8, line) catch return;
-        disabled.append(al, dup) catch {
+        const dup = al.dupe(u8, line) catch {
+            util_log.err("zdtd: load modlet disabled list {s}: out of memory\n", .{path});
+            for (next.items) |d| al.free(d);
+            next.deinit(al);
+            return;
+        };
+        next.append(al, dup) catch {
             al.free(dup);
+            util_log.err("zdtd: load modlet disabled list {s}: out of memory\n", .{path});
+            for (next.items) |d| al.free(d);
+            next.deinit(al);
             return;
         };
     }
+
+    for (disabled.items) |d| al.free(d);
+    disabled.deinit(al);
+    disabled = next;
 }
 
 /// Write the disabled list to `state_path` (create/overwrite). Caller holds no

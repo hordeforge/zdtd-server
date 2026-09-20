@@ -161,7 +161,17 @@ pub const Store = struct {
     pub fn loadCleared(self: *Store, allocator: std.mem.Allocator, world_dir: []const u8) void {
         var path_buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{world_dir}) catch return;
-        const raw = io_fs.readFileAll(allocator, path) catch return;
+        const raw = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
+            // Missing file = fresh world; other I/O must not look the same.
+            error.FileNotFound => return,
+            else => {
+                std.debug.print(
+                    "zdtd: load sleepers_cleared {s} failed: {s}\n",
+                    .{ path, @errorName(err) },
+                );
+                return;
+            },
+        };
         defer allocator.free(raw);
         // Header is 9 bytes: 5-byte magic + u32 count. An 8-byte file passed
         // the old `< 8` check and then sliced raw[5..9] one past the end.
@@ -252,7 +262,16 @@ pub const Store = struct {
     pub fn loadTriggered(self: *Store, allocator: std.mem.Allocator, world_dir: []const u8) void {
         var path_buf: [512]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/sleepers_triggered.zst", .{world_dir}) catch return;
-        const raw = io_fs.readFileAll(allocator, path) catch return;
+        const raw = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => {
+                std.debug.print(
+                    "zdtd: load sleepers_triggered {s} failed: {s}\n",
+                    .{ path, @errorName(err) },
+                );
+                return;
+            },
+        };
         defer allocator.free(raw);
         if (raw.len < 9 or !std.mem.eql(u8, raw[0..5], "ZSTG1")) return;
         const n = std.mem.readInt(u32, raw[5..9], .little);
