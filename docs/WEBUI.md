@@ -105,16 +105,16 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
 | Audit log | In-memory ring (24 lines) carried in `/api/state.json` as `console`; file log not implemented |
 | Read vs write | GET routes need auth; POST cmds need auth + CSRF |
-| Transfer encoding | Text bodies over 1 KiB are gzip-compressed when the client sends `Accept-Encoding: gzip` (`gzip;q=0` refuses it), with `Vary: Accept-Encoding`; a compression failure falls back to the plain body. The dashboard drops from ~71 KiB to ~23 KiB, `/api/state.json` from ~3.3 KiB to ~1.1 KiB |
+| Transfer encoding | Text over 1 KiB is gzip'd when `Accept-Encoding` allows it (`Vary: Accept-Encoding`; failure keeps the plain body). Shell: one gzip per session (~73→~23 KiB). JSON polls: fastest deflate (~3.3→~1.1 KiB). `/favicon.svg`: `public, max-age=604800, immutable`; other responses `no-store` |
 
 **Do not** expose webui on public WAN without TLS + strong secret + firewall.
 Document that loudly in README / GAME_OPTIONS.
 
 ## Information architecture (pages)
 
-Shell: header and nav plus an app mount point. The Preact app fetches
-`GET /api/state.json` once per poll and renders every panel from it; tab
-selection is client state carried in the URL hash.
+Shell: header, nav, and an `#app` mount that paints "Loading dashboard…" before
+the Preact bundle runs. The app polls `GET /api/state.json` and renders every
+panel from it; tab selection is client state in the URL hash.
 
 | Route | Purpose | Data source |
 |---|---|---|

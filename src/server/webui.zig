@@ -212,8 +212,15 @@ pub const Server = struct {
     recv_len: usize = 0,
     snap: Snapshot = .{},
     set_cookie: bool = false,
-    /// Game allocator for mutating admin routes (modlet state file).
+    /// Game allocator for mutating admin routes (modlet state file) and the
+    /// session-scoped shell gzip cache (see `shell_gz`).
     allocator: std.mem.Allocator = std.heap.page_allocator,
+    /// Last gzip of GET `/` for the current session token. The shell is ~73 KiB
+    /// plain / ~23 KiB gzip and is served on every dashboard load; recompressing
+    /// it per request burns tick-thread CPU for bytes that only change when the
+    /// session token does. Freed on logout, re-login, and deinit.
+    shell_gz: ?[]u8 = null,
+    shell_gz_for: [session_token_hex_len]u8 = .{0} ** session_token_hex_len,
     /// Queued console line (legacy drain path; POST prefers admin_fn same-request).
     cmd_pending: bool = false,
     cmd_line_buf: [max_cmd_line]u8 = undefined,
@@ -294,6 +301,29 @@ pub const Server = struct {
         self.secret_len = 0;
         @memset(&self.session_token, '0');
         self.session_expires_ns = 0;
+        self.clearShellGz();
+    }
+
+    fn clearShellGz(self: *Server) void {
+        if (self.shell_gz) |buf| {
+            self.allocator.free(buf);
+            self.shell_gz = null;
+        }
+        @memset(&self.shell_gz_for, 0);
+    }
+
+    /// Gzip the dashboard shell, reusing the prior result while the session
+    /// token is unchanged. Caller must not free the returned slice.
+    fn ensureShellGzip(self: *Server, plain: []const u8) error{ OutOfMemory, NoSpaceLeft }![]const u8 {
+        const tok = self.sessionTok();
+        if (self.shell_gz) |cached| {
+            if (std.mem.eql(u8, &self.shell_gz_for, tok)) return cached;
+            self.clearShellGz();
+        }
+        const packed_body = try gzipAlloc(self.allocator, plain, flate.Compress.Options.default);
+        self.shell_gz = packed_body;
+        @memcpy(&self.shell_gz_for, tok);
+        return packed_body;
     }
 
     fn secret(self: *const Server) []const u8 {
@@ -321,6 +351,8 @@ pub const Server = struct {
         }
         fillSessionToken(self.secret(), &nonce, &self.session_token);
         self.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
+        // New CSRF in the shell; drop any prior gzip so the next GET / rebuilds.
+        self.clearShellGz();
     }
 
     fn loginLocked(self: *const Server) bool {
@@ -513,7 +545,13 @@ pub const Server = struct {
                 return;
             }
             const body_svg: []const u8 = if (method == .HEAD) "" else favicon_svg;
-            try self.httpRespond(&req, .ok, "image/svg+xml; charset=utf-8", body_svg, &.{});
+            // Compile-time embed: the URL never changes without a binary rebuild,
+            // so browsers may keep it for a week instead of re-fetching on every
+            // sign-in / dashboard load (loopback still, but one fewer round trip
+            // when the tab already has it).
+            try self.httpRespond(&req, .ok, "image/svg+xml; charset=utf-8", body_svg, &.{
+                .{ .name = "Cache-Control", .value = "public, max-age=604800, immutable" },
+            });
             return;
         }
 
@@ -708,7 +746,19 @@ pub const Server = struct {
                 return;
             }
             if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderShell(&body_buf, self.sessionTok()), &.{});
+                const plain = try renderShell(&body_buf, self.sessionTok());
+                // Prefer the session-scoped gzip cache when the client asks for
+                // it: one compress per session instead of one per load.
+                if (plain.len >= gzip_min_bytes and acceptsGzip(req.head_buffer)) {
+                    if (self.ensureShellGzip(plain)) |gz| {
+                        try self.httpRespond(&req, .ok, "text/html; charset=utf-8", gz, &.{
+                            .{ .name = "Content-Encoding", .value = "gzip" },
+                            .{ .name = "Vary", .value = "Accept-Encoding" },
+                        });
+                        return;
+                    } else |_| {}
+                }
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", plain, &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/api/state.json")) {
@@ -906,8 +956,11 @@ pub const Server = struct {
         var n: usize = 0;
         hdrs[n] = .{ .name = "Content-Type", .value = content_type };
         n += 1;
-        hdrs[n] = .{ .name = "Cache-Control", .value = "no-store" };
-        n += 1;
+        // Callers may override (favicon is immutable; everything else stays no-store).
+        if (!headerListHas(extra, "Cache-Control")) {
+            hdrs[n] = .{ .name = "Cache-Control", .value = "no-store" };
+            n += 1;
+        }
         appendSecurityHeaders(&hdrs, &n);
         hdrs[n] = .{ .name = "Connection", .value = "close" };
         n += 1;
@@ -924,12 +977,20 @@ pub const Server = struct {
         }
         // Negotiated gzip. Only text bodies over the threshold, and a failed
         // compression falls back to the plain body rather than a 500: the page
-        // is more important than the wire size.
+        // is more important than the wire size. Skip when the caller already
+        // supplied Content-Encoding (session-cached shell gzip).
         var out_body = body;
         var gz: ?[]u8 = null;
         defer if (gz) |buf| self.allocator.free(buf);
-        if (body.len >= gzip_min_bytes and isCompressibleType(content_type) and acceptsGzip(req.head_buffer)) {
-            if (gzipAlloc(self.allocator, body)) |buf| {
+        const pre_encoded = headerListHas(extra, "Content-Encoding");
+        if (!pre_encoded and body.len >= gzip_min_bytes and isCompressibleType(content_type) and acceptsGzip(req.head_buffer)) {
+            // JSON polls every 1–5 s on the open dashboard: cheap level. HTML
+            // login/lockout pages are rare; default level pays for the bytes.
+            const level = if (std.mem.startsWith(u8, content_type, "application/json"))
+                flate.Compress.Options.fastest
+            else
+                flate.Compress.Options.default;
+            if (gzipAlloc(self.allocator, body, level)) |buf| {
                 gz = buf;
                 out_body = buf;
                 hdrs[n] = .{ .name = "Content-Encoding", .value = "gzip" };
@@ -975,6 +1036,7 @@ pub const Server = struct {
         self.session_expires_ns = 0;
         @memset(&self.session_token, '0');
         self.set_cookie = false;
+        self.clearShellGz();
         try req.respond("", .{
             .status = .see_other,
             .keep_alive = false,
@@ -1099,6 +1161,14 @@ fn qualityZero(params: []const u8) bool {
     return false;
 }
 
+/// True when `extra` already carries a header of this name (case-insensitive).
+fn headerListHas(extra: []const http.Header, name: []const u8) bool {
+    for (extra) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, name)) return true;
+    }
+    return false;
+}
+
 /// gzip a response body; the caller owns the returned bytes.
 ///
 /// Admin path only, and the 64 KiB deflate window is heap-allocated so nothing
@@ -1106,7 +1176,7 @@ fn qualityZero(params: []const u8) bool {
 /// request-controlled text is the only thing compressed, and the CSRF token
 /// never shares a response with input an attacker can shape, so the usual
 /// compression oracle does not apply.
-fn gzipAlloc(allocator: std.mem.Allocator, body: []const u8) error{ OutOfMemory, NoSpaceLeft }![]u8 {
+fn gzipAlloc(allocator: std.mem.Allocator, body: []const u8, opts: flate.Compress.Options) error{ OutOfMemory, NoSpaceLeft }![]u8 {
     const window = try allocator.alloc(u8, flate.max_window_len);
     defer allocator.free(window);
     // Fixed sink, like the wire framer: gzip adds an 18-byte container plus a
@@ -1115,7 +1185,7 @@ fn gzipAlloc(allocator: std.mem.Allocator, body: []const u8) error{ OutOfMemory,
     const out = try allocator.alloc(u8, cap);
     errdefer allocator.free(out);
     var sink: std.Io.Writer = .fixed(out);
-    var comp = flate.Compress.init(&sink, window, .gzip, .default) catch return error.NoSpaceLeft;
+    var comp = flate.Compress.init(&sink, window, .gzip, opts) catch return error.NoSpaceLeft;
     comp.writer.writeAll(body) catch return error.NoSpaceLeft;
     comp.finish() catch return error.NoSpaceLeft;
     const n = sink.end;
@@ -2407,6 +2477,8 @@ test "favicon is served before auth and mirrors HEAD" {
     const resp = s.testResp();
     try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Content-Type: image/svg+xml; charset=utf-8") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: public, max-age=604800, immutable") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: no-store") == null);
     try std.testing.expect(std.mem.find(u8, resp, "<svg ") != null);
     try testServeHttp(&s, "HEAD /favicon.svg HTTP/1.1\r\n\r\n");
     const head_resp = s.testResp();
@@ -2480,7 +2552,7 @@ test "acceptsGzip reads the negotiated coding and its q value" {
 
 test "gzipAlloc round-trips a body through the gzip container" {
     const body = "zdtd operator console: " ** 64;
-    const packed_body = try gzipAlloc(std.testing.allocator, body);
+    const packed_body = try gzipAlloc(std.testing.allocator, body, flate.Compress.Options.default);
     defer std.testing.allocator.free(packed_body);
     try std.testing.expect(packed_body.len < body.len);
     try std.testing.expectEqual(@as(u8, 0x1f), packed_body[0]);
@@ -2495,6 +2567,7 @@ test "gzipAlloc round-trips a body through the gzip container" {
 
 test "GET / gzips the shell only when the client asks for it" {
     var s: Server = .{};
+    defer s.clearShellGz();
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
     const nonce = [_]u8{0x5a} ** 32;
@@ -2515,6 +2588,14 @@ test "GET / gzips the shell only when the client asks for it" {
     try std.testing.expect(n > 0);
     try std.testing.expect(std.mem.endsWith(u8, plain_buf[0..n], "</html>"));
     try std.testing.expect(std.mem.find(u8, plain_buf[0..n], "__ZDTD_") == null);
+    // Session cache: a second gzip GET must reuse the same packed bytes (pointer
+    // equality on the server cache, same wire length on the capture).
+    const cached_ptr = s.shell_gz orelse return error.TestUnexpectedResult;
+    try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept-Encoding: gzip\r\n\r\n");
+    try std.testing.expect(s.shell_gz.?.ptr == cached_ptr.ptr);
+    const gz2 = s.testResp();
+    const gz2_body = gz2[(std.mem.indexOf(u8, gz2, "\r\n\r\n") orelse unreachable) + 4 ..];
+    try std.testing.expectEqual(gz_body.len, gz2_body.len);
     // A truncation bug would slip through a body-only check: the compressed
     // response must also be smaller than the uncompressed one.
     var s2: Server = .{};
