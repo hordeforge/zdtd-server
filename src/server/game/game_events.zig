@@ -79,7 +79,7 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
             },
             // Item actions and AddXPDeficit have no server-side work; the
             // response above is the whole server leg.
-            .remove_items, .add_starting_items, .add_xp_deficit => {},
+            .remove_items, .add_starting_items, .add_items, .add_xp_deficit => {},
         }
         if (assets_gameevents.isClientAction(a.class)) {
             sendClientSequenceAction(self, peer_slot, name, entity_id, idx);

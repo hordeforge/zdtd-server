@@ -1486,7 +1486,7 @@ test "offline init failure restores deterministic sim globals" {
         std.testing.allocator,
         ".zdtd_cfg_cache/dst_init_failure",
         0,
-        .{ .webui_port = 1, .enable_sample_plugin = false },
+        .{ .webui_port = 1 },
     ));
     try std.testing.expect(!util_sim.isEnabled());
 }
@@ -1555,7 +1555,6 @@ test "offline steps replay same world_time for same seed" {
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
             .worldgen_seed = 99,
-            .enable_sample_plugin = false,
         });
         defer {
             g.deinit();
@@ -1569,7 +1568,6 @@ test "offline steps replay same world_time for same seed" {
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
             .worldgen_seed = 99,
-            .enable_sample_plugin = false,
         });
         defer {
             g.deinit();
@@ -1606,7 +1604,6 @@ test "same seed replays identical outbound wire history (byte diff)" {
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir_a, 0, .{
             .worldgen_seed = 0xBAD_5EED,
-            .enable_sample_plugin = false,
         });
         defer {
             g.deinit();
@@ -1619,7 +1616,6 @@ test "same seed replays identical outbound wire history (byte diff)" {
     {
         const g = try Game.createWithOptions(std.testing.allocator, dir_b, 0, .{
             .worldgen_seed = 0xBAD_5EED,
-            .enable_sample_plugin = false,
         });
         defer {
             g.deinit();
@@ -1645,9 +1641,7 @@ test "ban expiry under virtual wall is seed-stable" {
     // Offline Game enables the virtual clock: wallSeconds must not sample host
     // REALTIME or ban add/expire cannot replay from a seed.
     io_fs.mkdirPath(".zdtd_cfg_cache");
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_ban_wall", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/dst_ban_wall", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -1666,9 +1660,7 @@ test "world clock persists across a restart (BM calendar survives)" {
     io_fs.mkdirPath(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/clock_persist";
     {
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
         defer {
             g.deinit();
             std.testing.allocator.destroy(g);
@@ -1678,9 +1670,7 @@ test "world clock persists across a restart (BM calendar survives)" {
         g.sim.director.clock.hours = 12.5;
     }
     {
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
         defer {
             g.deinit();
             std.testing.allocator.destroy(g);
@@ -1698,9 +1688,7 @@ test "world clock persists across a restart (BM calendar survives)" {
 
         // Shorter than the 12-byte ZCL1 head: rejected, clock left untouched.
         try io_fs.writeFile(p, "ZCL2\x00\x00");
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
         defer {
             g.deinit();
             std.testing.allocator.destroy(g);
@@ -1723,9 +1711,7 @@ test "world clock persists across a restart (BM calendar survives)" {
         // Day 3 = (3 - 1) * 24000 world-time units.
         std.mem.writeInt(u64, zcl1[4..12], 2 * 24000, .little);
         try io_fs.writeFile(p, &zcl1);
-        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-            .enable_sample_plugin = false,
-        });
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
         defer {
             g.deinit();
             std.testing.allocator.destroy(g);
@@ -1739,9 +1725,7 @@ test "world clock persists across a restart (BM calendar survives)" {
 test "setgamepref applies runtime GameStats prefs and broadcasts" {
     io_fs.mkdirPath(".zdtd_cfg_cache");
     const dir = ".zdtd_cfg_cache/pref_set_test";
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -1801,9 +1785,7 @@ test "sleeper scan job batch matches the serial pass" {
 }
 
 test "path step hook sees walls and terrain, and the snapshot agrees" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_snap", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_snap", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -1844,9 +1826,7 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
 
 test "parallel solid/water probes share one world without corruption" {
     if (@import("builtin").single_threaded) return error.SkipZigTest;
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_hooks_par", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_hooks_par", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -1934,9 +1914,7 @@ test "deco suppression follows the prefab AllowDecorations property" {
 }
 
 test "deco burst is biome driven and mirrors into the block store" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -2001,9 +1979,7 @@ test "deco burst is biome driven and mirrors into the block store" {
 }
 
 test "zombie chases over real terrain and stays on the surface" {
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/path_terrain", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/path_terrain", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -2031,7 +2007,6 @@ test "zombie chases over real terrain and stays on the surface" {
 
 test "[perf] switches run on the live step path" {
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/perf_switches", 0, .{
-        .enable_sample_plugin = false,
         .async_chunk_flush = true,
         .terrain_snapshot = true,
         .job_batches = true,
@@ -2055,9 +2030,7 @@ test "[perf] switches run on the live step path" {
 
 test "power visuals rewrite block meta once per state change" {
     io_fs.mkdirPath(".zdtd_cfg_cache");
-    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/power_visuals", 0, .{
-        .enable_sample_plugin = false,
-    });
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/power_visuals", 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3040,7 +3013,7 @@ test "waypoint invites relay to allies (Friends) and all (Everyone)" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3111,7 +3084,7 @@ test "game message relays verbatim to all clients including sender" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3159,7 +3132,7 @@ test "sound at position relays to all clients except the owning player" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3210,7 +3183,7 @@ test "entity award kill server is handled without re-crediting kills" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3236,7 +3209,7 @@ test "platform-id ban rejects a rejoin with the same identity" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3260,7 +3233,7 @@ test "whitelist gates the join: listed and admins enter, others are denied" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3288,7 +3261,7 @@ test "admin target key uses the platform id for an online session" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3318,7 +3291,6 @@ test "reserved and admin slots let privileged players join a full server" {
         .reserved_slots_permission = 0,
         .admin_slots = 1,
         .admin_slots_permission = 5,
-        .enable_sample_plugin = false,
     });
     defer {
         g.deinit();
@@ -3362,7 +3334,6 @@ test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
     try io_fs.writeFile(sa_path, xml_v1);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .serveradmin_path = sa_path,
-        .enable_sample_plugin = false,
     });
     defer {
         g.deinit();
@@ -3395,7 +3366,7 @@ test "particle effects relay to all clients except the causing owner; stealth is
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3469,7 +3440,7 @@ test "quest goto/treasure point reports are handled without double-completion" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3497,7 +3468,7 @@ test "entity physics report is handled without touching the sim" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3518,7 +3489,7 @@ test "entity ragdoll relays to other clients, not the owner" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3624,7 +3595,7 @@ test "in-game console runs admin verbs for admins, denies players" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3678,7 +3649,7 @@ test "quest objective events mirror to party members" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -3761,7 +3732,7 @@ test "poi lockout reports bedroll and land claim homes" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -4571,6 +4542,52 @@ test "NightStalker steal heals on hit (HealthSteal passive 167)" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), g.healthGainLossMult(cl.slot, "HealthSteal"), 0.0001);
 }
 
+test "held torch burn proc lands on the victim" {
+    // Held-item `onSelfAttackedOther` rows: the torch's Fire Proc group adds
+    // buffBurningElement to the victim on a hit (RandomRoll ≤ 30 per hit +
+    // `_underwater` gate; `_underwater` unset reads 0 → passes). Sweep hits
+    // like the Dentist test; the victim sink applies the target=other add.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const torch = g.items.byName("meleeToolTorch") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, torch.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == torch.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = torch.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    try std.testing.expect(torch.triggered.len > 0);
+    const burn_id = g.buffs.indexOfName("buffBurningElement").?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    var landed = false;
+    var k: u32 = 0;
+    while (k < 4000 and !landed) : (k += 1) {
+        g.tick_n += 1;
+        g.fireAttackedOther(ps, zs, 0);
+        if (g.sim.buffs[zs].find(burn_id) != null) landed = true;
+    }
+    try std.testing.expect(landed);
+}
+
 test "Boomstick stun lands on the victim (target=other AddBuff)" {
     // `onSelfAttackedOther` AddBuff rows with `target="other"` apply to the
     // victim (shotgun stuns), not the attacker. perkBoomstick 0 fires
@@ -4730,6 +4747,1150 @@ test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
     try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".PummelPeteCombo"), 0.001);
     g.fireAttackedOther(ps, zs, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 2), cl.cvars.get(".PummelPeteCombo"), 0.001);
+}
+
+test "victim-directed cvar writes land on player victims" {
+    // `target="other"` ModifyCVar rows write the victim's store when the
+    // victim is a player: PistolPeteComplete's bleedCounter add fires on a
+    // player victim (zombie victims stay recorded-only, no cvar store).
+    // Held 9mm pistol gates the group; victim in range.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    const vs = g.sim.playerByPeer(cb.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPistolPeteComplete")) {
+            ca.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    ca.skill_level_n = 1;
+    const pistol = g.items.byName("gunHandgunT0PipePistol") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, ca.slot, pistol.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == pistol.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = pistol.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.sim.transform[ps] = .{ .x = 256, .y = 70, .z = 256, .yaw = 0 };
+    g.sim.transform[vs] = .{ .x = 257, .y = 70, .z = 256, .yaw = 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cb.cvars.get("bleedCounter"), 0.001);
+    g.fireAttackedOther(ps, vs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cb.cvars.get("bleedCounter"), 0.001);
+    // Attacker's own store is untouched by the victim-directed row.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), ca.cvars.get("bleedCounter"), 0.001);
+}
+
+test "zombie fist infection lands on player victim" {
+    // Attacker class hand_item rows: meleeHandZombie01's ungated
+    // onSelfAttackedOther ModifyCVar add 10 to infectionCounter on the
+    // target=other (the player victim), remapped onto the player's store.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_v: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap_v);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    // The effect group gates on the victim already being infected
+    // (CVarCompare infectionCounter GT 0 target=other): zombies escalate
+    // existing infection, never start it. Seed 1 first.
+    _ = cl.cvars.apply("infectionCounter", .set, 1);
+    g.fireAttackedSelf(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 11), cl.cvars.get("infectionCounter"), 0.001);
+    g.fireAttackedSelf(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 21), cl.cvars.get("infectionCounter"), 0.001);
+}
+
+test "zombie victim carries bleedCounter through the cvar column" {
+    // Zombie victims now own a lazy cvar store like stock EntityBuffs:
+    // PistolPeteComplete's 9mm onSelfAttackedOther row adds bleedCounter
+    // (LT 1 gate passes on 0), and the next hit's GT 0 gate lands the bleed
+    // buff on the zombie. Previously zombies carried no store and the rows
+    // were recorded-only.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPistolPeteComplete")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const pistol = g.items.byName("gunHandgunT0PipePistol") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, pistol.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == pistol.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = pistol.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.sim.transform[ps] = .{ .x = 256, .y = 70, .z = 256, .yaw = 0 };
+    const zid = g.sim.spawnZombie(257, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.transform[zs] = .{ .x = 257, .y = 70, .z = 256, .yaw = 0 };
+    // First hit: bleedCounter 0 → 1 on the zombie's own column.
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), g.sim.entity_cvars[zs].get("bleedCounter"), 0.001);
+    // Second hit: GT 0 gate passes → buffInjuryBleeding lands on the zombie.
+    const bleed_id = g.buffs.indexOfName("buffInjuryBleeding").?;
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expect(g.sim.buffs[zs].find(bleed_id) != null);
+}
+
+test "BarBrawling rage grants on taking a hit (onOtherDamagedSelf)" {
+    // The victim's `onOtherDamagedSelf` fires when a landed hit applies
+    // damage: perkBarBrawling6RageMode grants the rage buff when holding a
+    // perkBrawler weapon (knuckles). The damage-apply event was previously
+    // unfired.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkBarBrawling6RageMode")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const knucks = g.items.byName("meleeWpnKnucklesT0LeatherKnuckles") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, knucks.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == knucks.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = knucks.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    const rage_id = g.buffs.indexOfName("buffBarBrawling6RageMode").?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    try std.testing.expect(g.sim.buffs[ps].find(rage_id) == null);
+    g.fireAttackedSelf(ps, zs, 0);
+    try std.testing.expect(g.sim.buffs[ps].find(rage_id) != null);
+}
+
+test "combat entry grants the magnum criminal-pursuit buff" {
+    // `onCombatEntered` fires on the out-of-combat -> in-combat transition
+    // (a landed hit after the idle window): holding the 44 magnum with
+    // Enforcer Criminal Pursuit 1 grants its 20 s stamina buff. Previously
+    // the trigger was never fired.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkEnforcerCriminalPursuit")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const magnum = g.items.byName("gunHandgunT2Magnum44") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, magnum.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == magnum.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = magnum.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    const pursuit_id = g.buffs.indexOfName("buffEnforcerCriminalPursuit").?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    try std.testing.expect(g.sim.buffs[ps].find(pursuit_id) == null);
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expect(g.sim.buffs[ps].find(pursuit_id) != null);
+    // Re-entry within the idle window does not double-grant (already active);
+    // the buff is the same instance.
+    g.fireAttackedOther(ps, zs, 0);
+    try std.testing.expect(g.sim.buffs[ps].find(pursuit_id) != null);
+}
+
+test "fall impact escalates the leg-injury counter" {
+    // A self-fall damage claim (failing dtype) fires onSelfFallImpact on the
+    // check buff: the `_fallSpeed`-gated rows add to $legHurtCounter and grant
+    // buffPlayerFallingDamage. The rising counter is the server's leg-injury
+    // escalation stock applies on bad landings.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    _ = g.tickSurvival(1.0); // grants the check buffs (buffStatusCheck01) on entered-game
+    const check_id = g.buffs.indexOfName("buffStatusCheck01").?;
+    try std.testing.expect(g.sim.buffs[ps].find(check_id) != null);
+    // A sprained leg escalates on each bad landing (the leg buffs carry the
+    // $legHurtCounter + buffLegGetsWorse rows); the check buff's own row
+    // adds buffPlayerFallingDamage at any impact.
+    _ = cl.cvars.apply("$legHurtCounter", .set, 0);
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffLegSprained", cl.entity_id));
+    g.fireFallImpact(ps, 25);
+    try std.testing.expect(cl.cvars.get("$legHurtCounter") > 0);
+    const fall_dmg_id = g.buffs.indexOfName("buffPlayerFallingDamage").?;
+    try std.testing.expect(g.sim.buffs[ps].find(fall_dmg_id) != null);
+}
+
+test "zombie fist applies exactly one wound per hit (fireOneBuff)" {
+    // The zombie hand's AddBuff row is `fireOneBuff="true"` with 7 weighted
+    // wound buffs: stock picks ONE by cumulative weight, not all. Seed the
+    // group gate, hit, and assert only one of the seven is active.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_v: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap_v);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    _ = cl.cvars.apply("infectionCounter", .set, 1);
+    const wound_names = [_][]const u8{ "buffFatiguedTrigger", "buffArmSprainedCHTrigger", "buffLegSprainedCHTrigger", "buffLaceration", "buffAbrasionCatch", "buffInjuryStunned01CHTrigger", "buffInjuryBleedingTwo" };
+    var ids: [7]u16 = undefined;
+    for (wound_names, 0..) |n, i| ids[i] = g.buffs.indexOfName(n).?;
+    g.fireAttackedSelf(ps, zs, 0);
+    var active: usize = 0;
+    for (ids) |id| {
+        if (g.sim.buffs[ps].find(id) != null) active += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), active);
+}
+
+test "buffInfectionMain escalates the infection counter" {
+    // buffInfectionMain's update row adds `@_InfectionRate` to
+    // infectionCounter every update tick: the infection worsens over time
+    // server-side, gating the stage buffs and cure logic.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInfectionMain", cl.entity_id));
+    _ = cl.cvars.apply("infectionCounter", .set, 0);
+    _ = cl.cvars.apply("_InfectionRate", .set, 1);
+    var k: u32 = 0;
+    while (k < 600 and cl.cvars.get("infectionCounter") <= 0) : (k += 1) {
+        g.tick_n += 1;
+        _ = systems.tickAll(&g.sim, 0.05);
+        _ = g.tickSurvival(0.05);
+    }
+    try std.testing.expect(cl.cvars.get("infectionCounter") > 0);
+}
+
+test "victim PackMule display buff fires on being hit" {
+    // Victim-side progression rows: the victim's own purchased
+    // perkPackMule 1 fires buffPackMuleDisplay when hit (5% RandomRoll gate
+    // may refuse; the row path is what this proves, so retry a few hits).
+    // Before this the victim event only evaluated buff rows, never the
+    // victim's own perk rows.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    var capture2: ln_peer.Capture = .{};
+    const cl2 = try g.attachJoinedClient(&capture2);
+    const atk = g.sim.playerByPeer(cl2.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPackMule")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    cl.entered_game_fired = true;
+    const disp_id = g.buffs.indexOfName("buffPackMuleDisplay").?;
+    // The 5% RandomRoll gate is seeded per event (entity id x tick through
+    // a SplitMix64 finalizer), so sweeping ticks passes near-certainly; the
+    // other gates (PackMule 1, victim alive, no injury buffs, not attached)
+    // all pass.
+    var landed = false;
+    var k: u32 = 0;
+    while (k < 4000 and !landed) : (k += 1) {
+        g.tick_n += 1;
+        g.fireAttackedSelf(ps, atk, 0);
+        if (g.sim.buffs[ps].find(disp_id) != null) landed = true;
+    }
+    try std.testing.expect(landed);
+}
+
+test "died rows set infectionCounter on player death" {
+    // `onSelfDied` fires in the hp-replicate death path: buffInfection04's
+    // row sets infectionCounter to 1 on the dead player's cvars.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInfection04", cl.entity_id));
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("infectionCounter"), 0.001);
+    // Radiation pool's died row removes itself (non-Twitch live row).
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffRadiationPool", cl.entity_id));
+    const rad_id = g.buffs.indexOfName("buffRadiationPool").?;
+    try std.testing.expect(g.sim.buffs[ps].find(rad_id) != null);
+    g.fireDied(ps);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get("infectionCounter"), 0.001);
+    const rad = g.sim.buffs[ps].find(rad_id);
+    try std.testing.expect(rad == null or rad.?.flags.remove);
+}
+
+test "leave-game rows clear harvest buff on disconnect" {
+    // `onSelfLeaveGame` fires in the session-drop path before the entity is
+    // destroyed: buffHarvest's self-remove row flags it. Assert the flag
+    // (the reap that follows never runs on a destroyed entity).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffHarvest", cl.entity_id));
+    const hid = g.buffs.indexOfName("buffHarvest").?;
+    try std.testing.expect(g.sim.buffs[ps].find(hid) != null);
+    g.fireLeaveGame(ps);
+    const inst = g.sim.buffs[ps].find(hid).?;
+    try std.testing.expect(inst.flags.remove);
+}
+
+test "CharismaticNature shares level with party member" {
+    // `target="selfOtherPlayers"` fan-out: buying CharismaticNature writes
+    // CharismaticNatureLevel onto party members' cvars and grants the group
+    // buff, so their own buff rows scale.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    try std.testing.expect(g.parties.acceptInvite(ca.entity_id, cb.entity_id) != null);
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkCharismaticNature")) {
+            ca.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    ca.skill_level_n = 1;
+    // addProgressionLevel refuses delta 0; call the (file-private) fire path
+    // through a 1-step bump from a zeroed ledger instead.
+    ca.skill_levels[0].level = 0;
+    _ = g.addProgressionLevel(ca.slot, "perkCharismaticNature", 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cb.cvars.get("CharismaticNatureLevel"), 0.001);
+    const grp_id = g.buffs.indexOfName("buffPerkCharismaticNature").?;
+    const cb_ps = g.sim.playerByPeer(cb.slot).?;
+    try std.testing.expect(g.sim.buffs[cb_ps].find(grp_id) != null);
+}
+
+test "multi-name RemoveBuff fans out (splint ladder)" {
+    // Stock splits `buff=` on commas into buffNames: buffLegCast's start row
+    // removes sprained+splinted+broken together. The recorded-list applier
+    // must split too (previously the whole comma string failed lookup and
+    // nothing was removed).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffLegSprained", cl.entity_id));
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffLegSplinted", cl.entity_id));
+    const sprain_id = g.buffs.indexOfName("buffLegSprained").?;
+    const splint_id = g.buffs.indexOfName("buffLegSplinted").?;
+    try std.testing.expect(g.sim.buffs[ps].find(sprain_id) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(splint_id) != null);
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffLegCast", cl.entity_id));
+    g.tickSurvival(1.0);
+    try std.testing.expect(g.sim.buffs[ps].find(sprain_id) == null or g.sim.buffs[ps].find(sprain_id).?.flags.remove);
+    try std.testing.expect(g.sim.buffs[ps].find(splint_id) == null or g.sim.buffs[ps].find(splint_id).?.flags.remove);
+}
+
+test "delayed kill stamina lands after 1s" {
+    // `delay=` ModifyStats rows defer: JavelinMaster 1 kill refunds +10
+    // stamina after 1.0 s (20 ticks), not immediately. Gated ItemHasTags
+    // perkJavelinMaster + victim alive.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkJavelinMaster")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const spear = g.items.byName("meleeWpnSpearT0StoneSpear") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, spear.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == spear.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = spear.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.sim.health[ps].stamina = 50;
+    g.sim.health[ps].stamina_max = 100;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.fireKilledOther(ps, zs);
+    // Not yet: deferred 20 ticks out.
+    try std.testing.expectApproxEqAbs(@as(f32, 50), g.sim.health[ps].stamina, 0.001);
+    var k: u8 = 0;
+    while (k < 25) : (k += 1) {
+        g.tick_n += 1;
+        g.tickSurvival(0.05);
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 60), g.sim.health[ps].stamina, 0.001);
+}
+
+test "power-attack kill refunds stamina via IsSecondaryAttack" {
+    // perkBatterUpComplete's club power-kill group gates on the book at 1 +
+    // `ItemHasTags club` + `IsSecondaryAttack`: the held club declares Action1
+    // (the heavy attack), which IL=65 resolves to `Actions[1] != null` — a
+    // weapon shape, not the swing type. Without the supplier the group
+    // refused and a club kill scored no refund.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkBatterUpComplete")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const club = g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, club.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == club.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    g.sim.health[ps].stamina = 50;
+    g.sim.health[ps].stamina_max = 100;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.fireKilledOther(ps, zs);
+    var k: u8 = 0;
+    while (k < 25) : (k += 1) {
+        g.tick_n += 1;
+        g.tickSurvival(0.05);
+    }
+    // The 1000-power refund clears the 100 cap (full refill on a club kill).
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].stamina, 0.001);
+}
+
+test "cure-all flags typed buffs only" {
+    // `RemoveAllNegativeBuffs` clears buffs whose DamageType is set and
+    // leaves untyped ones: abrasion (Bashing) flags, the berserker buff
+    // (no type) stays. Driven through the regen start row.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffBerserker", cl.entity_id));
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInjuryAbrasion", cl.entity_id));
+    const harv_id = g.buffs.indexOfName("buffBerserker").?;
+    const abr_id = g.buffs.indexOfName("buffInjuryAbrasion").?;
+    cl.level = 1;
+    // The applier is file-private; drive the real path through the regen
+    // buff's own start row instead. One survival tick fires starts without
+    // giving abrasion's own update self-remove time to reap it.
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffNearDeathRegen", cl.entity_id));
+    g.tickSurvival(1.0);
+    const abr = g.sim.buffs[ps].find(abr_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(abr.flags.remove);
+    try std.testing.expect(!g.sim.buffs[ps].find(harv_id).?.flags.remove);
+}
+
+test "bleeding drains HP via cvar-scaled HealthChangeOT" {
+    // buffInjuryBleeding's passive HealthChangeOT base_subtract reads
+    // `value="@$bleedAmount"`: the start row sets $bleedAmount =
+    // bleedCounter / 2, so a 4-stack bleed drains 2 HP per second through
+    // the active-buff fold.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].hp = 100;
+    g.sim.health[ps].max_hp = 100;
+    _ = cl.cvars.apply("bleedCounter", .set, 4);
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInjuryBleeding", cl.entity_id));
+    _ = g.tickSurvival(1.0);
+    // 4/2 = 2 per second; well-fed/regen could add a small offset, so assert
+    // the drain dominates rather than the exact bar.
+    try std.testing.expect(g.sim.health[ps].hp < 99);
+    try std.testing.expect(g.sim.health[ps].hp > 90);
+}
+
+test "spawn-heal finish restores bars" {
+    // Finish-event stat restores: buffEntitySpawnHeal's finish rows add 30000
+    // Health/Stamina (clamped to max). Previously applyTriggeredBuffs dropped
+    // res.mods, so finish stats never applied.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].hp = 10;
+    g.sim.health[ps].max_hp = 100;
+    g.sim.health[ps].stamina = 10;
+    g.sim.health[ps].stamina_max = 100;
+    const def_id = g.buffs.indexOfName("buffEntitySpawnHeal").?;
+    g.fireBuffFinish(ps, def_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].hp, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].stamina, 0.001);
+}
+
+test "heal-health cvar add heals per update" {
+    // `value="@cvar"` Health adds resolve at execute time: buffHealHealth's
+    // update row adds @medRegHealthIncSpeed per due update while the medical
+    // pool lasts. Seed the pool like a bandage use would.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].hp = 50;
+    g.sim.health[ps].max_hp = 100;
+    _ = cl.cvars.apply("medicalRegHealthAmount", .set, 30);
+    _ = cl.cvars.apply("medRegHealthIncSpeed", .set, 2);
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffHealHealth", cl.entity_id));
+    var k: u8 = 0;
+    while (k < 25) : (k += 1) {
+        _ = ecs.systems.tickAll(&g.sim, 0.05);
+        g.tickSurvival(0.05);
+    }
+    try std.testing.expect(g.sim.health[ps].hp > 50);
+}
+
+test "ranged ray-hit bleeds the victim (onSelfPrimaryActionRayHit)" {
+    // ItemActionRanged fires onSelfPrimaryActionRayHit (MinEvent 25) on a hit;
+    // perkAgilityMastery's bleed row bleeds the victim (bleedCounter add 1,
+    // gated bleedCounter LT 1 at 0). The C2S damage claim cannot say
+    // melee-vs-ranged, so the held weapon's `ranged` tag picks the ray-hit
+    // path; a melee club takes the onSelfAttackedOther path and does not
+    // bleed through this row.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkAgilityMastery")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 3 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const gun = g.items.byName("gunHandgunT0PipePistol") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, gun.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == gun.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = gun.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    try std.testing.expect(g.heldWeaponIsRanged(ps));
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.fireRayHit(ps, zs, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), g.sim.entity_cvars[zs].get("bleedCounter"), 0.001);
+    // The melee path (fireAttackedOther) does not apply the ray-hit bleed.
+    const club = g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 1 };
+    try std.testing.expect(!g.heldWeaponIsRanged(ps));
+    const zid2 = g.sim.spawnZombie(258, 70, 256, 40).?;
+    const zs2 = g.sim.slotOfNetId(zid2).?;
+    g.fireAttackedOther(ps, zs2, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.entity_cvars[zs2].get("bleedCounter"), 0.001);
+}
+
+test "level-curved ModifyCVar indexes the perk's level" {
+    // perkPhysician's onSelfProgressionUpdate row sets
+    // `$medicRegHealthIncreaseSpeed` from a curve (2, 2.5, 3, ...); stock
+    // Execute picks valueList[CalculatedLevel-1], so level 2 must write 2.5,
+    // not the first segment 2.0. Feeding the changed perk's level into the
+    // ctx resolves it.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPhysician")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    try std.testing.expect(g.addProgressionLevel(0, "perkPhysician", 1));
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), cl.cvars.get("$medicRegHealthIncreaseSpeed"), 0.001);
+}
+
+test "forgetting elixir resets progression and refunds points" {
+    // Grandpa's Forgetting Elixir's `ResetProgression reset_skills="true"`
+    // row: stock Progression::ResetProgression refunds CalculatedCostForLevel
+    // for every perk/attribute level above base, then attribute->1 / perk->0.
+    // The eat-path item rows now fire it, so the respec lands server-side.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "attStrength", .level = 2 };
+    cl.skill_levels[1] = .{ .name = "perkPummelPete", .level = 3 };
+    cl.skill_level_n = 2;
+    cl.skill_points = 0;
+    // Expected refund: attribute level 2 costs cost(2); perk level 3 costs
+    // cost(1)+cost(2)+cost(3) (perk base cost 1 each per the purchase path).
+    var expect: u32 = 0;
+    for (g.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, "attStrength")) {
+            var l: u8 = 2;
+            while (l <= 2) : (l += 1) expect += g.skillCostOf(cl.slot, a.name, l) orelse 1;
+        }
+    }
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPummelPete")) {
+            var l: u8 = 1;
+            while (l <= 3) : (l += 1) expect += g.skillCostOf(cl.slot, pk.name, l) orelse 1;
+        }
+    }
+    const elixir = g.items.byName("drinkJarGrandpasForgettingElixir") orelse return error.SkipZigTest;
+    g.fireItemUseBuffs(ps, elixir.id);
+    // attStrength back to base 1, perk back to 0, refunded points banked.
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(cl.slot, "attStrength"));
+    try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(cl.slot, "perkPummelPete"));
+    try std.testing.expectEqual(expect, cl.skill_points);
+}
+
+test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
+    // ItemActionEat fires onSelfPrimaryActionEnd on the dedicated server; the
+    // eaten item's AddBuff rows are the consumable grants (beer's stamina
+    // buff, fire-extinguish, coffee, drugs). The eat path now fires them with
+    // the pool cvars suppressed (EatProps owns food/water/HP), so the buffs
+    // land without double-restoring.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const beer = g.items.byName("drinkJarBeer") orelse return error.SkipZigTest;
+    const beer_id = g.buffs.indexOfName("buffBeer").?;
+    const ext_id = g.buffs.indexOfName("buffExtinguishFire").?;
+    // On fire: the extinguish group (gated `HasBuff buffIsOnFire`) grants
+    // buffExtinguishFire; the Drink Tier 3 group (gated `!HasBuff
+    // buffIsOnFire`) refuses beer.
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffIsOnFire", cl.entity_id));
+    g.fireItemUseBuffs(ps, beer.id);
+    try std.testing.expect(g.sim.buffs[ps].find(beer_id) == null);
+    try std.testing.expect(g.sim.buffs[ps].find(ext_id) != null);
+    // Second client, not on fire: the gates flip — beer grants, extinguish
+    // refuses.
+    var cap2: ln_peer.Capture = .{};
+    const cl2 = try g.attachJoinedClient(&cap2);
+    const ps2 = g.sim.playerByPeer(cl2.slot).?;
+    g.fireItemUseBuffs(ps2, beer.id);
+    try std.testing.expect(g.sim.buffs[ps2].find(beer_id) != null);
+    try std.testing.expect(g.sim.buffs[ps2].find(ext_id) == null);
+    // The beer duration cvar seeds through the merge on the not-on-fire
+    // client (the buff's update rows drain it to expire the stamina boost),
+    // while the food/water/HP pool cvars stay absent (EatProps owns the
+    // restore; seeding them would double-drain through buffProcessConsumables).
+    try std.testing.expect(cl2.cvars.get("$buffBeerDuration") > 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl2.cvars.get("$foodAmountAdd"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl2.cvars.get("foodHealthAmount"), 0.001);
+}
+
+test "consumable buff expires when its duration cvars drain" {
+    // The full chain: SlowMetabolism's metabolism cvar feeds the drain
+    // ($buffBeerDuration subtract @.dummy each update, dummy =
+    // $MetabolismDuration/2), and the buff's RemoveBuff row gates on
+    // `$buffBeerDuration LTE 0`. With the duration seeded by the eat path,
+    // the buff wears off server-side after enough updates.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // SlowMetabolism level 1 sets $MetabolismDuration = 1 (the first curve
+    // segment); drink a beer so the duration cvar seeds.
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkSlowMetabolism")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    try std.testing.expect(g.addProgressionLevel(0, "perkSlowMetabolism", 1));
+    const beer = g.items.byName("drinkJarBeer") orelse return error.SkipZigTest;
+    const beer_id = g.buffs.indexOfName("buffBeer").?;
+    g.fireItemUseBuffs(ps, beer.id);
+    try std.testing.expect(g.sim.buffs[ps].find(beer_id) != null);
+    var k: u32 = 0;
+    while (k < 30000 and g.sim.buffs[ps].find(beer_id) != null and cl.cvars.get("$buffBeerDuration") > 0) : (k += 1) {
+        g.tick_n += 1;
+        _ = systems.tickAll(&g.sim, 0.05);
+        _ = g.tickSurvival(0.05);
+    }
+    // The RemoveBuff row flags removal on the crossing update; a couple more
+    // full ticks let the buff tick reap the flagged slot.
+    var r: u8 = 0;
+    while (r < 5 and g.sim.buffs[ps].find(beer_id) != null) : (r += 1) {
+        g.tick_n += 1;
+        _ = systems.tickAll(&g.sim, 0.05);
+        _ = g.tickSurvival(0.05);
+    }
+    try std.testing.expect(g.sim.buffs[ps].find(beer_id) == null);
+    // The onSelfBuffRemove row cleared the duration cvars as the RemoveBuff
+    // action flagged it (the post-update remove pass fires the cleanup);
+    // no lingering $buffBeerDuration/.dummy state into the next beer.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("$buffBeerDuration"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".dummy"), 0.001);
+}
+
+test "infection04 start subtract kills instantly" {
+    // Immediate Health subtract: buffInfection04's start row subtracts
+    // 99999999 once (the infection kill blow at max counter). Previously only
+    // Health adds applied; the kill blow never touched the bar.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].hp = 100;
+    g.sim.health[ps].max_hp = 100;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInfection04", cl.entity_id));
+    g.tickSurvival(1.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.health[ps].hp, 0.001);
+}
+
+test "radiation pool drains 20 stamina per update" {
+    // Immediate Stamina ModifyStats: buffRadiationPool's update row subtracts
+    // 20 stamina per due update (previously parsed but never applied).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].stamina = 100;
+    g.sim.health[ps].stamina_max = 100;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffRadiationPool", cl.entity_id));
+    const before = g.sim.health[ps].stamina;
+    // update_rate 1 = 20 world ticks per update; drive the world clock so the
+    // buff tick marks the update due, then run survival to apply the row.
+    var k: u8 = 0;
+    while (k < 25) : (k += 1) {
+        _ = ecs.systems.tickAll(&g.sim, 0.05);
+        g.tickSurvival(0.05);
+    }
+    // 20 drained by the update row; other legs may add small offsets, so
+    // assert the drain dominates.
+    try std.testing.expect(g.sim.health[ps].stamina < before - 10);
+    try std.testing.expect(g.sim.health[ps].stamina > before - 30);
+}
+
+test "puking start drains 50 water immediately" {
+    // Immediate Food/Water ModifyStats: buffPuking01's start row subtracts 50
+    // water once (previously only Health adds applied; the drain was parsed
+    // but never touched the bars).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].water = 100;
+    g.sim.health[ps].water_max = 100;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffPuking01", cl.entity_id));
+    const before = g.sim.health[ps].water;
+    g.tickSurvival(1.0);
+    // 50 drained by the start row (observed 51.985: the tick's water
+    // restore adds ~2 on top); assert the drain dominates, not the exact bar.
+    try std.testing.expect(g.sim.health[ps].water < before - 40);
+    try std.testing.expect(g.sim.health[ps].water > before - 60);
+}
+
+test "MotherLode penalizes harvest XP via Harvesting tag" {
+    // Harvest passes `"Harvesting"` through awardXpTagged so the
+    // PlayerExpGain perc_add rows scale it: perkMotherLode 1 is -10%
+    // (SalvageOps/MotherLode mining penalty; night-stalker coffee -5%).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    cl.level = 1;
+    // Grant MotherLode 1 then award 100 Harvesting XP.
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkMotherLode")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const before = cl.xp;
+    g.awardXpTagged(cl.slot, 100, "Harvesting");
+    const gained = cl.xp - before;
+    // -10% → 90 XP.
+    try std.testing.expectEqual(@as(u64, 90), gained);
 }
 
 test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
@@ -4909,6 +6070,192 @@ test "kill trigger fires SiphoningStrikes heal on zombie kill" {
     }
     g.fireKilledOther(ps, zs);
     try std.testing.expectApproxEqAbs(@as(f32, 52), g.sim.health[ps].hp, 0.001);
+}
+
+test "morale start otherAOE cripples nearby zombies" {
+    // `target="otherAOE"` start rows fan out around the holder at start
+    // time (stock centers the range cube on Self): adding
+    // buffSledgeSaga3CrippledMorale cripples living zombies within 3 m of the
+    // killer. A distant zombie stays clean.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const crip_id = g.buffs.indexOfName("buffCrippledMorale").?;
+    const near = g.sim.spawnZombie(257, 70, 256, 40).?;
+    const near_s = g.sim.slotOfNetId(near).?;
+    const far = g.sim.spawnZombie(300, 70, 300, 40).?;
+    const far_s = g.sim.slotOfNetId(far).?;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffSledgeSaga3CrippledMorale", cl.entity_id));
+    g.tickSurvival(1.0);
+    try std.testing.expect(g.sim.buffs[near_s].find(crip_id) != null);
+    try std.testing.expect(g.sim.buffs[far_s].find(crip_id) == null);
+}
+
+test "kill trigger grants Dentist silver on tagged zombie kill" {
+    // `EntityTagCompare target="other"` on the kill event: FortitudeMastery
+    // 3+ with a brawler-tagged held item grants buffPerkTheDentistSilver on
+    // walker/crawler/bandit kills (5% RandomRoll gate may refuse, so sweep a
+    // few kills like the PackMule test). Proves the kill-event foreign-tag
+    // fill resolves instead of refusing.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkFortitudeMastery")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 3 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const knuck = g.items.byName("meleeWpnKnucklesT0LeatherKnuckles") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, knuck.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == knuck.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = knuck.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    const dent_id = g.buffs.indexOfName("buffPerkTheDentistSilver").?;
+    var landed = false;
+    var k: u32 = 0;
+    while (k < 4000 and !landed) : (k += 1) {
+        g.tick_n += 1;
+        const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+        const zs = g.sim.slotOfNetId(zid).?;
+        g.fireKilledOther(ps, zs);
+        if (g.sim.buffs[ps].find(dent_id) != null) landed = true;
+    }
+    try std.testing.expect(landed);
+    // The Dentist buff's start row calls action_give_silver: the Client
+    // sequence response goes to the killer. Tick survival so the start rows
+    // fire, then assert a GameEventResponse reached the killer's capture.
+    g.tickSurvival(1.0);
+    const ev_id = packages.idOf("NetPackageGameEventResponse").?;
+    var found_event = false;
+    var i: usize = 0;
+    while (i < capture.n) : (i += 1) {
+        const msg = capture.slots[i].data[0..capture.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == ev_id) found_event = true;
+        }
+    }
+    try std.testing.expect(found_event);
+}
+
+test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
+    // `onSelfKilledOther` RemoveBuff rows: perkFortitudeMastery clears
+    // buffInjuryBleeding on the killer (ungated first row). The kill event
+    // applies removes through the same path as adds.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkFortitudeMastery")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 1 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffInjuryBleeding", cl.entity_id));
+    const bleed_id = g.buffs.indexOfName("buffInjuryBleeding").?;
+    try std.testing.expect(g.sim.buffs[ps].find(bleed_id) != null);
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.fireKilledOther(ps, zs);
+    // Removal flags the instance (the buff tick reaps it); assert the flag.
+    const inst = g.sim.buffs[ps].find(bleed_id).?;
+    try std.testing.expect(inst.flags.remove);
+}
+
+test "kill trigger grants Berserker on club kill at Strength 5" {
+    // Kill-event self-gated AddBuff: StrengthMastery 5 + club-family held
+    // item grants buffBerserker on kill (ItemHasTags multi-tag list).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (g.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkStrengthMastery")) {
+            cl.skill_levels[0] = .{ .name = pk.name, .level = 5 };
+            break;
+        }
+    }
+    cl.skill_level_n = 1;
+    const club = g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, club.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == club.id) {
+            g.sim.inventory[ps].slots[i] = .{};
+            g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 1 };
+            g.sim.inventory[ps].holding = 0;
+            break;
+        }
+    }
+    const bers_id = g.buffs.indexOfName("buffBerserker").?;
+    const zid = g.sim.spawnZombie(256, 70, 256, 40).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.fireKilledOther(ps, zs);
+    try std.testing.expect(g.sim.buffs[ps].find(bers_id) != null);
 }
 
 test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
@@ -6005,7 +7352,7 @@ test "the three client-sent reports the server must not apply are handled and dr
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -6074,7 +7421,7 @@ test "the laser sight relays to other players but not back to the sender" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -6156,7 +7503,7 @@ test "a fresh login sends the empty AuthConfirmation for the client to echo" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);
@@ -6188,7 +7535,7 @@ test "an owner receives their parked vehicles as a waypoint list" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
         std.testing.allocator.destroy(g);

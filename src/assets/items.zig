@@ -19,6 +19,10 @@ pub const max_items: usize = 8192;
 /// rows in items.xml, the busiest item carrying 8, so both run far below cap.
 pub const max_passives_per_item: usize = 24;
 pub const max_item_passives_total: usize = 8192;
+/// Triggered-effect caps: V3.2.0 items.xml has 2422 `triggered_effect` rows
+/// and at most a few dozen per item, well below both.
+pub const max_triggered_per_item: usize = 64;
+pub const max_item_triggered_total: usize = 8192;
 
 /// Stock FastTags match between a passive's tag list and a drop row's tag
 /// list: an untagged passive applies to every drop; a tagged passive needs
@@ -285,6 +289,10 @@ pub const ItemDef = struct {
     /// `EffectManager.GetValue` layers 7/8), so clothing max stats, armor
     /// resistances and boots' stamina rows apply. Empty = no rows (most items).
     passives: []const buffs.Passive = &.{},
+    /// items.xml `triggered_effect` rows (the onSelfAttackedOther weapon procs:
+    /// torch burn, melee stuns, zombie-fist infections; group gates ride the
+    /// row's parsed reqs). The held-item hit event fires these. Empty = no rows.
+    triggered: []const buffs.Triggered = &.{},
     /// items.xml `Tags` property (comma list): the item's mod-attachment tag
     /// surface. A mod fits when its installable_tags intersects Tags and its
     /// blocked_tags is disjoint (RE items.md ItemClassModifier suitability).
@@ -354,6 +362,10 @@ pub const ItemDef = struct {
     /// placeable (fail closed - resourceWood etc. carry no Blockname and do
     /// not place in stock).
     place_block_name: []const u8 = "",
+    /// items.xml declares an Action1 (`<property class="Action1">`), the
+    /// secondary action. `IsSecondaryAttack` (IL=65) resolves to this — melee
+    /// weapons' heavy attack — not the current swing type.
+    has_secondary: bool = false,
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
     /// items.xml `CraftTimeValue` property (stock `ItemClass.CraftComponentTime`,
@@ -1169,7 +1181,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
     var stock_place_names: std.ArrayList([]const u8) = .empty;
+    var stock_has_secondary: std.ArrayList(bool) = .empty;
     defer stock_place_names.deinit(allocator);
+    defer stock_has_secondary.deinit(allocator);
     var stock_dmg_blocks: std.ArrayList(f32) = .empty;
     defer stock_dmg_blocks.deinit(allocator);
     var stock_light_values: std.ArrayList(f32) = .empty;
@@ -1281,6 +1295,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer passive_reqs_pool.deinit(allocator);
     var passive_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
     defer passive_req_ranges.deinit(allocator);
+    // Full `<triggered_effect>` surface per item (held-weapon hit procs:
+    // torch burn, melee stuns/bleeds, zombie-fist infections). Group-level
+    // requirements ride the row's parsed reqs like progression.
+    var stock_triggered_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer stock_triggered_ranges.deinit(allocator);
+    var triggered_pool: std.ArrayList(buffs.Triggered) = .empty;
+    defer triggered_pool.deinit(allocator);
+    var trig_reqs_pool: std.ArrayList(requirements.Requirement) = .empty;
+    defer trig_reqs_pool.deinit(allocator);
+    var trig_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_req_ranges.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -1383,6 +1408,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 if (xml.propertyValue(clean[ii..item_end], "Blockname")) |bn| place_name = try arena.dupe(u8, bn);
             }
             try stock_place_names.append(allocator, place_name);
+            // Secondary action presence (`<property class="Action1">`): the
+            // IsSecondaryAttack IL=65 shape check. Melee weapons carry the
+            // heavy attack here.
+            try stock_has_secondary.append(allocator, std.mem.find(u8, clean[ii..item_end], "class=\"Action1\"") != null);
             // DamageBlock property (hand items: zombie hand 8, feral 24).
             var dmg_block: f32 = 0;
             if (xml.propertyValue(clean[ii..item_end], "DamageBlock")) |v| {
@@ -1487,6 +1516,76 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     }
                 }
                 try stock_passive_ranges.append(allocator, .{ p0, passives_pool.items.len - p0 });
+            }
+            // Held-weapon triggered_effect rows (the onSelfAttackedOther procs
+            // with their effect-group gates). Same walk progression uses:
+            // effect_groups carry group <requirement> children that gate every
+            // row inside; direct rows are ungated. Starts after the `<item>`
+            // open tag (elementEnd on it would span the whole item).
+            if (std.mem.findPos(u8, body, 0, ">")) |igt| {
+                const inner_start = igt + 1;
+                if (!(igt > 0 and body[igt - 1] == '/')) {
+                    const inner_end = std.mem.findPos(u8, body, inner_start, "</item>") orelse body.len;
+                    const t0 = triggered_pool.items.len;
+                    const t_budget = @min(t0 + max_triggered_per_item, max_item_triggered_total);
+                    var ij: usize = inner_start;
+                    while (ij < inner_end and triggered_pool.items.len < t_budget) {
+                        const lt = std.mem.findPos(u8, body, ij, "<") orelse break;
+                        if (lt >= inner_end) break;
+                        if (std.mem.startsWith(u8, body[lt..], "</")) break;
+                        if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
+                            const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
+                            if (gt > lt and body[gt - 1] == '/') {
+                                ij = gt + 1;
+                                continue;
+                            }
+                            const close = std.mem.findPos(u8, body, gt, "</effect_group>") orelse break;
+                            const inner = body[gt + 1 .. close];
+                            var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+                            defer group_reqs.deinit(allocator);
+                            try requirements.scanChildren(allocator, arena, inner, 0, inner.len, &group_reqs);
+                            var seen: usize = triggered_pool.items.len;
+                            try buffs.scanTriggeredRows(
+                                allocator,
+                                arena,
+                                inner,
+                                0,
+                                inner.len,
+                                group_reqs.items,
+                                &triggered_pool,
+                                &trig_reqs_pool,
+                                &trig_req_ranges,
+                                t_budget,
+                                &seen,
+                            );
+                            ij = close + "</effect_group>".len;
+                            continue;
+                        }
+                        if (std.mem.startsWith(u8, body[lt..], "<triggered_effect")) {
+                            const end = requirements.elementEnd(body, lt);
+                            var seen: usize = triggered_pool.items.len;
+                            try buffs.scanTriggeredRows(
+                                allocator,
+                                arena,
+                                body,
+                                lt,
+                                end,
+                                &.{},
+                                &triggered_pool,
+                                &trig_reqs_pool,
+                                &trig_req_ranges,
+                                t_budget,
+                                &seen,
+                            );
+                        }
+                        ij = requirements.elementEnd(body, lt);
+                    }
+                    try stock_triggered_ranges.append(allocator, .{ t0, triggered_pool.items.len - t0 });
+                } else {
+                    try stock_triggered_ranges.append(allocator, .{ triggered_pool.items.len, 0 });
+                }
+            } else {
+                try stock_triggered_ranges.append(allocator, .{ triggered_pool.items.len, 0 });
             }
             var is_eat = itemActionClassIs(body, "Eat");
             const food_amt: f32 = firstCvarAdd(body, "$foodAmountAdd") orelse 0;
@@ -2141,6 +2240,45 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         item_passives = pool;
     }
 
+    // Same Extends inheritance for the triggered rows: a child that declares
+    // none inherits its parent's (schematic masters hand rows to their tier
+    // reads; most items declare none).
+    var item_triggered: []const buffs.Triggered = &.{};
+    {
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer ext_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
+        }
+        var own_trig_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .{};
+        defer own_trig_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_triggered_ranges.items[idx][1] > 0)
+                try own_trig_map.put(allocator, n, stock_triggered_ranges.items[idx]);
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_triggered_ranges.items[idx][1] > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < 24) : (hops += 1) {
+                if (own_trig_map.get(cur)) |rg| {
+                    stock_triggered_ranges.items[idx] = rg;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        const tpool = try arena.alloc(buffs.Triggered, triggered_pool.items.len);
+        @memcpy(tpool, triggered_pool.items);
+        if (trig_req_ranges.items.len != tpool.len) return error.MalformedItems;
+        const treq_pool = try arena.alloc(requirements.Requirement, trig_reqs_pool.items.len);
+        @memcpy(treq_pool, trig_reqs_pool.items);
+        for (tpool, trig_req_ranges.items) |*tr, rg| {
+            tr.reqs = treq_pool[rg[0] .. rg[0] + rg[1]];
+        }
+        item_triggered = tpool;
+    }
+
     // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
     var list: std.ArrayList(ItemDef) = .empty;
     defer list.deinit(allocator);
@@ -2162,6 +2300,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.has_quality = stock_has_quality.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
+                def.has_secondary = stock_has_secondary.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
                 def.light_value = stock_light_values.items[idx];
                 def.melee_range = stock_melee_ranges.items[idx];
@@ -2234,6 +2373,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .has_quality = stock_has_quality.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
+            .has_secondary = stock_has_secondary.items[idx],
             .damage_block = stock_dmg_blocks.items[idx],
             .light_value = stock_light_values.items[idx],
             .melee_range = stock_melee_ranges.items[idx],
@@ -2260,6 +2400,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
             .passives = item_passives[stock_passive_ranges.items[idx][0] .. stock_passive_ranges.items[idx][0] + stock_passive_ranges.items[idx][1]],
+            .triggered = item_triggered[stock_triggered_ranges.items[idx][0] .. stock_triggered_ranges.items[idx][0] + stock_triggered_ranges.items[idx][1]],
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
             .armor_group = try arena.dupe(u8, stock_armor_group.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],

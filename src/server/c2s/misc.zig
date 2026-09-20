@@ -841,7 +841,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
                 }
                 self.fireAttackedSelf(ei, actor_slot, d.body_part);
-                self.fireAttackedOther(actor_slot, ei, d.body_part);
+                // A self-fall claim (failing dtype, victim == the actor's own
+                // player) is the landing impact: fire the check buff's
+                // onSelfFallImpact leg-injury rows with the claimed amount as
+                // the `_fallSpeed` proxy (stock records the impact velocity).
+                if (d.dtype == 15 and ei == actor_slot) {
+                    self.fireFallImpact(ei, @floatFromInt(d.strength));
+                }
+                // The damage claim does not say melee-vs-ranged: the held
+                // weapon's `ranged` tag picks the onSelfPrimaryActionRayHit
+                // path (DeepCuts/perception bleed) over onSelfAttackedOther.
+                if (self.heldWeaponIsRanged(actor_slot)) {
+                    self.fireRayHit(actor_slot, ei, d.body_part);
+                } else {
+                    self.fireAttackedOther(actor_slot, ei, d.body_part);
+                }
             }
         }
         // Attribute the hit: stock's NetPackageDamageEntity carries

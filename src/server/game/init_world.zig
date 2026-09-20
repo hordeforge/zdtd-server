@@ -352,8 +352,8 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     }
     self.sim.power.resolve();
 
-    // Static plugins after world/assets are ready (sample_hello logs once).
-    self.plugins.enableStaticDefaults();
+    // Enable registered plugins after world/assets are ready.
+    self.plugins.enableAll();
     // Wasm plugins (ADR 0020 / PRD 0005): when a resolved mod plan is present
     // (main.zig discovered mods/, applied [mods] disabled/blacklist, resolved
     // tiers/overrides/claims), load through it; otherwise fall back to the

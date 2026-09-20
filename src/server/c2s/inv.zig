@@ -176,6 +176,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const r = invsys.applyEatProps(&self.sim, ps, props);
                     if (!r.ate) break;
                     self.grantMagazineRead(c.slot, e.id);
+                    self.fireItemUseBuffs(ps, e.id);
                     ate_any = true;
                     units_left -= 1;
                 }
@@ -193,6 +194,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
                         self.grantMagazineRead(c.slot, eid);
+                        self.fireItemUseBuffs(ps, eid);
                         ate_any = true;
                         units_left -= 1;
                     }
@@ -213,6 +215,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
                         self.grantMagazineRead(c.slot, eid);
+                        self.fireItemUseBuffs(ps, eid);
                         ate_any = true;
                         units_left -= 1;
                     }

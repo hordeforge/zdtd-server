@@ -15,6 +15,7 @@ const group = @import("group.zig");
 const poi_lock = @import("poi_lock.zig");
 const path_mod = @import("path.zig");
 const buff = @import("buff.zig");
+const cvars = @import("cvars.zig");
 
 pub const max_entities = ent.max_entities;
 /// Soft capacity warning threshold (fraction of max_entities).
@@ -338,6 +339,12 @@ pub const World = struct {
     /// Lazily attached (see buffsMut): most entities never carry a buff, and
     /// spawnBase resets mask[s] wholesale, so a stale set can never be read.
     buffs: [max_entities]c.BuffSet = [_]c.BuffSet{.{}} ** max_entities,
+    /// Lazily attached per-entity custom variables (cvarsMut): zombies carry
+    /// bleed/sprain counters written by victim-directed ModifyCVar rows and
+    /// read back by CVarCompare target=other escalation gates (DeepCuts,
+    /// PummelPete), exactly like stock EntityBuffs cvars. Players use the
+    /// client store; this column serves non-client entities.
+    entity_cvars: [max_entities]cvars.Set = [_]cvars.Set{.{}} ** max_entities,
     /// Buff-side PhysicalDamageResist percent summed over the entity's active
     /// buffs (the passive-effects VM, assets/buffs.zig effectTotals), refreshed
     /// by the survival tick. Feeds armorMitigation like stock
@@ -777,6 +784,16 @@ pub const World = struct {
             self.buffs[slot] = .{};
         }
         return &self.buffs[slot];
+    }
+
+    /// Custom-variable store for a slot, attaching the column on first use
+    /// (zombie bleed/sprain counters; same lazy pattern as buffsMut).
+    pub fn cvarsMut(self: *World, slot: Slot) *cvars.Set {
+        if (!self.mask[slot].cvars) {
+            self.mask[slot].cvars = true;
+            self.entity_cvars[slot] = .{};
+        }
+        return &self.entity_cvars[slot];
     }
 
     pub fn playerByPeer(self: *const World, peer_slot: usize) ?Slot {

@@ -30,6 +30,10 @@ pub fn replicatePlayerHealth(self: *Game) void {
         if (is_player and self.sim.health[i].hp <= 0) {
             const owner_slot = self.sim.player[i].peer_slot;
             if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
+                // `onSelfDied` buff rows fire once per death, before the
+                // game_on_death sequence below (infectionCounter set,
+                // aim/draw-buff removes).
+                if (!self.clients[@intCast(owner_slot)].death_counted) self.fireDied(i);
                 const oc = &self.clients[@intCast(owner_slot)];
                 // Death ledger: stock EntityAlive.OnEntityDeath (IL=146) bumps
                 // the victim's Died through AddScore(1, 0, 0, -1, 0), and

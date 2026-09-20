@@ -2,7 +2,8 @@
 //!
 //! Dependency direction: may import util only. Must not import wire, server,
 //! world, assets, litenet, or apm. Wire/world/assets may import pure types from
-//! here (components, QuestKind, InvSlot) for catalog → sim mapping; that
+//! here (components, QuestKind, InvSlot, the CVar store in cvars.zig) for
+//! catalog → sim mapping; that
 //! assets→ecs edge is intentional and one-way for pure shapes only. Offline
 //! inv fixtures live in inventory.zig (no assets import) so the graph stays
 //! acyclic.
@@ -36,6 +37,7 @@ pub const query = @import("query.zig");
 pub const group = @import("group.zig");
 pub const command = @import("command.zig");
 pub const locals = @import("locals.zig");
+pub const cvars = @import("cvars.zig");
 pub const schedule = @import("schedule.zig");
 
 pub const World = world.World;
@@ -67,5 +69,6 @@ test {
     _ = group;
     _ = command;
     _ = locals;
+    _ = cvars;
     _ = schedule;
 }

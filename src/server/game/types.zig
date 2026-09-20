@@ -429,16 +429,9 @@ pub const InitOptions = struct {
     /// mode pack and zdtd.toml overlays (main.zig builds it). Installed on
     /// World.rules at init; the sim reads w.rules.<group>.<field>.
     rules: ecs.rules.Rules = .{},
-    /// Wire geometry profile (ADR geometry/wire-profiles): the column-height
-    /// dialect the server emits (zdtd.toml `[wire] profile`, resolved by
-    /// main.zig; default stock). Non-stock needs a paired client mod.
+    /// Wire geometry profile (ADR geometry/wire-profiles): fixed stock (the
+    /// column-height dialect zdtd always emits; ADR 0036).
     wire_profile: protocol.WireProfile = .{},
-    /// Register the in-tree sample_hello static plugin (logs once on enable).
-    /// Default false: ADR 0020 decision 2 calls the native vtable host test
-    /// scaffolding, not a product surface, so the shipped configuration runs
-    /// one plugin mechanism (Wasm). Tests and a deliberate operator opt-in
-    /// (`enable_sample_plugin = true` in a preset) still exercise it.
-    enable_sample_plugin: bool = false,
     /// Seed the near-spawn demo hostiles at world init (2 zombies, a sleeper
     /// and an animal). Default true: a fresh world has something to fight and
     /// the demo turret has targets. Stock spawns these lazily through the
@@ -498,6 +491,17 @@ pub const SkillLevel = assets_progression.SkillLevel;
 /// Cap on distinct purchased skills per player (stock: 8 attributes + 57
 /// perks + 23 crafting_skills; 128 covers the tree with room for skill rows).
 pub const max_skill_levels: usize = 128;
+
+/// One deferred ModifyStats refund: the stat/op/value plus the tick it lands
+/// on (stock `MinEventActionBase::Delay` coroutine; kill-event stamina at
+/// +1.0 s = +20 ticks). due_tick 0 = slot free.
+pub const PendingMod = struct {
+    stat: [16]u8 = .{0} ** 16,
+    stat_len: u8 = 0,
+    op_add: bool = true,
+    value: f32 = 0,
+    due_tick: u64 = 0,
+};
 
 pub const Client = struct {
     /// The player's current movement tag, `EntityAlive.CurrentMovementTag`
@@ -566,6 +570,15 @@ pub const Client = struct {
     /// rows. Names point into the buff catalog's arena. Session-scoped: stock
     /// saves CVars with the entity, which is a separate persistence gap.
     cvars: cvars.Set = .{},
+    /// Deferred ModifyStats refunds (`delay=` rows: 21 kill-event stamina
+    /// refunds at 1.0 s). Fixed slots drained on the survival tick; a full
+    /// row drops and counts (bounded, never grows).
+    pending_mods: [8]PendingMod = [_]PendingMod{.{}} ** 8,
+    /// Combat-engagement timer (`EntityAlive.IsInCombat`): ticks remaining
+    /// after the last dealt/received damage. The 0->active transition fires
+    /// `onCombatEntered` progression rows (Enforcer Criminal Pursuit, Batter
+    /// Up Stealing Bases stamina buffs).
+    combat_remaining_ticks: i32 = 0,
     /// onSelfEnteredGame fired for this client (stock fires it when the player
     /// entity enters the game; the buff catalog's check buffs carry the rows).
     entered_game_fired: bool = false,

@@ -917,7 +917,7 @@ pub const Game = struct {
             .region = opts.region,
             .language = opts.language,
             .play_group = opts.play_group,
-            .plugins = .{ .sample_enabled = opts.enable_sample_plugin },
+            .plugins = .{},
             .wasm_ctx = .{
                 .data = self,
                 .log_fn = &wasmLog,
@@ -1711,6 +1711,11 @@ pub const Game = struct {
         return game_player.addProgressionLevel(self, slot, name, delta);
     }
 
+    /// Respec consumable: refund SkillPoints and clear perk/attribute levels.
+    pub fn resetProgression(self: *Game, slot: usize) void {
+        game_player.resetProgression(self, slot);
+    }
+
     pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
         return game_player.setProgressionLevelMax(self, slot, name);
     }
@@ -1886,12 +1891,40 @@ pub const Game = struct {
         return game_tick.fireBuffStack(self, ps, def_id);
     }
 
+    pub fn fireLeaveGame(self: *Game, ps: ecs.Slot) void {
+        return game_tick.fireLeaveGame(self, ps);
+    }
+
+    pub fn fireDied(self: *Game, ps: ecs.Slot) void {
+        return game_tick.fireDied(self, ps);
+    }
+
     pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part: i16) void {
         return game_tick.fireAttackedSelf(self, ps, attacker, body_part);
     }
 
     pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
         return game_tick.fireAttackedOther(self, ps, victim, body_part);
+    }
+
+    pub fn fireRayHit(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
+        return game_tick.fireRayHit(self, ps, victim, body_part);
+    }
+
+    pub fn noteCombat(self: *Game, slot: usize) void {
+        game_tick.noteCombat(self, slot);
+    }
+
+    pub fn fireFallImpact(self: *Game, ps: ecs.Slot, impact_speed: f32) void {
+        game_tick.fireFallImpact(self, ps, impact_speed);
+    }
+
+    pub fn heldWeaponIsRanged(self: *Game, ps: ecs.Slot) bool {
+        return game_tick.heldWeaponIsRanged(self, ps);
+    }
+
+    pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
+        return game_tick.fireItemUseBuffs(self, ps, item_id);
     }
 
     pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {

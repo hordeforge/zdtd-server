@@ -46,6 +46,9 @@ pub const Class = enum {
     /// its own stack.
     remove_items,
     add_starting_items,
+    /// `AddItems`: same client-performed shape (`ActionAddItems::OnClientPerform`
+    /// only; Dentist silver/gold grant a nugget). Server leg is the response.
+    add_items,
 };
 
 pub const Action = struct {
@@ -118,6 +121,7 @@ fn classOf(name: []const u8) ?Class {
     if (std.mem.eql(u8, name, "AddXPDeficit")) return .add_xp_deficit;
     if (std.mem.eql(u8, name, "RemoveItems")) return .remove_items;
     if (std.mem.eql(u8, name, "AddStartingItems")) return .add_starting_items;
+    if (std.mem.eql(u8, name, "AddItems")) return .add_items;
     return null;
 }
 
@@ -128,7 +132,7 @@ fn classOf(name: []const u8) ?Class {
 /// server executes itself.
 pub fn isClientAction(c: Class) bool {
     return switch (c) {
-        .modify_entity_stat, .modify_cvar, .add_xp_deficit, .remove_items, .add_starting_items => true,
+        .modify_entity_stat, .modify_cvar, .add_xp_deficit, .remove_items, .add_starting_items, .add_items => true,
         .remove_death_buffs, .add_buff => false,
     };
 }
@@ -257,7 +261,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                         }
                     }
                 },
-                .add_xp_deficit, .remove_items, .add_starting_items => {},
+                .add_xp_deficit, .remove_items, .add_starting_items, .add_items => {},
                 .modify_cvar => {
                     a.cvar = try arena.dupe(u8, xml.propertyValue(abody, "cvar") orelse "");
                     a.cvar_op = try arena.dupe(u8, xml.propertyValue(abody, "operation") orelse "");

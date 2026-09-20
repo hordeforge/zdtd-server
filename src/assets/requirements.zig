@@ -82,6 +82,10 @@ pub const Kind = enum(u8) {
     time_of_day,
     has_buff,
     is_alive,
+    /// `WasAlive` IL=26: !WasDead at last tick start. On a hit event the
+    /// victim is alive (dead entities take no hits), so this reads the same
+    /// other_alive bit as IsAlive target=other.
+    was_alive,
     /// `IsMale` IL=19: target.IsMale. Fill from entity class_id vs
     /// class_player_male / class_player_female. Null Ctx refuses.
     is_male,
@@ -91,6 +95,10 @@ pub const Kind = enum(u8) {
     /// `IsSleeping` IL=27: EntityEnemy with IsSleeping set (non-enemy fails).
     /// Fill from mask.sleeper && !sleeper.awake. Null Ctx refuses.
     is_sleeping,
+    /// `TargetRange` IL=59: `Entity::GetDistance(self, other)` vs value.
+    /// Self-only when a held ItemValue exists (stock refuses on empty hand);
+    /// target=other reads the damage path's other_distance. Null refuses.
+    target_range,
     /// `IsLocalPlayer` IL=23: target is EntityPlayerLocal. Dedicated server
     /// never hosts EntityPlayerLocal — always false when Ctx is filled.
     /// Null Ctx refuses.
@@ -135,6 +143,9 @@ pub const Kind = enum(u8) {
     /// Null Ctx refuses. (# ponytail: enclosure model later if indoors passives matter)
     is_indoors,
     is_attached_to_entity,
+    /// `IsSecondaryAttack` IL=65: the held item HAS a secondary action
+    /// (`ItemClass.Actions[1]` non-null), not the current swing type.
+    is_secondary_attack,
     in_biome,
     holding_item_has_tags,
     /// `HoldingItemBroken`: true when the held ItemValue's PercentUsesLeft
@@ -271,6 +282,10 @@ pub const BuffNames = struct {
 pub const Ctx = struct {
     levels: []const NameLevel = &.{},
     player_level: u16 = 1,
+    /// Level of the progression whose update is firing: level-curved
+    /// ModifyCVar rows index `valueList[level-1]` from this (stock reads
+    /// MinEventParams.ProgressionValue.CalculatedLevel). Null = no hint.
+    progression_level: ?u8 = null,
     /// `WorldClock.day` for `IsDayNumber` (1-based, same as WorldTimeToDays).
     /// Null = no clock fold (refuse).
     day_number: ?u32 = null,
@@ -315,6 +330,9 @@ pub const Ctx = struct {
     /// Null = no identity fold (refuse).
     is_indoors: ?bool = null,
     attached_to_entity: bool = false,
+    /// Held item has a secondary action (`ItemClass.Actions[1]`), per
+    /// IsSecondaryAttack IL=65. Filled by the kill/hit ctx from the held def.
+    is_secondary_attack: bool = false,
     /// Biome id at the entity (biomes.xml `<biomemap id>`). Null = no biome in
     /// the params, which fails InBiome in BOTH polarities
     /// (InBiome::IsValid IL=30 returns false before it reads `invert`).
@@ -430,6 +448,18 @@ pub const Ctx = struct {
     /// The `other` entity's sleeper bit for `IsSleeping target="other"` (damage path).
     /// Null = no other in scope → refuse (not self).
     other_is_sleeping: ?bool = null,
+    /// Self-to-other distance in metres for `TargetRange target="other"`
+    /// (damage path; `Entity::GetDistance`). Null = no other in scope.
+    other_distance: ?f32 = null,
+    /// The `other` entity's Health fraction/max for the StatCompare family
+    /// target=other (damage path; PulverizingFinishers ≤30%, PartyStarter
+    /// full-HP). Null = no other in scope → refuse.
+    other_hp_frac: ?f32 = null,
+    other_hp_max: ?f32 = null,
+    /// The `other` entity's cvar store for `CVarCompare target="other"`
+    /// (party-share fan-out supplies each member's store). Null = no other
+    /// in scope → refuse.
+    other_cvars: ?*cvars.Set = null,
     /// One entry per worn equipment item: the item's `Tags` property as a comma
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
@@ -513,9 +543,11 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "TimeOfDay")) return .time_of_day;
     if (std.mem.eql(u8, name, "HasBuff")) return .has_buff;
     if (std.mem.eql(u8, name, "IsAlive")) return .is_alive;
+    if (std.mem.eql(u8, name, "WasAlive")) return .was_alive;
     if (std.mem.eql(u8, name, "IsMale")) return .is_male;
     if (std.mem.eql(u8, name, "IsCorpse")) return .is_corpse;
     if (std.mem.eql(u8, name, "IsSleeping")) return .is_sleeping;
+    if (std.mem.eql(u8, name, "TargetRange")) return .target_range;
     if (std.mem.eql(u8, name, "IsLocalPlayer")) return .is_local_player;
     if (std.mem.eql(u8, name, "IsFPV")) return .is_fpv;
     if (std.mem.eql(u8, name, "IsSheltered")) return .is_sheltered;
@@ -528,6 +560,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "IsLookingAtEntity")) return .is_looking_at_entity;
     if (std.mem.eql(u8, name, "IsIndoors")) return .is_indoors;
     if (std.mem.eql(u8, name, "IsAttachedToEntity")) return .is_attached_to_entity;
+    if (std.mem.eql(u8, name, "IsSecondaryAttack")) return .is_secondary_attack;
     if (std.mem.eql(u8, name, "InBiome")) return .in_biome;
     if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
     if (std.mem.eql(u8, name, "HoldingItemBroken")) return .holding_item_broken;
@@ -895,6 +928,26 @@ fn sample(name: []const u8, ctx: Ctx) ?Sample {
     return .{ .cur = cur, .frac = frac, .mod_max = mod_max, .base_max = base_max };
 }
 
+/// Remap target=other stat reads onto the victim's supplied Health: only
+/// Health rows ship with a foreign target (PulverizingFinishers,
+/// PartyStarter), and only Health has an other_* supplier. Anything else
+/// refuses rather than reading self.
+fn statOtherCtx(r: Requirement, ctx: Ctx) Ctx {
+    if (r.target != .other) return ctx;
+    if (!eqIgnoreCase(r.arg, "Health")) return Ctx{
+        .hp_frac = 0,
+        .hp_max = 0,
+        .hp_base_max = 0,
+    };
+    var out = ctx;
+    const frac = ctx.other_hp_frac orelse return Ctx{};
+    const max = ctx.other_hp_max orelse return Ctx{};
+    out.hp_frac = frac;
+    out.hp_max = max;
+    out.hp_base_max = max;
+    return out;
+}
+
 /// `StatComparePercCurrentToMax::Compare` (IL=120): the named stat's value as a
 /// fraction of `Stat::Max` (the BASE max), compared against `value`; a stat
 /// whose max is not positive fails the gate in both polarities (the IL returns
@@ -981,6 +1034,15 @@ fn evalIsCorpse(r: Requirement, ctx: Ctx) Verdict {
 fn evalIsSleeping(r: Requirement, ctx: Ctx) Verdict {
     const sleeping = ctx.is_sleeping orelse return .unsupported;
     return verdict(sleeping, r.negated);
+}
+
+/// `TargetRange::IsValid` IL=59: `Entity::GetDistance(self, other)` vs the
+/// row value (both orders compare the same; invert negates the result).
+/// target=other reads the damage path's other_distance; self target has no
+/// distance supplier (stock also needs Self+Other) and refuses.
+fn evalTargetRange(r: Requirement, ctx: Ctx) Verdict {
+    const d = ctx.other_distance orelse return .unsupported;
+    return verdict(compare(d, r.op, operand(ctx, r)), r.negated);
 }
 
 /// `IsLocalPlayer::IsValid` IL=23: EntityPlayerLocal only exists client-side.
@@ -1242,9 +1304,21 @@ fn evalInSafeZone(r: Requirement) Verdict {
 }
 
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
-/// negated by `invert`.
+/// negated by `invert`. target=other reads the supplied other_cvars store
+/// (party-share fan-out); without one the gate refuses.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
+    if (r.target == .other and ctx.other_cvars == null) return .unsupported;
     return verdict(compare(cvarValue(ctx, r.arg), r.op, operand(ctx, r)), r.negated);
+}
+
+/// Swap the cvar store to the other's for foreign CVarCompare reads: the
+/// caller (party-share fan-out) sets other_cvars per member. Self reads and
+/// `@` operands keep the holder's own store.
+fn cvarOtherCtx(r: Requirement, ctx: Ctx) Ctx {
+    if (r.target != .other) return ctx;
+    var out = ctx;
+    out.cvars = ctx.other_cvars;
+    return out;
 }
 
 /// The right-hand operand of a comparison: the literal `value`, or the entity's
@@ -1303,8 +1377,14 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
     //   IsAlive + other_alive (damage path)
     //   HasBuff + other_live_buff (damage path; BuffSink.has)
     //   IsCorpse + other_is_corpse / IsSleeping + other_is_sleeping (damage path)
+    //   TargetRange + other_distance (damage path)
+    //   WasAlive + other_alive (damage path; victim alive on a hit)
+    //   StatComparePercCurrentToMax + other_hp_* (damage path; remapped in
+    //   statOtherCtx, so the gate list lets it through)
+    //   CVarCompare + other_cvars (party-share fan-out supplies the member's
+    //   store; the evaluator refuses without one)
     // Everything else refuses rather than reading self.
-    if (r.target != .self and r.kind != .entity_tag_compare and r.kind != .progression_level and r.kind != .is_alive and r.kind != .has_buff and r.kind != .is_corpse and r.kind != .is_sleeping)
+    if (r.target != .self and r.kind != .entity_tag_compare and r.kind != .progression_level and r.kind != .is_alive and r.kind != .has_buff and r.kind != .is_corpse and r.kind != .is_sleeping and r.kind != .target_range and r.kind != .was_alive and r.kind != .stat_compare_perc_current_to_max and r.kind != .cvar_compare)
         return .unsupported;
     var use_ctx = ctx;
     if (r.target == .other) {
@@ -1317,6 +1397,9 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         } else if (r.kind == .is_alive) {
             const oa = ctx.other_alive orelse return .unsupported;
             use_ctx.alive = oa;
+        } else if (r.kind == .was_alive) {
+            const oa = ctx.other_alive orelse return .unsupported;
+            use_ctx.alive = oa;
         } else if (r.kind == .has_buff) {
             const olb = ctx.other_live_buff orelse return .unsupported;
             use_ctx.live_buff = olb;
@@ -1327,6 +1410,15 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         } else if (r.kind == .is_sleeping) {
             const os = ctx.other_is_sleeping orelse return .unsupported;
             use_ctx.is_sleeping = os;
+        } else if (r.kind == .stat_compare_perc_current_to_max) {
+            // Victim health needs no use_ctx remap: statOtherCtx remaps at
+            // the dispatch site onto the other_hp_* supplier.
+        } else if (r.kind == .cvar_compare) {
+            // Member cvars need no use_ctx remap: cvarOtherCtx swaps the store
+            // at the dispatch site (and refuses without a supplier).
+        } else if (r.kind == .target_range) {
+            // Distance needs no remap: the evaluator reads other_distance
+            // straight from ctx (both orders compare the same).
         } else return .unsupported;
     } else if (r.target == .instigator) {
         if (r.kind != .progression_level) return .unsupported;
@@ -1351,9 +1443,11 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .time_of_day => return evalTimeOfDay(r, ctx),
         .has_buff => return evalHasBuff(r, use_ctx),
         .is_alive => return verdict(use_ctx.alive, r.negated),
+        .was_alive => return verdict(use_ctx.alive, r.negated),
         .is_male => return evalIsMale(r, ctx),
         .is_corpse => return evalIsCorpse(r, use_ctx),
         .is_sleeping => return evalIsSleeping(r, use_ctx),
+        .target_range => return evalTargetRange(r, ctx),
         .is_local_player => return evalIsLocalPlayer(r, ctx),
         .is_fpv => return evalIsFpv(r, ctx),
         .is_sheltered => return evalIsSheltered(r, ctx),
@@ -1365,6 +1459,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .is_looking_at_block => return evalIsLookingAtBlock(r, ctx),
         .is_looking_at_entity => return evalIsLookingAtEntity(r, ctx),
         .is_indoors => return evalIsIndoors(r, ctx),
+        .is_secondary_attack => return verdict(ctx.is_secondary_attack, r.negated),
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
         .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
         .holding_item_broken => return evalHoldingItemBroken(r, ctx),
@@ -1376,7 +1471,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .game_stat_bool => return evalGameStatBool(r, ctx),
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
-        .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
+        .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, statOtherCtx(r, ctx)),
         .stat_compare_perc_current_to_mod_max => return evalStatComparePercCurrentToModMax(r, ctx),
         .stat_compare_mod_max => return evalStatCompareModMax(r, ctx),
         .stat_compare_max => return evalStatCompareMax(r, ctx),
@@ -1391,7 +1486,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .is_held_item => return evalIsHeldItem(r, ctx),
         .is_instigator => return evalIsInstigator(r, ctx),
         .entity_has_movement_tag => return evalEntityHasMovementTag(r, ctx),
-        .cvar_compare => return evalCvarCompare(r, ctx),
+        .cvar_compare => return evalCvarCompare(r, cvarOtherCtx(r, ctx)),
         .worn_items => return evalWornItems(r, ctx),
         .random_roll => return evalRandomRoll(r, ctx),
         .perks_unlocked => return evalPerksUnlocked(r, ctx),
@@ -1769,6 +1864,24 @@ test "StatCompare max family separates Stat::Max from Stat::ModifiedMax" {
     const no_base = Requirement{ .kind = .stat_compare_max, .name = "StatCompareMax", .arg = "Health", .op = .eq, .value = 100 };
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{no_base}, .{ .hp_max = 200 }, &counts));
     try testing.expectEqual(@as(u32, 2), counts.unsupported);
+}
+
+test "StatComparePercCurrentToMax target=other reads victim health" {
+    // Stock PulverizingFinishers (victim ≤30%) and PartyStarter (victim
+    // full-HP) gate attacker EntityDamage on the victim's Health fraction.
+    const low = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "health", .op = .le, .value = 0.3, .target = .other };
+    var counts: Counts = .{};
+    // No victim supplier: the remap leaves a zero max, which the IL's zero
+    // guard fails in both polarities (never passes).
+    try testing.expectEqual(Verdict.fail, evaluate(&.{low}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{low}, .{ .other_hp_frac = 0.2, .other_hp_max = 100 }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{low}, .{ .other_hp_frac = 1.0, .other_hp_max = 100 }, &counts));
+    const full = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "Health", .op = .ge, .value = 1, .target = .other };
+    try testing.expectEqual(Verdict.pass, evaluate(&.{full}, .{ .other_hp_frac = 1.0, .other_hp_max = 100 }, &counts));
 }
 
 test "EntityTagCompare matches the entity's own class Tags" {
@@ -2504,6 +2617,21 @@ test "IsAlive target=other reads other_alive" {
     try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .alive = true, .other_alive = false }, &counts));
 }
 
+test "WasAlive target=other reads other_alive" {
+    // Stock SpearHunter QuickStrike gates on the victim having been alive
+    // (!WasDead at last tick start); on a hit the victim is alive, so this
+    // reads the same other_alive bit as IsAlive target=other.
+    const gate = Requirement{ .kind = .was_alive, .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .alive = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .alive = false, .other_alive = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .alive = true, .other_alive = false }, &counts));
+}
+
 test "HasBuff target=other reads other_live_buff" {
     // Stock fire-proc rows gate AddBuff on HasBuff target="other". Without a
     // supplier the gate refuses; with other_live_buff + buff_active it resolves.
@@ -2559,6 +2687,37 @@ test "IsSleeping target=other reads other_is_sleeping" {
     try testing.expectEqual(@as(u32, 1), counts.resolved);
     counts = .{};
     try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .is_sleeping = true, .other_is_sleeping = false }, &counts));
+}
+
+test "CVarCompare target=other reads member store" {
+    // Stock CharismaticNature share rows gate each member's own
+    // CharismaticNatureLevel before writing it. Without a supplier the gate
+    // refuses; with other_cvars it resolves the member's store.
+    const gate = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = "CharismaticNatureLevel", .op = .lt, .value = 1, .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    var member: cvars.Set = .{};
+    _ = member.apply("CharismaticNatureLevel", .set, 0);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .other_cvars = &member }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    _ = member.apply("CharismaticNatureLevel", .set, 2);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .other_cvars = &member }, &counts));
+}
+
+test "TargetRange compares self-to-other distance" {
+    // Stock PistolPete/LimbShot gates use TargetRange LTE 3 target="other".
+    const gate = Requirement{ .kind = .target_range, .target = .other, .op = .le, .value = 3 };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .other_distance = 2.5 }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .other_distance = 44 }, &counts));
 }
 
 test "InBiome needs a biome in the params for either polarity" {

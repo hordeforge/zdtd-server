@@ -33,7 +33,7 @@ check_edges litenet 'server|world|ecs|assets|apm'
 check_edges plugin 'server|wire|world|ecs|assets|litenet|apm'
 
 # Domain and encoding packages follow the dependency notes in their root modules.
-# assets→ecs is allowed (pure shapes only: components, quest kinds).
+# assets→ecs is allowed (pure shapes only: components, quest kinds, the CVar store).
 # ecs must NOT import assets (offline fixtures live in ecs; production uses hooks).
 # EXCEPTION (comptime-only): ecs/rules.zig seeds its [rules.difficulty] field
 # defaults from assets/sandbox_presets.zig (the comptime-embedded stock

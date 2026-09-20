@@ -77,7 +77,10 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // The next spawn on this peer slot reaps anyway (world.zig:1241), but
     // dropping the ghost now keeps counts and replication honest between
     // joins. Plugin leave already ran above; destroy itself has no side hooks.
+    // `onSelfLeaveGame` rows fire first (storm/harvest/smell cleanup removes,
+    // debug-buff self-removes) while the buff set still exists.
     if (self.sim.playerByPeer(slot)) |ps| {
+        self.fireLeaveGame(ps);
         self.sim.destroy(ps);
     }
     // Turrets hold the owning client slot, and slots are recycled, so a

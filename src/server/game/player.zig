@@ -746,6 +746,70 @@ fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
     return @trunc(v);
 }
 
+/// The respec consumable (Grandpa's Forgetting Elixir, `ResetProgression`
+/// with `reset_skills="true"`): refund SkillPoints for every purchased
+/// perk/attribute level above base and clear those levels. Stock's
+/// `Progression::ResetProgression` (IL=113) refunds
+/// `CalculatedCostForLevel(2..attrLevel)` for attributes and
+/// `(1..perkLevel)` for perks, then sets attribute=1 / perk=0. Books and
+/// crafting skills stay (removeBooks/removeCrafting are false).
+pub fn resetProgression(self: *Game, slot: usize) void {
+    if (slot >= self.clients.len) return;
+    const c = &self.clients[slot];
+    const pt = self.progression_table;
+    var refund: u32 = 0;
+    var i: usize = 0;
+    while (i < c.skill_level_n) : (i += 1) {
+        const name = c.skill_levels[i].name;
+        var is_attribute = false;
+        var is_perk = false;
+        var base_cost: u16 = 1;
+        var mult: f32 = 1.0;
+        var max_level: u8 = 0;
+        var found = false;
+        for (pt.attributes) |a| {
+            if (!std.mem.eql(u8, a.name, name)) continue;
+            is_attribute = true;
+            base_cost = a.base_cost;
+            mult = a.cost_mult;
+            max_level = a.max_level;
+            found = true;
+            break;
+        }
+        if (!found) {
+            for (pt.perks) |pk| {
+                if (!std.mem.eql(u8, pk.name, name)) continue;
+                if (pk.book) break; // books are read, never bought, not reset
+                is_perk = true;
+                base_cost = pk.base_cost;
+                mult = pk.cost_mult;
+                max_level = pk.max_level;
+                found = true;
+                break;
+            }
+        }
+        if (!found or (!is_attribute and !is_perk)) continue;
+        const level = c.skill_levels[i].level;
+        if (is_attribute) {
+            if (level <= 1) continue;
+            var l: u8 = 2;
+            while (l <= level and l <= max_level) : (l += 1) {
+                refund = refund +% skillCostForLevel(base_cost, mult, l);
+            }
+            c.skill_levels[i].level = 1;
+        } else {
+            if (level == 0) continue;
+            var l: u8 = 1;
+            while (l <= level and l <= max_level) : (l += 1) {
+                refund = refund +% skillCostForLevel(base_cost, mult, l);
+            }
+            c.skill_levels[i].level = 0;
+        }
+        fireProgressionUpdate(self, slot, name);
+    }
+    c.skill_points = @min(@as(u64, c.skill_points) + refund, 65535);
+}
+
 /// Catalog-validated cost of buying `skill` at `target_level`, or null when
 /// the purchase would be denied (unknown skill, not the next level, already
 /// maxed, above the level the `<level_requirements>` allow, a book). Mirrors
@@ -1167,12 +1231,70 @@ pub fn fireProgressionUpdate(self: *Game, slot: usize, name: []const u8) void {
     if (rows.len == 0) return;
     const c = &self.clients[slot];
     var counts: requirements.Counts = .{};
+    // The changed progression's own level: level-curved ModifyCVar rows
+    // (metabolism curves) index `valueList[level-1]` from it.
+    var changed_level: ?u8 = null;
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        if (std.mem.eql(u8, sl.name, name) and sl.level > 0) {
+            changed_level = @intCast(sl.level);
+            break;
+        }
+    }
     const ctx: requirements.Ctx = .{
         .levels = c.skill_levels[0..c.skill_level_n],
         .player_level = c.level,
         .cvars = &c.cvars,
+        .progression_level = changed_level,
     };
     _ = assets_buffs.evaluateRows(rows, .progression_update, ctx, &counts);
+    // `target="selfOtherPlayers"` rows (CharismaticNature level share + group
+    // buff) evaluate per member with that member's cvar store supplied, so
+    // the per-member LT gates see the member's own level. The self write
+    // already landed in the evaluate above.
+    applyPartyShare(self, slot, rows);
+}
+
+/// Fan `selfOtherPlayers` progression-update rows out to the buyer's party
+/// members and allies (CharismaticNature level share + group buff). Each
+/// member evaluates the rows with their own cvar store supplied, so the
+/// per-member LT gates resolve; writes land on the member's store and buffs
+/// go through the catalog add (BuffResistance gate included).
+fn applyPartyShare(self: *Game, slot: usize, rows: []const assets_buffs.Triggered) void {
+    const buyer = &self.clients[slot];
+    const party = self.parties.partyByMember(buyer.entity_id);
+    for (&self.clients) |*m| {
+        if (m.slot == slot or !m.joined or m.entity_id <= 0) continue;
+        var in_scope = false;
+        if (party) |p| {
+            if (p.find(m.entity_id) != null) in_scope = true;
+        }
+        if (!in_scope) {
+            const buyer_id = buyer.puid_primary.get();
+            const member_id = m.puid_primary.get();
+            if (buyer_id != null and member_id != null and self.allies.isAlly(buyer_id.?, member_id.?)) in_scope = true;
+        }
+        if (!in_scope) continue;
+        var counts: requirements.Counts = .{};
+        const mctx: requirements.Ctx = .{
+            .levels = buyer.skill_levels[0..buyer.skill_level_n],
+            .player_level = buyer.level,
+            .cvars = &buyer.cvars,
+            .other_cvars = &m.cvars,
+        };
+        const res = assets_buffs.evaluateRows(rows, .progression_update, mctx, &counts);
+        for (res.party_cvars[0..res.party_cvar_n], res.party_cvar_ops[0..res.party_cvar_n], res.party_cvar_vals[0..res.party_cvar_n]) |cvar, op, val| {
+            _ = m.cvars.apply(cvar, op, val);
+        }
+        const mps = self.sim.playerByPeer(m.slot) orelse continue;
+        for (res.add_party_buffs[0..res.add_party_n]) |bnames| {
+            var it = std.mem.splitScalar(u8, bnames, ',');
+            while (it.next()) |seg| {
+                const bname = std.mem.trim(u8, seg, " \t");
+                if (bname.len == 0) continue;
+                _ = self.addCatalogBuff(m.entity_id, mps, bname, buyer.entity_id);
+            }
+        }
+    }
 }
 
 /// Fire a perk's `onPerkLevelChanged` rows after a purchase (the 4

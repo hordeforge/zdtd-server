@@ -1,8 +1,8 @@
 //! Stock `PassiveEffects` ordinals: the numeric id an `ItemValue` stat entry
 //! carries on the wire (`ItemValue::Write` IL=323 writes `(byte)Stat.type`).
 //!
-//! Generated from the stock enum's declaration order (`None` = 0); regenerate
-//! with `python3 tools/gen_passive_effects.py`. Do not hand-edit.
+//! Generated from the stock enum's declaration order (`None` = 0). Do not
+//! hand-edit.
 
 const std = @import("std");
 

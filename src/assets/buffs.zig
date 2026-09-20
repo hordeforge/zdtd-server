@@ -90,6 +90,11 @@ pub const StatMod = struct {
     stat: []const u8 = "",
     op: Op = .unknown,
     value: f32 = 0,
+    /// `target="other"` on the row: the delta belongs to the event's other
+    /// entity (Physician euthanizer set-to-kill), not self.
+    target_other: bool = false,
+    /// `delay=` seconds carried from the row; the caller defers (0 lands now).
+    delay_s: f32 = 0,
 };
 
 /// Triggered rows per buff and in total (the onSelf* surface; only
@@ -139,6 +144,39 @@ pub const Trigger = enum(u8) {
     /// that is already active (42 buffs / 93 rows, mostly ModifyCVar chains
     /// like `buffHarvest`'s `$buffHarvestBonus`).
     stack,
+    /// `onSelfLeaveGame`: fired on disconnect (storm/harvest/smell cleanup
+    /// removes, debug-buff self-removes). Evaluated in the session-drop path
+    /// before the entity is destroyed.
+    leave_game,
+    /// `onSelfDied`: fired on player death (infectionCounter set,
+    /// aim/draw-buff removes). Evaluated in the hp-replicate death path
+    /// before the game_on_death sequence runs.
+    died,
+    /// `onSelfPrimaryActionEnd`: fired when an eaten item's use ends; the
+    /// consumable grants land here (beer/caffeine stamina buffs, drug
+    /// water/DR buffs, goldenrod dysentery cure, medical buffProcessConsumables).
+    /// Fired by the eat path, not the C2S damage/hit events.
+    primary_action_end,
+    /// `onSelfPrimaryActionRayHit`: fired when a ranged primary shot resolves
+    /// a hit (DeepCuts/perception bleed-on-shot rows). The ranged hit path
+    /// fires it; the C2S damage claim does not distinguish melee/ranged, so
+    /// the held weapon's `ranged` tag selects it.
+    primary_action_ray_hit,
+    /// `onSelfDamagedOther`: fired when a landed hit applies its damage
+    /// (Agility leg-cripple, Physician euthanizer on the stun baton). Fired
+    /// alongside the attack event on the same C2S hit.
+    self_damaged_other,
+    /// `onOtherDamagedSelf`: fired on the victim when a landed hit applies
+    /// damage from another entity (BarBrawling's rage on taking a fist hit).
+    /// Fired alongside the victim's `other_attacked_self` path.
+    other_damaged_self,
+    /// `onCombatEntered`: fired on the out-of-combat -> in-combat transition
+    /// (Enforcer Criminal Pursuit / Batter Up Stealing Bases stamina buffs).
+    combat_entered,
+    /// `onSelfFallImpact`: fired when the player lands after a fall (the
+    /// buffStatusCheck01 leg-injury rows, gated on `_fallSpeed`). Driven by
+    /// the falling-damage claim (dtype "falling"), which carries the impact.
+    fall_impact,
     other,
 };
 
@@ -154,6 +192,16 @@ pub const TriggeredAction = enum(u8) {
     modify_cvar,
     /// `MinEventActionRemoveCVar`: drop one.
     remove_cvar,
+    /// `RemoveAllNegativeBuffs`: flag every active buff whose DamageType is
+    /// set (near-death regen cure).
+    remove_all_negative,
+    /// `ResetProgression`: the respec consumable (Grandpa's Forgetting Elixir
+    /// `reset_skills="true"`) refunds SkillPoints and clears perk/attribute
+    /// levels to base. Recorded; the caller resets the player.
+    reset_progression,
+    /// `CallGameEvent`: run a gameevents.xml sequence by name
+    /// (`MinEventActionCallGameEvent`; Dentist silver/gold grants).
+    call_game_event,
     other,
 };
 
@@ -169,11 +217,36 @@ pub const Triggered = struct {
     value: f32 = 0,
     /// AddBuff/RemoveBuff target.
     buff: []const u8 = "",
+    /// `fireOneBuff="true"`: weighted single-pick over the comma `buff=` list
+    /// (MinEventActionBuffModifierBase: GameRandom.RandomFloat walked against
+    /// cumulative `buffWeights`; zombie-fist wound rows). Weights parsed into
+    /// buff_weights; the caller picks one deterministically.
+    fire_one_buff: bool = false,
+    buff_weights: [16]f32 = .{0} ** 16,
+    buff_weights_n: u8 = 0,
     /// `target="other"` on AddBuff/RemoveBuff rows: stock applies the buff
     /// to the event's other entity (victim-directed perk procs: shotgun
     /// stuns, cripples, bleeds) instead of self. `target="otherAOE"` rows
-    /// are recorded but not applied (no AoE victim set on the event).
+    /// apply to living entities within `range` of the other entity
+    /// (SledgeSaga kill cripple); `target="selfAOE"` rows are recorded but
+    /// not applied (admin RingOfFire only: no update-event range scan).
     target_other: bool = false,
+    target_other_aoe: bool = false,
+    /// `target="selfOtherPlayers"` on ModifyCVar/AddBuff rows: stock fans the
+    /// row out to party/ally members (CharismaticNature level share + group
+    /// buff). Parsed; the progression-update caller applies it.
+    target_party: bool = false,
+    /// `delay=` seconds on a row (stock `MinEventActionBase::Delay` runs the
+    /// action through a coroutine; 21 kill-event stamina refunds carry 1.0).
+    /// Parsed; the caller defers (0 = immediate).
+    delay_s: f32 = 0,
+    /// AoE range in metres (`range=`) and tag filter (`target_tags=`) for
+    /// `target="otherAOE"` rows.
+    aoe_range: f32 = 0,
+    aoe_tags: []const u8 = "",
+    /// CallGameEvent sequence name (`event=`); also reuses `buff` storage? No:
+    /// a dedicated field keeps buff names and event names apart.
+    game_event: []const u8 = "",
     /// ModifyCVar/RemoveCVar target (`cvar=`).
     cvar: []const u8 = "",
     /// ModifyCVar operation (`operation=`); `CVarOperation` defaults to set.
@@ -182,6 +255,12 @@ pub const Triggered = struct {
     /// entity's custom variable at apply time (`MinEventActionModifyCVar`'s
     /// `cvarRef`), not from `value`.
     value_cvar: []const u8 = "",
+    /// Level-curved ModifyCVar `value="a,b,c"`: `Execute` indexes
+    /// valueList[CalculatedLevel-1] when the event carries the row's
+    /// ProgressionValue (spear-hunter metabolism curves). value_list_n = the
+    /// parsed segment count; 0 = plain scalar.
+    value_list: [16]f32 = .{0} ** 16,
+    value_list_n: u8 = 0,
     /// The row's direct `<requirement>` children, evaluated by the shared
     /// evaluator (empty = ungated).
     reqs: []const requirements.Requirement = &.{},
@@ -205,6 +284,9 @@ pub const BuffDef = struct {
     update_rate_ticks: i32 = default_update_rate_ticks,
     /// BuffClass::RemoveOnDeath (asm.il 1371585), default true per .ctor.
     remove_on_death: bool = true,
+    /// BuffClass::DamageType (`<damage_type value>` element, default none).
+    /// `RemoveAllNegativeBuffs` clears buffs whose type is set.
+    damage_type: []const u8 = "",
     /// The buff's `<tags value="..."/>` list (buffs.xml element, not an
     /// attribute). `game_on_death_injured` uses it to keep
     /// `deathpenalty_injured` buffs through death (16 stock buffs carry it).
@@ -341,6 +423,50 @@ fn parseBoolAttr(s: []const u8, default: bool) bool {
 pub fn firstF32(s: []const u8) f32 {
     const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
     return std.fmt.parseFloat(f32, std.mem.trim(u8, s[0..comma], " \t")) catch 0;
+}
+
+/// Parse a comma-separated ModifyCVar value curve (spear-hunter metabolism
+/// rows) into a fixed array; level i reads value[i] (1-based).
+fn parseValueList(s: []const u8) struct { list: [16]f32, n: u8 } {
+    var out = [_]f32{0} ** 16;
+    var n: u8 = 0;
+    if (s.len == 0) return .{ .list = out, .n = 0 };
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        const t = std.mem.trim(u8, seg, " \t");
+        if (t.len == 0) continue;
+        if (n >= out.len) break;
+        out[n] = std.fmt.parseFloat(f32, t) catch 0;
+        n += 1;
+    }
+    return .{ .list = out, .n = n };
+}
+
+/// Parse a comma-separated `weights=` list into a fixed array (fireOneBuff).
+fn parseWeights(s: []const u8) [16]f32 {
+    var out = [_]f32{0} ** 16;
+    if (s.len == 0) return out;
+    var it = std.mem.splitScalar(u8, s, ',');
+    var i: usize = 0;
+    while (it.next()) |seg| {
+        if (i >= out.len) break;
+        out[i] = std.fmt.parseFloat(f32, std.mem.trim(u8, seg, " \t")) catch 0;
+        i += 1;
+    }
+    return out;
+}
+
+/// Count of parsed weights (0 for empty).
+fn weightsCount(s: []const u8) u8 {
+    if (s.len == 0) return 0;
+    var n: u8 = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        if (std.mem.trim(u8, seg, " \t").len == 0) continue;
+        if (n >= 16) break;
+        n += 1;
+    }
+    return n;
 }
 
 /// Fill `out` with the comma-separated curve segments of a passive `value`
@@ -614,22 +740,42 @@ pub fn scanTriggeredRows(
         // (MinEventActionModifyCVar::ParseXmlAttribute IL_0172 sets cvarRef and
         // strips the sigil); `@:` is a localization key and never a cvar. The
         // randomint(...)/randomfloat(...) forms are not implemented: a row that
-        // would roll is refused rather than applied as 0.
-        const val_cvar = if (act == .modify_cvar and val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
+        // would roll is refused rather than applied as 0. ModifyStats reads
+        // `value="@x"` the same way at execute time (IL_0008: cvarRef →
+        // GetCustomVar into value; falling-damage subtracts @.impactSpeed).
+        const val_cvar = if ((act == .modify_cvar or act == .modify_stats) and val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
         const roll = act == .modify_cvar and (std.mem.startsWith(u8, val_s, "randomint(") or
             std.mem.startsWith(u8, val_s, "randomfloat("));
         const target_s = xml.attr(body, ri, "target") orelse "";
+        const weights_s = xml.attr(body, ri, "weights") orelse "";
         const tr: Triggered = .{
             .trigger = parseTrigger(trig_s),
             .action = if (roll or health_cvar) .other else act,
             .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
+            .fire_one_buff = std.mem.eql(u8, xml.attr(body, ri, "fireOneBuff") orelse "", "true"),
+            .buff_weights = parseWeights(weights_s),
+            .buff_weights_n = weightsCount(weights_s),
+            .game_event = try arena.dupe(u8, xml.attr(body, ri, "event") orelse ""),
             .target_other = std.mem.eql(u8, target_s, "other"),
+            .target_other_aoe = std.mem.eql(u8, target_s, "otherAOE"),
+            .target_party = std.mem.eql(u8, target_s, "selfOtherPlayers"),
+            .aoe_range = firstF32(xml.attr(body, ri, "range") orelse "0"),
+            .aoe_tags = try arena.dupe(u8, xml.attr(body, ri, "target_tags") orelse ""),
             .stat = try arena.dupe(u8, if (is_add_health) "Health" else xml.attr(body, ri, "stat") orelse ""),
             .cvar = try arena.dupe(u8, xml.attr(body, ri, "cvar") orelse ""),
             .cvar_op = cvars.Operation.parse(xml.attr(body, ri, "operation") orelse "set") orelse .set,
             .value_cvar = if (val_cvar.len > 0) try arena.dupe(u8, val_cvar) else "",
             .op = if (is_add_health) .add else parseOp(xml.attr(body, ri, "operation") orelse "add"),
             .value = if (is_add_health) firstF32(health_s) else firstF32(val_s),
+            .value_list = blk: {
+                const vl = parseValueList(val_s);
+                break :blk vl.list;
+            },
+            .value_list_n = blk: {
+                const vl = parseValueList(val_s);
+                break :blk vl.n;
+            },
+            .delay_s = firstF32(xml.attr(body, ri, "delay") orelse "0"),
         };
         const rq0 = reqs_list.items.len;
         for (group_reqs) |g| try reqs_list.append(allocator, g);
@@ -756,6 +902,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         if (xml.attr(clean, bi, "remove_on_death")) |v| meta.remove_on_death = parseBoolAttr(v, true);
         if (std.mem.find(u8, body, "<tags")) |ti| {
             if (xml.attr(body, ti, "value")) |v| meta.tags = try arena.dupe(u8, v);
+        }
+        if (std.mem.find(u8, body, "<damage_type")) |di| {
+            if (xml.attr(body, di, "value")) |v| meta.damage_type = try arena.dupe(u8, v);
         }
         const m0 = mods_list.items.len;
         var mj: usize = 0;
@@ -1432,6 +1581,14 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfAttackedOther")) return .self_attacked_other;
     if (std.mem.eql(u8, s, "onSelfBuffFinish")) return .finish;
     if (std.mem.eql(u8, s, "onSelfBuffStack")) return .stack;
+    if (std.mem.eql(u8, s, "onSelfLeaveGame")) return .leave_game;
+    if (std.mem.eql(u8, s, "onSelfDied")) return .died;
+    if (std.mem.eql(u8, s, "onSelfPrimaryActionEnd")) return .primary_action_end;
+    if (std.mem.eql(u8, s, "onSelfPrimaryActionRayHit")) return .primary_action_ray_hit;
+    if (std.mem.eql(u8, s, "onSelfDamagedOther")) return .self_damaged_other;
+    if (std.mem.eql(u8, s, "onOtherDamagedSelf")) return .other_damaged_self;
+    if (std.mem.eql(u8, s, "onCombatEntered")) return .combat_entered;
+    if (std.mem.eql(u8, s, "onSelfFallImpact")) return .fall_impact;
     return .other;
 }
 
@@ -1442,7 +1599,10 @@ fn parseTriggeredAction(s: []const u8) TriggeredAction {
     if (std.mem.eql(u8, s, "AddOrRemoveBuff")) return .add_or_remove_buff;
     if (std.mem.eql(u8, s, "ModifyCVar")) return .modify_cvar;
     if (std.mem.eql(u8, s, "RemoveCVar")) return .remove_cvar;
-    return .other;
+    if (std.mem.eql(u8, s, "CallGameEvent")) return .call_game_event;
+    if (std.mem.eql(u8, s, "RemoveAllNegativeBuffs")) return .remove_all_negative;
+    if (std.mem.eql(u8, s, "ResetProgression")) return .reset_progression;
+    return .other; // RefreshPerks is a no-op here: the passive fold reads skill_levels live.
 }
 
 /// Largest number of one action's rows any single stock buff fires for one
@@ -1470,9 +1630,40 @@ pub const TriggeredResult = struct {
     /// order. The caller applies these to the event's other entity.
     add_other_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
     add_other_n: u8 = 0,
+    /// fireOneBuff flags + weights per other add: the entry's comma list is a
+    /// weighted single pick, not all.
+    add_other_fireone: [max_triggered_adds]bool = .{false} ** max_triggered_adds,
+    add_other_weights: [max_triggered_adds][16]f32 = .{.{0} ** 16} ** max_triggered_adds,
+    add_other_weights_n: [max_triggered_adds]u8 = .{0} ** max_triggered_adds,
     /// Victim-directed removes, parallel to remove_buffs.
     remove_other_buffs: [max_triggered_removes][]const u8 = .{""} ** max_triggered_removes,
     remove_other_n: u8 = 0,
+    /// AoE adds (`target="otherAOE"`): buff name + row range/tags per entry.
+    /// The caller scans living entities around the event's other entity.
+    add_aoe_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_aoe_range: [max_triggered_adds]f32 = .{0} ** max_triggered_adds,
+    add_aoe_tags: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_aoe_n: u8 = 0,
+    /// Party adds (`target="selfOtherPlayers"` AddBuff): buff names fanned out
+    /// to party/ally members by the caller.
+    add_party_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    add_party_n: u8 = 0,
+    /// Party cvar writes (`target="selfOtherPlayers"` ModifyCVar): cvar + op
+    /// + resolved value per entry, applied to each member's store.
+    party_cvars: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    party_cvar_ops: [max_triggered_adds]cvars.Operation = .{.set} ** max_triggered_adds,
+    party_cvar_vals: [max_triggered_adds]f32 = .{0} ** max_triggered_adds,
+    party_cvar_n: u8 = 0,
+    /// Game-event calls (`CallGameEvent`): sequence names the caller runs
+    /// through the gameevents runner.
+    game_events: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    game_event_n: u8 = 0,
+    /// Cure-all (`RemoveAllNegativeBuffs`): the caller flags every active
+    /// buff whose DamageType is set.
+    remove_all_negative: bool = false,
+    /// Respec (`ResetProgression`): the caller refunds SkillPoints and clears
+    /// perk/attribute levels to base.
+    reset_progression: bool = false,
 };
 
 /// The triggered-effect engine: evaluate one buff's `onSelf*` rows for
@@ -1525,21 +1716,56 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
                     out.truncated +|= 1;
                     continue;
                 }
-                out.mods[out.mod_n] = .{ .stat = tr.stat, .op = tr.op, .value = tr.value };
+                // `value="@cvar"` resolves at execute time against the
+                // holder's store (falling-damage @.impactSpeed); missing
+                // reads 0 like GetCustomVar.
+                const v = if (tr.value_cvar.len > 0) requirements.cvarValue(ctx, tr.value_cvar) else tr.value;
+                out.mods[out.mod_n] = .{ .stat = tr.stat, .op = tr.op, .value = v, .target_other = tr.target_other, .delay_s = tr.delay_s };
                 out.mod_n += 1;
             },
             .add_buff => {
                 if (tr.buff.len == 0) continue;
+                if (tr.target_party) {
+                    // Party adds skip every sink: the caller fans them out to
+                    // party/ally members (CharismaticNature group buff).
+                    if (out.add_party_n >= out.add_party_buffs.len) {
+                        out.truncated +|= 1;
+                        continue;
+                    }
+                    out.add_party_buffs[out.add_party_n] = tr.buff;
+                    out.add_party_n += 1;
+                    continue;
+                }
+                if (tr.target_other_aoe) {
+                    // AoE adds skip every sink: the caller fans them out over
+                    // living entities in range (no victims on update events).
+                    if (out.add_aoe_n >= out.add_aoe_buffs.len) {
+                        out.truncated +|= 1;
+                        continue;
+                    }
+                    out.add_aoe_buffs[out.add_aoe_n] = tr.buff;
+                    out.add_aoe_range[out.add_aoe_n] = tr.aoe_range;
+                    out.add_aoe_tags[out.add_aoe_n] = tr.aoe_tags;
+                    out.add_aoe_n += 1;
+                    continue;
+                }
                 if (tr.target_other) {
                     if (out.add_other_n >= out.add_other_buffs.len) {
                         out.truncated +|= 1;
                         continue;
                     }
                     out.add_other_buffs[out.add_other_n] = tr.buff;
+                    out.add_other_fireone[out.add_other_n] = tr.fire_one_buff;
+                    out.add_other_weights[out.add_other_n] = tr.buff_weights;
+                    out.add_other_weights_n[out.add_other_n] = tr.buff_weights_n;
                     out.add_other_n += 1;
                     // Victim-directed adds skip the self sink: the caller
-                    // applies them to the event's other entity.
-                    if (ctx.other_sink) |sk| sk.add_buff(sk.ctx, tr.buff);
+                    // applies them to the event's other entity. A fireOneBuff
+                    // row skips the live sink too (the weighted single pick
+                    // happens in the applier; the sink would apply all).
+                    if (ctx.other_sink) |sk| {
+                        if (!tr.fire_one_buff) sk.add_buff(sk.ctx, tr.buff);
+                    }
                     continue;
                 }
                 if (out.add_n >= out.add_buffs.len) {
@@ -1576,15 +1802,85 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
                 // Applied as the row is scanned, in document order, so a later
                 // row's gate sees this write (check02's `.ArmorLightTotal` is
                 // `set @.ArmorLightLevel` then `multiply @.ArmorLightWorn`).
+                // `target="other"` writes go to the victim's store when the
+                // event supplies one (player client stores, or the lazy
+                // per-entity column for zombies/others).
+                if (tr.target_other) {
+                    if (ctx.other_cvars) |ostore| {
+                        if (tr.cvar.len == 0) continue;
+                        const v = if (tr.value_cvar.len > 0) ostore.get(tr.value_cvar) else tr.value;
+                        _ = ostore.apply(tr.cvar, tr.cvar_op, v);
+                    }
+                    continue;
+                }
+                if (tr.target_party) {
+                    // Party cvar writes record for the caller's fan-out; the
+                    // self write still lands through the normal path below
+                    // when a store exists (stock writes self too).
+                    if (out.party_cvar_n < out.party_cvars.len and tr.cvar.len > 0) {
+                        const self_store = ctx.cvars;
+                        const v = if (tr.value_cvar.len > 0 and self_store != null) self_store.?.get(tr.value_cvar) else tr.value;
+                        out.party_cvars[out.party_cvar_n] = tr.cvar;
+                        out.party_cvar_ops[out.party_cvar_n] = tr.cvar_op;
+                        out.party_cvar_vals[out.party_cvar_n] = v;
+                        out.party_cvar_n += 1;
+                    } else if (out.party_cvar_n >= out.party_cvars.len) {
+                        out.truncated +|= 1;
+                    }
+                }
                 const store = ctx.cvars orelse continue;
                 if (tr.cvar.len == 0) continue;
-                const v = if (tr.value_cvar.len > 0) store.get(tr.value_cvar) else tr.value;
+                // A level-curved `value="a,b,c"` indexes valueList[level-1]
+                // when the event carries the row's ProgressionValue (stock
+                // Execute IL: CalculatedLevel); the progression-update caller
+                // supplies the changing perk's level.
+                const v = if (tr.value_list_n > 0 and tr.value_cvar.len == 0)
+                    tr.value_list[@min(tr.value_list_n, @max(1, ctx.progression_level orelse 1)) - 1]
+                else if (tr.value_cvar.len > 0) store.get(tr.value_cvar) else tr.value;
                 _ = store.apply(tr.cvar, tr.cvar_op, v);
             },
             .remove_cvar => {
+                // Stock splits `cvar=` on commas into cvarNames (ParseXml IL=23);
+                // every listed name is removed.
+                if (tr.target_other) {
+                    if (ctx.other_cvars) |ostore| {
+                        if (tr.cvar.len == 0) continue;
+                        var it = std.mem.splitScalar(u8, tr.cvar, ',');
+                        while (it.next()) |seg| {
+                            const name = std.mem.trim(u8, seg, " \t");
+                            if (name.len == 0) continue;
+                            _ = ostore.remove(name);
+                        }
+                    }
+                    continue;
+                }
                 const store = ctx.cvars orelse continue;
                 if (tr.cvar.len == 0) continue;
-                _ = store.remove(tr.cvar);
+                var it = std.mem.splitScalar(u8, tr.cvar, ',');
+                while (it.next()) |seg| {
+                    const name = std.mem.trim(u8, seg, " \t");
+                    if (name.len == 0) continue;
+                    _ = store.remove(name);
+                }
+            },
+            .call_game_event => {
+                if (tr.game_event.len == 0) continue;
+                if (out.game_event_n >= out.game_events.len) {
+                    out.truncated +|= 1;
+                    continue;
+                }
+                out.game_events[out.game_event_n] = tr.game_event;
+                out.game_event_n += 1;
+            },
+            .remove_all_negative => {
+                // Flagged in the result; the caller resolves DamageType
+                // against its buff table (the engine has no table here).
+                if (out.remove_all_negative) continue;
+                out.remove_all_negative = true;
+            },
+            .reset_progression => {
+                if (out.reset_progression) continue;
+                out.reset_progression = true;
             },
             .add_or_remove_buff => unreachable, // handled above (toggle, not gate)
             .other => continue,
@@ -1686,11 +1982,61 @@ fn triggeredHealthPerSecond(def: *const BuffDef, r: *const TriggeredResult) f32 
 pub fn healthAddDelta(r: *const TriggeredResult) f32 {
     var d: f32 = 0;
     for (r.mods[0..r.mod_n]) |m| {
+        // Victim-directed rows belong to the other applier, never self.
+        if (m.target_other) continue;
         if (!eqIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .add) continue;
         d += m.value;
     }
     return d;
+}
+
+/// Immediate Health `subtract` rows, applied once per firing event
+/// (infection04 kill blow 99999999, falling-damage @.impactSpeed). Stage-3
+/// hunger/thirst rows stay on the per-second path: callers pass the buff's
+/// update interval and those rows are excluded here by name match.
+pub fn healthSubtractOnce(r: *const TriggeredResult) f32 {
+    var d: f32 = 0;
+    for (r.mods[0..r.mod_n]) |m| {
+        if (m.target_other) continue;
+        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (m.op != .subtract) continue;
+        d += m.value;
+    }
+    return d;
+}
+
+/// Immediate Food/Water deltas from ModifyStats rows: `subtract` applies once
+/// (puking drains 50 water at start), `add` sums, `set` takes the last.
+/// Victim-directed rows excluded (other applier owns them).
+pub const FoodWaterDelta = struct { food: f32 = 0, water: f32 = 0, food_set: ?f32 = null, water_set: ?f32 = null };
+
+pub fn foodWaterDelta(r: *const TriggeredResult) FoodWaterDelta {
+    var out: FoodWaterDelta = .{};
+    for (r.mods[0..r.mod_n]) |m| {
+        if (m.target_other) continue;
+        if (eqIgnoreCase(m.stat, "Food")) {
+            if (m.op == .subtract) out.food -= m.value else if (m.op == .add) out.food += m.value else if (m.op == .set) out.food_set = m.value;
+        } else if (eqIgnoreCase(m.stat, "Water")) {
+            if (m.op == .subtract) out.water -= m.value else if (m.op == .add) out.water += m.value else if (m.op == .set) out.water_set = m.value;
+        }
+    }
+    return out;
+}
+
+/// Immediate Stamina deltas from ModifyStats rows: `subtract` applies once
+/// per firing event (radiation pool drains 20 per update), `add` sums, `set`
+/// takes the last. Victim-directed rows excluded (other applier owns them).
+pub const StaminaDelta = struct { delta: f32 = 0, set: ?f32 = null };
+
+pub fn staminaDelta(r: *const TriggeredResult) StaminaDelta {
+    var out: StaminaDelta = .{};
+    for (r.mods[0..r.mod_n]) |m| {
+        if (m.target_other) continue;
+        if (!eqIgnoreCase(m.stat, "Stamina")) continue;
+        if (m.op == .subtract) out.delta -= m.value else if (m.op == .add) out.delta += m.value else if (m.op == .set) out.set = m.value;
+    }
+    return out;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
@@ -2773,4 +3119,44 @@ test "AddOrRemoveBuff toggles on its gates" {
     try std.testing.expectEqual(@as(u8, 0), removed.add_n);
     try std.testing.expectEqual(@as(u8, 1), removed.remove_n);
     try std.testing.expectEqualStrings("buffHot", removed.remove_buffs[0]);
+}
+
+test "ModifyStats target=other flags the victim mod" {
+    // Stock buffPhysicianEuthanizer's start row sets Health on target=other
+    // (instant-kill); the flag routes it to the victim applier, not self.
+    const rows = [_]Triggered{
+        .{ .trigger = .start, .action = .modify_stats, .stat = "Health", .op = .set, .value = -25000, .target_other = true, .reqs = &.{} },
+        .{ .trigger = .start, .action = .modify_stats, .stat = "Health", .op = .add, .value = 2, .reqs = &.{} },
+    };
+    var counts: requirements.Counts = .{};
+    const res = evaluateRows(&rows, .start, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 2), res.mod_n);
+    try std.testing.expect(res.mods[0].target_other);
+    try std.testing.expect(!res.mods[1].target_other);
+    // Self-only folds skip victim rows (SiphoningStrikes path unaffected).
+    try std.testing.expectApproxEqAbs(@as(f32, 2), healthAddDelta(&res), 0.0001);
+}
+
+test "damage_type element parses onto the def" {
+    // `<damage_type value>` drives RemoveAllNegativeBuffs matching.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqualStrings("Bashing", t.byName("buffInjuryAbrasion").?.damage_type);
+    try std.testing.expectEqualStrings("bloodloss", t.byName("buffInjuryBleeding").?.damage_type);
+    try std.testing.expectEqualStrings("stun", t.byName("buffHarvest").?.damage_type);
+}
+
+test "cure-all row evaluates on regen start" {
+    // The regen cure row is gated PlayerLevel LT 6; level 1 passes and the
+    // result flags remove_all_negative.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const id = t.indexOfName("buffNearDeathRegen").?;
+    var counts: requirements.Counts = .{};
+    const res = evaluateTriggered(&t, id, .start, .{ .player_level = 1 }, &counts);
+    try std.testing.expect(res.remove_all_negative);
 }
