@@ -59,7 +59,11 @@ const HISTORY_DEFAULT_MS = 300000;
 const HISTORY_2_MIN_MS = 120000;
 const HISTORY_5_MIN_MS = 300000;
 const HISTORY_10_MIN_MS = 600000;
-const HISTORY_WINDOW_MS: ReadonlyArray<number> = [HISTORY_2_MIN_MS, HISTORY_5_MIN_MS, HISTORY_10_MIN_MS];
+const HISTORY_WINDOW_MS: ReadonlySet<number> = new Set([
+    HISTORY_2_MIN_MS,
+    HISTORY_5_MIN_MS,
+    HISTORY_10_MIN_MS,
+]);
 const TIME_GRID_5_S = 5000;
 const TIME_GRID_10_S = 10000;
 const TIME_GRID_15_S = 15000;
@@ -135,12 +139,12 @@ function loadHistoryMs(): number {
     // URL wins (?history=120000), then the stored preference, then the default.
     // Unknown values fall back down the chain (missing beats fake).
     const param = Number(new URLSearchParams(globalThis.location.search).get("history"));
-    if (HISTORY_WINDOW_MS.includes(param)) {
+    if (HISTORY_WINDOW_MS.has(param)) {
         return param;
     }
     // oxlint-disable-next-line @rikalabs/no-json-parse-default-fallback -- deliberate: localStorage holds a bare integer written by this page, not JSON; a Number() parse failure falls back to the default window
     const stored = Number(globalThis.localStorage.getItem(HISTORY_STORAGE_KEY));
-    return HISTORY_WINDOW_MS.includes(stored) ? stored : HISTORY_DEFAULT_MS;
+    return HISTORY_WINDOW_MS.has(stored) ? stored : HISTORY_DEFAULT_MS;
 }
 
 // The drawing code runs from animation frames and pointer listeners rather
@@ -791,7 +795,7 @@ export function setChartStale(): void {
 }
 
 export function setChartHistory(ms: number): void {
-    if (!HISTORY_WINDOW_MS.includes(ms)) {
+    if (!HISTORY_WINDOW_MS.has(ms)) {
         return;
     }
     historyMs = ms;

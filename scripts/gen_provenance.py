@@ -13,9 +13,8 @@ The per-area WORKS/PARTIAL/MISSING counts are recounted from the live markers
 below is hand-maintained and must stay in sync with the GAP sections.
 """
 
-import re
 import pathlib
-import sys
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 GAP = ROOT / "docs" / "GAP_ANALYSIS.md"
@@ -202,7 +201,7 @@ def build():
     # handful of amber squares among ~300 green ones is invisible on hue alone
     # (and gone entirely for red/green colour vision deficiency).
     map_blocks = []
-    for name, w, p, m, rows in sorted(cats, key=lambda c: (c[2] + c[3] == 0, c[0])):
+    for name, w, p, m, _rows in sorted(cats, key=lambda c: (c[2] + c[3] == 0, c[0])):
         total = w + p + m
         # Cells follow the scorecard counts, not the prose rows: the counts are
         # the documented source of truth and the two can differ (a category's

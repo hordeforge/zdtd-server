@@ -321,7 +321,7 @@ def main():
 
     # Constants ledger well-formedness: anchor file must exist, bucket valid, source non-empty.
     bad_const = []
-    for anchor, value, bucket, source in const_rows:
+    for anchor, _value, bucket, source in const_rows:
         if bucket not in BUCKETS:
             bad_const.append(f"{anchor}: bad bucket {bucket!r}")
             continue

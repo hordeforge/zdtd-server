@@ -57,7 +57,7 @@ help:
 	@echo "  make test                      full unit + scenario suite"
 	@echo "  make test-one FILTER='name'    one substring filter (edit-test loop)"
 	@echo "  make fuzz                      fuzz entry (also part of make check)"
-	@echo "  make lint                      fmt check, shellcheck, architecture, docs, webui"
+	@echo "  make lint                      fmt check, shellcheck, ruff, architecture, docs, webui"
 	@echo "  make fmt                       zig fmt write"
 	@echo "  make check                     full local gate (same intent as CI validate)"
 	@echo "  make check-clean-build         cold-cache exe build (catch stale-cache misses)"
@@ -189,8 +189,13 @@ lint: need-zig need-python3 lint-webui lint-html
 	  echo "zdtd: missing required tool: shellcheck; apt/brew install shellcheck" >&2; \
 	  exit 127; \
 	}
+	@command -v ruff >/dev/null || { \
+	  echo "zdtd: missing required tool: ruff; install from https://docs.astral.sh/ruff (CI pins 0.16.4)" >&2; \
+	  exit 127; \
+	}
 	for script in scripts/*.sh; do bash -n "$$script"; done
 	shellcheck -o add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat scripts/*.sh
+	ruff check tools/ scripts/gen_provenance.py
 	$(ZIG) fmt --check build.zig build.zig.zon src mods plugins assets/fixtures
 	bash scripts/lint-architecture.sh
 	# Documentation gate: dead links, code citations in range, quoted Zig blocks

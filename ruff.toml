@@ -1,0 +1,28 @@
+# Ruff gate for repo Python (tools/*.py, scripts/gen_provenance.py).
+# Wired by `make lint` / CI; versions: whatever `ruff` on PATH reports
+# (CI pins via the Install lint tools step). Only rule groups the tree
+# already passes are selected so the gate is a ratchet, not a mass rewrite.
+# Line length is the smallest multiple of 10 the tree already clears (max
+# observed line was 407); do not tighten without reformatting first.
+
+target-version = "py311"
+line-length = 420
+
+[lint]
+select = [
+    "F",   # pyflakes
+    "E9",  # runtime / syntax (pycodestyle)
+    "W",   # pycodestyle warnings
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "RUF", # ruff-specific
+    "ERA", # commented-out code
+    "PIE", # flake8-pie
+    "TRY", # tryceratops
+    "ARG", # unused function args
+    "DTZ", # flake8-datetimez
+    "FA",  # future-annotations
+    "LOG", # flake8-logging
+    "G",   # flake8-logging-format
+    "PGH", # pygrep-hooks
+]

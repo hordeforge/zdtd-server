@@ -1115,7 +1115,7 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
 
 const TAB_SLUGS = ["status", "apm", "players", "console", "settings", "modules"] as const;
 type TabSlug = (typeof TAB_SLUGS)[number];
-const FAST_TABS: ReadonlyArray<TabSlug> = ["status", "apm", "players"];
+const FAST_TABS: ReadonlySet<TabSlug> = new Set<TabSlug>(["status", "apm", "players"]);
 
 function slugFromHash(): TabSlug | null {
     const raw = globalThis.location.hash.replace(/^#/u, "");
@@ -1333,7 +1333,7 @@ function useAutoRefresh() {
 function App(): ComponentChildren {
     const activeTab = useTabRouting();
     const { autoEnabled, pageHidden, refreshNote, setRefreshNote } = useAutoRefresh();
-    const cadence = FAST_TABS.includes(activeTab) ? POLL_FAST_MS : POLL_SLOW_MS;
+    const cadence = FAST_TABS.has(activeTab) ? POLL_FAST_MS : POLL_SLOW_MS;
     const { state, failed, reload } = useDashboard(autoEnabled, pageHidden, cadence);
 
     useEffect(() => {

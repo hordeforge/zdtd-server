@@ -112,7 +112,7 @@ version_ge() {
   # Return 0 if $1 >= $2 (dot-separated integers).
   local a="$1" b="$2"
   local IFS=.
-  # shellcheck disable=SC2206
+  # shellcheck disable=SC2206 # deliberate: IFS=. word-splits the version into array cells
   local -a aa=($a) bb=($b)
   local i ai bi
   local n=${#aa[@]}

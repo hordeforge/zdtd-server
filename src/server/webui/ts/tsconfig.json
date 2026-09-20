@@ -27,5 +27,5 @@
     "noEmitOnError": true,
     "types": []
   },
-  "files": ["login.ts", "lockout.ts", "shell.tsx"]
+  "files": ["login.ts", "lockout.ts", "shell.tsx", "chart.ts"]
 }

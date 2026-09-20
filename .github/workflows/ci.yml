@@ -101,9 +101,19 @@ jobs:
           path: |
             ~/.cache/zdtd
             ~/.bun/install/cache
-          key: webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-${{ hashFiles('scripts/lint-webui.sh', 'scripts/lint-html.sh', 'scripts/webui-ts-project.sh', 'scripts/build-webui-ts.sh', '.oxlintrc.jsonc') }}
+          key: webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-${{ hashFiles('scripts/lint-webui.sh', 'scripts/lint-html.sh', 'scripts/webui-ts-project.sh', 'scripts/build-webui-ts.sh', '.oxlintrc.jsonc', 'ruff.toml') }}
           restore-keys: |
             webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-
+
+      # After the ~/.cache/zdtd restore so a cache hit keeps the venv; before
+      # make check so `ruff` is on PATH. Pin matches make lint / ruff.toml.
+      - name: Install ruff
+        run: |
+          set -euo pipefail
+          python3 -m venv "$HOME/.cache/zdtd/ruff-venv"
+          "$HOME/.cache/zdtd/ruff-venv/bin/pip" install --quiet 'ruff==0.16.4'
+          echo "$HOME/.cache/zdtd/ruff-venv/bin" >> "$GITHUB_PATH"
+          "$HOME/.cache/zdtd/ruff-venv/bin/ruff" --version
 
       - name: Run validation gate
         run: make check
