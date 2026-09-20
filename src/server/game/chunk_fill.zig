@@ -148,12 +148,21 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .tex_at = BlockCtx.tex,
         .default_tex = TexCtx.def,
         .default_tex_ctx = &tex_ctx,
-        // TTS density overrides exist only when the chunk has a densities plane;
-        // without one, dens_at returns null for every cell and writeDensityChannel
-        // falls back to 65536 scalar densityAt calls, bypassing its SIMD
-        // packDensityFromRaws fast path (gated on dens_at == null). Both agree
-        // bit-for-bit with no overrides: densityForBlock(type) per cell.
+        // TTS density overrides: pass the dense paint plane + bitset so
+        // writeDensityChannel can SIMD-pack from raws then overlay painted
+        // cells. dens_at stays as the scalar fallback when raws are absent
+        // (non-stock profile) or the planes are incomplete.
         .dens_at = if (ch.densities == null) null else BlockCtx.dens,
+        .dens_plane = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
+            const d = ch.densities.?;
+            std.debug.assert(d.len >= 65536);
+            break :blk @as(*const [65536]u8, @ptrCast(d.ptr));
+        } else null,
+        .dens_set = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
+            const s = ch.dens_set.?;
+            std.debug.assert(s.len >= 8192);
+            break :blk @as(*const [8192]u8, @ptrCast(s.ptr));
+        } else null,
         .water_block_id = self.world.terrain_ids.water,
         // Same gate as dens_at: with no damage plane every cell reads 0, and
         // writeDamageChannel's null branch (sameValue 0 per layer) writes the

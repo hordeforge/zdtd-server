@@ -77,9 +77,11 @@ pub fn replicate(self: *Game) !void {
 
     var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
-    var obs_ok: [game_mod.max_clients]bool = .{false} ** game_mod.max_clients;
     var obs_r: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var active: game_mod.ObsMask = 0;
+    // Present: joined+entered+peer with a resolved entity cell. Range-remove
+    // walks present ∩ ~in_range instead of re-testing cellsInRange per client.
+    var present: game_mod.ObsMask = 0;
     for (&self.clients, 0..) |*cl, ci| {
         obs_r[ci] = cl.view_radius;
         if (cl.joined and cl.entered and cl.peer != null) active |= game_mod.bitOf(ci);
@@ -88,7 +90,7 @@ pub fn replicate(self: *Game) !void {
             const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
             obs_cx[ci] = oc.cx;
             obs_cz[ci] = oc.cz;
-            obs_ok[ci] = true;
+            if (cl.entered) present |= game_mod.bitOf(ci);
         }
     }
 
@@ -193,11 +195,14 @@ pub fn replicate(self: *Game) !void {
         }
 
         if (is_mob) {
-            for (&self.clients, 0..) |*cl, ci| {
+            // Known but out of interest: walk present ∩ ~in_range bits (the
+            // observerMask word already encodes cellsInRange per lane).
+            var leave = present & ~in_range;
+            while (leave != 0) : (leave &= leave - 1) {
+                const ci = @ctz(leave);
+                const cl = &self.clients[ci];
                 if (!cl.known_entities.isSet(i)) continue;
-                if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
                 const peer = cl.peer orelse continue;
-                if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
                 const rb = packages.buildRemoveBodyReason(
                     &self.body_buf,
                     self.sim.network_id[i].id,
@@ -331,7 +336,7 @@ pub fn replicate(self: *Game) !void {
         }
     }
 
-    try replicateBots(self, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+    try replicateBots(self, &obs_cx, &obs_cz, &obs_r, active, present);
 
     var dirty_now = self.sim.dirty_bits;
     var dirty_it = dirty_now.iterator(.{});
@@ -352,9 +357,9 @@ fn replicateBots(
     self: *Game,
     obs_cx: *const [game_mod.max_clients]i32,
     obs_cz: *const [game_mod.max_clients]i32,
-    obs_ok: *const [game_mod.max_clients]bool,
     obs_r: *const [game_mod.max_clients]i32,
     active: game_mod.ObsMask,
+    present: game_mod.ObsMask,
 ) !void {
     const heartbeat = self.tick_n % self.pos_heartbeat_period_ticks == 0;
     var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
@@ -428,11 +433,12 @@ fn replicateBots(
         }
 
         // Range-remove: known but now out of the viewer's interest square.
-        for (&self.clients, 0..) |*cl, ci| {
+        var leave = present & ~in_range;
+        while (leave != 0) : (leave &= leave - 1) {
+            const ci = @ctz(leave);
+            const cl = &self.clients[ci];
             if (!cl.known_bots.isSet(bi)) continue;
-            if (!cl.joined or !cl.entered or !obs_ok[ci]) continue;
             const peer = cl.peer orelse continue;
-            if (interest.cellsInRange(obs_cx[ci], obs_cz[ci], ecell.cx, ecell.cz, cl.view_radius)) continue;
             const rb = packages.buildRemoveBodyReason(&self.body_buf, b.net_id, .unloaded) catch {
                 self.harness.counters.inc(.encode_errors);
                 continue;
@@ -495,12 +501,12 @@ test "bot spawn encodes once for multiple viewers" {
     g.tick_n = 1;
     const obs_cx = [_]i32{0} ** game_mod.max_clients;
     const obs_cz = [_]i32{0} ** game_mod.max_clients;
-    const obs_ok = [_]bool{true} ** game_mod.max_clients;
     const obs_r = [_]i32{1} ** game_mod.max_clients;
     const active = game_mod.bitOf(ca.slot) | game_mod.bitOf(cb.slot);
+    const present = active;
     const encoded = g.harness.counters.get(.packages_encoded);
     const fanouts = g.harness.counters.get(.replicate_fanouts);
-    try replicateBots(g, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+    try replicateBots(g, &obs_cx, &obs_cz, &obs_r, active, present);
     try std.testing.expectEqual(encoded + 1, g.harness.counters.get(.packages_encoded));
     try std.testing.expectEqual(fanouts + 2, g.harness.counters.get(.replicate_fanouts));
     try std.testing.expect(ca.known_bots.isSet(0));
@@ -511,7 +517,7 @@ test "bot spawn encodes once for multiple viewers" {
     try std.testing.expectEqualSlices(u8, spawn_a, spawn_b);
     cap_a.clear();
     cap_b.clear();
-    try replicateBots(g, &obs_cx, &obs_cz, &obs_ok, &obs_r, active);
+    try replicateBots(g, &obs_cx, &obs_cz, &obs_r, active, present);
     try std.testing.expectEqual(encoded + 1, g.harness.counters.get(.packages_encoded));
     try std.testing.expect(cap_a.findPkgId(spawn_id) == null);
     try std.testing.expect(cap_b.findPkgId(spawn_id) == null);

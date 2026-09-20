@@ -106,6 +106,12 @@ pub const EncodeOpts = struct {
     /// only when `raws` is null. Null disables the memoization: channels fall
     /// back to the block_at callback.
     raws_scratch: ?*[65536]u32 = null,
+    /// TTS density paint plane (stock sbyte as u8) + bitset of painted cells.
+    /// Both null, or both stock-length (65536 dens / 8192 set bytes). When set
+    /// with `raws`, writeDensityChannel SIMD-packs from raws then overlays
+    /// painted cells so POI chunks keep the fast path instead of dens_at.
+    dens_plane: ?*const [65536]u8 = null,
+    dens_set: ?*const [8192]u8 = null,
 };
 
 fn texAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u64 {
@@ -693,18 +699,43 @@ fn densityAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u8 {
     return densityForBlock(blockType(rawAt(opts, lx, y, lz)));
 }
 
+/// Overlay TTS density paint onto a band already filled by packDensityFromRaws.
+/// `base` is the absolute plane index of dens[0] (y0*256). dens_set bits are
+/// 1 = dens_plane[idx] is a TTS override. Scalar equivalent: per cell, if the
+/// set bit is on write dens_plane else keep the raw-derived density.
+fn overlayDensPaint(dens: *[cells_per_layer]u8, dens_plane: *const [65536]u8, dens_set: *const [8192]u8, base: usize) void {
+    const lanes: usize = 8;
+    var c: usize = 0;
+    while (c + lanes <= cells_per_layer) : (c += lanes) {
+        const abs = base + c;
+        const bits = dens_set[abs / 8];
+        if (bits == 0) continue;
+        var mask: @Vector(lanes, bool) = undefined;
+        inline for (0..lanes) |lane| {
+            mask[lane] = (bits & (@as(u8, 1) << @intCast(lane))) != 0;
+        }
+        const painted: @Vector(lanes, u8) = dens_plane[abs..][0..lanes].*;
+        const base_d: @Vector(lanes, u8) = dens[c..][0..lanes].*;
+        dens[c..][0..lanes].* = @select(u8, mask, painted, base_d);
+    }
+}
+
 fn writeDensityChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     // ChunkBlockChannel bpv=1: per layer presence(1=null/sameValue, 0=full 1024).
-    // Fast path: dense raw plane + no TTS dens_at → SIMD packDensityFromRaws.
-    // dens_at or missing raws falls back to per-cell densityAt (scalar).
+    // Fast path: dense raw plane → SIMD packDensityFromRaws, then optional TTS
+    // dens_plane/dens_set overlay. dens_at without a paint plane (or missing
+    // raws) falls back to per-cell densityAt (scalar).
+    const paint = opts.dens_plane != null and opts.dens_set != null;
+    const use_simd = opts.raws != null and (opts.dens_at == null or paint);
     var layer_i: usize = 0;
     while (layer_i < opts.layers) : (layer_i += 1) {
         const y0: i32 = @intCast(layer_i * 4);
         var dens: [cells_per_layer]u8 = undefined;
-        if (opts.dens_at == null and opts.raws != null) {
+        if (use_simd) {
             const plane = opts.raws.?;
             const base: usize = @intCast(y0 * 256);
             packDensityFromRaws(plane[base..][0..cells_per_layer], &dens);
+            if (paint) overlayDensPaint(&dens, opts.dens_plane.?, opts.dens_set.?, base);
         } else {
             var ly: i32 = 0;
             while (ly < 4) : (ly += 1) {
@@ -1450,6 +1481,68 @@ test "simd packU16Plane and fillWaterMassFromRaws match scalar" {
     @memset(&raws, 1);
     try std.testing.expect(!fillWaterMassFromRaws(&raws, water_id, &mass));
     try std.testing.expectEqual(@as(u16, 0), mass[0]);
+}
+
+test "simd density channel with dens_plane overlay matches dens_at scalar" {
+    // POI path: raws + TTS dens_plane/dens_set must match dens_at callback bytes.
+    var heights: [256]u8 = .{60} ** 256;
+    var plane: [65536]u32 = undefined;
+    var dens_plane: [65536]u8 = .{0} ** 65536;
+    var dens_set: [8192]u8 = .{0} ** 8192;
+    var i: usize = 0;
+    while (i < plane.len) : (i += 1) {
+        const lx: i32 = @intCast(i % 16);
+        const lz: i32 = @intCast((i / 16) % 16);
+        const y: i32 = @intCast(i / 256);
+        plane[i] = defaultBlockAt(&heights, lx, y, lz);
+        if (y == 30 and lx == 2 and lz == 3) plane[i] = 259;
+    }
+    // Paint a handful of cells with TTS densities that differ from raw defaults.
+    const paints = [_]struct { lx: i32, y: i32, lz: i32, d: u8 }{
+        .{ .lx = 1, .y = 40, .lz = 2, .d = 12 },
+        .{ .lx = 5, .y = 41, .lz = 7, .d = 200 },
+        .{ .lx = 0, .y = 0, .lz = 0, .d = 1 },
+        .{ .lx = 15, .y = 255, .lz = 15, .d = 127 },
+    };
+    for (paints) |p| {
+        const idx: usize = @intCast(p.lx + p.lz * 16 + p.y * 256);
+        dens_plane[idx] = p.d;
+        dens_set[idx / 8] |= @as(u8, 1) << @intCast(idx % 8);
+    }
+    const DensCtx = struct {
+        dens: *const [65536]u8,
+        set: *const [8192]u8,
+        fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) ?u8 {
+            const self: *const @This() = @ptrCast(@alignCast(ctx.?));
+            const idx: usize = @intCast(lx + lz * 16 + y * 256);
+            const bit: u8 = @as(u8, 1) << @intCast(idx % 8);
+            if (self.set[idx / 8] & bit == 0) return null;
+            return self.dens[idx];
+        }
+    };
+    var dctx: DensCtx = .{ .dens = &dens_plane, .set = &dens_set };
+    var buf_a: [131072]u8 = undefined;
+    var buf_b: [131072]u8 = undefined;
+    const via_plane = try encodeNetworkChunk(&buf_a, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .raws = &plane,
+        .dens_plane = &dens_plane,
+        .dens_set = &dens_set,
+        // dens_at also set: the SIMD+overlay path must still win and match.
+        .dens_at = DensCtx.at,
+        .block_ctx = &dctx,
+    });
+    const via_cb = try encodeNetworkChunk(&buf_b, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .raws = &plane,
+        .dens_at = DensCtx.at,
+        .block_ctx = &dctx,
+    });
+    try std.testing.expectEqualSlices(u8, via_cb, via_plane);
 }
 
 test "simd density channel with raws plane matches dens_at-less scalar encode" {
