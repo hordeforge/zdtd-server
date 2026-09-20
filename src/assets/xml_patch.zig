@@ -515,14 +515,19 @@ fn elementSpan(hay: []const u8, open_at: usize) ?struct { start: usize, end: usi
     }
     const tag = hay[t0..t1];
     var close_buf: [72]u8 = undefined;
+    const close_tag = formatCloseTag(tag, &close_buf) orelse return null;
+    const close = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse return null;
+    return .{ .start = open_at, .end = close + close_tag.len };
+}
+
+/// `</tag>` into a caller stack buffer. Null when the name does not fit.
+fn formatCloseTag(tag: []const u8, close_buf: *[72]u8) ?[]const u8 {
     if (tag.len + 3 > close_buf.len) return null;
     close_buf[0] = '<';
     close_buf[1] = '/';
     @memcpy(close_buf[2..][0..tag.len], tag);
     close_buf[2 + tag.len] = '>';
-    const close_tag = close_buf[0 .. 3 + tag.len];
-    const close = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse return null;
-    return .{ .start = open_at, .end = close + close_tag.len };
+    return close_buf[0 .. 3 + tag.len];
 }
 
 fn setAttribute(allocator: std.mem.Allocator, hay: []const u8, open_at: usize, attr_name: []const u8, new_val: []const u8) ![]u8 {
@@ -756,8 +761,8 @@ fn replaceElementChildren(allocator: std.mem.Allocator, hay: []const u8, open_at
     }
     const tag = hay[t0..t1];
     const body_end = if (self_close) gt + 1 else blk: {
-        const close_tag = try std.fmt.allocPrint(allocator, "</{s}>", .{tag});
-        defer allocator.free(close_tag);
+        var close_buf: [72]u8 = undefined;
+        const close_tag = formatCloseTag(tag, &close_buf) orelse return error.NameTooLong;
         const cl = std.mem.findPos(u8, hay, gt + 1, close_tag) orelse return error.BadElement;
         break :blk cl + close_tag.len;
     };
@@ -1022,8 +1027,8 @@ fn findConditionalBranch(clean: []const u8, op_open: usize, op_body: []const u8,
         var inner: []const u8 = "";
         var next_i = gt + 1;
         if (!self_close) {
-            const close_tag = std.fmt.allocPrint(std.heap.page_allocator, "</{s}>", .{name}) catch return null;
-            defer std.heap.page_allocator.free(close_tag);
+            var close_buf: [72]u8 = undefined;
+            const close_tag = formatCloseTag(name, &close_buf) orelse break;
             const cl = std.mem.findPos(u8, op_body, gt + 1, close_tag) orelse break;
             inner = op_body[gt + 1 .. cl];
             next_i = cl + close_tag.len;

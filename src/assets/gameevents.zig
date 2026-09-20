@@ -246,7 +246,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     t.arena_ptr = arena_holder;
     errdefer t.deinit();
 
-    var list: std.ArrayListUnmanaged(Sequence) = .empty;
+    var list: std.ArrayList(Sequence) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const si = std.mem.findPos(u8, clean, i, "<action_sequence ") orelse break;
@@ -262,7 +262,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         const close = std.mem.findPos(u8, clean, gt, "</action_sequence>") orelse break;
         const body = clean[gt + 1 .. close];
 
-        var acts: std.ArrayListUnmanaged(Action) = .empty;
+        var acts: std.ArrayList(Action) = .empty;
         var supported = true;
         var p: usize = 0;
         while (p < body.len) {

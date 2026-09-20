@@ -475,10 +475,11 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
             // seed, so fill from the run seed + slot + peer id instead.
             if (util_sim.isEnabled()) {
                 util_sim.fillChallenge(&c.challenge, i, peer.local_id);
+            } else if (self.net.sock.sock != null) {
+                // Reuse the bound UDP Io (no nested Threaded.init / signal handlers).
+                self.net.sock.io().random(&c.challenge);
             } else {
-                // Per-connection init is allowed (accept path, not the tick).
-                // Nested Threaded is paired init/deinit so it can sit inside a
-                // bound UDP socket Threaded.
+                // Offline / unbound accept path (tests without listen): short-lived Io.
                 var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
                 defer threaded.deinit();
                 threaded.io().random(&c.challenge);

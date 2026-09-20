@@ -572,12 +572,17 @@ pub fn step(self: *Game) !void {
             std.debug.print("zdtd: {s} apm report failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
         };
         if (report_ok) {
-            var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-            defer threaded.deinit();
-            std.Io.File.stdout().writeStreamingAll(threaded.io(), report_writer.buffered()) catch |e| {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} apm report write failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(e) });
-            };
+            const report = report_writer.buffered();
+            // Reuse the bound UDP Io so the periodic APM dump does not construct
+            // Io.Threaded (signal handlers + bookkeeping) on the tick path.
+            if (self.net.sock.sock != null) {
+                std.Io.File.stdout().writeStreamingAll(self.net.sock.io(), report) catch |e| {
+                    var ts: [19]u8 = undefined;
+                    std.debug.print("zdtd: {s} apm report write failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(e) });
+                };
+            } else {
+                std.debug.print("{s}", .{report});
+            }
         }
     }
     completed = true;

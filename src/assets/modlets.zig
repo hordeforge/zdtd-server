@@ -61,7 +61,7 @@ pub const state_file_name = "modlets_disabled.txt";
 
 /// Mods the operator disabled (owned names), guarded because the webui poll
 /// thread toggles while the roster is read for rendering.
-var disabled: std.ArrayListUnmanaged([]const u8) = .empty;
+var disabled: std.ArrayList([]const u8) = .empty;
 var disabled_lock: parallel.IoMutex = .{};
 /// Absolute path of the state file, set by `install` (owned by `state_alloc`).
 var state_path: ?[]const u8 = null;
@@ -242,7 +242,7 @@ fn loadDisabled(allocator: std.mem.Allocator, path: []const u8) void {
     };
     defer allocator.free(raw);
 
-    var next: std.ArrayListUnmanaged([]const u8) = .empty;
+    var next: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, raw, '\n');
     while (it.next()) |line_raw| {
         const line = std.mem.trim(u8, line_raw, " \t\r");

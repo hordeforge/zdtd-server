@@ -220,7 +220,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, ctx: LoadCtx
     t.arena_ptr = arena_holder;
     errdefer t.deinit();
 
-    var list: std.ArrayListUnmanaged(Placeholder) = .empty;
+    var list: std.ArrayList(Placeholder) = .empty;
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_placeholders) {
         const pi = std.mem.findPos(u8, clean, i, "<placeholder ") orelse break;
@@ -236,7 +236,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, ctx: LoadCtx
         const close = std.mem.findPos(u8, clean, gt, "</placeholder>") orelse break;
         const body = clean[gt + 1 .. close];
 
-        var targets: std.ArrayListUnmanaged(Target) = .empty;
+        var targets: std.ArrayList(Target) = .empty;
         var bi: usize = 0;
         while (bi < body.len and targets.items.len < max_targets_per_placeholder) {
             const bi_pos = std.mem.findPos(u8, body, bi, "<block ") orelse break;

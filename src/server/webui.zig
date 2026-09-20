@@ -307,9 +307,15 @@ pub const Server = struct {
 
     fn issueSession(self: *Server) void {
         var nonce: [32]u8 = undefined;
-        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-        defer threaded.deinit();
-        threaded.io().random(&nonce);
+        if (self.listener.enabled()) {
+            // Reuse the listen Io; avoid nested Threaded.init on the login path.
+            self.listener.io().random(&nonce);
+        } else {
+            // Unit tests issue a session without listen().
+            var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+            defer threaded.deinit();
+            threaded.io().random(&nonce);
+        }
         fillSessionToken(self.secret(), &nonce, &self.session_token);
         self.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
     }

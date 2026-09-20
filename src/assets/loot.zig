@@ -430,7 +430,7 @@ fn stripClientConditionals(allocator: std.mem.Allocator, body: []const u8) ![]co
         scan = close + close_tag.len;
     }
     if (!any) return body;
-    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var out: std.ArrayList(u8) = .empty;
     var from: usize = 0;
     scan = 0;
     while (std.mem.findPos(u8, body, scan, "<conditional")) |cs| {
