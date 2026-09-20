@@ -974,12 +974,19 @@ pub const Game = struct {
         errdefer {
             // Network half first so fail-closed webui (after net/admin listen)
             // does not leak FDs in tests/library createWithOptions paths.
+            // Plugins before stores (same order as successful deinit). Process
+            // globals (config S2C cache, mod dirs, modlets, mcp, serveradmin
+            // path) share the successful teardown so a mid-create return cannot
+            // leave them for the next Game in the process.
             self.webui.deinit();
             self.admin.deinit();
             self.info_tcp.stop();
             self.net.deinit();
+            self.plugins.shutdown();
+            self.wasm_plugins.shutdown();
             @import("game/lifecycle.zig").deinitStores(self);
             self.world.deinit();
+            @import("game/lifecycle.zig").deinitCreateOwned(self);
         }
         // [perf] async_chunk_flush. Offline Game (port 0) runs force-serial, so
         // World.asyncEnabled() keeps writes inline there regardless.

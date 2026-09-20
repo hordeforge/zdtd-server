@@ -54,6 +54,12 @@ pub fn deinitCache(allocator: std.mem.Allocator) void {
     cache_built = false;
 }
 
+/// Test/assert helper: true after a successful `buildCache`, false after
+/// `deinitCache` (including the create-failure errdefer).
+pub fn cacheBuiltForTest() bool {
+    return cache_built;
+}
+
 /// Raw-Deflate `src` into an owned buffer. A result that does not fit the
 /// blob cap fails with `error.ConfigBlobTooLarge` (never truncate, PRD R12).
 fn deflateBlob(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
@@ -80,6 +86,9 @@ pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_di
         const file_name = std.fmt.bufPrint(&name_buf, "{s}.xml", .{name}) catch continue;
         const patched = paths.readConfigXml(allocator, file_name, game_dir, config_dir) catch |err| {
             std.debug.print("zdtd: config cache {s} failed: {s}\n", .{ name, @errorName(err) });
+            // Drop any rows already stored so a retry starts clean and the
+            // process-global blobs cannot accumulate across failed builds.
+            deinitCache(allocator);
             return err;
         } orelse continue;
         defer allocator.free(patched);
@@ -88,6 +97,7 @@ pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_di
                 "zdtd: config cache deflate {s} failed: {s} ({d} raw bytes)\n",
                 .{ name, @errorName(err), patched.len },
             );
+            deinitCache(allocator);
             return err;
         };
         cache[idx] = .{ .data = blob };

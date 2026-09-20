@@ -36,11 +36,30 @@ pub fn deinit(self: *Game) void {
     self.info_tcp.stop();
     self.world.deinit();
     self.net.deinit();
+    deinitProcessGlobals(self);
+    if (leave_sim) util_sim.disable();
+}
+
+/// Process-global ownership (config S2C cache, mod dirs, modlets scan,
+/// serveradmin_path). Shared by `deinit` and the create-failure path so a
+/// mid-create return cannot leave them for the next Game in the process.
+pub fn deinitProcessGlobals(self: *Game) void {
     @import("config_files.zig").deinitCache(self.allocator);
     @import("../../assets/paths.zig").deinitModDirs(self.allocator);
     @import("../../assets/modlets.zig").deinit(self.allocator);
-    if (self.serveradmin_path) |p| self.allocator.free(p);
-    if (leave_sim) util_sim.disable();
+    if (self.serveradmin_path) |p| {
+        self.allocator.free(p);
+        self.serveradmin_path = null;
+    }
+}
+
+/// Create-failure teardown for ownership that is not covered by
+/// `deinitStores` / world / net: mcp listener and process globals. Plugins
+/// are shut down by the caller *before* `deinitStores` (same order as
+/// successful `deinit`).
+pub fn deinitCreateOwned(self: *Game) void {
+    self.mcp.deinit();
+    deinitProcessGlobals(self);
 }
 
 /// Sim plus every asset store, in construction-reverse order. Shared by `deinit`

@@ -1489,6 +1489,10 @@ test "offline init failure restores deterministic sim globals" {
         .{ .webui_port = 1 },
     ));
     try std.testing.expect(!util_sim.isEnabled());
+    // createWithOptions errdefer must clear the process-global config S2C
+    // cache: buildCache runs before webui.listen, and a stuck cache_built
+    // would skip rebuild on the next Game.create in this process.
+    try std.testing.expect(!@import("config_files.zig").cacheBuiltForTest());
 }
 
 test "offline successful step advances exactly one virtual tick" {
