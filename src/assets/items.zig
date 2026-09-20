@@ -991,7 +991,7 @@ fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
             i = ti + 10;
             continue;
         }
-        const add: u8 = if (lvl > 255) 255 else @intCast(lvl);
+        const add: u8 = @intCast(@min(lvl, 255));
         return .{ pname, add };
     }
     return null;
@@ -1068,7 +1068,7 @@ fn firstGiveExp(body: []const u8) u16 {
             i = ti + 10;
             continue;
         }
-        return if (n > 65535) 65535 else @intCast(n);
+        return @intCast(@min(n, 65535));
     }
     return 0;
 }

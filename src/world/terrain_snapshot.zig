@@ -133,7 +133,7 @@ pub const Snapshot = struct {
             while (lx < store.chunk_size) : (lx += 1) {
                 const idx: usize = @intCast(lx * store.chunk_size + lz);
                 const h: u16 = ch.heightAt(lx, lz);
-                out.surface[idx] = if (h > 255) 255 else @intCast(h);
+                out.surface[idx] = @intCast(@min(h, 255));
             }
         }
     }

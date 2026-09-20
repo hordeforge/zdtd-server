@@ -65,7 +65,7 @@ pub const Heightmap = struct {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
                 const h16 = self.heightAtWorld(base_x + lx, base_z + lz) orelse @as(u16, fallback);
-                out[@intCast(lx + lz * 16)] = if (h16 > 255) 255 else @intCast(h16);
+                out[@intCast(lx + lz * 16)] = @intCast(@min(h16, 255));
             }
         }
     }

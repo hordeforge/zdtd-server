@@ -84,10 +84,16 @@ pub const StatEntry = struct {
 
 /// ItemValue.Flags bit 0: Activated (get_Activated = Flags & 1; the old
 /// `Activated` byte field, V3.2.0 changelog-3.2.0 §3.4).
-pub const cFlagsActivated: u8 = 1;
+pub const flags_activated: u8 = 1;
 /// ItemValue.Flags bit 1: WasCombined (get_WasCombined = Flags & 2; the
 /// Combine Station rework marks combined items).
-pub const cFlagsWasCombined: u8 = 2;
+pub const flags_was_combined: u8 = 2;
+
+/// ItemValue.Write/ReadData v>=8 encoding-flags bit 0: type is relative
+/// (add `items_start_here` on read). Distinct from `flags_activated`.
+pub const item_value_enc_relative_type: u8 = 1;
+/// ItemValue.Write/ReadData v>=8 encoding-flags bit 1: Stats array follows.
+pub const item_value_enc_has_stats: u8 = 2;
 
 /// Map relative item index (0..) to absolute type with ItemsStartHere offset.
 pub fn itemTypeFromIndex(item_index: u16) i32 {
@@ -118,11 +124,11 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
     var wire_type: i32 = s.type_id;
     var flags: u8 = 0;
     if (wire_type >= items_start_here) {
-        flags |= 1;
+        flags |= item_value_enc_relative_type;
         wire_type -= items_start_here;
     }
-    // Bit 2 = `Stats != null` on the reader side (`flags & 2`).
-    if (s.stats_n > 0) flags |= 2;
+    // Encoding bit 1 = `Stats != null` on the reader side.
+    if (s.stats_n > 0) flags |= item_value_enc_has_stats;
     try w.writeByte(flags);
     try w.writeU16(@intCast(wire_type));
     try w.writeF32(s.use_times);
@@ -164,10 +170,10 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
 /// and its Quality. The mods' stat effects are client-side; id+quality ride
 /// so RequirementItemModTier and the client re-render stay honest.
 fn writeItemValueNested(w: *binary.Writer, mod_id: u16, quality: u8) !void {
-    try w.writeByte(9); // item_value_save_version
-    // Mods are items: the item flag (bit 1) + the item index (the ECS id,
+    try w.writeByte(item_value_save_version);
+    // Mods are items: relative-type encoding flag + the item index (the ECS id,
     // which for items IS the index past ItemsStartHere).
-    try w.writeByte(1);
+    try w.writeByte(item_value_enc_relative_type);
     try w.writeU16(mod_id);
     try w.writeF32(0); // use_times
     // Stock default when unset is 1 (prior nested writer hardcoded it).
@@ -618,7 +624,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     var flags: u8 = 0;
     if (version >= 8) flags = try r.readByte();
     var type_id: i32 = try r.readU16();
-    if ((flags & 1) != 0) type_id += items_start_here;
+    if ((flags & item_value_enc_relative_type) != 0) type_id += items_start_here;
     // legacy type remap for version < 8 skipped (we always send v9)
 
     const use_times: f32 = if (version > 5) try r.readF32() else @floatFromInt(try r.readU16());
@@ -637,7 +643,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
 
     var stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats;
     var stats_n: u8 = 0;
-    if ((flags & 2) != 0) {
+    if ((flags & item_value_enc_has_stats) != 0) {
         const sc = try r.readByte();
         var si: u8 = 0;
         while (si < sc) : (si += 1) {

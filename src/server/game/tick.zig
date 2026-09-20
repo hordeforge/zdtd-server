@@ -659,7 +659,7 @@ pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part
             ic.other_cvars = &c.cvars;
             const hres = assets_buffs.evaluateRows(rows, .self_attacked_other, ic, &req_counts);
             if (hres.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, hres.truncated);
-            applyTriggeredBuffsOther(self, ps, &hres, attacker_id(self, attacker));
+            applyTriggeredBuffsOther(self, ps, &hres, attackerId(self, attacker));
         }
     }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
@@ -682,7 +682,7 @@ fn attackerHandTriggers(self: *Game, attacker: ecs.Slot) ?[]const assets_buffs.T
 }
 
 /// Net id for a victim-directed add's instigator (the attacker).
-fn attacker_id(self: *Game, attacker: ecs.Slot) i32 {
+fn attackerId(self: *Game, attacker: ecs.Slot) i32 {
     return if (self.sim.mask[attacker].network_id) self.sim.network_id[attacker].id else -1;
 }
 

@@ -1356,7 +1356,7 @@ pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
     if (slot >= self.clients.len) return false;
     const interned = internProgressionName(self, name) orelse return false;
     const max_level = progressionMaxLevel(self, interned) orelse return false;
-    const target: u8 = if (max_level > 255) 255 else @intCast(max_level);
+    const target: u8 = @intCast(@min(max_level, 255));
     const c = &self.clients[slot];
     var i: usize = 0;
     while (i < c.skill_level_n) : (i += 1) {

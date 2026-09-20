@@ -155,11 +155,13 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .dens_at = if (ch.densities == null) null else BlockCtx.dens,
         .dens_plane = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
             const d = ch.densities.?;
+            // Slice length asserted above; ptrCast to fixed array for SIMD dens pack.
             std.debug.assert(d.len >= 65536);
             break :blk @as(*const [65536]u8, @ptrCast(d.ptr));
         } else null,
         .dens_set = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
             const s = ch.dens_set.?;
+            // Slice length asserted above; ptrCast to fixed array for dens bitset.
             std.debug.assert(s.len >= 8192);
             break :blk @as(*const [8192]u8, @ptrCast(s.ptr));
         } else null,
@@ -176,6 +178,7 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // still lazy (height-only / unmaterialized). Stock dialect only.
         .raws = if (profile.isStock() and ch.blocks != null) blk: {
             const b = ch.blocks.?;
+            // Slice length asserted above; ptrCast to fixed [65536]u32 for encode SIMD.
             std.debug.assert(b.len >= 65536);
             break :blk @as(*const [65536]u32, @ptrCast(b.ptr));
         } else null,

@@ -408,7 +408,7 @@ pub const Chunk = struct {
     }
 
     pub fn setHeight(self: *Chunk, lx: i32, lz: i32, h: u16) void {
-        const stored: u8 = if (h > 255) 255 else @intCast(h);
+        const stored: u8 = @intCast(@min(h, 255));
         self.heights[@intCast(lx + lz * chunk_size)] = stored;
         self.dirty = true;
     }
@@ -501,7 +501,7 @@ pub const Chunk = struct {
             while (top >= 0) : (top -= 1) {
                 if ((b[self.blockIndex(lx, top, lz)] & 0xffff) != block_air) break;
             }
-            self.setHeight(lx, lz, if (top < 0) 0 else @intCast(top));
+            self.setHeight(lx, lz, @intCast(@max(top, 0)));
         }
         self.dirty = true;
     }
