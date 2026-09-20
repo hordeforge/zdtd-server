@@ -64,22 +64,25 @@ input[data-invalid=true]:focus{outline-color:var(--err)}
 button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:1rem;cursor:pointer}
 button:hover{background:var(--acc-ink)}
 button:active{transform:translateY(1px)}
-.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
+.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--edge);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
 .secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
 .secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
 .hint{color:var(--muted);font-size:0.8rem;margin:0.75rem 0 0;line-height:1.6}
 .hint + .hint{margin-top:0.25rem}
 .err{margin:0 0 0.85rem;padding:0.9rem 1rem;border-radius:var(--r);background:var(--err-soft);border:1px solid var(--err-border);color:var(--err-ink);font-family:var(--sans);font-size:1rem;line-height:1.5}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .brand{margin:0;font-family:var(--sans);font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;color:var(--fg)}
 .signin{margin-top:0.65rem;width:100%}
+@media(prefers-reduced-motion:reduce){button:active{transform:none}}
 @media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 /* /zdtd-css:signin */
 button:disabled{opacity:.45;cursor:not-allowed}
 #retry-seconds{font-variant-numeric:tabular-nums;font-weight:700;color:var(--fg)}
 </style></head>
 <body><main><h1 class="brand">zdtd sign in</h1><p class="meta">operator console</p>
-<p id="login-err" class="err" role="alert" tabindex="-1">Too many failed sign-ins. Try again in <span id="retry-seconds" aria-live="off">__ZDTD_RETRY_S__</span> seconds.</p>
+<p id="login-err" class="err" role="alert" tabindex="-1">Too many failed sign-ins. Try again in <span id="retry-seconds">__ZDTD_RETRY_S__</span> seconds.</p>
+<p id="retry-live" class="sr-only" aria-live="polite"></p>
 <form method="post" action="/login" aria-describedby="login-err">
 <label for="login-token">Shared secret</label>
 <input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" data-invalid="true" aria-invalid="true" aria-describedby="login-err login-help" disabled>
@@ -94,6 +97,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
 //! the compiled JS keeps the reference so the substituted seconds reach the
 //! browser. Compiled by scripts/build-webui-ts.sh and injected into
 //! login_lockout.html.
-var n=document.querySelector("#login-err");if(n===null)throw Error("webui: missing element #login-err");var r=document.querySelector("#retry-seconds");if(r===null)throw Error("webui: missing element #retry-seconds");n.focus();var e=__ZDTD_RETRY_S__,t=1000,o=setInterval(()=>{if(e-=1,r.textContent=String(e),e<=0)clearInterval(o),globalThis.location.replace("/login")},t);})();
+var t=document.querySelector("#login-err");if(t===null)throw Error("webui: missing element #login-err");var o=document.querySelector("#retry-seconds");if(o===null)throw Error("webui: missing element #retry-seconds");var r=document.querySelector("#retry-live");if(r===null)throw Error("webui: missing element #retry-live");var i=r;t.focus();var e=__ZDTD_RETRY_S__,s=1000,c=120,l=90,_=60,N=30,T=15,a=10,m=5,u=new Set([c,l,_,N,T,a,m]);function E(n){i.textContent=n===1?"Try again in 1 second.":`Try again in ${n} seconds.`}var A=setInterval(()=>{if(e-=1,o.textContent=String(e),u.has(e))E(e);if(e<=0)clearInterval(A),globalThis.location.replace("/login")},s);})();
 /* /zdtd-ts:lockout */
 </script></body></html>

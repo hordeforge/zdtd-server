@@ -15,13 +15,44 @@ const seconds = document.querySelector<HTMLElement>('#retry-seconds');
 if (seconds === null) {
     throw new Error('webui: missing element #retry-seconds');
 }
+const liveCandidate = document.querySelector<HTMLElement>('#retry-live');
+if (liveCandidate === null) {
+    throw new Error('webui: missing element #retry-live');
+}
+const liveRegion: HTMLElement = liveCandidate;
 message.focus();
 
 let remaining = __ZDTD_RETRY_S__;
 const COUNTDOWN_TICK_MS = 1000;
+// Announce at a few milestones only: a per-second polite live region would
+// flood screen readers (WCAG 2.2.1 / 4.1.3).
+const ANNOUNCE_AT_2M = 120;
+const ANNOUNCE_AT_90S = 90;
+const ANNOUNCE_AT_1M = 60;
+const ANNOUNCE_AT_30S = 30;
+const ANNOUNCE_AT_15S = 15;
+const ANNOUNCE_AT_10S = 10;
+const ANNOUNCE_AT_5S = 5;
+const ANNOUNCE_AT = new Set([
+    ANNOUNCE_AT_2M,
+    ANNOUNCE_AT_90S,
+    ANNOUNCE_AT_1M,
+    ANNOUNCE_AT_30S,
+    ANNOUNCE_AT_15S,
+    ANNOUNCE_AT_10S,
+    ANNOUNCE_AT_5S,
+]);
+
+function announceRemaining(n: number): void {
+    liveRegion.textContent = n === 1 ? 'Try again in 1 second.' : `Try again in ${n} seconds.`;
+}
+
 const countdown = setInterval(() => {
     remaining -= 1;
     seconds.textContent = String(remaining);
+    if (ANNOUNCE_AT.has(remaining)) {
+        announceRemaining(remaining);
+    }
     if (remaining <= 0) {
         clearInterval(countdown);
         globalThis.location.replace('/login');

@@ -19,7 +19,7 @@ token.setAttribute('aria-invalid', token.dataset.invalid === 'true' ? 'true' : '
 toggle.addEventListener('click', () => {
     const shown = token.type === 'text';
     token.type = shown ? 'password' : 'text';
-    toggle.textContent = shown ? 'Show' : 'Hide';
+    toggle.textContent = shown ? 'Show secret' : 'Hide secret';
     toggle.setAttribute('aria-pressed', String(!shown));
     token.focus();
 });

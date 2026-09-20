@@ -510,7 +510,7 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
                     class={over ? "meter hot" : "meter"}
                     role="img"
                     id="glance-meter"
-                    aria-label={over ? "tick p99 over the 50 ms budget" : "tick p99 within budget"}
+                    aria-label={`${p99Ms.toFixed(1)} milliseconds tick p99, ${over ? "over" : "within"} the 50 millisecond budget`}
                 >
                     <i id="glance-meter-fill" style={{ transform: `scaleX(${fill / PERCENT_MAX})` }}></i>
                 </div>
@@ -830,7 +830,7 @@ function ModletTable({
                                 <input type="hidden" name="csrf" value={csrf} />
                                 <input type="hidden" name="name" value={modlet.name} />
                                 <input type="hidden" name="action" value={modlet.disabled ? "enable" : "disable"} />
-                                <button type="submit" class="mod-btn" aria-disabled={pending === modlet.name}>
+                                <button type="submit" class="mod-btn" disabled={pending === modlet.name} aria-busy={pending === modlet.name}>
                                     {modlet.disabled ? "Enable" : "Disable"}
                                     <span class="sr-only"> {modlet.name}</span>
                                 </button>
@@ -979,8 +979,9 @@ function CommandForm({
                     maxlength={MAX_CMD_LINE}
                     required
                     readOnly={pending}
+                    aria-busy={pending}
                 />
-                <button type="submit" aria-disabled={pending}>{pending ? "Running…" : "Run"}</button>
+                <button type="submit" disabled={pending}>{pending ? "Running…" : "Run"}</button>
             </form>
             <div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
                 {QUICK_COMMANDS.map((quick) => (
@@ -989,6 +990,7 @@ function CommandForm({
                         class="quick-cmd"
                         key={quick.line}
                         data-cmd={quick.line}
+                        disabled={pending}
                         onClick={() => {
                             onRun(quick.line);
                         }}
@@ -1378,7 +1380,7 @@ function App(): ComponentChildren {
         <Fragment>
             {banner}
             {state === null ? (
-                <p class="meta">Loading dashboard…</p>
+                <p class="meta" role="status" aria-live="polite">Loading dashboard…</p>
             ) : (
                 <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />
             )}

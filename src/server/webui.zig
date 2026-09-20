@@ -3021,9 +3021,12 @@ test "renderLogin substitutes banner and input state" {
     // During lockout, controls are disabled so users cannot keep submitting failures.
     try std.testing.expect(std.mem.find(u8, locked, "disabled>") != null);
     try std.testing.expect(std.mem.find(u8, locked, "tabindex=\"-1\"") != null);
-    // The countdown ticks inside role="alert"; without aria-live=off a screen
-    // reader interrupts itself once a second for the whole lockout.
-    try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\" aria-live=\"off\"") != null);
+    // Visible countdown stays out of a live region; milestones announce via
+    // #retry-live so a screen reader is not interrupted once a second.
+    try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\"") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\" aria-live=") == null);
+    try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-live\"") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "aria-live=\"polite\"") != null);
     try std.testing.expect(std.mem.find(u8, locked, "globalThis.location.replace(\"/login\")") != null);
 }
 

@@ -66,14 +66,16 @@ input[data-invalid=true]:focus{outline-color:var(--err)}
 button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:1rem;cursor:pointer}
 button:hover{background:var(--acc-ink)}
 button:active{transform:translateY(1px)}
-.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
+.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--edge);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
 .secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
 .secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
 .hint{color:var(--muted);font-size:0.8rem;margin:0.75rem 0 0;line-height:1.6}
 .hint + .hint{margin-top:0.25rem}
 .err{margin:0 0 0.85rem;padding:0.9rem 1rem;border-radius:var(--r);background:var(--err-soft);border:1px solid var(--err-border);color:var(--err-ink);font-family:var(--sans);font-size:1rem;line-height:1.5}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .brand{margin:0;font-family:var(--sans);font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;color:var(--fg)}
 .signin{margin-top:0.65rem;width:100%}
+@media(prefers-reduced-motion:reduce){button:active{transform:none}}
 @media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 /* /zdtd-css:signin */
