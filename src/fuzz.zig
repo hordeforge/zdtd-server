@@ -1,6 +1,7 @@
 //! Coverage-guided fuzz targets for remote wire parsing boundaries and
 //! other untrusted-input surfaces (admin lines, map XML, COG headers,
-//! config XML patches, quest catalogs, GSI text builders, save formats).
+//! config XML patches, quest catalogs, GSI text builders, save formats,
+//! signable TE bodies, ZSG1 sign texts).
 
 const std = @import("std");
 const packet = @import("litenet/packet.zig");
@@ -40,6 +41,7 @@ const prefabs = @import("world/prefabs.zig");
 const tts = @import("world/tts.zig");
 const store = @import("world/store.zig");
 const vending = @import("world/vending.zig");
+const signs = @import("world/signs.zig");
 const path_mod = @import("ecs/path.zig");
 const weather = @import("world/weather.zig");
 const ally = @import("server/ally.zig");
@@ -408,6 +410,120 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         if (login.internalId().get()) |id| try std.testing.expect(id.id.len <= platform_user.max_id_len);
     } else |_| {}
     _ = packages.parseAllyRequest(input) catch null;
+}
+
+/// Minimal NetPackageTileEntity outer header (handle | xyz | block | pay_len).
+fn signTeOuter(pay_len: u32) [21]u8 {
+    var buf: [21]u8 = undefined;
+    buf[0] = 7;
+    std.mem.writeInt(i32, buf[1..5], 3, .little);
+    std.mem.writeInt(i32, buf[5..9], 70, .little);
+    std.mem.writeInt(i32, buf[9..13], 5, .little);
+    std.mem.writeInt(i32, buf[13..17], 742, .little);
+    std.mem.writeInt(u32, buf[17..21], pay_len, .little);
+    return buf;
+}
+
+/// Build a composite payload with one TEFeatureSignable module carrying `text`
+/// (null = clear). Returns the payload slice length written into `pay`.
+fn signTePayload(pay: []u8, text: ?[]const u8) usize {
+    var o: usize = 0;
+    // chunkPos
+    @memset(pay[o..][0..12], 0);
+    o += 12;
+    const outer_mark = o;
+    o += 4; // size marker patched below
+    std.mem.writeInt(i32, pay[o..][0..4], 742, .little);
+    o += 4;
+    pay[o] = 0; // no owner
+    o += 1;
+    pay[o] = 1; // one module
+    o += 1;
+    std.mem.writeInt(i32, pay[o..][0..4], stock_te.feature_hash_signable, .little);
+    o += 4;
+    const feat_mark = o;
+    o += 4;
+    if (text) |t| {
+        pay[o] = 1; // has_text
+        o += 1;
+        // 7-bit length (single byte when t.len < 128)
+        pay[o] = @intCast(t.len);
+        o += 1;
+        @memcpy(pay[o..][0..t.len], t);
+        o += t.len;
+    } else {
+        pay[o] = 0;
+        o += 1;
+    }
+    pay[o] = 0; // no author
+    o += 1;
+    std.mem.writeInt(u32, pay[feat_mark..][0..4], @intCast(o - feat_mark), .little);
+    std.mem.writeInt(u32, pay[outer_mark..][0..4], @intCast(o - outer_mark), .little);
+    return o;
+}
+
+const signable_te_hello_pay = blk: {
+    var pay: [64]u8 = undefined;
+    const n = signTePayload(&pay, "hi");
+    break :blk pay[0..n].*;
+};
+const signable_te_clear_pay = blk: {
+    var pay: [64]u8 = undefined;
+    const n = signTePayload(&pay, null);
+    break :blk pay[0..n].*;
+};
+
+const signable_te_corpus = [_][]const u8{
+    "",
+    &.{ 0xff, 0xff, 0xff, 0xff },
+    // truncated after outer header
+    &signTeOuter(0),
+    // claimed huge pay_len, empty body
+    &signTeOuter(0xffff),
+    // valid clear (no text)
+    &(signTeOuter(@intCast(signable_te_clear_pay.len)) ++ signable_te_clear_pay),
+    // valid short text
+    &(signTeOuter(@intCast(signable_te_hello_pay.len)) ++ signable_te_hello_pay),
+    // module count huge after a plausible head (must fail closed)
+    &(signTeOuter(20) ++ [_]u8{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // chunkPos
+        8, 0, 0, 0, // outer size
+        742 & 0xff, (742 >> 8) & 0xff, 0, 0, // block
+        0, // no owner
+        0xff, // mod_n
+    }),
+    // feat_size underflow (< 4)
+    &(signTeOuter(30) ++ [_]u8{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        18, 0, 0, 0,
+        742 & 0xff, (742 >> 8) & 0xff, 0, 0,
+        0, 1,
+    } ++ std.mem.asBytes(&stock_te.feature_hash_signable).* ++ [_]u8{ 2, 0, 0, 0 }),
+    // overlong 7-bit string length inside a signable feature
+    &(signTeOuter(40) ++ [_]u8{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        28, 0, 0, 0,
+        742 & 0xff, (742 >> 8) & 0xff, 0, 0,
+        0, 1,
+    } ++ std.mem.asBytes(&stock_te.feature_hash_signable).* ++
+        [_]u8{ 16, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0x0f }),
+};
+
+test "fuzz signable TE body decoder" {
+    try std.testing.fuzz({}, fuzzSignableTe, .{ .corpus = &signable_te_corpus });
+}
+
+fn fuzzSignableTe(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    var text_buf: [stock_te.max_sign_text_bytes]u8 = undefined;
+    if (stock_te.parseSignableTeBody(input, &text_buf)) |sign| {
+        try std.testing.expect(sign.text_len <= text_buf.len);
+        try std.testing.expect(sign.text_len <= stock_te.max_sign_text_bytes);
+        if (!sign.has_text) try std.testing.expectEqual(@as(usize, 0), sign.text_len);
+    } else |_| {}
 }
 
 const inv_corpus = [_][]const u8{
@@ -1228,6 +1344,55 @@ fn fuzzContainersZct(_: void, smith: *std.testing.Smith) !void {
     defer std.testing.allocator.destroy(s);
     s.* = .{};
     s.loadFromSlice(storage[0..len]) catch return;
+}
+
+const zsg_corpus = [_][]const u8{
+    "",
+    "ZSG1",
+    // empty store: magic + count 0
+    &([_]u8{ 'Z', 'S', 'G', '1', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'Z', 'S', 'G', '0', 1, 0 }),
+    // claimed huge count, truncated
+    &([_]u8{ 'Z', 'S', 'G', '1', 0xff, 0xff }),
+    // one sign: pos(0,70,0) block 742 len=3 body "abc"
+    &([_]u8{ 'Z', 'S', 'G', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 0xEE, 0x02, 0, 0, 3, 0, 'a', 'b', 'c' }),
+    // count=1 but body len claims max_body+1 (must fail closed)
+    &([_]u8{ 'Z', 'S', 'G', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 } ++
+        std.mem.asBytes(&@as(u16, @intCast(signs.max_body + 1))).* ++
+        [_]u8{0} ** 8),
+    // count=1, len within max but stream truncated mid-body
+    &([_]u8{ 'Z', 'S', 'G', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 8, 0, 1, 2, 3 }),
+    // count=2 with only one full record
+    &([_]u8{ 'Z', 'S', 'G', '1', 2, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 }),
+};
+
+test "fuzz signs.zsg loader" {
+    try std.testing.fuzz({}, fuzzSignsZsg, .{ .corpus = &zsg_corpus });
+}
+
+fn fuzzSignsZsg(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // Store is large (256 signs x 512-byte bodies); keep off the fuzz stack.
+    const s = try std.testing.allocator.create(signs.SignStore);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.loadFromSlice(storage[0..len]) catch return;
+    try std.testing.expect(s.n <= signs.max_signs);
+    var seen: usize = 0;
+    var i: usize = 0;
+    while (i < signs.max_signs and seen < s.n) : (i += 1) {
+        if (!s.used[i]) continue;
+        seen += 1;
+        try std.testing.expect(s.items[i].len <= signs.max_body);
+    }
+    try std.testing.expectEqual(s.n, seen);
 }
 
 const zvn_corpus = [_][]const u8{

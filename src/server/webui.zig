@@ -1696,8 +1696,9 @@ test "renderLoginLockout substitutes the real remaining seconds" {
     var buf: [8192]u8 = undefined;
     const out = try renderLoginLockout(&buf, 7);
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
-    try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\" aria-live=\"off\">7<") != null);
-    try std.testing.expect(std.mem.find(u8, out, "var e=7,t=1000") != null);
+    // Visible countdown is not a live region; #retry-live announces milestones.
+    try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\">7<") != null);
+    try std.testing.expect(std.mem.find(u8, out, "var e=7,s=1000") != null);
 }
 
 test "lockoutRemainingS counts down and clamps at zero" {
@@ -3033,7 +3034,7 @@ test "renderLogin substitutes banner and input state" {
     try std.testing.expect(std.mem.find(u8, ok, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
     // Show/Hide toggle (compiled from ts/login.ts; minified in the page).
-    try std.testing.expect(std.mem.find(u8, ok, "e.type=n?\"password\":\"text\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "e.type=t?\"password\":\"text\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
     try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-describedby=\"login-help\"") != null);
