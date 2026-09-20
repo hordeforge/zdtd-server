@@ -1,10 +1,10 @@
 //! Server process layer: Game orchestration, config, admin/GSI TCP, scenarios.
 //!
 //! Dependency direction: top of the stack. May import all other src packages.
-//! New join/tick/C2S behavior lands in `game.zig` (or extracted helpers beside
-//! it: `phase_gate`, `movement`, `c2s_text`); keep stock package bodies in
-//! `wire/` (via packages facade), sim rules in `ecs/`, map IO in `world/`.
-//! Mono clock: `util/clock` only.
+//! New join/tick/C2S behavior lands in `game/` helpers or `c2s/` handlers
+//! (`phase_gate`, `movement`, `c2s_text` stay beside `game.zig` when pure);
+//! keep stock package bodies in `wire/` (via packages facade), sim rules in
+//! `ecs/`, map IO in `world/`. Mono clock: `util/clock` only.
 
 pub const game = @import("game.zig");
 pub const config = @import("config.zig");
@@ -59,6 +59,7 @@ pub const game_locks = @import("game/locks.zig");
 pub const game_bot = @import("game/bot.zig");
 pub const game_trader_wire = @import("game/trader_wire.zig");
 pub const game_send_extra = @import("game/send_extra.zig");
+pub const game_delivery_policy = @import("game/delivery_policy.zig");
 pub const game_rescue = @import("game/rescue.zig");
 pub const game_guard = @import("game/guard.zig");
 pub const game_session_drop = @import("game/session_drop.zig");
@@ -138,6 +139,7 @@ test {
     _ = game_bot;
     _ = game_trader_wire;
     _ = game_send_extra;
+    _ = game_delivery_policy;
     _ = game_rescue;
     _ = game_guard;
     _ = game_session_drop;

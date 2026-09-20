@@ -1,4 +1,5 @@
 //! Framed send helpers extracted from game.zig.
+//! Delivery classifiers live in delivery_policy.zig (no import of net.zig).
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -7,7 +8,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const clock = @import("../../util/clock.zig");
-const game_net = @import("net.zig");
+const delivery_policy = @import("delivery_policy.zig");
 
 pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
     return sendCompressed(self, peer, pkg_name, body, game_mod.window_retry_budget_ns, false) catch false;
@@ -46,7 +47,7 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
             @min(budget_ns, peer.critical_budget_deadline_ns - now);
     }
     // Same attempt ladder as sendGameBudget (Chunk 4000 / droppable 64 / else 960).
-    const droppable = !critical and game_net.isDroppablePackage(pkg_name);
+    const droppable = !critical and delivery_policy.isDroppablePackage(pkg_name);
     const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
         4000
     else if (droppable)

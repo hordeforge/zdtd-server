@@ -11,6 +11,7 @@ const protocol = @import("../../protocol.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
+const schedule = @import("../../ecs/schedule.zig");
 const interest = @import("../../ecs/interest.zig");
 const replicate_te = @import("../replicate_te.zig");
 const invsys = @import("../../ecs/inventory.zig");
@@ -141,9 +142,9 @@ pub fn step(self: *Game) !void {
         self.sim.ambient_light = luma * sky.moonAmbientScale(moon, day_pct);
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
-        // before systems.tickAll consumes the noise ring.
+        // before schedule.run consumes the noise ring.
         self.triggerSleeperVolumesByNoise();
-        const r = systems.tickAll(&self.sim, dt);
+        const r = schedule.run(&self.sim, dt);
         self.harness.counters.add(.path_replans, r.path_replans);
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
         // Sleeper re-arm (stock ClearedUpdate IL=33): recount the per-volume
@@ -164,8 +165,8 @@ pub fn step(self: *Game) !void {
             self.sim.rules.water.spread_cap,
             self.sim.rules.water.puddle_cap,
         );
-        // Falling-block gravity/landing runs inside systems.tickAll (schedule
-        // falling phase) so ECS owns the entity tick.
+        // Falling-block gravity/landing runs inside schedule.run (falling
+        // phase) so ECS owns the entity tick.
         // Demolition explosions (RE entity-ai.md EntityZombieCop): the sim
         // countdowns pushed requests; apply the entity + block AoE here.
         self.drainExplosions();

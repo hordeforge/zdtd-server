@@ -1,12 +1,15 @@
 //! ECS package root: SoA world, components, systems, resources.
 //!
 //! Dependency direction: may import util only. Must not import wire, server,
-//! world, assets, litenet, or apm. Wire/world/assets may import pure types from
-//! here (components, QuestKind, InvSlot, the CVar store in cvars.zig) for
-//! catalog → sim mapping; that
-//! assets→ecs edge is intentional and one-way for pure shapes only. Offline
-//! inv fixtures live in inventory.zig (no assets import) so the graph stays
-//! acyclic.
+//! world, litenet, or apm. The sole assets import is the comptime-only
+//! sandbox_presets seed in rules.zig (documented below). Wire/world/assets may
+//! import pure types from here (components, QuestKind, InvSlot, the CVar store
+//! in cvars.zig) for catalog → sim mapping; that assets→ecs edge is intentional
+//! and one-way for pure shapes only. Offline inv fixtures live in inventory.zig
+//! (no assets import) so the graph stays acyclic.
+//!
+//! Schedule owns the tick pipeline and imports systems; systems must not import
+//! schedule (call `schedule.run` from server/Game, not a systems wrapper).
 //!
 //! Single documented exception (lint-architecture.sh, comptime-only):
 //! ecs/rules.zig imports assets/sandbox_presets.zig to seed the

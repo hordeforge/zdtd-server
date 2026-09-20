@@ -16,6 +16,7 @@ const world_store = @import("../../world/store.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
+const schedule = @import("../../ecs/schedule.zig");
 const game_hooks = @import("../game/hooks.zig");
 const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
@@ -5281,7 +5282,7 @@ test "buffInfectionMain escalates the infection counter" {
     var k: u32 = 0;
     while (k < 600 and cl.cvars.get("infectionCounter") <= 0) : (k += 1) {
         g.tick_n += 1;
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         _ = g.tickSurvival(0.05);
     }
     try std.testing.expect(cl.cvars.get("infectionCounter") > 0);
@@ -5747,7 +5748,7 @@ test "heal-health cvar add heals per update" {
     try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffHealHealth", cl.entity_id));
     var k: u8 = 0;
     while (k < 25) : (k += 1) {
-        _ = ecs.systems.tickAll(&g.sim, 0.05);
+        _ = ecs.schedule.run(&g.sim, 0.05);
         g.tickSurvival(0.05);
     }
     try std.testing.expect(g.sim.health[ps].hp > 50);
@@ -5981,7 +5982,7 @@ test "consumable buff expires when its duration cvars drain" {
     var k: u32 = 0;
     while (k < 30000 and g.sim.buffs[ps].find(beer_id) != null and cl.cvars.get("$buffBeerDuration") > 0) : (k += 1) {
         g.tick_n += 1;
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         _ = g.tickSurvival(0.05);
     }
     // The RemoveBuff row flags removal on the crossing update; a couple more
@@ -5989,7 +5990,7 @@ test "consumable buff expires when its duration cvars drain" {
     var r: u8 = 0;
     while (r < 5 and g.sim.buffs[ps].find(beer_id) != null) : (r += 1) {
         g.tick_n += 1;
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         _ = g.tickSurvival(0.05);
     }
     try std.testing.expect(g.sim.buffs[ps].find(beer_id) == null);
@@ -6056,7 +6057,7 @@ test "radiation pool drains 20 stamina per update" {
     // buff tick marks the update due, then run survival to apply the row.
     var k: u8 = 0;
     while (k < 25) : (k += 1) {
-        _ = ecs.systems.tickAll(&g.sim, 0.05);
+        _ = ecs.schedule.run(&g.sim, 0.05);
         g.tickSurvival(0.05);
     }
     // 20 drained by the update row; other legs may add small offsets, so

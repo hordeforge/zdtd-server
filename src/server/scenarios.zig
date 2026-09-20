@@ -24,6 +24,7 @@ const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const quest_mod_components = @import("../ecs/components.zig");
 const systems = @import("../ecs/systems.zig");
+const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -13078,13 +13079,13 @@ test "scenario zombies aggro and melee bots (revenge + proximity)" {
     const zid = g.sim.spawnZombie(20, zy, 20, 100).?;
     const zs = g.sim.slotOfNetId(zid).?;
 
-    // Drive the sim AI (same order as step.zig: sim tickAll, then bots tick)
+    // Drive the sim AI (same order as step.zig: schedule.run, then bots tick)
     // until the zombie latches the bot as its target and closes to melee.
     var ticks: usize = 0;
     var latched = false;
     var meleed = false;
     while (ticks < 600 and !meleed) : (ticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         g.bots.tick(g, 0.05);
         if (g.sim.zombie_ai[zs].target_id == bid) latched = true;
         if (g.bots.bots[bs].hp < 100) meleed = true;
@@ -18478,7 +18479,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     g.sim.zombie_ai[zs].attack_cd = 0;
     var ticks: usize = 0;
     while (ticks < 200 and g.sim.health[vs].hp >= hp0 and !gracedHere(g, vs)) : (ticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
     }
     // Grace deflected the blow: no HP lost, and the recharge buff applied.
     try std.testing.expectEqual(hp0, g.sim.health[vs].hp);
@@ -18490,7 +18491,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     g.sim.zombie_ai[zs].attack_cd = 0;
     var ticks2: usize = 0;
     while (ticks2 < 200 and g.sim.health[vs].hp >= hp0) : (ticks2 += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
     }
     try std.testing.expect(g.sim.health[vs].hp < hp0);
     // Expire the 60 s buff (shorten the instance) and run the expiry drain:
@@ -18500,7 +18501,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     slot.duration_max = 0.05;
     var eticks: usize = 0;
     while (eticks < 20 and c.cvars.get("perkSpectersGrace") > 0) : (eticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         g.tickSurvival(0.05);
         try g.step();
     }
@@ -18546,7 +18547,7 @@ test "scenario buff finish chains the injury cooldown" {
     slot.duration_max = 0.05;
     var eticks: usize = 0;
     while (eticks < 20 and !hasBuffNamed(g, vs, "buffInjuryKnockdown01Cooldown")) : (eticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
         g.tickSurvival(0.05);
         try g.step();
     }
@@ -18608,7 +18609,7 @@ test "scenario preacher armor resists zombie hits more" {
     g.sim.zombie_ai[zs].attack_cd = 0;
     var ticks: usize = 0;
     while (ticks < 200 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
     }
     const loss_wearing = hp0 - g.sim.health[vs].hp;
     try std.testing.expect(loss_wearing > 0);
@@ -18618,7 +18619,7 @@ test "scenario preacher armor resists zombie hits more" {
     g.sim.zombie_ai[zs].attack_cd = 0;
     ticks = 0;
     while (ticks < 200 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
     }
     const loss_naked = hp0 - g.sim.health[vs].hp;
     try std.testing.expect(loss_naked > loss_wearing);
@@ -18756,7 +18757,7 @@ test "scenario victim hit fires concussion counter" {
     const hp0 = g.sim.health[vs].hp;
     var ticks: usize = 0;
     while (ticks < 400 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
-        _ = systems.tickAll(&g.sim, 0.05);
+        _ = schedule.run(&g.sim, 0.05);
     }
     try std.testing.expect(g.sim.health[vs].hp < hp0);
     try std.testing.expect(c.cvars.get("$concussionCounter") > 0);

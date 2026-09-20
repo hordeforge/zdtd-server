@@ -3711,11 +3711,6 @@ pub fn systemBuffs(w: *World, out: []buff.Expiry) u8 {
     return n;
 }
 
-/// Thin wrapper over schedule.run (explicit phases). Prefer schedule for new code.
-pub fn tickAll(w: *World, dt: f32) @import("schedule.zig").TickResult {
-    return @import("schedule.zig").run(w, dt);
-}
-
 fn testGround(_: ?*anyopaque, _: i32, _: i32) f32 {
     return 65;
 }

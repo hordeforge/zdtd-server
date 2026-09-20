@@ -310,6 +310,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/replicate_health.zig` | R | Health replicate path - extracted verbatim from game.zig. Thin forwarder keeps callers unchanged |
 | `src/server/game/rescue.zig` | R | Deep-void rescue extracted from game.zig |
 | `src/server/game/send_extra.zig` | R | Framed send helpers extracted from game.zig |
+| `src/server/game/delivery_policy.zig` | R | Pure S2C delivery classifiers (unreliable / compressed / droppable); shared by net.zig and send_extra.zig so those stay one-way |
 | `src/server/game/session_drop.zig` | R | Client slot teardown extracted from game.zig |
 | `src/server/game/sleeper.zig` | R | Sleeper-volume scan + spawn extracted from game.zig |
 | `src/server/game/social.zig` | R | Buff + party/ally helpers extracted from game.zig (verbatim bodies) |

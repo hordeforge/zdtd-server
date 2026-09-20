@@ -55,6 +55,22 @@ if [[ $fail -ne 0 ]]; then
   exit 1
 fi
 
+# Within-package one-way edges that used to be 2-cycles:
+# schedule orchestrates systems; systems must not import schedule.
+hits="$(rg -n --glob '*.zig' '@import\("schedule\.zig"\)' src/ecs/systems.zig 2>/dev/null || true)"
+if [[ -n "$hits" ]]; then
+  printf '%s\n' "$hits"
+  echo "lint-architecture: ecs/systems.zig must not import schedule.zig (call schedule.run from the server)" >&2
+  fail=1
+fi
+# net → send_extra; shared classifiers live in delivery_policy (no send_extra → net).
+hits="$(rg -n --glob '*.zig' '@import\("net\.zig"\)' src/server/game/send_extra.zig 2>/dev/null || true)"
+if [[ -n "$hits" ]]; then
+  printf '%s\n' "$hits"
+  echo "lint-architecture: game/send_extra.zig must not import net.zig (use delivery_policy.zig)" >&2
+  fail=1
+fi
+
 # Every package file must be referenced by its root.zig barrel, or its tests
 # silently drop out of the `zig build test` aggregate.
 for dir in src/*/; do

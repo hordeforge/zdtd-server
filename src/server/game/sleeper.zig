@@ -203,7 +203,7 @@ fn triggerVolume(self: *Game, vi: usize) void {
 /// contains a combat-noise event. The stock wake is player-independent
 /// (World.CheckSleeperVolumeNoise, entity-ai.md 844): a shot inside a POI
 /// spawns its sleepers even before the player enters. Must run BEFORE
-/// systems.tickAll consumes the noise ring.
+/// schedule.run consumes the noise ring.
 pub fn triggerSleeperVolumesByNoise(self: *Game) void {
     if (self.sleepers.volumes.len == 0) return;
     const take = @min(self.sim.noise_n, self.sim.noise_events.len);
