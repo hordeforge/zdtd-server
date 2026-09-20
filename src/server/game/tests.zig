@@ -3304,6 +3304,81 @@ test "whitelist gates the join: listed and admins enter, others are denied" {
     _ = try g.attachJoinedClientAs(&cap, id_c);
 }
 
+test "name-keyed admin entry does not grant a platform peer who spoofs the name" {
+    // Deny side of the permission matrix: a client-supplied display name must
+    // not mint admin rights when the peer already presented a platform id
+    // (stock AdminUsers.HasEntry keys on PlatformId only, IL=30).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(g.admin_list.add("Bot", 0)); // name-keyed owner entry
+    const spoof: platform_user.Id = .{ .platform = "Steam", .id = "attacker" };
+    var cap: ln_peer.Capture = .{};
+    // Harness login name is always "Bot"; with a platform id that must not
+    // inherit the name-keyed admin row.
+    const c = try g.attachJoinedClientAs(&cap, spoof);
+    try std.testing.expectEqual(@as(u16, 1000), g.permLevelOf(c));
+    try std.testing.expect(!g.permissionListHit(&g.admin_list, c));
+    // No-platform sessions still resolve name-keyed entries (loadgen).
+    var cap2: ln_peer.Capture = .{};
+    const bot = try g.attachJoinedClient(&cap2);
+    try std.testing.expectEqual(@as(u16, 0), g.permLevelOf(bot));
+}
+
+test "name-keyed whitelist entry does not admit a platform peer with that name" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Whitelist is name-keyed "Bot"; a Steam peer logging in as Bot must not
+    // slip through on the display name alone.
+    try std.testing.expect(g.whitelist.add("Bot", 0));
+    var cap: ln_peer.Capture = .{};
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "spoof" }));
+    // No-platform "Bot" still matches the name-keyed row.
+    _ = try g.attachJoinedClient(&cap);
+}
+
+test "admin add from player console cannot grant a more privileged level" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Mid-level admin (5) with `admin` delegated to level 5.
+    try std.testing.expect(g.admin_list.add("Bot", 5));
+    try std.testing.expect(g.setCommandLevel("admin", 5));
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expectEqual(@as(u16, 5), g.permLevelOf(c));
+
+    cap.clear();
+    var body: [64]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeString("admin add Eve 0");
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageConsoleCmdServer", w.written()));
+    const cid = packages.idOf("NetPackageConsoleCmdClient").?;
+    const resp = cap.findPkgId(cid) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.find(u8, resp, "cannot grant a more privileged level") != null);
+    try std.testing.expect(g.admin_list.find("Eve") == null);
+}
+
 test "admin target key uses the platform id for an online session" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

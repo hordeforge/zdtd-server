@@ -327,6 +327,10 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
             var sink_buf: [4096]u8 = undefined;
             self.admin_reply_len = 0;
             self.admin_reply_sink = sink_buf[0..];
+            // Carry the caller's level into runAdminLine so `admin add` cannot
+            // grant a more privileged level than the actor (escalation).
+            self.admin_actor_level = caller_level;
+            defer self.admin_actor_level = null;
             self.runAdminLine(cmd, "player_console");
             self.admin_reply_sink = null;
             var lines_buf: [64][]const u8 = undefined;
@@ -1384,6 +1388,15 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         .admin => |sub| switch (sub) {
             .list => self.adminWrite(admin_cmds.writeAdminList, .{&self.admin_list}),
             .add => |a| {
+                // In-game console: refuse granting a more privileged level than
+                // the actor (0 = highest). Trusted TCP/webui leave
+                // admin_actor_level null and keep full grant rights.
+                if (self.admin_actor_level) |actor| {
+                    if (@as(u16, a.level) < actor) {
+                        self.adminReply("cannot grant a more privileged level than your own\n");
+                        return;
+                    }
+                }
                 var idb: [96]u8 = undefined;
                 const id = self.adminTargetKey(a.target, &idb);
                 if (!self.admin_list.add(id, a.level)) {
@@ -1398,6 +1411,14 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             .remove => |t| {
                 var idb: [96]u8 = undefined;
                 const id = self.adminTargetKey(t, &idb);
+                if (self.admin_actor_level) |actor| {
+                    if (self.admin_list.find(id)) |ei| {
+                        if (@as(u16, self.admin_list.entries[ei].level) < actor) {
+                            self.adminReply("cannot remove a more privileged admin\n");
+                            return;
+                        }
+                    }
+                }
                 const removed = self.admin_list.remove(id);
                 if (removed) self.saveAdminLists();
                 var b: [160]u8 = undefined;

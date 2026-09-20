@@ -173,23 +173,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Stock BansAndWhitelistAuthorizer.Authorize (IL=71): with a
         // non-empty whitelist only whitelisted players and admins join;
         // everyone else is denied EKickReason.NotOnWhitelist(7) (admins
-        // bypass via AdminUsers.HasEntry). Whitelist/admin entries are
-        // matched by the "platform:id" composite (serveradmin.xml) or by
-        // the login name (zdtd `whitelist add`/`admin add`).
+        // bypass via AdminUsers.HasEntry). Platform composite when the
+        // client presented one; name only for no-platform sessions - a
+        // display name must not mint whitelist/admin standing for a peer
+        // that already has a platform id (stock HasEntry IL=30).
         if (self.whitelist.n > 0) {
-            const nm = if (c.name_len > 0) c.name[0..c.name_len] else "";
-            var wl_hit = nm.len != 0 and self.whitelist.find(nm) != null;
-            var adm_hit = nm.len != 0 and self.admin_list.find(nm) != null;
-            if (c.puid_primary.get()) |pid| {
-                var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
-                // Fail closed: an identity whose composite key cannot be
-                // built is NOT on the whitelist (the old bufPrint catch
-                // returned early and skipped the gate entirely).
-                if (std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch null) |key| {
-                    if (!wl_hit) wl_hit = self.whitelist.find(key) != null;
-                    if (!adm_hit) adm_hit = self.admin_list.find(key) != null;
-                }
-            }
+            const wl_hit = self.permissionListHit(&self.whitelist, c);
+            const adm_hit = self.permissionListHit(&self.admin_list, c);
             if (!wl_hit and !adm_hit) {
                 self.harness.counters.inc(.join_fail);
                 if (c.peer) |p| {

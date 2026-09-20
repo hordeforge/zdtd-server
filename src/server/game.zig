@@ -690,6 +690,11 @@ pub const Game = struct {
     /// When non-null, adminReply also appends into this buffer (webui cmd responses).
     admin_reply_sink: ?[]u8 = null,
     admin_reply_len: usize = 0,
+    /// Set only while `handleConsoleCmd` runs `runAdminLine`: the in-game
+    /// caller's permission level. Trusted operator paths (TCP/webui) leave
+    /// this null so they keep full grant rights. Used to refuse `admin add`
+    /// of a more privileged level than the actor (privilege escalation).
+    admin_actor_level: ?u16 = null,
     webui: webui_mod.Server = .{},
     /// MCP transport bridge (ADR 0031); polled from step like webui/admin.
     mcp: mcp_mod.Transport = .{},
@@ -3259,20 +3264,39 @@ pub const Game = struct {
 
     /// `AdminUsers.GetUserPermissionLevel` equivalent (PlayerSlotsAuthorizer
     /// and command gates): the stored level (0 = top admin) when the identity
-    /// is in the admin list, else the 1000 default. Matches by the
-    /// "platform:id" composite first, then the login name.
+    /// is in the admin list, else the 1000 default.
+    ///
+    /// Stock `AdminUsers.HasEntry` (IL=30) keys on PlatformId/CrossplatformId
+    /// only. A client-supplied display name must not mint admin rights when
+    /// the peer already presented a platform id (same class of hole ADR 0038
+    /// closed for player saves). Name-keyed list entries apply only to
+    /// no-platform sessions (loadgen / legacy).
     pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
-        if (c.name_len != 0) {
-            if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
-        }
         if (c.puid_primary.get()) |pid| {
             var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
             const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
-            if (key.len != 0) {
-                if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
-            }
+            if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
+            return 1000;
+        }
+        if (c.name_len != 0) {
+            if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
         }
         return 1000;
+    }
+
+    /// True when `c` hits `list` the way stock AdminUsers/Whitelist do:
+    /// platform composite when the client presented one; name only for
+    /// no-platform sessions. Used by the whitelist gate and ClientInfo admin
+    /// flag so those surfaces cannot drift from `permLevelOf`.
+    pub fn permissionListHit(self: *const Game, list: *const admin_cmds.PermissionList, c: *const Client) bool {
+        _ = self;
+        if (c.puid_primary.get()) |pid| {
+            var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
+            const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return false;
+            return list.find(key) != null;
+        }
+        if (c.name_len != 0) return list.find(c.name[0..c.name_len]) != null;
+        return false;
     }
 
     pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {

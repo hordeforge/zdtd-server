@@ -20,7 +20,6 @@ const hooks = @import("hooks.zig");
 const clock = @import("../../util/clock.zig");
 const rng_util = @import("../../util/rng.zig");
 const persist = @import("../persist.zig");
-const admin_cmds = @import("../admin_cmds.zig");
 const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
@@ -2791,16 +2790,9 @@ pub fn tickClientInfo(self: *Game) void {
     for (&self.clients) |*c| {
         if (!c.joined or c.entity_id <= 0) continue;
         if (n >= entries.len) break;
-        // Admin flag: platform-id composite (serveradmin.xml / admin add on
-        // an online session) or the login name (name-keyed entries).
-        var is_admin = c.name_len != 0 and self.admin_list.find(c.name[0..c.name_len]) != null;
-        if (!is_admin) {
-            if (c.puid_primary.get()) |pid| {
-                var key_buf: [admin_cmds.max_id]u8 = undefined;
-                const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch "";
-                if (key.len != 0) is_admin = self.admin_list.find(key) != null;
-            }
-        }
+        // Admin flag: same hit rule as permLevelOf / whitelist (platform
+        // composite when present; name only for no-platform sessions).
+        const is_admin = self.permissionListHit(&self.admin_list, c);
         entries[n] = .{ .entity_id = c.entity_id, .ping_ms = 0, .admin = is_admin };
         n += 1;
     }
