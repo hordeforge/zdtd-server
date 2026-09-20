@@ -14,9 +14,9 @@ Only imports of another package directory are counted; single-file imports
 | From package | To package | Imports |
 |---|---|---|
 | `apm` | `util` | 2 |
-| `assets` | `ecs` | 9 |
+| `assets` | `ecs` | 10 |
 | `assets` | `util` | 67 |
-| `ecs` | `assets` | 2 |
+| `ecs` | `assets` | 1 |
 | `ecs` | `util` | 5 |
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
