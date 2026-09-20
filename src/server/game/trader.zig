@@ -46,9 +46,9 @@ pub fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
 }
 
 pub fn tickTraderAreas(self: *Game) void {
-    var s: ecs.Slot = 0;
-    while (s < ecs.max_entities) : (s += 1) {
-        if (!self.sim.alive[s] or !self.sim.mask[s].trader or !self.sim.mask[s].trader_stock) continue;
+    // Kind group, not 0..max_entities: this runs every tick and traders are rare.
+    for (ecs.groupSlice(&self.sim, .trader)) |s| {
+        if (!self.sim.mask[s].trader_stock) continue;
         const st = &self.sim.trader_stock[s];
         const closed = !traderIsOpen(self, s);
         if (closed == st.is_closed) continue;

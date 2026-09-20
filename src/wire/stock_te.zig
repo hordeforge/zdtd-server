@@ -455,43 +455,6 @@ fn parseStorageFeature(r: *binary.Reader, out: *ParsedTe) binary.ReadError!void 
     }
 }
 
-/// Apply parsed items into container store entry.
-pub fn applyParsedToContainer(
-    parsed: *const ParsedTe,
-    cont: *containers.Container,
-    reverse: ?stock_inv.ReverseResolver,
-    ctx: ?*anyopaque,
-) void {
-    const n = if (parsed.size_x > 0 and parsed.size_y > 0)
-        @min(@as(usize, parsed.size_x) * @as(usize, parsed.size_y), containers.max_container_slots)
-    else
-        @min(parsed.item_count, containers.max_container_slots);
-    // Geometry only grows: a client-declared smaller grid must not make the
-    // container's tail slots unaddressable (and drop them from the save).
-    cont.slot_count = @intCast(@max(@as(usize, cont.slot_count), n));
-    cont.block_id = parsed.block_id;
-    cont.clear();
-    var i: usize = 0;
-    while (i < parsed.item_count and i < cont.slot_count) : (i += 1) {
-        const s = parsed.items[i];
-        if (s.type_id == 0 or s.count == 0) continue;
-        const item_id: u16 = if (reverse) |rv| rv(ctx, s.type_id) else blk: {
-            if (s.type_id > stock_inv.items_start_here) {
-                const rel = s.type_id - stock_inv.items_start_here;
-                if (rel > 0 and rel < 100) break :blk @as(u16, @intCast(rel));
-            }
-            break :blk 0;
-        };
-        if (item_id == 0) continue;
-        cont.setSlot(i, .{
-            .item_id = item_id,
-            .count = s.count,
-            .quality = @min(s.quality, 255),
-            .meta = s.meta,
-        });
-    }
-}
-
 // --- TileEntityWorkstation (TileEntityType.Workstation = 12, classic TE) ---
 // Network body after handle|worldPos|teBlockId|payloadLen. StreamModeWrite
 // ToServer (1) and ToClient (2) are byte-identical (TileEntityWorkstation::write

@@ -86,9 +86,7 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // Turrets hold the owning client slot, and slots are recycled, so a
     // turret still naming this one would pay its trap kills to whoever joins
     // next. The owner name stays: it is what the login re-map matches on.
-    var ti: usize = 0;
-    while (ti < ecs.max_entities) : (ti += 1) {
-        if (!self.sim.alive[ti] or self.sim.kind[ti] != .turret) continue;
+    for (self.sim.kind_groups.slice(.turret)) |ti| {
         if (self.sim.turret[ti].owner_slot == @as(i16, @intCast(slot))) {
             self.sim.turret[ti].owner_slot = -1;
         }

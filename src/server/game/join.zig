@@ -464,9 +464,7 @@ pub fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, p
 /// crate bag persists in `entities.zen` and the marker does not - saw no marker
 /// over a crate that was still sitting there full of loot.
 pub fn sendAirDropNavObjects(self: *Game, peer: *ln_peer.Peer) !void {
-    var i: ecs.Slot = 0;
-    while (i < ecs.max_entities) : (i += 1) {
-        if (!self.sim.alive[i] or self.sim.kind[i] != .loot_bag) continue;
+    for (ecs.groupSlice(&self.sim, .loot_bag)) |i| {
         if (!self.sim.mask[i].loot_bag or !self.sim.loot_bag[i].supply_crate) continue;
         if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
         const t = self.sim.transform[i];
@@ -492,15 +490,17 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
     const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
     const pfx: f32 = @floatFromInt(px);
     const pfz: f32 = @floatFromInt(pz);
-    var i: ecs.Slot = 0;
     var sent: u32 = 0;
-    var alive_z: u32 = 0;
-    while (i < ecs.max_entities) : (i += 1) {
-        if (!self.sim.alive[i]) continue;
+    const alive_z: u32 = @intCast(ecs.groupSlice(&self.sim, .zombie).len);
+    // Walk alive_bits (slot-ascending) rather than 0..max_entities so idle
+    // slots cost nothing; filter to the three join-burst kinds. Order matches
+    // the old open scan so the 16-cap picks the same entities.
+    var it = self.sim.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
         if (!self.sim.mask[i].kind) continue;
         const k = self.sim.kind[i];
         if (k != .zombie and k != .animal and k != .trader) continue;
-        if (k == .zombie) alive_z += 1;
         if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
         if (self.sim.mask[i].player) continue;
         const nid = self.sim.network_id[i].id;
@@ -545,9 +545,7 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
     const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
     const pfx: f32 = @floatFromInt(px);
     const pfz: f32 = @floatFromInt(pz);
-    var i: ecs.Slot = 0;
-    while (i < ecs.max_entities) : (i += 1) {
-        if (!self.sim.alive[i] or !self.sim.mask[i].player) continue;
+    for (ecs.groupSlice(&self.sim, .player)) |i| {
         if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
         const nid = self.sim.network_id[i].id;
         if (nid == c.entity_id or nid <= 0) continue;

@@ -309,9 +309,13 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     std.mem.writeInt(u32, out[16..20], @truncate(g.sim.director.clock.worldTimeBits()), .little);
     std.mem.writeInt(u32, out[20..24], @as(u32, @intFromBool(g.sim.director.bloodmoon_active)), .little);
     var n: usize = 0;
-    var s: ecs.Slot = 0;
-    while (s < ecs.max_entities and n < max_records) : (s += 1) {
-        if (!g.sim.alive[s] or !g.sim.mask[s].network_id) continue;
+    // alive_bits: pay for live actors, not the empty slot table. Slot order
+    // matches the open scan so sense record ordering stays stable.
+    var alive_it = g.sim.alive_bits.iterator(.{});
+    while (alive_it.next()) |idx| {
+        if (n >= max_records) break;
+        const s: ecs.Slot = @intCast(idx);
+        if (!g.sim.mask[s].network_id) continue;
         const k: u8 = switch (g.sim.kind[s]) {
             .player => 0,
             // Zombies and animals share the hostile bucket in the guest.

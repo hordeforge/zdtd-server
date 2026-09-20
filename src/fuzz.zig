@@ -23,6 +23,7 @@ const zdtd_config = @import("server/zdtd_config.zig");
 const serverconfig = @import("server/config.zig");
 const serverinfo = @import("server/serverinfo_tcp.zig");
 const persist = @import("server/persist.zig");
+const inv_apply = @import("server/inv_apply.zig");
 const xml_util = @import("assets/xml_util.zig");
 const xml_patch = @import("assets/xml_patch.zig");
 const quests_xml = @import("assets/quests.zig");
@@ -325,7 +326,7 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         // fixed container slot array and never shrink addressable slots.
         var cont: containers.Container = .{};
         const before = cont.slot_count;
-        stock_te.applyParsedToContainer(&te, &cont, null, null);
+        inv_apply.applyParsedToContainer(&te, &cont, null, null);
         try std.testing.expect(cont.slot_count <= containers.max_container_slots);
         try std.testing.expect(cont.slot_count >= before);
     } else |_| {}
@@ -496,9 +497,9 @@ fn fuzzInventoryDecoders(_: void, smith: *std.testing.Smith) !void {
     // Loot-container bag and player bag share the same blob layout; both modes
     // must refuse oversized blob_len / bag_n without writing past max_inv_slots.
     inv = .{};
-    _ = stock_inv.applyBagPackage(input, &inv, null, null, true) catch {};
+    _ = inv_apply.applyBagPackage(input, &inv, null, null, true) catch {};
     inv = .{};
-    _ = stock_inv.applyBagPackage(input, &inv, null, null, false) catch {};
+    _ = inv_apply.applyBagPackage(input, &inv, null, null, false) catch {};
 }
 
 const binary_corpus = [_][]const u8{

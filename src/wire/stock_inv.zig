@@ -888,39 +888,6 @@ pub fn applyPlayerInventoryBody(
 /// bool here consumed the next slot's version byte and desynced the rest of
 /// the body.
 ///
-/// Returns the number of bytes consumed so a relay can trim to the stock body.
-/// The cosmetic + unlock tail is parsed for stream correctness and dropped
-/// (client-side cosmetics, recorded).
-pub fn applyEquipmentBody(
-    body: []const u8,
-    inv: *components.Inventory,
-    reverse: ?ReverseResolver,
-    ctx: ?*anyopaque,
-) binary.ReadError!usize {
-    var r: binary.Reader = .{ .data = body };
-    const version = try r.readByte();
-    const eq_n: usize = if (version <= 2) 5 else if (version == 3) 8 else equipment_slots;
-    var i: usize = 0;
-    while (i < eq_n) : (i += 1) {
-        // ReadOrNull: the ItemValue's own version byte doubles as the presence
-        // marker, so an empty slot is one `0` byte.
-        const s = try readItemValue(&r);
-        if (i < components.inv_equip_count) {
-            inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
-        }
-    }
-    // The cosmetic + unlock tail only exists from version 2 on
-    // (Equipment.il.txt:1711, `blt` past it when version < 2).
-    if (version >= 2) {
-        var ci: usize = 0;
-        while (ci < eq_n) : (ci += 1) _ = try r.readI32();
-        const unlocked = try r.readI32();
-        var ui: i32 = 0;
-        while (ui < unlocked) : (ui += 1) _ = try r.readI32();
-    }
-    return r.pos;
-}
-
 /// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
 /// equipment ItemValue array, bag stacks (each gated by a bool).
 /// Best-effort count of eatable units in a PlayerInventory body (toolbelt+bag).
@@ -991,7 +958,7 @@ fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
     }
 }
 
-fn skipPackedBoolArray(r: *binary.Reader) binary.ReadError!void {
+pub fn skipPackedBoolArray(r: *binary.Reader) binary.ReadError!void {
     // PackedBoolArray.Write: 7-bit encoded length (StreamUtils.Write7BitEncodedInt
     // per IL), then packed bytes. Matches the reader in stock_te.zig.
     const len = try binary.read7BitEncodedInt(r);
@@ -1390,60 +1357,6 @@ pub fn peekBagEntityId(body: []const u8) binary.ReadError!i32 {
     return std.mem.readInt(i32, body[0..4], .little);
 }
 
-/// Apply NetPackageBag body into inventory bag (player_bag_only) or full slots.
-pub fn applyBagPackage(
-    body: []const u8,
-    inv: *components.Inventory,
-    reverse: ?ReverseResolver,
-    ctx: ?*anyopaque,
-    player_bag_only: bool,
-) binary.ReadError!i32 {
-    var r: binary.Reader = .{ .data = body };
-    const entity_id = try r.readI32();
-    const blob_len = try r.readU16();
-    if (r.remaining() < blob_len) return error.EndOfStream;
-    const blob = r.data[r.pos .. r.pos + blob_len];
-    r.pos += blob_len;
-
-    var br: binary.Reader = .{ .data = blob };
-    const bag_ver = try br.readByte();
-    const bag_n = try br.readU16();
-
-    if (player_bag_only) {
-        var i: usize = 0;
-        while (i < bag_n) : (i += 1) {
-            const s = try readItemStack(&br);
-            if (i < components.inv_bag_count) {
-                inv.slots[components.inv_bag_start + i] = toEcs(s, reverse, ctx);
-            }
-        }
-        while (i < components.inv_bag_count) : (i += 1) {
-            inv.slots[components.inv_bag_start + i] = .{};
-        }
-    } else {
-        // Loot: clear all, fill from start
-        inv.clear();
-        var i: usize = 0;
-        while (i < bag_n) : (i += 1) {
-            const s = try readItemStack(&br);
-            if (i < components.max_inv_slots) {
-                inv.slots[i] = toEcs(s, reverse, ctx);
-            }
-        }
-    }
-
-    const has_locked = try br.readBool();
-    if (has_locked) try skipPackedBoolArray(&br);
-    if (bag_ver >= 1 and br.remaining() >= 1) {
-        _ = try br.readBool(); // touched
-        if (br.remaining() >= 1) {
-            const has_prefs = try br.readBool();
-            _ = has_prefs;
-        }
-    }
-    return entity_id;
-}
-
 // --- NetPackageDropItemsContainer ---
 // droppedByID i32 | containerEntity string | Vector3 | u16 count | ItemStack*n
 // (write uses WriteItemStack loop, same as GameUtils list but count is u16 of array len)
@@ -1831,31 +1744,6 @@ test "holding encode decode" {
     try std.testing.expectEqual(@as(i32, items_start_here + 8), p.stack.type_id);
 }
 
-test "bag package roundtrip player bag slots" {
-    var buf: [8192]u8 = undefined;
-    var inv: components.Inventory = .{};
-    inv.slots[10] = .{ .item_id = 7, .count = 15, .quality = 1 };
-    inv.slots[11] = .{ .item_id = 3, .count = 30, .quality = 1 };
-    const body = try buildBagPackage(&buf, 42, &inv, null, null, true);
-    var inv2: components.Inventory = .{};
-    const rev = testRevItemId;
-    const eid = try applyBagPackage(body, &inv2, rev, null, true);
-    try std.testing.expectEqual(@as(i32, 42), eid);
-    try std.testing.expectEqual(@as(u16, 7), inv2.slots[10].item_id);
-    try std.testing.expectEqual(@as(u16, 15), inv2.slots[10].count);
-    try std.testing.expectEqual(@as(u16, 3), inv2.slots[11].item_id);
-
-    // Bag.Write closes with three bools: no LockedSlots, touched, no
-    // PreferenceTracker. Only the slots were read back, so a swap among those
-    // three went unnoticed - and the outer two are both false, which is why
-    // the middle one has to be true here to be observable at all. Layout:
-    // entityId i32 | blobLen u16 | version u8 | count u16 | N x ItemStack.
-    const tail = body[body.len - 3 ..];
-    try std.testing.expectEqual(@as(u8, 0), tail[0]); // LockedSlots absent
-    try std.testing.expectEqual(@as(u8, 1), tail[1]); // touched
-    try std.testing.expectEqual(@as(u8, 0), tail[2]); // PreferenceTracker absent
-}
-
 test "drop items container encode decode" {
     var buf: [512]u8 = undefined;
     const items = [_]StockSlot{
@@ -1995,43 +1883,6 @@ test "item mods survive the ECS conversion both ways" {
     try std.testing.expectEqual(@as(u16, 13), back.mods[1]);
     try std.testing.expectEqual(@as(u8, 4), back.mod_qualities[0]);
     try std.testing.expectEqual(@as(u8, 6), back.mod_qualities[1]);
-}
-
-test "applyEquipmentBody parses the standalone equipment body" {
-    // Equipment::Write (Equipment.il.txt:1594): version 4 | 12 x
-    // ItemValue::Write, where a null slot is the bare `0` byte its own version
-    // field would carry | 12 x cosmetic i32 | i32 unlocked | unlocked x i32.
-    // There is no presence bool: this test used to write one, which is why the
-    // parser's matching bug survived.
-    var buf: [1024]u8 = undefined;
-    var w = binary.Writer{ .buf = &buf };
-    try w.writeByte(4); // Equipment version -> 12 slots
-    for (0..12) |i| {
-        if (i == 2) {
-            // Absolute stock type (items_start_here + relative); fallbackEcsId
-            // maps it back to the relative ECS id.
-            try writeItemValue(&w, .{ .type_id = items_start_here + 5, .count = 1 });
-        } else {
-            try w.writeByte(0); // null ItemValue
-        }
-    }
-    for (0..12) |_| try w.writeI32(0); // cosmetics
-    try w.writeI32(0); // unlocked count
-    var inv: components.Inventory = .{};
-    const used = try applyEquipmentBody(w.written(), &inv, null, null);
-    try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
-    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
-    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
-    // The whole body is consumed, so a relay can trim to it.
-    try std.testing.expectEqual(w.written().len, used);
-
-    // Trailing bytes do not extend the parsed length.
-    var padded: [1024]u8 = undefined;
-    const n = w.written().len;
-    @memcpy(padded[0..n], w.written());
-    @memset(padded[n..][0..6], 0xcc);
-    var inv2: components.Inventory = .{};
-    try std.testing.expectEqual(n, try applyEquipmentBody(padded[0 .. n + 6], &inv2, null, null));
 }
 
 test "bag blob parses the stock Bag.Write layout" {

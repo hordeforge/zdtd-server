@@ -658,6 +658,9 @@ def main():
         # party scenario catches a swapped pair (mutation-checked 2026-09-04),
         # and it is not a shape any builder already emits.
         "src/server/game/session_drop.zig",
+        # Test-only Equipment.Write fixtures for applyEquipmentBody; production
+        # paths only call apply* on client bodies (parse stays in wire/).
+        "src/server/inv_apply.zig",
     }
     writer_re = re.compile(r"\b(?:wire_)?binary\.Writer\b")
     unexpected_writers = []

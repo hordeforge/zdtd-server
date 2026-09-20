@@ -1239,9 +1239,7 @@ pub const Game = struct {
         }
         // Vehicle baskets restore from entities.zen, which also loads before
         // loadAssets, so they need the same pass for the same reason.
-        var vi: usize = 0;
-        while (vi < ecs.max_entities) : (vi += 1) {
-            if (!self.sim.alive[vi] or self.sim.kind[vi] != .vehicle) continue;
+        for (ecs.groupSlice(&self.sim, .vehicle)) |vi| {
             const v = &self.sim.vehicle[vi];
             const n = @min(@as(usize, v.basket_n), v.basket.len);
             self.clampKnownStacks(v.basket[0..n]);
@@ -2122,9 +2120,7 @@ pub const Game = struct {
     /// shape as `reclaimForName`: the save carries a name because a slot is
     /// per-session, and login is where a name becomes a slot again.
     pub fn reclaimTurretsForName(self: *Game, name: []const u8, slot: usize) void {
-        var i: usize = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (!self.sim.alive[i] or self.sim.kind[i] != .turret) continue;
+        for (ecs.groupSlice(&self.sim, .turret)) |i| {
             const t = &self.sim.turret[i];
             if (t.owner_name_len != name.len) continue;
             if (!std.mem.eql(u8, t.owner_name[0..t.owner_name_len], name)) continue;

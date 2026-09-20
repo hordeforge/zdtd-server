@@ -22,6 +22,7 @@ pub const phase_gate = @import("phase_gate.zig");
 pub const movement = @import("movement.zig");
 pub const c2s_text = @import("c2s_text.zig");
 pub const evidence = @import("evidence.zig");
+pub const inv_apply = @import("inv_apply.zig");
 pub const guard_policy = @import("guard_policy.zig");
 pub const ally = @import("ally.zig");
 pub const replicate_te = @import("replicate_te.zig");
@@ -101,6 +102,7 @@ test {
     _ = movement;
     _ = c2s_text;
     _ = evidence;
+    _ = inv_apply;
     _ = guard_policy;
     _ = ally;
     _ = replicate_te;

@@ -15,6 +15,7 @@ const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const inv_apply = @import("../inv_apply.zig");
 const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
@@ -336,7 +337,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (entity_id == c.entity_id or entity_id == 0) {
             const ps = self.sim.playerByPeer(c.slot) orelse return true;
             if (!self.sim.mask[ps].inventory) return true;
-            _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[ps], reverseItemType, self, true) catch return true;
+            _ = inv_apply.applyBagPackage(body, &self.sim.inventory[ps], reverseItemType, self, true) catch return true;
             self.clampInventoryStacks(&self.sim.inventory[ps]);
         } else if (self.sim.slotOfNetId(entity_id)) |si| {
             // Ownership: never let a peer write another player's inventory.
@@ -362,7 +363,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 bp.z,
             )) return true;
             if (self.sim.mask[si].inventory) {
-                _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return true;
+                _ = inv_apply.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return true;
                 self.clampInventoryStacks(&self.sim.inventory[si]);
             } else if (self.sim.mask[si].vehicle) {
                 // Vehicle basket (RE NetPackageBag write IL=19 / read IL=16,
@@ -554,7 +555,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 cont.size_x = @intCast(parsed.size_x);
                 cont.size_y = @intCast(parsed.size_y);
             }
-            stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
+            inv_apply.applyParsedToContainer(&parsed, cont, reverseItemType, self);
             self.clampStackSlots(cont.slots[0..cont.slot_count]);
             // A player looting a container is the server-side trigger for
             // FetchFromContainer quests (stock's quest object observes the

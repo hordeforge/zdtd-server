@@ -682,9 +682,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const e_rad: f32 = @max(1, @min(ex.entity_radius, max_claimed_explosion_radius));
         const claimed_damage: f32 = if (ex.entity_damage > 0) ex.entity_damage else @as(f32, @floatFromInt(ex.block_damage));
         const e_dmg: f32 = @min(claimed_damage, @as(f32, @floatFromInt(self.max_claimed_damage)));
-        var es: ecs.Slot = 0;
-        while (es < ecs.max_entities) : (es += 1) {
-            if (!self.sim.alive[es] or !self.sim.mask[es].transform or !self.sim.mask[es].health) continue;
+        // alive_bits: pay for live entities, not the empty slot table.
+        var alive_it = self.sim.alive_bits.iterator(.{});
+        while (alive_it.next()) |idx| {
+            const es: ecs.Slot = @intCast(idx);
+            if (!self.sim.mask[es].transform or !self.sim.mask[es].health) continue;
             const nid = self.sim.network_id[es].id;
             if (nid <= 0) continue;
             const t = self.sim.transform[es];

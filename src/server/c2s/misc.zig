@@ -12,6 +12,7 @@ const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const inv_apply = @import("../inv_apply.zig");
 const components = @import("../../ecs/components.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
@@ -525,7 +526,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (eid != c.entity_id) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].inventory) return true;
-        const eq_len = packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch {
+        const eq_len = inv_apply.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
