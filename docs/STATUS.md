@@ -667,21 +667,11 @@ World geometry is now data-driven, not baked into the column format:
 (`sea_level`, `height_scale`, `height_offset`, `height_ceiling`; identity at
 stock defaults, so vanilla worlds are byte-identical) and the terrain sources
 (flat / baked DTM / proc) feed it - a world can ship compressed mountains,
-a sea-level model or a custom ceiling with a stock client. Layer B is the
-wire-profile seam: `protocol.WireProfile` (one source of truth: `y_dim`;
-layers/`c_max_height`/plane cell count derive; the index stride stays the
-fixed `ChunkAreaDim` 256) flows from `[wire] profile` (zdtd.toml,
-default `stock`) into the chunk store (`Chunk.y_dim`, profile-sized planes),
-the chunk wire builder (layer band count + column-height bounds; `stock`
-bytes pinned by goldens) and the save format (ZCH4 carries
-the column height; a stock loader rejects it and a mismatched non-stock
-loader fails closed). A non-stock dialect needs a paired client mod
-(RealEarth-style engine expand) - the seam is proven by a synthetic
-`tall-512` scenario (128-layer wire bodies, ZCH4 round-trip, production
-chunk_fill stream), not by a real client. Known bound: a dense non-stock
-chunk can exceed the fixed 512 KiB `body_buf` (fails loudly, not corrupts);
-profile-sized send buffers are follow-on. Proc worldgen stays 256-tall
-(fail-closed with non-stock); RealEarth's own dialect is RE-gated future
+a sea-level model or a custom ceiling with a stock client. The `[wire] profile`
+column-height dialect surface was removed (2026-09): zdtd emits only the stock
+256-tall format, so `protocol.WireProfile` (one source of truth `y_dim`)
+survives as the save/chunk carry of that fixed height; there is no non-stock
+dialect or `[wire] profile` config. RealEarth's own dialect is RE-gated future
 work. Research cross-link: `7dtd-engine-research/docs/world/terrain-height.md`.
 Also (2026-08-29): the procedural shaping params moved to
 `[rules.worldgen]` (base_height/height_amp/min+max_surface/squash/
@@ -2806,10 +2796,10 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Loadgen parity vs stock dedi | **PASS (2026-08-06)** | same `--join --count 2 --actions 20 --seed 4242` workload on the stock V3.1.0 dedicated (Navezgane) and on zdtd: both 2/2 bots joined rc=0, 0 deaths, no protocol errors; zdtd apm shows join_ok=26 join_fail=0, phase/decode/c2s rejects all 0 ([CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md)) |
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; `tcp_listen` + `std.http.Server`; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | Authority spine (P4.0) | **PASS (first cut)** | `phase_gate` matrix; movement envelope + player-coordinate ceiling (`max_player_coord`, C2S reject / admin tele clamp / plugin spawn+query fail-closed); reject counters in apm/webui; `ZdtdAuthorityMode`; inv ledger ring |
-| Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
+| Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` static host; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
 | Mod tiers + override (PRD 0005 / ADR 0032) | **PASS (first cut)** | `manifest.toml` manifests, `mods/*/manifest.toml` discovery, `[mods] disabled`/`blacklist` (core components protected), five exclusive core override points (loot.roll, quest.payout, damage.player_scale, craft.request, trade.price), `override = <name>` mod replacement, load-time conflict detection. Gap: kill/death/block/quest-accept hooks stay composition-only (not override points); call-next (`claim_mode = "chain"`) reserved, rejected at load |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
-| Preset pack | **PASS (first cut)** | `presets/default.toml` + `preset.zig`; `--preset` / `[preset] name` → InitOptions; `enable_sample_plugin` |
+| Preset pack | **PASS (first cut)** | `presets/default.toml` + `preset.zig`; `--preset` / `[preset] name` → InitOptions |
 | C2S package coverage | **PASS (all ToServer handled)** | parity tool: 0 unhandled dir=1 (**86** dispatch arms across `c2s/*`, counted 2026-08-29; the 3.2.0 ToServer additions - POIMetadataRequest, ConfirmSpawnEntity, EntitySetSkillLevelServer - all have arms); `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10; 190-pkg catalog docs/wire/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco streams (A22 id-negotiation residual only). Not full-stock parity. |
 

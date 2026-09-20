@@ -75,7 +75,7 @@ parser change (ADR 0021). Pointer fields (an arena handle) are not operator sett
 and are not listed.
 
 
-### `[stream]` (Stream, `src/server/zdtd_config.zig:309`)
+### `[stream]` (Stream, `src/server/zdtd_config.zig:300`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -94,7 +94,7 @@ and are not listed.
 | `save_interval_ticks` | `?u64` | `null` | 39 |
 
 
-### `[authority]` (Authority, `src/server/zdtd_config.zig:310`)
+### `[authority]` (Authority, `src/server/zdtd_config.zig:301`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -119,7 +119,7 @@ and are not listed.
 | `guard_weak_break_rate` | `?u32` | `null` | 70 |
 
 
-### `[feature]` (Feature, `src/server/zdtd_config.zig:311`)
+### `[feature]` (Feature, `src/server/zdtd_config.zig:302`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -130,7 +130,7 @@ and are not listed.
 | `deco_objects_per_join` | `?usize` | `null` | 84 |
 
 
-### `[perf]` (Perf, `src/server/zdtd_config.zig:312`)
+### `[perf]` (Perf, `src/server/zdtd_config.zig:303`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -139,7 +139,7 @@ and are not listed.
 | `job_batches` | `?bool` | `null` | 96 |
 
 
-### `[sim]` (Sim, `src/server/zdtd_config.zig:313`)
+### `[sim]` (Sim, `src/server/zdtd_config.zig:304`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -174,86 +174,79 @@ and are not listed.
 | `airdrop_loot_list` | `?[]const u8` | `null` | 175 |
 
 
-### `[preset]` (Preset, `src/server/zdtd_config.zig:314`)
+### `[preset]` (Preset, `src/server/zdtd_config.zig:305`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `name` | `?[]const u8` | `null` | 203 |
+| `name` | `?[]const u8` | `null` | 194 |
 
 
-### `[plugin]` (Plugin, `src/server/zdtd_config.zig:315`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `modules` | `?[]const u8` | `null` | 209 |
-| `fuel` | `?u64` | `null` | 214 |
-| `max_pages` | `?u64` | `null` | 216 |
-| `deny` | `?[]const u8` | `null` | 221 |
-| `allow` | `?[]const u8` | `null` | 225 |
-
-
-### `[mods]` (Mods, `src/server/zdtd_config.zig:317`)
+### `[plugin]` (Plugin, `src/server/zdtd_config.zig:306`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `disabled` | `?[]const u8` | `null` | 234 |
-| `blacklist` | `?[]const u8` | `null` | 238 |
-| `enabled` | `?[]const u8` | `null` | 242 |
+| `modules` | `?[]const u8` | `null` | 200 |
+| `fuel` | `?u64` | `null` | 205 |
+| `max_pages` | `?u64` | `null` | 207 |
+| `deny` | `?[]const u8` | `null` | 212 |
+| `allow` | `?[]const u8` | `null` | 216 |
 
 
-### `[quests]` (Quests, `src/server/zdtd_config.zig:321`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `objective_kinds` | `[]const u8` | `""` | 258 |
-| `default_kill_count` | `?u8` | `null` | 259 |
-| `kill_per_tier` | `?u8` | `null` | 260 |
-| `goto_radius` | `?f32` | `null` | 261 |
-| `stay_radius` | `?f32` | `null` | 262 |
-| `poi_min_dist` | `?f32` | `null` | 265 |
-| `poi_max_dist` | `?f32` | `null` | 266 |
-| `max_poi_attempts` | `?u32` | `null` | 267 |
-| `poi_bed_lockout_radius` | `?f32` | `null` | 270 |
-| `trader_band_1` | `?f32` | `null` | 273 |
-| `trader_band_2` | `?f32` | `null` | 274 |
-
-
-### `[bots]` (Bots, `src/server/zdtd_config.zig:324`)
+### `[mods]` (Mods, `src/server/zdtd_config.zig:308`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `shoot_damage` | `?f32` | `null` | 281 |
-| `headshot_multiplier` | `?f32` | `null` | 282 |
-| `spawn_spread` | `?f32` | `null` | 283 |
-| `spawn_y` | `?f32` | `null` | 284 |
-| `max_step_up` | `?f32` | `null` | 285 |
-| `arrival_dist` | `?f32` | `null` | 286 |
-| `shot_range_slop` | `?f32` | `null` | 287 |
-| `weapon_profiles` | `[]const u8` | `""` | 291 |
+| `disabled` | `?[]const u8` | `null` | 225 |
+| `blacklist` | `?[]const u8` | `null` | 229 |
+| `enabled` | `?[]const u8` | `null` | 233 |
 
 
-### `[apm]` (Apm, `src/server/zdtd_config.zig:326`)
+### `[quests]` (Quests, `src/server/zdtd_config.zig:312`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `objective_kinds` | `[]const u8` | `""` | 249 |
+| `default_kill_count` | `?u8` | `null` | 250 |
+| `kill_per_tier` | `?u8` | `null` | 251 |
+| `goto_radius` | `?f32` | `null` | 252 |
+| `stay_radius` | `?f32` | `null` | 253 |
+| `poi_min_dist` | `?f32` | `null` | 256 |
+| `poi_max_dist` | `?f32` | `null` | 257 |
+| `max_poi_attempts` | `?u32` | `null` | 258 |
+| `poi_bed_lockout_radius` | `?f32` | `null` | 261 |
+| `trader_band_1` | `?f32` | `null` | 264 |
+| `trader_band_2` | `?f32` | `null` | 265 |
+
+
+### `[bots]` (Bots, `src/server/zdtd_config.zig:315`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `shoot_damage` | `?f32` | `null` | 272 |
+| `headshot_multiplier` | `?f32` | `null` | 273 |
+| `spawn_spread` | `?f32` | `null` | 274 |
+| `spawn_y` | `?f32` | `null` | 275 |
+| `max_step_up` | `?f32` | `null` | 276 |
+| `arrival_dist` | `?f32` | `null` | 277 |
+| `shot_range_slop` | `?f32` | `null` | 278 |
+| `weapon_profiles` | `[]const u8` | `""` | 282 |
+
+
+### `[apm]` (Apm, `src/server/zdtd_config.zig:317`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `dump_every_s` | `?u64` | `null` | 182 |
 
 
-### `[worldgen]` (Worldgen, `src/server/zdtd_config.zig:328`)
+### `[worldgen]` (Worldgen, `src/server/zdtd_config.zig:319`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `seed` | `?u64` | `null` | 189 |
 
 
-### `[wire]` (Wire, `src/server/zdtd_config.zig:334`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `profile` | `[]const u8` | `"stock"` | 198 |
-
-
-### `[rules]` (rules_mod.RulesOverlay, `src/server/zdtd_config.zig:337`)
+### `[rules]` (rules_mod.RulesOverlay, `src/server/zdtd_config.zig:322`)
 
 No fields parsed.
 

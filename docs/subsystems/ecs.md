@@ -63,8 +63,9 @@ pub const Mask = packed struct(u32) {
     bot: bool = false,
     dirty: bool = false,
     buffs: bool = false,
+    cvars: bool = false,
     falling: bool = false,
-    _pad: u11 = 0,
+    _pad: u10 = 0,
 };
 ```
 

@@ -8,7 +8,7 @@ Sources: [`src/plugin/root.zig`](../../src/plugin/root.zig), [`src/plugin/wasm.z
 
 ## Package boundary and who calls whom
 
-Two unrelated things share the package. The shipping plugin format is a `.wasm` module loaded by `WasmHost` (`src/plugin/wasm.zig`). The static host (`src/plugin/host.zig`, `src/plugin/api.zig`, `src/plugin/sample_hello.zig`) is in-tree test scaffolding: "Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping native ABI. No dynlib, no stock IModApi." (`src/plugin/api.zig:1`). ADR 0020 decision 2 keeps it for scenarios that need hook calls without standing up a Wasm runtime (`docs/adr/0020-wasm-only-plugin-api.md:32`).
+Two unrelated things share the package. The shipping plugin format is a `.wasm` module loaded by `WasmHost` (`src/plugin/wasm.zig`). The static host (`src/plugin/host.zig`, `src/plugin/api.zig`) is in-tree test scaffolding: "Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping native ABI. No dynlib, no stock IModApi." (`src/plugin/api.zig:1`).
 
 Boot order. `main` discovers manifests under `mods/` and `plugins/` (`src/main.zig:766`, `src/main.zig:769`), resolves them into a load plan (`src/main.zig:808`), and stores it on `InitOptions.plugin_plan` (`src/main.zig:820`). World init then loads through the plan, falling back to the legacy `[plugin] modules` list when no plan exists (`src/server/game/init_world.zig:363`), applies the operator queued-verb policy over every loaded slot (`src/server/game/init_world.zig:372`), and calls `on_enable` on each module (`src/server/game/init_world.zig:377`). Shutdown runs the reverse order before the stores are freed (`src/server/game/lifecycle.zig:31`).
 

@@ -29,7 +29,7 @@ and read the effective serverconfig without editing files blindly.
 
 > Purpose/positioning inferred from the brief and WEBUI.md; the "meaningfully
 > different mechanism" is the one the doc itself states: a browser ops console
-> embedded in the server binary with zero Node/npm dependency.
+> embedded in the server binary with no runtime toolchain to install.
 
 zdtd's web UI gives the operator a live, read-only health view plus a safe
 command surface for the Zeven Days to Die dedicated server, embedded in the
@@ -39,11 +39,12 @@ and the UI never perturbs the 50 ms sim tick.
 
 ## Positioning
 
-> Inferred from WEBUI.md non-goals and the HTMX/Alpine rationale; labeled.
+> Inferred from WEBUI.md and ADR 0040; labeled.
 
-A browser ops dashboard for a from-scratch dedicated server, delivered as
-server-rendered HTML with zero build step, no SPA, no node_modules in CI, and
-a tick-safe read model. What a rival tool could not honestly copy: the console
+A browser ops dashboard for a from-scratch dedicated server, delivered as three
+self-contained HTML pages (Preact over one JSON state endpoint, ADR 0040) with
+no runtime dependency and no node_modules in the tree, and a tick-safe read
+model. What a rival tool could not honestly copy: the console
 is a first-class surface of the server process itself, loopback-bound with a
 shared-secret or cookie session by default, and reads a snapshot that is
 guaranteed off the sim hot path.
@@ -68,11 +69,15 @@ Confirmed (docs/WEBUI.md "Settled decisions (WU0-WU2)" and architecture):
 - Dashboard: live server health (tick budget, joins, peers, chunks, zombies,
   apm counters), player list, serverconfig / effective options (read-only),
   console command surface.
-- Server-rendered HTML fragments with an inline vanilla JS poller using
-  htmx-style attributes; vendor htmx/alpine embed is an optional later step.
+- Preact dashboard rendered from GET /api/state.json (ADR 0040, superseding
+  the htmx/Alpine plan of ADR 0018); the bundle is compiled from
+  src/server/webui/ts and inlined into the committed page by
+  scripts/build-webui-ts.sh. Login and lockout stay server-rendered.
 - Security: loopback default bind, shared-secret or cookie session, login
   lockout, CSRF protection on command POSTs.
-- No build step, no SPA, no Node toolchain; everything serves from one binary.
+- Nothing to install to run it: the pages are embedded in the binary and
+  nothing is read from disk at runtime. Editing them needs bun + tsc, which the
+  lint gate pins (scripts/lint-webui.sh).
 - All UI I/O stays out of the 50 ms tick (or command-queue only).
 
 Explicit non-goals (do not treat as gaps): stock Steam browser clone, in-game
@@ -95,10 +100,12 @@ marketed as a separate product.
   model, information architecture, UI sketch, command surface, data snapshot,
   implementation plan, settled WU0-WU2 decisions).
 - src/server/webui/: shipped surface (shell.html, login.html,
-  login_failed.html, login_lockout.html; the admin/GSI/webui wiring in
-  src/server/).
+  login_lockout.html, their TypeScript sources under ts/, and the
+  admin/GSI/webui wiring in src/server/).
 - docs/APM.md: the metrics the dashboard reads (counters, section latency,
   dumps).
+- DESIGN.md: the visual system (paper cockpit, one terminal; tokens and
+  component rules) extracted from the shipped pages.
 - Absent: no marketing copy, no screenshots, no external testimonials or
   customer evidence; do not fabricate any.
 
@@ -109,8 +116,8 @@ marketed as a separate product.
 1. The 50 ms tick is sacred: the UI observes, never perturbs the sim.
 2. Secure by default: loopback, secret or cookie session, CSRF-safe commands,
    no anonymous admin.
-3. Zero-toolchain: one binary, server-rendered HTML, no build step to run the
-   console.
+3. Zero-install: one binary serves the pages; no Node runtime, no package
+   manager, no reverse proxy in the operator's path.
 4. Act like admin TCP: the same command surface, the same validation, the same
    audit trail.
 5. Read before write: configuration is visible read-only; commands are the

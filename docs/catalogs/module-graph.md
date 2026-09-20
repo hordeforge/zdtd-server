@@ -16,7 +16,7 @@ Only imports of another package directory are counted; single-file imports
 | `apm` | `util` | 2 |
 | `assets` | `ecs` | 9 |
 | `assets` | `util` | 67 |
-| `ecs` | `assets` | 1 |
+| `ecs` | `assets` | 2 |
 | `ecs` | `util` | 5 |
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
@@ -27,7 +27,7 @@ Only imports of another package directory are counted; single-file imports
 | `server` | `litenet` | 37 |
 | `server` | `plugin` | 10 |
 | `server` | `server/game` | 8 |
-| `server` | `util` | 78 |
+| `server` | `util` | 79 |
 | `server` | `wire` | 80 |
 | `server` | `world` | 76 |
 | `wire` | `assets` | 8 |
