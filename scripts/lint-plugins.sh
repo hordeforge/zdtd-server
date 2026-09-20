@@ -49,7 +49,7 @@ while read -r built; do
     echo "zdtd: lint-plugins: $rel is stale (its source changed without a rebuild)" >&2
     stale=1
   fi
-done < <(find "$mirror" -name '*.wasm' | sort)
+done < <(find "$mirror" -name '*.wasm' | LC_ALL=C sort)
 
 if [ "$stale" -ne 0 ] || [ "$missing" -ne 0 ]; then
   echo "zdtd: lint-plugins: run 'make plugins' and commit the rebuilt .wasm" >&2

@@ -42,7 +42,11 @@ A="$scratch/a"
 B="$scratch/longer-build-path-b"
 mkdir -p "$A/src" "$B/src"
 for tree in "$A/src" "$B/src"; do
-  tar -cf - build.zig build.zig.zon .zigversion src assets | tar -xf - -C "$tree"
+  # Normalize archive metadata so the two scratch trees differ only by path
+  # length (the property this gate uses to catch absolute-path leakage), not by
+  # host uid/gid, mtime, or readdir order of the source listing.
+  LC_ALL=C tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    -cf - build.zig build.zig.zon .zigversion src assets | tar -xf - -C "$tree"
 done
 
 # Both halves go through the same script `make release` uses, so this gate

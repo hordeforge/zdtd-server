@@ -21,4 +21,5 @@ if [[ -z "$bom" ]]; then
   echo "dep-bom: no dependency hashes found in build.zig.zon" >&2
   exit 1
 fi
-printf '%s\n' "$bom"
+# Stable order so buildinfo.txt is identical across hosts for the same zon.
+printf '%s\n' "$bom" | LC_ALL=C sort

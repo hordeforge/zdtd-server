@@ -18,18 +18,27 @@
 # package.json/node_modules (.gitignore: "opencode tooling only"), so the
 # versions live here as the single source of truth.
 # Override locally: TSC_VERSION=5.9.3 OXLINT_VERSION=1.79.0 \
-#   OXLINT_TSGOLINT_VERSION=7.0.2001 bash scripts/lint-webui.sh
+#   OXLINT_TSGOLINT_VERSION=7.0.2001 ANTI_SLOP_SHA=... ANTI_SLOP_SHA256=... \
+#   bash scripts/lint-webui.sh
 #
-# Requires: bun (bunx), python3 (already a make check requirement).
+# Requires: bun (bunx), python3, sha256sum (already a make check requirement).
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "zdtd: lint-webui: missing required tool: sha256sum (GNU coreutils)" >&2
+  exit 127
+fi
 oxlint_version="${OXLINT_VERSION:-1.79.0}"
 oxlint_standards_version="${OXLINT_STANDARDS_VERSION:-0.8.1}"
 oxlint_tsgolint_version="${OXLINT_TSGOLINT_VERSION:-7.0.2001}"
 oxlint_plugins_version="${OXLINT_PLUGINS_VERSION:-1.79.0}"
 anti_slop_sha="${ANTI_SLOP_SHA:-6d538555cb151d4121ed51a27db81890eacf8ae9}"
+# Content hash of the GitHub archive for ANTI_SLOP_SHA (commit pin alone is not
+# enough: GitHub can regenerate archive bytes for the same commit). Override
+# only together with ANTI_SLOP_SHA when deliberately bumping the plugin.
+anti_slop_sha256="${ANTI_SLOP_SHA256:-a720663fd2562e22e3da670769faa88dc34c9a761fdd9a7d285e20d92871848e}"
 tsc_version="${TSC_VERSION:-5.9.3}"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdtd/oxlint-standards"
 
@@ -56,6 +65,12 @@ bunx --bun -p "typescript@$tsc_version" tsc -p "$webui_ts_project/tsconfig.json"
 mkdir -p "$cache_dir"
 if [ ! -d "$cache_dir/anti-slop-src" ]; then
   curl -fsSL "https://github.com/dmmulroy/anti-slop/archive/$anti_slop_sha.tar.gz" -o "$cache_dir/anti-slop.tar.gz"
+  got_sha256="$(sha256sum "$cache_dir/anti-slop.tar.gz" | cut -d' ' -f1)"
+  if [ "$got_sha256" != "$anti_slop_sha256" ]; then
+    rm -f "$cache_dir/anti-slop.tar.gz"
+    echo "zdtd: lint-webui: anti-slop archive sha256 mismatch (got $got_sha256, want $anti_slop_sha256)" >&2
+    exit 1
+  fi
   mkdir -p "$cache_dir/anti-slop-src"
   tar xzf "$cache_dir/anti-slop.tar.gz" -C "$cache_dir/anti-slop-src" --strip-components=2 "anti-slop-$anti_slop_sha/src"
 fi
@@ -80,7 +95,7 @@ if [ ! -f "$cache_dir/anti-slop-src/index.js" ] || \
       # Rewrite .ts import extensions to .js so Node.js can load them.
       sed -i 's|from "\(\..*\)\.ts"|from "\1.js"|g' "$out"
       sed -i "s|from '\(\..*\)\.ts'|from '\1.js'|g" "$out"
-    done < <(find . -name '*.ts' -type f -print0) )
+    done < <(find . -name '*.ts' -type f -print0 | LC_ALL=C sort -z) )
 fi
 # `bun add` reaches the network on every run, so a transient DNS/registry blip
 # used to fail the whole gate (a failing sub-make surfaces as `make check`

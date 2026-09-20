@@ -30,7 +30,7 @@ mapfile -t html_files < <(
     -not -path '*/node_modules/*' \
     -not -path '*/zig-pkg/*' \
     -not -path '*/zig-out/*' \
-    | sort
+    | LC_ALL=C sort
 )
 
 if [ "${#html_files[@]}" -eq 0 ]; then

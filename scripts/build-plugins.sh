@@ -96,7 +96,12 @@ if [ -n "$clang_bin" ]; then
     # In place: skip an artifact already newer than its source. Under --dest
     # the mirror starts empty, so every artifact is built.
     if [ ! -f "$w" ] || [ "$w" -ot "$c" ]; then
-      "$clang_bin" --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
+      # Pin locale/epoch and map the build path out so a different checkout
+      # directory cannot change the committed .wasm bytes.
+      LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" \
+        "$clang_bin" --target=wasm32 -nostdlib -O2 \
+        -ffile-prefix-map="$PWD"=. \
+        -Wl,--no-entry -Wl,--export-all \
         -o "$w" "$c"
       echo "built $w"
     fi
