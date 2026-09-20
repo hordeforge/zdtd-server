@@ -1462,6 +1462,16 @@ pub fn qualityPriceMod(min_mod: f32, max_mod: f32, quality: u8) f32 {
     return min_mod + (max_mod - min_mod) * t;
 }
 
+/// Clamp a float dukes unit price into the u16 trader/wire slot. Non-finite
+/// (Inf from EconomicValue="inf", NaN from a bad markup) or non-positive fails
+/// closed to `fallback` instead of trapping `@intFromFloat` / `@as(u64, …)` on
+/// values past the integer domain. Clamp in the float domain first so a
+/// modded EconomicValue of 1e20 cannot overflow the cast before `@min(…, 65535)`.
+pub fn clampDukesUnitPrice(scaled: f64, fallback: u16) u16 {
+    if (!std.math.isFinite(scaled) or scaled <= 0) return fallback;
+    return @intFromFloat(@min(@trunc(scaled), 65535.0));
+}
+
 pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16, side: u8, coin_item_id: u16) bool {
     if (qty == 0) return false;
     if (coin_item_id == 0) return false;
@@ -5760,6 +5770,17 @@ test "trade leaves entry markup alone; restock resets" {
     // A restock rebuilds fresh entries: markup back to neutral.
     traderRestock(&w);
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+}
+
+test "clampDukesUnitPrice fails closed on Inf and saturates past u16" {
+    // EconomicValue="inf" / 1e20 previously trapped @as(u64, @trunc(...))
+    // before the 65535 min; clamp in float space first.
+    try std.testing.expectEqual(@as(u16, 5), clampDukesUnitPrice(std.math.inf(f64), 5));
+    try std.testing.expectEqual(@as(u16, 5), clampDukesUnitPrice(std.math.nan(f64), 5));
+    try std.testing.expectEqual(@as(u16, 5), clampDukesUnitPrice(-3.0, 5));
+    try std.testing.expectEqual(@as(u16, 5), clampDukesUnitPrice(0.0, 5));
+    try std.testing.expectEqual(@as(u16, 65535), clampDukesUnitPrice(1e20, 5));
+    try std.testing.expectEqual(@as(u16, 42), clampDukesUnitPrice(42.9, 5));
 }
 
 test "trade applies barter hook scales to buy cost and sell gain" {

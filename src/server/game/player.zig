@@ -190,7 +190,18 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         const ctx: requirements.Ctx = .{ .item_tags = def.tags, .item_quality = held_slot.quality };
         break :blk assets_buffs.namedPassiveFold("ExperienceGain", def.passives, itemQualityAxis(self, held_slot.quality), ctx, 1.0, &counts);
     };
-    const base_scaled: u64 = @intFromFloat(@as(f32, @floatFromInt(base * scale_pct / 100)) * held_xp);
+    // A modded held ExperienceGain curve can yield NaN/Inf/negative; @intFromFloat
+    // of those traps the tick. Fail closed to an unscaled 1.0 multiplier.
+    const held: f32 = if (std.math.isFinite(held_xp) and held_xp > 0) held_xp else 1.0;
+    // Percent in integer space (base is xpGainFor-clamped to i32 range so the
+    // u64 product fits), then apply held in f64 so a large base is not rounded
+    // away by an f32 mantissa before the cast.
+    const after_pct: u64 = base * @as(u64, scale_pct) / 100;
+    const product = @as(f64, @floatFromInt(after_pct)) * @as(f64, held);
+    const base_scaled: u64 = if (!std.math.isFinite(product) or product <= 0)
+        0
+    else
+        @intFromFloat(@min(product, @as(f64, @floatFromInt(std.math.maxInt(u64)))));
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
     // V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
@@ -1134,7 +1145,7 @@ fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64
             v = assets_buffs.playerExpGainFold(def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
         }
     }
-    if (!(v >= 0)) v = 0;
+    if (!(v >= 0) or !std.math.isFinite(v)) v = 0;
     // Round toward nearest like a float→int XP grant; clamp to u64.
     const rounded: u128 = @intFromFloat(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
     return @intCast(@min(rounded, @as(u128, std.math.maxInt(u64))));

@@ -718,7 +718,9 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
     // divides by the bundle; the caller multiplies unit × qty.
     const bundle: f64 = @floatFromInt(@max(1, d.econ_bundle_size));
     const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup) / bundle;
-    return @max(1, @as(u32, @intCast(@min(@as(u64, @floor(scaled)), 65535))));
+    // Floor like stock GetSellPrice; clampDukesUnitPrice truncates, so floor
+    // first. Fail closed on Inf/huge econ instead of trapping the int cast.
+    return @max(1, @as(u32, ecs.systems.clampDukesUnitPrice(@floor(scaled), 1)));
 }
 
 /// Stock ItemValue.PercentUsesLeft (ItemValue.get_PercentUsesLeft IL=17):
