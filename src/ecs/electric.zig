@@ -632,7 +632,6 @@ pub const PowerGrid = struct {
     pub fn connect(self: *PowerGrid, a: u16, b: u16) bool {
         if (a == b) return false;
         if (self.indexOfId(a) == null or self.indexOfId(b) == null) return false;
-        // no dup
         var i: usize = 0;
         while (i < self.wire_n) : (i += 1) {
             const w = self.wires[i];
@@ -651,13 +650,9 @@ pub const PowerGrid = struct {
 
     /// BFS power flood; solar generators only source when `daylight`.
     pub fn resolveDay(self: *PowerGrid, daylight: bool) void {
-        // Reset
         self.total_gen = 0;
         self.total_load = 0;
-        var i: usize = 0;
-        while (i < self.node_n) : (i += 1) {
-            self.nodes[i].powered = false;
-        }
+        for (self.nodes[0..self.node_n]) |*n| n.powered = false;
 
         // Mark reachable from any on generator via wires (undirected).
         var visited: [max_nodes]bool = .{false} ** max_nodes;
@@ -711,7 +706,7 @@ pub const PowerGrid = struct {
             cursor[b] += 1;
         }
 
-        i = 0;
+        var i: usize = 0;
         while (i < self.node_n) : (i += 1) {
             // Generators need fuel (or zero capacity = infinite for tests that zero it).
             if (self.nodes[i].kind == .generator and self.nodes[i].on) {

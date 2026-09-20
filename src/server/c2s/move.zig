@@ -40,7 +40,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // not counted as movement rejects against a legit player.
         if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
             self.resetMoveEnvelopePeer(c.slot, env.x, ny, env.z);
-            systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
+            systems.questTickGoto(&self.sim, c.slot, env.x, env.z);
             systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
             return true;
         }
@@ -51,7 +51,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(p.entity_id)) |si| yaw = self.sim.transform[si].yaw;
         self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
         self.noteAcceptedMove(c, env.x, env.y, env.z);
-        systems.questTickGoto(&self.sim, c.slot, env.x, env.y, env.z);
+        systems.questTickGoto(&self.sim, c.slot, env.x, env.z);
         systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
         return true;
     }

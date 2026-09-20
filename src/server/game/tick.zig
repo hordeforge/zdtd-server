@@ -1914,7 +1914,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             }
             // Survival stage state: the thresholds decide which stage stays; the
             // engine's own rows brought them in above, so this only reaps.
-            syncStageBuffs(self, c.entity_id, ps, assets_buffs.survivalStages(sv, h));
+            syncStageBuffs(self, ps, assets_buffs.survivalStages(sv, h));
             // Two queries, like stock: the max-stat/change-over-time consumers
             // call EffectManager.GetValue with no tags, and
             // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41
@@ -2226,8 +2226,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
 /// stock client shows the same HUD state. Revertible: a stage change removes
 /// the stale buff (flagged; the buff tick relays the removal) and the VM
 /// recomputes its deltas without it. No-op when the stages already match.
-fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, keep: assets_buffs.SurvivalStages) void {
-    _ = entity_id;
+fn syncStageBuffs(self: *Game, ps: ecs.Slot, keep: assets_buffs.SurvivalStages) void {
     const set = self.sim.buffsMut(ps);
     var remove_ids: [assets_buffs.max_triggered_removes]u16 = undefined;
     var n_rem: usize = 0;

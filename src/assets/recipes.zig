@@ -282,9 +282,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
         var body: []const u8 = "";
         var next_i = gt + 1;
-        if (gt > tag and clean[gt - 1] == '/') {
-            // self-closing
-        } else {
+        if (!(gt > tag and clean[gt - 1] == '/')) {
             const close = std.mem.findPos(u8, clean, gt, "</recipe>") orelse break;
             body = clean[gt + 1 .. close];
             next_i = close + 9;

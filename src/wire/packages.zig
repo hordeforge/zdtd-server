@@ -1214,7 +1214,6 @@ test "player id PDF bag is CarryCapacity empties" {
     var r: binary.Reader = .{ .data = body };
     _ = try r.readI32(); // entity
     _ = try r.readI16(); // team
-    // Skip ECD through entityData/trader (same as writeEmptyPlayerDataFileNetwork head).
     // Skip ECD via stock_inv helper (player branch + v36 stress).
     _ = try stock_inv.skipEcdNetworkWriteFalse(&r);
     const tb_n = try r.readU16();

@@ -929,7 +929,6 @@ pub const Inventory = struct {
         const n = if (qty == 0 or qty > src.count) src.count else qty;
         const dst = self.slots[to];
         if (dst.count == 0 or dst.item_id == 0) {
-            // place
             const taken = self.takeFromSlot(from, n) orelse return false;
             self.slots[to] = taken;
             if (self.holding == from and self.slots[from].count == 0) self.holding = inv_no_holding;

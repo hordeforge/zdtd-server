@@ -821,11 +821,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         };
         const extends = xml.attr(clean, tag, "extends");
         const gt = std.mem.findPos(u8, clean, tag, ">") orelse break;
-        // self-closing?
         var body_end = gt + 1;
-        if (gt > tag and clean[gt - 1] == '/') {
-            // empty
-        } else {
+        if (!(gt > tag and clean[gt - 1] == '/')) {
             const close = std.mem.findPos(u8, clean, gt, "</entity_class>") orelse break;
             body_end = close;
         }

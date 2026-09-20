@@ -482,9 +482,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (err != error.NotSignableTe) self.harness.counters.inc(.c2s_malformed);
             break :blk null;
         }) |sign| {
-            if (sign.has_storage) {
-                // fall through to the storage branch
-            } else {
+            if (!sign.has_storage) {
                 const owner = self.sim.playerByPeer(c.slot) orelse return true;
                 const op = self.sim.transform[owner];
                 if (self.rejectIfBeyondEditRange(

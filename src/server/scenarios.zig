@@ -3351,7 +3351,7 @@ test "scenario stock fixture quests.xml load" {
     // Accept clear: Goto POI (phase1) → ClearSleepers (phase3) → ReturnToNPC (phase4).
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear.id));
     // Reach the quest POI to clear phase 1; the rally scaffolding (phase 2) auto-skips.
-    systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.ty, clear.tz);
+    systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.tz);
     var k: u16 = 0;
     while (k < clear.target_count) : (k += 1) questKillAtPoi(g, c);
     // Return-to-NPC (highest phase) still pending: not complete until turned in.
@@ -3366,7 +3366,7 @@ test "scenario stock fixture quests.xml load" {
     {
         const t2 = g.sim.catalog.byName("tier2_clear").?;
         try std.testing.expect(systems.questAccept(&g.sim, c.slot, t2.id));
-        systems.questTickGoto(&g.sim, c.slot, t2.tx, t2.ty, t2.tz);
+        systems.questTickGoto(&g.sim, c.slot, t2.tx, t2.tz);
         var kk2: u16 = 0;
         while (kk2 < t2.target_count) : (kk2 += 1) questKillAtPoi(g, c);
         try std.testing.expect(systems.questHasActive(&g.sim, c.slot, t2.id));
@@ -3505,7 +3505,7 @@ test "scenario quest accept kill complete and trader buy" {
     // visit_the_trader (id 3): Goto trader (phase1) → interact (phase2) → complete.
     _ = systems.questAccept(&g.sim, c.slot, 3);
     const v = g.sim.catalog.byId(3).?;
-    systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz);
+    systems.questTickGoto(&g.sim, c.slot, v.tx, v.tz);
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
 
@@ -3564,7 +3564,7 @@ test "scenario quest accept kill complete and trader buy" {
     // that - a test that cannot fail is not a test.
     {
         _ = systems.questAccept(&g.sim, c.slot, 3); // visit_the_trader
-        systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz); // phase 1
+        systems.questTickGoto(&g.sim, c.slot, v.tx, v.tz); // phase 1
         try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
         // Stand at the machine: opening a trade window is reach-gated on
         // [sim] trader_use_range, so a body naming a distant TE is refused
@@ -8309,7 +8309,7 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     // --- on_quest_complete doubles: tier1_clear pays 1000 exp -> 2000 ---
     const clear = g.sim.catalog.byName("tier1_clear").?;
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear.id));
-    systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.ty, clear.tz);
+    systems.questTickGoto(&g.sim, c.slot, clear.tx, clear.tz);
     var k: u16 = 0;
     while (k < clear.target_count) : (k += 1) questKillAtPoi(g, c);
     systems.questOnTraderOpen(&g.sim, c.slot);
@@ -8601,9 +8601,9 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     // goto_point: the parsed radius gates the arrival - outside does nothing,
     // inside the target (the bound POI center 8,8) completes it.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 2));
-    systems.questTickGoto(&g.sim, c.slot, 0, 70, 0); // ~11 m from the target
+    systems.questTickGoto(&g.sim, c.slot, 0, 0); // ~11 m from the target
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 2));
-    systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
+    systems.questTickGoto(&g.sim, c.slot, 8, 8);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 2));
     systems.drainQuestCoins(&g.sim, c.slot);
 
@@ -8803,8 +8803,8 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
             systems.questOnFetchItem(&g.sim, c.slot, 1);
             systems.questOnCraft(&g.sim, c.slot, "sweep");
             systems.questOnTraderOpen(&g.sim, c.slot);
-            systems.questTickGoto(&g.sim, c.slot, d.tx, d.ty, d.tz);
-            systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
+            systems.questTickGoto(&g.sim, c.slot, d.tx, d.tz);
+            systems.questTickGoto(&g.sim, c.slot, 8, 8);
             systems.questTickStayWithin(&g.sim, c.slot, d.tx, d.tz);
             systems.questTickStayWithin(&g.sim, c.slot, 8, 8);
             // Shared phases with a POIStayWithin constraint need the player in
@@ -16201,7 +16201,7 @@ test "scenario trader open reach: quest turn-in needs the player at the trader" 
     const tid = g.sim.spawnTrader("npcTraderJen", g.sim.transform[ps].x + far, 70, g.sim.transform[ps].z, 5, 5000).?;
 
     _ = systems.questAccept(&g.sim, c.slot, 3);
-    systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz);
+    systems.questTickGoto(&g.sim, c.slot, v.tx, v.tz);
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
 
     var open: [6]u8 = undefined;

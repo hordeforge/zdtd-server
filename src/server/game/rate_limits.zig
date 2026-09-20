@@ -76,9 +76,7 @@ test "the bucket refills one token per period and never past the cap" {
     const cap: u8 = 3;
     const period: u64 = 50_000_000;
     const t0: u64 = 1_000_000;
-    // Drain it.
-    var i: usize = 0;
-    while (i < cap) : (i += 1) try std.testing.expect(takeTokenAt(t0, &tokens, &refill, cap, period));
+    for (0..cap) |_| try std.testing.expect(takeTokenAt(t0, &tokens, &refill, cap, period));
     try std.testing.expect(!takeTokenAt(t0, &tokens, &refill, cap, period));
 
     // Just short of a period: still empty.

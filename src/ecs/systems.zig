@@ -1344,8 +1344,7 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
     }
 }
 
-pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) void {
-    _ = py;
+pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, pz: f32) void {
     const ps = w.playerByPeer(peer_slot) orelse return;
     if (!w.mask[ps].journal) return;
     var j = &w.journal[ps];
@@ -4956,7 +4955,7 @@ test "quest phase graph goto then kill then turn-in at trader" {
     try std.testing.expectEqual(@as(u8, 1), s.phase);
 
     // Reach the goto point → advance to the kill phase.
-    questTickGoto(&w, 0, 10, 70, 10);
+    questTickGoto(&w, 0, 10, 10);
     try std.testing.expectEqual(@as(u8, 2), s.phase);
 
     // Three kills complete the kill phase → trader phase, not yet ready.
@@ -5045,10 +5044,10 @@ test "goto quest binds the nearest real POI instead of an invented spot" {
     try std.testing.expectEqual(@as(f32, 100), s.poi.x);
     try std.testing.expectEqual(@as(f32, 200), s.poi.z);
     // The def marker (0,0) is not the target: standing there does nothing.
-    questTickGoto(&w, 0, 0, 70, 0);
+    questTickGoto(&w, 0, 0, 0);
     try std.testing.expect(questHasActive(&w, 0, 40));
     // Arriving at the POI center completes the goto quest.
-    questTickGoto(&w, 0, 120, 70, 220);
+    questTickGoto(&w, 0, 120, 220);
     try std.testing.expect(!questHasActive(&w, 0, 40));
     drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
@@ -5076,7 +5075,7 @@ test "goto/stay default radii come from catalog.policy (ADR 0021)" {
     try std.testing.expect(questAccept(&w, 0, 42));
     // 11 m from (10,10): inside the 12 m policy radius -> completes; the
     // builtin 4 m default would not have.
-    questTickGoto(&w, 0, 10, 70, -1);
+    questTickGoto(&w, 0, 10, -1);
     try std.testing.expect(!questHasActive(&w, 0, 42));
 
     // stay_within: the policy radius is the floor when no distance is parsed.
@@ -5416,10 +5415,10 @@ test "fetch_trader goto target stays the def spot, not a covering POI center" {
     try std.testing.expect(s.poi.valid());
     // Standing at the POI center (32,32) must not advance phase 1: the "go to
     // trader" target is the def spot, never a covering prefab center.
-    questTickGoto(&w, 0, 32, 70, 32);
+    questTickGoto(&w, 0, 32, 32);
     try std.testing.expectEqual(@as(u8, 1), s.phase);
     // The def spot advances phase 1 -> phase 2 (ready to turn in).
-    questTickGoto(&w, 0, 0, 70, 0);
+    questTickGoto(&w, 0, 0, 0);
     try std.testing.expectEqual(@as(u8, 2), s.phase);
     try std.testing.expect(s.ready_turn_in);
 }
