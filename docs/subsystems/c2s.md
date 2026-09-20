@@ -19,13 +19,22 @@ A payload that fails to parse at all is counted `c2s_malformed` and dropped; an 
 
 ## The handler contract
 
-Dispatch is entered with the decoded package id and body, not a name. An id outside the negotiated map is logged and dropped, since there is no name to route (src/server/c2s/dispatch.zig:19):
+Dispatch is entered with the decoded package id and body, not a name. An id outside the negotiated map is counted on `c2s_malformed`, rate-limited-logged, and dropped, since there is no name to route (src/server/c2s/dispatch.zig:19):
 
 ```zig
 pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
     if (id >= packages.default_mappings.len) {
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} unmapped package local_id={d} package_id={d} body_len={d}\n", .{ clock.wallStamp(&ts), peer.local_id, id, body.len });
+        // Metric so an unmapped-id flood moves c2s_malformed (and the webui
+        // error panel) instead of only a rate-limited stderr line.
+        self.harness.counters.inc(.c2s_malformed);
+        const n = self.harness.counters.get(.c2s_malformed);
+        if (n == 1 or n % 100 == 0) {
+            var ts: [19]u8 = undefined;
+            std.debug.print(
+                "zdtd: {s} unmapped package local_id={d} package_id={d} body_len={d} n={d}\n",
+                .{ clock.wallStamp(&ts), peer.local_id, id, body.len, n },
+            );
+        }
         return;
     }
     const name = packages.default_mappings[id];
@@ -43,7 +52,7 @@ The phase gate then runs before any handler, and the six domains are tried in a 
     self.harness.counters.inc(.c2s_unhandled);
 ```
 
-(src/server/c2s/dispatch.zig:39). Every domain handler has the same signature and the same contract: return `true` when the name belongs to the domain, `false` to fall through (src/server/c2s/move.zig:23):
+(src/server/c2s/dispatch.zig:48). Every domain handler has the same signature and the same contract: return `true` when the name belongs to the domain, `false` to fall through (src/server/c2s/move.zig:23):
 
 ```zig
 /// True when `name` belongs to this domain and was handled.
@@ -98,7 +107,7 @@ Some `quest` and `misc` arms are pure delegation into `src/server/game/social.zi
 
 Three generic helpers carry most of the policy. `rejectIfNotSender` drops a claimed entity id that is not the sender's and records an `.ownership`/`.strong` event (src/server/game/guard.zig:46). `rejectIfBeyondEditRange` compares the acting position against the target and drops past `max_edit_range`, default 96 blocks (src/server/game/guard.zig:13; src/server/game/types.zig:98). `quarantineDenies` refuses one surface, `damage`, `container`, or `block`, for a peer its guard policy quarantined (src/server/game/guard.zig:112).
 
-Domain-specific ownership checks supplement those: `NetPackageEntityPosAndRot` rejects an entity id that is not the sender's (src/server/c2s/move.zig:30), `NetPackageEntityCollect` requires the claimed collector to be the sender (src/server/c2s/move.zig:65), `NetPackageItemReload` requires a live player entity that is the sender (src/server/c2s/inv.zig:96), and `NetPackageBag` refuses to write another player's inventory, then range-gates writes to any other inventory by id (src/server/c2s/inv.zig:338). Login performs the identity work: the name is sanitized, the platform identities are stored, the client's compatibility version is compared against `version.stock_wire_comp`, the slot cap and reserved/admin tiers are evaluated, plugin and Wasm login verdicts run, and the identity ban list and whitelist are checked (src/server/c2s/join.zig:62, 77, 99, 144, 164, 179).
+Domain-specific ownership checks supplement those: `NetPackageEntityPosAndRot` rejects an entity id that is not the sender's (src/server/c2s/move.zig:30), `NetPackageEntityCollect` requires the claimed collector to be the sender (src/server/c2s/move.zig:65), `NetPackageItemReload` requires a live player entity that is the sender (src/server/c2s/inv.zig:96), and `NetPackageBag` refuses to write another player's inventory, then range-gates writes to any other inventory by id (src/server/c2s/inv.zig:338). Login performs the identity work: the name is sanitized, the platform identities are stored, the client's compatibility version is compared against `version.stock_wire_comp`, the slot cap and reserved/admin tiers are evaluated, plugin and Wasm login verdicts run, and the identity ban list and whitelist are checked (src/server/c2s/join.zig:80, 90, 121, 166, 190, 207).
 
 Bounds and caps are named module constants, never inline numbers: the claimed explosion radius is capped at the largest stock `ExplosionData` radius (src/server/c2s/blocks.zig:24), the spawn `chunkViewDim` at the view-distance-8 mesh core (src/server/c2s/join.zig:31), the claimed damage at `max_claimed_damage` (src/server/game/types.zig:93), and a claimed `fatal` is honored only against NPC kinds by substituting a fixed kill amount (src/server/c2s/misc.zig:36). Client-supplied inventory is clamped to the catalog stack size after every apply, and attached mods are scrubbed when they exceed the item's mod-slot curve or fail the mod's installability gate (src/server/c2s/inv.zig:45, 137). Text is a separate trust boundary: `sanitizePlayerName` strips C0, DEL, invalid UTF-8, and bidi overrides without splitting a codepoint (src/server/c2s_text.zig:20), `chatMsgOk` bounds a chat body to 256 bytes of valid UTF-8 with no controls (src/server/c2s_text.zig:75), and the player F1 console accepts only the verbs in `player_console_allowlist` (src/server/c2s_text.zig:89).
 

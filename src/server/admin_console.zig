@@ -1238,16 +1238,18 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             self.adminReply(s);
         },
         .status => {
-            // One-line ops glance: load + key error counters for incident triage.
-            var sb: [320]u8 = undefined;
+            // One-line ops glance: load + join + key error counters for incident triage.
+            var sb: [384]u8 = undefined;
             const s = std.fmt.bufPrint(
                 &sb,
-                "tick={d} players={d} zombies={d} chunks={d} overruns={d} encode_err={d} send_err={d} window_drop={d} persist_err={d}\n",
+                "tick={d} players={d} zombies={d} chunks={d} join_ok={d} join_fail={d} overruns={d} encode_err={d} send_err={d} window_drop={d} persist_err={d}\n",
                 .{
                     self.tick_n,
                     self.countJoined(),
                     self.sim.countKind(.zombie),
                     self.world.chunks.count(),
+                    self.harness.counters.get(.join_ok),
+                    self.harness.counters.get(.join_fail),
                     self.harness.counters.get(.tick_overruns),
                     self.harness.counters.get(.encode_errors),
                     self.harness.counters.get(.net_send_errors),

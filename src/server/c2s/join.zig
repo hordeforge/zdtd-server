@@ -29,6 +29,20 @@ const apm = @import("../../apm/root.zig");
 /// Upper bound on C2S RequestToSpawnPlayer.chunkViewDim (viewDist 8 mesh core).
 const max_spawn_chunk_view_dim: i32 = 8;
 
+/// Spawn a player entity or record a join failure. A full entity table used to
+/// return null with no counter and no log, so `join_ok`/`join_fail` stayed flat
+/// while the peer hung mid-login with no operator signal.
+fn spawnPlayerOrFail(self: *Game, c: *Client, x: f32, y: f32, z: f32, where: []const u8) ?i32 {
+    if (self.sim.spawnPlayer(x, y, z, @intCast(c.slot))) |eid| return eid;
+    self.harness.counters.inc(.join_fail);
+    var ts: [19]u8 = undefined;
+    std.debug.print(
+        "zdtd: {s} player spawn failed ({s}) slot={d} name_len={d}\n",
+        .{ clock.wallStamp(&ts), where, c.slot, c.name_len },
+    );
+    return null;
+}
+
 /// True when handled (join SM package). False lets caller fall through to c2s/*.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     // Join-phase attribution (GAP "Join-burst tick budget"): the whole C2S
@@ -74,7 +88,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // ignore-case, or stock kicks EKickReason.VersionMismatch(4).
                 // A different client build must not join and desync silently.
                 if (!std.ascii.eqlIgnoreCase(login.compVersion(), version_mod.stock_wire_comp)) {
+                    // Keep the specific counter for version triage, and also
+                    // bump join_fail so the join_ok/join_fail ratio and the
+                    // webui join_fail gauge cover every deny reason.
                     self.harness.counters.inc(.c2s_version_rejects);
+                    self.harness.counters.inc(.join_fail);
                     if (c.peer) |p| {
                         var denied: [64]u8 = undefined;
                         if (packages.buildPlayerDeniedBody(&denied, .version_mismatch, 0, 0, "")) |body2| {
@@ -82,7 +100,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                 self.harness.counters.inc(.net_send_errors);
                         } else |_| self.harness.counters.inc(.encode_errors);
                     }
-                    std.debug.print("zdtd: login version mismatch comp='{s}' want='{s}' slot={d}\n", .{ login.compVersion(), version_mod.stock_wire_comp, c.slot });
+                    var ts: [19]u8 = undefined;
+                    std.debug.print(
+                        "zdtd: {s} login version mismatch comp='{s}' want='{s}' slot={d} local_id={d}\n",
+                        .{ clock.wallStamp(&ts), login.compVersion(), version_mod.stock_wire_comp, c.slot, peer.local_id },
+                    );
+                    self.dropClientSlot(c.slot, "version-mismatch");
                     return true;
                 }
                 // Stock PlayerSlotsAuthorizer.Authorize (IL=174) rejects a
@@ -166,6 +189,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (!banned and c.name_len != 0) banned = self.ban_list.banned(c.name[0..c.name_len], wall_now);
         if (banned) {
             self.harness.counters.inc(.join_fail);
+            var ts: [19]u8 = undefined;
+            std.debug.print(
+                "zdtd: {s} login identity ban slot={d} name_len={d} local_id={d}\n",
+                .{ clock.wallStamp(&ts), c.slot, c.name_len, peer.local_id },
+            );
             self.dropClientSlot(c.slot, "identity-ban");
             return true;
         }
@@ -193,6 +221,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 return true;
             }
         }
+        // Reserve the player entity before LoginAnswer so a full entity table
+        // cannot leave the client believing it joined with no server entity.
+        const surf0 = self.spawnSurface(sp.x, sp.z);
+        const was_joined = c.joined;
+        const eid = spawnPlayerOrFail(
+            self,
+            c,
+            @floatFromInt(surf0.x),
+            @floatFromInt(surf0.y),
+            @floatFromInt(surf0.z),
+            "PlayerLogin",
+        ) orelse {
+            self.dropClientSlot(c.slot, "spawn-full");
+            return true;
+        };
+        c.entity_id = eid;
         const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
         try self.sendGameCritical(peer, "NetPackagePlayerLoginAnswer", ans);
         // Stock AuthFinalizer.Authorize (IL=10): the last authorizer step
@@ -202,10 +246,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // GetLength 9 is the base NetPackage header; the body is empty
         // (read IL=1, write IL=4 both touch nothing past the base).
         try self.sendGame(peer, "NetPackageAuthConfirmation", &.{});
-        const surf0 = self.spawnSurface(sp.x, sp.z);
-        const was_joined = c.joined;
-        const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return true;
-        c.entity_id = eid;
         // Restored claims keyed by this login name get their live owner
         // entity re-mapped here (entity ids are reassigned per session).
         self.reclaimForName(c.name[0..c.name_len], eid);
@@ -227,13 +267,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.noteEvidence(c, peer.local_id, eid, .flood, .info, .none, 1, 0);
         }
         // Name length only in logs (name stays on admin listplayers / webui).
-        std.debug.print("zdtd: PlayerLogin name_len={d} entity={d} body={d}\n", .{ c.name_len, eid, body.len });
+        // local_id ties this line to the earlier "peer connected" / challenge logs.
+        std.debug.print(
+            "zdtd: PlayerLogin name_len={d} entity={d} slot={d} local_id={d} body={d}\n",
+            .{ c.name_len, eid, c.slot, peer.local_id, body.len },
+        );
         return true;
     }
     // Stock: StartAsClient starts config-wait coroutine, then RequestToEnterGame.
     // Send local ConfigFiles now so the wait can finish; then WorldInfo.
     if (std.mem.eql(u8, name, "NetPackageRequestToEnterGame")) {
-        std.debug.print("zdtd: RequestToEnterGame entity={d}\n", .{c.entity_id});
+        std.debug.print("zdtd: RequestToEnterGame entity={d} slot={d} local_id={d}\n", .{ c.entity_id, c.slot, peer.local_id });
         // One deadline covers the whole must-deliver enter bundle. Clear it at
         // the request boundary so later critical exchanges (sign data,
         // PlayerId) receive their own bounded budget.
@@ -241,7 +285,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         defer peer.critical_budget_deadline_ns = 0;
         if (c.entity_id <= 0) {
             const surf_e = self.spawnSurface(sp.x, sp.z);
-            c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf_e.x), @floatFromInt(surf_e.y), @floatFromInt(surf_e.z), @intCast(c.slot)) orelse return true;
+            c.entity_id = spawnPlayerOrFail(
+                self,
+                c,
+                @floatFromInt(surf_e.x),
+                @floatFromInt(surf_e.y),
+                @floatFromInt(surf_e.z),
+                "RequestToEnterGame",
+            ) orelse {
+                self.dropClientSlot(c.slot, "spawn-full");
+                return true;
+            };
             c.joined = true;
             self.tryRestorePlayer(c);
         }
@@ -450,7 +504,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         } else |_| {}
         const surf = self.spawnSurface(sp.x, sp.z);
         if (c.entity_id <= 0) {
-            c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return true;
+            c.entity_id = spawnPlayerOrFail(
+                self,
+                c,
+                @floatFromInt(surf.x),
+                @floatFromInt(surf.y),
+                @floatFromInt(surf.z),
+                "RequestToSpawnPlayer",
+            ) orelse {
+                self.dropClientSlot(c.slot, "spawn-full");
+                return true;
+            };
         } else if (self.sim.slotOfNetId(c.entity_id)) |si| {
             // Respawn heal/teleport only when actually dead; a live player
             // resending RequestToSpawn must not get a free heal + escape.
@@ -534,10 +598,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildEntityStatChangedBody(self.body_buf[512..640], c.entity_id, -1, .health, 100, 100, 0)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                 } else |_| {}
-                std.debug.print("zdtd: respawn heal entity={d}\n", .{c.entity_id});
+                std.debug.print("zdtd: respawn heal entity={d} slot={d}\n", .{ c.entity_id, c.slot });
             }
         } else {
-            c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return true;
+            c.entity_id = spawnPlayerOrFail(
+                self,
+                c,
+                @floatFromInt(surf.x),
+                @floatFromInt(surf.y),
+                @floatFromInt(surf.z),
+                "RequestToSpawnPlayer-rebind",
+            ) orelse {
+                self.dropClientSlot(c.slot, "spawn-full");
+                return true;
+            };
         }
         c.joined = true;
         // Stream the spawn area before the bundle, while the client is still

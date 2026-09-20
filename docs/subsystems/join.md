@@ -94,10 +94,11 @@ const joined_allow: []const []const u8 = &.{
 The `playing` arm is an unconditional `true` (phase_gate.zig:62), so the gate is
 not a typo filter: typed handlers still do their own ownership and bounds checks
 (docs/AUTHORITY.md). A denied package is dropped with the `phase_rejects` counter
-and a `.phase` / `.hard` evidence record (dispatch.zig:29-34); there is no
+and a `.phase` / `.hard` evidence record (dispatch.zig:38-44); there is no
 disconnect arm here, although docs/STATE_MACHINES.md:50 lists "gate drop /
 disconnect" as an exit from Entering. An id at or past `default_mappings.len` is
-logged and dropped before the gate (dispatch.zig:20-24).
+counted on `c2s_malformed` and rate-limited-logged before the gate
+(dispatch.zig:20-32).
 
 ## Challenge, login and enter
 
@@ -108,39 +109,41 @@ logged and dropped before the gate (dispatch.zig:20-24).
    sends `NetPackagePackageIds`, and replays a payload that raced the echo out of
    `preauth_buf` (net_handlers.zig:49-75).
 2. `NetPackagePlayerLogin`, gated before any effect: version equality against
-   `version.stock_wire_comp` (c2s/join.zig:77), the `PlayerSlotsAuthorizer` tier
-   math (c2s/join.zig:99-113), plugin and Wasm denies (c2s/join.zig:144-155), the
-   identity ban (c2s/join.zig:164-171), and the whitelist when configured
-   (c2s/join.zig:179-205). On accept: `PlayerLoginAnswer` with the full GSI text
-   (c2s/join.zig:207), an empty `AuthConfirmation` the client echoes
-   (c2s/join.zig:215), the sim player spawn (c2s/join.zig:218), claim and turret
-   re-mapping by login name (c2s/join.zig:222-223), and `tryRestorePlayer`
-   (c2s/join.zig:230). A re-login while joined takes the early arm: answer plus
-   `PlayerSpawnedInWorld`, no second enter (c2s/join.zig:47-59).
+   `version.stock_wire_comp` (c2s/join.zig:90-109; also `join_fail` + drop), the
+   `PlayerSlotsAuthorizer` tier math (c2s/join.zig:121-147), plugin and Wasm
+   denies (c2s/join.zig:166-177), the identity ban (c2s/join.zig:190-198), and
+   the whitelist when configured (c2s/join.zig:207-222). On accept the sim player
+   is reserved first (`spawnPlayerOrFail`, c2s/join.zig:228-239) so a full entity
+   table cannot send `PlayerLoginAnswer` with no entity; then
+   `PlayerLoginAnswer` with the full GSI text (c2s/join.zig:240-241), an empty
+   `AuthConfirmation` the client echoes (c2s/join.zig:248), claim and turret
+   re-mapping by login name (c2s/join.zig:251-252), and `tryRestorePlayer`
+   (c2s/join.zig:259). A re-login while joined takes the early arm: answer plus
+   `PlayerSpawnedInWorld`, no second enter (c2s/join.zig:61-73).
 3. `NetPackageRequestToEnterGame` arms one critical deadline for the whole
-   bundle (c2s/join.zig:251) and sends, in order: blocks id mapping,
+   bundle (c2s/join.zig:284) and sends, in order: blocks id mapping,
    localization, the 42 config rows, `WorldInfo`, `ChunkClusterInfo`,
    `WorldSpawnPoints`, `WorldAreas`, `WorldTime`, `GameStats`, then the join deco
-   burst (c2s/join.zig:262-286). `WorldInfo` goes out here and never in the spawn
+   burst (c2s/join.zig:305-329). `WorldInfo` goes out here and never in the spawn
    bundle, because a second one restarts the client's `createWorld` mid-session
-   (c2s/join.zig:270-272).
+   (c2s/join.zig:311-312).
 4. `SignDataRequest` answers with batched `SignDataResponse`, the final batch a
    critical send because the client blocks worldInfo continuation on
    `isLastBatch` (game/join.zig:233-270); `POIMetadataRequest` answers with the
-   compressed 3.2.0 metadata blob (c2s/join.zig:349-380); `WorldFolder` answers
-   with one empty last part (c2s/join.zig:295-305).
+   compressed 3.2.0 metadata blob (c2s/join.zig:392-419); `WorldFolder` answers
+   with one empty last part (c2s/join.zig:338-347).
 5. `WorldInitInfoRequest` answers with an empty `WorldInitInfo` and sets
-   `world_ready`, when the chunk streamer may start (c2s/join.zig:384-398).
+   `world_ready`, when the chunk streamer may start (c2s/join.zig:429-443).
    `DynamicClientArrive` is the fallback: with an entity it sends the join
-   bundle, without one `WorldInitInfo` plus the spawn area (c2s/join.zig:403-439).
-6. `RequestToSpawnPlayer` parses `chunkViewDim` (clamped to 8, c2s/join.zig:31)
-   and the client's profile (c2s/join.zig:456), spawns or revives the sim player
-   (c2s/join.zig:461-550), streams the spawn area before the bundle
-   (c2s/join.zig:552), then calls `sendJoinBundle` (c2s/join.zig:561).
+   bundle, without one `WorldInitInfo` plus the spawn area (c2s/join.zig:448-484).
+6. `RequestToSpawnPlayer` parses `chunkViewDim` (clamped to 8, c2s/join.zig:30)
+   and the client's profile (c2s/join.zig:501), spawns or revives the sim player
+   (c2s/join.zig:505-615), streams the spawn area before the bundle
+   (c2s/join.zig:626-629), then calls `sendJoinBundle` (c2s/join.zig:635).
 
 Two stock paths are deliberately unanswered: `DynamicClientArrive` after enter,
-where stock reconciles a dynamic mesh, is a no-op (c2s/join.zig:404-408), and
-drones have no zdtd surface in the spawn-confirm relay (c2s/join.zig:318).
+where stock reconciles a dynamic mesh, is a no-op (c2s/join.zig:450-452), and
+drones have no zdtd surface in the spawn-confirm relay (c2s/join.zig:357).
 `sendTraderSnapshot` is an empty stub with the reason inline (game/join.zig:273-280).
 The handler answers ten names while the header enumerates seven (c2s/join.zig:1-7).
 

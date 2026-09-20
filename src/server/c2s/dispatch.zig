@@ -18,8 +18,17 @@ const c2s_misc = @import("misc.zig");
 
 pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
     if (id >= packages.default_mappings.len) {
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} unmapped package local_id={d} package_id={d} body_len={d}\n", .{ clock.wallStamp(&ts), peer.local_id, id, body.len });
+        // Metric so an unmapped-id flood moves c2s_malformed (and the webui
+        // error panel) instead of only a rate-limited stderr line.
+        self.harness.counters.inc(.c2s_malformed);
+        const n = self.harness.counters.get(.c2s_malformed);
+        if (n == 1 or n % 100 == 0) {
+            var ts: [19]u8 = undefined;
+            std.debug.print(
+                "zdtd: {s} unmapped package local_id={d} package_id={d} body_len={d} n={d}\n",
+                .{ clock.wallStamp(&ts), peer.local_id, id, body.len, n },
+            );
+        }
         return;
     }
     const name = packages.default_mappings[id];

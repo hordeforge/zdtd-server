@@ -150,8 +150,9 @@ Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
   It is a tick-end `WebSnapshot` subset for the dashboard (load, selected
   error counters, section means/p99, player roster), not the full
   `CounterId` map. See [WEBUI.md](WEBUI.md).
-- **Admin `status`:** one-line load + key error counters (overruns, encode/send
-  errors, window drops, persist errors). `guardstats` remains authority rejects.
+- **Admin `status`:** one-line load + join_ok/join_fail + key error counters
+  (overruns, encode/send errors, window drops, persist errors). `guardstats`
+  remains authority rejects.
 
 Signal-triggered dumps remain future work.
 
