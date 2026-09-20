@@ -248,8 +248,14 @@ pub fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
         const info_id = self.sim.trader_stock[ts].trader_info_id;
         if (info_id != 0) {
             if (self.npc.questListForTrader(info_id)) |ql| return ql;
+            // npc.xml loaded and this trader_info has no quest_list (e.g. junk
+            // drone): fail closed instead of inventing a stock list name.
+            if (self.npc.entries.len > 0) return "";
         }
     }
+    // When npc.xml is loaded, do not invent class-hash -> quest_list names;
+    // only the offline/fixture path (empty table) keeps the stock map.
+    if (self.npc.entries.len > 0) return "";
     if (hash == packages.stock_entity.class_npc_trader_rekt) return "trader_rekt_quests";
     if (hash == packages.stock_entity.class_npc_trader_bob) return "trader_bob_quests";
     if (hash == packages.stock_entity.class_npc_trader_hugh) return "trader_hugh_quests";

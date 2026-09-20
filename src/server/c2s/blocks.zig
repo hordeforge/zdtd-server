@@ -646,7 +646,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const wz = cz + dz;
                     if (wy <= 0) continue;
                     const cur = self.world.blockWorld(wx, wy, wz) catch continue;
-                    if (cur == 0 or cur == world_store.block_bedrock) continue;
+                    // Live AssignIds id (World.terrain_ids), not the offline
+                    // module pin: a dumpless merge or modded terrBedrock must
+                    // still skip the correct cell (HARDCODE A36 residual).
+                    if (cur == 0 or cur == self.world.terrain_ids.bedrock) continue;
                     // Stock Explosion::AttackBlocks, not "delete everything in
                     // the sphere": the claimed ExplosionData.BlockDamage is the
                     // power, the block's material decides whether it breaks

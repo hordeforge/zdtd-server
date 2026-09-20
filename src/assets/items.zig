@@ -214,6 +214,10 @@ pub const HarvestCountRow = struct {
     value: f32 = 0,
     curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     curve_n: u8 = 0,
+    /// Stock `level=` / `tier=` / `duration=` anchors (PassiveEffect::ModValue).
+    /// 0 = implicit Q1..Qmax spread via `curveValueAt`.
+    curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    curve_levels_n: u8 = 0,
     /// Comma list of gating tags ("" = applies to every drop row).
     tags: []const u8 = "",
 };
@@ -632,7 +636,14 @@ pub const ItemTable = struct {
         for (d.harvest_rows) |r| {
             if (!tagsIntersect(r.tags, drop_tags)) continue;
             const v = if (r.curve_n > 0)
-                buffs.curveValueAt(quality, self.max_quality_tier, r.curve[0..r.curve_n])
+                (if (r.curve_levels_n > 0)
+                    buffs.curveValueAtLevels(
+                        @floatFromInt(quality),
+                        r.curve_levels[0..r.curve_levels_n],
+                        r.curve[0..r.curve_n],
+                    )
+                else
+                    buffs.curveValueAt(quality, self.max_quality_tier, r.curve[0..r.curve_n]))
             else
                 r.value;
             switch (r.op) {
@@ -1777,7 +1788,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                             var curve_copy: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
                             const cn = buffs.parseCurveValue(v, &curve_copy);
                             @memcpy(curve[0..cn], curve_copy[0..cn]);
-                            try harvest_rows.append(allocator, .{ .op = row.op, .curve = curve, .curve_n = @intCast(cn), .tags = row.tags });
+                            var levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+                            const ln = buffs.parseAnchors(body, hi, &levels);
+                            try harvest_rows.append(allocator, .{
+                                .op = row.op,
+                                .curve = curve,
+                                .curve_n = @intCast(cn),
+                                .curve_levels = levels,
+                                .curve_levels_n = ln,
+                                .tags = row.tags,
+                            });
                         } else {
                             try harvest_rows.append(allocator, .{ .op = row.op, .value = xml.parseF32(v) orelse 0, .tags = row.tags });
                         }
@@ -2815,6 +2835,11 @@ test "HarvestCount held-tool rows parse and fold over base 1" {
         \\      <passive_effect name="HarvestCount" operation="perc_add" value=".05,.1,.15,.20,.25,.30" tier="1,2,3,4,5,6" tags="oreWoodHarvest"/>
         \\    </effect_group>
         \\  </item>
+        \\  <item name="meleeToolPickT1IronPickaxe">
+        \\    <effect_group name="Pick">
+        \\      <passive_effect name="HarvestCount" operation="perc_add" value=".1,.5" tier="2,6" tags="oreWoodHarvest"/>
+        \\    </effect_group>
+        \\  </item>
         \\</items>
     );
     var t = try loadFromPath(std.testing.allocator, path);
@@ -2836,8 +2861,16 @@ test "HarvestCount held-tool rows parse and fold over base 1" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(axe.id, 1, "oreWoodHarvest"), 1e-4);
     // Curve: quality 3 -> 1 + .15 = 1.15 (piecewise at quality 1..6).
     const helmet = t.byName("armorMinerHelmet").?;
+    try std.testing.expectEqual(@as(u8, 6), helmet.harvest_rows[0].curve_levels_n);
     try std.testing.expectApproxEqAbs(@as(f32, 1.05), t.harvestMultiplier(helmet.id, 1, "oreWoodHarvest"), 1e-4);
     try std.testing.expectApproxEqAbs(@as(f32, 1.15), t.harvestMultiplier(helmet.id, 3, "oreWoodHarvest"), 1e-4);
+    // tier="2,6": Q1 is out of range (stock ModValue) so the row applies
+    // nothing; Q2 starts at .1 and Q6 ends at .5.
+    const pick = t.byName("meleeToolPickT1IronPickaxe").?;
+    try std.testing.expectEqual(@as(u8, 2), pick.harvest_rows[0].curve_levels_n);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(pick.id, 1, "oreWoodHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), t.harvestMultiplier(pick.id, 2, "oreWoodHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), t.harvestMultiplier(pick.id, 6, "oreWoodHarvest"), 1e-4);
     // Unknown item / no rows -> 1.0.
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(9999, 1, "oreWoodHarvest"), 1e-4);
 }

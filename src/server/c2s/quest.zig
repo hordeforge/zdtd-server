@@ -679,7 +679,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         self.sim.wallet[ps].coins -= cost;
         vm.owner.set(acc.user) catch return true;
-        // Stock term: RentTimeInDays (trader_info rent_time, default 30).
+        // Stock term: RentTimeInDays (trader_info rent_time; Table default 30).
+        // Explicit 0 / negative still floors to 30 (stock ctor default).
         const term: i32 = if (info.rent_time > 0) info.rent_time else 30;
         const day_i: i32 = @intCast(day);
         vm.rental_end_day = if (vm.rental_end_day > 0) vm.rental_end_day + term else day_i + term;

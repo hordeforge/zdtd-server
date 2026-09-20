@@ -127,7 +127,9 @@ pub const TraderInfo = struct {
     player_owned: bool = false,
     rentable: bool = false,
     rent_cost: i32 = 0,
-    rent_time: i32 = 0,
+    /// Stock default when `rent_time` is omitted (traders.xml rentable rows
+    /// write 30; Match stock `TraderInfo` ctor default).
+    rent_time: i32 = 30,
     /// Union of every `<trader_items>` block, in XML order (SPECIALTY first).
     refs: []const ItemRef = &.{},
 };
@@ -555,7 +557,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
             .player_owned = std.mem.eql(u8, player_owned, "true") or std.mem.eql(u8, player_owned, "True"),
             .rentable = std.mem.eql(u8, rentable, "true") or std.mem.eql(u8, rentable, "True"),
             .rent_cost = if (rent_cost_v.len > 0) std.fmt.parseInt(i32, rent_cost_v, 10) catch 0 else 0,
-            .rent_time = if (rent_time_v.len > 0) std.fmt.parseInt(i32, rent_time_v, 10) catch 0 else 0,
+            .rent_time = if (rent_time_v.len > 0) std.fmt.parseInt(i32, rent_time_v, 10) catch 30 else 30,
             .refs = refs,
         });
     }
