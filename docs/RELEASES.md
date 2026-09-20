@@ -61,6 +61,8 @@ metadata requires a literal; `make check` rejects drift between them.
 Only the newest development release is supported during 0.x. There is no
 security backport branch or EOL schedule yet. Security fixes will be disclosed
 in the changelog without exploit detail until operators have an upgrade.
+Reporting posture: [../SECURITY.md](../SECURITY.md). Attack-surface map:
+[THREAT_MODEL.md](THREAT_MODEL.md).
 
 ## Release gate
 

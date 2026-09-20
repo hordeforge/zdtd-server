@@ -2,7 +2,7 @@
 
 > **What this is:** who owns sim state and which C2S gates enforce it: the P4 authority spine for join phases, validation, interest, and guard policy.
 
-> **Related:** [ARCHITECTURE §12](ARCHITECTURE.md#12-invariants) · [ARCHITECTURE §4](ARCHITECTURE.md#4-net-stack-litenet-framing-packages) · [ARCHITECTURE §5](ARCHITECTURE.md#5-join-flow) · [STATUS](STATUS.md) · [STATE_MACHINES](STATE_MACHINES.md) · [wire/PACKAGES](wire/PACKAGES.md) · [wire/INVENTORY](wire/INVENTORY.md) · [APM](APM.md) · [SCALE](SCALE.md)
+> **Related:** [ARCHITECTURE §12](ARCHITECTURE.md#12-invariants) · [ARCHITECTURE §4](ARCHITECTURE.md#4-net-stack-litenet-framing-packages) · [ARCHITECTURE §5](ARCHITECTURE.md#5-join-flow) · [STATUS](STATUS.md) · [STATE_MACHINES](STATE_MACHINES.md) · [wire/PACKAGES](wire/PACKAGES.md) · [wire/INVENTORY](wire/INVENTORY.md) · [APM](APM.md) · [SCALE](SCALE.md) · [THREAT_MODEL](THREAT_MODEL.md)
 
 Short map of **who owns state** and the gates already on the C2S path.
 ADR: [adr/0004-server-authoritative-c2s.md](adr/0004-server-authoritative-c2s.md).

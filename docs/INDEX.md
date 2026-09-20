@@ -117,6 +117,8 @@ Where the world and its data come from.
 
 | Doc | Role |
 |---|---|
+| [THREAT_MODEL.md](THREAT_MODEL.md) | Attack surface, trust boundaries, ranked risks (CISO view) |
+| [../SECURITY.md](../SECURITY.md) | Supported versions note and vulnerability reporting posture |
 | [WEBUI.md](WEBUI.md) | Operator web UI, security model, roadmap |
 | [PRODUCT.md](../PRODUCT.md) | Web UI product brief: users, purpose, positioning |
 | [PRD 0004](prd/0004-hot-restart.md) | What survives a server restart: persistence inventory + operator webui session continuity |
