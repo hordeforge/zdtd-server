@@ -98,6 +98,76 @@ fn blockIndex(lx: i32, y: i32, lz: i32) usize {
     return @intCast(lx + lz * 16 + y * 256);
 }
 
+/// Dense plane fill from a uniform biome stack + height plane. Hot first-touch
+/// path (DTM/flat). `out` must hold `16 * column_h * 16` cells. Stack scratch
+/// only (16 column templates). Scalar equivalent: per-column `fillColumn` + write.
+fn fillBlocksFromStack(
+    heights: *const [256]u8,
+    column_h: u32,
+    stack: biome_layers.Stack,
+    air: u32,
+    out: []u32,
+) void {
+    std.debug.assert(out.len >= @as(usize, @intCast(16 * column_h * 16)));
+    const lanes: usize = 16;
+    const air_v: @Vector(lanes, u32) = @splat(air);
+    var band: [lanes][256]u16 = undefined;
+    var lz: usize = 0;
+    while (lz < 16) : (lz += 1) {
+        const row_base = lz * 16;
+        var max_h: u16 = 0;
+        var lx: usize = 0;
+        while (lx < lanes) : (lx += 1) {
+            const h = heights[row_base + lx];
+            if (h > max_h) max_h = h;
+            biome_layers.Table.fillColumn(stack, h, &band[lx]);
+        }
+        const y_lim: u16 = @intCast(@min(@as(u32, max_h), column_h -| 1));
+        var y: u16 = 0;
+        while (y <= y_lim) : (y += 1) {
+            const h_row: @Vector(lanes, u8) = heights[row_base..][0..lanes].*;
+            const yv: @Vector(lanes, u8) = @splat(@truncate(y));
+            const solid = yv <= h_row;
+            var ids: @Vector(lanes, u32) = undefined;
+            inline for (0..lanes) |lane| {
+                ids[lane] = band[lane][y];
+            }
+            // Above-surface band cells are 0 from fillColumn, not air: select.
+            out[row_base + @as(usize, y) * 256 ..][0..lanes].* = @select(u32, solid, ids, air_v);
+        }
+    }
+}
+
+/// Rewrite a filled height plane through the geometry projection. Non-stock
+/// path only. Vectorized over 16-wide runs. Scalar equivalent: `projectPlaneScalar`.
+fn projectPlane(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32) void {
+    const lanes: usize = 16;
+    const V = @Vector(lanes, f32);
+    const scale: V = @splat(geo.height_scale);
+    const offset: V = @splat(geo.height_offset);
+    const ceil_v: V = @splat(@as(f32, @floatFromInt(geo.ceiling(profile_max))));
+    const zero: V = @splat(0);
+    const max255: V = @splat(255);
+    var i: usize = 0;
+    while (i + lanes <= heights.len) : (i += lanes) {
+        const h: @Vector(lanes, u8) = heights[i..][0..lanes].*;
+        const elev: V = @floatFromInt(h);
+        // Mirror Geometry.project then clamp to the u8 plane.
+        const v = offset + scale * elev;
+        const c = @max(zero, @min(v, ceil_v));
+        const clamped = @min(c, max255);
+        heights[i..][0..lanes].* = @as(@Vector(lanes, u8), @intFromFloat(@trunc(clamped)));
+    }
+    while (i < heights.len) : (i += 1) {
+        heights[i] = @intCast(@min(255, geo.project(@floatFromInt(heights[i]), profile_max)));
+    }
+}
+
+/// Scalar reference for `projectPlane`. Tests only.
+fn projectPlaneScalar(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32) void {
+    for (heights) |*h| h.* = @intCast(@min(255, geo.project(@floatFromInt(h.*), profile_max)));
+}
+
 pub const Chunk = struct {
     pos: ChunkPos,
     /// Active column height (wire profile; ADR geometry/wire-profiles). Stock
@@ -358,25 +428,16 @@ pub const Chunk = struct {
     }
 
     /// Materialize full block plane with a biome stack (called from World.getOrCreate).
+    /// Per-XZ-row: fill 16 column templates, then store each Y as a 16-wide
+    /// `@Vector` write (plane layout is x + z*16 + y*256). Scalar equivalent
+    /// is the per-column fillColumn + write loop in the golden test.
     pub fn ensureBlocksWithStack(self: *Chunk, allocator: std.mem.Allocator, stack: biome_layers.Stack) !void {
         if (self.blocks != null) return;
         self.allocator = allocator;
         const b = try allocator.alloc(u32, self.planeCells());
         const air = (self.terrain orelse &terrain_pins).air;
         @memset(b, air);
-        var col: [256]u16 = undefined;
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                const h = self.heightAt(lx, lz);
-                generateColumnIds(h, stack, &col);
-                var y: i32 = 0;
-                while (y <= h and y < self.y_dim) : (y += 1) {
-                    b[self.blockIndex(lx, y, lz)] = col[@intCast(y)];
-                }
-            }
-        }
+        fillBlocksFromStack(&self.heights, self.y_dim, stack, air, b);
         self.blocks = b;
     }
 
@@ -734,15 +795,6 @@ pub const World = struct {
     fn fallbackSeaU8(geo: rules_mod.Geometry) u8 {
         const s = @max(0.0, @min(geo.sea_level, 255.0));
         return @trunc(s);
-    }
-
-    /// Rewrite a filled height plane through the geometry projection. Non-stock
-    /// path only (the identity fast path skips it); profile max 255 until the
-    /// wire-profile layer lands (ADR geometry/wire-profiles). The plane is u8,
-    /// so the result clamps to 255 even if a future caller bypasses the
-    /// [rules.geometry] validation.
-    fn projectPlane(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32) void {
-        for (heights) |*h| h.* = @intCast(@min(255, geo.project(@floatFromInt(h.*), profile_max)));
     }
 
     pub fn loadStockMapEx(self: *World, map_dir: []const u8, prefabs_data_dir: ?[]const u8) !void {
@@ -2695,4 +2747,58 @@ test "Collide verbs decide movement and sight" {
     try w2.setBlockWorld(3, 70, 3, Ids.plant);
     try std.testing.expect(try w2.isSolidWorld(3, 70, 3));
     try std.testing.expect(w2.sightBlockedWorld(3, 70, 3));
+}
+
+test "projectPlane SIMD matches scalar Geometry.project" {
+    var prng = std.Random.DefaultPrng.init(0x51_11);
+    const rnd = prng.random();
+    const geos = [_]rules_mod.Geometry{
+        .{ .height_scale = 0.5 },
+        .{ .height_offset = 20 },
+        .{ .height_scale = 0.75, .height_offset = -10, .height_ceiling = 200 },
+        .{ .height_scale = 1.5, .height_ceiling = 180 },
+    };
+    for (geos) |geo| {
+        var simd_h: [256]u8 = undefined;
+        var scalar_h: [256]u8 = undefined;
+        for (&simd_h, &scalar_h) |*a, *b| {
+            const v = rnd.int(u8);
+            a.* = v;
+            b.* = v;
+        }
+        projectPlane(&simd_h, geo, 255);
+        projectPlaneScalar(&scalar_h, geo, 255);
+        try std.testing.expectEqualSlices(u8, &scalar_h, &simd_h);
+    }
+}
+
+test "fillBlocksFromStack SIMD matches per-column fillColumn write" {
+    var heights: [256]u8 = undefined;
+    var prng = std.Random.DefaultPrng.init(0xb10c);
+    const rnd = prng.random();
+    for (&heights) |*h| h.* = rnd.intRangeAtMost(u8, 8, 120);
+
+    const stack = biome_layers.defaultStack();
+    const air: u32 = assignids.air;
+    var simd_plane: [65536]u32 = undefined;
+    @memset(&simd_plane, air);
+    fillBlocksFromStack(&heights, 256, stack, air, &simd_plane);
+
+    // Scalar reference: same fillColumn + per-cell write as the old path.
+    var scalar_plane: [65536]u32 = undefined;
+    @memset(&scalar_plane, air);
+    var col: [256]u16 = undefined;
+    var lz: i32 = 0;
+    while (lz < 16) : (lz += 1) {
+        var lx: i32 = 0;
+        while (lx < 16) : (lx += 1) {
+            const h = heights[@intCast(lx + lz * 16)];
+            biome_layers.Table.fillColumn(stack, h, &col);
+            var y: i32 = 0;
+            while (y <= h) : (y += 1) {
+                scalar_plane[blockIndex(lx, y, lz)] = col[@intCast(y)];
+            }
+        }
+    }
+    try std.testing.expectEqualSlices(u32, &scalar_plane, &simd_plane);
 }
