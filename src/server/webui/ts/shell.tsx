@@ -192,17 +192,26 @@ function flashChanges(region: HTMLElement): void {
     const nodes = region.querySelectorAll<HTMLElement>(".stat, tbody tr");
     const prev = prevSignatures.get(region);
     const next = new Map<string, string>();
+    const changed: Array<HTMLElement> = [];
     let index = 0;
     for (const node of nodes) {
         next.set(String(index), node.textContent ?? "");
         if (prev !== undefined && prev.size > 0 && prev.get(String(index)) !== next.get(String(index))) {
-            node.classList.remove("flash");
-            // Force a reflow so back-to-back flashes restart the animation.
-            void node.offsetWidth;
+            changed.push(node);
+        }
+        index += 1;
+    }
+    // Clear, then flush layout once, then re-add: one forced reflow restarts
+    // every animation at once instead of one reflow per changed node.
+    for (const node of changed) {
+        node.classList.remove("flash");
+    }
+    if (changed.length > 0) {
+        void region.offsetWidth;
+        for (const node of changed) {
             node.classList.add("flash");
             globalThis.setTimeout(() => node.classList.remove("flash"), FLASH_MS);
         }
-        index += 1;
     }
     prevSignatures.set(region, next);
 }
@@ -503,7 +512,7 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
                     id="glance-meter"
                     aria-label={over ? "tick p99 over the 50 ms budget" : "tick p99 within budget"}
                 >
-                    <i id="glance-meter-fill" style={{ width: `${fill}%` }}></i>
+                    <i id="glance-meter-fill" style={{ transform: `scaleX(${fill / PERCENT_MAX})` }}></i>
                 </div>
             </div>
             <div class="glance-cell">
@@ -760,7 +769,7 @@ function ModuleTable({ modules }: { modules: Array<ModuleEntry> }): ComponentChi
                 ) : (
                     modules.map((module, index) => (
                         <tr key={module.name}>
-                            <td class="num" data-label="#">{String(index)}</td>
+                            <td class="num" data-label="#">{String(index + 1)}</td>
                             <th scope="row" data-label="Module">{module.name}</th>
                             <td data-label="State">
                                 <Pill tone={module.disabled ? "bad" : "ok"}>{module.disabled ? "disabled" : "enabled"}</Pill>
@@ -800,7 +809,7 @@ function ModletTable({
             <tbody>
                 {modlets.map((modlet, index) => (
                     <tr key={modlet.name}>
-                        <td class="num" data-label="#">{String(index)}</td>
+                        <td class="num" data-label="#">{String(index + 1)}</td>
                         <th scope="row" data-label="Modlet">
                             {modlet.name}
                             {modlet.has_code ? <span class="meta"> (code mod: XML only)</span> : null}
@@ -821,7 +830,7 @@ function ModletTable({
                                 <input type="hidden" name="csrf" value={csrf} />
                                 <input type="hidden" name="name" value={modlet.name} />
                                 <input type="hidden" name="action" value={modlet.disabled ? "enable" : "disable"} />
-                                <button type="submit" class="mod-btn" disabled={pending === modlet.name}>
+                                <button type="submit" class="mod-btn" aria-disabled={pending === modlet.name}>
                                     {modlet.disabled ? "Enable" : "Disable"}
                                     <span class="sr-only"> {modlet.name}</span>
                                 </button>
@@ -841,6 +850,9 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
     const csrf = state.csrf;
 
     const runAction = async (name: string, action: string): Promise<void> => {
+        if (pending !== null) {
+            return;
+        }
         setPending(name);
         setFailure(null);
         const post = await postModlet(csrf, name, action);
@@ -907,16 +919,26 @@ function confirmDestructive(line: string): boolean {
     return globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`);
 }
 
-/** Trim and confirm the line. Returns null after rejecting it to the operator. */
-function validatedLine(input: HTMLInputElement, raw: string): string | null {
+const DECLINED_REPLY = "Not run: the confirmation was declined or blocked by the browser, so nothing was sent. Run it again to be asked again.";
+
+/** A submitted line, or why it was not sent. An empty line reports itself. */
+type LineDecision = { kind: "run"; line: string } | { kind: "empty" } | { kind: "declined"; line: string };
+
+/** Trim and confirm the line. */
+function validatedLine(input: HTMLInputElement, raw: string): LineDecision {
     const line = raw.trim();
     if (line === "") {
         input.setCustomValidity("Enter a command.");
         input.reportValidity();
-        return null;
+        return { kind: "empty" };
     }
     input.setCustomValidity("");
-    return confirmDestructive(line) ? line : null;
+    // A cancelled dialog and a browser-suppressed one both answer false; the
+    // caller reports the refusal rather than dropping the command silently.
+    if (!confirmDestructive(line)) {
+        return { kind: "declined", line };
+    }
+    return { kind: "run", line };
 }
 
 
@@ -956,9 +978,9 @@ function CommandForm({
                     spellcheck={false}
                     maxlength={MAX_CMD_LINE}
                     required
-                    disabled={pending}
+                    readOnly={pending}
                 />
-                <button type="submit" disabled={pending}>{pending ? "Running…" : "Run"}</button>
+                <button type="submit" aria-disabled={pending}>{pending ? "Running…" : "Run"}</button>
             </form>
             <div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
                 {QUICK_COMMANDS.map((quick) => (
@@ -995,6 +1017,22 @@ function CommandOutput({ pending, outcome }: { pending: boolean; outcome: Comman
     );
 }
 
+/** The command output live region, plus the stable alert that carries failures.
+ * The region keeps one role for its whole life: a role flipping between status
+ * and alert is unreliably announced, so the alert text has its own node. */
+function CommandResult({ pending, outcome }: { pending: boolean; outcome: CommandOutcome | null }): ComponentChildren {
+    return (
+        <Fragment>
+            <div id="cmd-out" aria-live="polite" aria-atomic="true" role="status" aria-busy={pending}>
+                <CommandOutput pending={pending} outcome={outcome} />
+            </div>
+            <p class="sr-only" role="alert">
+                {outcome !== null && outcome.failed ? `${outcome.line}: ${outcome.text}` : ""}
+            </p>
+        </Fragment>
+    );
+}
+
 function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren {
     return (
         <div id="console-log" aria-label="Recent commands" role="region" tabindex={-1}>
@@ -1016,22 +1054,26 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
 
     const runLine = async (raw: string): Promise<void> => {
         const input = inputRef.current;
-        if (input === null) {
+        if (input === null || pending) {
             return;
         }
-        const line = validatedLine(input, raw);
-        if (line === null) {
+        const decision = validatedLine(input, raw);
+        if (decision.kind !== "run") {
+            if (decision.kind === "declined") {
+                setOutcome({ line: decision.line, text: DECLINED_REPLY, failed: true });
+                input.focus();
+            }
             return;
         }
         setPending(true);
         setOutcome(null);
-        const post = await postCommand(csrf, line);
+        const post = await postCommand(csrf, decision.line);
         setPending(false);
         if (post.kind === "redirect") {
             return;
         }
         if (post.kind === "unreachable") {
-            setOutcome({ line, text: UNREACHABLE_REPLY, failed: true });
+            setOutcome({ line: decision.line, text: UNREACHABLE_REPLY, failed: true });
             input.focus();
             return;
         }
@@ -1043,7 +1085,6 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
         void reload();
     };
 
-    const liveRole: "alert" | "status" = outcome !== null && outcome.failed ? "alert" : "status";
     return (
         <section id="console-section" role="tabpanel" tabindex={0} aria-labelledby="tab-console" hidden={!visible}>
             <h2 id="console-heading">Console</h2>
@@ -1058,13 +1099,9 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
                         csrf={csrf}
                         pending={pending}
                         inputRef={inputRef}
-                        onRun={(line) => {
-                            void runLine(line);
-                        }}
+                        onRun={(line) => void runLine(line)}
                     />
-                    <div id="cmd-out" aria-live="polite" aria-atomic="true" role={liveRole} aria-busy={pending}>
-                        <CommandOutput pending={pending} outcome={outcome} />
-                    </div>
+                    <CommandResult pending={pending} outcome={outcome} />
                     <ConsoleHistory lines={lines} />
                 </div>
             </div>
@@ -1226,6 +1263,17 @@ const refreshStateEl = queryEl("#refresh-state", HTMLElement);
 const glanceLampEl = queryEl("#glance-lamp", HTMLElement);
 const glanceWordEl = queryEl("#glance-word", HTMLElement);
 
+/** The header word for the derived connection state. */
+function glanceWord(failed: boolean, state: StateJson | null, over: boolean): string {
+    if (failed) {
+        return "no contact";
+    }
+    if (state === null) {
+        return "connecting";
+    }
+    return over ? "over budget" : "operational";
+}
+
 function autoRefreshLabel(autoEnabled: boolean, pageHidden: boolean): string {
     if (!autoEnabled) {
         return "Auto-refresh paused";
@@ -1296,13 +1344,14 @@ function App(): ComponentChildren {
         refreshStateEl.textContent = refreshNote ?? autoRefreshLabel(autoEnabled, pageHidden);
     }, [refreshNote, autoEnabled, pageHidden]);
 
+    // One derived connection state for the header: the lamp and the word must
+    // never describe the last good reading while the poll is failing.
     useEffect(() => {
-        if (state === null) {
-            return;
-        }
-        glanceLampEl.classList.toggle("bad", isOverBudget(state.apm));
-        glanceWordEl.textContent = isOverBudget(state.apm) ? "over budget" : "operational";
-    }, [state]);
+        const over = state !== null && isOverBudget(state.apm);
+        glanceLampEl.classList.toggle("bad", failed || over);
+        glanceLampEl.classList.toggle("idle", state === null && !failed);
+        glanceWordEl.textContent = glanceWord(failed, state, over);
+    }, [state, failed]);
 
     const runRefresh = useCallback(async (): Promise<void> => {
         refreshNowEl.disabled = true;

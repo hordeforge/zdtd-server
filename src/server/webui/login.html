@@ -2,14 +2,12 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in · zdtd</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<style>/* zdtd-tokens */
+<style>/* zdtd-css:tokens */
 :root{
   color-scheme:light;
   --bg:#f7f5f0;
   --bg2:#efece4;
   --panel:#fffdf8;
-  --panel2:#efece4;
-  --inset:#efece4;
   --well:#fffdf8;
   --line:#e2ddd0;
   --line2:#cfc8b6;
@@ -21,52 +19,62 @@
   --acc-ink:#0c4a2d;
   --acc-soft:#dcefe1;
   --acc-ghost:rgba(15,92,55,.06);
-  --acc-ring:rgba(15,92,55,.28);
   --ok:#0f5c37;
-  --ok-soft:#dcefe1;
   --warn:#6b4a00;
   --warn-soft:#f2dbaa;
   --err:#8a2318;
-  --err-border:#d59f96;
   --err-ink:#3d0d07;
+  --err-border:#d59f96;
   --err-field:rgba(138,35,24,.45);
   --err-soft:#f5c9c2;
+  --term:#101418;
+  --term2:#1a2129;
+  --term-line:#2a333d;
+  --term-band1:#22303c;
+  --term-band2:#2c3f4e;
+  --term-text:#d8e2dc;
+  --term-faint:#7f8b94;
+  --term-key:#ffd8a0;
+  --term-ok:#5fd894;
+  --term-bad:#ff7364;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
   --r:10px;
   --r-ctl:9px;
   --shadow:0 1px 2px rgba(26,29,33,.06),0 8px 24px -12px rgba(26,29,33,.18);
 }
-/* /zdtd-tokens */
+/* /zdtd-css:tokens */
+/* zdtd-css:signin */
 *{box-sizing:border-box}
 html{scrollbar-gutter:stable}
 body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items:center;padding:clamp(1rem,4vw,2rem);line-height:1.6;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
 a{color:var(--acc-ink);text-decoration:underline;text-decoration-color:rgba(15,92,55,.35);text-underline-offset:2px}
 a:hover{color:var(--acc-ink)}
-code{font-family:var(--mono);font-size:0.82em;background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
+code{font-family:var(--mono);background:var(--bg2);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:6px;color:var(--muted)}
 main{min-width:0;overflow-wrap:anywhere;width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.5rem 1.5rem 1.25rem}
-.meta{color:var(--muted);font-family:var(--sans);font-size:0.78rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
+.meta{color:var(--muted);font-family:var(--sans);font-size:0.8rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
 .lead{color:var(--muted);font-size:1rem;margin:0 0 1rem;line-height:1.6}
-label{display:block;font-family:var(--sans);font-size:0.9rem;font-weight:600;color:var(--fg);margin:1.1rem 0 0.45rem}
+label{display:block;font-family:var(--sans);font-size:1rem;font-weight:600;color:var(--fg);margin:1.1rem 0 0.45rem}
 .secret-row{display:flex;align-items:stretch;gap:0.35rem}
 .secret-row input{flex:1;min-width:0}
-input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.65rem 0.8rem;border:1.5px solid var(--edge);border-radius:var(--r-ctl);background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.95rem}
+input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:44px;padding:0.65rem 0.8rem;border:1.5px solid var(--edge);border-radius:var(--r-ctl);background:var(--well);color:var(--fg);font-family:var(--mono);font-size:1rem}
 input[type=password]:focus,input[type=text]:focus{outline:2px solid var(--acc);outline-offset:1px;border-color:var(--acc)}
 input[data-invalid=true]{border-color:var(--err-field);box-shadow:0 0 0 2px var(--err-soft)}
-button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:0.9rem;cursor:pointer}
+input[data-invalid=true]:focus{outline-color:var(--err)}
+button{appearance:none;min-height:44px;min-width:5rem;padding:0.7rem 1.25rem;border:1px solid var(--acc-ink);border-radius:var(--r-ctl);background:var(--acc);color:#fff;font-family:var(--sans);font-weight:600;font-size:1rem;cursor:pointer}
 button:hover{background:var(--acc-ink)}
 button:active{transform:translateY(1px)}
-.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--r-ctl);font-weight:600;font-size:0.85rem;font-family:var(--sans)}
+.secret-row button{margin-top:0;min-width:3.8rem;min-height:44px;background:transparent;color:var(--muted);border:1px solid var(--line2);border-radius:var(--r-ctl);font-weight:600;font-size:0.8rem;font-family:var(--sans)}
 .secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--bg2)}
 .secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
-.hint{color:var(--muted);font-size:0.85rem;margin:0.75rem 0 0;line-height:1.6}
+.hint{color:var(--muted);font-size:0.8rem;margin:0.75rem 0 0;line-height:1.6}
 .hint + .hint{margin-top:0.25rem}
-.err{margin:0 0 0.85rem;padding:0.9rem 1rem;border-radius:var(--r);background:var(--err-soft);border:1px solid var(--err-border);color:var(--err-ink);font-family:var(--sans);font-size:0.9rem;line-height:1.5}
+.err{margin:0 0 0.85rem;padding:0.9rem 1rem;border-radius:var(--r);background:var(--err-soft);border:1px solid var(--err-border);color:var(--err-ink);font-family:var(--sans);font-size:1rem;line-height:1.5}
 a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-.brand{margin:0;font-family:var(--sans);font-size:1.35rem;font-weight:700;letter-spacing:-0.02em;color:var(--fg)}
+.brand{margin:0;font-family:var(--sans);font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;color:var(--fg)}
 .signin{margin-top:0.65rem;width:100%}
 @media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
-</style></head>
+/* /zdtd-css:signin */</style></head>
 <body><main><h1 class="brand">zdtd sign in</h1><p class="meta">operator console</p>
 __ZDTD_LOGIN_BANNER__
 <form method="post" action="/login">
@@ -77,10 +85,11 @@ __ZDTD_LOGIN_BANNER__
 <p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
 <p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:login */
-(()=>{//! Webui login form: show/hide the shared secret.
-//! Injected into login.html (plain and failure states share the markup; the
-//! banner and input attrs are server-rendered placeholders).
+(()=>{//! Webui login form: show/hide the shared secret, and mirror the server's
+//! invalid flag into ARIA. Injected into login.html (plain and failure states
+//! share the markup; the banner and the invalid flag are server-rendered
+//! placeholders in a data attribute, which the HTML checker accepts).
 //! Compiled by scripts/build-webui-ts.sh.
-var e=document.querySelector("#login-token");if(e===null)throw Error("webui: missing element #login-token");var t=document.querySelector("#toggle-secret");if(t===null)throw Error("webui: missing element #toggle-secret");t.addEventListener("click",()=>{let n=e.type==="text";e.type=n?"password":"text",t.textContent=n?"Show":"Hide",t.setAttribute("aria-pressed",String(!n)),e.focus()});})();
+var e=document.querySelector("#login-token");if(e===null)throw Error("webui: missing element #login-token");var t=document.querySelector("#toggle-secret");if(t===null)throw Error("webui: missing element #toggle-secret");e.setAttribute("aria-invalid",e.dataset.invalid==="true"?"true":"false");t.addEventListener("click",()=>{let n=e.type==="text";e.type=n?"password":"text",t.textContent=n?"Show":"Hide",t.setAttribute("aria-pressed",String(!n)),e.focus()});})();
 /* /zdtd-ts:login */
 </script></body></html>

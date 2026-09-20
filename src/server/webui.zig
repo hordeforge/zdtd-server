@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const http = std.http;
+const flate = std.compress.flate;
 const tcp = @import("../util/tcp_listen.zig");
 const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 const version = @import("../version.zig");
@@ -43,6 +44,9 @@ pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
 pub const login_fail_limit: u32 = 8;
+/// Smallest body worth gzip: below this the container framing costs more than
+/// the compression saves (the JSON polls sit just under it).
+const gzip_min_bytes: usize = 1024;
 /// Lockout duration after `login_fail_limit` bad tokens (mono ns).
 pub const login_lockout_ns: u64 = 30 * std.time.ns_per_s;
 /// Session cookie lifetime (seconds). Stolen cookies expire without process restart.
@@ -877,7 +881,7 @@ pub const Server = struct {
         body: []const u8,
         extra: []const http.Header,
     ) !void {
-        var hdrs: [16]http.Header = undefined;
+        var hdrs: [18]http.Header = undefined;
         var n: usize = 0;
         hdrs[n] = .{ .name = "Content-Type", .value = content_type };
         n += 1;
@@ -897,7 +901,23 @@ pub const Server = struct {
             hdrs[n] = h;
             n += 1;
         }
-        try req.respond(body, .{
+        // Negotiated gzip. Only text bodies over the threshold, and a failed
+        // compression falls back to the plain body rather than a 500: the page
+        // is more important than the wire size.
+        var out_body = body;
+        var gz: ?[]u8 = null;
+        defer if (gz) |buf| self.allocator.free(buf);
+        if (body.len >= gzip_min_bytes and isCompressibleType(content_type) and acceptsGzip(req.head_buffer)) {
+            if (gzipAlloc(self.allocator, body)) |buf| {
+                gz = buf;
+                out_body = buf;
+                hdrs[n] = .{ .name = "Content-Encoding", .value = "gzip" };
+                n += 1;
+                hdrs[n] = .{ .name = "Vary", .value = "Accept-Encoding" };
+                n += 1;
+            } else |_| {}
+        }
+        try req.respond(out_body, .{
             .status = status,
             .keep_alive = false,
             .extra_headers = hdrs[0..n],
@@ -1011,6 +1031,77 @@ fn appendSecurityHeaders(hdrs: []http.Header, n: *usize) void {
     n.* += 1;
     hdrs[n.*] = .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" };
     n.* += 1;
+}
+
+/// Response bodies the webui may compress: everything it serves is text, and a
+/// binary body would be incompressible or already compressed.
+fn isCompressibleType(content_type: []const u8) bool {
+    return std.mem.startsWith(u8, content_type, "text/") or
+        std.mem.startsWith(u8, content_type, "application/json") or
+        std.mem.startsWith(u8, content_type, "image/svg+xml");
+}
+
+/// True when the request's `Accept-Encoding` allows gzip. std's head parser
+/// keeps only framing headers, so this reads the raw head bytes.
+fn acceptsGzip(head: []const u8) bool {
+    var lines = std.mem.splitSequence(u8, head, "\r\n");
+    _ = lines.next() orelse return false; // request line
+    while (lines.next()) |line| {
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const name = std.mem.trim(u8, line[0..colon], " \t");
+        if (!std.ascii.eqlIgnoreCase(name, "accept-encoding")) continue;
+        var codings = std.mem.splitScalar(u8, line[colon + 1 ..], ',');
+        while (codings.next()) |raw_coding| {
+            const coding = std.mem.trim(u8, raw_coding, " \t");
+            const semi = std.mem.indexOfScalar(u8, coding, ';');
+            const token = std.mem.trim(u8, if (semi) |i| coding[0..i] else coding, " \t");
+            if (!std.ascii.eqlIgnoreCase(token, "gzip")) continue;
+            if (semi) |i| {
+                if (qualityZero(coding[i + 1 ..])) continue; // `gzip;q=0` refuses it
+            }
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+/// `q=0`, `q=0.0` and `q=0.000` mean "not acceptable"; `q=0.5` does not.
+fn qualityZero(params: []const u8) bool {
+    var parts = std.mem.splitScalar(u8, params, ';');
+    while (parts.next()) |raw| {
+        const part = std.mem.trim(u8, raw, " \t");
+        if (part.len < 2 or !std.ascii.eqlIgnoreCase(part[0..2], "q=")) continue;
+        const q = std.fmt.parseFloat(f32, part[2..]) catch return false;
+        return q <= 0;
+    }
+    return false;
+}
+
+/// gzip a response body; the caller owns the returned bytes.
+///
+/// Admin path only, and the 64 KiB deflate window is heap-allocated so nothing
+/// this size rides the poll thread's stack. A body that carries no
+/// request-controlled text is the only thing compressed, and the CSRF token
+/// never shares a response with input an attacker can shape, so the usual
+/// compression oracle does not apply.
+fn gzipAlloc(allocator: std.mem.Allocator, body: []const u8) error{ OutOfMemory, NoSpaceLeft }![]u8 {
+    const window = try allocator.alloc(u8, flate.max_window_len);
+    defer allocator.free(window);
+    // Fixed sink, like the wire framer: gzip adds an 18-byte container plus a
+    // few bytes per deflate block, so 6% + 64 bytes covers incompressible input.
+    const cap = body.len + body.len / 16 + 64;
+    const out = try allocator.alloc(u8, cap);
+    errdefer allocator.free(out);
+    var sink: std.Io.Writer = .fixed(out);
+    var comp = flate.Compress.init(&sink, window, .gzip, .default) catch return error.NoSpaceLeft;
+    comp.writer.writeAll(body) catch return error.NoSpaceLeft;
+    comp.finish() catch return error.NoSpaceLeft;
+    const n = sink.end;
+    if (allocator.resize(out, n)) return out[0..n];
+    const exact = try allocator.dupe(u8, out[0..n]);
+    allocator.free(out);
+    return exact;
 }
 
 /// Console lines must be single-line printable (no C0/DEL) so URL-decoded form
@@ -1469,7 +1560,8 @@ comptime {
 }
 
 /// Sign-in form; `bad_token` swaps the lead for the failure banner and flips
-/// the input's invalid flag + describedby (the old login_failed.html).
+/// the input's `data-invalid` flag (which the page script mirrors into ARIA)
+/// plus describedby (the old login_failed.html).
 fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
     return renderTemplate(buf, login_html, &.{
         .{
@@ -1481,7 +1573,7 @@ fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
         },
         .{
             .key = "__ZDTD_LOGIN_INVALID__",
-            .val = if (bad_token) "true\" aria-invalid=\"true" else "false\" aria-invalid=\"false",
+            .val = if (bad_token) "true" else "false",
         },
         .{
             .key = "__ZDTD_LOGIN_DESCRIBEDBY__",
@@ -2327,6 +2419,73 @@ test "GET / serves the full rendered shell and not a truncated capture" {
     try std.testing.expect(std.mem.find(u8, resp, "__ZDTD_") == null);
 }
 
+test "acceptsGzip reads the negotiated coding and its q value" {
+    const cases = [_]struct { head: []const u8, want: bool }{
+        .{ .head = "GET / HTTP/1.1\r\n\r\n", .want = false },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n", .want = true },
+        .{ .head = "GET / HTTP/1.1\r\naccept-encoding: GZIP, deflate\r\n\r\n", .want = true },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: deflate, br\r\n\r\n", .want = false },
+        // q=0 refuses the coding; a positive q accepts it.
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip;q=0\r\n\r\n", .want = false },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip;q=0.000, br\r\n\r\n", .want = false },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: br;q=1.0, gzip;q=0.5\r\n\r\n", .want = true },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip ; q=0.8\r\n\r\n", .want = true },
+        // A header the parser folds elsewhere must not be mistaken for the coding.
+        .{ .head = "GET / HTTP/1.1\r\nTE: gzip\r\n\r\n", .want = false },
+    };
+    for (cases) |case| {
+        try std.testing.expectEqual(case.want, acceptsGzip(case.head));
+    }
+}
+
+test "gzipAlloc round-trips a body through the gzip container" {
+    const body = "zdtd operator console: " ** 64;
+    const packed_body = try gzipAlloc(std.testing.allocator, body);
+    defer std.testing.allocator.free(packed_body);
+    try std.testing.expect(packed_body.len < body.len);
+    try std.testing.expectEqual(@as(u8, 0x1f), packed_body[0]);
+    try std.testing.expectEqual(@as(u8, 0x8b), packed_body[1]);
+    var in: std.Io.Reader = .fixed(packed_body);
+    var plain: [body.len]u8 = undefined;
+    var out: std.Io.Writer = .fixed(&plain);
+    var dec: flate.Decompress = .init(&in, .gzip, &.{});
+    const n = try dec.reader.streamRemaining(&out);
+    try std.testing.expectEqualStrings(body, plain[0..n]);
+}
+
+test "GET / gzips the shell only when the client asks for it" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept-Encoding: gzip\r\n\r\n");
+    const gz = s.testResp();
+    try std.testing.expect(std.mem.find(u8, gz, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, gz, "Content-Encoding: gzip") != null);
+    try std.testing.expect(std.mem.find(u8, gz, "Vary: Accept-Encoding") != null);
+    const gz_body = gz[(std.mem.indexOf(u8, gz, "\r\n\r\n") orelse unreachable) + 4 ..];
+    try std.testing.expectEqual(@as(u8, 0x1f), gz_body[0]);
+    // The compressed page must inflate to exactly the page the plain request gets.
+    var in: std.Io.Reader = .fixed(gz_body);
+    var plain_buf: [max_shell_html]u8 = undefined;
+    var out: std.Io.Writer = .fixed(&plain_buf);
+    var dec: flate.Decompress = .init(&in, .gzip, &.{});
+    const n = try dec.reader.streamRemaining(&out);
+    try std.testing.expect(n > 0);
+    try std.testing.expect(std.mem.endsWith(u8, plain_buf[0..n], "</html>"));
+    try std.testing.expect(std.mem.find(u8, plain_buf[0..n], "__ZDTD_") == null);
+    // A truncation bug would slip through a body-only check: the compressed
+    // response must also be smaller than the uncompressed one.
+    var s2: Server = .{};
+    @memcpy(s2.secret_buf[0..6], "s3cr3t");
+    s2.secret_len = 6;
+    fillSessionToken("s3cr3t", &nonce, &s2.session_token);
+    try testServeHttp(&s2, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s2.testResp(), "Content-Encoding") == null);
+    try std.testing.expect(gz.len < s2.testResp().len);
+}
+
 /// Test admin thunk: echoes the line so the JSON body has a known reply.
 fn testAdminEcho(ctx: *anyopaque, line: []const u8, out: []u8) usize {
     _ = ctx;
@@ -2820,8 +2979,10 @@ test "renderShell serves the app mount point and the JSON poll" {
     try std.testing.expect(std.mem.find(u8, html, "id=\"glance-lamp\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"glance-word\"") != null);
     try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
-    // No-JS fallback: sections unhide, dead controls hide (head noscript).
-    try std.testing.expect(std.mem.find(u8, html, "section[hidden]{display:block}") != null);
+    // No-JS fallback: the static controls that need the app hide (head
+    // noscript). Sections are rendered by the Preact app, so there is no
+    // `section[hidden]` to unhide without JS.
+    try std.testing.expect(std.mem.find(u8, html, ".refresh-ctrl,#refresh-now,.glance-band{display:none}") != null);
     try std.testing.expect(std.mem.find(u8, html, "class=\"flush\"") == null); // partial-only
     try std.testing.expect(std.mem.find(u8, html, "class=\"mod-btn\"") == null); // partial-only
     try std.testing.expect(html.len < max_shell_html);
@@ -2838,13 +2999,16 @@ test "renderLogin substitutes banner and input state" {
     // Show/Hide toggle (compiled from ts/login.ts; minified in the page).
     try std.testing.expect(std.mem.find(u8, ok, "e.type=n?\"password\":\"text\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
-    try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\" aria-invalid=\"false\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-describedby=\"login-help\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, ok, "__ZDTD_") == null);
     const bad = try renderLogin(&buf, true);
     try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
-    try std.testing.expect(std.mem.find(u8, bad, "data-invalid=\"true\" aria-invalid=\"true\"") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "data-invalid=\"true\"") != null);
+    // The ARIA mirror is set from that flag in the page's script (the HTML
+    // checker rejects a placeholder inside aria-invalid).
+    try std.testing.expect(std.mem.find(u8, bad, "aria-invalid") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
     try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);

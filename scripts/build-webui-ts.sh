@@ -46,12 +46,13 @@ for entry in login lockout shell; do
     --define 'process.env.NODE_ENV="production"'
 done
 
-python3 - "$tmp" "$dest" <<'PY'
+python3 - "$tmp" "$dest" "$root/src/server/webui/shared.css" <<'PY'
 import pathlib
 import re
 import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+shared_css_path = pathlib.Path(sys.argv[3])
 
 # Compiled bundle per marker name.
 MARKER_JS = {
@@ -61,6 +62,14 @@ MARKER_JS = {
 }
 
 MARK = re.compile(r"/\* zdtd-ts:([A-Za-z0-9_-]+) \*/.*?/\* /zdtd-ts:\1 \*/", re.DOTALL)
+CSS_MARK = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/.*?/\* /zdtd-css:\1 \*/", re.DOTALL)
+
+# The shared style sheet is the one home for the design tokens and the sign-in
+# chrome. Regions are spliced by name, so a page carries only what it uses and
+# the committed page stays self-contained.
+css_regions = {}
+for match in CSS_MARK.finditer(shared_css_path.read_text(encoding="utf-8")):
+    css_regions[match.group(1)] = match.group(0)
 
 changed = 0
 for html_path in sorted(html_dir.glob("*.html")):
@@ -74,9 +83,22 @@ for html_path in sorted(html_dir.glob("*.html")):
         body = (js_dir / js).read_text(encoding="utf-8").rstrip("\n")
         return f"/* zdtd-ts:{name} */\n{body}\n/* /zdtd-ts:{name} */"
 
+    def splice_css(m):
+        name = m.group(1)
+        region = css_regions.get(name)
+        if region is None:
+            raise SystemExit(
+                f"build-webui-ts: no '{name}' region in {shared_css_path.name} "
+                f"for the marker in {html_path.name}"
+            )
+        return region
+
     out, n = MARK.subn(splice, text)
     if n == 0:
         raise SystemExit(f"build-webui-ts: no zdtd-ts markers found in {html_path}")
+    out, css_n = CSS_MARK.subn(splice_css, out)
+    if css_n != out.count("/* zdtd-css:"):
+        raise SystemExit(f"build-webui-ts: unclosed zdtd-css marker in {html_path}")
     if out != text:
         html_path.write_text(out, encoding="utf-8")
         changed += 1

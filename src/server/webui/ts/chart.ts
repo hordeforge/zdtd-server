@@ -105,18 +105,31 @@ function cssVar(name: string): string {
     return styles.getPropertyValue(name).trim() || "#6b7280";
 }
 
-const CHART_LINE_COLOR = cssVar("--term-ok");
-const CHART_GHOST_COLOR = cssVar("--term-faint");
-const CHART_GRID_COLOR = cssVar("--term-line");
-const CHART_LABEL_COLOR = cssVar("--term-faint");
-const CHART_BUDGET_COLOR = cssVar("--term-key");
-const SECTION_FILL_COLORS: ReadonlyArray<string> = [
-    cssVar("--term-line"),
-    cssVar("--term-band1"),
-    cssVar("--term-band2"),
-    cssVar("--term-faint"),
-    cssVar("--term-text"),
-];
+// The palette is re-read rather than frozen: forced-colors swaps the CSS
+// variables, and the canvas is not recoloured by the browser.
+let CHART_LINE_COLOR = "#6b7280";
+let CHART_GHOST_COLOR = "#6b7280";
+let CHART_GRID_COLOR = "#6b7280";
+let CHART_LABEL_COLOR = "#6b7280";
+let CHART_BUDGET_COLOR = "#6b7280";
+let SECTION_FILL_COLORS: ReadonlyArray<string> = [];
+
+function refreshChartPalette(): void {
+    CHART_LINE_COLOR = cssVar("--term-ok");
+    CHART_GHOST_COLOR = cssVar("--term-faint");
+    CHART_GRID_COLOR = cssVar("--term-line");
+    CHART_LABEL_COLOR = cssVar("--term-faint");
+    CHART_BUDGET_COLOR = cssVar("--term-key");
+    SECTION_FILL_COLORS = [
+        cssVar("--term-line"),
+        cssVar("--term-band1"),
+        cssVar("--term-band2"),
+        cssVar("--term-faint"),
+        cssVar("--term-text"),
+    ];
+}
+
+refreshChartPalette();
 
 function loadHistoryMs(): number {
     // URL wins (?history=120000), then the stored preference, then the default.
@@ -146,12 +159,15 @@ let chartDpr = 1;
 let chartMaxAgeMs = 0;
 let chartYMaxMs = 0;
 let chartRafId: number | null = null;
+let resizeRafId: number | null = null;
+let chartStale = false;
 let edgeMean: EdgeLerp | null = null;
 let edgeP99: EdgeLerp | null = null;
 let scrubIndex: number | null = null;
 let historyMs = loadHistoryMs();
 let lastApm: ApmJson | null = null;
 let reduceMotion: MediaQueryList | null = null;
+let forcedColors: MediaQueryList | null = null;
 
 function prefersReducedMotion(): boolean {
     if (reduceMotion === null) {
@@ -379,11 +395,18 @@ function setCaption(text: string): void {
 }
 
 function markChartLive(): void {
+    chartStale = false;
     setCaption(CAPTION_COLLECTING);
 }
 
 function markChartStale(): void {
+    // The caption is rewritten by every frame, so staleness is a flag the
+    // frame respects rather than a one-shot write the next frame erases.
+    chartStale = true;
     setCaption(CAPTION_STALE);
+    if (chartLive !== null) {
+        chartLive.textContent = CAPTION_STALE;
+    }
 }
 
 // Non-visual equivalent of the canvas: the newest section means as a
@@ -439,7 +462,7 @@ function announceScrub(): void {
 }
 
 function announceLive(): void {
-    if (chartLive === null || scrubIndex !== null || samples.length === 0) {
+    if (chartStale || chartLive === null || scrubIndex !== null || samples.length === 0) {
         return;
     }
     const newest = samples[samples.length - 1];
@@ -475,7 +498,9 @@ function finishChartFrame(ctx: CanvasRenderingContext2D, nowMs: number): void {
     ctx.arc(x, yAt(meanNow), EDGE_MARKER_RADIUS_PX, 0, CIRCLE * Math.PI);
     ctx.fillStyle = CHART_LINE_COLOR;
     ctx.fill();
-    setCaption(`mean ${meanNow.toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+    if (!chartStale) {
+        setCaption(`mean ${meanNow.toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+    }
     updateChartTable();
     announceLive();
 }
@@ -604,6 +629,10 @@ function chartStopRaf(): void {
         globalThis.cancelAnimationFrame(chartRafId);
         chartRafId = null;
     }
+    if (resizeRafId !== null) {
+        globalThis.cancelAnimationFrame(resizeRafId);
+        resizeRafId = null;
+    }
 }
 
 function pointerScrubTo(event: PointerEvent): void {
@@ -683,6 +712,18 @@ function onChartPointerUp(): void {
 }
 
 function onChartResize(): void {
+    // One redraw per frame: a drag-resize fires far more events than frames.
+    if (resizeRafId !== null) {
+        return;
+    }
+    resizeRafId = globalThis.requestAnimationFrame(() => {
+        resizeRafId = null;
+        drawChart(Date.now());
+    });
+}
+
+function onColorSchemeChange(): void {
+    refreshChartPalette();
     drawChart(Date.now());
 }
 
@@ -700,6 +741,11 @@ export function attachChart(handles: ChartHandles): void {
     handles.canvas.addEventListener("pointerup", onChartPointerUp);
     handles.canvas.addEventListener("pointercancel", onChartPointerUp);
     globalThis.addEventListener("resize", onChartResize);
+    if (forcedColors === null) {
+        forcedColors = globalThis.matchMedia("(forced-colors: active)");
+    }
+    forcedColors.addEventListener("change", onColorSchemeChange);
+    refreshChartPalette();
 }
 
 export function detachChart(): void {
@@ -711,6 +757,7 @@ export function detachChart(): void {
         chartCanvas.removeEventListener("pointercancel", onChartPointerUp);
     }
     globalThis.removeEventListener("resize", onChartResize);
+    forcedColors?.removeEventListener("change", onColorSchemeChange);
     chartStopRaf();
     chartCanvas = null;
     chartCtx = null;

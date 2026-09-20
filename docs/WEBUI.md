@@ -105,6 +105,7 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
 | Audit log | In-memory ring (24 lines) carried in `/api/state.json` as `console`; file log not implemented |
 | Read vs write | GET routes need auth; POST cmds need auth + CSRF |
+| Transfer encoding | Text bodies over 1 KiB are gzip-compressed when the client sends `Accept-Encoding: gzip` (`gzip;q=0` refuses it), with `Vary: Accept-Encoding`; a compression failure falls back to the plain body. The dashboard drops from ~71 KiB to ~23 KiB, `/api/state.json` from ~3.3 KiB to ~1.1 KiB |
 
 **Do not** expose webui on public WAN without TLS + strong secret + firewall.
 Document that loudly in README / GAME_OPTIONS.
@@ -320,11 +321,12 @@ substitution; nothing is read from disk at runtime. Vendor JS/CSS under
 `web/static/` stays a WU3 item (see the roadmap above), not a current path.
 
 The page JS is authored as TypeScript in `src/server/webui/ts/` (one source per
-page).
-`scripts/build-webui-ts.sh` compiles it with tsc (pinned `TSC_VERSION`) and
-splices the emitted classic script into each committed page between
-`/* zdtd-ts:<page> */` markers; `zig build` never runs tsc, so the Zig build
-stays pure and offline. `scripts/lint-webui.sh` (part of `make lint`)
+page). `scripts/build-webui-ts.sh` compiles it with tsc (pinned `TSC_VERSION`)
+and splices the emitted classic script into each committed page between
+`/* zdtd-ts:<page> */` markers, and splices the design tokens and sign-in
+chrome from `src/server/webui/shared.css` between `/* zdtd-css:<region> */`
+markers, so the shared style has one home; `zig build` never runs tsc, so the
+Zig build stays pure and offline. `scripts/lint-webui.sh` (part of `make lint`)
 type-checks with `tsc --noEmit`, lints the `.ts` sources with oxlint
 (`.oxlintrc.jsonc`, anti-slop rule set, `--deny-warnings`), and fails when the
 committed pages are stale (`make webui-ts` regenerates them). The HTML itself

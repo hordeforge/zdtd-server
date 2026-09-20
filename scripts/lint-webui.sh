@@ -114,7 +114,46 @@ cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 ( cd "$webui_ts_project" && PATH="$cache_dir/node_modules/.bin:$PATH" \
     bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc.jsonc" --deny-warnings ./*.ts ./*.tsx )
 
-# 3. Freshness: regenerate into a temp copy of the pages and diff.
+# 3. Design tokens: shared.css is the one home, spliced into the pages by the
+#    build. Every page must carry the tokens marker, the sign-in pages the
+#    sign-in marker, and no token may be declared that no page uses. A page that
+#    hand-edits its tokens instead of the shared file fails the freshness gate.
+python3 - "$root" <<'PY'
+import pathlib
+import re
+import sys
+
+pages_dir = pathlib.Path(sys.argv[1]) / "src/server/webui"
+region_re = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/(.*?)/\* /zdtd-css:\1 \*/", re.S)
+shared = (pages_dir / "shared.css").read_text(encoding="utf-8")
+regions = {m.group(1): m.group(2) for m in region_re.finditer(shared)}
+if "tokens" not in regions or "signin" not in regions:
+    raise SystemExit("zdtd: lint-webui: shared.css must define the tokens and signin regions")
+required = {
+    "shell.html": ("tokens",),
+    "login.html": ("tokens", "signin"),
+    "login_lockout.html": ("tokens", "signin"),
+}
+body = ""
+for page, wanted in required.items():
+    text = (pages_dir / page).read_text(encoding="utf-8")
+    for name in wanted:
+        if not re.search(rf"/\* zdtd-css:{name} \*/.*?/\* /zdtd-css:{name} \*/", text, re.S):
+            raise SystemExit(f"zdtd: lint-webui: {page} is missing the {name} region marker")
+    # Count usage everywhere except the token declarations themselves: the
+    # sign-in region is where --err-ink/--err-field are consumed.
+    body += re.sub(r"/\* zdtd-css:tokens \*/.*?/\* /zdtd-css:tokens \*/", "", text, flags=re.S)
+tokens = re.findall(r"(--[a-z0-9-]+):", regions["tokens"])
+dead = [token for token in tokens if body.count(token) == 0]
+if dead:
+    raise SystemExit(
+        "zdtd: lint-webui: token(s) declared in shared.css but used by no page: "
+        f"{', '.join(dead)}"
+    )
+print(f"zdtd: lint-webui: {len(tokens)} shared design tokens, all used")
+PY
+
+# 4. Freshness: regenerate into a temp copy of the pages and diff.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp -r "$root/src/server/webui" "$tmp/pages"

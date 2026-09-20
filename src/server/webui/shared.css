@@ -1,8 +1,9 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · zdtd</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<style>/* zdtd-css:tokens */
+/* Shared webui style: spliced into the committed pages by
+   scripts/build-webui-ts.sh between the zdtd-css markers. One home for the
+   design tokens and the sign-in chrome, so the pages cannot drift; they
+   stay self-contained and openable because the splice is committed. */
+
+/* zdtd-css:tokens */
 :root{
   color-scheme:light;
   --bg:#f7f5f0;
@@ -44,6 +45,7 @@
   --shadow:0 1px 2px rgba(26,29,33,.06),0 8px 24px -12px rgba(26,29,33,.18);
 }
 /* /zdtd-css:tokens */
+
 /* zdtd-css:signin */
 *{box-sizing:border-box}
 html{scrollbar-gutter:stable}
@@ -75,25 +77,3 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 .signin{margin-top:0.65rem;width:100%}
 @media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:CanvasText;--acc:LinkText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 /* /zdtd-css:signin */
-button:disabled{opacity:.45;cursor:not-allowed}
-#retry-seconds{font-variant-numeric:tabular-nums;font-weight:700;color:var(--fg)}
-</style></head>
-<body><main><h1 class="brand">zdtd sign in</h1><p class="meta">operator console</p>
-<p id="login-err" class="err" role="alert" tabindex="-1">Too many failed sign-ins. Try again in <span id="retry-seconds" aria-live="off">__ZDTD_RETRY_S__</span> seconds.</p>
-<form method="post" action="/login" aria-describedby="login-err">
-<label for="login-token">Shared secret</label>
-<input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" data-invalid="true" aria-invalid="true" aria-describedby="login-err login-help" disabled>
-<button type="submit" disabled>Sign in</button>
-</form>
-<p class="hint"><a href="/login">Try signing in again</a>. This page will refresh when the wait is over.</p>
-<p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-<p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
-/* zdtd-ts:lockout */
-(()=>{//! Webui lockout page: count down the remaining wait, then reload /login.
-//! `__ZDTD_RETRY_S__` is substituted server-side by webui.zig renderTemplate;
-//! the compiled JS keeps the reference so the substituted seconds reach the
-//! browser. Compiled by scripts/build-webui-ts.sh and injected into
-//! login_lockout.html.
-var n=document.querySelector("#login-err");if(n===null)throw Error("webui: missing element #login-err");var r=document.querySelector("#retry-seconds");if(r===null)throw Error("webui: missing element #retry-seconds");n.focus();var e=__ZDTD_RETRY_S__,t=1000,o=setInterval(()=>{if(e-=1,r.textContent=String(e),e<=0)clearInterval(o),globalThis.location.replace("/login")},t);})();
-/* /zdtd-ts:lockout */
-</script></body></html>
