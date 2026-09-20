@@ -70,7 +70,8 @@ synchronously through the frame handler.
   Content-Type (**415**), an oversized frame (`max_frame_kib`), and a missing
   token (**401** + `WWW-Authenticate: Bearer realm="zdtd-mcp"`) are HTTP
   errors, never a half-read frame.
-- **Auth:** `--mcp-token` (empty = loopback only, no token) is checked against
+- **Auth:** `--mcp-token` or env `ZDTD_MCP_TOKEN` (empty = loopback only, no
+  token; prefer env so the value is not visible in `ps`) is checked against
   `Authorization: Bearer` and `X-Zdtd-Secret` in constant time
   (`util/secret.zig`); default bind is `127.0.0.1`. No new trust boundary
   (ADR 0031 D2).
@@ -99,7 +100,8 @@ toml section can follow later if operators ask):
 ```
 --mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin)
 --mcp-bind ADDR       loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
---mcp-token STR       shared token for /mcp (empty = loopback only, no token)
+--mcp-token STR       shared token for /mcp (prefer env ZDTD_MCP_TOKEN; empty =
+                      loopback only, no token)
 --mcp-allowlist LIST  comma-separated SimCommand prefixes the admin_command
                       tool may queue, e.g. "bot count,say" (default: none)
 ```

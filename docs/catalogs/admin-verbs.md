@@ -96,14 +96,14 @@ union above.
 
 | Verbs (aliases grouped) | Line |
 |---|---|
-| `help`, `commands`, `?` | 353 |
-| `gettime`, `gt` | 358 |
-| `listplayers`, `lp` | 365 |
-| `listplayerids`, `lpi` | 373 |
-| `listents`, `le` | 383 |
-| `say`, `s` | 387 |
-| `version` | 398 |
-| `dm`, `cm`, `settempunit`, `debugmenu` | 400 |
+| `help`, `commands`, `?` | 357 |
+| `gettime`, `gt` | 362 |
+| `listplayers`, `lp` | 369 |
+| `listplayerids`, `lpi` | 377 |
+| `listents`, `le` | 387 |
+| `say`, `s` | 391 |
+| `version` | 402 |
+| `dm`, `cm`, `settempunit`, `debugmenu` | 404 |
 
 
 ## Player console allowlist (`src/server/c2s_text.zig`)

@@ -17,6 +17,7 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 |---|---|
 | CLI (`--port`, `--preset`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
+| Env `ZDTD_MCP_TOKEN` | MCP Bearer token when `--mcp-token` is unset (prefer env: not in `ps`) |
 | `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature/sim/plugin + optional `[preset] name`; first existing file wins; **fatal** if present but unreadable |
 | Preset pack `presets/<name>.toml` | When `--preset` (or the `--mode` alias) or `[preset] name` is set: data-only InitOptions + `[rules.*]` sim-rule overrides (after serverconfig, before stream keys; `zdtd.toml` wins on a rules key). A config-only mod carries its own preset inside the mod folder |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
@@ -81,7 +82,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 
 | Property | Default | Range | Effect + where |
 |---|---|---|---|
-| `GameDifficulty` | 2 | 0..5 | zombie hp scale 0.5×–2.0× (`Director.hpScale`) |
+| `GameDifficulty` | 1 | 0..5 | zombie hp scale 0.5×–2.0× (`Director.hpScale`); 1 = Adventurer (stock dedi default) |
 | `BloodMoonFrequency` | 7 | 0..255 | blood moon every N days; 0 disables (`WorldClock.isBloodMoonNight`) |
 | `BloodMoonRange` | 0 | 0..15 | deterministic ±day jitter of the blood-moon day per cycle |
 | `BloodMoonEnemyCount` | 8 | 0..60 | zombies per blood-moon spawn burst |
@@ -140,7 +141,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `SandboxCode` | empty | string | Stock sandbox code (EnumGamePrefs.SandboxCode 296): one string encoding all 165 sandbox options, echoed verbatim into the GameStats(71) blob so a joining client decodes the server's gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults (RE sandbox-options §8). Also decoded server-side by `config.zig applySandboxCode`, which overlays the operator's tuning (XP, block damage, blood moon, day length, zombie speeds) on the sim from the embedded stock value sets (§2.1). Malformed codes leave client defaults, exactly like stock |
 | `SandboxPreset` | empty | string | Sandbox preset NAME (295) for the server-browser display and stock-settings check; not used to load values. Advertised in the GSI GameInfoString (SandboxPreset = 0x12, SandboxCode = 0x13) when set; unset keys are omitted (empty = client default) |
 
-### Web UI (CLI / env; WU0–WU2 shipped)
+### Web UI and MCP (CLI / env)
 
 | Flag / env | Default | Notes |
 |---|---|---|
@@ -148,6 +149,10 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `--webui-bind` | `127.0.0.1` | IPv4 loopback only; use a TLS reverse proxy for remote access |
 | `--webui-secret` | empty | Bearer / `X-Zdtd-Secret` / login form; min 8 chars; visible in `ps` (prefer env) |
 | `ZDTD_WEBUI_SECRET` | unset | Used when CLI secret is empty; refuse start if port≠0 and both empty; min 8 chars |
+| `--mcp-port` | 0 | MCP streamable-HTTP; 0 = off. Loopback bind. Design: [RFC 0002](rfc/0002-mcp-server-design.md) |
+| `--mcp-bind` | `127.0.0.1` | IPv4 loopback only; use a TLS reverse proxy for remote access |
+| `--mcp-token` | empty | Bearer for `/mcp`; empty = loopback anonymous; max 128 chars; visible in `ps` (prefer env) |
+| `ZDTD_MCP_TOKEN` | unset | Used when CLI token is empty; optional (empty keeps loopback-only anonymous) |
 
 `GET`/`HEAD` `/healthz` is unauthenticated liveness. `GET`/`HEAD` `/readyz` is unauthenticated readiness and returns 503 until the first live tick snapshot. Dashboard + `POST /api/cmd` (admin verbs) need secret; CSRF field required for cookie-only sessions. `Accept: text/plain` on `/api/cmd` returns a plain body instead of an HTML fragment.
 

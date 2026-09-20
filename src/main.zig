@@ -14,6 +14,7 @@ const zdtd_config = @import("server/zdtd_config.zig");
 const preset_mod = @import("server/preset.zig");
 const plugin_mod = @import("plugin/root.zig");
 const webui_mod = @import("server/webui.zig");
+const mcp_transport = @import("server/mcp_transport.zig");
 const io_fs = @import("util/io_fs.zig");
 const log = @import("util/log.zig");
 const clock = @import("util/clock.zig");
@@ -40,7 +41,8 @@ const help_text =
     \\  --webui-secret STR    shared secret, min 8 chars (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
     \\  --mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin; docs/rfc/0002-mcp-server-design.md)
     \\  --mcp-bind ADDR       mcp bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
-    \\  --mcp-token STR       shared token for /mcp (empty = loopback only, no token)
+    \\  --mcp-token STR       shared token for /mcp (prefer env ZDTD_MCP_TOKEN; CLI visible in ps;
+    \\                        empty = loopback only, no token)
     \\  --mcp-allowlist LIST  comma-separated SimCommand prefixes the admin_command tool may queue (default: none)
     \\  --quests PATH         explicit quests.xml (file must exist)
     \\  --config-dir DIR      stock Data/Config dir (XML assets; dir must exist)
@@ -56,7 +58,7 @@ const help_text =
     \\  --                    end of options (no positionals follow)
     \\
     \\Value forms: --flag VALUE or --flag=VALUE
-    \\Precedence: CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
+    \\Precedence: CLI > env (ZDTD_WEBUI_SECRET, ZDTD_MCP_TOKEN) > world/zdtd.toml > CWD zdtd.toml >
     \\            preset pack (if --preset or [preset] name; a config-only mod's
     \\            own preset.toml sits below the explicit pick) > --serverconfig keys
     \\            > code defaults. See docs/GAME_OPTIONS.md.
@@ -68,6 +70,7 @@ const help_text =
     \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
     \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
     \\  ZDTD_WEBUI_SECRET=… zdtd --webui-port 8080
+    \\  ZDTD_MCP_TOKEN=… zdtd --mcp-port 8090
     \\  zdtd --worldgen-seed 42 --once
     \\  zdtd --quiet --once --port 0
     \\
@@ -351,6 +354,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var mcp_port: u16 = 0;
     var mcp_bind: []const u8 = "127.0.0.1";
     var mcp_token: []const u8 = "";
+    var mcp_token_cli = false;
     var mcp_allowlist: []const u8 = "";
     var max_ticks: u64 = 0;
     var once = false;
@@ -421,6 +425,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             mcp_bind = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--mcp-token")) {
             mcp_token = flagValue(&it, name, inline_val);
+            mcp_token_cli = true;
         } else if (std.mem.eql(u8, name, "--mcp-allowlist")) {
             mcp_allowlist = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--worldgen-seed")) {
@@ -625,6 +630,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         );
     }
 
+    // CLI > env ZDTD_MCP_TOKEN (same preference as the webui secret).
+    if (mcp_token.len == 0) {
+        if (std.process.Environ.getPosix(init.environ, "ZDTD_MCP_TOKEN")) |env_token| {
+            if (env_token.len > 0) mcp_token = env_token;
+        }
+    } else if (mcp_token_cli) {
+        std.debug.print(
+            "zdtd: warning: --mcp-token is visible in process listings; prefer env ZDTD_MCP_TOKEN\n",
+            .{},
+        );
+    }
+
     if (webui_port == 0 and (webui_secret_cli or !std.mem.eql(u8, webui_bind, "127.0.0.1"))) {
         std.debug.print(
             "zdtd: warning: --webui-bind/--webui-secret have no effect without --webui-port\n",
@@ -665,8 +682,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
         fatal("webui port {d} collides with AdminPort/TelnetPort", .{webui_port});
     }
+    if (mcp_port == 0 and (mcp_token_cli or !std.mem.eql(u8, mcp_bind, "127.0.0.1"))) {
+        std.debug.print(
+            "zdtd: warning: --mcp-bind/--mcp-token have no effect without --mcp-port\n",
+            .{},
+        );
+    }
     if (mcp_port != 0 and !isLoopbackBind(mcp_bind)) {
         usageError("--mcp-bind must be loopback (127.0.0.1 or localhost); use a TLS reverse proxy for remote access", .{});
+    }
+    if (mcp_port != 0 and mcp_token.len > mcp_transport.max_token_len) {
+        usageError(
+            "mcp token must be at most {d} characters (got {d}); use env ZDTD_MCP_TOKEN",
+            .{ mcp_transport.max_token_len, mcp_token.len },
+        );
     }
     if (mcp_port != 0 and mcp_port == port) {
         if (port_cli) {
@@ -1022,24 +1051,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
     init_opts.quest_policy = qpol;
     // Effective bot host policy: preset pack < zdtd.toml (same precedence).
     var bcfg: @import("server/game/bot.zig").BotHostConfig = .{};
-    if (preset_owned) |*ppk| {
-        if (ppk.bots.shoot_damage) |v| bcfg.shoot_damage = v;
-        if (ppk.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
-        if (ppk.bots.spawn_spread) |v| bcfg.spawn_spread = v;
-        if (ppk.bots.spawn_y) |v| bcfg.spawn_y = v;
-        if (ppk.bots.max_step_up) |v| bcfg.max_step_up = v;
-        if (ppk.bots.arrival_dist) |v| bcfg.arrival_dist = v;
-        if (ppk.bots.shot_range_slop) |v| bcfg.shot_range_slop = v;
-        if (ppk.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = ppk.bots.weapon_profiles;
-    }
-    if (toml_owned) |*tf| {
-        if (tf.bots.shoot_damage) |v| bcfg.shoot_damage = v;
-        if (tf.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
-        if (tf.bots.spawn_spread) |v| bcfg.spawn_spread = v;
-        if (tf.bots.spawn_y) |v| bcfg.spawn_y = v;
-        if (tf.bots.max_step_up) |v| bcfg.max_step_up = v;
-        if (tf.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = tf.bots.weapon_profiles;
-    }
+    if (preset_owned) |*ppk| zdtd_config.applyBotsOverlay(ppk.bots, &bcfg);
+    if (toml_owned) |*tf| zdtd_config.applyBotsOverlay(tf.bots, &bcfg);
     init_opts.bot_config = bcfg;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).
     zdtd_config.sanitizeInitOptions(&init_opts);

@@ -1,6 +1,6 @@
 //! zdtd.toml: operator tunables (Bucket B), not stock serverconfig.
-//! Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml >
-//! CWD zdtd.toml > --serverconfig keys > code defaults.
+//! Precedence (applied by caller): CLI > env (ZDTD_WEBUI_SECRET, ZDTD_MCP_TOKEN) >
+//! world/zdtd.toml > CWD zdtd.toml > --serverconfig keys > code defaults.
 //! Minimal TOML subset: [section] + key = int|float|bool|string. No arrays/tables-in-tables.
 //! Parsing is the comptime binder (src/util/toml_bind.zig, ADR 0021 decision 1);
 //! this file declares the shape and the merge/sanitize behaviour.
@@ -49,6 +49,9 @@ pub const Authority = struct {
     /// (rejects Y-only teleports the horizontal clamp cannot see).
     max_vertical_speed_mps: ?f32 = null,
     max_claimed_damage: ?i32 = null,
+    /// Cap on a claimed sound's volumeScale (NetPackageAudio). Unbounded
+    /// claims would turn one footstep into a server-wide AI alarm.
+    max_claimed_noise_scale: ?f32 = null,
     peer_stale_ms: ?u64 = null,
     lock_stale_ms: ?u64 = null,
     join_rate_limit_ms: ?u64 = null,
@@ -268,7 +271,7 @@ pub const Quests = struct {
 
 /// `[bots]` config section: host-side FPS bot policy (ADR 0026 / ADR 0021).
 /// Binder-scalar optional fields; main.zig merges mode pack < zdtd.toml into
-/// the BotManager's BotHostConfig.
+/// the BotManager's BotHostConfig via `applyBotsOverlay`.
 pub const Bots = struct {
     shoot_damage: ?f32 = null,
     headshot_multiplier: ?f32 = null,
@@ -282,6 +285,19 @@ pub const Bots = struct {
     /// `[quests] objective_kinds`.
     weapon_profiles: []const u8 = "",
 };
+
+/// Merge a `[bots]` overlay onto a BotHostConfig-shaped dest. Only non-null /
+/// non-empty fields override. Call in precedence order (preset then toml).
+pub fn applyBotsOverlay(bots: Bots, cfg: anytype) void {
+    if (bots.shoot_damage) |v| cfg.shoot_damage = v;
+    if (bots.headshot_multiplier) |v| cfg.headshot_multiplier = v;
+    if (bots.spawn_spread) |v| cfg.spawn_spread = v;
+    if (bots.spawn_y) |v| cfg.spawn_y = v;
+    if (bots.max_step_up) |v| cfg.max_step_up = v;
+    if (bots.arrival_dist) |v| cfg.arrival_dist = v;
+    if (bots.shot_range_slop) |v| cfg.shot_range_slop = v;
+    if (bots.weapon_profiles.len > 0) cfg.weapon_profiles = bots.weapon_profiles;
+}
 
 pub const File = struct {
     pub const toml_label = "zdtd.toml";
@@ -383,6 +399,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
         if (@hasField(@TypeOf(opts.*), "max_vertical_speed_mps")) opts.max_vertical_speed_mps = v;
     }
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
+    if (f.authority.max_claimed_noise_scale) |v| {
+        if (@hasField(@TypeOf(opts.*), "max_claimed_noise_scale")) opts.max_claimed_noise_scale = v;
+    }
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
     if (f.authority.lock_stale_ms) |v| {
         if (@hasField(@TypeOf(opts.*), "lock_stale_ns")) opts.lock_stale_ns = v *| 1_000_000;
@@ -555,6 +574,15 @@ pub fn sanitizeInitOptions(opts: anytype) void {
     if (opts.max_claimed_damage < 1) {
         util_log.warn("zdtd: max_claimed_damage={d} invalid; using 1\n", .{opts.max_claimed_damage});
         opts.max_claimed_damage = 1;
+    }
+    if (@hasField(@TypeOf(opts.*), "max_claimed_noise_scale") and
+        (!std.math.isFinite(opts.max_claimed_noise_scale) or opts.max_claimed_noise_scale <= 0))
+    {
+        util_log.warn(
+            "zdtd: max_claimed_noise_scale={d} invalid; using 1\n",
+            .{opts.max_claimed_noise_scale},
+        );
+        opts.max_claimed_noise_scale = 1;
     }
     if (!std.math.isFinite(opts.max_edit_range) or opts.max_edit_range <= 0) {
         util_log.warn("zdtd: max_edit_range={d} invalid; using 1\n", .{opts.max_edit_range});
@@ -807,6 +835,31 @@ test "parse [bots] section" {
     try std.testing.expectEqual(@as(?f32, 3.0), f.bots.shot_range_slop);
 }
 
+test "applyBotsOverlay copies every [bots] field including arrival_dist" {
+    // Pins the merge used by main.zig: a toml-only arrival_dist/shot_range_slop
+    // must not be silently dropped (preset overlay already applied those keys).
+    const overlay: Bots = .{
+        .arrival_dist = 0.25,
+        .shot_range_slop = 4.5,
+        .shoot_damage = 15.0,
+    };
+    var cfg = struct {
+        shoot_damage: f32 = 12.0,
+        headshot_multiplier: f32 = 2.0,
+        spawn_spread: f32 = 2.0,
+        spawn_y: f32 = 70,
+        max_step_up: f32 = 1.5,
+        arrival_dist: f32 = 0.05,
+        shot_range_slop: f32 = 2.0,
+        weapon_profiles: []const u8 = "",
+    }{};
+    applyBotsOverlay(overlay, &cfg);
+    try std.testing.expectEqual(@as(f32, 15.0), cfg.shoot_damage);
+    try std.testing.expectEqual(@as(f32, 0.25), cfg.arrival_dist);
+    try std.testing.expectEqual(@as(f32, 4.5), cfg.shot_range_slop);
+    try std.testing.expectEqual(@as(f32, 2.0), cfg.headshot_multiplier);
+}
+
 /// Mirror of the server init-options shape the merge helpers write into.
 /// One superset covers every test below; helpers ignore fields they do not know.
 const TestOpts = struct {
@@ -828,6 +881,7 @@ const TestOpts = struct {
     max_horizontal_speed_mps: f32 = 20,
     max_vertical_speed_mps: f32 = 25,
     max_claimed_damage: i32 = 200,
+    max_claimed_noise_scale: f32 = 8,
     peer_stale_ms: u64 = 3000,
     lock_stale_ns: u64 = 30_000_000_000,
     trader_wallet_dukes: i32 = 5000,
@@ -966,6 +1020,21 @@ test "sanitizeInitOptions rejects non-finite ranges" {
     sanitizeInitOptions(&o);
     try std.testing.expectEqual(@as(f32, 1), o.max_edit_range);
     try std.testing.expectEqual(@as(f32, 1), o.interest_range);
+}
+
+test "apply and sanitize max_claimed_noise_scale" {
+    var f = try parse(std.testing.allocator,
+        \\[authority]
+        \\max_claimed_noise_scale = 4.0
+    );
+    defer f.deinit();
+    var o: TestOpts = .{};
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(@as(f32, 4.0), o.max_claimed_noise_scale);
+
+    o.max_claimed_noise_scale = -1;
+    sanitizeInitOptions(&o);
+    try std.testing.expectEqual(@as(f32, 1), o.max_claimed_noise_scale);
 }
 
 test "sanitizeInitOptions clamps max_streamed_chunks to cap" {

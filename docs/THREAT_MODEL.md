@@ -32,7 +32,7 @@ Ranks are relative exploitability × blast radius for a typical LAN/public dedi,
 | HTTP webui | off (`--webui-port` 0) | loopback only | shared secret required to listen; HMAC session cookie | `src/server/webui.zig:260` |
 | HTTP MCP | off (`--mcp-port` 0) | loopback only | Bearer/token when configured; empty token = loopback anonymous | `src/server/mcp_transport.zig:75` |
 
-CLI and env that arm the surface: `src/main.zig:28` (usage text), flag parse from `src/main.zig:380`, webui secret env preference `src/main.zig:623`, loopback enforcement `src/main.zig:645` / `src/main.zig:668`.
+CLI and env that arm the surface: `src/main.zig:28` (usage text), flag parse from `src/main.zig:372`, webui secret env preference `src/main.zig:620`, MCP token env preference `src/main.zig:633`, loopback enforcement `src/main.zig:661` / `src/main.zig:691`.
 
 ### Other inputs
 
@@ -43,7 +43,7 @@ CLI and env that arm the surface: `src/main.zig:28` (usage text), flag parse fro
 | World save overlays (`.zch`, player, TE stores) | operator-trusted; must still length-check | `src/server/persist.zig`, `src/world/` |
 | Stock `game-dir` + `Mods/` XML / assetbundles | operator-supplied data; XPath patches applied | `src/assets/`, modlet load path |
 | Wasm modules under `plugins/` / `mods/` | operator-selected code in sandbox | `src/plugin/wasm.zig:1` |
-| CLI argv / env (`ZDTD_WEBUI_SECRET`, passwords) | secrets enter here; never log values | `src/main.zig:1075` |
+| CLI argv / env (`ZDTD_WEBUI_SECRET`, `ZDTD_MCP_TOKEN`, passwords) | secrets enter here; never log values | `src/main.zig:1091` |
 
 ### Surfaces listed nowhere else as security-critical
 
@@ -76,7 +76,7 @@ No separate debug HTTP port or metrics scrape listener exists beyond webui/APM d
 
 **Crosses:** console lines and HTTP that reach `runAdminLine` / MCP frame handler.
 
-**Must authenticate:** admin password or webui secret/session; MCP token when set. Webui refuses to listen without a secret (`src/server/webui.zig:262`). Admin without password warns and binds loopback only (`src/main.zig:1053`, `src/server/admin.zig:81`).
+**Must authenticate:** admin password or webui secret/session; MCP token when set. Webui refuses to listen without a secret (`src/server/webui.zig:262`). Admin without password warns and binds loopback only (`src/main.zig:1066`, `src/server/admin.zig:81`).
 
 **Privilege transition:** authenticated operator runs the full admin verb surface (kick, ban, give, shutdown, plugin reload, …). Treat possession of the secret/password/token as root on the game process.
 
@@ -92,12 +92,12 @@ No separate debug HTTP port or metrics scrape listener exists beyond webui/APM d
 
 | Secret | Enters | Lives | Leaves |
 |---|---|---|---|
-| ServerPassword | config / init options | `litenet.Server.server_password` slice | never logged as value (`src/main.zig:1075` prints `set`/`open`) |
+| ServerPassword | config / init options | `litenet.Server.server_password` slice | never logged as value (`src/main.zig:1091` prints `set`/`open`) |
 | TelnetPassword | config | `admin.Auth.password` | compared constant-time (`src/server/admin.zig:32`) |
 | Webui secret | CLI or `ZDTD_WEBUI_SECRET` | `webui` secret buffer; session is HMAC, not raw secret | cookie carries session token only (`src/server/webui.zig:200`) |
-| MCP token | CLI | transport token buffer; zeroed on deinit | Bearer header compare (`src/server/mcp_transport.zig:395`) |
+| MCP token | CLI or `ZDTD_MCP_TOKEN` | transport token buffer; zeroed on deinit | Bearer header compare (`src/server/mcp_transport.zig:396`) |
 
-CLI `--webui-secret` is warned as visible in process listings (`src/main.zig:623`). No in-repo rotation protocol beyond restart with a new value.
+CLI `--webui-secret` / `--mcp-token` are warned as visible in process listings (`src/main.zig:627`, `:640`). No in-repo rotation protocol beyond restart with a new value.
 
 ### 6. Build → runtime
 
@@ -166,7 +166,7 @@ PII is limited to player display names and platform ids handled for admin lists;
 
 ### Documentation vs code
 
-Claims in [WEBUI.md](WEBUI.md) (loopback-only bind, secret required) match `src/server/webui.zig:262` and `src/main.zig:645`. Do not assume TLS inside zdtd: plain HTTP on loopback only; reverse proxy is operator-side.
+Claims in [WEBUI.md](WEBUI.md) (loopback-only bind, secret required) match `src/server/webui.zig:262` and `src/main.zig:661`. Do not assume TLS inside zdtd: plain HTTP on loopback only; reverse proxy is operator-side.
 
 ## Abuse cases (authenticated hostile player)
 

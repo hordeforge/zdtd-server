@@ -8,63 +8,63 @@ Every operator-facing tunable, parsed from its declaration. Semantics live in
 
 ## serverconfig.xml keys
 
-`known_serverconfig_names` (src/server/config.zig:218) is the accepted key list; the
+`known_serverconfig_names` (src/server/config.zig:213) is the accepted key list; the
 destination column names the field the parser assigns.
 
 | Key | Destination field | Parsed in | Line |
 |---|---|---|---|
-| `ServerPort` | port | src/server/config.zig | 462 |
-| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 468 |
-| `GameName` | world_name | src/server/config.zig | 476 |
-| `GameWorld` | game_world | src/server/config.zig | 477 |
-| `ServerPassword` | password | src/server/config.zig | 485 |
-| `AdminPort` | admin_port | src/server/config.zig | 486 |
-| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 492 |
-| `TelnetPort` | telnet_port | src/server/config.zig | 496 |
-| `TelnetPassword` | telnet_password | src/server/config.zig | 503 |
-| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 504 |
-| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 506 |
-| `ViewRadius` | view_radius | src/server/config.zig | 508 |
-| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 510 |
-| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 511 |
-| `ServerAdminSlots` | admin_slots | src/server/config.zig | 512 |
-| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 513 |
-| `GameDifficulty` | game_difficulty | src/server/config.zig | 514 |
-| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 515 |
-| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 516 |
-| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 517 |
-| `DayNightLength` | day_night_length | src/server/config.zig | 518 |
-| `DayLightLength` | day_light_length | src/server/config.zig | 519 |
-| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 522 |
-| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 523 |
-| `ZombieMove` | zombie_move | src/server/config.zig | 524 |
-| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 525 |
-| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 526 |
-| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 527 |
-| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 528 |
-| `LootAbundance` | loot_abundance | src/server/config.zig | 529 |
-| `XPMultiplier` | xp_multiplier | src/server/config.zig | 530 |
-| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 531 |
-| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 532 |
-| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 533 |
-| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 534 |
-| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 535 |
-| `DropOnDeath` | drop_on_death | src/server/config.zig | 536 |
-| `BuildCreate` | build_create | src/server/config.zig | 537 |
-| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 538 |
-| `LandClaimSize` | land_claim_size | src/server/config.zig | 540 |
-| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 546 |
-| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 548 |
-| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 550 |
-| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 560 |
-| `SandboxPreset` | sandbox_preset | src/server/config.zig | 479 |
-| `ServerDescription` | server_description | src/server/config.zig | 480 |
-| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 481 |
-| `Region` | region | src/server/config.zig | 482 |
-| `Language` | language | src/server/config.zig | 483 |
-| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 484 |
-| `SandboxCode` | sandbox_code | src/server/config.zig | 478 |
-| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 562 |
+| `ServerPort` | port | src/server/config.zig | 457 |
+| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 463 |
+| `GameName` | world_name | src/server/config.zig | 471 |
+| `GameWorld` | game_world | src/server/config.zig | 472 |
+| `ServerPassword` | password | src/server/config.zig | 480 |
+| `AdminPort` | admin_port | src/server/config.zig | 481 |
+| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 487 |
+| `TelnetPort` | telnet_port | src/server/config.zig | 491 |
+| `TelnetPassword` | telnet_password | src/server/config.zig | 498 |
+| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 499 |
+| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 501 |
+| `ViewRadius` | view_radius | src/server/config.zig | 503 |
+| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 505 |
+| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 506 |
+| `ServerAdminSlots` | admin_slots | src/server/config.zig | 507 |
+| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 508 |
+| `GameDifficulty` | game_difficulty | src/server/config.zig | 509 |
+| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 510 |
+| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 511 |
+| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 512 |
+| `DayNightLength` | day_night_length | src/server/config.zig | 513 |
+| `DayLightLength` | day_light_length | src/server/config.zig | 514 |
+| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 517 |
+| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 518 |
+| `ZombieMove` | zombie_move | src/server/config.zig | 519 |
+| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 520 |
+| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 521 |
+| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 522 |
+| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 523 |
+| `LootAbundance` | loot_abundance | src/server/config.zig | 524 |
+| `XPMultiplier` | xp_multiplier | src/server/config.zig | 525 |
+| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 526 |
+| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 527 |
+| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 528 |
+| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 529 |
+| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 530 |
+| `DropOnDeath` | drop_on_death | src/server/config.zig | 531 |
+| `BuildCreate` | build_create | src/server/config.zig | 532 |
+| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 533 |
+| `LandClaimSize` | land_claim_size | src/server/config.zig | 535 |
+| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 541 |
+| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 543 |
+| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 545 |
+| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 555 |
+| `SandboxPreset` | sandbox_preset | src/server/config.zig | 474 |
+| `ServerDescription` | server_description | src/server/config.zig | 475 |
+| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 476 |
+| `Region` | region | src/server/config.zig | 477 |
+| `Language` | language | src/server/config.zig | 478 |
+| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 479 |
+| `SandboxCode` | sandbox_code | src/server/config.zig | 473 |
+| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 557 |
 
 
 ## zdtd.toml
@@ -75,178 +75,179 @@ parser change (ADR 0021). Pointer fields (an arena handle) are not operator sett
 and are not listed.
 
 
-### `[stream]` (Stream, `src/server/zdtd_config.zig:300`)
+### `[stream]` (Stream, `src/server/zdtd_config.zig:317`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `max_streamed_chunks` | `?usize` | `null` | 20 |
-| `chunk_adds_per_stream_tick` | `?u32` | `null` | 21 |
-| `stream_radius_min` | `?i32` | `null` | 22 |
-| `stream_radius_max` | `?i32` | `null` | 23 |
-| `chunk_stream_period_ticks` | `?u64` | `null` | 24 |
-| `motion_replicate_period_ticks` | `?u64` | `null` | 25 |
-| `pos_heartbeat_period_ticks` | `?u64` | `null` | 28 |
-| `world_time_send_ticks` | `?u64` | `null` | 30 |
-| `vehicle_pos_send_ticks` | `?u64` | `null` | 32 |
-| `spawn_area_radius_max` | `?i32` | `null` | 33 |
-| `sleeper_tick_ticks` | `?u64` | `null` | 35 |
-| `turret_sync_ticks` | `?u64` | `null` | 37 |
-| `save_interval_ticks` | `?u64` | `null` | 39 |
+| `max_streamed_chunks` | `?usize` | `null` | 21 |
+| `chunk_adds_per_stream_tick` | `?u32` | `null` | 22 |
+| `stream_radius_min` | `?i32` | `null` | 23 |
+| `stream_radius_max` | `?i32` | `null` | 24 |
+| `chunk_stream_period_ticks` | `?u64` | `null` | 25 |
+| `motion_replicate_period_ticks` | `?u64` | `null` | 26 |
+| `pos_heartbeat_period_ticks` | `?u64` | `null` | 29 |
+| `world_time_send_ticks` | `?u64` | `null` | 31 |
+| `vehicle_pos_send_ticks` | `?u64` | `null` | 33 |
+| `spawn_area_radius_max` | `?i32` | `null` | 34 |
+| `sleeper_tick_ticks` | `?u64` | `null` | 36 |
+| `turret_sync_ticks` | `?u64` | `null` | 38 |
+| `save_interval_ticks` | `?u64` | `null` | 40 |
 
 
-### `[authority]` (Authority, `src/server/zdtd_config.zig:301`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `interest_range_blocks` | `?f32` | `null` | 43 |
-| `max_edit_range_blocks` | `?f32` | `null` | 44 |
-| `max_horizontal_speed_mps` | `?f32` | `null` | 46 |
-| `max_vertical_speed_mps` | `?f32` | `null` | 49 |
-| `max_claimed_damage` | `?i32` | `null` | 50 |
-| `peer_stale_ms` | `?u64` | `null` | 51 |
-| `lock_stale_ms` | `?u64` | `null` | 52 |
-| `join_rate_limit_ms` | `?u64` | `null` | 53 |
-| `mode` | `?[]const u8` | `null` | 54 |
-| `guard_enforce` | `?bool` | `null` | 57 |
-| `guard_dry_run` | `?bool` | `null` | 58 |
-| `guard_quarantine` | `?bool` | `null` | 59 |
-| `guard_load_shed` | `?bool` | `null` | 60 |
-| `guard_window_ticks` | `?u64` | `null` | 61 |
-| `guard_strong_distinct` | `?u32` | `null` | 62 |
-| `guard_hard_repeat` | `?u32` | `null` | 63 |
-| `guard_kick_delay_ticks` | `?u64` | `null` | 68 |
-| `guard_shed_hold_ticks` | `?u64` | `null` | 69 |
-| `guard_weak_break_rate` | `?u32` | `null` | 70 |
-
-
-### `[feature]` (Feature, `src/server/zdtd_config.zig:302`)
+### `[authority]` (Authority, `src/server/zdtd_config.zig:318`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `wire_chunks` | `?bool` | `null` | 74 |
-| `deco_trees` | `?bool` | `null` | 77 |
-| `deco_mirror` | `?bool` | `null` | 80 |
-| `block_id_mapping` | `?bool` | `null` | 83 |
-| `deco_objects_per_join` | `?usize` | `null` | 84 |
+| `interest_range_blocks` | `?f32` | `null` | 44 |
+| `max_edit_range_blocks` | `?f32` | `null` | 45 |
+| `max_horizontal_speed_mps` | `?f32` | `null` | 47 |
+| `max_vertical_speed_mps` | `?f32` | `null` | 50 |
+| `max_claimed_damage` | `?i32` | `null` | 51 |
+| `max_claimed_noise_scale` | `?f32` | `null` | 54 |
+| `peer_stale_ms` | `?u64` | `null` | 55 |
+| `lock_stale_ms` | `?u64` | `null` | 56 |
+| `join_rate_limit_ms` | `?u64` | `null` | 57 |
+| `mode` | `?[]const u8` | `null` | 58 |
+| `guard_enforce` | `?bool` | `null` | 61 |
+| `guard_dry_run` | `?bool` | `null` | 62 |
+| `guard_quarantine` | `?bool` | `null` | 63 |
+| `guard_load_shed` | `?bool` | `null` | 64 |
+| `guard_window_ticks` | `?u64` | `null` | 65 |
+| `guard_strong_distinct` | `?u32` | `null` | 66 |
+| `guard_hard_repeat` | `?u32` | `null` | 67 |
+| `guard_kick_delay_ticks` | `?u64` | `null` | 72 |
+| `guard_shed_hold_ticks` | `?u64` | `null` | 73 |
+| `guard_weak_break_rate` | `?u32` | `null` | 74 |
 
 
-### `[perf]` (Perf, `src/server/zdtd_config.zig:303`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `async_chunk_flush` | `?bool` | `null` | 92 |
-| `terrain_snapshot` | `?bool` | `null` | 94 |
-| `job_batches` | `?bool` | `null` | 96 |
-
-
-### `[sim]` (Sim, `src/server/zdtd_config.zig:304`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `starter_zombies` | `?bool` | `null` | 104 |
-| `spawn_starter_kit` | `?[]const u8` | `null` | 109 |
-| `demo_seed` | `?bool` | `null` | 114 |
-| `trader_wallet_dukes` | `?i32` | `null` | 117 |
-| `min_chat_gap_ns` | `?u64` | `null` | 120 |
-| `inv_bucket_cap` | `?u8` | `null` | 121 |
-| `inv_refill_ns` | `?u64` | `null` | 122 |
-| `block_bucket_cap` | `?u8` | `null` | 123 |
-| `block_refill_ns` | `?u64` | `null` | 124 |
-| `min_damage_gap_ns` | `?u64` | `null` | 125 |
-| `damage_burst_max` | `?u8` | `null` | 126 |
-| `trader_restock_cap` | `?u16` | `null` | 129 |
-| `trader_restock_refill` | `?u16` | `null` | 130 |
-| `craft_max_times` | `?u16` | `null` | 132 |
-| `sleeper_party_radius` | `?f32` | `null` | 136 |
-| `storm_frequency` | `?i32` | `null` | 140 |
-| `te_scan_block_cap` | `?u32` | `null` | 144 |
-| `te_scan_te_cap` | `?u32` | `null` | 145 |
-| `trader_use_range` | `?f32` | `null` | 148 |
-| `party_shared_kill_range` | `?f32` | `null` | 151 |
-| `storm_bm_push_ticks` | `?i64` | `null` | 154 |
-| `workstation_crafts_per_tick` | `?u16` | `null` | 158 |
-| `workstation_craft_backlog` | `?f32` | `null` | 159 |
-| `sleeper_cap_gate_enabled` | `?bool` | `null` | 164 |
-| `airdrop_schedule` | `?[]const u8` | `null` | 171 |
-| `airdrop_day_min` | `?u32` | `null` | 172 |
-| `airdrop_day_max` | `?u32` | `null` | 173 |
-| `airdrop_drop_hour` | `?u32` | `null` | 174 |
-| `airdrop_loot_list` | `?[]const u8` | `null` | 175 |
-
-
-### `[preset]` (Preset, `src/server/zdtd_config.zig:305`)
+### `[feature]` (Feature, `src/server/zdtd_config.zig:319`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `name` | `?[]const u8` | `null` | 194 |
+| `wire_chunks` | `?bool` | `null` | 78 |
+| `deco_trees` | `?bool` | `null` | 81 |
+| `deco_mirror` | `?bool` | `null` | 84 |
+| `block_id_mapping` | `?bool` | `null` | 87 |
+| `deco_objects_per_join` | `?usize` | `null` | 88 |
 
 
-### `[plugin]` (Plugin, `src/server/zdtd_config.zig:306`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `modules` | `?[]const u8` | `null` | 200 |
-| `fuel` | `?u64` | `null` | 205 |
-| `max_pages` | `?u64` | `null` | 207 |
-| `deny` | `?[]const u8` | `null` | 212 |
-| `allow` | `?[]const u8` | `null` | 216 |
-
-
-### `[mods]` (Mods, `src/server/zdtd_config.zig:308`)
+### `[perf]` (Perf, `src/server/zdtd_config.zig:320`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `disabled` | `?[]const u8` | `null` | 225 |
-| `blacklist` | `?[]const u8` | `null` | 229 |
-| `enabled` | `?[]const u8` | `null` | 233 |
+| `async_chunk_flush` | `?bool` | `null` | 96 |
+| `terrain_snapshot` | `?bool` | `null` | 98 |
+| `job_batches` | `?bool` | `null` | 100 |
 
 
-### `[quests]` (Quests, `src/server/zdtd_config.zig:312`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `objective_kinds` | `[]const u8` | `""` | 249 |
-| `default_kill_count` | `?u8` | `null` | 250 |
-| `kill_per_tier` | `?u8` | `null` | 251 |
-| `goto_radius` | `?f32` | `null` | 252 |
-| `stay_radius` | `?f32` | `null` | 253 |
-| `poi_min_dist` | `?f32` | `null` | 256 |
-| `poi_max_dist` | `?f32` | `null` | 257 |
-| `max_poi_attempts` | `?u32` | `null` | 258 |
-| `poi_bed_lockout_radius` | `?f32` | `null` | 261 |
-| `trader_band_1` | `?f32` | `null` | 264 |
-| `trader_band_2` | `?f32` | `null` | 265 |
-
-
-### `[bots]` (Bots, `src/server/zdtd_config.zig:315`)
+### `[sim]` (Sim, `src/server/zdtd_config.zig:321`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `shoot_damage` | `?f32` | `null` | 272 |
-| `headshot_multiplier` | `?f32` | `null` | 273 |
-| `spawn_spread` | `?f32` | `null` | 274 |
-| `spawn_y` | `?f32` | `null` | 275 |
-| `max_step_up` | `?f32` | `null` | 276 |
-| `arrival_dist` | `?f32` | `null` | 277 |
-| `shot_range_slop` | `?f32` | `null` | 278 |
-| `weapon_profiles` | `[]const u8` | `""` | 282 |
+| `starter_zombies` | `?bool` | `null` | 108 |
+| `spawn_starter_kit` | `?[]const u8` | `null` | 113 |
+| `demo_seed` | `?bool` | `null` | 118 |
+| `trader_wallet_dukes` | `?i32` | `null` | 121 |
+| `min_chat_gap_ns` | `?u64` | `null` | 124 |
+| `inv_bucket_cap` | `?u8` | `null` | 125 |
+| `inv_refill_ns` | `?u64` | `null` | 126 |
+| `block_bucket_cap` | `?u8` | `null` | 127 |
+| `block_refill_ns` | `?u64` | `null` | 128 |
+| `min_damage_gap_ns` | `?u64` | `null` | 129 |
+| `damage_burst_max` | `?u8` | `null` | 130 |
+| `trader_restock_cap` | `?u16` | `null` | 133 |
+| `trader_restock_refill` | `?u16` | `null` | 134 |
+| `craft_max_times` | `?u16` | `null` | 136 |
+| `sleeper_party_radius` | `?f32` | `null` | 140 |
+| `storm_frequency` | `?i32` | `null` | 144 |
+| `te_scan_block_cap` | `?u32` | `null` | 148 |
+| `te_scan_te_cap` | `?u32` | `null` | 149 |
+| `trader_use_range` | `?f32` | `null` | 152 |
+| `party_shared_kill_range` | `?f32` | `null` | 155 |
+| `storm_bm_push_ticks` | `?i64` | `null` | 158 |
+| `workstation_crafts_per_tick` | `?u16` | `null` | 162 |
+| `workstation_craft_backlog` | `?f32` | `null` | 163 |
+| `sleeper_cap_gate_enabled` | `?bool` | `null` | 168 |
+| `airdrop_schedule` | `?[]const u8` | `null` | 175 |
+| `airdrop_day_min` | `?u32` | `null` | 176 |
+| `airdrop_day_max` | `?u32` | `null` | 177 |
+| `airdrop_drop_hour` | `?u32` | `null` | 178 |
+| `airdrop_loot_list` | `?[]const u8` | `null` | 179 |
 
 
-### `[apm]` (Apm, `src/server/zdtd_config.zig:317`)
+### `[preset]` (Preset, `src/server/zdtd_config.zig:322`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `dump_every_s` | `?u64` | `null` | 182 |
+| `name` | `?[]const u8` | `null` | 198 |
 
 
-### `[worldgen]` (Worldgen, `src/server/zdtd_config.zig:319`)
+### `[plugin]` (Plugin, `src/server/zdtd_config.zig:323`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `seed` | `?u64` | `null` | 189 |
+| `modules` | `?[]const u8` | `null` | 204 |
+| `fuel` | `?u64` | `null` | 209 |
+| `max_pages` | `?u64` | `null` | 211 |
+| `deny` | `?[]const u8` | `null` | 216 |
+| `allow` | `?[]const u8` | `null` | 220 |
 
 
-### `[rules]` (rules_mod.RulesOverlay, `src/server/zdtd_config.zig:322`)
+### `[mods]` (Mods, `src/server/zdtd_config.zig:325`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `disabled` | `?[]const u8` | `null` | 229 |
+| `blacklist` | `?[]const u8` | `null` | 233 |
+| `enabled` | `?[]const u8` | `null` | 237 |
+
+
+### `[quests]` (Quests, `src/server/zdtd_config.zig:329`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `objective_kinds` | `[]const u8` | `""` | 253 |
+| `default_kill_count` | `?u8` | `null` | 254 |
+| `kill_per_tier` | `?u8` | `null` | 255 |
+| `goto_radius` | `?f32` | `null` | 256 |
+| `stay_radius` | `?f32` | `null` | 257 |
+| `poi_min_dist` | `?f32` | `null` | 260 |
+| `poi_max_dist` | `?f32` | `null` | 261 |
+| `max_poi_attempts` | `?u32` | `null` | 262 |
+| `poi_bed_lockout_radius` | `?f32` | `null` | 265 |
+| `trader_band_1` | `?f32` | `null` | 268 |
+| `trader_band_2` | `?f32` | `null` | 269 |
+
+
+### `[bots]` (Bots, `src/server/zdtd_config.zig:332`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `shoot_damage` | `?f32` | `null` | 276 |
+| `headshot_multiplier` | `?f32` | `null` | 277 |
+| `spawn_spread` | `?f32` | `null` | 278 |
+| `spawn_y` | `?f32` | `null` | 279 |
+| `max_step_up` | `?f32` | `null` | 280 |
+| `arrival_dist` | `?f32` | `null` | 281 |
+| `shot_range_slop` | `?f32` | `null` | 282 |
+| `weapon_profiles` | `[]const u8` | `""` | 286 |
+
+
+### `[apm]` (Apm, `src/server/zdtd_config.zig:334`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `dump_every_s` | `?u64` | `null` | 186 |
+
+
+### `[worldgen]` (Worldgen, `src/server/zdtd_config.zig:336`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `seed` | `?u64` | `null` | 193 |
+
+
+### `[rules]` (rules_mod.RulesOverlay, `src/server/zdtd_config.zig:339`)
 
 No fields parsed.
 

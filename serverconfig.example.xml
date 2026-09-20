@@ -51,7 +51,7 @@
   <property name="TelnetFailedLoginsBlocktime" value="10"/>
   <property name="ViewRadius" value="7"/>
 
-  <property name="GameDifficulty" value="2"/>
+  <property name="GameDifficulty" value="1"/>
   <property name="BloodMoonFrequency" value="7"/>
   <property name="BloodMoonRange" value="0"/>
   <property name="BloodMoonEnemyCount" value="8"/>

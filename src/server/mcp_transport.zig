@@ -28,6 +28,7 @@ pub const max_resp: usize = 8 * 1024;
 /// Full HTTP request cap: frame plus headers.
 const max_req: usize = max_frame + 4096;
 const max_token: usize = 128;
+pub const max_token_len = max_token;
 /// Polls before an incomplete request is dropped (~10 s at 4 polls per tick).
 const max_client_polls: u32 = 800;
 
