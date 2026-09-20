@@ -77,6 +77,28 @@ pub fn wallNs() u64 {
     return @as(u64, @intCast(ts.sec)) *% std.time.ns_per_s +% @as(u64, @intCast(ts.nsec));
 }
 
+/// .NET `DateTime` ticks for Unix epoch 1970-01-01 00:00:00 UTC
+/// (100 ns since 0001-01-01). Matches LiteNetLib pong and signs.xml stamps.
+/// Do not use `std.time.epoch.clr`: that constant is two days off the CLR epoch.
+pub const dotnet_unix_epoch_ticks: i64 = 621_355_968_000_000_000;
+
+/// .NET `DateTime.UtcNow.Ticks` from the wall (or virtual) clock. LiteNetLib
+/// clients fold this into `_remoteDelta` / `RemoteUtcTime`; monoNs-scaled
+/// values look like year 0001 and corrupt that estimate.
+pub fn dotnetUtcTicks() i64 {
+    return @as(i64, @intCast(wallNs() / 100)) +% dotnet_unix_epoch_ticks;
+}
+
+/// `DateTime.ToBinary()` for a UTC instant at `unix_secs` (KickPlayerData.banUntil).
+/// Kind=Utc occupies bits 62..63; FromBinary on the client restores the stamp.
+pub fn unixSecondsToDateTimeBinaryUtc(unix_secs: i64) i64 {
+    const tick_delta = std.math.mul(i64, unix_secs, 10_000_000) catch std.math.maxInt(i64);
+    const ticks = std.math.add(i64, tick_delta, dotnet_unix_epoch_ticks) catch std.math.maxInt(i64);
+    // DateTime stores Kind in the top two bits; clear then set Utc (= 1).
+    const ticks_only = ticks & ~(@as(i64, 3) << 62);
+    return ticks_only | (@as(i64, 1) << 62);
+}
+
 /// Wall-clock "YYYY-MM-DD HH:MM:SS" stamp for log/audit lines. Virtual-clock
 /// aware (derives from virtual mono ns when enabled) so deterministic runs and
 /// tests stay seed-stable. Not on the hot path (bufPrint + epoch math).
@@ -179,4 +201,35 @@ test "wallNs is epoch-correlatable and virtual-clock deterministic" {
     try std.testing.expectEqual(@as(u64, 5_123_456_789), wallNs());
     disableVirtual();
     try std.testing.expect(wallNs() / std.time.ns_per_s >= 1_600_000_000);
+}
+
+test "dotnetUtcTicks is DateTime ticks from wall time, not mono" {
+    defer disableVirtual();
+    // 2026-02-27 13:43:31.0000000Z = 1772199811 s (signs.zig golden).
+    enableVirtual(1_772_199_811 * std.time.ns_per_s);
+    try std.testing.expectEqual(
+        @as(i64, 1_772_199_811 * 10_000_000) +% dotnet_unix_epoch_ticks,
+        dotnetUtcTicks(),
+    );
+    // Sub-second wall ns become 100 ns tick units.
+    enableVirtual(1_772_199_811 * std.time.ns_per_s + 2500);
+    try std.testing.expectEqual(
+        @as(i64, 1_772_199_811 * 10_000_000 + 25) +% dotnet_unix_epoch_ticks,
+        dotnetUtcTicks(),
+    );
+    // A mono-scaled stand-in (what the pong path used to emit) is nowhere near
+    // a real DateTime tick and must not be confused with this helper.
+    try std.testing.expect(dotnetUtcTicks() > 600_000_000_000_000_000);
+}
+
+test "unixSecondsToDateTimeBinaryUtc sets Utc kind bits for FromBinary" {
+    const secs: i64 = 1_772_199_811; // 2026-02-27 13:43:31Z
+    const bin = unixSecondsToDateTimeBinaryUtc(secs);
+    const kind = @as(u64, @bitCast(bin)) >> 62;
+    try std.testing.expectEqual(@as(u64, 1), kind); // DateTimeKind.Utc
+    const ticks = bin & ~(@as(i64, 3) << 62);
+    try std.testing.expectEqual(secs * 10_000_000 +% dotnet_unix_epoch_ticks, ticks);
+    // Saturates rather than wrapping on absurd far-future bans.
+    const sat = unixSecondsToDateTimeBinaryUtc(std.math.maxInt(i64));
+    try std.testing.expectEqual(@as(u64, 1), @as(u64, @bitCast(sat)) >> 62);
 }

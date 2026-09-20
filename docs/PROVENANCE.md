@@ -181,7 +181,7 @@ Coverage targets, all enforced by the scan:
 | File | B | Stock source (header-cited; R rows cite the RE doc) |
 |---|---|---|
 | `src/apm/metrics.zig` | Z | Monotonic counters and latency histograms for zdtd (not 7dtd-server-apm) |
-| `src/apm/profiler.zig` | Z | Scoped wall-clock sections for tick phases (zdtd-native; not 7dtd-server-apm) |
+| `src/apm/profiler.zig` | Z | Scoped monotonic sections for tick phases (zdtd-native; not 7dtd-server-apm) |
 | `src/apm/report.zig` | Z | Snapshot dump: human text or JSON lines for loadgen-side compare |
 | `src/apm/root.zig` | Z | zdtd-native metrics + profiling harness. Not 7dtd-server-apm (stock Mono). This is first-class instrumentation inside the Zig process |
 | `src/apm/tracy.zig` | Z | Optional Tracy client bindings, off by default. |
@@ -339,7 +339,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/webui.zig` | Z | Operator web UI HTTP listener (WU0–WU2: dashboard + console cmds). Loopback by default; shared secret required when enabled  The Modules partial lists the scanned modlets with per-mod enable/disable forms posting to the CSRF-gated `/api/modlet`, which persists the state and re-renders the partial (2026-09-13).|
 | `src/server/zdtd_config.zig` | Z | zdtd.toml: operator tunables (Bucket B), not stock serverconfig. Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml > |
 | `src/util/arena.zig` | Z | Lazy/eager scratch-arena helpers shared by asset table loaders. |
-| `src/util/clock.zig` | Z | Monotonic nanoseconds and best-effort sleep. |
+| `src/util/clock.zig` | Z | Monotonic nanoseconds, wall seconds/ns, .NET UtcNow.Ticks / DateTime.ToBinary helpers, and best-effort sleep. |
 | `src/util/io_fs.zig` | Z | Thin wrappers around Zig 0.16 `std.Io` for one-shot FS ops. Ordinary file/dir work goes through here or `std.Io` directly, never |
 | `src/util/log.zig` | Z | Leveled logging (debug/info/warn/err/crit on the stock Log.Level 0..4 ladder). |
 | `src/util/parallel.zig` | Z | Parallel-for over dense slot ranges with a persistent worker pool. Uses Zig 0.16 `std.Io` mutex/condition (no raw syscalls, no spawn-per-call) |
@@ -494,7 +494,7 @@ field-by-field provenance.
 
 | Constant | Value | B | Stock source |
 |---|---|:-:|---|
-| `util/sim.zig` `challenge_mix` | `0xC4A11E46_E5EED` | Z | Domain tag XOR'd into `fillChallenge` so DST challenge streams stay distinct from other `initFromU64` call sites that share the run seed; zdtd-owned (not a stock Guid mix) |
+| `util/clock.zig` `dotnet_unix_epoch_ticks` | `621355968000000000` | R | .NET DateTime ticks at Unix epoch (LiteNetLib pong UtcNow.Ticks; KickPlayerData.banUntil via ToBinary). Not `std.time.epoch.clr` (two days off). |
 | `assets/gamestages.zig ticks_per_day` | 24000 | A | Stock sim day length (24000 ticks @ 20 TPS); gamestages.xml stage math uses it |
 | `ecs/electric.zig default_trigger_pulse_s` | 0.5 | R | Trigger pulse width (RE: PowerItemTypes; tile-entities-power.md) |
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |

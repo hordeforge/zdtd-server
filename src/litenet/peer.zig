@@ -628,9 +628,10 @@ pub const Peer = struct {
                     pong[0] = packet.makeByte0(.pong, self.conn_num);
                     pong[1] = raw[1];
                     pong[2] = raw[2];
-                    // Ticks not used for our RTT; client only needs a valid 11-byte pong.
-                    const ticks: i64 = @intCast(clock.monoNs() / 100); // 100ns units ≈ DateTime ticks scale
-                    std.mem.writeInt(i64, pong[3..][0..8], ticks, .little);
+                    // LiteNetLib ProcessPong: RTT uses a local Stopwatch, but
+                    // `_remoteDelta` / `RemoteUtcTime` need DateTime.UtcNow.Ticks.
+                    // monoNs/100 reads as year-0001 and corrupts that estimate.
+                    std.mem.writeInt(i64, pong[3..][0..8], clock.dotnetUtcTicks(), .little);
                     try self.sendRaw(sock, &pong);
                 }
                 return null;

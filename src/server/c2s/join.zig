@@ -183,12 +183,39 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // legacy bans.zsv rows and sessions without a platform identity.
         const wall_now = clock.wallSeconds();
         var banned = false;
+        var ban_idx: ?usize = null;
         if (c.puid_primary.get()) |pid| {
-            banned = self.ban_list.bannedId(pid.platform, pid.id, wall_now);
+            if (self.ban_list.bannedId(pid.platform, pid.id, wall_now)) {
+                banned = true;
+                ban_idx = self.ban_list.findId(pid.platform, pid.id);
+            }
         }
-        if (!banned and c.name_len != 0) banned = self.ban_list.banned(c.name[0..c.name_len], wall_now);
+        if (!banned and c.name_len != 0) {
+            if (self.ban_list.banned(c.name[0..c.name_len], wall_now)) {
+                banned = true;
+                ban_idx = self.ban_list.find(c.name[0..c.name_len]);
+            }
+        }
         if (banned) {
             self.harness.counters.inc(.join_fail);
+            // Stock always sends PlayerDenied before the drop so the client
+            // shows the ban UI (banUntil via DateTime.ToBinary) instead of a
+            // bare timeout (scenarios.zig guard-kick note).
+            if (c.peer) |p| {
+                var until_bin: i64 = 0;
+                var reason: []const u8 = "";
+                if (ban_idx) |i| {
+                    const e = &self.ban_list.entries[i];
+                    until_bin = clock.unixSecondsToDateTimeBinaryUtc(e.expires_unix);
+                    reason = e.reason.slice();
+                }
+                // i32+i32+i64 + 7-bit len + max_reason
+                var denied: [4 + 4 + 8 + 5 + admin_cmds.max_reason]u8 = undefined;
+                if (packages.buildPlayerDeniedBody(&denied, .banned, 0, until_bin, reason)) |body2| {
+                    self.sendGame(p, "NetPackagePlayerDenied", body2) catch
+                        self.harness.counters.inc(.net_send_errors);
+                } else |_| self.harness.counters.inc(.encode_errors);
+            }
             var ts: [19]u8 = undefined;
             std.debug.print(
                 "zdtd: {s} login identity ban slot={d} name_len={d} local_id={d}\n",

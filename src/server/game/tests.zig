@@ -3284,11 +3284,22 @@ test "platform-id ban rejects a rejoin with the same identity" {
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClientAs(&cap, id);
     const now = clock.wallSeconds();
-    try std.testing.expect(g.ban_list.addId("Steam", "76561198000000000", "X", now + 3600, "test"));
+    const until = now + 3600;
+    try std.testing.expect(g.ban_list.addId("Steam", "76561198000000000", "X", until, "test"));
     var cap2: ln_peer.Capture = .{};
     // Same platform id is rejected at the login gate (identity-ban), even
     // though the harness login name is the generic "Bot".
     try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap2, id));
+    // Client sees PlayerDenied with EKickReason.Banned and banUntil ToBinary,
+    // not a bare drop that looks like a network timeout.
+    const denied_id = packages.idOf("NetPackagePlayerDenied") orelse return error.TestUnexpectedResult;
+    const body = cap2.findPkgId(denied_id) orelse return error.TestUnexpectedResult;
+    var r: wire_binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@intFromEnum(packages.KickReason.banned), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32());
+    try std.testing.expectEqual(clock.unixSecondsToDateTimeBinaryUtc(until), try r.readI64());
+    var reason_buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("test", try r.readString(&reason_buf));
     // Name-keyed bans still gate the name-only path (no platform session).
     try std.testing.expect(g.ban_list.add("Bot", now + 3600, "test"));
     try std.testing.expectError(error.JoinFailed, g.attachJoinedClient(&cap2));
