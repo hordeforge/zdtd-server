@@ -160,21 +160,18 @@ pub const Flusher = struct {
     /// Drain every queued write, then join the writer. Joined, never detached:
     /// a detached writer would lose queued chunks at process exit. Terminal:
     /// later `submit` calls return `error.Shutdown` and fall back to sync.
+    /// Always takes `mu` before deciding "never started", so a racing `submit`
+    /// cannot spawn a writer after this path returns without joining.
     pub fn deinit(self: *Flusher) void {
         if (!available()) return;
-        if (!self.started.load(.acquire) and !self.shutdown) {
-            // Never spawned: nothing queued, nothing to join.
-            self.shutdown = true;
-            std.debug.assert(self.n == 0);
-            return;
-        }
         const io = parallel.poolIo();
         self.mu.lockUncancelable(io);
         self.shutdown = true;
+        const t = self.thread;
         self.work_cv.broadcast(io);
         self.mu.unlock(io);
-        if (self.thread) |t| {
-            t.join();
+        if (t) |thread| {
+            thread.join();
             self.thread = null;
         }
         // Writer exits only after the ring is empty; assert rather than leak.

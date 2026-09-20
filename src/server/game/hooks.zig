@@ -480,15 +480,11 @@ pub fn heldItemLight(ctx: ?*anyopaque, item_id: u16) f32 {
     return 0;
 }
 
-/// Block-solid probe for the AI sense LOS ray (stock CanSee's Voxel.Raycast).
-/// A missing/erroring chunk counts as clear (nothing to hide behind yet).
-/// Runs on parallel AI/turret workers (LOS, movement probes, gravity), so the
-/// world probe holds `terrain_mu`: `isSolidWorld` reaches `World.getOrCreate`,
-/// which mutates shared state (chunk-map insert/evict/rehash, touch_seq) and
 /// `blocks.xml` Collide `movement` verb for a block id: stock
 /// `Block.IsCollideMovement`. Wired onto `World.movement_solid_fn`, so the
 /// block id is resolved by the store and the table stays out of `world/`. An id
-/// the table does not know keeps the pre-parse behaviour (solid).
+/// the table does not know keeps the pre-parse behaviour (solid). Id-only: no
+/// chunk map access, safe from parallel AI workers without `terrain_mu`.
 pub fn blockMovementSolid(ctx: ?*anyopaque, id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.blocks.byId(id)) |d| return (d.collide & assets_blocks.collide_movement) != 0;
@@ -539,15 +535,19 @@ pub fn blockMobSpawnGround(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     return true;
 }
 
-/// Coordinate-level sight probe for the AI/voxel LOS paths: the same
-/// `sightBlockedWorld` the bot gate uses, through a function pointer so
-/// `ecs/systems.zig` does not need the store's chunk machinery.
+/// Coordinate-level sight probe for the AI CanSee LOS ray (stock
+/// `Block.IsSeeThrough` / Voxel.Raycast). Wired as `sim.sight_fn` and called
+/// from parallel AI workers, so it holds `terrain_mu`: `sightBlockedWorld`
+/// reaches `World.getOrCreate` (chunk-map insert/evict/rehash, touch_seq).
 pub fn blockSightBlockedAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
+    g.terrain_mu.lock();
+    defer g.terrain_mu.unlock();
     return g.world.sightBlockedWorld(x, y, z);
 }
 
-/// allocates from the non-thread-safe World allocator.
+/// Block-solid probe for AI movement/gravity and the solid_fn LOS fallback.
+/// Same locking contract as `blockSightBlockedAt` / `blockIsWaterAt`.
 pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     g.terrain_mu.lock();

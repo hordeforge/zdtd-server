@@ -756,6 +756,8 @@ pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
 /// when a sight-blocking block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
 /// (treated as clear) so a bot is not permanently silenced across a chunk
 /// border; the guest brain already gates the shot on its own accuracy rolls.
+/// Holds `terrain_mu`: `sightBlockedWorld` reaches `getOrCreate` like the AI
+/// sight hook (`blockSightBlockedAt`).
 pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
     const dx = to[0] - from[0];
     const dy = to[1] - from[1];
@@ -764,6 +766,8 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
     if (dist < 0.5) return true;
     const step: f32 = 0.5;
     const n = @as(usize, @floor(dist / step));
+    self.terrain_mu.lock();
+    defer self.terrain_mu.unlock();
     var i: usize = 1;
     while (i <= n) : (i += 1) {
         const t = (@as(f32, @floatFromInt(i)) * step) / dist;
@@ -791,10 +795,13 @@ pub fn groundHeight(self: *Game, x: i32, z: i32) f32 {
 /// True when a solid block occupies the standing cells at `p`: the cell the
 /// feet sit in and the one above (head). Chunk-probe errors fail OPEN (treated
 /// as clear) so a cover search is not blocked by an unloaded chunk border.
+/// Holds `terrain_mu` for the same getOrCreate contract as `groundHeight`.
 fn coverSolidAt(self: *Game, p: [3]f32) bool {
     const ix: i32 = @floor(p[0]);
     const iy: i32 = @floor(p[1]);
     const iz: i32 = @floor(p[2]);
+    self.terrain_mu.lock();
+    defer self.terrain_mu.unlock();
     if (self.world.isSolidWorld(ix, iy, iz) catch false) return true;
     if (self.world.isSolidWorld(ix, iy + 1, iz) catch false) return true;
     return false;

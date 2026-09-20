@@ -1872,7 +1872,7 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
     try std.testing.expectEqual(before + 1, g.world.chunks.count());
 }
 
-test "parallel solid/water probes share one world without corruption" {
+test "parallel solid/water/sight probes share one world without corruption" {
     if (@import("builtin").single_threaded) return error.SkipZigTest;
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_hooks_par", 0, .{});
     defer {
@@ -1882,7 +1882,8 @@ test "parallel solid/water probes share one world without corruption" {
     // The port-0 offline Game pins DST serial scheduling; this test needs real
     // fan-out so several workers enter the chunk-generating probes at once.
     // (Pre-2026-08 audit these hooks reached World.getOrCreate unlocked:
-    // concurrent getOrPut/rehash on the chunk map plus non-atomic touch_seq.)
+    // concurrent getOrPut/rehash on the chunk map plus non-atomic touch_seq.
+    // sight_fn had the same hole until it took terrain_mu like solid/water.)
     defer parallel.setForceSerial(false);
     parallel.setForceSerial(false);
     const Probe = struct {
@@ -1890,6 +1891,7 @@ test "parallel solid/water probes share one world without corruption" {
         fn work(ctx: @This(), begin: usize, end: usize) void {
             const solid = ctx.g.sim.solid_fn.?;
             const water = ctx.g.sim.water_fn.?;
+            const sight = ctx.g.sim.sight_fn.?;
             var i = begin;
             while (i < end) : (i += 1) {
                 // Interleave coordinates across a 128x128 block area (64
@@ -1898,6 +1900,7 @@ test "parallel solid/water probes share one world without corruption" {
                 const z: i32 = @as(i32, @intCast((i / 128) % 128)) - 64;
                 _ = solid(ctx.g, x, 61, z);
                 _ = water(ctx.g, x, 60, z);
+                _ = sight(ctx.g, x, 62, z);
             }
         }
     };
@@ -1906,6 +1909,8 @@ test "parallel solid/water probes share one world without corruption" {
     try std.testing.expect(g.world.chunks.count() >= 64);
     const s0 = g.sim.solid_fn.?(g, 3, 61, 3);
     try std.testing.expectEqual(s0, g.sim.solid_fn.?(g, 3, 61, 3));
+    const sight0 = g.sim.sight_fn.?(g, 3, 62, 3);
+    try std.testing.expectEqual(sight0, g.sim.sight_fn.?(g, 3, 62, 3));
 }
 
 test "deco suppression follows the prefab AllowDecorations property" {
