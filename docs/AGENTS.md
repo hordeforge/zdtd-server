@@ -67,6 +67,8 @@ STATUS.md.
 | `scripts/gen_provenance.py` | `docs/provenance.html` is fresh | `make check` |
 | `scripts/lint-architecture.sh` | package edges and `root.zig` barrel coverage | `make lint` |
 | `scripts/lint-webui.sh` | webui TypeScript and page freshness | `make lint` |
+| `scripts/lint-html.sh` | webui HTML/CSS (vnu) | `make lint` |
+| `scripts/lint-plugins.sh` | committed plugin `.wasm` matches a fresh rebuild | `make lint` |
 
 ## Slop checklist
 

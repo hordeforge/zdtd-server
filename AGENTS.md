@@ -7,15 +7,16 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 | | |
 |---|---|
 | Workspace | [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md) |
-| Architecture | [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) |
+| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (founding: [`ZIG_CLONE.md`](docs/ZIG_CLONE.md)) |
 | Wire | [`../7dtd-engine-research/docs/network/protocol.md`](../7dtd-engine-research/docs/network/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
-| Gaps / plan | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
+| Gaps / tasks | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/WORK_PLAN.md`](docs/WORK_PLAN.md) |
+| Phases | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (M7+) |
 | Backlog | [`TODO.md`](TODO.md) |
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
 
-Target: **V3.2.0 b10** (Mono) wire, **20 TPS** (50 ms) tick. Use the exact Zig version in [`.zigversion`](.zigversion), not any 0.16+ compiler; `make release-check` enforces the pin. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
+Target: **V3.2.0 b10** (Mono) wire, **20 TPS** (50 ms) tick. Use the exact Zig version in [`.zigversion`](.zigversion) (currently 0.16.0); `make release-check` enforces the pin. Do not float past that pin. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
 
 ## Principles
 
@@ -49,7 +50,7 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 
 1. **Zig only** for server code. Wire facts from `../7dtd-engine-research/docs` + loadgen goldens.
 2. **No game DLL or bulk IL** in this repo.
-3. **Milestones** follow ZIG_CLONE then `IMPLEMENTATION_PLAN` (M7+). Don't skip join/terrain/inv fidelity for AI/scale.
+3. **Milestones** follow ZIG_CLONE then `IMPLEMENTATION_PLAN` (M7+); ranked next work is `WORK_PLAN`. Don't skip join/terrain/inv fidelity for AI/scale.
 4. **Package IDs dynamic.** Resolve via negotiated name→id map. Never treat numeric id as stable across versions (fixtures may pin maps for tests).
 5. **Validate with loadgen + stock client + zdtd apm.** Never require 7dtd-server-apm.
 6. **Instrument hot paths** (net, sim, interest, chunk stream) with `apm` as they land.
@@ -57,8 +58,8 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 8. Prefer **SoA + serialize-once interest** over stock Mono shapes.
 9. **Server owns missing features.** Fix stock-client gaps (chunks, deco, signs, inv direction, spawn/UI unlock, entity state) here with correct wire/sim. Never make `7dtd-fastconnect`/client mods invent world data, skip server steps, or suppress protocol errors. Client tooling is join/automation only. Workspace rule 10.
 10. **Stock fidelity: missing > fake.** No invented terrain shells, fake FX, or incomplete journal blobs failing stock `Read`.
-11. **New tunable = struct field, not parse arm.** `util/toml_bind.zig` binds `zdtd.toml`/mode packs by walking the dest struct - adding a field auto-configures/validates/documents it. Never hand-write `std.mem.eql(u8, key, ...)` chains (ADR 0021). Sim params live in `ecs/rules.zig`; a `Rules` value is a **floor** - per-entity stock data wins where present.
-12. **Markup is not a string literal.** Webui pages are `.html` under `src/server/webui/` (CSS inline, JS compiled from TypeScript) embedded via `@embedFile`. Nothing read from disk at runtime. The dashboard is a Preact app (ADR 0040): JS is authored as `.tsx`/`.ts` in `src/server/webui/ts/`, type-checked by tsc and bundled by `bun build` into the committed pages by `scripts/build-webui-ts.sh` (pinned preact staged in a cache project by `scripts/webui-ts-project.sh`; `make webui-ts`); the shared design tokens and sign-in CSS live once in `src/server/webui/shared.css` and are spliced into the pages by the same script, so edit that file, not a page's copy. `scripts/lint-webui.sh` (tsc `--noEmit` + oxlint with the anti-slop + strict rule set in `.oxlintrc.jsonc`, the dmmulroy/anti-slop plugin vendored as source at a pinned SHA fetched into the cache, plus a page-freshness gate and a shared-token usage gate) and `scripts/lint-html.sh` (vnu, `vnu-filter.txt`) are both part of `make lint`.
+11. **New tunable = struct field, not parse arm.** `util/toml_bind.zig` binds `zdtd.toml`/preset packs by walking the dest struct - adding a field auto-configures/validates/documents it. Never hand-write `std.mem.eql(u8, key, ...)` chains (ADR 0021). Sim params live in `ecs/rules.zig`; a `Rules` value is a **floor** - per-entity stock data wins where present.
+12. **Markup is not a string literal.** Webui `.html` under `src/server/webui/` is embedded via `@embedFile` (never runtime disk, never Zig string literals). Dashboard is Preact (ADR 0040): author `.tsx`/`.ts` in `src/server/webui/ts/`, rebuild with `make webui-ts`; edit tokens in `shared.css`, not page copies. `scripts/lint-webui.sh` + `scripts/lint-html.sh` are part of `make lint`. Details: [`docs/WEBUI.md`](docs/WEBUI.md).
 13. **Name for what it does.** Don't call a streaming throttle `world_enabled`. Confusing names are defects.
 14. **One stock package shape → one builder.** No second "almost stock" encoder.
 15. **Don't hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md). Every src file needs a provenance row in [`docs/PROVENANCE.md`](docs/PROVENANCE.md) (bucket A stock-data / R RE-cited / Z zdtd-owned + source); `tools/provenance_scan.py` in `make check` fails new files without one - add the row with the change. Stock `Data/Config`, prefabs, DTM, TTS, XML catalogs, etc. must be **read from assets** (runtime `game-dir`/`assets/*` or **comptime** embed/parse generating tables).
@@ -81,7 +82,7 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 24. **Fail closed on encode.** If body can't be built correctly (missing catalog entry, buffer too small, unknown TE), omit or send stock empty/error form. Never truncate mid-field, zero-pad to guessed size, or desync `BinaryReader`.
 25. **Keep `make check` green.** No "fix later" or skipped asserts. New wire/sim → unit or `scenarios.zig` test if non-trivial; join/spawn/chunk/inv → loadgen smoke when practical.
 26. **Stdlib, not OS guts.** Use APIs from the pinned Zig toolchain: `std.Io`/`Dir`/`File`/`Threaded`, `std.mem`, `std.fmt`, `std.Thread` (via `util/parallel`), etc. No OOP abstract classes - **stdlib interfaces** (`std.Io` vtable) + thin helpers (`util/io_fs.zig`) are idiomatic. Don't open-code `std.os.linux.*`, raw `std.posix` file loops, or `std.c` for ordinary FS - use `util/io_fs`/`std.Io`. OS-specific socket/clock/sysinfo calls confined to `litenet/udp_socket.zig`, `util/tcp_listen.zig`, `util/clock.zig`, `util/sys_metrics.zig`. Optional webui HTTP body via `std.http.Server` (see `docs/STD_ABSTRACTIONS.md`). Don't shell out when in-process API exists (workspace Native APIs rule). Follow [Zig Zen](https://ziglang.org/documentation/master/#Zen).
-27. **Typed tools > shell.** Use `ast-grep` for structural edits, `ripgrep` (`rg`) for text search, `semcode` for semantic/cross-file search over bare `sed`/`grep`. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware search.
+27. **Typed tools > shell.** Use `ast-grep` for structural edits and `rg` for text search over bare `sed`/`grep`. Keep `Read`/`Glob`/`Grep` wrappers for workspace-aware search.
 28. **Bots stay Wasm plugins (ADR 0026).** All bot brain logic - target selection, aim, movement and combat decisions - lives in the `mods/fps_bot` guest; the host `BotManager` stays a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs + host policy knobs). Never port brain decisions into Zig, and never let the host drive bots without the module.
 29. **Wasm-first for behavioral add-ons (ADR 0020).** Anything that is *technically* expressible over the plugin boundary - `zdtd.sense` / `zdtd.queue` / `zdtd.query` + the hooks and verdicts - ships as a Wasm plugin: bots, chat commands/filters, announcements and kill-feeds, event observers, custom verdicts, admin tooling, reward scaling. Native Zig is for what the boundary *cannot* express: wire encode/emit, LiteNet, interest/replication and the chunk stream, direct sim mutation (ECS authority, inventory, blocks, quests, trading), world store and persistence, config loading, the plugin runtime, APM instrumentation. "It is core" is not a reason to keep something native; prove that the boundary cannot carry it. When a feature needs an affordance the boundary lacks, extend the boundary (an ADR-worthy decision) rather than adding native behavior.
 30. **Spatiotemporal composability for plugins (Cordis paper, adopted 2026-08-20).** Plugins are runtime components, so their lifecycle and effects must be bounded the way the paper's fibers are: (a) **reloadable** - a module can be disposed and reinstantiated in place without a server restart (`plugin reload <name>`; dispose runs `on_shutdown`, reclaims fuel/memory, re-arms the budget, re-activates `on_enable`); (b) **revertible effects** - every `zdtd.queue` command is attributed to its issuing plugin (1-based slot src) and a disabled/trapped module's still-pending effects are withdrawn before the drain; never let a broken module's queued effects execute; (c) **declarative dependencies** - modules export `_zdtd_requires` naming the hooks + host verbs they need, validated fail-closed at load (a typo'd hook must be a loud load rejection, not a silent never-fire). When adding a plugin affordance, keep it compatible with all three; review plugin-runtime changes against `docs/prompts/plugin-composability-review.md`.
@@ -129,7 +130,7 @@ Join/spawn/chunk/inv changes: loadgen smoke **and** stock client (EAC off) when 
 src/main.zig           CLI, DebugAllocator, construct Game, run loop
 src/protocol.zig       wire constants (challenge, tick rate; package ids in wire/)
 src/server/game.zig    join SM; delegating façade - most paths in game/*, c2s/*
-src/server/game/*      per-domain Game helpers (net, tick, world, player, join) - each takes *Game
+src/server/game/*      per-domain Game helpers (e.g. net, tick, world, player, join, chunk_stream, trader) - each takes *Game
 src/server/c2s/*       C2S handlers by domain (join, move, blocks, inv, quest, misc); each exposes handle(*Game,*Client,*Peer,name,body) anyerror!bool, routed by dispatch.zig
 src/server/*           admin TCP, GSI, config, persistence, scenarios, webui
 src/ecs/*              SoA world, systems, inventory, quests, interest
@@ -141,7 +142,7 @@ src/apm/*              counters, section timers, dumps (not 7dtd-server-apm)
 src/plugin/*           Wasm plugin host, hook table, budgets (ADR 0020)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
-src/ecs/rules.zig      sim rule params, overlaid by mode packs (ADR 0021)
+src/ecs/rules.zig      sim rule params, overlaid by preset packs (ADR 0021)
 src/server/webui/      webui markup, @embedFile'd (never Zig string literal); linted by scripts/lint-webui.sh (JS) + lint-html.sh (HTML/CSS)
 assets/fixtures/       offline XML and .wasm fixtures for tests
 presets/               preset packs (`--preset <name>`; `--mode` is a deprecated alias)

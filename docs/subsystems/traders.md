@@ -65,9 +65,9 @@ Trader money resolves through one helper: a trader with a nonzero `wallet_defaul
 
 ## The traders.xml roll
 
-`TraderTable` is the parsed catalog: groups, per-trader `trader_info` rows, the `traderAlways` fallback refs, and the root economy attributes (`buy_markup`, `sell_markdown`, `quality_mod`, `quest_tier_mod`, `currency_item`) (src/assets/traders.zig:134-158). `loadFromPath` parses it from a comment-stripped file and fails with `OpenFailed` when there are no groups or no `trader_info` rows (src/assets/traders.zig:436, :475, :561).
+`TraderTable` is the parsed catalog: groups, per-trader `trader_info` rows, the `traderAlways` fallback refs, and the root economy attributes (`buy_markup`, `sell_markdown`, `quality_mod`, `quest_tier_mod`, `currency_item`) (src/assets/traders.zig:137-158). `loadFromPath` parses it from a comment-stripped file and fails with `OpenFailed` when there are no groups or no `trader_info` rows (src/assets/traders.zig:439, :478, :564).
 
-The per-trader row and one item reference (src/assets/traders.zig:29 and :113):
+The per-trader row and one item reference (src/assets/traders.zig:30 and :114):
 
 ```zig
 pub const ItemRef = struct {
@@ -106,7 +106,9 @@ pub const TraderInfo = struct {
     player_owned: bool = false,
     rentable: bool = false,
     rent_cost: i32 = 0,
-    rent_time: i32 = 0,
+    /// Stock default when `rent_time` is omitted (traders.xml rentable rows
+    /// write 30; Match stock `TraderInfo` ctor default).
+    rent_time: i32 = 30,
     /// Union of every `<trader_items>` block, in XML order (SPECIALTY first).
     refs: []const ItemRef = &.{},
 };
@@ -132,7 +134,7 @@ The price assignment (src/server/game/trader.zig:249-257):
         };
 ```
 
-`econ` is `items.xml EconomicValue`, `bundle` is `EconomicBundleSize` with a floor of 1, and `sell_scale` is `EconomicSellScale` (src/assets/items.zig:224, :235, :239). The quality lerp `qmod` is `qualityPriceMod(iqmin, iqmax, quality)`, a lerp from the minimum multiplier at quality 1 to the maximum at quality 6 (src/ecs/systems.zig:1441-1445). The per-item `TraderQualityMod` pair wins over the trader's root `quality_mod` when the item declares one (src/server/game/trader.zig:245-248; item fields at src/assets/items.zig:230-231). The buy side multiplies `econ` by the resolved buy markup and the sell side by `sell_scale * sell_markup`. When no `trader_info` override and no root row exist (the offline builtin catalog), the defaults are `default_buy_markup = 1.0` and `default_sell_markdown = 0.02` (src/assets/traders.zig:107-108, used at src/server/game/trader.zig:214-217).
+`econ` is `items.xml EconomicValue`, `bundle` is `EconomicBundleSize` with a floor of 1, and `sell_scale` is `EconomicSellScale` (src/assets/items.zig:224, :235, :239). The quality lerp `qmod` is `qualityPriceMod(iqmin, iqmax, quality)`, a lerp from the minimum multiplier at quality 1 to the maximum at quality 6 (src/ecs/systems.zig:1441-1445). The per-item `TraderQualityMod` pair wins over the trader's root `quality_mod` when the item declares one (src/server/game/trader.zig:245-248; item fields at src/assets/items.zig:230-231). The buy side multiplies `econ` by the resolved buy markup and the sell side by `sell_scale * sell_markup`. When no `trader_info` override and no root row exist (the offline builtin catalog), the defaults are `default_buy_markup = 1.0` and `default_sell_markdown = 0.02` (src/assets/traders.zig:108-109, used at src/server/game/trader.zig:214-217).
 
 Stock quality rules are shared by both roll sites: `Game.qualityPolicy` is built from `[rules.trader]` plus the items table so neither the trader stock nor the vending store carries private defaults (src/server/game/trader.zig:131-144).
 
