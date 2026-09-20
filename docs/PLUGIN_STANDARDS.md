@@ -45,7 +45,7 @@ sense of "core" (shipped in-tree, Zig source, built by
 | manifest | yes | `manifest.toml` (fixed name, discovered automatically; the manifest, not a "mod file") |
 | committed binary | yes (wasm plugins) | `<module>.wasm` - exactly the directory name + `.wasm` |
 | root source | yes (core plugins are Zig) | `<module>.zig` - exactly the directory name |
-| build wrapper | yes (Zig plugins) | `main.zig` |
+| build wrapper | yes (Zig plugins) | shared `plugins/core_main.zig` (core plugins; never copied per plugin) |
 | config | no | `config.toml` (fixed name; the module's own default config, served raw via the `zdtd.config` import) |
 | readme | recommended | `README.md` (what it does, its config keys, how to enable) |
 | icon | no | `icon.png` (fixed name; metadata only - the host never loads or renders it). `manifest.toml` `icon = "icon.png"` (relative path, same validation as `preset`) |

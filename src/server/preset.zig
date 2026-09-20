@@ -92,7 +92,6 @@ pub const Preset = struct {
     /// infinite on-the-fly proc terrain. Precedence: CLI --worldgen-seed >
     /// zdtd.toml [worldgen] seed > this pack value (resolved in main.zig).
     worldgen_seed: ?u64 = null,
-    enable_sample_plugin: ?bool = null,
     /// Sim rule overlay (ADR 0021 decision 3): `[rules.combat]` etc. merged
     /// into World.rules by main.zig before the zdtd.toml overlay.
     rules: rules_mod.RulesOverlay = .{},
@@ -118,7 +117,6 @@ pub const default_pack_toml =
     \\name = "default"
     \\max_spawned_zombies = 64
     \\blood_moon_frequency = 7
-    \\enable_sample_plugin = false
 ;
 
 /// True when name is a single path segment: [A-Za-z0-9_]{1,64}, no dots/slashes.
@@ -202,7 +200,6 @@ pub fn applyToInitOptions(p: *const Preset, opts: anytype) void {
     if (p.land_claim_offline_durability_modifier) |v| opts.land_claim_offline_durability_modifier = v;
     if (p.land_claim_expiry_days) |v| opts.land_claim_expiry_days = v;
     if (p.loot_respawn_days) |v| opts.loot_respawn_days = v;
-    if (p.enable_sample_plugin) |v| opts.enable_sample_plugin = v;
 }
 
 test "parse default pack" {
@@ -211,7 +208,6 @@ test "parse default pack" {
     try std.testing.expectEqualStrings("default", p.name);
     try std.testing.expectEqual(@as(u16, 64), p.max_spawned_zombies.?);
     try std.testing.expectEqual(@as(u8, 7), p.blood_moon_frequency.?);
-    try std.testing.expectEqual(false, p.enable_sample_plugin.?);
 }
 
 /// Mirror of the server init-options shape applyToInitOptions writes into.
@@ -242,7 +238,6 @@ const TestOpts = struct {
     land_claim_offline_durability_modifier: u16 = 4,
     land_claim_expiry_days: u16 = 3,
     loot_respawn_days: u16 = 7,
-    enable_sample_plugin: bool = false,
     wire_chunks: bool = true,
 };
 
@@ -250,13 +245,11 @@ test "applyToInitOptions overrides only set fields" {
     var o: TestOpts = .{};
     var p = try parse(std.testing.allocator,
         \\max_spawned_zombies = 32
-        \\enable_sample_plugin = true
     );
     defer p.deinit();
     applyToInitOptions(&p, &o);
     try std.testing.expectEqual(@as(u16, 32), o.max_spawned_zombies);
     try std.testing.expectEqual(@as(u8, 3), o.blood_moon_frequency);
-    try std.testing.expectEqual(true, o.enable_sample_plugin);
     try std.testing.expectEqual(true, o.wire_chunks);
 }
 
@@ -369,12 +362,9 @@ test "parse bloodmoon_frequency alias and sections" {
     var p = try parse(std.testing.allocator,
         \\[gameplay]
         \\bloodmoon_frequency = 5
-        \\[plugin]
-        \\enable_sample_plugin = false
     );
     defer p.deinit();
     try std.testing.expectEqual(@as(u8, 5), p.blood_moon_frequency.?);
-    try std.testing.expectEqual(false, p.enable_sample_plugin.?);
 }
 
 test "parse rejects unknown and malformed preset settings" {

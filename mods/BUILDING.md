@@ -29,17 +29,18 @@ without touching the tree.
 | File | Role |
 |---|---|
 | `<name>.zig` | plugin root: hook exports (`on_*`), optional `_zdtd_requires` |
-| `main.zig` | build wrapper: comptime-imports the root, exports `_start` |
 | `<name>.wasm` | committed build output (do not edit) |
 | `manifest.toml` | manifest (naming/format standards in PLUGIN_STANDARDS.md) |
+| `plugins/core_main.zig` | shared build wrapper for every `core_*` plugin |
 
 ## Why the wrapper
 
 `zig build-exe` requires an entry point even for freestanding targets, but the
 plugin ABI has none - zwasm runs the start section only when the module
-declares one, which ours never do. So each plugin has a two-line wrapper that
-comptime-references the real module graph and exports an `_start` that is
-never invoked.
+declares one, which ours never do. So every core plugin builds against the one
+`core_main.zig` wrapper (referenced for the module as a whole, not copied per
+plugin) that comptime-references the real module graph and exports an `_start`
+that is never invoked.
 
 ## Build recipe (what the script does per plugin)
 
@@ -47,7 +48,7 @@ never invoked.
 zig build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
   --name <name> \
   --dep plugin_common --dep plugin_root \
-  -Mroot=plugins/<name>/main.zig \
+  -Mroot=plugins/core_main.zig \
   --dep plugin_common -Mplugin_root=plugins/<name>/<name>.zig \
   -Mplugin_common=mods/plugin_common.zig
 mv <name>.wasm plugins/<name>/<name>.wasm

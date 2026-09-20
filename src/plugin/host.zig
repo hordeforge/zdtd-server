@@ -3,7 +3,6 @@
 
 const std = @import("std");
 const api = @import("api.zig");
-const sample_hello = @import("sample_hello.zig");
 
 pub const max_plugins: usize = 8;
 
@@ -12,8 +11,6 @@ pub const PluginHost = struct {
     n: usize = 0,
     enabled: [max_plugins]bool = .{false} ** max_plugins,
     view: api.Host = .{},
-    /// When true, register in-tree sample_hello at enableStaticDefaults.
-    sample_enabled: bool = true,
 
     pub fn register(self: *PluginHost, plugin: *const api.PluginVTable) bool {
         if (self.n >= max_plugins) return false;
@@ -27,14 +24,6 @@ pub const PluginHost = struct {
         self.enabled[self.n] = false;
         self.n += 1;
         return true;
-    }
-
-    /// Register built-in static samples (Debug-friendly, zero cost when hooks null).
-    pub fn enableStaticDefaults(self: *PluginHost) void {
-        if (self.sample_enabled) {
-            _ = self.register(&sample_hello.vtable);
-        }
-        self.enableAll();
     }
 
     pub fn enableAll(self: *PluginHost) void {
@@ -318,23 +307,8 @@ pub const PluginHost = struct {
     }
 };
 
-test "host registers sample and enables once" {
-    var h: PluginHost = .{};
-    h.enableStaticDefaults();
-    try std.testing.expectEqual(@as(usize, 1), h.count());
-    try std.testing.expectEqual(@as(usize, 1), h.enabledCount());
-    // Second enableAll is a no-op for already-enabled slots.
-    h.enableAll();
-    try std.testing.expectEqual(@as(usize, 1), h.enabledCount());
-    h.setTick(42);
-    h.onTick(); // sample has null on_tick
-    h.playerJoin(0, 100); // sample has null on_player_join
-    h.shutdown();
-    try std.testing.expectEqual(@as(usize, 0), h.enabledCount());
-}
-
 test "host rejects duplicate and caps" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     const p: api.PluginVTable = .{ .name = "a" };
     try std.testing.expect(h.register(&p));
     try std.testing.expect(!h.register(&p));
@@ -352,7 +326,7 @@ test "host rejects duplicate and caps" {
 }
 
 test "host chat filter hook first handler wins and suppress" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     const p1: api.PluginVTable = .{
         .name = "c1",
         .on_chat = &struct {
@@ -385,7 +359,7 @@ test "host chat filter hook first handler wins and suppress" {
 }
 
 test "host admin command hook first handler wins" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     const p1: api.PluginVTable = .{
         .name = "p1",
         .on_admin_command = &struct {
@@ -417,7 +391,7 @@ test "host admin command hook first handler wins" {
 }
 
 test "host perkSpend verdict: deny, keep, and percent-scale first-wins" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     // Static lifetime: PluginHost keeps the vtable pointer.
     const gate = api.PluginVTable{
         .name = "perkgate",
@@ -441,7 +415,7 @@ test "host perkSpend verdict: deny, keep, and percent-scale first-wins" {
 }
 
 test "host gameEvent verdict: deny and keep first-wins" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     // Static lifetime: PluginHost keeps the vtable pointer.
     const gate = api.PluginVTable{
         .name = "gameeventgate",
@@ -468,7 +442,7 @@ test "host gameEvent verdict: deny and keep first-wins" {
 var stat_last: [7]i32 = .{0} ** 7;
 
 test "host stat-changed observer fires with the player snapshot" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     stat_last = .{0} ** 7;
     const obs = api.PluginVTable{
         .name = "statobs",
@@ -496,7 +470,7 @@ var buff_last_adding: bool = false;
 var buff_calls: u32 = 0;
 
 test "host buff observer fires for both directions" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     buff_calls = 0;
     const obs = api.PluginVTable{
         .name = "buffobs",
@@ -529,7 +503,7 @@ test "host buff observer fires for both directions" {
 var ev_last: [8]i32 = .{0} ** 8;
 
 test "host evidence observer fires with the guard event (T21)" {
-    var h: PluginHost = .{ .sample_enabled = false };
+    var h: PluginHost = .{};
     ev_last = .{0} ** 8;
     const obs = api.PluginVTable{
         .name = "evobs",

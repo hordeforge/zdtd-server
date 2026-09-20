@@ -29,7 +29,6 @@ A native ABI could promise neither.
 | Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32`, `config(out_ptr, out_cap) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `plugin_api_version=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (23 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
-| `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
 | Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin` / `playerLeave`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks; perk spend / GameEvent / stat changed / trade / quest accept consult their verdicts and observers |
 | Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
 | Perk verdict (ADR 0033) | `on_perk_spend(player, skill, level, cost)`: `<0` deny the purchase, `0` keep, `>0` scales the skill-point cost by percent; first non-zero wins |
@@ -167,7 +166,7 @@ build too, not a defect in zwasm.
 
 | Decision | Notes |
 |---|---|
-| Capability list | Shipped minimal: `log`, `tick`, `queue`. Event hooks (T15) deny/adjust deaths, kills, block damage and quest rewards; read-only sim views are the next candidate. Every addition is permanent, so it lands on evidence |
+| Capability list | Shipped: `log`, `tick`, `queue`, `sense`, `query`, and the `json_*` set plus `config` for the MCP/self-config paths. Event hooks (T15) deny/adjust deaths, kills, block damage and quest rewards. Every addition is permanent, so it lands on evidence |
 | Memory and fuel defaults | zdtd ships `Budget` defaults (100M fuel, 1024 pages). Re-tune from a real plugin's measured cost per tick once one exists |
 | Interpreter or JIT | zwasm's interpreter is the hardened default; JIT is a later question and only with evidence that a plugin needs it |
 
@@ -222,10 +221,9 @@ Guests: each `.wasm` is instantiated once, its exported hooks registered, and
 every call runs under the fuel and memory budget described above. No raw `*Game`
 crosses, and no package bytes can be injected (ADR 0010, ADR 0020).
 
-The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`,
-default false) runs the same hook order without a runtime, so scenarios can
-assert hook behaviour directly. It is test scaffolding, not a shipping format,
-and the shipped presets leave it off (ADR 0020 decision 2).
+The in-tree static host (`src/plugin/host.zig`) runs the same hook order without
+a runtime, so scenarios can assert hook behaviour directly. It is test
+scaffolding, not a shipping format (ADR 0020 decision 2).
 
 ## Host surface (narrow)
 
@@ -257,90 +255,12 @@ No access to LiteNet peer maps, body_buf, or package id tables except through
 `sendStock(name, body)` where `body` was built by **core** builders the plugin
 called (e.g. `host.buildChat(buf, …)`).
 
-## Hook catalog (target; none of these named hooks are implemented)
+## Hooks and commands
 
-Shipped v1 hooks are only the four vtable fields listed under implementation
-status. Priorities: lower runs first. Core reserved bands: `0..99` internal, `100..999`
-first-party, `1000+` third-party default.
-
-### Connection / join
-
-| Hook | When | Can | Cannot |
-|---|---|---|---|
-| `onPeerConnect` | LiteNet accept | observe, early ban check | skip challenge |
-| `onChallengeOk` | after ids map | observe | rewrite PackageIds |
-| `onPlayerLogin` | login decode | **deny** join (reason) | forge identity |
-| `onEnterGame` | RequestToEnter | deny / set spawn hint | skip PlayerId |
-| `onSpawned` | after spawn bundle | observe | omit stock packages |
-| `onPeerDisconnect` | teardown | observe, cleanup plugin state | |
-
-### C2S apply (authority path)
-
-Called **after** phase allow + decode, **before** or **around** sim apply.
-Return: `allow` | `deny(reason)` | `modify(request)` for supported fields only.
-
-| Hook | Request type |
-|---|---|
-| `onSetBlock` | pos, block id, meta |
-| `onDamage` | target, amount, source |
-| `onInvTx` | op, slots, counts |
-| `onCraft` | recipe key |
-| `onExplosion` | pos, radius class |
-| `onLock` | channel, op |
-| `onChat` | text (length-capped) |
-| `onVehicleControl` | entity, inputs |
-| `onUnhandledC2S` | name + body len only (no blind parse obligation) |
-
-Aligns with TODO P4 guard: same seams as Hard invariants; guard can be a
-first-party plugin or core module using identical hooks.
-
-### Sim phases
-
-| Hook | Phase |
-|---|---|
-| `onBeforeTick` | start of `step` |
-| `onAfterDirector` | after horde/clock |
-| `onAfterAi` | after zombie AI apply |
-| `onAfterVehicles` | |
-| `onAfterPower` | |
-| `onAfterTurrets` | |
-| `onBeforeReplicate` | dirty gather |
-| `onAfterReplicate` | |
-| `onTickEnd` | scrub locals, plugin frame arena |
-
-### World / entities (observe + command)
-
-| Hook | Notes |
-|---|---|
-| `onEntitySpawned` / `onEntityDied` | net id, kind, cause |
-| `onChunkCommitted` | cx,cz after store write |
-| `onLootFill` | container id, can replace roll **table choice** not raw items without catalog |
-| `onQuestEvent` | accept/complete/turn-in |
-
-### Admin / ops
-
-| Hook | Notes |
-|---|---|
-| `onAdminCommand` | after parse; can handle unknown verbs |
-| `onConfigReload` | optional |
-
-## Commands (plugin → core)
-
-Plugins never mutate SoA columns directly in v1. They enqueue:
-
-```text
-SimCommand =
-  | give_item { entity, item_id, count }
-  | damage { entity, amount, cause }
-  | teleport { entity, x,y,z }
-  | set_block { x,y,z, id }          // still goes through validation
-  | kick { peer, reason_id }
-  | quarantine { peer, bits }
-  | broadcast_chat { text }
-```
-
-Executed in documented windows (end of C2S, or `onTickEnd`) so parallel AI
-never races plugin writes.
+The shipped Wasm hooks (24) and host verbs, and the queued `SimCommand`
+verbs, are owned by [PLUGIN_DEV.md](PLUGIN_DEV.md): the observe/verdict tables
+under [Hooks](PLUGIN_DEV.md) and the queue verbs under
+[Queued commands](PLUGIN_DEV.md). That table is the authoritative contract.
 
 ## Concurrency
 
@@ -359,13 +279,10 @@ The layout below is illustrative, not a quote of any one file:
 ```
 // src/plugin/api.zig : experimental types
 // src/plugin/host.zig : fixed registry table
-// src/plugin/sample_hello.zig : in-tree sample
 ```
 
 Plugins are compiled in and registered at runtime via `PluginHost.register`
-(`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
-InitOption (default false, test scaffolding), not a build option. Public
-facade: `src/plugin/root.zig`.
+(`src/plugin/host.zig`). Public facade: `src/plugin/root.zig`.
 
 ### v2 (shipped first cut): Wasm runtime
 

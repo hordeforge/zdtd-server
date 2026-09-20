@@ -33,8 +33,8 @@ fn defaultLog(level: LogLevel, msg: []const u8) void {
         .warn => "warn",
         .err => "err",
     };
-    // debug/info are boot chatter (`sample_hello enabled`); warn/err must
-    // survive `--quiet` like every other server warning.
+    // debug/info are boot chatter; warn/err must survive `--quiet` like every
+    // other server warning.
     switch (level) {
         .debug, .info => util_log.info("zdtd plugin [{s}]: {s}\n", .{ tag, msg }),
         .warn, .err => std.debug.print("zdtd plugin [{s}]: {s}\n", .{ tag, msg }),

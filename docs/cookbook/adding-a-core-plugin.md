@@ -38,7 +38,7 @@ fixed (`docs/PLUGIN_STANDARDS.md:41-51`, `mods/BUILDING.md`):
 | `manifest.toml` | yes | fixed name, discovered automatically |
 | `<module>.wasm` | yes | the directory name plus `.wasm` |
 | `<module>.zig` | yes | the directory name, the plugin root |
-| `main.zig` | yes | build wrapper |
+| `main.zig` | yes | build wrapper: shared `plugins/core_main.zig` for core plugins |
 | `config.toml` | no | the module's own default config |
 | `README.md` | recommended | what it does, its config keys, how to enable |
 | `icon.png` | no | metadata only |
@@ -87,12 +87,12 @@ of the module's own `config.toml` (`mods/plugin_common.zig:116-160`). Every Zig
 guest built on this module also declares its contract version through
 `_zdtd_api` (`mods/plugin_common.zig:21-27`).
 
-## 4. Add the build wrapper
+## 4. No build wrapper per plugin
 
-`main.zig` is a two-line wrapper: `zig build-exe` needs an entry point even for
-a freestanding target, and zwasm runs a start section only when the module
-declares one, which these never do. Copy
-`plugins/core_killfeed/main.zig:5-8` verbatim:
+Core plugins share one wrapper, `plugins/core_main.zig` (`plugins/core_main.zig:7-10`): `zig build-exe` needs
+an entry point even for a freestanding target, and zwasm runs a start section
+only when the module declares one, which these never do. The shared wrapper
+comptime-references the plugin root module:
 
 ```zig
 comptime {
@@ -101,8 +101,10 @@ comptime {
 export fn _start() void {}
 ```
 
-A hook declared directly in the wrapper, or a `pub` symbol outside the root
-module, does not land in the wasm.
+The build script wires `-Mroot=plugins/core_main.zig` and
+`-Mplugin_root=plugins/<module>/<module>.zig` per plugin, so a new core plugin
+needs no wrapper of its own. A hook declared directly in the wrapper, or a
+`pub` symbol outside the root module, does not land in the wasm.
 
 ## 5. Write the manifest
 

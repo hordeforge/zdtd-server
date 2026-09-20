@@ -7,7 +7,6 @@ name = "horde_lite"
 # Stock serverconfig keys (optional overrides)
 max_spawned_zombies = 32
 blood_moon_frequency = 10
-enable_sample_plugin = false
 
 # Sim rules (docs/GAME_OPTIONS.md "[rules] sim rules"): zombies hit softer and
 # slower, horde parties cap lower. An operator's zdtd.toml [rules.*] wins.

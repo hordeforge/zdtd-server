@@ -33,7 +33,7 @@ build() {
   $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
     --name "$mod" \
     --dep plugin_common --dep plugin_root \
-    -Mroot="plugins/$mod/main.zig" \
+    -Mroot="plugins/core_main.zig" \
     --dep plugin_common -Mplugin_root="plugins/$mod/$mod.zig" \
     -Mplugin_common=mods/plugin_common.zig
   local out

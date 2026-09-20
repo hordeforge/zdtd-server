@@ -5,7 +5,7 @@
 **Status:** shipped (T9 runtime 2026-08-06; T15 event hooks + deny/adjust
 2026-08-07). The runtime loads `.wasm` modules named in zdtd.toml and calls the
 lifecycle/event hooks under fuel and memory budgets. The host import table is
-deliberately small and documented below; read-only sim views are still open.
+deliberately small and documented below.
 **Related:** [PLUGIN_API.md](PLUGIN_API.md) (host/guest contract and budgets) · [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) (naming and manifest) · [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) (boundary audit) · [STATE_MACHINES.md](STATE_MACHINES.md) (tick and net) · [AUTHORITY.md](AUTHORITY.md) (authority rules) · [GAME_OPTIONS.md](GAME_OPTIONS.md) (config)
 
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
@@ -226,6 +226,11 @@ module importing `wasi_snapshot_preview1` fails to instantiate.
 | `despawn id` | Queue removal of the entity with the given net id |
 | `damage id amount` | Queue damage to the entity with the given net id |
 | `glide id 0\|1` | Arm/clear the player's glide (ADR 0037): while armed the server clamps the player's vertical delta to `[rules.glide] sink_vy_mps` (server-side fall slow-down). Attributed per plugin; cleared on plugin withdrawal |
+| `say <text>` | Queue a global chat line from the plugin's src (`c2s/misc.zig` sanitizer applies; an empty body is dropped). Attributed per plugin; it is an irrevocable effect, counted in `plugin_effects_not_reverted` on withdrawal |
+
+The `bot <verb>` family (`spawn` / `remove` / `move` / `look` / `shoot` /
+`count`, ADR 0026) is handled host-side by `BotManager`, not through this
+buffer, and carries its own attribution ([PLUGIN_API.md:54](PLUGIN_API.md#L54)).
 
 Commands are applied by the sim on a later tick's drain (the fixed 64-slot
 command buffer; a full buffer drops new commands). Unknown or malformed
@@ -393,9 +398,10 @@ Event hooks (T15, return a verdict):
 | `on_block_damage` | `(x: i32, y: i32, z: i32, dmg: i32) -> i32` | `<0` deny (no damage); `>0` apply that percent (`200` doubles) |
 | `on_quest_complete` | `(player_entity_id: i32, quest_def_id: i32) -> i32` | `<0` withhold the payout; `>0` pay that percent of items/exp |
 
-Remaining verdict hooks and observers (the full host surface is 23 hooks;
+Remaining verdict hooks and observers (the Wasm host surface is 24 hooks;
 [PLUGIN_API.md](PLUGIN_API.md) is the authoritative contract - this table
-completes the authoring view):
+completes the authoring view. The in-tree static host has 23; it deliberately
+omits `on_mcp_frame`, which only the Wasm host routes):
 
 | Export | Signature | Verdict return / when |
 |---|---|---|
@@ -491,9 +497,9 @@ zig build-exe plugin.zig -target wasm32-freestanding -rdynamic -OReleaseSmall \
 mv my_plugin.wasm my_plugin_final.wasm
 ```
 
-`zig build-exe` needs an entry point even for freestanding targets; add a
-one-line `export fn _start() void {}` to your module (the committed core
-plugins put it in a separate `main.zig` wrapper - see
+`zig build-exe` needs an entry point even for freestanding targets; the
+committed core plugins get it from the shared
+[`plugins/core_main.zig`](../plugins/core_main.zig) wrapper (see
 [mods/BUILDING.md](../mods/BUILDING.md)). zwasm runs the start section only if
 the module declares one, which ours never do, so `_start` is never invoked.
 
@@ -549,4 +555,3 @@ loops forever is stopped with `OutOfFuel` instead of hanging the caller.
 | Filesystem or network from a plugin | Would defeat the sandbox; ask for a capability and a host function instead |
 | Threads | Sim hooks are deterministic and single-threaded by design |
 | Emitting raw packages | The server owns the wire; see rule 4 |
-| Hot reload | Not in the first version |

@@ -721,11 +721,9 @@ const mode_corpus = [_][]const u8{
     "[gameplay]\nblood_moon_frequency = 300\n",
     "max_spawned_zombies = -1\n",
     "bloodmoon_frequency = 99999999999999999999\n",
-    "enable_sample_plugin = maybe\n",
     "name = \"unterminated\n[",
     "[section\n",
     "name=\n=\n# c\n",
-    "[plugin]\nenable_sample_plugin = true # trailing\n",
 };
 
 test "fuzz mode pack TOML parser" {
