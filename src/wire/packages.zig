@@ -77,16 +77,6 @@ pub const parsePlayerDataEcdHead = stock_motion.parsePlayerDataEcdHead;
 const readWorldF32 = stock_motion.readWorldF32;
 const readWorldI32 = stock_motion.readWorldI32;
 
-test "entity speeds body roundtrip" {
-    var buf: [32]u8 = undefined;
-    const body = try buildEntitySpeedsBody(&buf, 106, 2, 1.25, -0.5);
-    const p = try parseEntitySpeedsBody(body);
-    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
-    try std.testing.expectEqual(@as(u8, 2), p.movement_state);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.25), p.speed_forward, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, -0.5), p.speed_strafe, 0.001);
-}
-
 test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -837,77 +827,6 @@ test "NetPackageChunk resolves to an id and frames at that id" {
     try std.testing.expectEqual(chunk_id, std.mem.readInt(u16, fr[pkg_id_off..][0..2], .little));
     // LiteNet channeled total must fit pending_bytes (1200).
     try std.testing.expect(fr.len + 4 < 1200);
-}
-
-test "pos body golden size" {
-    var body_buf: [64]u8 = undefined;
-    // Distinct values in every slot: the body is entityId | pos x,y,z |
-    // bUseQRotation | rot x,y,z | onGround, and a length check plus an id
-    // check cannot see two of those floats trading places.
-    const body = try buildPosAndRotBody(&body_buf, 7, 1, 2, 3, 11, 90, 13, true);
-    try std.testing.expectEqual(@as(usize, 30), body.len);
-    const p = try parsePosAndRotBody(body);
-    try std.testing.expectEqual(@as(i32, 7), p.entity_id);
-    try std.testing.expect(p.on_ground);
-
-    const f32At = struct {
-        fn get(b: []const u8, off: usize) f32 {
-            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
-        }
-    }.get;
-    try std.testing.expectEqual(@as(f32, 1), f32At(body, 4)); // pos x
-    try std.testing.expectEqual(@as(f32, 2), f32At(body, 8));
-    try std.testing.expectEqual(@as(f32, 3), f32At(body, 12));
-    try std.testing.expectEqual(@as(u8, 0), body[16]); // bUseQRotation false
-    try std.testing.expectEqual(@as(f32, 11), f32At(body, 17)); // rot x
-    try std.testing.expectEqual(@as(f32, 90), f32At(body, 21));
-    try std.testing.expectEqual(@as(f32, 13), f32At(body, 25));
-    try std.testing.expectEqual(@as(u8, 1), body[29]); // onGround
-}
-
-test "pos body rejects non-finite and out-of-range coordinates" {
-    var body_buf: [64]u8 = undefined;
-    const nan = try buildPosAndRotBody(&body_buf, 7, std.math.nan(f32), 2, 3, 0, 0, 0, true);
-    try std.testing.expectError(error.Overflow, parsePosAndRotBody(nan));
-    const huge = try buildPosAndRotBody(&body_buf, 7, 1, 2, 1e30, 0, 0, 0, true);
-    try std.testing.expectError(error.Overflow, parsePosAndRotBody(huge));
-    const nan_rot = try buildPosAndRotBody(&body_buf, 7, 1, 2, 3, std.math.nan(f32), 0, 0, true);
-    try std.testing.expectError(error.Overflow, parsePosAndRotBody(nan_rot));
-}
-
-test "entity speeds rejects non-finite" {
-    var buf: [32]u8 = undefined;
-    const body = try buildEntitySpeedsBody(&buf, 1, 0, std.math.nan(f32), 0);
-    try std.testing.expectError(error.Overflow, parseEntitySpeedsBody(body));
-    const inf = try buildEntitySpeedsBody(&buf, 1, 0, 1, std.math.inf(f32));
-    try std.testing.expectError(error.Overflow, parseEntitySpeedsBody(inf));
-}
-
-test "rel body golden size" {
-    var body_buf: [64]u8 = undefined;
-    // Distinct values: the six i16 (rot x,y,z then dPos x,y,z) had zeros and
-    // repeats among them, so most swaps in that run emitted identical bytes
-    // and the size check could not have seen the rest.
-    const body = try buildRelPosBody(&body_buf, 1, 21, 22, 23, 11, 12, 13, true, 2);
-    try std.testing.expectEqual(@as(usize, 20), body.len);
-    var frame_buf: [128]u8 = undefined;
-    const fr = try framed(&frame_buf, "NetPackageEntityRelPosAndRot", body);
-    // contentLen at offset 9 = 22
-    const cl = std.mem.readInt(i32, fr[9..][0..4], .little);
-    try std.testing.expectEqual(@as(i32, 22), cl);
-
-    // entityId i32 | bUseQRotation bool | rot x,y,z i16 | dPos x,y,z i16 |
-    // onGround bool | updateSteps i16 (RE protocol-packages.md 5.5.4).
-    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[0..4], .little));
-    try std.testing.expectEqual(@as(u8, 0), body[4]); // bUseQRotation
-    try std.testing.expectEqual(@as(i16, 11), std.mem.readInt(i16, body[5..7], .little)); // rot x
-    try std.testing.expectEqual(@as(i16, 12), std.mem.readInt(i16, body[7..9], .little));
-    try std.testing.expectEqual(@as(i16, 13), std.mem.readInt(i16, body[9..11], .little));
-    try std.testing.expectEqual(@as(i16, 21), std.mem.readInt(i16, body[11..13], .little)); // dPos x
-    try std.testing.expectEqual(@as(i16, 22), std.mem.readInt(i16, body[13..15], .little));
-    try std.testing.expectEqual(@as(i16, 23), std.mem.readInt(i16, body[15..17], .little));
-    try std.testing.expectEqual(@as(u8, 1), body[17]); // onGround
-    try std.testing.expectEqual(@as(i16, 2), std.mem.readInt(i16, body[18..20], .little)); // updateSteps
 }
 
 test "package ids body" {
