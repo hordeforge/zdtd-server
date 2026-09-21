@@ -258,6 +258,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/turrets.zig` | R | Turret system (parallel target scan, fire, kill reports). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/falling.zig` | R | Falling-block system (stability-collapse fall, crush, hit counts). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/stealth.zig` | R | Stealth + noise system (heat events, noise notify, per-player tick). Split out of systems.zig, re-exported through the systems facade |
+| `src/ecs/dig.zig` | R | Dig system (zombie block-chew cadence). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/despawn.zig` | R | Despawn system (idle/wandering far zombies). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/systems.zig` | R | ECS systems: pure functions over World SoA columns + resources. Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots  `classPhysResist` (per-entity class stat, else the class_table row) scales server-computed damage at the deferred accumulator and the turret apply loop (2026-09-14).|
 | `src/ecs/quest_trade.zig` | R | Quest + trader systems (journal phase graph, wallet, loot pickup, buy/sell/restock). Split out of systems.zig, re-exported through the systems facade |

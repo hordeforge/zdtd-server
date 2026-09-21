@@ -29,6 +29,7 @@ pub const turrets = @import("turrets.zig");
 pub const falling = @import("falling.zig");
 pub const stealth = @import("stealth.zig");
 pub const despawn = @import("despawn.zig");
+pub const dig = @import("dig.zig");
 pub const quest_trade = @import("quest_trade.zig");
 pub const quest = @import("quest.zig");
 pub const poi_lock = @import("poi_lock.zig");
@@ -67,6 +68,7 @@ test {
     _ = falling;
     _ = stealth;
     _ = despawn;
+    _ = dig;
     _ = quest_trade;
     _ = quest;
     _ = poi_lock;
