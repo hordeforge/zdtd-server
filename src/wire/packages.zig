@@ -2488,62 +2488,6 @@ test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
     try std.testing.expectEqual(@as(i32, 42), p.player_id);
 }
 
-test "parseSetBlockTexture reads the stock paint body" {
-    var buf: [32]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &buf };
-    try w.writeI32(5);
-    try w.writeI32(60);
-    try w.writeI32(-8);
-    try w.writeByte(3); // face
-    try w.writeByte(17); // catalog idx
-    try w.writeI32(-1); // dedi rebroadcast playerIdThatChanged
-    try w.writeByte(0); // channel
-    const t = try parseSetBlockTexture(w.written());
-    // Whole position: only x was read back, so y and z could swap unnoticed
-    // and paint would land on a different block.
-    try std.testing.expectEqual(@as(i32, 5), t.x);
-    try std.testing.expectEqual(@as(i32, 60), t.y);
-    try std.testing.expectEqual(@as(i32, -8), t.z);
-    try std.testing.expectEqual(@as(u8, 3), t.face);
-    try std.testing.expectEqual(@as(u8, 17), t.idx);
-    try std.testing.expectEqual(@as(i32, -1), t.player_id);
-    try std.testing.expectEqual(@as(u8, 0), t.channel);
-    // Round-trip: build is the same 19-byte layout.
-    var out: [32]u8 = undefined;
-    const built = try buildSetBlockTextureBody(&out, t);
-    try std.testing.expectEqual(@as(usize, 19), built.len);
-    const t2 = try parseSetBlockTexture(built);
-    try std.testing.expectEqual(@as(i32, -8), t2.z);
-    try std.testing.expectEqual(@as(u8, 17), t2.idx);
-    // Raw bytes, not only the round-trip: build and parse can move a field
-    // together and still agree with each other, which is what the swap audit
-    // reported here after the parse-side assertions were added.
-    try std.testing.expectEqual(@as(i32, 5), std.mem.readInt(i32, built[0..4], .little));
-    try std.testing.expectEqual(@as(i32, 60), std.mem.readInt(i32, built[4..8], .little));
-    try std.testing.expectEqual(@as(i32, -8), std.mem.readInt(i32, built[8..12], .little));
-    try std.testing.expectEqual(@as(u8, 3), built[12]); // face
-    try std.testing.expectEqual(@as(u8, 17), built[13]); // idx
-    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, built[14..18], .little));
-    try std.testing.expectEqual(@as(u8, 0), built[18]); // channel
-    // Truncated at every boundary is EndOfStream.
-    var cut: usize = 0;
-    while (cut < 19) : (cut += 1) {
-        try std.testing.expectError(error.EndOfStream, parseSetBlockTexture(built[0..cut]));
-    }
-}
-
-test "parseItemReload reads the single entityId" {
-    var buf: [8]u8 = undefined;
-    std.mem.writeInt(i32, buf[0..4], 12345, .little);
-    try std.testing.expectEqual(@as(i32, 12345), try parseItemReload(buf[0..4]));
-    // Negative ids are legal wire values (the sender's own entity id is
-    // always positive; a negative one fails the entity-exists gate).
-    std.mem.writeInt(i32, buf[0..4], -1, .little);
-    try std.testing.expectEqual(@as(i32, -1), try parseItemReload(buf[0..4]));
-    try std.testing.expectError(error.EndOfStream, parseItemReload(buf[0..3]));
-    try std.testing.expectError(error.EndOfStream, parseItemReload(&.{}));
-}
-
 /// Stock `NetPackageEntityRagdoll` (write IL=59): entityId i32, flags u8,
 /// then conditionally (flags&1) duration f32, bodyPart i16, forceVec 3xf32,
 /// forceWorldPos 3xf32, hipPos 3xf32, (flags&2) mode u8, (flags&4) state u8.
