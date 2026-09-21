@@ -18828,7 +18828,7 @@ test "scenario comma buff lists apply each name" {
     if (g.buffs.indexOfName(n0) == null or g.buffs.indexOfName(n1) == null) return error.SkipZigTest;
     var list_buf: [256]u8 = undefined;
     const list = try std.fmt.bufPrint(&list_buf, "{s},noSuchBuffXYZ,{s}", .{ n0, n1 });
-    const tick = @import("game/tick.zig");
+    const tick = @import("game/buff_events.zig");
     tick.applyCommaBuffs(g, c.entity_id, ps, list);
     try std.testing.expect(hasBuffNamed(g, ps, n0));
     try std.testing.expect(hasBuffNamed(g, ps, n1));

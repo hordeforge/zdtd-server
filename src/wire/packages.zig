@@ -174,6 +174,7 @@ pub const parseSetBlockChanges = stock_block.parseSetBlockChanges;
 pub const WaterSetChange = stock_block.WaterSetChange;
 pub const parseWaterSet = stock_block.parseWaterSet;
 pub const buildWaterSetBody = stock_block.buildWaterSetBody;
+pub const water_mass_full: u16 = stock_block.water_mass_full;
 pub const AudioPlay = stock_block.AudioPlay;
 pub const parseAudioPlay = stock_block.parseAudioPlay;
 pub const buildAudioPlayBody = stock_block.buildAudioPlayBody;
