@@ -117,7 +117,7 @@ The radius is derived per pass from the client's own `view_radius`, clamped to t
         while (r > 1 and @as(usize, @intCast((2 * r + 1) * (2 * r + 1))) > self.max_streamed_chunks) r -= 1;
 ```
 
-Removals run first: every streamed key outside the square gets `NetPackageChunkRemove` (body `chunkKey: i64`, `src/wire/packages.zig:2052-2056`), the key is dropped from the set, and, only when `deco_trees` is off, a `NetPackageDecoResetWorldChunk` follows (`src/server/game/chunk_stream.zig:305-318`). The gate is deliberate: with join-time deco objects live, the reset would run `RestoreGeneratedDecos` over terrain deco the server can never resend (`src/server/game/chunk_stream.zig:308-317`).
+Removals run first: every streamed key outside the square gets `NetPackageChunkRemove` (body `chunkKey: i64`, `src/wire/stock_chunkremove.zig:16-21`), the key is dropped from the set, and, only when `deco_trees` is off, a `NetPackageDecoResetWorldChunk` follows (`src/server/game/chunk_stream.zig:305-318`). The gate is deliberate: with join-time deco objects live, the reset would run `RestoreGeneratedDecos` over terrain deco the server can never resend (`src/server/game/chunk_stream.zig:308-317`).
 
 Adds run as a row-major raster inside the square, skipping bits already set, charging the budget per attempt and stopping the pass on a refused send (`src/server/game/chunk_stream.zig:331-343`):
 

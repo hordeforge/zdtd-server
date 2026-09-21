@@ -1418,7 +1418,7 @@ parsed, and quest offering is unwired.
   + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
   the stock parse fails. A real stock client's post-trade push reaches the
   server.
-  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:1980-2116`,
+  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:1481-1523`,
   `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
@@ -4849,7 +4849,7 @@ a finer server encoding.
   23-byte records (biomeId, groupIndex, remainingSeconds, 5x f32), no count prefix,
   groupIndex clamped to the biome's group count so `SetWeatherGroup` cannot index
   out of range. Sent on re-join and every 20 ticks, deferred under load shedding.
-  *Anchors:* `src/wire/packages.zig:2057-2075`, `src/server/game.zig`,
+  *Anchors:* `src/wire/packages.zig:848-897`, `src/server/game.zig`,
   `:8113`
 
 - **Weather biome padding when biomes.xml yields fewer than 5 weather biomes** `WORKS` `(2026-08-22 re-audit)`
@@ -4860,7 +4860,7 @@ a finer server encoding.
   data (stock biomes.xml supplies exactly 5 weather biomes), live for modded
   biomes.xml only - out of stock-scope parity; the clamp keeps fabricated ids from
   overrunning the source group list.
-  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:2065-2075`,
+  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:856-875`,
   `asm.il:2054217-2054277`
 
 - **StormFrequency configurability** `DONE 2026-08-07`
@@ -4885,8 +4885,7 @@ a finer server encoding.
   (GameInfoString 18/19) when the operator set them; unset keys are omitted
   (empty = client default, same as GameStats).
   *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
-  `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig` `gameStatsValues`,
-  `src/wire/packages.zig:2039-2040`,
+  `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig:2890` `gameStatsValues`,
   `../../7dtd-engine-research/docs/gameplay/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
