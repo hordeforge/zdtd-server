@@ -576,6 +576,11 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
         .remove_on_death = def.remove_on_death,
     }, ecs.buff.duration_from_class, instigator_id, 0, 0, 0);
     game_social.relayBuff(self, entity_id, def.name, true, instigator_id, null) catch {};
+    // Mobs run no survival pass, so their start rows fire here (players
+    // cover start rows there; firing here too would double-apply).
+    if (!self.sim.mask[ps].player) {
+        fireMobBuffStart(self, ps, def_id);
+    }
     return true;
 }
 
@@ -584,6 +589,30 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
 /// store, AddBuff/RemoveBuff through the sink.
 pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
     fireBuffEvent(self, ps, def_id, .stack, null);
+}
+
+/// Fire a mob buff's `onSelfBuffStart` rows at add time (burning duration
+/// seed, wound-table side effects). Players run start rows through the
+/// survival pass; mobs have no such driver, so adds evaluate them here.
+/// Uses the victim's own cvar store; granted buffs apply silently (mob
+/// buffs have no S2C buff-list sync).
+pub fn fireMobBuffStart(self: *Game, vs: ecs.Slot, def_id: u16) void {
+    var req_counts: requirements.Counts = .{};
+    var ctx = requirements.Ctx{ .alive = self.sim.alive[vs] };
+    ctx.cvars = self.sim.cvarsMut(vs);
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .start, ctx, &req_counts);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    const vid = if (self.sim.mask[vs].network_id) self.sim.network_id[vs].id else -1;
+    for (res.add_buffs[0..res.add_n]) |names| {
+        var it = std.mem.splitScalar(u8, names, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            _ = addCatalogBuff(self, vid, vs, name, vid);
+        }
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
 /// Fire an entity class's own rows (radiated regen on damaged, spawn heal)

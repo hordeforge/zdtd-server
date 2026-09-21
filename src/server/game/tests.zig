@@ -9339,3 +9339,35 @@ test "radiated regen stops at 80 percent HP" {
     const regen = g.buffs.indexOfName("buffRadiatedRegen") orelse return error.SkipZigTest;
     try std.testing.expect(g.sim.buffs[zs].find(regen) == null);
 }
+
+test "a burning zombie seeds its duration and self-extinguishes" {
+    // buffBurningElement start rows seed $buffBurningElementDuration=10;
+    // update rows decrement it and remove the buff at 0. Mob adds fire
+    // start rows inline (no survival pass drives them).
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    _ = g.addCatalogBuff(zid, zs, "buffBurningElement", zid);
+    const store = g.sim.cvarsMut(zs);
+    try std.testing.expectEqual(@as(f32, 10), store.get("$buffBurningElementDuration"));
+    // Drain the countdown: each step decrements once.
+    var ti: usize = 0;
+    const burning = g.buffs.indexOfName("buffBurningElement").?;
+    while (ti < 30 and g.sim.buffs[zs].find(burning) != null) : (ti += 1) try g.step();
+    try std.testing.expect(g.sim.buffs[zs].find(burning) == null);
+}
