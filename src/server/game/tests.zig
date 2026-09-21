@@ -9430,3 +9430,27 @@ test "died class rows reset hazard timers" {
     try std.testing.expectApproxEqAbs(@as(f32, 180), cl.cvars.get("$BurntHazardTimer"), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".BurntTrackTime"), 0.001);
 }
+
+test "join seeds class entered-game cvars" {
+    // playerMale onSelfEnteredGame rows seed carryCapacityBase and the
+    // four hazard timer maxes through the shared engine on first join.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 180), cl.cvars.get("$BurntHazardTimerMax"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 180), cl.cvars.get("$BurntHazardTimer"), 0.001);
+}

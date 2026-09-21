@@ -1978,6 +1978,14 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 // comes from the same Unity hash the PlayerId wire carries.
                 if (self.entities.byHash(assets_unity_hash.class_player_male)) |pdef| {
                     for (pdef.buffs) |bname| _ = addCatalogBuff(self, c.entity_id, ps, bname, c.entity_id);
+                    // Player-class entered-game rows (carryCapacity base,
+                    // hazard timer max seeds, hazard cleanup removes): same
+                    // engine and ctx as the buff rows below.
+                    if (pdef.triggered.len != 0) {
+                        const ceg = assets_buffs.evaluateRows(pdef.triggered, .entered_game, req_ctx, &req_counts);
+                        if (ceg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, ceg.truncated);
+                        applyTriggeredBuffs(self, c.entity_id, ps, &ceg, c.entity_id);
+                    }
                 }
                 life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
                 for (life_buf[0..life_ids_n]) |id| {
