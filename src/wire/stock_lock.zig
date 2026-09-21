@@ -347,3 +347,88 @@ test "lock request grant response layout" {
     try std.testing.expectEqual(false, try dr.readBool()); // isForceUnlocked
     try std.testing.expectEqual(@as(u16, 0), try dr.readU16()); // channel
 }
+
+test "lock response for a trader carries the context and trader data" {
+    // buildLockResponseTrader had no test. It differs from a plain grant by
+    // forcing success true and appending the context type name, the command
+    // and a TraderData block, so the leading locking/success pair is where a
+    // swap would pass unnoticed.
+    var req_buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &req_buf };
+    try w.writeBool(true); // locking
+    try w.writeU16(3); // channel
+    try w.writeI32(0); // no targets
+    try w.writeString("EntityTraderLockContext");
+    try w.writeString("trade");
+    const head = try parseLockRequest(w.written());
+
+    var resp_buf: [512]u8 = undefined;
+    const resp = try buildLockResponseTrader(&resp_buf, head, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    var r: binary.Reader = .{ .data = resp };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqual(true, try r.readBool()); // locking echoed
+    try std.testing.expectEqual(true, try r.readBool()); // success forced
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
+    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // channel echoed
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // targets count
+    try std.testing.expectEqualStrings("EntityTraderLockContext", try r.readString(&s_buf));
+    try std.testing.expectEqualStrings("trade", try r.readString(&s_buf));
+    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
+
+    // With locking=true both leading bools are true, so a swap between the
+    // echoed locking and the forced success emits identical bytes. Repeat with
+    // locking=false: the pair is then observable, and success must still be
+    // forced true regardless.
+    var req2_buf: [64]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &req2_buf };
+    try w2.writeBool(false); // locking
+    try w2.writeU16(3);
+    try w2.writeI32(0);
+    try w2.writeString("EntityTraderLockContext");
+    try w2.writeString("trade");
+    const head2 = try parseLockRequest(w2.written());
+    var resp2_buf: [512]u8 = undefined;
+    const resp2 = try buildLockResponseTrader(&resp2_buf, head2, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    try std.testing.expectEqual(@as(u8, 0), resp2[0]); // locking echoed false
+    try std.testing.expectEqual(@as(u8, 1), resp2[1]); // success still forced
+
+    // Same builder, vending context: VendingMachineLockContext::Read takes the
+    // TraderData straight after the type name, with no Command and no
+    // hasTraderData bool (TileEntityVendingMachine_VendingMachineLockContext
+    // .il.txt:19). Emitting the entity shape here handed the client two extra
+    // bytes it reads as the first half of TraderID.
+    var vreq_buf: [64]u8 = undefined;
+    var vw: binary.Writer = .{ .buf = &vreq_buf };
+    try vw.writeBool(true);
+    try vw.writeU16(3);
+    try vw.writeI32(0);
+    try vw.writeString(vending_lock_context);
+    const vhead = try parseLockRequest(vw.written());
+    var vresp_buf: [512]u8 = undefined;
+    const vresp = try buildLockResponseTrader(&vresp_buf, vhead, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    var vr: binary.Reader = .{ .data = vresp };
+    _ = try vr.readBool(); // locking
+    _ = try vr.readBool(); // success
+    _ = try vr.readString(&s_buf); // errorMsg
+    _ = try vr.readBool(); // isForceUnlocked
+    _ = try vr.readU16(); // channel
+    _ = try vr.readI32(); // targets count
+    try std.testing.expectEqualStrings(vending_lock_context, try vr.readString(&s_buf));
+    // TraderData begins immediately: its TraderID, not a command length byte.
+    try std.testing.expectEqual(@as(i32, 42), try vr.readI32());
+    // The two contexts must not produce the same tail length for equal data.
+    try std.testing.expect(vresp.len < resp.len);
+}

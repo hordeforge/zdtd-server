@@ -136,7 +136,7 @@ pub fn drainSleeperWakeups(self: *Game) void {
 
 A stirred sleeper sends `NetPackageSleeperPassiveChange` and plays the groan; a fully woken one sends
 `NetPackageSleeperWakeup` (`src/server/game/world_tick.zig:418-426`,
-`src/wire/packages.zig:1311-1317`). Both are broadcasts rather than interest-gated, matching the
+`src/wire/stock_sleeper.zig:16-36`). Both are broadcasts rather than interest-gated, matching the
 stock send with no target entity.
 
 ## Re-arm and the 2 Hz cadence

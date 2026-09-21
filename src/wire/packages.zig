@@ -661,91 +661,6 @@ pub const stock_gamestats = @import("stock_gamestats.zig");
 pub const GameStatsValues = stock_gamestats.GameStatsValues;
 pub const buildGameStatsBodyValues = stock_gamestats.buildGameStatsBodyValues;
 
-test "lock response for a trader carries the context and trader data" {
-    // buildLockResponseTrader had no test. It differs from a plain grant by
-    // forcing success true and appending the context type name, the command
-    // and a TraderData block, so the leading locking/success pair is where a
-    // swap would pass unnoticed.
-    var req_buf: [64]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &req_buf };
-    try w.writeBool(true); // locking
-    try w.writeU16(3); // channel
-    try w.writeI32(0); // no targets
-    try w.writeString("EntityTraderLockContext");
-    try w.writeString("trade");
-    const head = try parseLockRequest(w.written());
-
-    var resp_buf: [512]u8 = undefined;
-    const resp = try buildLockResponseTrader(&resp_buf, head, .{
-        .trader_id = 42,
-        .available_money = 1000,
-        .entries = &.{},
-    });
-    var r: binary.Reader = .{ .data = resp };
-    var s_buf: [64]u8 = undefined;
-    try std.testing.expectEqual(true, try r.readBool()); // locking echoed
-    try std.testing.expectEqual(true, try r.readBool()); // success forced
-    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
-    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
-    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // channel echoed
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // targets count
-    try std.testing.expectEqualStrings("EntityTraderLockContext", try r.readString(&s_buf));
-    try std.testing.expectEqualStrings("trade", try r.readString(&s_buf));
-    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
-
-    // With locking=true both leading bools are true, so a swap between the
-    // echoed locking and the forced success emits identical bytes. Repeat with
-    // locking=false: the pair is then observable, and success must still be
-    // forced true regardless.
-    var req2_buf: [64]u8 = undefined;
-    var w2: binary.Writer = .{ .buf = &req2_buf };
-    try w2.writeBool(false); // locking
-    try w2.writeU16(3);
-    try w2.writeI32(0);
-    try w2.writeString("EntityTraderLockContext");
-    try w2.writeString("trade");
-    const head2 = try parseLockRequest(w2.written());
-    var resp2_buf: [512]u8 = undefined;
-    const resp2 = try buildLockResponseTrader(&resp2_buf, head2, .{
-        .trader_id = 42,
-        .available_money = 1000,
-        .entries = &.{},
-    });
-    try std.testing.expectEqual(@as(u8, 0), resp2[0]); // locking echoed false
-    try std.testing.expectEqual(@as(u8, 1), resp2[1]); // success still forced
-
-    // Same builder, vending context: VendingMachineLockContext::Read takes the
-    // TraderData straight after the type name, with no Command and no
-    // hasTraderData bool (TileEntityVendingMachine_VendingMachineLockContext
-    // .il.txt:19). Emitting the entity shape here handed the client two extra
-    // bytes it reads as the first half of TraderID.
-    var vreq_buf: [64]u8 = undefined;
-    var vw: binary.Writer = .{ .buf = &vreq_buf };
-    try vw.writeBool(true);
-    try vw.writeU16(3);
-    try vw.writeI32(0);
-    try vw.writeString(vending_lock_context);
-    const vhead = try parseLockRequest(vw.written());
-    var vresp_buf: [512]u8 = undefined;
-    const vresp = try buildLockResponseTrader(&vresp_buf, vhead, .{
-        .trader_id = 42,
-        .available_money = 1000,
-        .entries = &.{},
-    });
-    var vr: binary.Reader = .{ .data = vresp };
-    _ = try vr.readBool(); // locking
-    _ = try vr.readBool(); // success
-    _ = try vr.readString(&s_buf); // errorMsg
-    _ = try vr.readBool(); // isForceUnlocked
-    _ = try vr.readU16(); // channel
-    _ = try vr.readI32(); // targets count
-    try std.testing.expectEqualStrings(vending_lock_context, try vr.readString(&s_buf));
-    // TraderData begins immediately: its TraderID, not a command length byte.
-    try std.testing.expectEqual(@as(i32, 42), try vr.readI32());
-    // The two contexts must not produce the same tail length for equal data.
-    try std.testing.expect(vresp.len < resp.len);
-}
-
 pub const stock_weather = @import("stock_weather.zig");
 pub const WeatherBiome = stock_weather.WeatherBiome;
 pub const buildWeatherBody = stock_weather.buildWeatherBody;
@@ -820,38 +735,6 @@ pub const SpawnPointEntry = stock_entity.SpawnPointEntry;
 /// NetPackageWorldSpawnPoints body = SpawnPointList.Write (one stock shape).
 /// Per-point payload = 26 bytes (stock GetLength lies with count*20).
 pub const buildWorldSpawnPoints = stock_entity.buildWorldSpawnPointsBody;
-
-test "world spawn points stock wire" {
-    var buf: [128]u8 = undefined;
-    const body = try buildWorldSpawnPoints(&buf, &[_]stock_entity.SpawnPointEntry{
-        .{ .x = -273, .y = 61, .z = 449, .heading = 51 },
-        .{ .x = 0, .y = 70, .z = 0 },
-    });
-    // 1 + 4 + 2*26
-    try std.testing.expectEqual(@as(usize, 57), body.len);
-    try std.testing.expectEqual(@as(u8, 2), body[0]);
-    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, body[1..5], .little));
-    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[5..7], .little));
-    try std.testing.expectEqual(@as(f32, -273), @as(f32, @bitCast(std.mem.readInt(u32, body[7..11], .little))));
-    try std.testing.expectEqual(@as(f32, 61), @as(f32, @bitCast(std.mem.readInt(u32, body[11..15], .little))));
-    try std.testing.expectEqual(@as(f32, 449), @as(f32, @bitCast(std.mem.readInt(u32, body[15..19], .little))));
-    try std.testing.expectEqual(@as(f32, 51), @as(f32, @bitCast(std.mem.readInt(u32, body[19..23], .little))));
-    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[23..27], .little));
-    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[27..31], .little));
-}
-
-test "world spawn points: 32 entries exceed the old 512-byte join buffer" {
-    // Regression (2026-08-29 Pregen soak): sendWorldSpawnPoints built into a
-    // 512-byte slice, but 32 entries need 837 bytes (26/entry + 5 header), so
-    // maps with >= 20 spawn points overflowed on every enter. The join
-    // handler now uses a 1024-byte slice; pin that the full cap fits.
-    var pts: [32]stock_entity.SpawnPointEntry = undefined;
-    for (&pts, 0..) |*p, i| p.* = .{ .x = @floatFromInt(i), .y = 60, .z = @floatFromInt(i) };
-    var buf: [1024]u8 = undefined;
-    const body = try buildWorldSpawnPoints(&buf, &pts);
-    try std.testing.expect(body.len > 512); // the old slice could not hold it
-    try std.testing.expect(body.len < buf.len);
-}
 
 pub const stock_areas = @import("stock_areas.zig");
 pub const TraderTeleport = stock_areas.TraderTeleport;

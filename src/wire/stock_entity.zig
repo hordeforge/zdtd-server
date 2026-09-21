@@ -952,3 +952,34 @@ test "world spawn points body is the stock SpawnPointList shape" {
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // team
     try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // activeInGameMode
 }
+
+test "world spawn points stock wire" {
+    var buf: [128]u8 = undefined;
+    const body = try buildWorldSpawnPointsBody(&buf, &[_]SpawnPointEntry{
+        .{ .x = -273, .y = 61, .z = 449, .heading = 51 },
+        .{ .x = 0, .y = 70, .z = 0 },
+    });
+    // 1 + 4 + 2*26
+    try std.testing.expectEqual(@as(usize, 57), body.len);
+    try std.testing.expectEqual(@as(u8, 2), body[0]);
+    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, body[1..5], .little));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[5..7], .little));
+    try std.testing.expectEqual(@as(f32, -273), @as(f32, @bitCast(std.mem.readInt(u32, body[7..11], .little))));
+    try std.testing.expectEqual(@as(f32, 61), @as(f32, @bitCast(std.mem.readInt(u32, body[11..15], .little))));
+    try std.testing.expectEqual(@as(f32, 449), @as(f32, @bitCast(std.mem.readInt(u32, body[15..19], .little))));
+    try std.testing.expectEqual(@as(f32, 51), @as(f32, @bitCast(std.mem.readInt(u32, body[19..23], .little))));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[23..27], .little));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[27..31], .little));
+}
+test "world spawn points: 32 entries exceed the old 512-byte join buffer" {
+    // Regression (2026-08-29 Pregen soak): sendWorldSpawnPoints built into a
+    // 512-byte slice, but 32 entries need 837 bytes (26/entry + 5 header), so
+    // maps with >= 20 spawn points overflowed on every enter. The join
+    // handler now uses a 1024-byte slice; pin that the full cap fits.
+    var pts: [32]SpawnPointEntry = undefined;
+    for (&pts, 0..) |*p, i| p.* = .{ .x = @floatFromInt(i), .y = 60, .z = @floatFromInt(i) };
+    var buf: [1024]u8 = undefined;
+    const body = try buildWorldSpawnPointsBody(&buf, &pts);
+    try std.testing.expect(body.len > 512); // the old slice could not hold it
+    try std.testing.expect(body.len < buf.len);
+}
