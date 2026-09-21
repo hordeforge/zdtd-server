@@ -367,6 +367,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
 | `src/wire/stock_damage.zig` | R | Stock NetPackageDamageEntity body (V3.2.0 packed-flags head + 30-field body; RE inventories/netpackage-bodies.md write IL=144, changelog-3.2.0 §3.1). Split out of the packages.zig facade, same builders and golden tests |
+| `src/wire/stock_world.zig` | R | World bodies (time, sign-data terminator, init info, world info, folder transfer, chunk-cluster info). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_block.zig` | R | Block + audio bodies (SetBlock variants, multi-change parse, WaterSet, AudioPlay, BlockValue meta/flag consts). Split out of the packages.zig facade, same builders and test |
 | `src/wire/stock_motion.zig` | R | Entity motion bodies (PosAndRot/teleport, spawn response, trader stock data, rel-pos, AliveFlags, speeds, player-data ECD head). Split out of the packages.zig facade, same builders |
 | `src/wire/stock_map.zig` | R | Stock NetPackageChunk envelope + height-plane test payload, and NetPackageMapChunks (write IL=109). Split out of the packages.zig facade, same builders and tests |

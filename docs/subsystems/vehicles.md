@@ -82,7 +82,7 @@ vehicle id and slot both `-1`; the sim seat is freed even when the encode fails,
 seat on remotes is worse than a missing packet (`src/server/game/vehicle.zig:35-51`). A late joiner
 gets current occupancy replayed seat by seat (`src/server/game/vehicle.zig:55-71`), and the owning
 player receives their parked hulls as an `EntityWaypointList` with list type `Vehicle` (0)
-(`src/server/game/vehicle.zig:78-97`, `src/wire/packages.zig:6545-6559`).
+(`src/server/game/vehicle.zig:78-97`, `src/wire/packages.zig:5528-5542`).
 
 ## Drive input
 
@@ -91,7 +91,7 @@ name. The handler gates on that exact length, so a real stock body (entity type,
 ItemValue, placing entity) can never be decoded as this one (`src/server/c2s/misc.zig:1247`,
 `src/wire/packages.zig:6103-6108`). The op byte selects enter, exit or drive, and only seat 0
 steers (`src/server/c2s/misc.zig:1251-1257`). The parser rejects non-finite throttle or steer values
-(`src/wire/packages.zig:5275`):
+(`src/wire/packages.zig:5097`):
 
 ```zig
 pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, throttle: f32, steer: f32 } {
