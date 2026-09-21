@@ -338,3 +338,22 @@ test "parseItemReload reads the single entityId" {
     try std.testing.expectError(error.EndOfStream, parseItemReload(buf[0..3]));
     try std.testing.expectError(error.EndOfStream, parseItemReload(&.{}));
 }
+
+test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
+    var buf: [64]u8 = undefined;
+    const out = try buildPickupBlockBody(&buf, 7, 8, 9, 0x1234, 42);
+    // Body is 3x4 + 4 + 4 + 1 null-identity byte.
+    try std.testing.expectEqual(@as(usize, 21), out.len);
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    var sent2: ?platform_user.Id = null;
+    const p = try parsePickupBlockBody(out, &plat, &id, &sent2);
+    try std.testing.expect(sent2 == null);
+    // Whole position: y and z had nothing reading them back, so a swap in the
+    // triple would pick up a different block than the client asked for.
+    try std.testing.expectEqual(@as(i32, 7), p.x);
+    try std.testing.expectEqual(@as(i32, 8), p.y);
+    try std.testing.expectEqual(@as(i32, 9), p.z);
+    try std.testing.expectEqual(@as(u32, 0x1234), p.raw);
+    try std.testing.expectEqual(@as(i32, 42), p.player_id);
+}
