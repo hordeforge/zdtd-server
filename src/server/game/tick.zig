@@ -965,6 +965,9 @@ pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
         _ = c.cvars.apply(entry.name, .set, entry.value);
     }
     applyTriggeredBuffsFull(self, c.entity_id, ps, &res, c.entity_id, false);
+    // Gated `GiveExp` rows sum here (bandage 10 + Physician tier bonus);
+    // this replaces the flat first-GiveExp award, which ignored the gates.
+    if (res.give_exp > 0) self.awardXp(@intCast(peer_slot), res.give_exp);
     // Grandpa's Forgetting Elixir: `ResetProgression` resets skills and
     // refunds points server-side (the client's respec UI reads the result).
     if (res.reset_progression) self.resetProgression(@intCast(peer_slot));

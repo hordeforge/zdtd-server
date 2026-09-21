@@ -8936,3 +8936,35 @@ test "respawn grants the stock spawn-protection and trauma buffs" {
     try std.testing.expect(g.sim.buffs[ps].find(trauma) != null);
     try std.testing.expect(g.sim.buffs[ps].find(regen) != null);
 }
+
+test "eating a bandage grants Physician-scaled XP through gated GiveExp rows" {
+    // medicalBandage carries an ungated GiveExp 10 plus Physician-gated
+    // 20/30/60 rows. The eat path sums the passing rows instead of the flat
+    // first-GiveExp award, so Physician 1 earns 30, bare hands earn 10.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const bandage = g.items.byName("medicalBandage") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, bandage.id, 1));
+    const before = cl.xp;
+    g.fireItemUseBuffs(ps, bandage.id);
+    try std.testing.expectEqual(before + 10, cl.xp);
+    cl.skill_levels[0] = .{ .name = "perkPhysician", .level = 1 };
+    cl.skill_level_n = 1;
+    g.fireItemUseBuffs(ps, bandage.id);
+    try std.testing.expectEqual(before + 10 + 30, cl.xp);
+}

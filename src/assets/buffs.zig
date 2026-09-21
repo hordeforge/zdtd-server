@@ -216,6 +216,9 @@ pub const TriggeredAction = enum(u8) {
     /// `CallGameEvent`: run a gameevents.xml sequence by name
     /// (`MinEventActionCallGameEvent`; Dentist silver/gold grants).
     call_game_event,
+    /// `GiveExp`: grant XP on the event (medical Physician-scaled rows,
+    /// schematics/books flat rows). Gated per row; passing rows sum.
+    give_exp,
     other,
 };
 
@@ -776,7 +779,8 @@ pub fn scanTriggeredRows(
             .cvar_op = cvars.Operation.parse(xml.attr(body, ri, "operation") orelse "set") orelse .set,
             .value_cvar = if (val_cvar.len > 0) try arena.dupe(u8, val_cvar) else "",
             .op = if (is_add_health) .add else parseOp(xml.attr(body, ri, "operation") orelse "add"),
-            .value = if (is_add_health) firstF32(health_s) else firstF32(val_s),
+            // `GiveExp` carries its amount in `exp=`, not `value=`.
+            .value = if (is_add_health) firstF32(health_s) else if (act == .give_exp) firstF32(xml.attr(body, ri, "exp") orelse "0") else firstF32(val_s),
             .value_list = blk: {
                 const vl = parseValueList(val_s);
                 break :blk vl.list;
@@ -1616,6 +1620,7 @@ fn parseTriggeredAction(s: []const u8) TriggeredAction {
     if (std.mem.eql(u8, s, "CallGameEvent")) return .call_game_event;
     if (std.mem.eql(u8, s, "RemoveAllNegativeBuffs")) return .remove_all_negative;
     if (std.mem.eql(u8, s, "ResetProgression")) return .reset_progression;
+    if (std.mem.eql(u8, s, "GiveExp")) return .give_exp;
     return .other; // RefreshPerks is a no-op here: the passive fold reads skill_levels live.
 }
 
@@ -1678,6 +1683,9 @@ pub const TriggeredResult = struct {
     /// Respec (`ResetProgression`): the caller refunds SkillPoints and clears
     /// perk/attribute levels to base.
     reset_progression: bool = false,
+    /// XP (`GiveExp`): passing rows sum here; the caller awards the total
+    /// through its XP ledger.
+    give_exp: u32 = 0,
 };
 
 /// The triggered-effect engine: evaluate one buff's `onSelf*` rows for
@@ -1898,6 +1906,11 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
             .reset_progression => {
                 if (out.reset_progression) continue;
                 out.reset_progression = true;
+            },
+            .give_exp => {
+                // Gated rows sum: an ungated base row plus the owned tier's
+                // gated row both land (bandage 10 + Physician bonus).
+                out.give_exp +|= @intFromFloat(@max(0, tr.value));
             },
             .add_or_remove_buff => unreachable, // handled above (toggle, not gate)
             .other => continue,
@@ -3168,4 +3181,22 @@ test "cure-all row evaluates on regen start" {
     var counts: requirements.Counts = .{};
     const res = evaluateTriggered(&t, id, .start, .{ .player_level = 1 }, &counts);
     try std.testing.expect(res.remove_all_negative);
+}
+
+test "GiveExp rows sum the passing gates" {
+    // Bandage shape: ungated 10 plus a Physician-gated 20. Both land at
+    // Physician 1; only the base lands without it.
+    const rows = [_]Triggered{
+        .{ .trigger = .primary_action_end, .action = .give_exp, .value = 10, .reqs = &.{} },
+        .{ .trigger = .primary_action_end, .action = .give_exp, .value = 20, .reqs = &.{
+            .{ .kind = .progression_level, .arg = "perkPhysician", .op = .ge, .value = 1 },
+        } },
+    };
+    var counts: requirements.Counts = .{};
+    const levels = [_]requirements.NameLevel{.{ .name = "perkPhysician", .level = 1 }};
+    const with_perk = evaluateRows(&rows, .primary_action_end, .{ .levels = &levels }, &counts);
+    try std.testing.expectEqual(@as(u32, 30), with_perk.give_exp);
+    counts = .{};
+    const bare = evaluateRows(&rows, .primary_action_end, .{}, &counts);
+    try std.testing.expectEqual(@as(u32, 10), bare.give_exp);
 }

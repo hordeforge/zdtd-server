@@ -1376,7 +1376,10 @@ pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
 /// SetProgressionLevel(level=-1) plus GiveExp on the consumed item.
 /// GiveExp (RE minevents.md IL=63) is `_xpOther` / XPTypes 8 on stock; the
 /// wire maps any non-kill type to `_xpOther`, so AddExpClient uses
-/// xp_type_other. Unknown names fail closed; 0 exp is a no-op.
+/// xp_type_other. Unknown names fail closed; 0 exp is a no-op. The XP itself
+/// is awarded by the eat path's gated GiveExp sum (fireItemUseBuffs), which
+/// honours Physician-tier rows the flat first-GiveExp award ignored; this
+/// covers only the progression levels here.
 pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
     if (item_id == 0 or slot >= self.clients.len) return;
     const def = self.items.byId(item_id) orelse return;
@@ -1386,8 +1389,6 @@ pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
     for (def.progression_set_max) |pname| {
         _ = setProgressionLevelMax(self, slot, pname);
     }
-    if (def.eat_exp == 0) return;
-    awardXp(self, slot, def.eat_exp);
 }
 
 /// Fold one named passive over a client's purchased attribute/perk levels
@@ -1696,8 +1697,10 @@ test "grantMagazineRead awards GiveExp through the server ledger" {
     g.items = .{ .defs = &defs, .source = .xml };
     const before = g.clients[0].xp;
     g.grantMagazineRead(0, 100);
-    try std.testing.expectEqual(before + 50, g.clients[0].xp);
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "craftingHarvestingTools"));
+    // XP rides the eat path's gated GiveExp sum now (fireItemUseBuffs), not
+    // the flat award: the ledger itself is unchanged here.
+    try std.testing.expectEqual(before, g.clients[0].xp);
 }
 
 test "grantMagazineRead SetProgressionLevel -1 sets perk to max" {
@@ -1726,7 +1729,7 @@ test "grantMagazineRead SetProgressionLevel -1 sets perk to max" {
     g.items = .{ .defs = &defs, .source = .xml };
     const before = g.clients[0].xp;
     g.grantMagazineRead(0, 100);
-    try std.testing.expectEqual(before + 50, g.clients[0].xp);
+    try std.testing.expectEqual(before, g.clients[0].xp);
     try std.testing.expectEqual(@as(u8, 5), g.skillLevelOf(0, "perkFiremansAlmanacHeat"));
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "perkFiremansAlmanacComplete"));
     // Idempotent at max.
