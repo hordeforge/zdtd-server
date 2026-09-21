@@ -24,7 +24,7 @@ Every C2S package reaches the subsystem through one chain: phase gate, then `c2s
 `.playing` never reaches a handler.
 
 `NetPackageEntityPosAndRot` is absolute; its parser rejects a body under 30 bytes and
-reads rotation only to skip it (`src/wire/packages.zig:987-1004`):
+reads rotation only to skip it (`src/wire/stock_motion.zig:123-140`):
 
 ```zig
 pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool, wire_len: usize } {

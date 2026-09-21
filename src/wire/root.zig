@@ -20,6 +20,7 @@ pub const stock_quest = @import("stock_quest.zig");
 pub const stock_buff = @import("stock_buff.zig");
 pub const stock_damage = @import("stock_damage.zig");
 pub const stock_map = @import("stock_map.zig");
+pub const stock_motion = @import("stock_motion.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const stock_party = @import("stock_party.zig");
@@ -40,6 +41,7 @@ test {
     _ = stock_buff;
     _ = stock_damage;
     _ = stock_map;
+    _ = stock_motion;
     _ = stock_te;
     _ = stock_sign;
     _ = stock_party;
