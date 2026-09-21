@@ -6,7 +6,7 @@ Sources: [`src/server/game/chunk_stream.zig`](../../src/server/game/chunk_stream
 
 ## Ownership and wiring
 
-`Game` holds thin forwarders so the entry points stay visible from `game.zig` (`sendSpawnChunk` at `src/server/game.zig:3929`, `sendContainersInChunk` at `src/server/game.zig:3975`, `sendSpawnArea` at `src/server/game.zig:3979`, `drainSpawnArea` at `src/server/game.zig:3986`, `streamChunksForClient` at `src/server/game.zig:3993`). The bodies live in `game/chunk_stream.zig` and `game/chunk_fill.zig`.
+`Game` holds thin forwarders so the entry points stay visible from `game.zig` (`sendSpawnChunk` at `src/server/game.zig:3681`, `sendContainersInChunk` at `src/server/game.zig:3727`, `sendSpawnArea` at `src/server/game.zig:3731`, `drainSpawnArea` at `src/server/game.zig:3738`, `streamChunksForClient` at `src/server/game.zig:3745`). The bodies live in `game/chunk_stream.zig` and `game/chunk_fill.zig`.
 
 The driver is `replicate`, once per tick (`src/server/game/replicate.zig:20`). It first drains every peer's pending spawn area against one shared budget (`src/server/game/replicate.zig:32-46`), then, on the `chunk_stream_period_ticks` gate and only for peers that are `entered` or `world_ready`, runs the view stream per client (`src/server/game/replicate.zig:47-61`). That whole pass is the `.replicate` apm section; the stream adds `.chunk_stream` (`src/server/game/chunk_stream.zig:261`), chunk generation `.chunk_gen` (`src/server/game/chunk_fill.zig:45`), the TE scan `.te_scan` (`src/server/game/chunk_fill.zig:273`), and the drain `.join_drain` (`src/server/game/chunk_stream.zig:221`).
 
