@@ -879,3 +879,16 @@ pub const VelYSent = struct {
     gen: u32 = 0,
 };
 
+/// Sparse block-meta caps: `block_raw` is a write-through mirror of the chunk
+/// raw plane (GAP 13). `blockRawAt` prefers a resident chunk over a mirror hit
+/// so a plane-only write cannot serve stale rotation/meta; eviction of a
+/// mirror entry is a cache miss, not content loss. Partial block damage lives
+/// in the chunk damage plane (world/store.zig), persisted by ZCH3, so it has
+/// no game-level cap.
+pub const max_block_raw_entries: usize = 256;
+
+/// Bound on the spawn-surface descent over blocks whose `CanPlayersSpawnOn` is
+/// false (a tree or vehicle column): a modded world cannot spin the join path
+/// in a loop.
+pub const max_spawn_ground_scan: usize = 32;
+

@@ -169,13 +169,7 @@ pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_m
 pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
 pub const default_interest_range = game_types.default_interest_range;
-/// Sparse block-meta caps: `block_raw` is a write-through mirror of the chunk
-/// raw plane (GAP 13). `blockRawAt` prefers a resident chunk over a mirror hit
-/// so a plane-only write cannot serve stale rotation/meta; eviction of a
-/// mirror entry is a cache miss, not content loss. Partial block damage lives
-/// in the chunk damage plane (world/store.zig), persisted by ZCH3, so it has
-/// no game-level cap.
-pub const max_block_raw_entries: usize = 256;
+pub const max_block_raw_entries = game_types.max_block_raw_entries;
 pub const max_chat_msg_len = game_types.max_chat_msg_len;
 pub const default_min_chat_gap_ns = game_types.default_min_chat_gap_ns;
 pub const default_inv_bucket_cap = game_types.default_inv_bucket_cap;
@@ -201,10 +195,7 @@ pub const map_window_n = game_types.map_window_n;
 pub const critical_retry_budget_ns = game_types.critical_retry_budget_ns;
 pub const default_view_radius = game_types.default_view_radius;
 
-/// Bound on the spawn-surface descent over blocks whose `CanPlayersSpawnOn` is
-/// false (a tree or vehicle column): a modded world cannot spin the join path
-/// in a loop.
-pub const max_spawn_ground_scan: usize = 32;
+pub const max_spawn_ground_scan = game_types.max_spawn_ground_scan;
 pub const default_max_players = game_types.default_max_players;
 pub const replicate_frame_cap = game_types.replicate_frame_cap;
 pub const speeds_body_off = game_types.speeds_body_off;
