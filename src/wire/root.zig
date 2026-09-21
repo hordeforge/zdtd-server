@@ -24,6 +24,7 @@ pub const stock_motion = @import("stock_motion.zig");
 pub const stock_block = @import("stock_block.zig");
 pub const stock_world = @import("stock_world.zig");
 pub const stock_estats = @import("stock_estats.zig");
+pub const stock_invtx = @import("stock_invtx.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const stock_party = @import("stock_party.zig");
@@ -48,6 +49,7 @@ test {
     _ = stock_block;
     _ = stock_world;
     _ = stock_estats;
+    _ = stock_invtx;
     _ = stock_te;
     _ = stock_sign;
     _ = stock_party;
