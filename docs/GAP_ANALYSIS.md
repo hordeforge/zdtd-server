@@ -2111,12 +2111,12 @@ encoding is one day high.
   BloodMoonFrequency/Range/EnemyCount (SandboxOptions 48/49/51 per
   `UpdateInGameValuesWithSandboxOptions`, asm.il:2501770) onto the sim
   config, which feeds the CalcNextDay schedule (stat 58 row, WORKS). The
-  same string echoes verbatim into GameStats(71) (`packages.zig:2217`), so a
+  same string echoes verbatim into GameStats(71) (`stock_gamestats.zig:163`), so a
   joining client decodes the server's settings instead of its local
   GamePrefs. The legacy BloodMoonFrequency serverconfig property remains a
   fallback when no SandboxCode is set.
   *Anchors:* `src/server/config.zig:313-340,422-423,459`,
-  `src/assets/sandbox.zig:149`, `src/wire/packages.zig:2217`,
+  `src/assets/sandbox.zig:149`, `src/wire/stock_gamestats.zig:163`,
   `asm.il:2501770`, `$game/serverconfig.xml` line 103
 
 - **Wandering horde / screamer heat** `WORKS`
