@@ -3069,8 +3069,8 @@ gamestage, no wandering hordes, and no screamers.
 
   **Residual (found 2026-09-09): `active_scale` also multiplies movement
   speed, not just the decision cadence.** `lodScale` returns 1.0 / 0.3 / 0.1
-  by distance to the *sensed* target (`systems.zig:1892`). That value drains
-  `decision_cd` (`:1959`), which is the documented LOD throttle, but it is
+  by distance to the *sensed* target (`src/ecs/sensing.zig:16`). That value drains
+  `decision_cd` (`src/ecs/ai_tasks.zig:389`), which is the documented LOD throttle, but it is
   also passed as the `speed` argument to `chaseAlongPath` at six sites
   (`:2276, :2314, :2423, :2545, :2594, :2627`), where it scales real
   movement. The bands are 15 blocks (`mid_dist_sq` 225) and 64 blocks
@@ -3381,7 +3381,7 @@ unvalidated, and durability, mods and repair do not exist.
   and `killXpAward`/turret path both call `rollLootDrop(net_id, drop_prob)` so
   most kills drop nothing; deterministic hash test pins 4% rate.
   *Anchors:* `src/assets/entities.zig:326-332`, `src/ecs/world.zig:856-880`,
-  `src/ecs/systems.zig:2107-2127`, `$game/Data/Config/entityclasses.xml` line 689
+  `src/ecs/world.zig:1599`, `$game/Data/Config/entityclasses.xml` line 689
 
 - **Player death loot bag (DropOnDeath)** `WORKS` `(2026-08-22)`
   Modes 1..3 drop a bag holding the victim's **real inventory range**:

@@ -979,3 +979,783 @@ pub fn questObjectiveEvent(w: *World, peer_slot: usize, quest_code: i32, kind: q
     bumpPhase(w, ps, s, d, kind, 1);
     return true;
 }
+
+test "quest kill complete on journal component" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 1));
+    try std.testing.expect(questHasActive(&w, 0, 1));
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 1));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(@as(u32, 25), questCoins(&w, 0));
+}
+
+test "quest progress and coin rewards saturate instead of wrapping" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 22,
+        .kind = .fetch_item,
+        .title = "Large fetch",
+        .target_count = std.math.maxInt(u16),
+        .reward_coin = 10,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const ps = w.playerByPeer(0).?;
+    w.wallet[ps].coins = std.math.maxInt(u32) - 5;
+    questFindActive(&w, 0, 22).?.progress = std.math.maxInt(u16) - 5;
+
+    questOnFetchItem(&w, 0, 10);
+
+    try std.testing.expect(!questHasActive(&w, 0, 22));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(std.math.maxInt(u32), questCoins(&w, 0));
+}
+
+test "quest phase graph goto then kill then turn-in at trader" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .goto_point, .required = 1 },
+        .{ .kind = .kill_zombies, .required = 3 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 20,
+        .kind = .kill_zombies,
+        .name = "pg",
+        .title = "PG",
+        .target_count = 3,
+        .reward_coin = 50,
+        .turn_in = true,
+        .tx = 10,
+        .ty = 70,
+        .tz = 10,
+        .objective_count = 3,
+        .phases = &phases,
+        .highest_phase = 3,
+        .objective_phases = &[_]u8{ 1, 2, 3 },
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 20, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 20));
+    const s = questFindActive(&w, 0, 20).?;
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    // Kills on the goto phase must not advance it.
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    // Reach the goto point → advance to the kill phase.
+    questTickGoto(&w, 0, 10, 10);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+
+    // Three kills complete the kill phase → trader phase, not yet ready.
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 3), s.phase);
+    try std.testing.expect(!s.ready_turn_in);
+    try std.testing.expect(questHasActive(&w, 0, 20));
+
+    // Interacting at the trader satisfies the highest phase and turns in.
+    questOnTraderOpen(&w, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 20));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(@as(u32, 50), questCoins(&w, 0));
+}
+
+test "quest phase graph auto-skips leading scaffolding on accept" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .auto, .required = 1 },
+        .{ .kind = .kill_zombies, .required = 2 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 21,
+        .kind = .kill_zombies,
+        .name = "sk",
+        .title = "SK",
+        .target_count = 2,
+        .reward_coin = 30,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objective_phases = &[_]u8{ 1, 2 },
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 21, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 21));
+    // Leading auto phase auto-completes on accept: land on the kill phase.
+    try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 21).?.phase);
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 21));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(@as(u32, 30), questCoins(&w, 0));
+}
+
+/// Fixed POI covering the quest target used by the rally tests.
+fn testPoiRect(_: ?*anyopaque, x: f32, z: f32) ?c.PoiRect {
+    const rect: c.PoiRect = .{ .x = 0, .y = 60, .z = 0, .size_x = 64, .size_y = 20, .size_z = 64 };
+    return if (rect.containsXZ(x, z)) rect else null;
+}
+
+/// Nearest-POI hook for the B26 goto placement test.
+fn testNearestPoi(_: ?*anyopaque, _: f32, _: f32) ?c.PoiRect {
+    return .{ .x = 100, .y = 60, .z = 200, .size_x = 40, .size_y = 20, .size_z = 40 };
+}
+
+test "goto quest binds the nearest real POI instead of an invented spot" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .goto_point, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 40,
+        .kind = .goto_point,
+        .name = "gp",
+        .title = "GP",
+        .target_count = 1,
+        .reward_coin = 10,
+        .tx = 0, // no static position; the bound POI must win
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 40, .source = .builtin };
+    w.nearest_poi_fn = &testNearestPoi;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 40));
+    const s = questFindActive(&w, 0, 40).?;
+    // Accept bound the nearest real POI (100,200) with its 40x40 footprint.
+    try std.testing.expect(s.poi.valid());
+    try std.testing.expectEqual(@as(f32, 100), s.poi.x);
+    try std.testing.expectEqual(@as(f32, 200), s.poi.z);
+    // The def marker (0,0) is not the target: standing there does nothing.
+    questTickGoto(&w, 0, 0, 0);
+    try std.testing.expect(questHasActive(&w, 0, 40));
+    // Arriving at the POI center completes the goto quest.
+    questTickGoto(&w, 0, 120, 220);
+    try std.testing.expect(!questHasActive(&w, 0, 40));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
+}
+
+test "goto/stay default radii come from catalog.policy (ADR 0021)" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .goto_point, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 42,
+        .kind = .goto_point,
+        .name = "gr",
+        .title = "GR",
+        .tx = 10,
+        .ty = 70,
+        .tz = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+    }};
+    // Policy radius 12 m (no poi_fn: the goto target is the def spot 10,10).
+    w.catalog = .{ .defs = &defs, .starter_id = 42, .policy = .{ .goto_radius = 12 } };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 42));
+    // 11 m from (10,10): inside the 12 m policy radius -> completes; the
+    // builtin 4 m default would not have.
+    questTickGoto(&w, 0, 10, -1);
+    try std.testing.expect(!questHasActive(&w, 0, 42));
+
+    // stay_within: the policy radius is the floor when no distance is parsed.
+    const stay_phases = [_]quest.PhaseSpec{.{ .kind = .stay_within, .required = 1 }};
+    const stay_defs = [_]quest.QuestDef{.{
+        .id = 43,
+        .kind = .stay_within,
+        .name = "sw",
+        .title = "SW",
+        .tx = 0,
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 1,
+        .phases = &stay_phases,
+        .highest_phase = 1,
+    }};
+    w.catalog = .{ .defs = &stay_defs, .starter_id = 43, .policy = .{ .stay_radius = 12 } };
+    try std.testing.expect(questAccept(&w, 0, 43));
+    questTickStayWithin(&w, 0, 10, 0); // 10 m from the target: inside 12 m
+    try std.testing.expect(!questHasActive(&w, 0, 43));
+}
+
+test "ClearSleepers kills gate to the bound POI and suppress its sleepers" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 2, .poi_gated = true }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 50,
+        .kind = .kill_zombies,
+        .name = "cs",
+        .title = "CS",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 50, .source = .builtin };
+    w.poi_fn = &testPoiRect; // POI covering (0,0)..(64,64)
+    // Spy: completing the clear phase fires the sleeper-suppression hook.
+    var cleared_n: u32 = 0;
+    const spy = struct {
+        fn f(ctx: ?*anyopaque, _: c.PoiRect) void {
+            const p: *u32 = @ptrCast(@alignCast(ctx.?));
+            p.* += 1;
+        }
+    }.f;
+    w.quest_clear_ctx = &cleared_n;
+    w.quest_clear_fn = spy;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 50));
+    try std.testing.expect(questFindActive(&w, 0, 50).?.poi.valid());
+    // A kill outside the bound POI must not advance a ClearSleepers phase
+    // (stock QuestEvent_SleepersCleared only counts the POI's own sleepers).
+    questOnZombieKilled(&w, 0, 1000, 1000);
+    try std.testing.expect(questHasActive(&w, 0, 50));
+    try std.testing.expectEqual(@as(u32, 0), cleared_n);
+    // Kills inside the POI count; completing the phase suppresses sleepers.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(questHasActive(&w, 0, 50));
+    questOnZombieKilled(&w, 0, 20, 20);
+    try std.testing.expect(!questHasActive(&w, 0, 50));
+    try std.testing.expectEqual(@as(u32, 1), cleared_n);
+}
+
+test "ClearSleepers target uses the POI's live sleeper count (B25)" {
+    // Stock ObjectiveClearSleepers counts the bound POI's sleeper volume
+    // spawns as the kill target; the Game hook supplies that count and the
+    // def's policy floor is not used (audit B25).
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{.{
+        .phase = 1,
+        .kind = .kill_zombies,
+        .required = 1, // policy floor; the hook overrides it to 4
+        .poi_gated = true,
+    }};
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 1, .poi_gated = true }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 51,
+        .kind = .kill_zombies,
+        .name = "cs_live",
+        .title = "CS live",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 51, .source = .builtin };
+    w.poi_fn = &testPoiRect; // POI covering (0,0)..(64,64)
+    const Spy = struct {
+        fn f(_: ?*anyopaque, _: c.PoiRect) u16 {
+            return 4; // the POI holds 4 sleepers
+        }
+    };
+    w.quest_sleeper_count_ctx = null;
+    w.quest_sleeper_count_fn = &Spy.f;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 51));
+    try std.testing.expect(questFindActive(&w, 0, 51).?.poi.valid());
+    // 1-3 kills: still active (target 4, not the def floor of 1).
+    questOnZombieKilled(&w, 0, 10, 10);
+    questOnZombieKilled(&w, 0, 20, 20);
+    questOnZombieKilled(&w, 0, 30, 30);
+    try std.testing.expect(questHasActive(&w, 0, 51));
+    // The 4th kill completes the phase.
+    questOnZombieKilled(&w, 0, 40, 40);
+    try std.testing.expect(!questHasActive(&w, 0, 51));
+    // Unset hook keeps the def floor.
+    w.quest_sleeper_count_fn = null;
+    try std.testing.expect(questAccept(&w, 0, 51));
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(!questHasActive(&w, 0, 51));
+}
+
+test "phase advances only when all its objectives complete (shared phase)" {
+    // Stock refreshQuestCompletion requires ALL non-optional objectives of the
+    // phase (here ClearSleepers-style kills + a stay constraint). Killing the
+    // zombies alone must not advance while the stay objective is incomplete.
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 2 },
+        .{ .phase = 1, .kind = .stay_within, .required = 1 },
+        .{ .phase = 2, .kind = .trader_interact, .required = 1 },
+    };
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 2 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 60,
+        .kind = .kill_zombies,
+        .name = "sh",
+        .title = "SH",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 3,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 60, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 60));
+    // Both kills land, but the stay objective is still incomplete: the phase
+    // holds (the old single-objective model would have advanced here).
+    questOnZombieKilled(&w, 0, 10, 10);
+    questOnZombieKilled(&w, 0, 20, 20);
+    try std.testing.expectEqual(@as(u8, 1), questFindActive(&w, 0, 60).?.phase);
+    try std.testing.expect(questHasActive(&w, 0, 60));
+    // Satisfying the stay constraint completes the shared phase (def spot
+    // (0,0); the def has no POI so the plain-radius check applies).
+    questTickStayWithin(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 60).?.phase);
+}
+
+test "optional objectives never block the phase" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 1 },
+        .{ .phase = 1, .kind = .fetch_item, .required = 5, .optional = true },
+    };
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 61,
+        .kind = .kill_zombies,
+        .name = "op",
+        .title = "OP",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 61, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 61));
+    // The optional fetch objective is untouched, yet the kill completes the quest.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(!questHasActive(&w, 0, 61));
+}
+
+test "phase-0 objectives gate every phase" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 0, .kind = .craft, .required = 1 }, // always-active
+        .{ .phase = 1, .kind = .kill_zombies, .required = 1 },
+        .{ .phase = 2, .kind = .trader_interact, .required = 1 },
+    };
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 62,
+        .kind = .kill_zombies,
+        .name = "", // empty name: the craft hook's recipe-name filter must not
+        // reject the event before it reaches the phase-0 craft objective
+        .title = "P0",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 3,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 62, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 62));
+    // Phase 1's kill completes, but the always-active craft objective (phase 0)
+    // is still incomplete: the phase must not advance.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expectEqual(@as(u8, 1), questFindActive(&w, 0, 62).?.phase);
+    // Crafting satisfies the always-active objective and the phase advances.
+    questOnCraft(&w, 0, "sweep");
+    try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 62).?.phase);
+}
+
+test "ForcePhaseFinish objective fails the quest while incomplete" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 2 },
+        .{ .phase = 1, .kind = .fetch_item, .required = 1, .force = true },
+    };
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 2 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 63,
+        .kind = .kill_zombies,
+        .name = "fp",
+        .title = "FP",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 63, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 63));
+    // The phase stays incomplete (fetch objective untouched) and a phase
+    // objective carries ForcePhaseFinish: the quest fails (stock
+    // refreshQuestCompletion IL_00F8-0104 CloseQuest(Failed)).
+    questOnZombieKilled(&w, 0, 10, 10);
+    var found_failed = false;
+    for (&w.journal[0].slots) |*s2| {
+        if (s2.def_id == 63 and s2.failed) found_failed = true;
+    }
+    try std.testing.expect(found_failed);
+    try std.testing.expect(!questHasActive(&w, 0, 63));
+}
+
+test "SpawnGSEnemy action fires gamestage-scaled spawns on phase entry" {
+    var w: World = .{};
+    defer w.deinit();
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const actions = [_]quest.QuestActionSpec{.{ .kind = .spawn_gs_enemy, .phase = 2, .name = "SleeperGSList", .count_min = 1, .count_max = 2 }} ** quest.max_actions;
+    const defs = [_]quest.QuestDef{.{
+        .id = 64,
+        .kind = .kill_zombies,
+        .name = "gs",
+        .title = "GS",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objective_phases = &[_]u8{ 1, 2 },
+        .actions = actions,
+        .action_n = 1,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 64, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    // Spy: capture the fired spawn request.
+    const Call = struct { fired: bool = false, list: []const u8 = "", min: u8 = 0, max: u8 = 0, px: f32 = 0, pz: f32 = 0 };
+    var call = Call{};
+    const spy = struct {
+        fn f(ctx: ?*anyopaque, _: c.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
+            const c2: *Call = @ptrCast(@alignCast(ctx.?));
+            c2.fired = true;
+            c2.list = list;
+            c2.min = min;
+            c2.max = max;
+            c2.px = px;
+            c2.pz = pz;
+        }
+    }.f;
+    w.quest_spawn_ctx = &call;
+    w.quest_spawn_fn = spy;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 64));
+    try std.testing.expect(!call.fired); // phase 1 has no spawn action
+    // Completing phase 1 enters phase 2, firing the phase-2 SpawnGSEnemy.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(call.fired);
+    try std.testing.expectEqualStrings("SleeperGSList", call.list);
+    try std.testing.expectEqual(@as(u8, 1), call.min);
+    try std.testing.expectEqual(@as(u8, 2), call.max);
+    try std.testing.expectEqual(@as(f32, 0), call.px); // player spawn (0,0)
+    try std.testing.expectEqual(@as(f32, 0), call.pz);
+}
+
+test "fetch_trader goto target stays the def spot, not a covering POI center" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 41,
+        .kind = .fetch_trader,
+        .name = "ft",
+        .title = "FT",
+        .target_count = 1,
+        .reward_coin = 20,
+        .tx = 0,
+        .ty = 70,
+        .tz = 0,
+        .objective_count = 2,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 41, .source = .builtin };
+    // testPoiRect covers (0,0)-(64,64), so accept binds it even for a
+    // fetch_trader (poiAt(d.tx, d.tz) runs for every kind).
+    w.poi_fn = &testPoiRect;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 41));
+    const s = questFindActive(&w, 0, 41).?;
+    try std.testing.expect(s.poi.valid());
+    // Standing at the POI center (32,32) must not advance phase 1: the "go to
+    // trader" target is the def spot, never a covering prefab center.
+    questTickGoto(&w, 0, 32, 32);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    // The def spot advances phase 1 -> phase 2 (ready to turn in).
+    questTickGoto(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expect(s.ready_turn_in);
+}
+
+const rally_phases = [_]quest.PhaseSpec{
+    .{ .kind = .rally, .required = 1 },
+    .{ .kind = .kill_zombies, .required = 2 },
+};
+
+const rally_defs = [_]quest.QuestDef{.{
+    .id = 22,
+    .kind = .kill_zombies,
+    .name = "rp",
+    .title = "RP",
+    .target_count = 2,
+    .reward_coin = 30,
+    .tx = 10,
+    .ty = 70,
+    .tz = 10,
+    .objective_count = 2,
+    .phases = &rally_phases,
+    .highest_phase = 2,
+    .objective_phases = &[_]u8{ 1, 2 },
+}};
+
+test "rally phase blocks until the marker is activated" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const s = questFindActive(&w, 0, 22).?;
+    // With a POI rect the rally phase is real work: it must not be skipped.
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    try std.testing.expect(s.poi.valid());
+    // Kills on the rally phase do not advance it.
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    // A foreign quest code is ignored.
+    try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code + 1));
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+
+    try std.testing.expect(questOnRallyActivated(&w, 0, s.quest_code));
+    try std.testing.expect(s.rally_activated);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    // A repeat activation is refused and must not advance the kill phase.
+    try std.testing.expect(!questOnRallyActivated(&w, 0, s.quest_code));
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expectEqual(@as(u16, 0), s.progress);
+}
+
+test "questObjectiveEvent redelivery does not re-finish a completed phase" {
+    // Client NetPackageQuestObjectiveUpdate can arrive twice for the same
+    // activation; the second must not re-run finishPhaseGraph / completeQuest.
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .block_activate, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 55,
+        .kind = .block_activate,
+        .title = "Activate",
+        .target_count = 1,
+        .reward_coin = 10,
+        .phases = &phases,
+        .highest_phase = 1,
+        .turn_in = true,
+    }};
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &defs, .starter_id = 55, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 55));
+    const s = questFindActive(&w, 0, 55).?;
+    try std.testing.expectEqual(@as(u8, 1), s.phase);
+    try std.testing.expect(questObjectiveEvent(&w, 0, s.quest_code, .block_activate));
+    try std.testing.expect(s.ready_turn_in);
+    try std.testing.expectEqual(@as(u16, 1), s.progress);
+    // Redelivery: progress already met required, so bumpPhase returns without
+    // touching the ring or re-entering finishPhaseGraph.
+    const completed_before = w.completed_quests_n;
+    try std.testing.expect(questObjectiveEvent(&w, 0, s.quest_code, .block_activate));
+    try std.testing.expectEqual(completed_before, w.completed_quests_n);
+    try std.testing.expect(s.ready_turn_in);
+    try std.testing.expectEqual(@as(u16, 1), s.progress);
+}
+
+test "rally phase stays scaffolding without a poi rect" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 22));
+    const s = questFindActive(&w, 0, 22).?;
+    // No POI hook → the client can never find a rally marker, so the phase
+    // auto-completes exactly as it did before rally objectives existed.
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    try std.testing.expect(!s.poi.valid());
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 22));
+}
+
+test "poi lockout reports quest lock and other players inside" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    const a_id = w.spawnPlayer(5, 70, 5, 0).?;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+
+    // Another player standing in the POI blocks the reset.
+    const b_id = w.spawnPlayer(20, 70, 20, 1).?;
+    const b = w.slotOfNetId(b_id).?;
+    try std.testing.expectEqual(poi_lock.LockReason.player_inside, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+    w.transform[b].x = 500;
+    w.transform[b].z = 500;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+
+    // A live quest lock wins over everything and carries LockedOutUntil.
+    questPoiLock(&w, b_id, 10, 10);
+    const locked = questCheckPoiLockout(&w, a_id, 10, 10);
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, locked.reason);
+    try std.testing.expectEqual(@as(u64, 0), locked.extra_data);
+    questPoiUnlock(&w, b_id, 10, 10);
+    // Still inside the unlock grace window.
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+}
+
+test "poi lockout exempts a party member inside the POI" {
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &rally_defs, .starter_id = 22, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    // Hook: entity ids 100 and 101 are in one party; everyone else is not.
+    const Ctx = struct {
+        fn same(ctx: ?*anyopaque, a: i32, b: i32) bool {
+            _ = ctx;
+            const in_party = (a == 100 or a == 101) and (b == 100 or b == 101);
+            return a != b and in_party;
+        }
+    };
+    w.party_same_ctx = null;
+    w.party_same_fn = &Ctx.same;
+    const a_id = w.spawnPlayer(5, 70, 5, 0).?;
+    w.network_id[w.slotOfNetId(a_id).?].id = 100;
+    // Party mate inside the POI does not block A's rally.
+    const b_id = w.spawnPlayer(20, 70, 20, 1).?;
+    w.network_id[w.slotOfNetId(b_id).?].id = 101;
+    try std.testing.expectEqual(poi_lock.LockReason.none, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+    // A non-party player (fresh id 102) still blocks.
+    const c_id = w.spawnPlayer(20, 70, 20, 2).?;
+    w.network_id[w.slotOfNetId(c_id).?].id = 102;
+    try std.testing.expectEqual(poi_lock.LockReason.player_inside, questCheckPoiLockout(&w, a_id, 10, 10).reason);
+}
+
+test "quest turn_in needs trader open" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 9,
+        .kind = .kill_zombies,
+        .name = "t1",
+        .title = "T",
+        .target_count = 2,
+        .reward_coin = 40,
+        .turn_in = true,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 9, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 9));
+    questOnZombieKilled(&w, 0, 0, 0);
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expect(questHasActive(&w, 0, 9));
+    try std.testing.expect(questFindActive(&w, 0, 9).?.ready_turn_in);
+    questOnTraderOpen(&w, 0);
+    try std.testing.expect(!questHasActive(&w, 0, 9));
+    drainQuestCoins(&w, 0);
+    try std.testing.expectEqual(@as(u32, 40), questCoins(&w, 0));
+}
+
+test "unlock_poi action releases the quest POI lock on phase entry" {
+    // A phase-2 UnlockPOI action (stock QuestActionUnlockPOI, asm.il
+    // 1390421-1390429): locking the quest POI then advancing into phase 2 must
+    // release the lock, not leave the POI reserved forever.
+    const unlock_phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .kill_zombies, .required = 1 },
+    };
+    const unlock_actions = [_]quest.QuestActionSpec{
+        .{ .kind = .unlock_poi, .phase = 2 },
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+        .{},
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 31,
+        .kind = .kill_zombies,
+        .name = "unlocker",
+        .title = "U",
+        .target_count = 2,
+        .reward_coin = 10,
+        .tx = 10,
+        .ty = 70,
+        .tz = 10,
+        .objective_count = 2,
+        .phases = &unlock_phases,
+        .highest_phase = 2,
+        .objective_phases = &[_]u8{ 1, 2 },
+        .actions = unlock_actions,
+        .action_n = 1,
+    }};
+    var w: World = .{};
+    defer w.deinit();
+    w.catalog = .{ .defs = &defs, .starter_id = 31, .source = .builtin };
+    w.poi_fn = &testPoiRect;
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    try std.testing.expect(questAccept(&w, 0, 31));
+    const s = questFindActive(&w, 0, 31).?;
+    try std.testing.expect(s.poi.valid());
+    questPoiLock(&w, p, s.poi.x, s.poi.z);
+    try std.testing.expectEqual(poi_lock.LockReason.quest_lock, questCheckPoiLockout(&w, p, s.poi.x, s.poi.z).reason);
+    // One kill advances to phase 2, firing the UnlockPOI action. The lock then
+    // drops its quester and enters the stock grace window (last quester out
+    // starts `unlock_grace`), so `check` still reports quest_lock briefly.
+    questOnZombieKilled(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 2), s.phase);
+    var idx: ?usize = null;
+    for (w.poi_locks.entries[0..w.poi_locks.n], 0..) |*e, i| {
+        if (e.rect.containsXZ(s.poi.x, s.poi.z)) {
+            idx = i;
+            break;
+        }
+    }
+    try std.testing.expect(idx != null);
+    try std.testing.expectEqual(@as(u8, 0), w.poi_locks.entries[idx.?].quester_n);
+    try std.testing.expect(!w.poi_locks.entries[idx.?].locked);
+}

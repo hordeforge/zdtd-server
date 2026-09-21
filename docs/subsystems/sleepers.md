@@ -127,7 +127,7 @@ pub const Sleeper = struct {
 
 The AI and damage paths push a wake request into a bounded ring, 16 entries, so a POI full of
 sleepers cannot stall the tick (`src/ecs/components.zig:1162-1172`, `src/ecs/world.zig:1015-1029`,
-`src/ecs/systems.zig:1962-1965`).
+`src/ecs/ai_tasks.zig:267-280`).
 Drain happens on the tick path (`src/server/game/world_tick.zig:407`):
 
 ```zig
