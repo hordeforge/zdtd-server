@@ -1043,3 +1043,29 @@ pub fn isBedrollId(self: *const Game, block_id: u16) bool {
     }
     return false;
 }
+
+/// Re-map restored claims to the entity id a player got at login, and mark
+/// the owner online. Called once per login; no-op for unknown names.
+pub fn reclaimForName(self: *Game, name: []const u8, entity_id: i32) void {
+    if (entity_id <= 0) return;
+    for (self.land_claims[0..self.land_claims_n]) |*claim| {
+        if (claim.owner_name_len != name.len) continue;
+        if (!std.mem.eql(u8, claim.owner_name[0..claim.owner_name_len], name)) continue;
+        claim.owner_entity = entity_id;
+        claim.owner_online = true;
+        claim.owner_seen_day = self.sim.director.clock.day;
+    }
+}
+
+/// Re-map restored turrets to the client slot this player just took, so
+/// trap kills pay the player who placed them rather than nobody. Same
+/// shape as `reclaimForName`: the save carries a name because a slot is
+/// per-session, and login is where a name becomes a slot again.
+pub fn reclaimTurretsForName(self: *Game, name: []const u8, slot: usize) void {
+    for (ecs.groupSlice(&self.sim, .turret)) |i| {
+        const t = &self.sim.turret[i];
+        if (t.owner_name_len != name.len) continue;
+        if (!std.mem.eql(u8, t.owner_name[0..t.owner_name_len], name)) continue;
+        t.owner_slot = @intCast(slot);
+    }
+}
