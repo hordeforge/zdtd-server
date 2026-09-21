@@ -584,6 +584,9 @@ pub fn tryCombineTools(self: *Game, peer_slot: usize, from: u16, to: u16) bool {
     if (a.item_id == 0 or a.item_id != b.item_id or a.count == 0 or b.count == 0) return false;
     if (a.quality != b.quality) return false;
     const def = self.items.byId(a.item_id) orelse return false;
+    // Stock clones the donor's mods/cosmetics on combine; zdtd has no donor
+    // merge for those, so a modded pair refuses rather than eating mods.
+    if (a.mod_n > 0 or b.mod_n > 0) return false;
     const max_use = hooks.maxUseTimes(def, a.quality);
     if (max_use == 0) return false;
     const rem_a: f32 = @max(0, @as(f32, @floatFromInt(max_use)) - a.use_times);
