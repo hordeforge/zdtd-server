@@ -1408,7 +1408,7 @@ parsed, and quest offering is unwired.
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
   exactly, and the envelope matches `NetPackageTraderData::write`. Correct bytes
   on a package the client will not accept.
-  *Anchors:* `src/wire/packages.zig:643-668`, `asm.il:861034-861057`,
+  *Anchors:* `src/wire/stock_trade.zig:238`, `asm.il:861034-861057`,
   `asm.il:861060-861230`, `asm.il:860491-860628`, `asm.il:843213-843265`
 
 - **C2S NetPackageTraderData handling** `WORKS`
@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
-  *Anchors:* `src/wire/packages.zig:2384-2490` (`parseStockInvTx`),
+  *Anchors:* `src/wire/packages.zig:1925-1967` (`parseStockInvTx`),
   `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`

@@ -1607,61 +1607,6 @@ test "entity spawn response and teleport layout" {
     try std.testing.expectApproxEqAbs(@as(f32, 1), p.x, 0.01);
 }
 
-test "stock trader data snapshot layout" {
-    var buf: [512]u8 = undefined;
-    const items = [_]TraderStockEntry{
-        .{ .item = .{ .type_id = stock_inv.items_start_here + 2, .count = 5, .quality = 1 }, .markup = 0 },
-    };
-    const body = try buildTraderDataStock(&buf, 50, 50, 1000, items[0..]);
-    // Envelope: entity-id branch only, no tePosition (asm.il 839492-839540).
-    var r: binary.Reader = .{ .data = body };
-    try std.testing.expectEqual(true, try r.readBool()); // entityId != -1
-    try std.testing.expectEqual(@as(i32, 50), try r.readI32()); // entityId
-    try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
-    // TraderData.Write (asm.il 857508-857528)
-    try std.testing.expectEqual(@as(i32, 50), try r.readI32()); // TraderID
-    try std.testing.expectEqual(@as(u64, 0), try r.readU64()); // lastInventoryUpdate
-    try std.testing.expectEqual(@as(u8, 2), try r.readByte()); // FileVersion
-    // WriteInventoryData (asm.il 857530-857594)
-    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // PrimaryInventory count
-    // Entry.Write (asm.il 856889-856907): ItemStack + i8 markup + bool addedByPlayer.
-    const slot = try stock_inv.readItemStack(&r);
-    try std.testing.expectEqual(@as(u16, 5), slot.count);
-    try std.testing.expectEqual(@as(i8, 0), @as(i8, @bitCast(try r.readByte()))); // Markup
-    try std.testing.expectEqual(false, try r.readBool()); // AddedByPlayer
-    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // TierItemGroups count
-    try std.testing.expectEqual(@as(i32, 1000), try r.readI32()); // AvailableMoney
-    try std.testing.expectEqual(body.len, r.pos);
-}
-
-test "trader data snapshot holds the stock 50-entry window (MaxItems)" {
-    var buf: [4096]u8 = undefined;
-    var items: [components.max_stock]TraderStockEntry = undefined;
-    for (&items, 0..) |*it, i| {
-        it.* = .{ .item = .{ .type_id = stock_inv.items_start_here + 2, .count = 5, .quality = 1 } };
-        _ = i;
-    }
-    const body = try buildTraderDataStock(&buf, 50, 50, 1000, items[0..]);
-    var r: binary.Reader = .{ .data = body };
-    try std.testing.expectEqual(true, try r.readBool());
-    _ = try r.readI32();
-    try std.testing.expectEqual(true, try r.readBool());
-    _ = try r.readI32();
-    _ = try r.readU64();
-    _ = try r.readByte();
-    try std.testing.expectEqual(@as(i32, components.max_stock), try r.readI32());
-    var i: usize = 0;
-    while (i < components.max_stock) : (i += 1) {
-        const slot = try stock_inv.readItemStack(&r);
-        try std.testing.expectEqual(@as(u16, 5), slot.count);
-        _ = try r.readByte();
-        try std.testing.expectEqual(false, try r.readBool());
-    }
-    try std.testing.expectEqual(@as(u8, 0), try r.readByte());
-    try std.testing.expectEqual(@as(i32, 1000), try r.readI32());
-    try std.testing.expectEqual(body.len, r.pos);
-}
-
 test "stock npc quest list empty fetch layout" {
     var buf: [32]u8 = undefined;
     const body = try buildNpcQuestListFetch(&buf, 50, 106, 0, &.{});
