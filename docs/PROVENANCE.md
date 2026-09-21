@@ -367,6 +367,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
 | `src/wire/stock_damage.zig` | R | Stock NetPackageDamageEntity body (V3.2.0 packed-flags head + 30-field body; RE inventories/netpackage-bodies.md write IL=144, changelog-3.2.0 §3.1). Split out of the packages.zig facade, same builders and golden tests |
+| `src/wire/stock_lock.zig` | R | Lock bodies (request parse, grant/deny/force-unlock/trader/unlock responses). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_invtx.zig` | R | Inventory-transaction bodies (compact InvTx request/response, legacy data request, stock InventoryData request/response, IdMapping). Split out of the packages.zig facade, same builders and test |
 | `src/wire/stock_estats.zig` | R | Entity stat bodies (StatChanged/EnumStat, award-kill, attack target, stealth bodies). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_world.zig` | R | World bodies (time, sign-data terminator, init info, world info, folder transfer, chunk-cluster info). Split out of the packages.zig facade, same builders and tests |
