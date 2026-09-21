@@ -1198,3 +1198,16 @@ test "quest treasure point body branches on the action byte" {
 
     try std.testing.expectError(error.EndOfStream, parseQuestTreasurePoint(reply[0 .. reply.len - 1]));
 }
+
+/// zdtd-native quest accept/progress, **not a stock client wire body**:
+/// def_id u16, op u8 (0=list, 1=accept, 2=abandon). Kept for unit and loadgen
+/// fixtures. The stock quest C2S shapes are NetPackageNPCQuestList
+/// (parseNpcQuestList) and NetPackageQuestObjectiveUpdate, both tried before
+/// this one in c2s/quest.zig.
+pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
+    if (body.len < 3) return error.EndOfStream;
+    return .{
+        .def_id = std.mem.readInt(u16, body[0..2], .little),
+        .op = body[2],
+    };
+}

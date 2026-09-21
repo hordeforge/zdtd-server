@@ -331,19 +331,7 @@ pub const buildExplosionClient = stock_explosion.buildExplosionClient;
 pub const ExplosionInitiate = stock_explosion.ExplosionInitiate;
 pub const parseExplosionInitiate = stock_explosion.parseExplosionInitiate;
 
-/// zdtd-native quest accept/progress, **not a stock client wire body**:
-/// def_id u16, op u8 (0=list, 1=accept, 2=abandon). Kept for unit and loadgen
-/// fixtures. The stock quest C2S shapes are NetPackageNPCQuestList
-/// (parseNpcQuestList) and NetPackageQuestObjectiveUpdate, both tried before
-/// this one in c2s/quest.zig.
-pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
-    if (body.len < 3) return error.EndOfStream;
-    return .{
-        .def_id = std.mem.readInt(u16, body[0..2], .little),
-        .op = body[2],
-    };
-}
-
+pub const parseQuestOp = stock_quest.parseQuestOp;
 pub const NpcQuestEventType = stock_quest.NpcQuestEventType;
 pub const NpcQuestListHead = stock_quest.NpcQuestListHead;
 pub const parseNpcQuestList = stock_quest.parseNpcQuestList;
