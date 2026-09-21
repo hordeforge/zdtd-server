@@ -36,6 +36,7 @@ pub const stock_chat = @import("stock_chat.zig");
 pub const stock_attach = @import("stock_attach.zig");
 pub const stock_areas = @import("stock_areas.zig");
 pub const stock_velocity = @import("stock_velocity.zig");
+pub const stock_clientinfo = @import("stock_clientinfo.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
@@ -73,6 +74,7 @@ test {
     _ = stock_attach;
     _ = stock_areas;
     _ = stock_velocity;
+    _ = stock_clientinfo;
     _ = stock_vehicle;
     _ = stock_te;
     _ = stock_sign;
