@@ -258,6 +258,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/rules.zig` | R | Sim rule parameters (ADR 0021 decision 2): a game mode is mostly these numbers. Carried on `World.rules` (read as `w.rules.<group>.<field>`), set |
 | `src/ecs/schedule.zig` | Z | Explicit sim pipeline phases. Ordered only; parallel stays inside a phase (systemZombieAi / systemTurrets via util/parallel). No access-set scheduler |
 | `src/ecs/turrets.zig` | R | Turret system (parallel target scan, fire, kill reports). Split out of systems.zig, re-exported through the systems facade |
+| `src/ecs/ai_tasks.zig` | R | Combat AI task graph (EAITask priority/mutex, approach/wander/attack tasks, parallel dispatch). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/falling.zig` | R | Falling-block system (stability-collapse fall, crush, hit counts). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/stealth.zig` | R | Stealth + noise system (heat events, noise notify, per-player tick). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/dig.zig` | R | Dig system (zombie block-chew cadence). Split out of systems.zig, re-exported through the systems facade |
