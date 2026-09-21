@@ -140,7 +140,7 @@ Stock quality rules are shared by both roll sites: `Game.qualityPolicy` is built
 
 ## Trade requests and validation
 
-zdtd's trade body is not a stock package. It is exactly 9 bytes (trader entity i32, item u16, qty u16, side u8) and rides under the `NetPackageTraderData` name for loadgen, while a real client's trade arrives as its post-trade `TraderData` copy (src/wire/packages.zig:4242-4255). The router therefore discriminates on length: bodies longer than 9 bytes parse as the stock ToServer header, exactly 9 with `body[8]` 0 or 1 goes to `handleTrade`, and anything else is treated as a window open (src/server/c2s/quest.zig:539-568).
+zdtd's trade body is not a stock package. It is exactly 9 bytes (trader entity i32, item u16, qty u16, side u8) and rides under the `NetPackageTraderData` name for loadgen, while a real client's trade arrives as its post-trade `TraderData` copy (src/wire/stock_trade.zig:62-75). The router therefore discriminates on length: bodies longer than 9 bytes parse as the stock ToServer header, exactly 9 with `body[8]` 0 or 1 goes to `handleTrade`, and anything else is treated as a window open (src/server/c2s/quest.zig:539-568).
 
 `handleTrade` validates in this order (src/server/game/trader_wire.zig:52-99): parse the body, resolve the trader entity and require the sender within `trade_use_range` of it, reject a sell of an item whose `SellableToTrader` is false, reject a sell when the `trader_info` `allow_sell` is false, then call `systems.trade` with the coin item id. Every rejection that carries a distance or item verdict increments `bounds_rejects`. A successful trade fires the plugin trader event (kind 1 buy, 2 sell) and re-sends a snapshot.
 

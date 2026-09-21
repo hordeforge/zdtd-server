@@ -82,7 +82,7 @@ vehicle id and slot both `-1`; the sim seat is freed even when the encode fails,
 seat on remotes is worse than a missing packet (`src/server/game/vehicle.zig:35-51`). A late joiner
 gets current occupancy replayed seat by seat (`src/server/game/vehicle.zig:55-71`), and the owning
 player receives their parked hulls as an `EntityWaypointList` with list type `Vehicle` (0)
-(`src/server/game/vehicle.zig:78-97`, `src/wire/packages.zig:4420-4434`).
+(`src/server/game/vehicle.zig:78-97`, `src/wire/stock_login.zig:262-276`).
 
 ## Drive input
 
