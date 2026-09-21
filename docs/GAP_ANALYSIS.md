@@ -865,7 +865,7 @@ re-arms) with the population count as the quest target.
 - **completiontype TurnIn vs AutoComplete** `WORKS`
   Parsed and honoured; TurnIn parks in `ready_turn_in` at the highest phase and
   completes on trader open. All 31 occurrences in the stock file are TurnIn.
-  *Anchors:* `src/assets/quests.zig:296`, `src/ecs/systems.zig:222`, `:349`,
+  *Anchors:* `src/assets/quests.zig:296`, `src/ecs/quest_trade.zig:57-63`, `:1021`,
   `asm.il:990502-990503`
 
 - **difficulty_tier** `WORKS`
@@ -980,7 +980,7 @@ re-arms) with the population count as the quest target.
   coordinate survives only as the no-POI-data fallback for offline/test worlds.
   *Anchors:* `src/server/game/quest.zig` (journal writer position data),
   `src/server/c2s/quest.zig` (giver capture at accept),
-  `src/ecs/systems.zig:326-338`, `src/ecs/world.zig:391-399`,
+  `src/ecs/quest_trade.zig:1116`, `src/ecs/world.zig:391-399`,
   `src/wire/stock_quest.zig:12`, `:614`
 
 - **NetPackageNPCQuestList FetchList + QuestPacketEntry wire** `WORKS`
@@ -1095,7 +1095,7 @@ re-arms) with the population count as the quest target.
   rect and skips leading scaffolding phases; the phase walk saturates correctly;
   TurnIn parks and completes on trader open, paying into the wallet with
   saturating add. Six unit tests.
-  *Anchors:* `src/ecs/systems.zig:277`, `:270`, `:187`, `:2386`, `:2564`
+  *Anchors:* `src/ecs/quest_trade.zig:1021`, `:1074`, `:983`, `:997`, `:1491`
 
 - **Rally-point objective execution** `WORKS` `(2026-08-21)`
   `questOnRallyActivated` marks `RallyMarkerActivated` once and advances a rally
@@ -1107,7 +1107,7 @@ re-arms) with the population count as the quest target.
   marker. The rally handshake (TryRallyMarker reason switch + party mirror) is
   the NetPackageQuestEvent row; sleeper re-arm suppression is that row's open
   item.
-  *Anchors:* `src/ecs/systems.zig:458`, `:234`, `:298`,
+  *Anchors:* `src/ecs/quest_trade.zig:556`, `:232`, `:297`,
   `src/assets/quests.zig` scanObjectiveMeta, `src/ecs/quest.zig` PoiSelectKind
 
 - **Kill / fetch / goto / stay-within / craft progress hooks** `WORKS` `(2026-08-22)`
@@ -1735,7 +1735,7 @@ parsed, and quest offering is unwired.
   the whole path over the wire: the Goto→Interact→TurnIn starter completes on
   the second lock-open with the coin reward, and a fetch quest parked at
   ready_turn_in completes on a single open.
-  *Anchors:* `src/ecs/systems.zig:900` questOnTraderOpen,
+  *Anchors:* `src/ecs/quest_trade.zig:414` questOnTraderOpen,
   `src/server/c2s/misc.zig:674` (lock-open call site),
   `src/server/c2s/quest.zig:342` (TraderData fallback), scenario
   `trader-quest-open`
@@ -1757,7 +1757,7 @@ parsed, and quest offering is unwired.
   `reward_coin` and the default starter-kit coin row both use the same name
   (`QuestPolicy.currency_item` / `sim.currency_item`, fed at load from traders.xml).
   *Anchors:* `src/server/game/trader.zig`, `src/server/game/loot.zig`,
-  `src/assets/quests.zig`, `src/ecs/world.zig`, `src/ecs/systems.zig:625-645`
+  `src/assets/quests.zig`, `src/ecs/world.zig`, `src/ecs/quest_trade.zig:685`
 
 ---
 
@@ -2738,7 +2738,7 @@ gamestage, no wandering hordes, and no screamers.
   CanExecute scan, then Update), with `isBestTask` reproducing
   `areTasksCompatible` and Reset hooks seeding lookTime at the two stock sites.
   `executeDelayScale` pinned at the 0.85 base.
-  *Anchors:* `src/ecs/systems.zig:732-750`, `:797-806`, `:956-1007`,
+  *Anchors:* `src/ecs/ai_tasks.zig:41-100`,
   `asm.il:437713`, `asm.il:437874`
 
 - **EAI task coverage** `WORKS` `(2026-08-22 re-audit)`

@@ -673,7 +673,7 @@ will strand more of them, including anchors written today.
    today (several are already known from this pass: "Autosave and shutdown
    save" → `src/server/game/lifecycle.zig`; "questOnTraderOpen reached"
    → `src/server/c2s/quest.zig:219` / `src/server/c2s/misc.zig:469`, and
-   `questOnTraderOpen` itself is `src/ecs/systems.zig:380`; "Vehicle, turret,
+   `questOnTraderOpen` itself is `src/ecs/quest_trade.zig:414`; "Vehicle, turret,
    power... persistence" → `src/server/persist.zig` `saveEntities`/
    `loadEntities`, `src/server/game/chunk_fill.zig` `scanChunkPower`).
 2. **Stop the recurrence:** prefer citing a function name (optionally with

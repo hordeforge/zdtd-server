@@ -14,6 +14,7 @@ const PlayerSnap = @import("sensing.zig").PlayerSnap;
 const canSensePlayer = @import("sensing.zig").canSensePlayer;
 const stealthLightAttackPercent = @import("sensing.zig").stealthLightAttackPercent;
 const nearestPlayerSnap = @import("sensing.zig").nearestPlayerSnap;
+const stealthLightPreBlend = @import("sensing.zig").stealthLightPreBlend;
 const systemZombieAi = @import("ai_tasks.zig").systemZombieAi;
 
 
@@ -300,4 +301,301 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
     try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
     try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
     try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+}
+
+test "stealth: standing players wake sleepers at the full volume radius" {
+    // RE entity-ai.md CanSleeperAttackDetect: not crouching → true, so the
+    // volume radius gates the wake (no FastLerp shrink). The crouch leg only
+    // protects beyond FastLerp(3,15,0.89) = 13.68: 16 m crouched is out,
+    // uncrouching wakes the 20 m volume. The disturbed-level gate is open.
+    var w: World = .{ .rules = .{ .ai = .{
+        .crouch_sleeper_detect_min = 3.0,
+        .crouch_sleeper_detect_max = 15.0,
+        .stealth_light_passive = 0.89,
+    } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 20;
+    w.sleeper[zs].wake_light_near = -1000;
+    w.sleeper[zs].wake_light_far = -500;
+    const p = w.spawnPlayer(16, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.player[ps].crouching = true;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    // In the volume beyond the crouch wake reach: the sleeper stirs once.
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    w.player[ps].crouching = false;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
+}
+test "stealth: sleepers wake inside the GetSleeperDisturbedLevel light gate" {
+    // RE UpdateSleeper wake scan (entity-ai.md): a sleeping zombie wakes the
+    // nearest player with GetSleeperDisturbedLevel(dist, lightLevel) >= 2 -
+    // wake = Lerp(rolledWakeNear, rolledWakeFar, dist/sightRangeBase) and
+    // lightLevel > wake. With the stock roll midpoints (-17.5 / 410) over a
+    // 30 m sightRange, noon (lightLevel 46.26) wakes within ~14.8% of the
+    // range (4 m wakes, wake 39.4); night (0) wakes only within ~1.2 m
+    // (0.04 pct, wake -0.4); a 2 m night player stays hidden.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 30.0 }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 20;
+    w.sleeper[zs].wake_light_near = -17.5;
+    w.sleeper[zs].wake_light_far = 410.0;
+    const p = w.spawnPlayer(4, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Day (ambient 0.5 → lightLevel 46.26): 4 m wakes (threshold 39.4).
+    w.ambient_light = 0.5;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    w.sleeper[zs].awake = false; // re-arm for the night case
+    w.sleeper_wake_n = 0;
+    // Night (lightLevel 0): 4 m hidden (threshold 39.4) - the sleeper STIRS
+    // (SetSleeperActive one-shot) but stays asleep; 1 m wakes (-3.9).
+    w.ambient_light = 0;
+    w.transform[ps].x = 4;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
+    w.transform[ps].x = 1;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+}
+test "stealth: lightAttackPercent folds the passive-89 below 0.1 selfLight" {
+    // RE PlayerStealth.TickServer IL_010B: selfLight (the held-item light,
+    // GetStealthLightLevel's out param) < 0.1 → passive-89, else 1.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.0, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.099, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.1, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.5, 0.89), 0.0001);
+}
+
+test "group AI: combat noise alerts distant zombies to investigate" {
+    // Stock NotifyNoise: a landed melee hit emits noise that alerts zombies
+    // within radius even when they cannot sense the player directly; they
+    // investigate the spot (has_spot) instead of wandering.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
+    defer w.deinit();
+    const a = w.spawnZombie(0, 70, 0, 40).?;
+    const aslot = w.slotOfNetId(a).?;
+    _ = w.spawnZombie(10, 70, 0, 40).?;
+    const bslot = w.slotOfNetId(a).? + 1;
+    const p = w.spawnPlayer(1, 70, 0, 0).?;
+    _ = w.slotOfNetId(p).?;
+    var hit: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0 and hit == 0) : (t += 0.05) {
+        hit = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(hit > 0); // A landed a hit -> noise.
+    // B at 10 m cannot sense the player (sense 4) but the noise alerts it.
+    try std.testing.expect(w.zombie_ai[aslot].alert);
+    try std.testing.expect(w.zombie_ai[bslot].alert);
+    try std.testing.expect(w.zombie_ai[bslot].has_spot);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.zombie_ai[bslot].spot_x, 1.0);
+}
+test "group AI: combat noise wakes sleepers within radius" {
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
+    defer w.deinit();
+    _ = w.spawnZombie(0, 70, 0, 40).?;
+    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 16;
+    _ = w.spawnPlayer(1, 70, 0, 0).?;
+    var hit: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0 and hit == 0) : (t += 0.05) {
+        hit = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(hit > 0);
+    // The sleeper at 12 m (volume 16 would need the player closer, but the
+    // noise radius 24 covers it) wakes and investigates.
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
+    // The noise wake also pushed the SleeperWakeup wire event; the player at
+    // 11 m was in the volume (16) first, so the sleeper stirred (groan req)
+    // before the noise woke it (wake req).
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
+}
+test "damage wakes a sleeper and pushes the wakeup event" {
+    // Stock EntityAlive.ProcessDamageResponseLocal: any damage triggers
+    // ConditionalTriggerSleeperWakeUp (plus CheckSleeperVolumeNoise while
+    // passive). The sim flips the sleeper awake and the Game broadcasts
+    // NetPackageSleeperWakeup from the drained ring.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.sleeper[zs].awake);
+    _ = w.damageFrom(z, 10.0, -1);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    // The ring is consume-owns-drain: the drainer zeroes the count; a second
+    // hit on the now-awake sleeper pushes nothing new.
+    w.sleeper_wake_n = 0;
+    _ = w.damageFrom(z, 5.0, -1);
+    try std.testing.expectEqual(@as(usize, 0), w.sleeper_wake_n);
+}
+
+test "stealth noise: a loud clip folds into the player and alerts a zombie" {
+    // RE entity-ai.md PlayerStealth: a relayed sound with a sounds.xml Noise
+    // row accumulates into the player's stealth list; CalcVolume + the heard
+    // test alert an idle zombie within the attraction radius (it investigates
+    // the player's spot, same tick - stealth runs before the AI pass).
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4 } } };
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    const z = w.spawnZombie(10, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+    // pipe_pistol_fire (stock V3.1.4): volume 62, 2 s = 40 ticks, muffle 0.8.
+    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0);
+    systemStealth(&w);
+    // Radius = min(62 x 0.6, 40) = 37.2 covers 10 m; heard = 108.8 / 6.4 >= 1.
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    try std.testing.expect(w.zombie_ai[zs].state == .chase);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), w.zombie_ai[zs].spot_x, 0.01);
+    // Ring consumed (consume-owns-drain), noise volume is the CalcVolume fold.
+    try std.testing.expectEqual(@as(usize, 0), w.stealth_noise_n);
+    try std.testing.expect(w.stealth[ps].noise_volume > 50.0);
+}
+test "stealth noise: crouch muffle scales the noise volume" {
+    // RE AIDirector.NotifyNoise: a crouched instigator's volumeScale is
+    // multiplied by the clip's muffled_when_crouched before the fold.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // stepdirt (V3.1.4): volume 5, muffle 0.507.
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
+    systemStealth(&w);
+    const standing = w.stealth[ps].noise_volume;
+    // The entry itself is unfolded (5); the muffle scales the fold.
+    try std.testing.expectApproxEqAbs(@as(f32, 5), w.stealth[ps].noises[0].volume, 0.001);
+    w.stealth[ps] = .{};
+    w.player[ps].crouching = true;
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
+    systemStealth(&w);
+    const crouched = w.stealth[ps].noise_volume;
+    try std.testing.expect(crouched < standing);
+    // Entry volume carries the muffle: 5 x 0.507.
+    try std.testing.expectApproxEqAbs(@as(f32, 5 * 0.507), w.stealth[ps].noises[0].volume, 0.001);
+}
+test "stealth light: pre-blend feeds the _lightlevel cvar" {
+    // RE PlayerStealth TickServer IL_0078-00B9: ambient + held-light blend
+    // (ratio clamped 0.5..3.2), crouch x0.6, then `_lightlevel = light x 100`
+    // before the speed scale and passive blend.
+    try std.testing.expectApproxEqAbs(@as(f32, 0), stealthLightPreBlend(0, 0, false), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), stealthLightPreBlend(0, 0, true), 0.0001);
+    // Torch .35 on dark 0.05: ratio .35/.1 = 3.5 -> clamped 3.2.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05 + 0.35 * 3.2), stealthLightPreBlend(0.05, 0.35, false), 0.0001);
+    // Crouch x0.6 on the blended value.
+    try std.testing.expectApproxEqAbs(@as(f32, (0.5 + 0.0) * 0.6), stealthLightPreBlend(0.5, 0, true), 0.0001);
+    // The full level still matches the old inline math at passive 1.
+    try std.testing.expectApproxEqAbs(stealthLightLevel(0.5, 0, false, 1.0, 0), (0.32 + 0.68) * 0.5 * 100.0, 0.001);
+}
+
+test "stealth noise: cached NoiseMultiplier scales both volumes" {
+    // RE PlayerStealth CalcVolume/NotifyNoise: each multiplies by GetValue(88
+    // NoiseMultiplier). The survival tick caches the buff/perk/item fold in
+    // stealth_noise_mult; the legs read the column, defaulting to the neutral
+    // base 1.0 offline.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Volume 20 >= the loud threshold (11), so the decay window pauses and the
+    // accumulated posts are exact on both runs (CalcVolume never decays).
+    w.pushStealthNoise(ps, 0, 70, 0, 20, 20, 1.0, 0);
+    systemStealth(&w);
+    const base_vol = w.stealth[ps].noise_volume;
+    const base_sleep = w.stealth[ps].sleeper_noise_volume;
+    try std.testing.expect(base_vol > 0);
+    try std.testing.expect(base_sleep > 0);
+    w.stealth[ps] = .{};
+    w.stealth_noise_mult[ps] = 0.5;
+    w.pushStealthNoise(ps, 0, 70, 0, 20, 20, 1.0, 0);
+    systemStealth(&w);
+    try std.testing.expectApproxEqAbs(base_vol * 0.5, w.stealth[ps].noise_volume, 0.001);
+    try std.testing.expectApproxEqAbs(base_sleep * 0.5, w.stealth[ps].sleeper_noise_volume, 0.001);
+}
+test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
+    // RE PlayerStealth.NotifyNoise: the curved volume accumulates into
+    // sleeperNoiseVolume (cap 360 → World.CheckSleeperVolumeNoise) and decays
+    // 2.5/tick once the loud-noise wait window elapses.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Loud: volume 120 → eff = 60 + 60^1.4 ~ 368.5 > 360 → cap + wake.
+    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_volume_noise_n);
+    // Loud noise holds the decay for the wait window (stock 20 ticks).
+    for (0..10) |_| systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
+    for (0..10) |_| systemStealth(&w);
+    try std.testing.expect(w.stealth[ps].sleeper_noise_volume < 360.0);
+    // Quiet noise (stepcloth 3 < loud 11) decays immediately: 3 - 2.5 = 0.5.
+    w.stealth[ps] = .{};
+    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0);
+    systemStealth(&w);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), w.stealth[ps].sleeper_noise_volume, 0.001);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 0.0), w.stealth[ps].sleeper_noise_volume);
+}
+test "stealth noise: a sleeping zombie that hears wakes" {
+    // RE PlayerStealth attraction: a sleeping zombie inside the attraction
+    // radius that passes the heard test wakes and investigates (the separate
+    // 360-cap volume wake covers whole volumes).
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4 } } };
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    const z = w.spawnSleeperDef(5, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.sleeper[zs].awake);
+    // stepbush (V3.1.4): volume 11 - radius 6.6 covers 5 m, heard ~ 7 >= 1.
+    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0);
+    systemStealth(&w);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+test "stealth noise: heat rows feed the activity map" {
+    // RE AIDirector.NotifyNoise: heat_map_strength > 0 adds activity to the
+    // heat map for the region, held for the fixed 240 s window NotifyNoise
+    // passes (the row's heat_map_time is not read by stock at all).
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Auger_Fire_Start (V3.1.4): volume 60, 2 s, heat 1.0.
+    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(usize, 1), w.director.heat_n);
+    // notifyActivity: activity = value, decay = value / (duration_ticks / 20)
+    // per second - 240 s = 4800 ticks → 1.0 / 240 s.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 240.0), w.director.heat[0].decay, 0.0001);
 }

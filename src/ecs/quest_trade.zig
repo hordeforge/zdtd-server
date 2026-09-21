@@ -2034,3 +2034,140 @@ test "traderRestock honors the configured cap and refill" {
     traderRestock(&w);
     try std.testing.expectEqual(@as(u16, 200), w.trader_stock[ts].entries[0].count);
 }
+
+test "trader buys an item it does not stock via the sell-price hook" {
+    // Stock lets you sell anything (GetSellPrice: EconomicValue x scale x
+    // markdown); the hook prices non-stocked items. 0 / unset keeps the
+    // stocked-only restriction.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 5, .quality = 1 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 2, .price = 10, .sell = 100 };
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 25 else 0; // 25 dukes per non-stocked unit
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+
+    // Without a stocked entry the sale still lands at the hooked price.
+    // The starter kit already carried 50 casinoCoin, so the wallet ends at
+    // 50 (starter) + 50 (2 x 25 sell) = 100.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 100), w.wallet[ps].coins);
+    try std.testing.expectEqual(@as(i32, 450), w.trader_stock[ts].wallet);
+    // The stocked entry is untouched by a non-stocked sale.
+    try std.testing.expectEqual(@as(u16, 2), w.trader_stock[ts].entries[0].count);
+    // Unset hook: non-stocked sells are refused (test worlds keep the old rule).
+    w.sell_price_fn = null;
+    const coins_before = w.wallet[ps].coins;
+    try std.testing.expect(!trade(&w, 0, trader_id, 77, 1, 1, 6));
+    try std.testing.expectEqual(coins_before, w.wallet[ps].coins);
+}
+test "trader prices scale with item quality (quality_mod lerp)" {
+    // Stock GetBuyPrice/GetSellPrice apply Lerp(qualityMinMod, qualityMaxMod,
+    // (quality-1)/5); the traders.xml comment pins QL1 -> min and QL6 -> max.
+    // With the stock root quality_mod="1,2" a QL6 item prices at 2x a QL1.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    w.trader_quality_min_mod = 1.0;
+    w.trader_quality_max_mod = 2.0;
+    try std.testing.expectEqual(@as(f32, 1.0), qualityPriceMod(1, 2, 1));
+    try std.testing.expectEqual(@as(f32, 1.6), qualityPriceMod(1, 2, 4));
+    try std.testing.expectEqual(@as(f32, 2.0), qualityPriceMod(1, 2, 6));
+    try std.testing.expectEqual(@as(f32, 1.0), qualityPriceMod(1, 1, 6)); // unset = no effect
+
+    // Non-stocked sell: a QL6 stack pays 2x the hook price, QL1 pays 1x.
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 6 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 25 else 0; // 25 dukes per non-stocked unit
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+    // 50 (starter) + 2 x (25 * 2.0) = 150.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 150), w.wallet[ps].coins);
+}
+test "worn items sell for less (PercentUsesLeft rides the sold stack)" {
+    // Stock GetSellPrice multiplies the sell base by the SOLD ItemValue's
+    // PercentUsesLeft (ItemValue.get_PercentUsesLeft IL=17): a half-worn
+    // stone-axe-like stack pays half. The pul hook receives the sold stack's
+    // quality + use_times, not the entry's.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 5000).?;
+    const ps = w.playerByPeer(0).?;
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 1, .use_times = 125 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 100 else 0; // 100 dukes per non-stocked unit
+        }
+    };
+    const Pul = struct {
+        fn pul(_: ?*anyopaque, item: u16, quality: u8, use_times: f32) f32 {
+            // Stone-axe-like Q1 cap 250: 125/250 used -> half value. The
+            // coin totals below verify the hook receives the sold stack's
+            // quality/use_times (a wrong cap would price differently).
+            _ = item;
+            _ = quality;
+            return 1 - @min(@max(use_times / 250.0, 0), 1);
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+    w.percent_uses_left_ctx = null;
+    w.percent_uses_left_fn = &Pul.pul;
+    // 50 (starter) + 2 x (100 x 1.0 qmod x 0.5 pul) = 150.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 150), w.wallet[ps].coins);
+    // A fresh stack (use_times 0) pays full price: the wallet gains 200
+    // more (2 x 100) on top of the 150 from the worn sale.
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 1 };
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 350), w.wallet[ps].coins);
+}
+
+test "completed starter quest is not granted again on the next login" {
+    var w: World = .{};
+    defer w.deinit();
+    const defs = [_]quest.QuestDef{.{
+        .id = 22,
+        .kind = .fetch_item,
+        .title = "Starter",
+        .target_count = 1,
+        .reward_coin = 10,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 22, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    // First login grants the starter.
+    try std.testing.expect(questAcceptStarter(&w, 0));
+    try std.testing.expect(questHasActive(&w, 0, 22));
+    // The player completes it; a second login must not re-grant it (hasActive
+    // only matches active slots, so the guard scans completed slots too).
+    const ps = w.playerByPeer(0).?;
+    for (&w.journal[ps].slots) |*s| {
+        if (s.def_id == 22 and s.active) {
+            s.completed = true;
+            s.active = false;
+            break;
+        }
+    }
+    try std.testing.expect(!questAcceptStarter(&w, 0));
+    // A fresh player on a different peer still gets the starter.
+    _ = w.spawnPlayer(0, 70, 5, 1);
+    try std.testing.expect(questAcceptStarter(&w, 1));
+}

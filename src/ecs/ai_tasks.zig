@@ -25,6 +25,7 @@ const systemStealth = systems.systemStealth;
 const applyGravity = systems.applyGravity;
 const lodScale = systems.lodScale;
 const applyDeferredDamage = systems.applyDeferredDamage;
+const systemDigUpdate = systems.systemDigUpdate;
 /// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
 const dmg_scale: u32 = 100;
 const protocol = @import("../protocol.zig");
@@ -2276,3 +2277,181 @@ test "system zombie territorial walks home when far" {
     try std.testing.expect(dx * dx + dz * dz <= terr3 * terr3);
 }
 
+
+test "move helper: a blocked grounded zombie jumps a 1-block wall" {
+    // RE entity-ai.md 2030-2034: MoveHelper.StartJump triggers when both slide
+    // axes are blocked and the body is grounded; the hop (heightDiff ~1.3)
+    // carries the body over obstacles up to jump_height. Step-up is disabled
+    // so only the jump can cross.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .step_height = 0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            if (y <= 70) return true; // ground
+            if (x == 10 and y == 71 and z == 5) return true; // 1-block wall
+            return false;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const z = w.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Walk toward x=15; the wall at x=10 must be jumped.
+    for (0..600) |_| {
+        stepToward(&w, s, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+        if (w.transform[s].x >= 14.0) break;
+    }
+    try std.testing.expect(w.transform[s].x >= 14.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 71.0), w.transform[s].y, 0.5); // settled near the ground
+    // The jump cost at least one impulse (vy was set positive once).
+    try std.testing.expect(w.zombie_ai[s].jump_cd <= w.rules.ai.jump_delay_s);
+
+    // Control: with no jump height the wall is impassable.
+    var w2: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .step_height = 0, .jump_height = 0 } } };
+    defer w2.deinit();
+    w2.solid_ctx = null;
+    w2.solid_fn = &Ground.solid;
+    const z2 = w2.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const s2 = w2.slotOfNetId(z2).?;
+    for (0..600) |_| {
+        stepToward(&w2, s2, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w2, s2, 0.05);
+        if (w2.transform[s2].x >= 14.0) break;
+    }
+    try std.testing.expect(w2.transform[s2].x < 10.0);
+}
+test "move helper: a blocked grounded zombie digs the blocking block" {
+    // RE entity-ai.md DigStart/DigUpdate: after the jump fails on a 3-tall
+    // wall (the 1.3-block hop cannot clear it) and its cooldown lapses, the
+    // blocked grounded AI digs the solid cell in its move direction; the
+    // cadence pushes DigRequests the Game drains. The wall spans all z so the
+    // slide cannot route around it.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .jump_delay_s = 1.0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, _: i32) bool {
+            if (y <= 70) return true; // ground
+            if (x == 10 and (y == 71 or y == 72 or y == 73)) return true; // 3-tall wall
+            return false;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const z = w.spawnZombieClass(5, 71, 5, 500, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Walk toward x=15: the jump fires once (fails on the 2-tall wall), then
+    // during the cooldown the dig starts.
+    for (0..120) |_| {
+        stepToward(&w, s, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[s].digging);
+    try std.testing.expectEqual(@as(i32, 10), w.zombie_ai[s].dig_x);
+    try std.testing.expectEqual(@as(i32, 71), w.zombie_ai[s].dig_y);
+    // The cadence pushes a DigRequest after the windup (rules.ai default 18).
+    var pushed = false;
+    for (0..@as(usize, 18) + 4) |_| {
+        systemDigUpdate(&w);
+        if (w.dig_n > 0) {
+            pushed = true;
+            break;
+        }
+    }
+    try std.testing.expect(pushed);
+}
+
+test "move helper: a submerged body floats instead of dropping" {
+    // RE entity-ai.md cctor: cSwimGravityPer 0.025 / cSwimDragY 0.91 - a
+    // submerged AI body sinks slowly (float) instead of falling to the bed,
+    // and horizontal moves slow to the swim speed fraction.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Pool = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70; // bed at 70
+        }
+        fn isWater(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y > 70 and y <= 78; // water column 71..78
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Pool.solid;
+    w.water_ctx = null;
+    w.water_fn = &Pool.isWater;
+    const z = w.spawnZombieClass(5, 80, 5, 200, 7, "").?; // drop into the pool
+    const s = w.slotOfNetId(z).?;
+    for (0..60) |_| applyGravity(&w, s, 0.05); // enter the water
+    try std.testing.expect(w.transform[s].y <= 78.5); // reached the surface
+    for (0..120) |_| applyGravity(&w, s, 0.05); // 6 s submerged
+    // Sank slowly: nowhere near the bed (70) - a float.
+    try std.testing.expect(w.transform[s].y > 76.0);
+    // Horizontal: the swim speed fraction halves the step.
+    const x0 = w.transform[s].x;
+    stepToward(&w, s, 20.0, 5.0, 2.2, 0.05);
+    const moved = w.transform[s].x - x0;
+    try std.testing.expect(moved > 0.02 and moved < 0.09); // ~0.055 (2.2*0.5*0.05)
+}
+test "move helper: an entity in the way is pushed, not walked through" {
+    // RE entity-ai.md AttackPush: a blocked-by-entity zombie stops and shoves
+    // the blocker along the push direction, so crowds part instead of overlap.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const a = w.spawnZombieClass(5, 71, 5, 200, 7, "").?;
+    const b = w.spawnZombieClass(7, 71, 5, 200, 7, "").?;
+    const sa = w.slotOfNetId(a).?;
+    const sb = w.slotOfNetId(b).?;
+    const bx0 = w.transform[sb].x;
+    for (0..40) |_| {
+        stepToward(&w, sa, 12, 5, 2.2, 0.05);
+        applyGravity(&w, sa, 0.05);
+    }
+    // A never walked through B (stops just behind it) and B got shoved.
+    try std.testing.expect(w.transform[sa].x < w.transform[sb].x - 0.4);
+    try std.testing.expect(w.transform[sb].x > bx0 + 0.3);
+}
+
+test "demolition: primes at the health threshold, countdowns, then requests the explosion" {
+    // RE entity-ai.md EntityZombieCop.OnUpdateEntity: the cop primes when
+    // health drops below max*explode_threshold, counts down explodeDelay*20,
+    // readies the blast ((delay/5)*1.5*20) and pushes an explode request the
+    // Game drains. A class without ExplosionData never primes.
+    var w: World = .{ .rules = .{ .ai = .{ .explosion_radius = 4.0 } } };
+    defer w.deinit();
+    w.setClassDef(1, .{ .name = "zombieCop", .kind = .zombie, .hash = 7, .explode_threshold = 0.75, .explode_delay_s = 0.5 });
+    const z = w.spawnZombieClass(0, 70, 0, 40, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    // Full health: never primes.
+    for (0..5) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[s].primed);
+    // Damage below 75% (40 * 0.75 = 30): primes on the next AI tick.
+    w.health[s].hp = 29;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[s].primed);
+    try std.testing.expectEqual(@as(i32, 10), w.zombie_ai[s].prime_ticks); // 0.5 * 20
+    // Countdown: 10 ticks start + (0.5/5)*1.5*20 = 3 explode ticks.
+    var exploded = false;
+    for (0..30) |_| {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.explode_n > 0) {
+            exploded = true;
+            break;
+        }
+    }
+    try std.testing.expect(exploded);
+    // A plain zombie (no explosion data) never primes no matter how hurt.
+    var w2: World = .{};
+    defer w2.deinit();
+    const z2 = w2.spawnZombie(0, 70, 0, 40).?;
+    const s2 = w2.slotOfNetId(z2).?;
+    w2.health[s2].hp = 1;
+    for (0..3) |_| _ = systemZombieAi(&w2, 0.05);
+    try std.testing.expect(!w2.zombie_ai[s2].primed);
+}
