@@ -74,3 +74,19 @@ pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32,
     return buf[0..13];
 }
 
+
+test "vehicle data sync header framing" {
+    // senderId | vehicleId | syncFlags | dataLen | data
+    var body: [16]u8 = .{ 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 4, 0, 9, 8, 7, 6 };
+    const s = try parseVehicleDataSync(&body);
+    try std.testing.expectEqual(@as(i32, 1), s.sender_id);
+    try std.testing.expectEqual(@as(i32, 2), s.vehicle_id);
+    try std.testing.expectEqual(@as(u16, 3), s.sync_flags);
+    try std.testing.expectEqualSlices(u8, &.{ 9, 8, 7, 6 }, s.data);
+    // A truncated payload must never hand out bytes past the body.
+    try std.testing.expectError(error.EndOfStream, parseVehicleDataSync(body[0..15]));
+    try std.testing.expectError(error.EndOfStream, parseVehicleDataSync(body[0..11]));
+    // Empty payload is legal framing.
+    const empty = try parseVehicleDataSync(&[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+    try std.testing.expectEqual(@as(usize, 0), empty.data.len);
+}

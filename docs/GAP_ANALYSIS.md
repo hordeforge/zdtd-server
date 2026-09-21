@@ -2099,7 +2099,7 @@ encoding is one day high.
   applies stock's Setup clamp to [-8, 8] per axis (protocol-packages.md
   §5.5.5). A knockback impulse beyond the stock band no longer ships
   non-stock motion values to peers.
-  *Anchors:* `src/wire/packages.zig:2432-2447`,
+  *Anchors:* `src/wire/stock_velocity.zig:19-29`,
   `src/server/c2s/misc.zig:591-604`
 
 - **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`

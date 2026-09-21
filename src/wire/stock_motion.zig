@@ -220,3 +220,15 @@ pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32 } {
     _ = try r.readF32(); // pos.z
     return .{ .entity_id = entity_id };
 }
+
+test "entity spawn response and teleport layout" {
+    var buf: [64]u8 = undefined;
+    const sr = try buildEntitySpawnResponse(&buf, true, null);
+    try std.testing.expectEqual(@as(usize, 2), sr.len); // success + empty ItemValue
+    try std.testing.expectEqual(@as(u8, 1), sr[0]);
+    try std.testing.expectEqual(@as(u8, 0), sr[1]);
+    const tp = try buildEntityTeleportBody(&buf, 106, 1, 70, 2, 0, 90, 0, true);
+    const p = try parsePosAndRotBody(tp);
+    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), p.x, 0.01);
+}
