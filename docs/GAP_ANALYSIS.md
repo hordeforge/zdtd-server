@@ -6810,7 +6810,7 @@ not stock:
 | Wire tool stock UX packages | PARTIAL (WireToolActions = peer visual rebroadcast) |
 | Battery charge / solar | WORKS (2026-08-27 re-audit: the battery SoC ships - electric.zig ticks charge on surplus and discharge on shortfall (test "battery charges on surplus and discharges on shortfall"), and solar nodes are daylight-gated (only contribute when the day/night clock says day, schedule.zig turrets read solar as powered only in daylight); residuals recorded: battery capacity/coulomb profile rides the block OutputPerCharge/OutputPerStack parses, no separate SoC wire) |
 | Turret placeable block + power | PARTIAL (entity + node) |
-| Ammo items / reload | PARTIAL (ammo counter) |
+| Ammo items / reload | PARTIAL (the sim ammo counter decrements per shot and gates fire; no refill path: stock loads ammo through the `TileEntityPoweredRangedTrap` TE stacks (`isLocked`/`Stacks`/`TargetType`, tile-entities-power.md:540) whose network payload layout is not pinned in the RE corpus (`../../7dtd-engine-research/docs/gameplay/tile-entities-power.md:540` pins the disk fields only), so there is no validated C2S shape to accept - recorded RE-blocked, not wired) |
 | Blade / junk turret variants | PARTIAL (the turret system ships blade + junk variants with the stock wire + sim; the placed turret's range/damage/fire interval now parse from the autoTurret block data (blocks.xml MaxDistance/EntityDamage/BurstFireRate, rule 15, wired via the Game hook - 2026-08-27); per-variant data beyond the base block (blade/junk item stats from items.xml Action0, magazine/ammo semantics) stays rules-driven, recorded) |
 
 ---
