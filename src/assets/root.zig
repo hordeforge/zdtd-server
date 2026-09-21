@@ -36,6 +36,7 @@ pub const block_textures = @import("block_textures.zig");
 pub const painting = @import("painting.zig");
 pub const spawning = @import("spawning.zig");
 pub const buffs = @import("buffs.zig");
+pub const buff_curve = @import("buff_curve.zig");
 pub const triggered = @import("triggered.zig");
 pub const requirements = @import("requirements.zig");
 pub const require_eval = @import("require_eval.zig");
@@ -83,6 +84,7 @@ test {
     _ = painting;
     _ = spawning;
     _ = buffs;
+    _ = buff_curve;
     _ = triggered;
     _ = requirements;
     _ = require_eval;
