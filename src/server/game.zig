@@ -3792,6 +3792,11 @@ pub const Game = struct {
         return game_craft.tryScrap(self, peer_slot, bag_slot, qty);
     }
 
+    /// Repair-by-combine (MergeBest): drag one damaged tool onto another.
+    pub fn tryCombineTools(self: *Game, peer_slot: usize, from: u16, to: u16) bool {
+        return game_craft.tryCombineTools(self, peer_slot, from, to);
+    }
+
     pub fn coinItemId(self: *const Game) u16 {
         return game_trader.coinItemId(self);
     }

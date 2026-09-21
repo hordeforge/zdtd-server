@@ -9575,3 +9575,69 @@ test "submersion mirrors the underwater cvar" {
     try g.step();
     try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("_underwater"), 0.001);
 }
+
+test "dragging a damaged tool onto another combines durability" {
+    // Stock ItemValue.MergeBest: remaining uses sum against the larger max.
+    // Two half-worn axes become one with the combined remainder.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const axe = g.items.byName("meleeToolAxeT1IronFireaxe") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, axe.id, 1));
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, axe.id, 1));
+    // Tools may stack on give: split the pair across two slots first.
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != axe.id or s.count < 2) continue;
+        const taken = g.sim.inventory[ps].takeFromSlot(@intCast(i), 1).?;
+        var free: u16 = 0;
+        for (g.sim.inventory[ps].slots, 0..) |f, j| {
+            if (f.count == 0) {
+                free = @intCast(j);
+                break;
+            }
+        }
+        g.sim.inventory[ps].slots[free] = taken;
+        break;
+    }
+    var s0: u16 = 0;
+    var s1: u16 = 0;
+    var found: u8 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != axe.id or s.count == 0) continue;
+        if (found == 0) {
+            s0 = @intCast(i);
+        } else {
+            s1 = @intCast(i);
+        }
+        found += 1;
+        if (found == 2) break;
+    }
+    try std.testing.expectEqual(@as(u8, 2), found);
+    g.sim.inventory[ps].slots[s0].use_times = 10;
+    g.sim.inventory[ps].slots[s1].use_times = 20;
+    try std.testing.expect(g.tryCombineTools(cl.slot, s0, s1));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[s0].item_id);
+    try std.testing.expectEqual(axe.id, g.sim.inventory[ps].slots[s1].item_id);
+    // Summed remainder clamped by the max: max - ((max-10) + (max-20)).
+    const max_use = @as(f32, @floatFromInt(hookMaxUses(g, axe.id, 1)));
+    try std.testing.expectApproxEqAbs(@max(0, max_use - ((max_use - 10) + (max_use - 20))), g.sim.inventory[ps].slots[s1].use_times, 0.001);
+}
+
+fn hookMaxUses(g: *Game, item_id: u16, quality: u8) u32 {
+    const def = g.items.byId(item_id) orelse return 0;
+    return @import("hooks.zig").maxUseTimes(def, quality);
+}

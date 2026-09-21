@@ -20,6 +20,7 @@ const assets_requirements = @import("../../assets/requirements.zig");
 const requirements = assets_requirements;
 const assets_sandbox = @import("../../assets/sandbox.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const hooks = @import("hooks.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
@@ -565,6 +566,34 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
     const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
     self.sim.inv_ledger.record(p, out_id, d, .craft);
     systems.questOnCraft(&self.sim, peer_slot, recipe.name);
+    return true;
+}
+
+/// Repair-by-combine (stock ItemValue.MergeBest, RE items.md): dragging
+/// one damaged tool onto another of the same item + quality sums both
+/// remaining durabilities against the larger MaxUseTimes:
+/// `UseTimes = max(0, maxMax - (myRemaining + otherRemaining))`.
+/// Only when both carry durability (use_times MaxUseTimes model); plain
+/// stacks keep the existing merge path. Returns true when combined.
+pub fn tryCombineTools(self: *Game, peer_slot: usize, from: u16, to: u16) bool {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return false;
+    if (!self.sim.mask[ps].inventory) return false;
+    if (from >= components.max_inv_slots or to >= components.max_inv_slots or from == to) return false;
+    const a = self.sim.inventory[ps].slots[from];
+    const b = self.sim.inventory[ps].slots[to];
+    if (a.item_id == 0 or a.item_id != b.item_id or a.count == 0 or b.count == 0) return false;
+    if (a.quality != b.quality) return false;
+    const def = self.items.byId(a.item_id) orelse return false;
+    const max_use = hooks.maxUseTimes(def, a.quality);
+    if (max_use == 0) return false;
+    const rem_a: f32 = @max(0, @as(f32, @floatFromInt(max_use)) - a.use_times);
+    const rem_b: f32 = @max(0, @as(f32, @floatFromInt(max_use)) - b.use_times);
+    if (rem_a <= 0 or rem_b <= 0) return false;
+    // MergeBest: the survivor keeps summed remaining uses.
+    const kept: f32 = @max(0, @as(f32, @floatFromInt(max_use)) - (rem_a + rem_b));
+    self.sim.inventory[ps].slots[to].use_times = kept;
+    self.sim.inventory[ps].slots[from] = .{};
+    if (self.sim.inventory[ps].holding == from) self.sim.inventory[ps].holding = components.inv_no_holding;
     return true;
 }
 

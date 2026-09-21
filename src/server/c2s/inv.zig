@@ -914,6 +914,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 .place => if (self.quarantineDenies(c, .block)) return true,
                 else => {},
             }
+            // Repair-by-combine first: dragging a damaged tool onto another
+            // is MergeBest, not a move/swap. Falls through to the normal
+            // path when the pair does not combine.
+            if (op == .move and self.tryCombineTools(c.slot, tx.a, tx.b)) {
+                var ack: [5]u8 = .{ 1, 0, 0, 0, 0 };
+                try self.sendGame(peer, "NetPackageInventoryTransactionResponse", &ack);
+                return true;
+            }
             // The open bag's position, read while it still exists: a drain
             // that empties it destroys the entity, and the marker is keyed by
             // position.
