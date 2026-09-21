@@ -25,6 +25,7 @@ const systemStealth = systems.systemStealth;
 const applyGravity = systems.applyGravity;
 const lodScale = systems.lodScale;
 const applyDeferredDamage = systems.applyDeferredDamage;
+/// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
 const dmg_scale: u32 = 100;
 const protocol = @import("../protocol.zig");
 const path_mod = @import("path.zig");
