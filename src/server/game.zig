@@ -2759,23 +2759,7 @@ pub const Game = struct {
     /// re-seeding here reset the progress counter at 20 Hz while it only
     /// advances per horde spawn, so the bonus drop never fired.
     pub fn pushBloodMoonBonus(self: *Game, stage: i32) void {
-        const cfg = self.gamestages.config;
-        // No gamestages.xml means no cadence to push. Clamping the absent 0
-        // up to 1 would overwrite the director's stock defaults with "bonus
-        // on every spawn, unscaled", which is the opposite of the intent.
-        if (cfg.loot_bonus_every <= 0) return;
-        var every: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
-        if (self.gamestages.spawnerByName(ecs.aidirector.Director.bloodmoon_spawner)) |sp| {
-            if (sp.getStage(stage)) |st| {
-                var sum: u32 = 0;
-                for (st.spawns) |sg| sum +|= sg.num;
-                const maxc: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_max_count))));
-                const cadence: u32 = @max(sum / maxc, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
-                every = @max(1, cadence);
-            }
-        }
-        const scale: f32 = if (cfg.loot_bonus_scale > 0) cfg.loot_bonus_scale else 1.0;
-        self.sim.director.setBloodMoonBonusParams(every, scale);
+        return game_world_tick.pushBloodMoonBonus(self, stage);
     }
 
     /// spawning.xml <entityspawner name=…> → its EntityGroupName property.
