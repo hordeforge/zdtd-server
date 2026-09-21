@@ -27,6 +27,7 @@ pub const guard_policy = @import("guard_policy.zig");
 pub const ally = @import("ally.zig");
 pub const replicate_te = @import("game/replicate_te.zig");
 pub const persist = @import("persist.zig");
+pub const persist_traders = @import("persist_traders.zig");
 pub const game_net = @import("game/net.zig");
 pub const game_tick = @import("game/tick.zig");
 pub const game_world_tick = @import("game/world_tick.zig");
@@ -110,6 +111,7 @@ test {
     _ = ally;
     _ = replicate_te;
     _ = persist;
+    _ = persist_traders;
     _ = game_net;
     _ = game_game_events;
     _ = game_tick;
