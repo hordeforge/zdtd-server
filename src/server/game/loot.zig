@@ -236,3 +236,32 @@ pub fn broadcastItemDropSpawn(self: *Game, net_id: i32, stack: packages.stock_in
     });
     try self.broadcastNear("NetPackageEntitySpawn", spb, self.sim.transform[bi].x, self.sim.transform[bi].z, self.interest_range);
 }
+
+pub fn isStorageBlockId(self: *const Game, block_id: u16) bool {
+    // Prefer blocks.xml LootList/CompositeTileEntity ∩ AssignIds dump.
+    if (self.maxdamage.isStorageId(block_id)) return true;
+    // Comptime pins are a second authority after a dump merge. With a
+    // game-dir they can match the wrong block if AssignIds remapped.
+    if (self.stock_catalogs_requested) return false;
+    const d = packages.stock_deco;
+    if (block_id == @as(u16, @intCast(d.cnt_wooden_chest_closed))) return true;
+    if (block_id == @as(u16, @intCast(d.cnt_wooden_chest_open))) return true;
+    if (block_id == @as(u16, @intCast(d.cnt_wood_writable_crate))) return true;
+    if (block_id == @as(u16, @intCast(d.cnt_desk_safe))) return true;
+    if (block_id == @as(u16, @intCast(d.cnt_hardened_chest_insecure))) return true;
+    return false;
+}
+
+/// Closed<->open pair from blocks.xml DowngradeBlock (AssignIds-resolved).
+pub fn storagePairId(self: *const Game, block_id: u16) ?u16 {
+    if (self.storage_pairs.toggleId(block_id)) |id| return id;
+    // Offline fallback: wooden chest pins. After a game-dir load the
+    // dump/XML pair is the only authority.
+    if (self.stock_catalogs_requested) return null;
+    const d = packages.stock_deco;
+    const closed: u16 = @intCast(d.cnt_wooden_chest_closed);
+    const open: u16 = @intCast(d.cnt_wooden_chest_open);
+    if (block_id == closed) return open;
+    if (block_id == open) return closed;
+    return null;
+}
