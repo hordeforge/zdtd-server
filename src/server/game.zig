@@ -258,9 +258,7 @@ fn tagsAnySet(needle: []const u8, hay: []const u8) bool {
     return false;
 }
 
-pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
-    return game_stability.stabilityAfterSetBlock(self, x, y, z, old_id, new_id);
-}
+pub const stabilityAfterSetBlock = game_stability.stabilityAfterSetBlock;
 
 /// Last-sent EntityLookAt look target (world coords) for one entity slot.
 /// `gen` pins the entry to the slot's current occupant (network_id[].gen):
