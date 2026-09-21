@@ -596,3 +596,21 @@ pub fn pushBloodMoonBonus(self: *Game, stage: i32) void {
     const scale: f32 = if (cfg.loot_bonus_scale > 0) cfg.loot_bonus_scale else 1.0;
     self.sim.director.setBloodMoonBonusParams(every, scale);
 }
+
+pub fn sampleFlushCounters(self: *Game) void {
+    const f = &self.world.flush;
+    const q = f.queued.load(.monotonic);
+    const w = f.written.load(.monotonic);
+    const e = f.errors.load(.monotonic);
+    const s = self.world.sync_fallbacks.load(.monotonic);
+    const wt = f.waits.load(.monotonic);
+    self.harness.counters.add(.chunk_flush_queued, q -| self.flush_seen.queued);
+    self.harness.counters.add(.chunk_flush_written, w -| self.flush_seen.written);
+    self.harness.counters.add(.chunk_flush_errors, e -| self.flush_seen.errors);
+    self.harness.counters.add(.chunk_flush_sync, s -| self.flush_seen.sync);
+    self.harness.counters.add(.chunk_flush_waits, wt -| self.flush_seen.waits);
+    // Async writes fail off-tick, so persistence_errors would otherwise
+    // never see them (saveAll returns before the write happens).
+    self.harness.counters.add(.persistence_errors, e -| self.flush_seen.errors);
+    self.flush_seen = .{ .queued = q, .written = w, .errors = e, .sync = s, .waits = wt };
+}
