@@ -14,6 +14,7 @@ pub const quests = @import("quests.zig");
 pub const blocks = @import("blocks.zig");
 pub const items = @import("items.zig");
 pub const item_stats = @import("item_stats.zig");
+pub const item_parse = @import("item_parse.zig");
 pub const item_modifiers = @import("item_modifiers.zig");
 pub const signs = @import("signs.zig");
 pub const gameevents = @import("gameevents.zig");
@@ -60,6 +61,7 @@ test {
     _ = blocks;
     _ = items;
     _ = item_stats;
+    _ = item_parse;
     _ = item_modifiers;
     _ = signs;
     _ = gameevents;
