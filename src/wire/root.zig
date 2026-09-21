@@ -33,6 +33,7 @@ pub const stock_login = @import("stock_login.zig");
 pub const stock_gameevent = @import("stock_gameevent.zig");
 pub const stock_console = @import("stock_console.zig");
 pub const stock_chat = @import("stock_chat.zig");
+pub const stock_attach = @import("stock_attach.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
@@ -67,6 +68,7 @@ test {
     _ = stock_gameevent;
     _ = stock_console;
     _ = stock_chat;
+    _ = stock_attach;
     _ = stock_vehicle;
     _ = stock_te;
     _ = stock_sign;
