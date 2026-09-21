@@ -2580,55 +2580,8 @@ pub const Game = struct {
 
     /// Align spawn to DTM height and ensure a solid under the feet block so
     /// dig/place sample rings (BlockUnderFeet) see terrain, not air.
-    pub fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
-        const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
-        const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
-        // heightWorld = top solid; PDF/entity feet use that block Y; entity
-        // float y = h+1.
-        var feet_y: i32 = @max(@as(i32, @intCast(h_u16)), 1);
-        // Stock Chunk::CanPlayersSpawnAtPos IL_0023 requires the block below the
-        // feet to carry CanPlayersSpawnOn (default true; treeMaster and the
-        // vehicle masters declare false), so a forest or parked-vehicle column
-        // walks down to the ground instead of spawning the player on top of it.
-        var scan: usize = 0;
-        while (scan < max_spawn_ground_scan) : (scan += 1) {
-            if (feet_y <= 1) break;
-            const below = self.world.blockWorld(sx, feet_y - 1, sz) catch break;
-            if (below == 0) break; // nothing to stand on: keep the surface
-            if (self.blocks.canPlayersSpawnOn(below)) break;
-            feet_y -= 1;
-        }
-        // Live AssignIds resolved at init (A05); the module pin is the offline
-        // default until resolveTerrainIds runs, so modded dumps stay correct.
-        const dirt = self.world.terrain_ids.dirt;
-        // 3x3 pad of solid at surface so client mesh + BlockUnderFeet see ground.
-        var dz: i32 = -1;
-        while (dz <= 1) : (dz += 1) {
-            var dx: i32 = -1;
-            while (dx <= 1) : (dx += 1) {
-                const px = sx + dx;
-                const pz = sz + dz;
-                // Ensure surface cell solid.
-                const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
-                if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch |err| {
-                    std.debug.print(
-                        "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
-                        .{ px, feet_y, pz, @errorName(err) },
-                    );
-                };
-                // One block below if empty (stairs / overhang).
-                if (feet_y > 0) {
-                    const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
-                    if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch |err| {
-                        std.debug.print(
-                            "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
-                            .{ px, feet_y - 1, pz, @errorName(err) },
-                        );
-                    };
-                }
-            }
-        }
-        return .{ .x = sx, .y = feet_y, .z = sz };
+    pub fn spawnSurface(self: *Game, sx: i32, sz: i32) game_join.SpawnSurface {
+        return game_join.spawnSurface(self, sx, sz);
     }
 
     pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
