@@ -162,7 +162,7 @@ survives by construction. That was a third of the tree (356 pairs down to 270)
 and it was hiding real findings behind noise.
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 214/214 (100%).** Every row below carries a bucket and a
+- **File coverage: 215/215 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
@@ -323,7 +323,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/trader_wire.zig` | R | Trader wire helpers extracted from game.zig. stockEntries + sendTraderSnapshot + handleTrade + applyTraderDataCopyFrom |
 | `src/server/game/types.zig` | R | Game-owned types extracted from game.zig: InitOptions, defaults, LandClaim, Client. Canonical definitions live here; game.zig re-exports them so exist |
 | `src/server/game/vehicle.zig` | R | Vehicle seat + positions S2C helpers - extracted verbatim from game.zig. seatRider / unseatRider (NetPackageEntityAttach) and the periodic |
-| `src/server/game/wasm_host.zig` | R | Wasm host shims for Game - callbacks the plugin layer calls back into. Extracted verbatim so game.zig keeps only a re-export |
+| `src/server/game/wasm_host.zig` | R | Wasm host shims for Game - callbacks the plugin layer calls back into. Extracted verbatim so game.zig keeps only a re-export. Guest `zdtd.log` text is capped (`max_wasm_log_len`) and login names / platform ids are replaced with `redact_placeholder` when the token is at least `min_redact_token_len` bytes (operator-log PII bound; not stock) |
 | `src/server/game/plugin_compose.zig` | Z | Dual-host plugin composition (static PluginHost then WasmHost): one place for verdict/observer/deny ordering |
 | `src/server/game/weather.zig` | R | Weather S2C helpers - extracted verbatim from game.zig. anyEnteredClient, the NetPackageWeather body builder and its send paths |
 | `src/server/game/world.zig` | R | Domain - extracted from game.zig; helpers take *Game World / claims / block meta / locks. Bodies copied verbatim from game.zig |
@@ -566,6 +566,8 @@ field-by-field provenance.
 | `quality_parse_max` | 255 | Z | `assets/traders.zig`: **zdtd-owned** trust-boundary clamp on a `quality="lo,hi"` bound. Stock quality is an ItemValue byte and stock XML only writes 1..6; a modlet writing a larger bound is clamped at parse so the roll stays inside the wire type when `[rules.trader] max_tier` disables the ceiling |
 | `server/game/tick.zig base_consumable_stat_max` | 100 | R | `EntityStats::Init` IL=40 passes `ldc.r4 100` as the default value into `EffectManager.GetValue` for the stat maxes (the `ldc.i4.s 104` FoodMax passive first), so Food/Water/Stamina start at 100 and the passive VM folds its `*Max` deltas onto that base. The tick's max recompute (`@max(1, 100 + delta)`) and the new `requirements.Ctx.*_base_max` (`Stat::Max`) now share one name, `base_consumable_stat_max`, so `StatCompareMax` / `StatComparePercModMaxToMax` cannot drift from the arithmetic they gate. Named 2026-09-12; previously two bare 100 literals in `tickSurvival` |
 | `server/game/weather.zig no_biomes_weather_count` | 5 | Z | **zdtd-owned** `NetPackageWeather` entry count used only when no `biomes.xml` is loaded at all (offline / no `--game-dir`): the stock 5-biome layout, so an unmodded client still reads a well-formed body. With a game dir the count is the loaded table's `weather_n` (biomes whose `weatherGroups.Count > 0`, what `InitBiomeWeather` asm.il ~2050437 sizes the read from); the hardcoded 5 this replaces broke modded counts (hardcode audit 2026-09-12 A1). Named 2026-09-12; the fallback constant is `no_biomes_weather_count` |
+| `server/game/wasm_host.zig min_redact_token_len` | 3 | Z | **zdtd-owned** shortest login name / platform-id token redacted from guest `zdtd.log` lines: one- and two-byte tokens would shred ordinary English; platform ids are always longer |
+| `server/game/wasm_host.zig redact_placeholder` | [redacted] | Z | **zdtd-owned** replacement string written over redacted player PII in wasm log lines (`redactPlayerPii`) |
 
 | `server/webui.zig gzip_min_bytes` | 1024 | Z | **zdtd-owned** transfer-policy floor: `gzip_min_bytes` is the size below which a body goes uncompressed because the gzip container costs more than it saves (`/api/state.json` sits just under it, the pages far above). Not a stock value |
 ### 3.9 Divergence register (provenance for the differences)
@@ -647,7 +649,7 @@ below is therefore the surviving record of the final live statuses.
 ## 4. Coverage and maintenance
 
 - **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **214/214 (100%)**; a new src file without a ledger
+  File coverage must stay **215/215 (100%)**; a new src file without a ledger
   row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
 - **Constants:** the ledger covers the behavioral values; the authoritative
   field-by-field provenance for the rules surface lives inline in
@@ -658,7 +660,7 @@ below is therefore the surviving record of the final live statuses.
 - **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
   table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
 
-- `python3 tools/provenance_scan.py` gates **file coverage 214/214** and ledger
+- `python3 tools/provenance_scan.py` gates **file coverage 215/215** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
   file exists).
 - After a game update: re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,

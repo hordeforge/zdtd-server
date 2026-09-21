@@ -23,7 +23,7 @@
 
 ## 1. System overview
 
-zdtd is a **single-process, single-authority, fixed-step** dedicated server. Stock Unity clients (EAC off, V3.1.0 b14) join over LiteNetLib; the server owns blocks, inventory, HP, quests, time, and every byte it sends. There is no Mono, no GC pause, and no `Mods/` code loading - behavioral extension is Wasm plugins over a typed host boundary.
+zdtd is a **single-process, single-authority, fixed-step** dedicated server. Stock Unity clients (EAC off, V3.2.0 b10) join over LiteNetLib; the server owns blocks, inventory, HP, quests, time, and every byte it sends. There is no Mono, no GC pause, and no `Mods/` code loading - behavioral extension is Wasm plugins over a typed host boundary.
 
 The three planes are deliberately split even though the tick thread is single-owner for game rules:
 

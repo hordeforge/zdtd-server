@@ -1,12 +1,12 @@
 # Gap analysis: what a player can and cannot do on Navezgane
 
-> **What this is:** the full 300-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
+> **What this is:** the full 300-feature inventory for the V3.2.0 b10 stock-client play path (IL citations still name the V3.1.0 dump), with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
 
 > **Related:** hub [STATUS.md](STATUS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md)
 
 **Date pin:** 2026-08-06
-**Game line:** stock client **V3.1.0 b14**, EAC off, Navezgane, direct IP.
-**Version pin:** target is stock **V3.1.0 b14**; IL citations `asm.il:NNNN` refer to the V3.1.0 dump whose identity (size, line count, MD5) is recorded in [`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md). Mentions of V3.0.1 are provenance only; pre-2026-08-06 line numbers may drift by roughly 3500 lines in the NetPackage region.
+**Game line:** stock client **V3.2.0 b10** (connected wire; see `src/version.zig`), EAC off, Navezgane, direct IP. Bundled AssignIds dump remains 3.1.0-era (GAP_ANALYSIS §1a).
+**Version pin:** supported wire is stock **V3.2.0 b10**; IL citations `asm.il:NNNN` refer to the V3.1.0 dump whose identity (size, line count, MD5) is recorded in [`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md). Mentions of V3.0.1 are provenance only; pre-2026-08-06 line numbers may drift by roughly 3500 lines in the NetPackage region.
 **IL reference:** `$HOME/.cache/zdtd-scratch/asm.il` (2026-08-05 dump). Line
 numbers in this document refer to **that** dump. Older ranges quoted in
 [GAP_ANALYSIS.md](GAP_ANALYSIS.md) drift by roughly 3500 lines in the
@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but two of the 299 features WORK (297 WORKS, 2 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but two of the 300 features WORK (298 WORKS, 2 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -151,11 +151,12 @@ Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
 rows below are corrected to those counts. Recount 2026-09-04 (this pass, by
 counting the `- **name** \`TAG\`` bullets in sections 4-12): the canonical set
-is **299 features (297 WORKS, 2 PARTIAL, 0 MISSING)** after the 2026-09-08
-death/kill re-score (kill counters WORKS; client-accrued accumulators remain in
-[DIVERGENCES](DIVERGENCES.md) §2). The previous pass wrote
-297/300 and two area headers (World systems 45, Net and ops 49) that the
-markers did not support; those were corrected 2026-09-04. The remaining PARTIAL
+is **300 features (298 WORKS, 2 PARTIAL, 0 MISSING)** after later rescores
+(death/kill counters WORKS on 2026-09-08; client-accrued accumulators remain in
+[DIVERGENCES](DIVERGENCES.md) §2). An earlier pass wrote
+297/299 and two area headers (World systems 45, Net and ops 49) that the
+markers did not support; those were corrected 2026-09-04 and the Total row
+now matches the live markers. The remaining PARTIAL
 rows are the 2026-08-29 join-burst tick budget and the perk/attribute
 passive-effects VM; the chunk-pointer stability gap was closed
 2026-08-30 by the pointer-stable chunk store. The
@@ -219,9 +220,9 @@ A `WORKS` score means the feature is implemented and wire-correct. It does
 not mean zdtd behaves identically to stock: the places where it knowingly
 does not, and why, are in [DIVERGENCES.md](DIVERGENCES.md).
 
-299 features scored across nine areas (recounted 2026-09-04 from the
-per-feature markers, which are the source of truth for the counts; STATUS
-wins on conflict about what shipped, not about the arithmetic).
+300 features scored across nine areas (Total row below matches the live
+per-feature markers; STATUS wins on conflict about what shipped, not about
+the arithmetic).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|

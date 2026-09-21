@@ -30,9 +30,9 @@ That is **not** sibling `7dtd-server-apm` (stock Mono dedi).
 ## Status
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
-death/respawn, loot, craft/workstation, trade, persist; scorecard **294 WORKS /
-1 PARTIAL / 0 MISSING** (2026-08-30, see STATUS).
-See [docs/STATUS.md](docs/STATUS.md).
+death/respawn, loot, craft/workstation, trade, persist; scorecard **298 WORKS /
+2 PARTIAL / 0 MISSING** (see [docs/STATUS.md](docs/STATUS.md) and
+[docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)).
 
 ```bash
 # Flat default world (builtin quest catalog)

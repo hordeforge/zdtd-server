@@ -9,15 +9,16 @@ round-trip test proves self-consistency, not stock compatibility. A claim about
 stock behaviour needs an IL anchor (method plus line) or an observation from the
 real client.
 
-**Version pin:** the target is stock **V3.1.0 b14**, EAC off, and that is what
-the live gate runs against. IL citations of the form `asm.il:NNNN` refer to the
-V3.1.0 single-file dump whose identity (size, line count, MD5) is recorded in
-[`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md); those
-line numbers are valid only against that exact file. The research repo tracks
-the latest release only: its `il/` sets are all V3.1.0 and the V3.0.1 sets were
-deleted on 2026-08-06. Mentions of V3.0.1 in these documents are provenance, and
-any line number written before that date may be a V3.0.1 number, which drifts by
-roughly 3500 lines in the NetPackage region.
+**Version pin:** the supported stock client wire is **V3.2.0 b10** (Mono, EAC
+off; see `src/version.zig` and [STATUS.md](STATUS.md)). IL citations of the form
+`asm.il:NNNN` still refer to the V3.1.0 single-file dump whose identity (size,
+line count, MD5) is recorded in
+[`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md);
+those line numbers are valid only against that exact file. The research repo
+tracks the latest release only: its `il/` sets are all V3.1.0 and the V3.0.1
+sets were deleted on 2026-08-06. Mentions of V3.0.1 in these documents are
+provenance, and any line number written before that date may be a V3.0.1
+number, which drifts by roughly 3500 lines in the NetPackage region.
 
 ## Read first
 
@@ -25,8 +26,8 @@ New to the project, or picking up work:
 
 1. [../CONTRIBUTING.md](../CONTRIBUTING.md) clone → `make help` → edit-test → PR gate.
 2. [STATUS.md](STATUS.md) what works now, with the current gates.
-3. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 295 features scored
-   WORKS / PARTIAL / MISSING with anchors (293 / 2 / 0).
+3. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 300 features scored
+   WORKS / PARTIAL / MISSING with anchors (298 / 2 / 0).
 4. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 5. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
 6. [../TODO.md](../TODO.md) open backlog first; shipped log below the fold.
@@ -34,7 +35,7 @@ New to the project, or picking up work:
 8. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
 9. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
 10. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
-   the stock game (file map 214/214 + constants ledger; gated by
+   the stock game (file map 215/215 + constants ledger; gated by
    `tools/provenance_scan.py` in `make check`). Re-run the review with
    [provenance-review.md](provenance-review.md) (copy-paste agent prompt:
    method, gates, honesty rules; picked up by `~/review-prompts`).
