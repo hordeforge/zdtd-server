@@ -12742,6 +12742,51 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     std.debug.print("PASS self-report: own flags and speeds applied, spoofed entity ids refused\n", .{});
 }
 
+test "scenario the alive-flags jump edge fires the leg buffs' onSelfJump rows" {
+    // Stock EntityAlive.set_Jumping (IL=46) fires onSelfJump when the move
+    // helper starts a jump; the client reports it in the AliveFlags 0x0010
+    // bit. A sprained leg escalates on the edge ($legHurtCounter +
+    // buffLegGetsWorse) exactly like the fall-impact rows; a repeated jump
+    // bit with no clear in between fires once (edge, not level).
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    _ = g.tickSurvival(1.0); // grants the check buffs (buffStatusCheck01) on entered-game
+    const jump_bit: u16 = 0x0010;
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffLegSprained", cl.entity_id));
+    var body: [32]u8 = undefined;
+    var fb: [256]u8 = undefined;
+    _ = cl.cvars.apply("$legHurtCounter", .set, 0);
+    // Set edge: counter rises and the worse-leg buff lands.
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, jump_bit)));
+    try std.testing.expect(cl.cvars.get("$legHurtCounter") > 0);
+    const worse_id = g.buffs.indexOfName("buffLegGetsWorse").?;
+    try std.testing.expect(g.sim.buffs[ps].find(worse_id) != null);
+    // Same bit again with no clear: no second fire.
+    const before = cl.cvars.get("$legHurtCounter");
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, jump_bit)));
+    try std.testing.expectApproxEqAbs(before, cl.cvars.get("$legHurtCounter"), 0.001);
+    // Clear then set: fires again.
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, 0x0008)));
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, jump_bit)));
+    try std.testing.expect(cl.cvars.get("$legHurtCounter") > before);
+    std.debug.print("PASS jump edge: leg buffs escalate once per set edge\n", .{});
+}
+
 test "scenario a quest entity spawn summons one entity for the sender only" {
     // Body (RE protocol-packages.md 6.17, read IL_0002-001F): entityType i32 |
     // gamestageGroup string | entityIDQuestHolder i32. The last field is the

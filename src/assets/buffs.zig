@@ -178,6 +178,11 @@ pub const Trigger = enum(u8) {
     /// buffStatusCheck01 leg-injury rows, gated on `_fallSpeed`). Driven by
     /// the falling-damage claim (dtype "falling"), which carries the impact.
     fall_impact,
+    /// `onSelfJump`: fired when the player's move helper starts a jump
+    /// (stock EntityAlive.set_Jumping IL=46). The leg buffs' activity
+    /// escalation (buffLegGetsWorse, $legHurtCounter) rides this; driven by
+    /// the AliveFlags 0x0010 edge on the C2S flags word.
+    jump,
     /// `onSelfDamagedBlock`: fired when the player damages a block (the check
     /// buff's church-bell spawn gate; TriggerHasTags reads the block's tags).
     block_damaged,
@@ -1608,6 +1613,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onOtherDamagedSelf")) return .other_damaged_self;
     if (std.mem.eql(u8, s, "onCombatEntered")) return .combat_entered;
     if (std.mem.eql(u8, s, "onSelfFallImpact")) return .fall_impact;
+    if (std.mem.eql(u8, s, "onSelfJump")) return .jump;
     if (std.mem.eql(u8, s, "onSelfDamagedBlock")) return .block_damaged;
     if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
     if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;

@@ -1945,6 +1945,10 @@ pub const Game = struct {
         game_tick.fireFallImpact(self, ps, impact_speed);
     }
 
+    pub fn fireJump(self: *Game, ps: ecs.Slot) void {
+        game_tick.fireJump(self, ps);
+    }
+
     pub fn fireBlockDamaged(self: *Game, ps: ecs.Slot, block_id: u16) void {
         game_tick.fireBlockDamaged(self, ps, block_id);
     }

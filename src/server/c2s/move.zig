@@ -181,6 +181,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         if (self.sim.slotOfNetId(f.entity_id)) |idx| {
+            // Jump edge first: the stored word is overwritten below, so the
+            // previous jump bit must be read before the verbatim store (stock
+            // relay mirror).
+            const was_jumping = (self.sim.flags[idx].bits & ecs.components.flag_jumping) != 0;
             // Store the client-reported word verbatim (stock relay mirror).
             // Server-side decisions never read these stored bits: crouch is
             // derived from the package directly below, and the S2C flags word
@@ -199,6 +203,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // for the sender's own entity, like the speeds path below.
                 if (f.entity_id == c.entity_id) {
                     _ = c.cvars.apply("_crouching", .set, if (self.sim.player[idx].crouching) 1 else 0);
+                }
+                // Jump edge (stock EntityAlive.set_Jumping IL=46): the client
+                // sets the 0x0010 Jumping bit when its move helper starts a
+                // jump. Firing the check buffs' `onSelfJump` rows here drives
+                // the leg-injury escalation (buffLegGetsWorse, $legHurtCounter)
+                // off the same wire signal the client already sends. Grounded
+                // by the same rule as crouch: the sender's own entity only.
+                const jumping = (f.flags & ecs.components.flag_jumping) != 0;
+                if (f.entity_id == c.entity_id and jumping and !was_jumping) {
+                    if (self.sim.playerByPeer(c.slot)) |ps| {
+                        self.fireJump(ps);
+                    }
                 }
             }
         }
