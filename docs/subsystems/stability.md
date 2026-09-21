@@ -145,7 +145,7 @@ entity only when the block declares a model on fall; otherwise it is simply gone
 (`src/server/game/stability.zig:76-83`). The entities themselves are ECS kind `falling_block`, ticked
 by their own schedule phase gated on the `falling` rule, which is why turning that rule off while
 SetBlock collapses continue lets fallers accumulate (`src/ecs/rules.zig:41-46`,
-`src/ecs/schedule.zig:106`, `src/ecs/systems.zig:3094`).
+`src/ecs/schedule.zig:106`, `src/ecs/falling.zig:24`).
 
 ## When it runs
 

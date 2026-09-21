@@ -2892,7 +2892,7 @@ gamestage, no wandering hordes, and no screamers.
   holding entity slots + `known_entities` bits forever; sleepers and alerted
   mobs stay (POI volumes / engaged fights). Systems test `far animals despawn
   like zombies; near animals stay` covers far/near/alerted.
-  *Anchors:* `src/ecs/systems.zig:2952` systemDespawnFar, `:1716`
+  *Anchors:* `src/ecs/despawn.zig:26` systemDespawnFar, `src/ecs/ai_tasks.zig:1845`
 
 - **Animal replication carries no movement state** `WORKS` `(2026-08-22)`
   The EntitySpeeds / EntityAliveFlags block now covers `.animal` too: animals

@@ -165,7 +165,7 @@ seat"; `unseatRider` broadcasts detach with vehicle id and slot both -1, and a l
 gets current occupancy replayed (`src/server/game/vehicle.zig:14-71`). The sim copies the
 hull transform onto every seated rider each tick, offset by 1 in Y, because the client
 parents the rider to the seat itself; a rider whose entity is gone frees the seat, and
-freeing seat 0 stops the vehicle (`src/ecs/systems.zig:3260-3277`). The movement-relevant
+freeing seat 0 stops the vehicle (`src/ecs/vehicle.zig:148-156`). The movement-relevant
 field subset, interior fields trimmed, is (`src/ecs/components.zig:495-510`):
 
 ```zig
