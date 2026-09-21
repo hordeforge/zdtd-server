@@ -24,6 +24,7 @@ pub const components = @import("components.zig");
 pub const world = @import("world.zig");
 pub const BotSnap = world.BotSnap;
 pub const systems = @import("systems.zig");
+pub const quest_trade = @import("quest_trade.zig");
 pub const quest = @import("quest.zig");
 pub const poi_lock = @import("poi_lock.zig");
 pub const buff = @import("buff.zig");
@@ -56,6 +57,7 @@ test {
     _ = components;
     _ = world;
     _ = systems;
+    _ = quest_trade;
     _ = quest;
     _ = poi_lock;
     _ = buff;
