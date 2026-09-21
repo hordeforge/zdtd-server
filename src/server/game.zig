@@ -2398,64 +2398,7 @@ pub const Game = struct {
     /// (`error`) so the client does not proceed under local ids. An empty dump
     /// (no AssignIds data) still skips and leaves LoadLocal behaviour.
     pub fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
-        if (!self.block_id_mapping) return;
-        const nameid = packages.stock_nameid;
-        if (self.maxdamage.idNameCount() == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping skipped (no AssignIds dump loaded)\n", .{clock.wallStamp(&ts)});
-            return;
-        }
-        const summary = nameid.measure(self.maxdamage.idNameIterator(), &self.nameid_seen) catch |err| {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping measure failed ({s})\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return err;
-        };
-
-        // NetPackageIdMapping body: name | i32 dataLen | data (asm.il 822416-822438).
-        const map_name = "blocks";
-        // One-byte 7-bit length prefix; the writer below emits exactly one byte.
-        comptime std.debug.assert(map_name.len < 0x80);
-        const body_len = 1 + map_name.len + 4 + summary.bytes;
-        // Framed into body_buf, not send_buf: the deflated mapping lands around
-        // 255 KiB, which leaves no headroom in the 256 KiB send_buf if the dump
-        // grows. body_buf is 512 KiB and idle here (the config files that use it
-        // are sent after this returns).
-        var fr: wire_frame.DeflateFramer = undefined;
-        fr.begin(&self.body_buf, &self.deflate_window, 0, packages.idOf("NetPackageIdMapping").?, body_len) catch |err| {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping frame init failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return err;
-        };
-        const w = fr.writer();
-        const ok = blk: {
-            w.writeByte(@intCast(map_name.len)) catch break :blk false;
-            w.writeAll(map_name) catch break :blk false;
-            w.writeInt(i32, @intCast(summary.bytes), .little) catch break :blk false;
-            nameid.write(w, self.maxdamage.idNameIterator(), summary) catch break :blk false;
-            break :blk true;
-        };
-        if (!ok) {
-            var ts: [19]u8 = undefined;
-            std.debug.print(
-                "zdtd: {s} blocks IdMapping does not fit body_buf ({d} raw bytes)\n",
-                .{ clock.wallStamp(&ts), summary.bytes },
-            );
-            return error.Overflow;
-        }
-        const framed = fr.finish() catch |err| {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping deflate failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return err;
-        };
-        self.sendFramedReliable(peer, "NetPackageIdMapping", framed, critical_retry_budget_ns, true) catch |err| {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} blocks IdMapping send failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
-            return err;
-        };
-        std.debug.print(
-            "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
-            .{ summary.count, summary.bytes, framed.len },
-        );
+        return game_config_files.sendBlockIdMapping(self, peer);
     }
 
     pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
