@@ -1853,7 +1853,7 @@ encoding is one day high.
   §3/§8: empty code = stock defaults, groups encode only changed options), so
   the red clock fires on the real horde night at the configured hour.
   *Anchors:* `asm.il:1574299`, `asm.il:1248240`, `asm.il:2502629`,
-  `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`, `src/server/game.zig`
+  `asm.il:1913041`, `src/wire/stock_gamestats.zig:163`, `:321`, `src/server/game.zig`
 
 - **NetPackageBloodmoonMusic** `WORKS` `(2026-08-21)`
   Builder is IL-correct; eligibility is now **per player** like stock
