@@ -30,7 +30,7 @@ The `Game` fields the loop itself owns (`src/server/game.zig:274`):
     running: bool = true,
 ```
 
-`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3233`, `src/server/game.zig:3260`).
+`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game/lifecycle.zig:112`, `src/server/game/lifecycle.zig:139`).
 
 Cadence gates are `InitOptions`/`Game` fields sampled as tick counts, not seconds. The compile-time defaults (`src/server/game/types.zig:87`):
 
@@ -83,46 +83,47 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game.zig:3168`):
+The only real-time pacer is `Game.run` (`src/server/game/lifecycle.zig:108`):
 
 ```zig
-    pub fn run(self: *Game) !void {
-        const tick_ns: u64 = protocol.tick_ns;
-        var next_t = clock.monoNs() + tick_ns;
-        while (self.running) {
-            try self.step();
-            // Snapshot after step returns (step stack unwound; avoids overflow).
-            self.fillWebuiSnap();
-            const now = clock.monoNs();
-            if (next_t > now) {
-                clock.sleepNs(next_t - now);
-            } else if (now > next_t) {
-                // Fell behind the 50 ms budget: count for apm; rate-limit log.
-                self.harness.counters.inc(.tick_overruns);
-                // Availability valve: hold weak evidence + deferrable broadcasts
-                // for 2 s. Chunk streaming, motion replicate, WorldTime and every
-                // Hard gate keep running.
-                if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
-                const overruns = self.harness.counters.get(.tick_overruns);
-                if (overruns == 1 or overruns % 100 == 0) {
-                    const late_us = (now -% next_t) / 1000;
-                    var ts: [19]u8 = undefined;
-                    std.debug.print(
-                        "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
-                        .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
-                    );
-                }
+pub fn run(self: *Game) !void {
+    const tick_ns: u64 = @import("../../protocol.zig").tick_ns;
+    const clock = @import("../../util/clock.zig");
+    var next_t = clock.monoNs() + tick_ns;
+    while (self.running) {
+        try self.step();
+        // Snapshot after step returns (step stack unwound; avoids overflow).
+        self.fillWebuiSnap();
+        const now = clock.monoNs();
+        if (next_t > now) {
+            clock.sleepNs(next_t - now);
+        } else if (now > next_t) {
+            // Fell behind the 50 ms budget: count for apm; rate-limit log.
+            self.harness.counters.inc(.tick_overruns);
+            // Availability valve: hold weak evidence + deferrable broadcasts
+            // for 2 s. Chunk streaming, motion replicate, WorldTime and every
+            // Hard gate keep running.
+            if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
+            const overruns = self.harness.counters.get(.tick_overruns);
+            if (overruns == 1 or overruns % 100 == 0) {
+                const late_us = (now -% next_t) / 1000;
+                var ts: [19]u8 = undefined;
+                std.debug.print(
+                    "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
+                    .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
+                );
             }
-            next_t += tick_ns;
-            if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;
         }
-        try self.world.saveAll();
+        next_t += tick_ns;
+        if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;
     }
+    try self.world.saveAll();
+}
 ```
 
 The policy this encodes: sleep to the absolute deadline; on overrun count the tick and rate-limit the log to the first and every hundredth; then re-anchor. Because the re-anchor sets `next_t = now + tick_ns` when the deadline is already in the past, missed ticks are dropped rather than replayed - there is no catch-up burst, and a process that stalls for a second resumes at the current time instead of running twenty ticks back to back. One loop iteration counts at most one overrun regardless of how many tick periods it lost.
 
-The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game.zig:3224`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
+The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game/lifecycle.zig:125`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
 
 Time comes from one leaf module so the loop can be made deterministic without touching callers. `clock.monoNs` reads `CLOCK_MONOTONIC` in production but returns the virtual counter when one is active (`src/util/clock.zig:48`), `sleepNs` advances that counter and returns immediately instead of sleeping (`src/util/clock.zig:97`), and `enableVirtual` switches the process over (`src/util/clock.zig:25`). The offline path enables the seeded virtual clock at init (`src/server/game/init_world.zig:109`) and the local `util/sim` layer advances it one tick per completed step (`src/server/game/step.zig:38`), so a `--ticks N` run is reproducible from its seed and does not depend on host speed. `wallNs`/`wallSeconds` exist for values that cross the process boundary, such as report timestamps and ban expiry, and also follow the virtual clock (`src/util/clock.zig:62`, `src/util/clock.zig:73`).
 

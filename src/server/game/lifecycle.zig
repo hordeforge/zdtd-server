@@ -1,6 +1,7 @@
 //! Shutdown ordering for Game: flush every store, then tear down subsystems.
 //! Player persistence lives in server/persist.zig; callers go there directly.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const apm = @import("../../apm/root.zig");
@@ -102,4 +103,38 @@ pub fn deinitStores(self: *Game) void {
 
 pub fn refreshInfoPlayers(self: *Game) void {
     self.info_tcp.setPlayers(@intCast(self.countJoined()));
+}
+
+pub fn run(self: *Game) !void {
+    const tick_ns: u64 = @import("../../protocol.zig").tick_ns;
+    const clock = @import("../../util/clock.zig");
+    var next_t = clock.monoNs() + tick_ns;
+    while (self.running) {
+        try self.step();
+        // Snapshot after step returns (step stack unwound; avoids overflow).
+        self.fillWebuiSnap();
+        const now = clock.monoNs();
+        if (next_t > now) {
+            clock.sleepNs(next_t - now);
+        } else if (now > next_t) {
+            // Fell behind the 50 ms budget: count for apm; rate-limit log.
+            self.harness.counters.inc(.tick_overruns);
+            // Availability valve: hold weak evidence + deferrable broadcasts
+            // for 2 s. Chunk streaming, motion replicate, WorldTime and every
+            // Hard gate keep running.
+            if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
+            const overruns = self.harness.counters.get(.tick_overruns);
+            if (overruns == 1 or overruns % 100 == 0) {
+                const late_us = (now -% next_t) / 1000;
+                var ts: [19]u8 = undefined;
+                std.debug.print(
+                    "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
+                    .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
+                );
+            }
+        }
+        next_t += tick_ns;
+        if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;
+    }
+    try self.world.saveAll();
 }

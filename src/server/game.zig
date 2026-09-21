@@ -55,6 +55,7 @@ const game_guard = @import("game/guard.zig");
 const game_session_drop = @import("game/session_drop.zig");
 const game_init_assets = @import("game/init_assets.zig");
 const game_init_world = @import("game/init_world.zig");
+const game_lifecycle = @import("game/lifecycle.zig");
 const persist = @import("persist.zig");
 const admin_console = @import("admin_console.zig");
 const game_types = @import("game/types.zig");
@@ -3166,36 +3167,7 @@ pub const Game = struct {
     }
 
     pub fn run(self: *Game) !void {
-        const tick_ns: u64 = protocol.tick_ns;
-        var next_t = clock.monoNs() + tick_ns;
-        while (self.running) {
-            try self.step();
-            // Snapshot after step returns (step stack unwound; avoids overflow).
-            self.fillWebuiSnap();
-            const now = clock.monoNs();
-            if (next_t > now) {
-                clock.sleepNs(next_t - now);
-            } else if (now > next_t) {
-                // Fell behind the 50 ms budget: count for apm; rate-limit log.
-                self.harness.counters.inc(.tick_overruns);
-                // Availability valve: hold weak evidence + deferrable broadcasts
-                // for 2 s. Chunk streaming, motion replicate, WorldTime and every
-                // Hard gate keep running.
-                if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
-                const overruns = self.harness.counters.get(.tick_overruns);
-                if (overruns == 1 or overruns % 100 == 0) {
-                    const late_us = (now -% next_t) / 1000;
-                    var ts: [19]u8 = undefined;
-                    std.debug.print(
-                        "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
-                        .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
-                    );
-                }
-            }
-            next_t += tick_ns;
-            if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;
-        }
-        try self.world.saveAll();
+        return game_lifecycle.run(self);
     }
 
     pub fn applyDamage(self: *Game, entity_id: i32, amount: f32) bool {
