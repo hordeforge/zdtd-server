@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const binary = @import("binary.zig");
+const stock_entity = @import("stock_entity.zig");
 const platform_user = @import("platform_user.zig");
 
 
@@ -224,3 +225,29 @@ pub fn buildSetBlockTextureBody(buf: []u8, t: SetBlockTexture) ![]u8 {
     return w.written();
 }
 
+
+pub const TraderStockEntry = stock_entity.TraderStockEntry;
+
+/// Stock NetPackageTraderData.write (asm.il 839492-839540): the entity id and
+/// tePosition are mutually exclusive. Write(bool = entityId != -1); when true it
+/// writes ONLY the i32 entityId and branches past the position write. Our near-spawn
+/// trader is an EntityTrader, so we always take the entity-id branch. Emitting a
+/// tePosition here would desync the client's read and corrupt the TraderData body.
+pub fn buildTraderDataStock(
+    buf: []u8,
+    entity_id: i32,
+    trader_id: i32,
+    available_money: i32,
+    entries: []const TraderStockEntry,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeBool(true); // entityId != -1
+    try w.writeI32(entity_id);
+    try w.writeBool(true); // has TraderData
+    try stock_entity.writeTraderDataBody(&w, .{
+        .trader_id = trader_id,
+        .available_money = available_money,
+        .entries = entries,
+    });
+    return w.written();
+}
