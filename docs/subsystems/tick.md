@@ -20,7 +20,7 @@ pub const tick_ns: u64 = 1_000_000_000 / ticks_per_second;
 
 `Game.step` derives its sim delta from the same constant rather than from a measured elapsed time (`src/server/game/step.zig:91`), so a late tick does not hand a larger `dt` to the sim.
 
-The `Game` fields the loop itself owns (`src/server/game.zig:353`):
+The `Game` fields the loop itself owns (`src/server/game.zig:330`):
 
 ```zig
     /// Load-shed valve: weak evidence + deferrable broadcasts are dropped while
@@ -83,7 +83,7 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game.zig:3914`):
+The only real-time pacer is `Game.run` (`src/server/game.zig:3905`):
 
 ```zig
     pub fn run(self: *Game) !void {

@@ -243,21 +243,6 @@ pub const playerDamageVerdictAmount = game_hooks.playerDamageVerdictAmount;
 pub const announceChat = game_hooks.announceChat;
 pub const tradePriceVerdict = game_hooks.tradePriceVerdict;
 
-/// Any comma-list tag of `needle` present in `hay` (stock FastTags
-/// Test_AnySet; the POI tags and the spawning.xml tags/notags lists).
-fn tagsAnySet(needle: []const u8, hay: []const u8) bool {
-    var it = std.mem.splitScalar(u8, needle, ',');
-    while (it.next()) |tag| {
-        const t = std.mem.trim(u8, tag, " \t");
-        if (t.len == 0) continue;
-        var h = std.mem.splitScalar(u8, hay, ',');
-        while (h.next()) |ht| {
-            if (std.mem.eql(u8, t, std.mem.trim(u8, ht, " \t"))) return true;
-        }
-    }
-    return false;
-}
-
 pub const stabilityAfterSetBlock = game_stability.stabilityAfterSetBlock;
 
 /// Last-sent EntityLookAt look target (world coords) for one entity slot.
@@ -300,14 +285,6 @@ const VelYSent = struct {
     vy: f32 = 0,
     gen: u32 = 0,
 };
-
-/// The run's map seed: the value `Utils.RandomFromSeedOnPos` (IL=2666) folds
-/// into every per-cell stream. The flat default world has no generator, so the
-/// sim's default seed stands in.
-fn worldSeedOf(self: *const Game) i32 {
-    const s: u64 = if (self.world.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed;
-    return @truncate(@as(i64, @bitCast(s)));
-}
 
 pub const Game = struct {
     allocator: std.mem.Allocator,
@@ -3250,7 +3227,7 @@ pub const Game = struct {
             if (!self.placeholders_loaded) return null;
             holder.* = .{
                 .table = &self.placeholder_table,
-                .world_seed = worldSeedOf(self),
+                .world_seed = @truncate(@as(i64, @bitCast(if (self.world.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed))),
                 .biome_name = @This().at,
                 .biome_ctx = self,
             };
@@ -3357,8 +3334,22 @@ pub const Game = struct {
         if (r.tags.len == 0 and r.notags.len == 0) return true;
         const pf = if (self.world.prefabs) |*p| p else return r.tags.len == 0;
         const poi = pf.poiTagsAt(x, z);
-        if (r.notags.len > 0 and tagsAnySet(r.notags, poi)) return false;
-        if (r.tags.len > 0 and !tagsAnySet(r.tags, poi)) return false;
+        const anySet = struct {
+            fn call(needle: []const u8, hay: []const u8) bool {
+                var it = std.mem.splitScalar(u8, needle, ',');
+                while (it.next()) |tag| {
+                    const t = std.mem.trim(u8, tag, " \t");
+                    if (t.len == 0) continue;
+                    var h = std.mem.splitScalar(u8, hay, ',');
+                    while (h.next()) |ht| {
+                        if (std.mem.eql(u8, t, std.mem.trim(u8, ht, " \t"))) return true;
+                    }
+                }
+                return false;
+            }
+        }.call;
+        if (r.notags.len > 0 and anySet(r.notags, poi)) return false;
+        if (r.tags.len > 0 and !anySet(r.tags, poi)) return false;
         return true;
     }
 
