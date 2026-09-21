@@ -18,15 +18,15 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
 | `ZPV` | src/server/persist.zig | 93 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
 | `ZPV` | src/server/persist.zig | 617 | savePlayers | - |
-| `ZEN2` | src/server/persist.zig | 1586 | saveEntities | - |
-| `ZEN2` | src/server/persist.zig | 1747 | loadEntities | - |
-| `ZENT` | src/server/persist.zig | 1748 | loadEntities | - |
-| `ZCLC` | src/server/persist.zig | 1912 | saveClaims | - |
-| `ZCLC` | src/server/persist.zig | 1945 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 1977 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 1997 | ztrScanLen | - |
-| `ZTR1` | src/server/persist.zig | 2060 | saveTraders | - |
-| `ZPV` | src/server/persist.zig | 2240 | zpv2DropName | - |
+| `ZEN2` | src/server/persist.zig | 1589 | saveEntities | - |
+| `ZEN2` | src/server/persist.zig | 1750 | loadEntities | - |
+| `ZENT` | src/server/persist.zig | 1751 | loadEntities | - |
+| `ZCLC` | src/server/persist.zig | 1915 | saveClaims | - |
+| `ZCLC` | src/server/persist.zig | 1948 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 1980 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 2000 | ztrScanLen | - |
+| `ZTR1` | src/server/persist.zig | 2063 | saveTraders | - |
+| `ZPV` | src/server/persist.zig | 2243 | zpv2DropName | - |
 | `ZCT3` | src/world/containers.zig | 187 | posFromGuid | - |
 | `ZCT3` | src/world/containers.zig | 205 | posFromGuid | - |
 | `ZCT3` | src/world/containers.zig | 271 | posFromGuid | - |
