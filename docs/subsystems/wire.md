@@ -74,9 +74,9 @@ Callers must pass a `body_len` to `begin` before the first body byte, then push 
 
 ## Package ids: registry and resolution
 
-`packages.zig` holds one ordered name list. Its index is the numeric package id, and `idOf` is the only lookup (`src/wire/packages.zig:75`, `src/wire/packages.zig:290`).
+`packages.zig` holds one ordered name list. Its index is the numeric package id, and `idOf` is the only lookup (`src/wire/stock_ids.zig:61`, `src/wire/stock_ids.zig:275`).
 
-The registry head (src/wire/packages.zig:27):
+The registry head (src/wire/stock_ids.zig:12):
 
 ```zig
 pub const PackageName = enum {
@@ -100,11 +100,11 @@ pub const PackageName = enum {
     NetPackageQuestObjectiveUpdate,
 ```
 
-The matching `default_mappings` array (`src/wire/packages.zig:76`) has 191 names (`docs/wire/PACKAGES.md:10`). Ids are dynamic per AGENTS rule 4, so no numeric id may be treated as stable across game versions or builds; the array index is a server-side choice that the client adopts by reading the advertised list. `default_mappings` is advertised verbatim at join (`src/wire/packages.zig:319` writes the mapping table; call site `src/server/game/net_handlers.zig:54`), and it is also the inbound decode table: the dispatch entry point rejects any id at or above the list length and otherwise takes the name from the same index (`src/server/c2s/dispatch.zig:20`, `src/server/c2s/dispatch.zig:25`). There is no per-peer inbound map in this reading; only the outbound id is looked up per send.
+The matching `default_mappings` array (`src/wire/stock_ids.zig:61`) has 191 names (`docs/wire/PACKAGES.md:10`). Ids are dynamic per AGENTS rule 4, so no numeric id may be treated as stable across game versions or builds; the array index is a server-side choice that the client adopts by reading the advertised list. `default_mappings` is advertised verbatim at join (`src/wire/stock_ids.zig:304` writes the mapping table; call site `src/server/game/net_handlers.zig:54`), and it is also the inbound decode table: the dispatch entry point rejects any id at or above the list length and otherwise takes the name from the same index (`src/server/c2s/dispatch.zig:20`, `src/server/c2s/dispatch.zig:25`). There is no per-peer inbound map in this reading; only the outbound id is looked up per send.
 
-A duplicated name is a wire fault, not a typo: `StaticStringMap` would keep one entry and shift every later id. The build rejects it at compile time (`src/wire/packages.zig:270`). `id_map` is built with `initComptime`, so `idOf` cannot allocate (`src/wire/packages.zig:287`).
+A duplicated name is a wire fault, not a typo: `StaticStringMap` would keep one entry and shift every later id. The build rejects it at compile time (`src/wire/stock_ids.zig:255`). `id_map` is built with `initComptime`, so `idOf` cannot allocate (`src/wire/stock_ids.zig:272`).
 
-The advertised version triple is pinned to the 3.2.0 wire and must agree with the login gate (`src/wire/packages.zig:294`):
+The advertised version triple is pinned to the 3.2.0 wire and must agree with the login gate (`src/wire/stock_ids.zig:279`):
 
 ```zig
 pub const VersionInfo = struct {
@@ -124,13 +124,20 @@ Every stock shape has exactly one builder (AGENTS rule 14). The contract is stat
 
 Server-side buffers are preallocated on `Game`: `send_buf` is 256 KiB and `body_buf` is 512 KiB (`src/server/game.zig:456`, `src/server/game.zig:457`). A body that does not fit is an error, not a truncation; the chunk builder reserves its own header bytes and rejects an undersized buffer up front (`src/wire/stock_chunk.zig:852`). The full blocks mapping is the one body that cannot be built into `body_buf`; it streams through `DeflateFramer` instead, and the `IdMapping` send site logs and skips when it would not fit (`src/server/game.zig:2499`, `src/server/game.zig:2520`).
 
-Parse-side entry points live in the same modules as their builders, with the same field order. Rotation is parsed but discarded, and the parser returns `wire_len` because the `bUseQRotation` branch makes the stock body length variable: a relay must forward `body[0..wire_len]` (`src/wire/packages.zig:987`). Coordinates from the wire pass `readWorldF32`, which rejects non-finite and out-of-world values before the simulation sees them (`src/wire/packages.zig:948`, `src/wire/packages.zig:950`).
+Parse-side entry points live in the same modules as their builders, with the same field order. Rotation is parsed but discarded, and the parser returns `wire_len` because the `bUseQRotation` branch makes the stock body length variable: a relay must forward `body[0..wire_len]` (`src/wire/stock_motion.zig:98`). Coordinates from the wire pass `readWorldF32`, which rejects non-finite and out-of-world values before the simulation sees them (`src/wire/stock_motion.zig:61`, `src/wire/stock_motion.zig:74`).
 
 ## Stock body modules by domain
 
 | Module | Domain and representative builders |
 |---|---|
-| `packages.zig` | Join and motion bodies that have no separate module: `buildPackageIdsBody`, `buildLoginAnswerBody`, `buildPlayerIdBody*`, `buildSpawnedBody`, `buildPosAndRotBody`, `buildRelPosBody`, `buildAliveFlagsBody`, `buildEntitySpeedsBody`, `buildLocalizationBody`, `buildConfigFileBody`, `buildTraderDataStock` (`src/wire/packages.zig:319`, `src/wire/packages.zig:466`, `src/wire/packages.zig:819`, `src/wire/packages.zig:882`) |
+| `packages.zig` | Facade plus bodies with no separate module yet (re-exports every `stock_*.zig`; split leaves below) |
+| `stock_ids.zig` | Package id registry: `PackageName`, `default_mappings`, `idOf`, `VersionInfo`, `buildPackageIdsBody` |
+| `stock_loginanswer.zig` | `buildLoginAnswerBody` |
+| `stock_playerid.zig` | `buildPlayerIdBody*`, `buildSpawnedBody` |
+| `stock_motion.zig` | `buildPosAndRotBody`, `buildRelPosBody`, `buildAliveFlagsBody`, `buildEntitySpeedsBody` |
+| `stock_localization.zig` | `buildLocalizationBody` |
+| `stock_configfile.zig` | `buildConfigFileBody` |
+| `stock_trade.zig` | `buildTraderDataStock` |
 | `stock_inv.zig` | `ItemValue`/`ItemStack`/`Bag`/`Equipment` encode and parse: `writeItemValue`, `writeItemStackList`, `writeBag`, `writeEquipment`, `writePlayerInventory`, `buildFromEcsResolved`, `buildBagPackage`, `buildPersistentPlayerState`, `parseBagBody` (`src/wire/stock_inv.zig:111`, `src/wire/stock_inv.zig:210`, `src/wire/stock_inv.zig:273`, `src/wire/stock_inv.zig:749`) |
 | `stock_chunk.zig` | `NetPackageChunk` payload: `buildNetPackageChunkNew` plus the density, terrain-id, and water helpers (`src/wire/stock_chunk.zig:852`) |
 | `stock_entity.zig` | `NetPackageEntitySpawn` (`EntityCreationData`) and `NetPackageWorldSpawnPoints`: `buildEntitySpawnStock`, `writePlayerProfile`, `writeTraderDataBody`, `buildWorldSpawnPointsBody` (`src/wire/stock_entity.zig:363`, `src/wire/stock_entity.zig:347`, `src/wire/stock_entity.zig:922`) |

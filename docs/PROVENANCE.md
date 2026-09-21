@@ -386,6 +386,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_areas.zig` | R | World-areas bodies (trader compound entries + WorldAreas builder). Split out of the packages.zig facade, same code and test |
 | `src/wire/stock_attach.zig` | R | Attach bodies (EntityAttach build/parse + detach predicate). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_chat.zig` | R | Chat + effect-request bodies (stock chat, sound-at-position, particle-effect invoke). Split out of the packages.zig facade, same code and tests |
+| `src/wire/stock_ids.zig` | R | Package id subsystem (PackageName, default_mappings, idOf, VersionInfo, PackageIds builder). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_console.zig` | R | Console bodies (server-command parse + client-reply builder). Split out of the packages.zig facade, same code and tests |
 | `src/wire/stock_gameevent.zig` | R | Game-event bodies (GameEventRequest ack + ClientSequenceAction builder). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_login.zig` | R | Player-login parse plus ally/waypoint/party-quest/ally-response bodies. Split out of the packages.zig facade, same parser and tests |

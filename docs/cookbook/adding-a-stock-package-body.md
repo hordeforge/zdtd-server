@@ -91,7 +91,7 @@ Rules that come from the codec, not from style:
 ## 4. Register the package name if it is new
 
 Ids are dynamic and resolve through the negotiated name map, never through a
-literal (`src/wire/packages.zig:290`):
+literal (`src/wire/stock_ids.zig:275`):
 
 ```zig
 pub fn idOf(name: []const u8) ?u16 {

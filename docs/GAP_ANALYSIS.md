@@ -1418,7 +1418,7 @@ parsed, and quest offering is unwired.
   + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
   the stock parse fails. A real stock client's post-trade push reaches the
   server.
-  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:3131-3156`,
+  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:2447-2553`,
   `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
