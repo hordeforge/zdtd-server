@@ -100,6 +100,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         if (self.sim.slotOfNetId(entity_id) == null) return true;
         try self.broadcastExcept("NetPackageItemReload", body, c.slot);
+        // Stock check-buff row (buffStatusCheck01 onReloadStart): while the
+        // held weapon carries `reloadPenalty` the reloader walks slowed
+        // (buffReloadMovementPenalty, RunAndGun-gated Walk/RunSpeed rows).
+        // Fired through the shared engine so the held-tag gate applies.
+        if (self.sim.slotOfNetId(entity_id)) |ps| {
+            self.fireReloadStart(ps);
+        }
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerInventory")) {

@@ -9076,3 +9076,44 @@ test "a cripple-modded hit cripples a walker victim" {
     }
     try std.testing.expect(g.sim.buffs[zs].find(crippled) != null);
 }
+
+test "reloading a penalty weapon grants the reload slow buff" {
+    // buffStatusCheck01's onReloadStart row grants buffReloadMovementPenalty
+    // while the held weapon carries `reloadPenalty`. The reload handler fires
+    // the rows through the shared engine, so the gate applies.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const pistol = g.items.byName("gunHandgunT1Pistol") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, pistol.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != pistol.id) continue;
+        g.sim.inventory[ps].slots[i] = .{};
+        g.sim.inventory[ps].slots[0] = .{ .item_id = pistol.id, .count = 1, .quality = 1 };
+        break;
+    }
+    g.sim.inventory[ps].holding = 0;
+    const slow = g.buffs.indexOfName("buffReloadMovementPenalty") orelse return error.SkipZigTest;
+    // The check buffs ride the entity class Buffs= list in live play; the
+    // harness client starts bare, so attach the row owner directly.
+    _ = g.addCatalogBuff(cl.entity_id, ps, "buffStatusCheck01", cl.entity_id);
+    var rbuf: [8]u8 = undefined;
+    std.mem.writeInt(i32, rbuf[0..4], cl.entity_id, .little);
+    var fbuf: [64]u8 = undefined;
+    try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageItemReload", rbuf[0..4]));
+    try std.testing.expect(g.sim.buffs[ps].find(slow) != null);
+}

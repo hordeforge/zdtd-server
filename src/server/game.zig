@@ -1936,6 +1936,10 @@ pub const Game = struct {
         game_tick.fireBlockDamaged(self, ps, block_id);
     }
 
+    pub fn fireReloadStart(self: *Game, ps: ecs.Slot) void {
+        game_tick.fireReloadStart(self, ps);
+    }
+
     pub fn heldWeaponIsRanged(self: *Game, ps: ecs.Slot) bool {
         return game_tick.heldWeaponIsRanged(self, ps);
     }

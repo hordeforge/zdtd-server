@@ -191,6 +191,11 @@ pub const Trigger = enum(u8) {
     /// (tier-curved cvars like $enforcerBuffResistance index valueList by
     /// the item's quality). Same reconcile path as the equip edges.
     equip_update,
+    /// `onReloadStart` / `onReloadStop`: fired around a weapon reload
+    /// (the check buff grants buffReloadMovementPenalty while the held
+    /// weapon carries `reloadPenalty`; the buff removes itself on stop).
+    reload_start,
+    reload_stop,
     other,
 };
 
@@ -1607,6 +1612,8 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
     if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;
     if (std.mem.eql(u8, s, "onSelfEquipUpdate")) return .equip_update;
+    if (std.mem.eql(u8, s, "onReloadStart")) return .reload_start;
+    if (std.mem.eql(u8, s, "onReloadStop")) return .reload_stop;
     return .other;
 }
 
