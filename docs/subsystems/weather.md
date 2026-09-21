@@ -61,7 +61,7 @@ pub const Manager = struct {
     weather_n: u8 = 0,
 ```
 
-The entry struct the server fills (`src/wire/packages.zig:750`):
+The entry struct the server fills (`src/wire/stock_weather.zig:10`):
 
 ```zig
 pub const WeatherBiome = struct {
@@ -77,7 +77,7 @@ pub const WeatherBiome = struct {
 };
 ```
 
-`group_count` never reaches the wire; it only bounds the index the client will use unchecked, so an out-of-range `group_index` is emitted as 0 (`src/wire/packages.zig:770`):
+`group_count` never reaches the wire; it only bounds the index the client will use unchecked, so an out-of-range `group_index` is emitted as 0 (`src/wire/stock_weather.zig:30`):
 
 ```zig
 pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
