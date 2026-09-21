@@ -329,22 +329,8 @@ pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []cons
 pub const stock_loginanswer = @import("stock_loginanswer.zig");
 pub const buildLoginAnswerBody = stock_loginanswer.buildLoginAnswerBody;
 
-/// Stock `NetPackageLocalization` body (write IL=30): seqNr i32 | totalParts
-/// i32 | dataLen i32 (-1 when null) | data bytes. `Compress()` is false for
-/// this package (`get_Compress` IL=2), so the frame stays uncompressed even
-/// though the payload itself is stock's raw-Deflate patch blob.
-pub fn buildLocalizationBody(buf: []u8, seq: i32, total: i32, data: ?[]const u8) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI32(seq);
-    try w.writeI32(total);
-    if (data) |d| {
-        try w.writeI32(@intCast(d.len));
-        try w.writeBytes(d);
-    } else {
-        try w.writeI32(-1);
-    }
-    return w.written();
-}
+pub const stock_localization = @import("stock_localization.zig");
+pub const buildLocalizationBody = stock_localization.buildLocalizationBody;
 
 /// Stock NetPackageConfigFile body (RE IL=25, protocol-packages.md §...):
 /// `name` (7-bit string), then dataLen i32 = -1 when data is null (client
