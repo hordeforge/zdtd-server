@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const binary = @import("binary.zig");
+const framed = @import("stock_frame.zig").framed;
 
 
 /// GameUtils/EKickReason (asm.il:1913681-1913720). Only the values zdtd emits:
@@ -55,4 +56,30 @@ pub fn buildPlayerDeniedBody(
     try w.writeI64(ban_until_binary);
     try w.writeString(custom_reason);
     return w.written();
+}
+
+test "PlayerDenied body matches stock field order and excludes the package id" {
+    var buf: [64]u8 = undefined;
+    const body = try buildPlayerDeniedBody(&buf, .mod_decision, 0, 0, "abc");
+    // i32 + i32 + i64 + (1-byte 7-bit length + 3 bytes) = 20 bytes, which is
+    // also stock GetLength() (asm.il:827105-827110) for a 3-char reason.
+    try std.testing.expectEqual(@as(usize, 20), body.len);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(i32, 0x10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32());
+    try std.testing.expectEqual(@as(i64, 0), try r.readI64());
+    try std.testing.expectEqual(@as(u32, 3), try binary.read7BitEncodedInt(&r));
+    try std.testing.expectEqualStrings("abc", body[body.len - 3 ..]);
+
+    // framed() appends the body verbatim after the u16 package id that the base
+    // NetPackage::write emits; the body must not carry a second copy of it.
+    var framed_buf: [64]u8 = undefined;
+    const f = try framed(&framed_buf, "NetPackagePlayerDenied", body);
+    try std.testing.expect(std.mem.endsWith(u8, f, body));
+    // frame header is 13 bytes (frame.framePackage), then u16 id, then body.
+    try std.testing.expectEqual(@as(usize, 13 + 2) + body.len, f.len);
+
+    const manual = try buildPlayerDeniedBody(&buf, .manual_kick, 0, 0, "");
+    try std.testing.expectEqual(@as(i32, 0x0A), std.mem.readInt(i32, manual[0..4], .little));
+    try std.testing.expectEqual(@as(usize, 17), manual.len);
 }
