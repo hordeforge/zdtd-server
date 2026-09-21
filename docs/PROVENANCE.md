@@ -371,6 +371,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_configfile.zig` | R | Config-file body (name + len + bytes with null form). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_localization.zig` | R | Localization body (seqNr + totalParts + dataLen + bytes). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_loginanswer.zig` | R | Login-answer body (bAllowed + null lobby/identity pairs). Split out of the packages.zig facade, moved verbatim |
+| `src/wire/stock_chunkremove.zig` | R | Chunk-remove bodies (key build/parse pair). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_bloodmoon.zig` | R | Bloodmoon-music body (single eligibility bool). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_remove.zig` | R | Remove bodies (entity-remove with reason byte). Split out of the packages.zig facade, same builders and test |
 | `src/wire/stock_horde.zig` | R | Horde-event body (event byte + pos + maxDist). Split out of the packages.zig facade, same builder and test |

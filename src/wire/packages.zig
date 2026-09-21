@@ -1486,22 +1486,9 @@ test "weather body clamps out of range group index" {
     try std.testing.expectEqual(@as(u8, 0), body[47]);
 }
 
-/// Stock NetPackageChunkRemove: chunkKey i64 (WorldChunkCache.MakeChunkKey).
-pub fn buildChunkRemoveBody(buf: []u8, cx: i32, cz: i32) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeI64(makeChunkKey(cx, cz));
-    return w.written();
-}
-
-/// Read side of NetPackageChunkRemove: one `chunkKey` i64, the key
-/// buildChunkRemoveBody writes. The coordinates come back out through the same
-/// WorldChunkCache.MakeChunkKey packing, so any i64 decodes to some chunk and
-/// the range check belongs at the caller, not here.
-pub fn parseChunkRemoveBody(body: []const u8) !struct { cx: i32, cz: i32 } {
-    if (body.len < 8) return error.EndOfStream;
-    const key = std.mem.readInt(i64, body[0..8], .little);
-    return .{ .cx = extractChunkKeyX(key), .cz = extractChunkKeyZ(key) };
-}
+pub const stock_chunkremove = @import("stock_chunkremove.zig");
+pub const buildChunkRemoveBody = stock_chunkremove.buildChunkRemoveBody;
+pub const parseChunkRemoveBody = stock_chunkremove.parseChunkRemoveBody;
 
 /// Read side of NetPackageEntityCollect (RE inventories/netpackage-bodies.md,
 /// write IL=12): `entityId` i32 | `playerId` i32, the order
