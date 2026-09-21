@@ -251,3 +251,34 @@ pub fn buildTraderDataStock(
     });
     return w.written();
 }
+
+test "parsePickupBlockBody reads the stock wrench-pickup layout" {
+    // 3x i32 pos | u32 rawData | i32 playerId | null platform identity (1 byte).
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(10);
+    try w.writeI32(64);
+    try w.writeI32(-3);
+    try w.writeU32(0x0004_0023); // type 0x23, meta nibble in bits 22..25
+    try w.writeI32(501);
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
+    const body = w.written();
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    var sent: ?platform_user.Id = null;
+    const p = try parsePickupBlockBody(body, &plat, &id, &sent);
+    try std.testing.expect(sent != null);
+    try std.testing.expectEqual(@as(i32, 10), p.x);
+    try std.testing.expectEqual(@as(i32, 64), p.y);
+    try std.testing.expectEqual(@as(i32, -3), p.z);
+    try std.testing.expectEqual(@as(u32, 0x0004_0023), p.raw);
+    try std.testing.expectEqual(@as(i32, 501), p.player_id);
+    // Truncated before the identity is EndOfStream, never a partial read.
+    var cut: usize = 0;
+    while (cut < 16) : (cut += 1) {
+        var pb: [platform_user.max_platform_len]u8 = undefined;
+        var ib: [platform_user.max_id_len]u8 = undefined;
+        var sent3: ?platform_user.Id = null;
+        try std.testing.expectError(error.EndOfStream, parsePickupBlockBody(body[0..cut], &pb, &ib, &sent3));
+    }
+}
