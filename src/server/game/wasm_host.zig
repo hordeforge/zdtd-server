@@ -97,11 +97,10 @@ pub fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
     var safe: [max_wasm_log_len]u8 = undefined;
     const sn: usize = if (ctx.data) |ptr|
         redactPlayerPii(gameFromPtr(ptr), line[0..n], &safe)
-    else
-        blk: {
-            @memcpy(safe[0..n], line[0..n]);
-            break :blk n;
-        };
+    else blk: {
+        @memcpy(safe[0..n], line[0..n]);
+        break :blk n;
+    };
     std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, safe[0..sn] });
 }
 
