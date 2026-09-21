@@ -9243,3 +9243,31 @@ test "a radiated zombie regenerates through its class proc buff" {
     try g.step();
     try std.testing.expect(g.sim.health[zs].hp > 100);
 }
+
+test "a burning zombie takes damage over time" {
+    // buffBurningElement drains HealthChangeOT 1.5/s; the mob regen pass
+    // folds negative OT raw into HP and replicates via dirty HP.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.health[zs].hp = 400;
+    _ = g.addCatalogBuff(zid, zs, "buffBurningElement", zid);
+    try g.step();
+    try g.step();
+    try std.testing.expect(g.sim.health[zs].hp < 400);
+}
