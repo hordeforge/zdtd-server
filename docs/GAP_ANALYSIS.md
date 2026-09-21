@@ -1994,7 +1994,7 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:409`, `:413`, `:601`, `aidirector.md`
   EndBloodMoon (412618) / party Tick
   dawn anyway.
-  *Anchors:* `src/ecs/systems.zig:1707`, `:1722`, `src/server/game.zig`,
+  *Anchors:* `src/ecs/aidirector.zig:1092`, `:1053`, `src/server/game.zig`,
   `asm.il:412618`, `asm.il:413662`
 
 - **Blood-moon bonus loot bags** `WORKS` (was `PARTIAL (waived)`; closed
@@ -2788,7 +2788,7 @@ gamestage, no wandering hordes, and no screamers.
   its attack task). The field rides the per-entity class copy on every spawn
   path; unprovoked, a timid animal flees or wanders instead of sprinting in.
   *Anchors:* `src/assets/entities.zig` resolvedAiAttacks,
-  `src/ecs/systems.zig:1743`, `src/ecs/world.zig:875-905`,
+  `src/assets/entities.zig:799`, `src/ecs/world.zig:875-905`,
   `$game/Data/Config/entityclasses.xml` lines 4724-4800
 
 - **Target sensing** `WORKS` `(2026-08-22 re-audit)`
