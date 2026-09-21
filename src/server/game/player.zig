@@ -1309,12 +1309,12 @@ fn applyPartyShare(self: *Game, slot: usize, rows: []const assets_buffs.Triggere
 }
 
 /// Fire a perk's `onPerkLevelChanged` rows after a purchase (the 4
-/// `perkIntellectMastery` point-chance cvar rows). Same ctx as the
-/// progression update; a separate trigger per stock's naming.
+/// `perkIntellectMastery` point-chance cvar rows) plus the held and worn
+/// items' rows (miner tools refresh their healing cvars when
+/// StrengthMastery lands mid-wield). Same ctx as the progression update;
+/// a separate trigger per stock's naming.
 pub fn firePerkLevelChanged(self: *Game, slot: usize, name: []const u8) void {
     if (slot >= self.clients.len) return;
-    const rows = progressionTriggered(self, name);
-    if (rows.len == 0) return;
     const c = &self.clients[slot];
     var counts: requirements.Counts = .{};
     const ctx: requirements.Ctx = .{
@@ -1322,7 +1322,56 @@ pub fn firePerkLevelChanged(self: *Game, slot: usize, name: []const u8) void {
         .player_level = c.level,
         .cvars = &c.cvars,
     };
-    _ = assets_buffs.evaluateRows(rows, .perk_level_changed, ctx, &counts);
+    const rows = progressionTriggered(self, name);
+    if (rows.len != 0) {
+        _ = assets_buffs.evaluateRows(rows, .perk_level_changed, ctx, &counts);
+    }
+    // Worn + held item rows (miner healing refresh). Item ctx answers
+    // IsEquipped/IsHeldItem and the tier gates; cvar writes land through
+    // the player store like the equip reconcile.
+    const ps = self.sim.playerByPeer(slot) orelse return;
+    if (!self.sim.mask[ps].inventory) return;
+    const inv = &self.sim.inventory[ps];
+    fireItemPerkRows(self, inv, ctx, &counts, true);
+    if (inv.holding < ecs.components.inv_toolbelt) {
+        fireItemPerkRows(self, inv, ctx, &counts, false);
+    }
+}
+
+/// Evaluate `.perk_level_changed` rows for worn (equipped=true) or held
+/// items through the shared engine.
+fn fireItemPerkRows(
+    self: *Game,
+    inv: *const ecs.components.Inventory,
+    base: requirements.Ctx,
+    counts: *requirements.Counts,
+    worn: bool,
+) void {
+    if (worn) {
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const s = inv.slots[esi];
+            if (s.count == 0 or s.item_id == 0) continue;
+            const def = self.items.byId(s.item_id) orelse continue;
+            if (def.triggered.len == 0) continue;
+            var ictx = base;
+            ictx.item_equipped = true;
+            ictx.item_tags = def.tags;
+            ictx.item_quality = s.quality;
+            _ = assets_buffs.evaluateRows(def.triggered, .perk_level_changed, ictx, counts);
+        }
+    } else {
+        const held = inv.heldItem();
+        if (held.count == 0) return;
+        const def = self.items.byId(held.item_id) orelse return;
+
+        if (def.triggered.len == 0) return;
+        var ictx = base;
+        ictx.item_equipped = false;
+        ictx.item_tags = def.tags;
+        ictx.item_quality = held.quality;
+        _ = assets_buffs.evaluateRows(def.triggered, .perk_level_changed, ictx, counts);
+    }
 }
 
 pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {

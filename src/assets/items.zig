@@ -1539,7 +1539,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     while (ij < inner_end and triggered_pool.items.len < t_budget) {
                         const lt = std.mem.findPos(u8, body, ij, "<") orelse break;
                         if (lt >= inner_end) break;
-                        if (std.mem.startsWith(u8, body[lt..], "</")) break;
+                        // Closing tags (</property> inside Action blocks,
+                        // </effect_group> strays) end one element, not the
+                        // walk: action blocks precede the effect_groups on
+                        // weapons/tools, and breaking here dropped every
+                        // triggered row on them (miner healing, bow procs).
+                        if (std.mem.startsWith(u8, body[lt..], "</")) {
+                            ij = requirements.elementEnd(body, lt);
+                            continue;
+                        }
                         if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
                             const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
                             if (gt > lt and body[gt - 1] == '/') {
@@ -2355,6 +2363,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.progression_add = stock_prog_add.items[idx];
                 def.progression_set_max = stock_prog_set_max.items[idx];
                 def.eat_exp = stock_eat_exp.items[idx];
+                // Triggered rows ride the alias too: builtin sim ids (stone
+                // axe, club, bandage) are the live defs, and their miner
+                // healing / wound-proc rows live on the xml alias.
+                const trg = stock_triggered_ranges.items[idx];
+                def.triggered = item_triggered[trg[0] .. trg[0] + trg[1]];
                 // Prefer stock name so byName("casinoCoin") works without alias walk.
                 def.name = n;
                 break;

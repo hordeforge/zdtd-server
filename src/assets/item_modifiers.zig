@@ -191,7 +191,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
             const inner = clean[gt + 1 .. end];
             while (ij < inner.len) {
                 const lt = std.mem.findPos(u8, inner, ij, "<") orelse break;
-                if (std.mem.startsWith(u8, inner[lt..], "</")) break;
+                // Closing tags end one element, not the walk (see items.zig:
+                // breaking here drops rows past any nested close).
+                if (std.mem.startsWith(u8, inner[lt..], "</")) {
+                    ij = requirements.elementEnd(inner, lt);
+                    continue;
+                }
                 if (std.mem.startsWith(u8, inner[lt..], "<effect_group")) {
                     const ggt = std.mem.findPos(u8, inner, lt, ">") orelse break;
                     if (ggt > lt and inner[ggt - 1] == '/') {

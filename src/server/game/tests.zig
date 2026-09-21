@@ -9454,3 +9454,41 @@ test "join seeds class entered-game cvars" {
     try std.testing.expectApproxEqAbs(@as(f32, 180), cl.cvars.get("$BurntHazardTimerMax"), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 180), cl.cvars.get("$BurntHazardTimer"), 0.001);
 }
+
+test "buying StrengthMastery refreshes a held miner tool's healing cvars" {
+    // Miner tools carry onPerkLevelChanged rows re-seeding $minerHealing
+    // when StrengthMastery lands mid-wield. The purchase path evaluates
+    // held/worn item rows alongside the perk rows.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const axe = g.items.byName("meleeToolRepairT0StoneAxe") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, axe.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != axe.id) continue;
+        g.sim.inventory[ps].slots[i] = .{};
+        g.sim.inventory[ps].slots[0] = .{ .item_id = axe.id, .count = 1, .quality = 1 };
+        break;
+    }
+    g.sim.inventory[ps].holding = 0;
+
+    cl.skill_points = 100;
+    _ = g.addProgressionLevel(cl.slot, "attStrength", 6);
+    try std.testing.expect(g.purchaseSkillAtCost(cl.slot, "perkStrengthMastery", 1, 0));
+    try std.testing.expect(axe.triggered.len > 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), cl.cvars.get("$minerHealing"), 0.001);
+}
