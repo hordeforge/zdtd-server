@@ -8893,3 +8893,38 @@ test "equipping rogue boots grants the worn marker buff and unequipping removes 
     try g.step();
     try std.testing.expect(g.sim.buffs[ps].find(marker) == null);
 }
+
+test "respawn grants the stock spawn-protection and trauma buffs" {
+    // entityclasses.xml playerMale onSelfRespawn rows grant the check buffs,
+    // buffDeathFoodDrinkAdjust (6.5 s godmode: PDR 100 tagged
+    // coredamageresist) and buffNearDeathTraumaTrigger (fires trauma+regen
+    // on its remove). The respawn handler applies the same set, so a fresh
+    // corpse is protected at the spawn point instead of taking full damage.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Kill, then respawn through the real C2S path.
+    g.sim.health[ps].hp = 0;
+    var spawn_body: [2]u8 = undefined;
+    std.mem.writeInt(i16, spawn_body[0..2], 4, .little);
+    var fb: [64]u8 = undefined;
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", &spawn_body));
+    const adjust = g.buffs.indexOfName("buffDeathFoodDrinkAdjust") orelse return error.SkipZigTest;
+    const trigger = g.buffs.indexOfName("buffNearDeathTraumaTrigger") orelse return error.SkipZigTest;
+    try std.testing.expect(g.sim.buffs[ps].find(adjust) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(trigger) != null);
+}

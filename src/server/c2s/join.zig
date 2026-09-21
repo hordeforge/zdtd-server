@@ -580,6 +580,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const def = self.buffs.byId(rm.def_id) orelse continue;
                     self.relayBuff(c.entity_id, def.name, false, -1, null) catch {};
                 }
+                // Stock playerMale respawn rows (entityclasses.xml): re-add the
+                // check buffs (survive death anyway, belt-and-braces), the
+                // 6.5 s spawn-protection buff (buffDeathFoodDrinkAdjust: PDR
+                // 100 + HP set on update) and the near-death trauma trigger
+                // (fires trauma + regen on its remove). Without these a
+                // respawned player takes full damage at the spawn point.
+                for ([_][]const u8{
+                    "buffStatusCheck01",
+                    "buffStatusCheck02",
+                    "buffDeathFoodDrinkAdjust",
+                    "buffNearDeathTraumaTrigger",
+                }) |bname| {
+                    _ = self.addCatalogBuff(c.entity_id, si, bname, c.entity_id);
+                }
                 // The DeathPenalty-selected respawn sequence adjusts what the
                 // funnel restored (game_on_respawn_injured halves Food/Water
                 // and may add buffInfectionCatch; the others SetMax, and
