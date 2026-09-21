@@ -42,6 +42,10 @@ pub const ModDef = struct {
     /// the shared buffs scanner (layer 13). Arena-owned like the other
     /// strings; empty for a mod with no stat rows.
     passives: []const buffs.Passive = &.{},
+    /// The modifier's `<triggered_effect>` rows with their group + row gates
+    /// (equip cvar seeds like $crippleChance, damage-time procs). Same
+    /// scanner as items.xml; empty when the mod carries none.
+    triggered: []const buffs.Triggered = &.{},
     /// `Extends` parent (mods inherit EconomicValue/Stacknumber and the
     /// owner-tiered quality flag from modGeneralMaster).
     extends: []const u8 = "",
@@ -132,6 +136,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
     var reqs_list: std.ArrayList(requirements.Requirement) = .empty;
     var req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
     var ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    // Triggered rows share the items.xml scanner (gates + row actions).
+    // Pool lists append through `allocator` (freed below); range lists
+    // append through `arena` (owned by it, like `ranges`).
+    var triggered_pool: std.ArrayList(buffs.Triggered) = .empty;
+    defer triggered_pool.deinit(allocator);
+    var trig_reqs_pool: std.ArrayList(requirements.Requirement) = .empty;
+    defer trig_reqs_pool.deinit(allocator);
+    var trig_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_req_ranges.deinit(allocator);
+    var trig_ranges: std.ArrayList(struct { usize, usize }) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const ii = std.mem.findPos(u8, clean, i, "<item_modifier ") orelse break;
@@ -169,6 +183,47 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
             std.math.maxInt(usize),
         );
         try ranges.append(arena, .{ p0, passives_list.items.len - p0 });
+        // Triggered rows per effect_group (group gates + row gates), same
+        // walk shape as items.xml: group children first, then rows.
+        const t0 = triggered_pool.items.len;
+        {
+            var ij: usize = 0;
+            const inner = clean[gt + 1 .. end];
+            while (ij < inner.len) {
+                const lt = std.mem.findPos(u8, inner, ij, "<") orelse break;
+                if (std.mem.startsWith(u8, inner[lt..], "</")) break;
+                if (std.mem.startsWith(u8, inner[lt..], "<effect_group")) {
+                    const ggt = std.mem.findPos(u8, inner, lt, ">") orelse break;
+                    if (ggt > lt and inner[ggt - 1] == '/') {
+                        ij = ggt + 1;
+                        continue;
+                    }
+                    const close = std.mem.findPos(u8, inner, ggt, "</effect_group>") orelse break;
+                    const ginner = inner[ggt + 1 .. close];
+                    var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+                    defer group_reqs.deinit(allocator);
+                    try requirements.scanChildren(allocator, arena, ginner, 0, ginner.len, &group_reqs);
+                    var seen: usize = triggered_pool.items.len;
+                    try buffs.scanTriggeredRows(
+                        allocator,
+                        arena,
+                        ginner,
+                        0,
+                        ginner.len,
+                        group_reqs.items,
+                        &triggered_pool,
+                        &trig_reqs_pool,
+                        &trig_req_ranges,
+                        std.math.maxInt(usize),
+                        &seen,
+                    );
+                    ij = close + "</effect_group>".len;
+                    continue;
+                }
+                ij = requirements.elementEnd(inner, lt);
+            }
+        }
+        try trig_ranges.append(arena, .{ t0, triggered_pool.items.len - t0 });
         try defs.append(arena, .{
             .name = try arena.dupe(u8, name),
             .installable = try arena.dupe(u8, installable),
@@ -195,6 +250,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
     @memcpy(out, defs.items);
     for (out, ranges.items) |*d, rg| {
         d.passives = pool[rg[0] .. rg[0] + rg[1]];
+    }
+    const tpool = try arena.alloc(buffs.Triggered, triggered_pool.items.len);
+    @memcpy(tpool, triggered_pool.items);
+    if (trig_req_ranges.items.len != tpool.len) return error.MalformedModifiers;
+    const treq_pool = try arena.alloc(requirements.Requirement, trig_reqs_pool.items.len);
+    @memcpy(treq_pool, trig_reqs_pool.items);
+    for (tpool, trig_req_ranges.items) |*tr, rg| {
+        tr.reqs = treq_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    for (out, trig_ranges.items) |*d, rg| {
+        d.triggered = tpool[rg[0] .. rg[0] + rg[1]];
     }
     // Extends pass: EconomicValue/Stacknumber/quality inherit from the parent
     // (modGeneralMaster carries econ 400). A child can precede its parent in
@@ -301,4 +367,19 @@ test "item_modifiers loads the stock catalog when present" {
     try std.testing.expect(t.isSuitable("modGunBarrelExtender", "T0,weapon,gun,barrelAttachments"));
     // A melee item (no gun/barrel tags) does not.
     try std.testing.expect(!t.isSuitable("modGunBarrelExtender", "T0,axe,melee"));
+}
+
+test "cripple mod carries tiered equip rows and the damage proc" {
+    const game = stock_paths.dedicated_server;
+    var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    const crip = t.byName("modGunCrippleEm") orelse return error.SkipZigTest;
+    var start_n: usize = 0;
+    var dmg_n: usize = 0;
+    for (crip.triggered) |tr| {
+        if (tr.trigger == .equip_start and tr.action == .modify_cvar) start_n += 1;
+        if ((tr.trigger == .self_attacked_other or tr.trigger == .self_damaged_other) and tr.action == .add_buff) dmg_n += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 6), start_n);
+    try std.testing.expect(dmg_n >= 1);
 }

@@ -8968,3 +8968,48 @@ test "eating a bandage grants Physician-scaled XP through gated GiveExp rows" {
     g.fireItemUseBuffs(ps, bandage.id);
     try std.testing.expectEqual(before + 10 + 30, cl.xp);
 }
+
+test "a held cripple mod rolls its damage proc through seeded cvars" {
+    // modGunCrippleEm's equip rows seed $crippleChance by mod tier; its
+    // onSelfDamagedOther rows roll buffInjuryCrippled01 onto walker victims.
+    // The held weapon's mods fire equip rows on held change and damage rows
+    // at hit time, so the full mod proc chain runs server-side.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // A club-family weapon holding the cripple mod at top tier (Q6 = 30%).
+    const club = g.items.byName("meleeWpnClubT1CaneKnife") orelse g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, club.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == club.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    const mod_id = g.items.ecsIdByName("modGunCrippleEm");
+    if (mod_id == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[from] = .{};
+    g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 6 };
+    g.sim.inventory[ps].slots[0].mods[0] = mod_id;
+    g.sim.inventory[ps].slots[0].mod_n = 1;
+    g.sim.inventory[ps].slots[0].mod_qualities[0] = 6;
+    g.sim.inventory[ps].holding = 0;
+    try g.step();
+    // The Q6 mod seeds the top-tier chance through its equip rows.
+    try std.testing.expectApproxEqAbs(@as(f32, 30), cl.cvars.get("$crippleChance"), 0.001);
+}

@@ -507,6 +507,8 @@ pub const PendingMod = struct {
 pub const EquipSeen = struct {
     id: u16 = 0,
     quality: u8 = 0,
+    /// Installed mod ids (for stop-row cleanup after the slot is overwritten).
+    mods: [4]u16 = .{0} ** 4,
 };
 
 pub const Client = struct {
@@ -746,6 +748,9 @@ pub const Client = struct {
     /// quality change fires `onSelfEquipUpdate` (tier-curved cvars). Zeroed
     /// on slot clear.
     equip_seen: [ecs.components.inv_equip_count]EquipSeen = [_]EquipSeen{.{}} ** ecs.components.inv_equip_count,
+    /// Last-tick held item (id + quality + mods), for the same reconcile on
+    /// the held weapon: installed mods' equip rows (proc cvars) seed here.
+    held_seen: EquipSeen = .{},
     /// P4 guard policy state (windowed detector counts, quarantine bits, kick
     /// arm tick). Cleared for free by `clients[slot] = .{}` on kick/disconnect.
     guard: guard_policy.PeerState = .{},

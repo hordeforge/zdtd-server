@@ -24,6 +24,7 @@ const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const inventory = @import("../../ecs/inventory.zig");
+const game_types = @import("types.zig");
 const assets_items = @import("../../assets/items.zig");
 const protocol = @import("../../protocol.zig");
 
@@ -838,6 +839,22 @@ fn fireHitRows(
                 applyKillMods(self, ps, &ires);
                 applyTriggeredBuffsFull(self, c.entity_id, ps, &ires, c.entity_id, false);
                 applyTriggeredBuffsOther(self, victim, &ires, c.entity_id);
+                // Installed mods' damage rows (cripple/burn/bleed procs):
+                // same ctx, mod quality answering RequirementItemModTier.
+                var mod_buf: [4]requirements.NameLevel = undefined;
+                for (held.mods) |mod_id| {
+                    if (mod_id == 0) continue;
+                    const mdef = self.items.byId(mod_id) orelse continue;
+                    const mrows = self.item_mods.byName(mdef.name) orelse continue;
+                    if (mrows.triggered.len == 0) continue;
+                    var mctx = ctx.*;
+                    mctx.item_mods = fillItemMods(self, held.mods, held.mod_qualities, &mod_buf);
+                    const mres = assets_buffs.evaluateRows(mrows.triggered, trigger, mctx, &counts);
+                    if (mres.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, mres.truncated);
+                    applyKillMods(self, ps, &mres);
+                    applyTriggeredBuffsFull(self, c.entity_id, ps, &mres, c.entity_id, false);
+                    applyTriggeredBuffsOther(self, victim, &mres, c.entity_id);
+                }
             }
         }
     }
@@ -2298,52 +2315,79 @@ fn syncEquipMarkers(self: *Game, c: *Client, ps: ecs.Slot, base_ctx: requirement
     nosink_ctx.other_sink = null;
     var esi: usize = ecs.components.inv_equip_start;
     while (esi < ecs.components.max_inv_slots) : (esi += 1) {
-        const seen_idx = esi - ecs.components.inv_equip_start;
-        const slot = inv.slots[esi];
-        const cur_id: u16 = if (slot.count == 0) 0 else slot.item_id;
-        const prev = c.equip_seen[seen_idx];
-        const prev_id: u16 = prev.id;
-        if (cur_id == prev_id and (cur_id == 0 or slot.quality == prev.quality)) continue;
-        c.equip_seen[seen_idx] = .{ .id = cur_id, .quality = slot.quality };
-        if (prev_id != 0 and cur_id != prev_id) {
-            if (self.items.byId(prev_id)) |old_def| {
-                if (old_def.triggered.len != 0) {
-                    var sctx = nosink_ctx;
-                    sctx.item_equipped = true;
-                    const res = assets_buffs.evaluateRows(old_def.triggered, .equip_stop, sctx, &req_counts);
-                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
-                    applyEquipStop(self, ps, &res);
-                }
+        syncEquipSlot(self, c, ps, &inv.slots[esi], &c.equip_seen[esi - ecs.components.inv_equip_start], true, &nosink_ctx, &req_counts);
+    }
+    // The held weapon's own + installed mods' equip rows (cripple/burn proc
+    // cvars seed here; the damage rows read them at hit time).
+    if (inv.holding < ecs.components.inv_toolbelt) {
+        syncEquipSlot(self, c, ps, &inv.slots[inv.holding], &c.held_seen, false, &nosink_ctx, &req_counts);
+    } else if (c.held_seen.id != 0) {
+        c.held_seen = .{};
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// One slot's equip edge: old item stop rows, new item start rows (or update
+/// rows on quality change), plus installed mods' rows. `equipped` answers
+/// IsEquipped (false for the held slot: Equipment::GetItems excludes it).
+fn syncEquipSlot(
+    self: *Game,
+    c: *Client,
+    ps: ecs.Slot,
+    slot: *const ecs.components.InvSlot,
+    seen: *game_types.EquipSeen,
+    equipped: bool,
+    nosink_ctx: *requirements.Ctx,
+    req_counts: *requirements.Counts,
+) void {
+    const cur_id: u16 = if (slot.count == 0) 0 else slot.item_id;
+    const prev_id: u16 = seen.id;
+    const prev_mods = seen.mods;
+    if (cur_id == prev_id and (cur_id == 0 or slot.quality == seen.quality)) return;
+    seen.* = .{ .id = cur_id, .quality = slot.quality, .mods = slot.mods };
+    if (prev_id != 0 and cur_id != prev_id) {
+        if (self.items.byId(prev_id)) |old_def| {
+            if (old_def.triggered.len != 0) {
+                var sctx = nosink_ctx.*;
+                sctx.item_equipped = equipped;
+                const res = assets_buffs.evaluateRows(old_def.triggered, .equip_stop, sctx, req_counts);
+                if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                applyEquipStop(self, ps, &res);
             }
         }
-        if (cur_id != 0) {
-            if (self.items.byId(cur_id)) |new_def| {
-                if (new_def.triggered.len != 0) {
-                    var sctx = nosink_ctx;
-                    sctx.item_equipped = true;
-                    sctx.item_active = (slot.flags & 1) != 0;
-                    sctx.item_tags = new_def.tags;
-                    sctx.item_quality = slot.quality;
-                    // Item-parent curves index valueList by quality tier
-                    // (minevents.md Execute IL=154).
-                    sctx.item_level = slot.quality;
-                    var mod_buf: [4]requirements.NameLevel = undefined;
-                    sctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &mod_buf);
-                    if (cur_id != prev_id) {
-                        const res = assets_buffs.evaluateRows(new_def.triggered, .equip_start, sctx, &req_counts);
-                        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
-                        applyEquipStart(self, c, ps, &res);
-                    } else {
-                        // Same piece, new quality: tier-curved cvars refresh.
-                        const res = assets_buffs.evaluateRows(new_def.triggered, .equip_update, sctx, &req_counts);
-                        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
-                    }
+        // Removed piece's installed mods stop rows (RemoveCVar cleanup
+        // like $crippleChance); mod ids snapshot before the overwrite.
+        fireSeenModRows(self, c, ps, &prev_mods, .equip_stop, req_counts);
+    }
+    if (cur_id != 0) {
+        // Installed mods' own equip rows fire even when the host item has
+        // no rows of its own (clubs carry no triggered rows; their mods do).
+        if (cur_id != prev_id) fireModEquipRows(self, c, ps, slot, .equip_start, req_counts);
+        if (self.items.byId(cur_id)) |new_def| {
+            if (new_def.triggered.len != 0) {
+                var sctx = nosink_ctx.*;
+                sctx.item_equipped = equipped;
+                sctx.item_active = (slot.flags & 1) != 0;
+                sctx.item_tags = new_def.tags;
+                sctx.item_quality = slot.quality;
+                // Item-parent curves index valueList by quality tier
+                // (minevents.md Execute IL=154).
+                sctx.item_level = slot.quality;
+                var mod_buf: [4]requirements.NameLevel = undefined;
+                sctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &mod_buf);
+                if (cur_id != prev_id) {
+                    const res = assets_buffs.evaluateRows(new_def.triggered, .equip_start, sctx, req_counts);
+                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                    applyEquipStart(self, c, ps, &res);
+                } else {
+                    // Same piece, new quality: tier-curved cvars refresh.
+                    const res = assets_buffs.evaluateRows(new_def.triggered, .equip_update, sctx, req_counts);
+                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
                 }
             }
         }
     }
-    self.harness.counters.add(.requirement_gates, req_counts.resolved);
-    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
 /// Apply an equip-start result: marker buffs land (gated adds relay), cvar
@@ -2371,6 +2415,79 @@ fn applyEquipStop(self: *Game, ps: ecs.Slot, res: *const assets_buffs.TriggeredR
             const def_id = self.buffs.indexOfName(name) orelse continue;
             _ = ecs.buff.remove(set, def_id);
         }
+    }
+}
+
+/// Fire one installed mod's equip rows with the host item's ctx (mod quality
+/// in item_mods answers RequirementItemModTier; the mod's own tier gates
+/// read it too). Start rows apply buffs/cvars; stop rows clean up.
+fn fireOneModRows(
+    self: *Game,
+    c: *Client,
+    ps: ecs.Slot,
+    mod_id: u16,
+    sctx: requirements.Ctx,
+    event: assets_buffs.Trigger,
+    req_counts: *requirements.Counts,
+) void {
+    const mdef = self.items.byId(mod_id) orelse return;
+    const mrows = self.item_mods.byName(mdef.name) orelse return;
+    if (mrows.triggered.len == 0) return;
+    const res = assets_buffs.evaluateRows(mrows.triggered, event, sctx, req_counts);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    if (event == .equip_start) {
+        applyEquipStart(self, c, ps, &res);
+    } else {
+        applyEquipStop(self, ps, &res);
+    }
+}
+
+/// Fire installed mods' equip-start rows for a newly worn piece.
+fn fireModEquipRows(
+    self: *Game,
+    c: *Client,
+    ps: ecs.Slot,
+    slot: *const ecs.components.InvSlot,
+    event: assets_buffs.Trigger,
+    req_counts: *requirements.Counts,
+) void {
+    const def = self.items.byId(slot.item_id) orelse return;
+    var sctx = requirements.Ctx{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .item_equipped = true,
+        .item_tags = def.tags,
+        .item_quality = slot.quality,
+        .item_level = slot.quality,
+        .cvars = &c.cvars,
+    };
+    var mod_buf: [4]requirements.NameLevel = undefined;
+    sctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &mod_buf);
+    for (slot.mods) |mod_id| {
+        if (mod_id == 0) continue;
+        fireOneModRows(self, c, ps, mod_id, sctx, event, req_counts);
+    }
+}
+
+/// Fire stored mod ids' stop rows for a removed piece (mod ids ride
+/// equip_seen because the live slot is already overwritten).
+fn fireSeenModRows(
+    self: *Game,
+    c: *Client,
+    ps: ecs.Slot,
+    mods: *const [4]u16,
+    event: assets_buffs.Trigger,
+    req_counts: *requirements.Counts,
+) void {
+    const sctx = requirements.Ctx{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .item_equipped = true,
+        .cvars = &c.cvars,
+    };
+    for (mods.*) |mod_id| {
+        if (mod_id == 0) continue;
+        fireOneModRows(self, c, ps, mod_id, sctx, event, req_counts);
     }
 }
 
