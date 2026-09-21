@@ -61,7 +61,7 @@ waypoint list is empty (`src/ecs/components.zig:523-527`, `src/server/game/vehic
 ## Seats and riders
 
 Mounting is a sim decision, not a client claim. `vehicleAttach` takes the requested wire slot and
-returns the seat that was actually granted, or null (`src/ecs/systems.zig:2475`):
+returns the seat that was actually granted, or null (`src/ecs/vehicle.zig:104`):
 
 ```zig
 pub fn vehicleAttach(w: *World, vslot: Slot, player_net: i32, requested: i16) ?u8 {

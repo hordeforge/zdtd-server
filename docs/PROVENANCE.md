@@ -254,6 +254,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/schedule.zig` | Z | Explicit sim pipeline phases. Ordered only; parallel stays inside a phase (systemZombieAi / systemTurrets via util/parallel). No access-set scheduler |
 | `src/ecs/systems.zig` | R | ECS systems: pure functions over World SoA columns + resources. Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots  `classPhysResist` (per-entity class stat, else the class_table row) scales server-computed damage at the deferred accumulator and the turret apply loop (2026-09-14).|
 | `src/ecs/quest_trade.zig` | R | Quest + trader systems (journal phase graph, wallet, loot pickup, buy/sell/restock). Split out of systems.zig, re-exported through the systems facade |
+| `src/ecs/vehicle.zig` | R | Vehicle sim (kind speeds, drive control, seat attach/detach). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/world.zig` | R | ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers |
 | `src/fuzz.zig` | Z | Coverage-guided fuzz targets for remote wire parsing boundaries and other untrusted-input surfaces (admin lines, map XML, COG headers, |
 | `src/litenet/packet.zig` | R | LiteNetLib wire packet property helpers. Property ordinals match the **game** Managed LiteNetLib (7DTD V3.1.0 b14), |
