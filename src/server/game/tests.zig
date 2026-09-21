@@ -9305,3 +9305,37 @@ test "a placed torch feeds the AI heat map" {
     g.noteBlockRemoved(256, 70, 256, torch.id);
     try std.testing.expectEqual(@as(usize, 0), g.heat_block_n);
 }
+
+test "radiated regen stops at 80 percent HP" {
+    // buffRadiatedRegen's update row removes it at >=80% health. The mob
+    // pass evaluates update rows inline (no other mob system drives the
+    // update event), so a healed zombie drops the buff instead of
+    // overhealing to full.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const zdef = g.entities.byName("zombieBoeRadiated") orelse return error.SkipZigTest;
+    _ = zdef;
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.health[zs].hp = 450;
+    _ = g.addCatalogBuff(zid, zs, "buffRadiatedRegen", zid);
+    // Flag on the first pass, reaped by the buff tick on the next.
+    try g.step();
+    try g.step();
+    const regen = g.buffs.indexOfName("buffRadiatedRegen") orelse return error.SkipZigTest;
+    try std.testing.expect(g.sim.buffs[zs].find(regen) == null);
+}

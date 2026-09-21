@@ -2351,6 +2351,30 @@ fn tickMobRegen(self: *Game, dt: f32) void {
             .hp_max = h.max_hp,
         };
         ctx.cvars = self.sim.cvarsMut(i);
+        // Mob buff update rows (radiated regen removes itself at >=80% HP):
+        // players run these on each buff's update rate; mobs evaluate them
+        // inline since no other mob system drives the update event. Removes
+        // flag for the buff-tick reap; cvar writes land directly.
+        var ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+        var nn: usize = 0;
+        for (&self.sim.buffs[i].slots) |*s| {
+            if (!s.active or nn >= ids.len) continue;
+            ids[nn] = s.def_id;
+            nn += 1;
+        }
+        for (ids[0..nn]) |id| {
+            const res = assets_buffs.evaluateTriggered(&self.buffs, id, .update, ctx, &req_counts);
+            if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+            for (res.remove_buffs[0..res.remove_n]) |names| {
+                var it2 = std.mem.splitScalar(u8, names, ',');
+                while (it2.next()) |seg| {
+                    const name = std.mem.trim(u8, seg, " \t");
+                    if (name.len == 0) continue;
+                    const rid = self.buffs.indexOfName(name) orelse continue;
+                    _ = ecs.buff.remove(self.sim.buffsMut(i), rid);
+                }
+            }
+        }
         const totals = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[i], ctx, &req_counts);
         if (totals.hp_ot == 0) continue;
         h.hp = @min(h.max_hp, @max(0, h.hp + totals.hp_ot * dt));
