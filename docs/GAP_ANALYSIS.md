@@ -916,7 +916,7 @@ re-arms) with the population count as the quest target.
   version 5, TraderPOIs=0, TradersByFaction=0, u16 quest count, per-quest u16
   size marker, TraderData=0. STATUS records the Quest PDF load as PASS after the
   RewardItem fix and the current client log has no `Failed loading` line.
-  *Anchors:* `src/wire/stock_quest.zig:219`, `src/wire/packages.zig:516`,
+  *Anchors:* `src/wire/stock_quest.zig:219`, `src/wire/stock_playerid.zig:264`,
   `docs/STATUS.md:28`, `asm.il:1005150-1005266`
 
 - **Per-objective Write shape** `WORKS` `(2026-09-08: StayWithin + Time closed)`

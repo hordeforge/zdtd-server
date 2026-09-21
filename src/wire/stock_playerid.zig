@@ -638,3 +638,123 @@ pub fn buildConfirmSpawnEntityBody(buf: []u8, created_entity_id: i64, key: *cons
     try w.writeBytes(key);
     return w.written();
 }
+
+
+/// NetPackageRequestToSpawnPlayer (RE inventories/netpackage-bodies.md write
+/// IL=17, protocol.md §5): `chunkViewDim` i16 | `playerProfile`
+/// (PlayerProfile.Write) | `nearEntityId` i32.
+///
+/// Only `chunkViewDim` is read. The profile is the client's display copy and
+/// the server owns the real one, so parsing it would buy nothing; `nearEntityId`
+/// sits behind that variable-length blob and is unused server-side. It used to
+/// be grabbed from the last four bytes without parsing the profile, which is a
+/// guess rather than a read: on a short body those four bytes overlap
+/// chunkViewDim itself. Reading a field we do not use, from an offset we did
+/// not derive, is strictly worse than not reading it.
+pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32 } {
+    if (body.len < 2) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    return .{ .chunk_view_dim = try r.readI16() };
+}
+
+/// The client's `PlayerProfile` out of a `NetPackageRequestToSpawnPlayer` body
+/// (stock read IL=14: `chunkViewDim:i16`, then `PlayerProfile::Read`). Separate
+/// from parseRequestToSpawnPlayer so a body without the profile still yields
+/// the dim, and a malformed profile leaves the caller on its default
+/// appearance instead of dropping the spawn.
+pub fn parseRequestToSpawnProfile(body: []const u8) !stock_entity.OwnedProfile {
+    if (body.len < 2 + 4) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readI16();
+    return stock_entity.readOwnedProfile(&r);
+}
+
+test "RequestToSpawnPlayer reads only the leading chunkViewDim" {
+    // A bare two-byte body is legal: everything after chunkViewDim is the
+    // client's profile blob plus a field the server does not use.
+    var two: [2]u8 = undefined;
+    std.mem.writeInt(i16, &two, 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&two)).chunk_view_dim);
+
+    // A trailing blob must not change what is read. The old code took the last
+    // four bytes as nearEntityId, so a body this shape used to reinterpret its
+    // own header bytes; asserting the dim is stable pins that it no longer
+    // depends on the body's length.
+    var long: [24]u8 = @splat(0xAB);
+    std.mem.writeInt(i16, long[0..2], 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&long)).chunk_view_dim);
+
+    // Shorter than the one field it does read is an error, not a zero.
+    var one: [1]u8 = .{0};
+    try std.testing.expectError(error.EndOfStream, parseRequestToSpawnPlayer(&one));
+}
+
+test "the client's profile round-trips out of RequestToSpawnPlayer" {
+    // Body shape from NetPackageRequestToSpawnPlayer (read IL=14):
+    // chunkViewDim:i16 | PlayerProfile (v5) | nearEntityId:i32.
+    var buf: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI16(4);
+    try stock_entity.writePlayerProfile(&w, .{
+        .archetype = "BaseFemale",
+        .is_male = false,
+        .race_name = "Black",
+        .variant_number = 3,
+        .hair_name = "hairFemaleShort",
+        .hair_color = "0,0,0",
+        .mustache_name = "",
+        .chops_name = "",
+        .beard_name = "",
+        .eye_color = "Green01",
+    });
+    try w.writeI32(-1);
+    const body = w.written();
+
+    const p = try parseRequestToSpawnProfile(body);
+    try std.testing.expectEqualStrings("BaseFemale", p.view().archetype);
+    try std.testing.expect(!p.view().is_male);
+    try std.testing.expectEqualStrings("Black", p.view().race_name);
+    try std.testing.expectEqual(@as(u8, 3), p.view().variant_number);
+    try std.testing.expectEqualStrings("hairFemaleShort", p.view().hair_name);
+    try std.testing.expectEqualStrings("Green01", p.view().eye_color);
+    // The dim still parses from the same body.
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(body)).chunk_view_dim);
+    // A body without the profile blob yields the dim and no profile.
+    var dim_only: [2]u8 = undefined;
+    std.mem.writeInt(i16, &dim_only, 6, .little);
+    try std.testing.expectError(error.EndOfStream, parseRequestToSpawnProfile(&dim_only));
+    try std.testing.expectEqual(@as(i32, 6), (try parseRequestToSpawnPlayer(&dim_only)).chunk_view_dim);
+}
+
+test "a received profile drives the PDF player class and appearance" {
+    var pbuf: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pbuf };
+    try pw.writeI16(4);
+    try stock_entity.writePlayerProfile(&pw, .{
+        .archetype = "BaseFemale",
+        .is_male = false,
+        .race_name = "Black",
+        .variant_number = 3,
+        .eye_color = "Green01",
+    });
+    try pw.writeI32(0);
+    const prof = try parseRequestToSpawnProfile(pw.written());
+
+    var buf: [4096]u8 = undefined;
+    const body = try buildPlayerIdBodyWithOpts(&buf, 7, 0, 4, 1, 2, 3, .{
+        .profile = prof.view(),
+        .player_name = "Ann",
+    });
+    // id i32 + team i16, then the ECD FileVersion byte and the entityClass:
+    // the female player class.
+    try std.testing.expectEqual(@as(u8, 36), body[6]);
+    try std.testing.expectEqual(@as(i32, stock_entity.class_player_female), std.mem.readInt(i32, body[7..11], .little));
+    try std.testing.expect(std.mem.find(u8, body, "BaseFemale") != null);
+    try std.testing.expect(std.mem.find(u8, body, "Green01") != null);
+    try std.testing.expect(std.mem.find(u8, body, "Ann") != null);
+    // Without a profile the body keeps the offline default (male class).
+    const dflt = try buildPlayerIdBodyWithOpts(&buf, 7, 0, 4, 1, 2, 3, .{});
+    try std.testing.expectEqual(@as(i32, stock_entity.class_player_male), std.mem.readInt(i32, dflt[7..11], .little));
+    try std.testing.expect(std.mem.find(u8, dflt, "BaseMale") != null);
+}
+
