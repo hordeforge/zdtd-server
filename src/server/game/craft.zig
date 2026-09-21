@@ -21,7 +21,7 @@ const requirements = assets_requirements;
 const assets_sandbox = @import("../../assets/sandbox.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
 const game_social = @import("social.zig");
 

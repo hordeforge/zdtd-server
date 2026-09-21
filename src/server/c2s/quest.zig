@@ -16,7 +16,7 @@ const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const rng_util = @import("../../util/rng.zig");
 const c2s_text = @import("../c2s_text.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("../game/replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 
 /// Fallback quest-giver marker Y when the trader NPC is not yet in the sim

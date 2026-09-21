@@ -8,7 +8,7 @@
 
 const std = @import("std");
 const protocol = @import("../../protocol.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("../game/replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
 const invsys = @import("../../ecs/inventory.zig");

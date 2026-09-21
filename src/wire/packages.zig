@@ -3041,7 +3041,7 @@ pub fn buildEntityStealthBody(
 pub fn buildEntityStealthCrouchBody(buf: []u8, entity_id: i32, is_crouching: bool) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
-    try w.writeU16(if (is_crouching) 1 else 0);
+    try w.writeU16(@intFromBool(is_crouching));
     return w.written();
 }
 

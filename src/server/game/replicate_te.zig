@@ -1,30 +1,31 @@
 //! Tile-entity replication: the S2C wire out for workstations, storage
 //! containers, vending machines and powered blocks.
 //!
-//! These were methods on `Game` in game.zig, which had grown past 13k lines with
-//! every concern interleaved. They take `*Game` as the first parameter rather
-//! than being methods, because a Zig method has to be declared inside the struct
-//! and `usingnamespace` is gone. Call them as `replicate_te.sendStorageTe(g, …)`.
+//! Lives under `server/game/` with the other `*Game` free-function helpers
+//! (`replicate.zig`, `replicate_health.zig`, `trader_wire.zig`). They take
+//! `*Game` as the first parameter rather than being methods, because a Zig
+//! method has to be declared inside the struct and `usingnamespace` is gone.
+//! Call them as `replicate_te.sendStorageTe(g, …)`.
 //!
 //! Everything here reads sim and world state and writes package bodies; nothing
 //! here mutates the sim. Body layout belongs to `wire/stock_*.zig` as always
 //! (AGENTS: one stock package shape, one builder).
 
 const std = @import("std");
-const game_mod = @import("game.zig");
+const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
-const packages = @import("../wire/packages.zig");
-const ecs = @import("../ecs/root.zig");
-const workstations_mod = @import("../world/workstations.zig");
-const vending_mod = @import("../world/vending.zig");
-const containers_mod = @import("../world/containers.zig");
-const assets_traders = @import("../assets/traders.zig");
-const io_fs = @import("../util/io_fs.zig");
-const game_trader = @import("game/trader.zig");
-const rng_util = @import("../util/rng.zig");
-const ln_peer = @import("../litenet/peer.zig");
+const packages = @import("../../wire/packages.zig");
+const ecs = @import("../../ecs/root.zig");
+const workstations_mod = @import("../../world/workstations.zig");
+const vending_mod = @import("../../world/vending.zig");
+const containers_mod = @import("../../world/containers.zig");
+const assets_traders = @import("../../assets/traders.zig");
+const io_fs = @import("../../util/io_fs.zig");
+const game_trader = @import("trader.zig");
+const rng_util = @import("../../util/rng.zig");
+const ln_peer = @import("../../litenet/peer.zig");
 const stock_te = packages.stock_te;
-const util_log = @import("../util/log.zig");
+const util_log = @import("../../util/log.zig");
 
 pub fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
     for (dst, src) |*d, s| {

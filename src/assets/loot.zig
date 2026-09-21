@@ -156,14 +156,14 @@ pub const EntryGate = struct {
                 const o = sandbox.optionByName(self.arg) orelse return false;
                 const set = sandbox.findSet(o.set_name) orelse return false;
                 var v: f32 = switch (o.kind) {
-                    .boolean => if (o.default_i != 0) 1 else 0,
+                    .boolean => @floatFromInt(@intFromBool(o.default_i != 0)),
                     .int => @floatFromInt(o.default_i),
                     .float => o.default_f,
                 };
                 for (player.sandbox_groups) |g| {
                     if (g.option_id != o.id) continue;
                     v = switch (o.kind) {
-                        .boolean => if (sandbox.valueB(o, g.index)) 1 else 0,
+                        .boolean => @floatFromInt(@intFromBool(sandbox.valueB(o, g.index))),
                         .int => @floatFromInt(sandbox.valueI(o, set, g.index)),
                         .float => sandbox.valueF(o, set, g.index),
                     };
@@ -281,14 +281,14 @@ fn groupAbundanceFactor(ctx: LootGateCtx, g: *const LootGroup) f32 {
     const o = sandbox.optionByName(opt_name) orelse return 1.0;
     const set = sandbox.findSet(o.set_name) orelse return 1.0;
     var v: f32 = switch (o.kind) {
-        .boolean => if (o.default_i != 0) 1 else 0,
+        .boolean => @floatFromInt(@intFromBool(o.default_i != 0)),
         .int => @floatFromInt(o.default_i),
         .float => o.default_f,
     };
     for (player.sandbox_groups) |grp| {
         if (grp.option_id != o.id) continue;
         v = switch (o.kind) {
-            .boolean => if (sandbox.valueB(o, grp.index)) 1 else 0,
+            .boolean => @floatFromInt(@intFromBool(sandbox.valueB(o, grp.index))),
             .int => @floatFromInt(sandbox.valueI(o, set, grp.index)),
             .float => sandbox.valueF(o, set, grp.index),
         };

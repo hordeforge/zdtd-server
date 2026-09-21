@@ -15,7 +15,7 @@ const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
 const systems = @import("../../ecs/systems.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("../game/replicate_te.zig");
 
 /// Cap on the C2S-claimed explosion radii (block + entity). RE: the largest
 /// stock ExplosionData.EntityRadius is 6 (entities.xml `explosion` on

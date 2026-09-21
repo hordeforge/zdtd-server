@@ -27,7 +27,7 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("replicate_te.zig");
 
 const te_types = packages.te_types;
 

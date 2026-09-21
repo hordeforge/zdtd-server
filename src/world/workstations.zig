@@ -820,7 +820,7 @@ pub const WorkstationStore = struct {
             w.is_player_placed = buf[o + 18] != 0;
             w.burn_time_left = @bitCast(std.mem.readInt(u32, buf[o + 19 ..][0..4], .little));
             // Group/queue/melt lengths index fixed arrays on the replicate path
-            // (`w.fuel[0..w.fuel_len]` in server/replicate_te.zig), so a length
+            // (`w.fuel[0..w.fuel_len]` in server/game/replicate_te.zig), so a length
             // wider than its array is an out-of-bounds slice. Reject the record
             // like the wire parser does (stock_te.zig readWsStackArray) rather
             // than clamping: a short echo would resize the client's grid.

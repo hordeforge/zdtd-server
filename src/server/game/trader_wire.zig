@@ -7,7 +7,7 @@ const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("replicate_te.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const vending_mod = @import("../../world/vending.zig");
 

@@ -18,7 +18,7 @@ that assets→ecs edge is intentional and one-way for pure shapes only"
 layer is the top of the stack and may import every package
 (`src/server/root.zig:1`).
 
-Sources: [`src/ecs/interest.zig`](../../src/ecs/interest.zig), [`src/ecs/entity.zig`](../../src/ecs/entity.zig), [`src/ecs/world.zig`](../../src/ecs/world.zig), [`src/ecs/components.zig`](../../src/ecs/components.zig), [`src/server/game/replicate.zig`](../../src/server/game/replicate.zig), [`src/server/replicate_te.zig`](../../src/server/replicate_te.zig), [`src/server/game/replicate_health.zig`](../../src/server/game/replicate_health.zig), [`src/server/game/step.zig`](../../src/server/game/step.zig), [`src/server/game/chunk_stream.zig`](../../src/server/game/chunk_stream.zig)
+Sources: [`src/ecs/interest.zig`](../../src/ecs/interest.zig), [`src/ecs/entity.zig`](../../src/ecs/entity.zig), [`src/ecs/world.zig`](../../src/ecs/world.zig), [`src/ecs/components.zig`](../../src/ecs/components.zig), [`src/server/game/replicate.zig`](../../src/server/game/replicate.zig), [`src/server/game/replicate_te.zig`](../../src/server/game/replicate_te.zig), [`src/server/game/replicate_health.zig`](../../src/server/game/replicate_health.zig), [`src/server/game/step.zig`](../../src/server/game/step.zig), [`src/server/game/chunk_stream.zig`](../../src/server/game/chunk_stream.zig)
 
 ## Geometry and the observer mask
 Interest is a uniform grid, not a spatial index. A cell is the position
@@ -262,27 +262,27 @@ rather than the motion pass mask (`src/server/game/replicate_health.zig:115`,
 `src/server/game/replicate_health.zig:134`). Tile entities own the S2C wire out
 for workstations, storage containers, vending machines, powered blocks, signs
 and authored lights
-(`src/server/replicate_te.zig:1`). Their boundary statement: "Everything here
+(`src/server/game/replicate_te.zig:1`). Their boundary statement: "Everything here
 reads sim and world state and writes package bodies; nothing here mutates the
-sim" (`src/server/replicate_te.zig:9`). Dirty workstations run on the
+sim" (`src/server/game/replicate_te.zig:9`). Dirty workstations run on the
 workstation tick, not the replicate tick:
 `tickWorkstations` ends by calling `broadcastDirtyWorkstations`
 (`src/server/game/craft.zig:634`), which encodes each dirty station once and
 broadcasts at `interest_range` as `NetPackageTileEntity`
-(`src/server/replicate_te.zig:86`). A station whose client-declared array
+(`src/server/game/replicate_te.zig:86`). A station whose client-declared array
 lengths are unknown is skipped and cleared rather than guessed, because "a
-guessed count resizes the client's grids" (`src/server/replicate_te.zig:71`).
+guessed count resizes the client's grids" (`src/server/game/replicate_te.zig:71`).
 `broadcastPowerVisuals` runs every step (`src/server/game/step.zig:268`) and is
 edge triggered: a node that did not flip costs one comparison and no packet
-(`src/server/replicate_te.zig:189`). Storage, vending, triggered power and
+(`src/server/game/replicate_te.zig:189`). Storage, vending, triggered power and
 signs are per-peer or per-position sends.
 `broadcastStorageTe` is position-scoped because stock
 `NetPackageTileEntity::ProcessPackage` rebroadcasts with range 192, so "A global
 broadcast sends every chest edit on the map to every peer"
-(`src/server/replicate_te.zig:172`). `broadcastVendingTe` is documented as an
+(`src/server/game/replicate_te.zig:172`). `broadcastVendingTe` is documented as an
 approximation: stock notifies the machine's listeners, zdtd uses "the view-radius
 interest set - a superset of the open windows"
-(`src/server/replicate_te.zig:430`). Newly streamed chunks push all four TE kinds
+(`src/server/game/replicate_te.zig:430`). Newly streamed chunks push all four TE kinds
 for that chunk, storage and signs and vending and lights, then workstations
 (`src/server/game/chunk_stream.zig:47`, `src/server/game/chunk_stream.zig:55`,
 `src/server/game/chunk_stream.zig:62`, `src/server/game/chunk_stream.zig:69`).

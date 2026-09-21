@@ -17,7 +17,7 @@ const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
 const world_store = @import("../../world/store.zig");
-const replicate_te = @import("../replicate_te.zig");
+const replicate_te = @import("replicate_te.zig");
 const clock = @import("../../util/clock.zig");
 
 /// Yield between join burst chunk sends so the peer's ACKs land. Loopback RTT

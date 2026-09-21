@@ -1557,7 +1557,7 @@ fn fuzzWorkstationStore(_: void, smith: *std.testing.Smith) !void {
     s.* = .{};
     s.loadFromSlice(storage[0..len]) catch return;
     // The replicate path slices these fixed arrays by the stored lengths
-    // (server/replicate_te.zig `w.fuel[0..w.fuel_len]`), so any accepted
+    // (server/game/replicate_te.zig `w.fuel[0..w.fuel_len]`), so any accepted
     // record must keep every length inside its array.
     for (&s.items) |w| {
         try std.testing.expect(w.fuel_len <= w.fuel.len);
