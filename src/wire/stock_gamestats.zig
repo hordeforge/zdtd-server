@@ -338,3 +338,32 @@ test "GameStats body is i16 len + full persistent blob" {
     // initPropertyDecl holds the order, and the swap-mutation audit reports
     // them as survivors by construction.
 }
+
+test "GameStats carries the config-driven creative, marker and camera values" {
+    // GameStats[18]/[20] come from GamePrefs 58 BuildCreate, [53] from the
+    // sandbox AirDropMarker, [34] from DropOnQuit, [66] from BiomeProgression
+    // and [68] from serverconfig CameraRestrictionMode. They used to be
+    // constants in the writer, so an operator could not turn creative mode,
+    // flight, the air-drop marker or the camera restriction on.
+    var on_buf: [512]u8 = undefined;
+    const on = try buildGameStatsBodyValues(&on_buf, .{
+        .build_create = true,
+        .air_drop_marker = false,
+        .drop_on_quit = 2,
+        .biome_progression = false,
+        .camera_restriction_mode = 1,
+    });
+    var off_buf: [512]u8 = undefined;
+    const off = try buildGameStatsBodyValues(&off_buf, .{});
+    // Same field set, so only the values differ: the writer's field order is
+    // the propertyList contract.
+    try std.testing.expectEqual(off.len, on.len);
+    try std.testing.expect(!std.mem.eql(u8, on, off));
+    // ScorePlayerKillMultiplier is 0 in both (GameModeSurvival::Init IL_0035).
+    const defaults = GameStatsValues{};
+    try std.testing.expectEqual(@as(i32, 0), defaults.score_player_kill_multiplier);
+    try std.testing.expectEqual(@as(i32, 0), defaults.drop_on_quit);
+    try std.testing.expect(!defaults.build_create);
+    try std.testing.expect(defaults.air_drop_marker);
+    try std.testing.expect(defaults.biome_progression);
+}

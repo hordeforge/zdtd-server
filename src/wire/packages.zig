@@ -599,20 +599,6 @@ test "NetPackageChunk resolves to an id and frames at that id" {
     try std.testing.expect(fr.len + 4 < 1200);
 }
 
-test "package ids body" {
-    var buf: [8192]u8 = undefined;
-    const body = try buildPackageIdsBody(&buf, .{}, &default_mappings);
-    var r: binary.Reader = .{ .data = body };
-    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
-    try std.testing.expectEqual(@as(i32, 3), try r.readI32());
-    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9;
-    // §8: build 9->10). A client derives "V 3.2.0" from these and echoes it
-    // in the login.
-    try std.testing.expectEqual(@as(i32, 20), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
-    try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
-}
-
 pub const stock_world = @import("stock_world.zig");
 pub const buildWorldTimeBody = stock_world.buildWorldTimeBody;
 pub const buildSignDataResponseEmptyLast = stock_world.buildSignDataResponseEmptyLast;
@@ -1260,50 +1246,4 @@ test "name id mapping payload is version, count, then id before name" {
     const none = try buildNameIdMappingPayload(&buf, &.{});
     try std.testing.expectEqual(@as(usize, 8), none.len);
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, none[4..8], .little));
-}
-
-test "GameStats carries the config-driven creative, marker and camera values" {
-    // GameStats[18]/[20] come from GamePrefs 58 BuildCreate, [53] from the
-    // sandbox AirDropMarker, [34] from DropOnQuit, [66] from BiomeProgression
-    // and [68] from serverconfig CameraRestrictionMode. They used to be
-    // constants in the writer, so an operator could not turn creative mode,
-    // flight, the air-drop marker or the camera restriction on.
-    var on_buf: [512]u8 = undefined;
-    const on = try buildGameStatsBodyValues(&on_buf, .{
-        .build_create = true,
-        .air_drop_marker = false,
-        .drop_on_quit = 2,
-        .biome_progression = false,
-        .camera_restriction_mode = 1,
-    });
-    var off_buf: [512]u8 = undefined;
-    const off = try buildGameStatsBodyValues(&off_buf, .{});
-    // Same field set, so only the values differ: the writer's field order is
-    // the propertyList contract.
-    try std.testing.expectEqual(off.len, on.len);
-    try std.testing.expect(!std.mem.eql(u8, on, off));
-    // ScorePlayerKillMultiplier is 0 in both (GameModeSurvival::Init IL_0035).
-    const defaults = GameStatsValues{};
-    try std.testing.expectEqual(@as(i32, 0), defaults.score_player_kill_multiplier);
-    try std.testing.expectEqual(@as(i32, 0), defaults.drop_on_quit);
-    try std.testing.expect(!defaults.build_create);
-    try std.testing.expect(defaults.air_drop_marker);
-    try std.testing.expect(defaults.biome_progression);
-}
-
-test "localization body carries seq, total and the deflate blob" {
-    // NetPackageLocalization::write IL=0030: seqNr i32, totalParts i32,
-    // data length (i32, -1 for null) then the bytes.
-    var buf: [64]u8 = undefined;
-    const body = try buildLocalizationBody(&buf, 0, 1, &[_]u8{ 0x03, 0x00 });
-    try std.testing.expectEqualSlices(u8, &[_]u8{
-        0, 0, 0, 0, // seqNr
-        1, 0, 0, 0, // totalParts
-        2,    0,    0, 0, // data length
-        0x03, 0x00,
-    }, body);
-    const nul = try buildLocalizationBody(&buf, 2, 3, null);
-    try std.testing.expectEqualSlices(u8, &[_]u8{
-        2, 0, 0, 0, 3, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
-    }, nul);
 }

@@ -23,3 +23,20 @@ pub fn buildLocalizationBody(buf: []u8, seq: i32, total: i32, data: ?[]const u8)
     }
     return w.written();
 }
+
+test "localization body carries seq, total and the deflate blob" {
+    // NetPackageLocalization::write IL=0030: seqNr i32, totalParts i32,
+    // data length (i32, -1 for null) then the bytes.
+    var buf: [64]u8 = undefined;
+    const body = try buildLocalizationBody(&buf, 0, 1, &[_]u8{ 0x03, 0x00 });
+    try std.testing.expectEqualSlices(u8, &[_]u8{
+        0, 0, 0, 0, // seqNr
+        1, 0, 0, 0, // totalParts
+        2,    0,    0, 0, // data length
+        0x03, 0x00,
+    }, body);
+    const nul = try buildLocalizationBody(&buf, 2, 3, null);
+    try std.testing.expectEqualSlices(u8, &[_]u8{
+        2, 0, 0, 0, 3, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
+    }, nul);
+}

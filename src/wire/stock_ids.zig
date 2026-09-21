@@ -310,3 +310,17 @@ pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []cons
     try w.writeBool(false); // hasHost
     return w.written();
 }
+
+test "package ids body" {
+    var buf: [8192]u8 = undefined;
+    const body = try buildPackageIdsBody(&buf, .{}, &default_mappings);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    try std.testing.expectEqual(@as(i32, 3), try r.readI32());
+    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9;
+    // §8: build 9->10). A client derives "V 3.2.0" from these and echoes it
+    // in the login.
+    try std.testing.expectEqual(@as(i32, 20), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
+}
