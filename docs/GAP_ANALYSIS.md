@@ -3156,9 +3156,10 @@ unvalidated, and durability, mods and repair do not exist.
   client and comes back; `inventory.degradeUse` wears a slot toward 0
   (clamped, stack stays present as a broken repairable item); the dig and
   landed-hit call sites degrade the held tool (blocks.zig + misc.zig,
-  scenario-tested). `players.zsv` does not persist use_times across restart -
-  a save-format internal of zdtd's own player file, out of scope per the
-  parity objective (the client-visible durability is session-accurate).
+  scenario-tested); repair-by-combine lands stock MergeBest on drag
+  (round 34). Residual: repair-kit consumption has no validated C2S shape
+  (the kit UI path is not pinned in the RE corpus), so kits cannot restore
+  durability yet - recorded, not wired.
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
   `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
   `src/server/c2s/misc.zig`
