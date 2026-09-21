@@ -368,6 +368,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
 | `src/wire/stock_damage.zig` | R | Stock NetPackageDamageEntity body (V3.2.0 packed-flags head + 30-field body; RE inventories/netpackage-bodies.md write IL=144, changelog-3.2.0 §3.1). Split out of the packages.zig facade, same builders and golden tests |
 | `src/wire/stock_vehicle.zig` | R | Vehicle bodies (DataSync header, native 13-byte control parse/build). Split out of the packages.zig facade, moved verbatim |
+| `src/wire/stock_login.zig` | R | Player-login parse plus ally/waypoint/party-quest/ally-response bodies. Split out of the packages.zig facade, same parser and tests |
 | `src/wire/stock_denied.zig` | R | Player-denied body (EKickReason subset + stock denied-body builder). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_trade.zig` | R | Player-action bodies (trader trade + ToServer header, vending access, pickup-block, item reload, set-block texture). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_playerid.zig` | R | PlayerId + spawned-in-world bodies (join PlayerId variants with PDF/journal writes). Split out of the packages.zig facade, same builders and tests |
