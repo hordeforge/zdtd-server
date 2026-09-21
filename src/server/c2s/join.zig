@@ -594,6 +594,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }) |bname| {
                     _ = self.addCatalogBuff(c.entity_id, si, bname, c.entity_id);
                 }
+                // Stock `onSelfRespawn` rows fire after the respawn: the only
+                // stock row is buffNearDeathProtection's self-remove (a stale
+                // protection buff from a previous life clears here, matching
+                // the TRIGGERED_BY comment on the trauma trigger).
+                self.fireRespawn(si);
                 // The DeathPenalty-selected respawn sequence adjusts what the
                 // funnel restored (game_on_respawn_injured halves Food/Water
                 // and may add buffInfectionCatch; the others SetMax, and

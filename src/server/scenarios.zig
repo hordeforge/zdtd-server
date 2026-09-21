@@ -12787,6 +12787,49 @@ test "scenario the alive-flags jump edge fires the leg buffs' onSelfJump rows" {
     std.debug.print("PASS jump edge: leg buffs escalate once per set edge\n", .{});
 }
 
+
+test "scenario the respawn funnel fires onSelfRespawn rows" {
+    // Stock fires onSelfRespawn after the player respawns; the only stock
+    // row is buffNearDeathProtection's self-remove. A stale protection buff
+    // (remove_on_death=false, so it survives death itself) clears in the
+    // funnel instead of lingering with its BuffResistance into the next life.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    _ = g.tickSurvival(1.0); // grants the check buffs (buffStatusCheck01) on entered-game
+    try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName("buffStatusCheck01").?) != null);
+    const prot_id = g.buffs.indexOfName("buffNearDeathProtection") orelse return error.SkipZigTest;
+    // Plant the stale protection buff, kill the player (it survives death
+    // by remove_on_death=false), then respawn: the funnel's onSelfRespawn
+    // rows clear it instead of letting its BuffResistance linger.
+    try std.testing.expect(g.addCatalogBuff(cl.entity_id, ps, "buffNearDeathProtection", cl.entity_id));
+    try std.testing.expect(g.sim.buffs[ps].find(prot_id) != null);
+    g.sim.health[ps].hp = 0;
+    var spawn_body: [2]u8 = undefined;
+    std.mem.writeInt(i16, spawn_body[0..2], 4, .little);
+    var fb: [64]u8 = undefined;
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", &spawn_body));
+    // Removal is flag-only (the buff tick reaps next tick and the expiry
+    // drain relays once): one step drains it.
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(prot_id) == null);
+    std.debug.print("PASS respawn rows: stale near-death protection clears on respawn\n", .{});
+}
+
 test "scenario a quest entity spawn summons one entity for the sender only" {
     // Body (RE protocol-packages.md 6.17, read IL_0002-001F): entityType i32 |
     // gamestageGroup string | entityIDQuestHolder i32. The last field is the

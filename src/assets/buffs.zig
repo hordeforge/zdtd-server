@@ -183,6 +183,15 @@ pub const Trigger = enum(u8) {
     /// escalation (buffLegGetsWorse, $legHurtCounter) rides this; driven by
     /// the AliveFlags 0x0010 edge on the C2S flags word.
     jump,
+    /// `onSelfRespawn`: fired after the player respawns (stock
+    /// EntityPlayer respawn flow). One stock row: buffNearDeathProtection
+    /// removes itself here. Driven by the respawn funnel after the check
+    /// buffs are re-added.
+    respawn,
+    /// `onSelfTeleported`: fired when the player is teleported (stock
+    /// Entity teleport flow). One stock row: buffNearDeathProtection
+    /// removes itself here. Currently unfired: no teleport path drives it.
+    teleported,
     /// `onSelfDamagedBlock`: fired when the player damages a block (the check
     /// buff's church-bell spawn gate; TriggerHasTags reads the block's tags).
     block_damaged,
@@ -1445,7 +1454,10 @@ pub fn tagsMatch(row_tags: []const u8, query: []const u8) bool {
         if (tag.len == 0) continue;
         var qit = std.mem.splitScalar(u8, query, ',');
         while (qit.next()) |qseg| {
-            if (std.mem.eql(u8, std.mem.trim(u8, qseg, " \t"), tag)) return true;
+            // Passive tags are matched case-insensitively (stock FastTags):
+            // the query carries the incoming buff's own name
+            // (BuffResistance vs `buffInjuryStunned01`-style tags).
+            if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, qseg, " \t"), tag)) return true;
         }
     }
     return false;
@@ -1614,6 +1626,8 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onCombatEntered")) return .combat_entered;
     if (std.mem.eql(u8, s, "onSelfFallImpact")) return .fall_impact;
     if (std.mem.eql(u8, s, "onSelfJump")) return .jump;
+    if (std.mem.eql(u8, s, "onSelfRespawn")) return .respawn;
+    if (std.mem.eql(u8, s, "onSelfTeleported")) return .teleported;
     if (std.mem.eql(u8, s, "onSelfDamagedBlock")) return .block_damaged;
     if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
     if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;
@@ -2851,6 +2865,10 @@ test "tagsMatch follows PassiveEffect::hasMatchingTag with the stock defaults" {
     try std.testing.expect(tagsMatch("running,swimmingRun", "swimmingRun"));
     try std.testing.expect(!tagsMatch("running", "walking"));
     try std.testing.expect(tagsMatch("coredamageresist", "coredamageresist"));
+    // Passive tags match case-insensitively (stock FastTags): a buff's own
+    // name queries its BuffResistance rows regardless of case.
+    try std.testing.expect(tagsMatch("buffInjuryStunned01", "buffinjurystunned01"));
+    try std.testing.expect(tagsMatch("BUFFEFFECT", "buffeffect"));
     // Whitespace and empty segments are tolerated on both sides.
     try std.testing.expect(tagsMatch(" running , secondary ", "secondary"));
     try std.testing.expect(tagsMatch("running", " running ,"));
