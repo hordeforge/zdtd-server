@@ -2862,7 +2862,10 @@ test "scenario combat noise wakes a sleeper volume before player entry" {
     _ = try g.attachJoinedClient(&cap);
     // One volume far from the player's spawn (~256, 70, 256).
     const vols = try gpa.alloc(sleepers_mod.Volume, 1);
+    // Freed after the deinit defer below: g.deinit persists sleeper markers
+    // (lifecycle.deinit), so the slice must outlive it.
     defer gpa.free(vols);
+    defer g.sleepers.volumes = &.{};
     vols[0] = .{
         .x0 = 100,
         .y0 = 70,
@@ -2908,7 +2911,10 @@ test "scenario cleared sleeper volume re-arms after LootRespawnDays" {
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     const vols = try gpa.alloc(sleepers_mod.Volume, 1);
+    // Freed after the deinit defer below: g.deinit persists sleeper markers
+    // (lifecycle.deinit), so the slice must outlive it.
     defer gpa.free(vols);
+    defer g.sleepers.volumes = &.{};
     vols[0] = .{
         .x0 = 100,
         .y0 = 70,
@@ -3040,7 +3046,10 @@ test "scenario group-id sleeper volumes cascade within one placement only" {
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     const vols = try gpa.alloc(sleepers_mod.Volume, 4);
+    // Freed after the deinit defer below: g.deinit persists sleeper markers
+    // (lifecycle.deinit), so the slice must outlive it.
     defer gpa.free(vols);
+    defer g.sleepers.volumes = &.{};
     vols[0] = .{
         .x0 = 100,
         .y0 = 70,
