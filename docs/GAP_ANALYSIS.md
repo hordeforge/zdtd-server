@@ -1867,7 +1867,7 @@ encoding is one day high.
   gone; scenario `bm-music` proves a far-away second party stays silent.
   *Anchors:* `src/server/game.zig` `playerBloodMoonMusic`,
   `src/server/game/step.zig` per-client music pass,
-  `src/server/game.zig` join bundle, `src/wire/packages.zig:896`,
+  `src/server/game.zig` join bundle, `src/wire/stock_bloodmoon.zig:13`,
   `asm.il:807834`, `asm.il:2593714`, `asm.il:807889`, il EntityPlayer.bloodMoonParty
 
 - **NetPackageHordeEvent** `N/A (parity)`
@@ -2575,7 +2575,7 @@ gamestage, no wandering hordes, and no screamers.
   Single global bool broadcast on the `bloodmoon_active` edge. Live playtest case
   `combat/blood_moon_music` PASS. Stock sends it per-player; the global broadcast
   is the documented simplification.
-  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:892-896`,
+  *Anchors:* `src/server/game.zig`, `src/wire/stock_bloodmoon.zig:13-22`,
   `junit-1784959913.xml`
 
 - **Zombie speed bands** `WORKS`
@@ -2961,7 +2961,7 @@ gamestage, no wandering hordes, and no screamers.
 - **NetPackageHordeEvent** `N/A (parity)`: see [§6 blood-moon
   NetPackageHordeEvent row](#6-blood-moon): the same verdict applies; this row
   exists only because the package also appears in the entity/AI catalog.
-  *Anchors:* `src/wire/packages.zig:896`
+  *Anchors:* `src/wire/stock_horde.zig:27`
 
 - **AIDirector / sleeper state persistence across restart** `PARTIAL (waived)`
   `saveAll` covers chunks/containers/block-meta/players; entity/director/sleeper
@@ -2989,7 +2989,7 @@ gamestage, no wandering hordes, and no screamers.
   gets quest credit, XP and a DroppedLootContainer. `combat/zombie_death_loot` and
   `economy/zombie_removed_after_kill` PASS.
   *Anchors:* `src/server/game.zig`, ``,
-  `src/wire/packages.zig:861-876`
+  `src/wire/stock_remove.zig:10-24`
 
 - **EntityRemove(Unloaded) when a mob leaves interest range** `WORKS`
   The replicate pass runs an unload sweep next to spawn-on-approach: any mob a
@@ -3000,7 +3000,7 @@ gamestage, no wandering hordes, and no screamers.
   `NetEntityDistributionEntry::updatePlayerEntity`. An observer whose own entity
   slot cannot be resolved is skipped rather than treated as sitting in cell (0,0),
   which would evict its whole known set.
-  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:861-880`,
+  *Anchors:* `src/server/game.zig`, `src/wire/stock_remove.zig:10-24`,
   `asm.il:801228-801276`, `asm.il:1227761`
 
 - **Corpse dwell time (TimeStayAfterDeath)** `WORKS` (corpse harvest residual)
@@ -4849,7 +4849,7 @@ a finer server encoding.
   23-byte records (biomeId, groupIndex, remainingSeconds, 5x f32), no count prefix,
   groupIndex clamped to the biome's group count so `SetWeatherGroup` cannot index
   out of range. Sent on re-join and every 20 ticks, deferred under load shedding.
-  *Anchors:* `src/wire/packages.zig:848-897`, `src/server/game.zig`,
+  *Anchors:* `src/wire/stock_weather.zig:11-53`, `src/server/game.zig`,
   `:8113`
 
 - **Weather biome padding when biomes.xml yields fewer than 5 weather biomes** `WORKS` `(2026-08-22 re-audit)`
@@ -4860,7 +4860,7 @@ a finer server encoding.
   data (stock biomes.xml supplies exactly 5 weather biomes), live for modded
   biomes.xml only - out of stock-scope parity; the clamp keeps fabricated ids from
   overrunning the source group list.
-  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:856-875`,
+  *Anchors:* `src/server/game.zig`, `src/wire/stock_weather.zig:31-53`,
   `asm.il:2054217-2054277`
 
 - **StormFrequency configurability** `DONE 2026-08-07`

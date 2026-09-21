@@ -213,7 +213,7 @@ Buffer exhaustion is an error at the builder, not a short body. `Writer.ensure` 
 
 A mapping blob is all-or-nothing. A truncated blob does not disable the client mapping: `LoadFromArray` swallows the failure and leaves the mapping live, so `AssignIds` renumbers every block the blob failed to name, silently (`src/wire/stock_nameid.zig:11`). `measure` therefore rejects an empty name, an over-long name, an out-of-range id, a duplicate id, and a header/row mismatch before any byte is written, and `write` re-checks the count it promised (`src/wire/stock_nameid.zig:82`, `src/wire/stock_nameid.zig:102`).
 
-A body whose item must be real is not faked. `NetPackageEntitySpawnResponse` dereferences `ItemValue.ItemClass` on the client, so an empty sentinel there is a null dereference; the builder is only used on place or throw, never on join (`src/wire/packages.zig:901`).
+A body whose item must be real is not faked. `NetPackageEntitySpawnResponse` dereferences `ItemValue.ItemClass` on the client, so an empty sentinel there is a null dereference; the builder is only used on place or throw, never on join (`src/wire/stock_motion.zig:43`).
 
 An identity is never truncated. `Stored.set` rejects an over-long platform or id instead of cutting it, because two accounts collapsing onto one identity is worse than a rejected packet (`src/wire/platform_user.zig:112`). `readString` likewise fails rather than silently shortening a parsed value (`src/wire/binary.zig:74`).
 
