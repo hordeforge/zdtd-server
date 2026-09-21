@@ -26,6 +26,7 @@ pub const BotSnap = world.BotSnap;
 pub const systems = @import("systems.zig");
 pub const vehicle = @import("vehicle.zig");
 pub const turrets = @import("turrets.zig");
+pub const falling = @import("falling.zig");
 pub const quest_trade = @import("quest_trade.zig");
 pub const quest = @import("quest.zig");
 pub const poi_lock = @import("poi_lock.zig");
@@ -61,6 +62,7 @@ test {
     _ = systems;
     _ = vehicle;
     _ = turrets;
+    _ = falling;
     _ = quest_trade;
     _ = quest;
     _ = poi_lock;
