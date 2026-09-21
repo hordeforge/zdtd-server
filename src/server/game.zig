@@ -1065,31 +1065,13 @@ pub const Game = struct {
     /// Test hook: scenarios swap the item catalog after construction, so they
     /// need to re-run the pass the constructor already did.
     pub fn clampSavedStoreStacksForTest(self: *Game) void {
-        self.clampSavedStoreStacks();
+        game_init_assets.clampSavedStoreStacks(self);
     }
 
     /// Bring saved container / workstation stacks down to the current
     /// items.xml cap. See the call site for why it runs after loadAssets.
     fn clampSavedStoreStacks(self: *Game) void {
-        for (&self.containers.items, self.containers.used[0..]) |*cont, u| {
-            if (!u) continue;
-            const n = @min(@as(usize, cont.slot_count), cont.slots.len);
-            self.clampKnownStacks(cont.slots[0..n]);
-        }
-        for (&self.workstations.items, self.workstations.used[0..]) |*ws, u| {
-            if (!u) continue;
-            self.clampKnownStacks(ws.fuel[0..]);
-            self.clampKnownStacks(ws.input[0..]);
-            self.clampKnownStacks(ws.tools[0..]);
-            self.clampKnownStacks(ws.output[0..]);
-        }
-        // Vehicle baskets restore from entities.zen, which also loads before
-        // loadAssets, so they need the same pass for the same reason.
-        for (ecs.groupSlice(&self.sim, .vehicle)) |vi| {
-            const v = &self.sim.vehicle[vi];
-            const n = @min(@as(usize, v.basket_n), v.basket.len);
-            self.clampKnownStacks(v.basket[0..n]);
-        }
+        return game_init_assets.clampSavedStoreStacks(self);
     }
 
     /// Clamp only slots whose item the catalog resolves. Unlike
@@ -1097,13 +1079,7 @@ pub const Game = struct {
     /// unresolved id here keeps its saved count: failing closed is right
     /// against a client claim and destructive against server-written state.
     pub fn clampKnownStacks(self: *const Game, slots: []ecs.components.InvSlot) void {
-        for (slots) |*s| {
-            if (s.count == 0 or s.item_id == 0) continue;
-            if (self.items.byId(s.item_id) == null) continue;
-            // Cap through the stock getter: the sandbox MaxStackSize option
-            // scales Stacknumber, and the raw field would clamp it back.
-            s.count = @min(s.count, self.items.stackFor(s.item_id));
-        }
+        return game_init_assets.clampKnownStacks(self, slots);
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
