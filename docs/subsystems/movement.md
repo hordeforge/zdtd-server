@@ -185,7 +185,7 @@ pub const Vehicle = struct {
 Drive input arrives as a 13-byte zdtd-shaped control body under the stock
 `NetPackageVehicleSpawn` name, gated on that exact length because a real stock body is at
 least 32 bytes and can never be read as this one (`src/server/c2s/misc.zig:1212-1226`,
-`src/wire/packages.zig:4436-4461`). Only seat 0 steers
+`src/wire/stock_vehicle.zig:37-61`). Only seat 0 steers
 (`src/server/c2s/misc.zig:1220-1222`). zdtd implements no client-requested vehicle
 spawning, so a stock `VehicleSpawn` body falls through unhandled (`docs/DIVERGENCES.md`,
 "Six zdtd-shaped bodies" 1a4).
