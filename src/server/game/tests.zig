@@ -9208,3 +9208,38 @@ test "worn rogue boots soften the fall impact computation" {
     const bare = cl.cvars.get(".impactSpeed");
     try std.testing.expect(with_boots < bare);
 }
+
+test "a radiated zombie regenerates through its class proc buff" {
+    // buffRadiatedRegen heals HealthChangeOT @RadiatedRegenAmount per
+    // second; the mob regen pass folds it with the victim's own cvar store
+    // (seeded by the class damage rows) and replicates via dirty HP.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const zdef = g.entities.byName("zombieBoeRadiated") orelse return error.SkipZigTest;
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].hash = zdef.hash;
+    g.sim.health[zs].hp = 100;
+    _ = cl;
+    // Seed the proc state as the damage rows would, then tick.
+    _ = g.addCatalogBuff(zid, zs, "buffRadiatedRegen", zid);
+    const store = g.sim.cvarsMut(zs);
+    _ = store.apply("RadiatedRegenAmount", .set, 4);
+    try g.step();
+    try g.step();
+    try std.testing.expect(g.sim.health[zs].hp > 100);
+}

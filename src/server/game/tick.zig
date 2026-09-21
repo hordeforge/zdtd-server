@@ -2325,6 +2325,39 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             }
         }
     }
+    tickMobRegen(self, dt);
+}
+
+/// Mob health over time: zombies/animals with active buffs fold their
+/// HealthChangeOT rows (radiated regen, burning DoTs) with the victim's own
+/// cvar store answering `@name` values. Stock ticks these in Stat.Tick on
+/// every EntityAlive; the player legs live above, this covers the rest.
+/// Positive heals clamp to max; negative ride raw like the player OT leg.
+/// Changed HP marks dirty so the replicate pass emits EntityStatChanged.
+fn tickMobRegen(self: *Game, dt: f32) void {
+    var req_counts: requirements.Counts = .{};
+    var it = self.sim.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
+        if (self.sim.mask[i].player) continue;
+        const kind = self.sim.kind[i];
+        if (kind != .zombie and kind != .animal) continue;
+        if (!self.sim.mask[i].buffs or !self.sim.mask[i].health) continue;
+        const h = &self.sim.health[i];
+        if (h.hp <= 0 or h.max_hp <= 0) continue;
+        var ctx = requirements.Ctx{
+            .alive = true,
+            .hp_frac = @max(0, @min(h.hp / h.max_hp, 1)),
+            .hp_max = h.max_hp,
+        };
+        ctx.cvars = self.sim.cvarsMut(i);
+        const totals = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[i], ctx, &req_counts);
+        if (totals.hp_ot == 0) continue;
+        h.hp = @min(h.max_hp, @max(0, h.hp + totals.hp_ot * dt));
+        self.sim.markDirty(i, .{ .hp = true });
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
 /// Keep the conditional survival stage buffs (buffStatusHungry/Thirsty01..03)
