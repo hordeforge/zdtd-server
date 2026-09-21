@@ -35,7 +35,7 @@ The tick step is the primary writer. `Game.step` opens a `.tick_total` scope as 
 
 Two periodic duties ride the same step. `sampleFlushCounters` converts the background chunk writer's atomic totals into counter deltas once per tick (`src/server/game/step.zig:546`, body at `src/server/game.zig:3156-3172`); the writer runs off-thread, so the tick thread samples and subtracts the previously seen values with saturating subtraction, and adds the error delta to both `.chunk_flush_errors` and `.persistence_errors` (`src/server/game.zig:3165-3170`). Then, when `tick_n % apm_report_period_ticks == 0`, the step builds a snapshot, fills the ops gauges, serializes one JSON line and writes it to stdout (`src/server/game/step.zig:548-582`). The period defaults to `protocol.ticks_per_second * 60` (`src/server/game/types.zig:56`) and is overridable from configuration through `zdtd.toml [apm] dump_every_s` (`src/server/game.zig:774`, `src/server/game.zig:907`).
 
-The overrun counter is the one counter written outside `step`: `Game.run` compares the next deadline with the monotonic clock, increments `.tick_overruns`, may arm the load-shed valve, and logs at the first overrun and every hundredth thereafter (`src/server/game.zig:3400-3412`).
+The overrun counter is the one counter written outside `step`: `Game.run` compares the next deadline with the monotonic clock, increments `.tick_overruns`, may arm the load-shed valve, and logs at the first overrun and every hundredth thereafter (`src/server/game.zig:3316-3328`).
 
 ## Counters
 

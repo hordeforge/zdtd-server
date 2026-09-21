@@ -2009,3 +2009,33 @@ test "player console help matches the c2s_text allowlist" {
         }
     }
 }
+
+pub const CommandLevel = struct {
+    verb: [24]u8 = [_]u8{0} ** 24,
+    level: u8 = 0,
+};
+
+pub fn commandLevel(self: *const Game, verb: []const u8) u8 {
+    for (self.command_levels[0..self.command_levels_n]) |cl| {
+        const v = std.mem.sliceTo(&cl.verb, 0);
+        if (std.mem.eql(u8, v, verb)) return cl.level;
+    }
+    return 0;
+}
+
+pub fn setCommandLevel(self: *Game, verb: []const u8, level: u8) bool {
+    for (self.command_levels[0..self.command_levels_n]) |*cl| {
+        const v = std.mem.sliceTo(&cl.verb, 0);
+        if (std.mem.eql(u8, v, verb)) {
+            cl.level = level;
+            return true;
+        }
+    }
+    if (self.command_levels_n >= self.command_levels.len or verb.len >= 24) return false;
+    const cl = &self.command_levels[self.command_levels_n];
+    self.command_levels_n += 1;
+    @memset(&cl.verb, 0);
+    @memcpy(cl.verb[0..verb.len], verb);
+    cl.level = level;
+    return true;
+}
