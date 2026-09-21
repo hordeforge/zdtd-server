@@ -849,14 +849,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (d.dtype == 15 and ei == actor_slot) {
                     self.fireFallImpact(ei, @floatFromInt(d.strength));
                 }
-                // The damage claim does not say melee-vs-ranged: the held
-                // weapon's `ranged` tag picks the onSelfPrimaryActionRayHit
-                // path (DeepCuts/perception bleed) over onSelfAttackedOther.
-                if (self.heldWeaponIsRanged(actor_slot)) {
-                    self.fireRayHit(actor_slot, ei, d.body_part);
-                } else {
-                    self.fireAttackedOther(actor_slot, ei, d.body_part);
-                }
+            }
+        }
+        // Attacker hit rows fire on every landed hit regardless of victim
+        // kind (stock runs the attacker's MinEvents on EntityAlive hit):
+        // Gunslinger combo, cripple/burn procs, DeepCuts bleeds. Victim-side
+        // rows stay in the player block above. The damage claim does not say
+        // melee-vs-ranged: the held weapon's `ranged` tag picks the
+        // onSelfPrimaryActionRayHit path over onSelfAttackedOther.
+        if (self.sim.slotOfNetId(d.entity_id)) |ei| {
+            if (self.heldWeaponIsRanged(actor_slot)) {
+                self.fireRayHit(actor_slot, ei, d.body_part);
+            } else {
+                self.fireAttackedOther(actor_slot, ei, d.body_part);
             }
         }
         // Attribute the hit: stock's NetPackageDamageEntity carries

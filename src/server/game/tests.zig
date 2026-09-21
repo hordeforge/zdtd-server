@@ -9013,3 +9013,66 @@ test "a held cripple mod rolls its damage proc through seeded cvars" {
     // The Q6 mod seeds the top-tier chance through its equip rows.
     try std.testing.expectApproxEqAbs(@as(f32, 30), cl.cvars.get("$crippleChance"), 0.001);
 }
+
+test "a cripple-modded hit cripples a walker victim" {
+    // The held club's Q6 cripple mod seeds $crippleChance=30 on held change;
+    // its onSelfDamagedOther rows roll buffInjuryCrippled01 onto walker
+    // victims. A C2S damage claim drives the full chain: cvar seed (reconcile)
+    // plus gated proc (hit event).
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const club = g.items.byName("meleeWpnClubT1CaneKnife") orelse g.items.byName("meleeWpnClubT0WoodenClub") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, club.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != club.id) continue;
+        g.sim.inventory[ps].slots[i] = .{};
+        g.sim.inventory[ps].slots[0] = .{ .item_id = club.id, .count = 1, .quality = 6 };
+        break;
+    }
+    const mod_id = g.items.ecsIdByName("modGunCrippleEm");
+    if (mod_id == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[0].mods[0] = mod_id;
+    g.sim.inventory[ps].slots[0].mod_n = 1;
+    g.sim.inventory[ps].slots[0].mod_qualities[0] = 6;
+    g.sim.inventory[ps].holding = 0;
+    try g.step();
+    // Walker victim with a buff set, in melee range.
+    const zdef = g.entities.byName("zombieBoe") orelse return error.SkipZigTest;
+    const zid = g.sim.spawnZombie(258, 70, 258, 200).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].hash = zdef.hash;
+    g.sim.transform[ps] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    const crippled = g.buffs.indexOfName("buffInjuryCrippled01") orelse return error.SkipZigTest;
+    // 30% per hit: step between claims so each rolls a fresh tick seed
+    // (same-tick rolls are deterministically identical).
+    var fbuf: [128]u8 = undefined;
+    var dmg: [256]u8 = undefined;
+    var hits: usize = 0;
+    while (hits < 40 and g.sim.buffs[zs].find(crippled) == null) : (hits += 1) {
+        // Keep the victim alive for the volley: the proc is the assertion,
+        // not the kill. Drain the capture so broadcasts never back up.
+        g.sim.health[zs].hp = 200;
+        capture.clear();
+        const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 5, false, cl.entity_id);
+        const framed = try packages.framed(&fbuf, "NetPackageDamageEntity", dbody);
+        try g.injectFramed(cl, framed);
+        try g.step();
+    }
+    try std.testing.expect(g.sim.buffs[zs].find(crippled) != null);
+}
