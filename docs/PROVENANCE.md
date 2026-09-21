@@ -705,7 +705,7 @@ below is therefore the surviving record of the final live statuses.
 | Perk requirement graphs / effect application | **Partial**: [ADR 0023](adr/0023-perk-attribute-system.md) accepted; catalog + XP math ship (rows above); per-player perk levels, spend, and requirement graphs remain WORK_PLAN (T16+). `Rules.Progression.*` floors stand in until the resolver lands |
 
 | B38 | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | zdtd engineering (Z), documented as fixed-size architecture |
-| B39 | `game.zig:352` | `sleeper_party_radius` (default 100.0), now a single `[sim]`-bound field (deduped; was duplicated at game.zig:3969 + game/sleeper.zig:13) | R: CalcGameStageAround radius (asm.il ~1093363) |
+| B39 | `game.zig:352` | `sleeper_party_radius` (default 100.0), now a single `[sim]`-bound field (deduped; was duplicated at game.zig + game/sleeper.zig:13) | R: CalcGameStageAround radius (asm.il ~1093363) |
 | B40 | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig` `builtinStockName` | zdtd mirror; divergence caught by existing id tests |
 
 ## 4. Coverage and maintenance

@@ -12,6 +12,9 @@ const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 
 const max_quest_position_data = game_mod.max_quest_position_data;
+const world_store = @import("../../world/store.zig");
+const world_tts = @import("../../world/tts.zig");
+const PlaceholderCtx = game_mod.Game.PlaceholderCtx;
 
 pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
     const head = packages.stock_quest.parseQuestEventHead(body) catch return;
@@ -347,3 +350,68 @@ pub fn buildTraderQuestOffers(
     }
     return n;
 }
+
+pub fn resetPoiBlocks(self: *Game, wx: i32, wz: i32) void {
+        const pf = if (self.world.prefabs) |*p| p else return;
+        var di: ?usize = null;
+        for (pf.items, 0..) |d, i| {
+            if (world_store.prefabs.isPart(d.name)) continue;
+            if (wx < d.x or wx >= d.x + d.size_x or wz < d.z or wz >= d.z + d.size_z) continue;
+            di = i;
+            break;
+        }
+        const idx = di orelse return;
+        const d = pf.items[idx];
+        const tb = pf.getTtsBlocks(d.name) orelse return;
+        const Ctx = struct {
+            g: *Game,
+            fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
+                const g: *Game = @ptrCast(@alignCast(ctx.?));
+                const prev_id = g.world.blockWorld(bx, by, bz) catch 0;
+                g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
+                // POI reset restores the authored state: pre-damaged cells get
+                // their TTS damage back, pristine cells clear any wear.
+                if (dmg > 0) {
+                    g.setBlockHp(bx, by, bz, dmg) catch return;
+                } else {
+                    g.clearBlockHp(bx, by, bz);
+                }
+                // Repainting a cell displaces whatever stood there, so the
+                // previous occupant's side state goes with it. Same call the
+                // destruction paths use, rather than a second copy of the
+                // list of stores a removal owes.
+                const new_id = world_store.typeId(raw);
+                if (prev_id != new_id) {
+                    // No spill: the reset restores the POI to its authored
+                    // state, it does not mine it out. Dropping the displaced
+                    // contents would let a player farm a POI's containers by
+                    // re-taking the quest that resets it.
+                    g.noteBlockRemovedEx(bx, by, bz, prev_id, false);
+                    // And the block the reset painted claims what its type
+                    // owns: a POI's authored generator or vending machine is
+                    // as real as a placed one, so restoring it has to restore
+                    // its node too, not just its block.
+                    g.noteBlockAdded(bx, by, bz, new_id);
+                }
+                if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
+                    // Best-effort visual broadcast: the world store is already
+                    // authoritative; a dropped SetBlock only delays the paint.
+                    g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), g.interest_range) catch {};
+                } else |_| {}
+            }
+        };
+        const TerrCtx = struct {
+            g: *Game,
+            fn at(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32) u16 {
+                const s: *const @This() = @ptrCast(@alignCast(ctx.?));
+                const t = world_store.World.worldToChunk(bx, bz);
+                const c = s.g.world.chunkAt(t.pos) orelse return 0;
+                return c.blockAt(t.lx, by, t.lz);
+            }
+        };
+        var terr_ctx: TerrCtx = .{ .g = self };
+        var ph_holder: world_tts.PlaceholderCtx = undefined;
+        const ph_arg = PlaceholderCtx.slot(self, &ph_holder);
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, ph_arg, Ctx.put, self);
+        std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
+    }
