@@ -9542,3 +9542,36 @@ test "a torch hit sets the victim burning" {
     }
     try std.testing.expect(g.sim.buffs[zs].find(burning) != null);
 }
+
+test "submersion mirrors the underwater cvar" {
+    // The head-block-water check feeds `_underwater` (53 stock gates:
+    // torch ignite, drowning buffs, swim penalties). Stock sets it
+    // client-side and never networks `_` names; the server projects it
+    // into the player store on every ctx build.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const water = g.world.terrain_ids.water;
+    if (water == 0) return error.SkipZigTest;
+    g.sim.transform[ps] = .{ .x = 256, .y = 70, .z = 256 };
+    try g.world.setBlockRawWorld(256, 71, 256, water);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get("_underwater"), 0.001);
+    try g.world.setBlockRawWorld(256, 71, 256, 0);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("_underwater"), 0.001);
+}

@@ -96,6 +96,12 @@ pub const PlayerCtx = struct {
         h: *const ecs.components.Health,
         sandbox_groups: []const sandbox.Group,
     ) requirements.Ctx {
+        // Mirror submersion into `_underwater` (53 stock gates: torch
+        // ignite, drowning buffs, swim penalties). Same head-block-water
+        // check as the drowning leg; stock sets it client-side and never
+        // networks `_` names, so the server projects it here and every ctx
+        // consumer reads the same value.
+        _ = c.cvars.apply("_underwater", .set, if (isHeadUnderwater(game, ps)) 1 else 0);
         return .{
             .levels = c.skill_levels[0..c.skill_level_n],
             .player_level = c.level,
@@ -918,6 +924,7 @@ fn fireHitRows(
         if (held.count > 0) {
             if (self.items.byId(held.item_id)) |def| {
                 const ires = assets_buffs.evaluateRows(def.triggered, trigger, ctx.*, &counts);
+
                 if (ires.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, ires.truncated);
                 applyKillMods(self, ps, &ires);
                 applyTriggeredBuffsFull(self, c.entity_id, ps, &ires, c.entity_id, false);
@@ -1499,6 +1506,21 @@ fn armorGroups(self: *const Game, ps: ecs.Slot, out: []requirements.ArmorGroup) 
         }
     }
     return out[0..n];
+}
+
+/// Head block is water: the drowning depth gate, shared by the
+/// `_underwater` cvar mirror (stock sets it client-side; never networked).
+fn isHeadUnderwater(game: *Game, ps: ecs.Slot) bool {
+    const water_id = game.world.terrain_ids.water;
+    if (water_id == 0) return false;
+    if (!game.sim.mask[ps].transform) return false;
+    const t = game.sim.transform[ps];
+    const id = game.world.blockWorld(
+        @trunc(t.x),
+        @as(i32, @trunc(t.y)) + 1,
+        @trunc(t.z),
+    ) catch 0;
+    return id == water_id;
 }
 
 /// The held item's `Tags` property, or "" for an empty hand.
