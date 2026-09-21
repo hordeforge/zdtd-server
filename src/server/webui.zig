@@ -864,7 +864,7 @@ pub const Server = struct {
         const reply = if (reply_len > 0) reply_buf[0..reply_len] else "ok\n";
         var audit_line: [max_audit_line]u8 = undefined;
         const al = std.fmt.bufPrint(&audit_line, "> {s}", .{line}) catch line;
-            self.pushAudit(al);
+        self.pushAudit(al);
         if (reply_len > 0) {
             const first = std.mem.findScalar(u8, reply, '\n') orelse reply.len;
             self.pushAudit(reply[0..utf8_util.truncLen(reply[0..first], max_audit_line)]);
@@ -1621,7 +1621,8 @@ fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
 }
 
 /// Cookie/header-safe secret: printable ASCII without whitespace, quotes, backslash, or `;`.
-fn secretCharsetOk(secret: []const u8) bool {
+/// Shared with main so startup fails with a clear usage error before listen.
+pub fn secretCharsetOk(secret: []const u8) bool {
     for (secret) |c| {
         if (c < 0x21 or c > 0x7e) return false;
         switch (c) {

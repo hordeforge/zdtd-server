@@ -357,6 +357,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !File {
 }
 
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
+    try rejectMisplacedSecretKeys(src);
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer allocator.destroy(arena);
     arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -371,6 +372,38 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !File {
         else => return err,
     };
     return f;
+}
+
+/// Credentials never belong in zdtd.toml (Bucket B policy). Fail with a
+/// redirect before the generic unknown-key path so operators see where the
+/// value should live instead of a cryptic `[section].password` miss.
+fn rejectMisplacedSecretKeys(src: []const u8) !void {
+    const redirects = [_]struct { key: []const u8, hint: []const u8 }{
+        .{ .key = "password", .hint = "use ServerPassword in serverconfig.xml" },
+        .{ .key = "server_password", .hint = "use ServerPassword in serverconfig.xml" },
+        .{ .key = "serverpassword", .hint = "use ServerPassword in serverconfig.xml" },
+        .{ .key = "telnet_password", .hint = "use TelnetPassword in serverconfig.xml" },
+        .{ .key = "telnetpassword", .hint = "use TelnetPassword in serverconfig.xml" },
+        .{ .key = "webui_secret", .hint = "set env ZDTD_WEBUI_SECRET (never zdtd.toml)" },
+        .{ .key = "mcp_token", .hint = "set env ZDTD_MCP_TOKEN (never zdtd.toml)" },
+        .{ .key = "secret", .hint = "webui/MCP secrets belong in the process environment" },
+        .{ .key = "token", .hint = "MCP token belongs in env ZDTD_MCP_TOKEN" },
+    };
+    var lines = std.mem.splitScalar(u8, src, '\n');
+    while (lines.next()) |raw_line| {
+        var line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+        if (line[0] == '[') continue;
+        const eq = std.mem.findScalar(u8, line, '=') orelse continue;
+        const key = std.mem.trim(u8, line[0..eq], " \t");
+        if (key.len == 0) continue;
+        for (redirects) |r| {
+            if (std.ascii.eqlIgnoreCase(key, r.key)) {
+                util_log.warn("zdtd: zdtd.toml key '{s}' is a secret; {s}\n", .{ key, r.hint });
+                return error.SecretInToml;
+            }
+        }
+    }
 }
 
 /// Merge File into InitOptions-like fields. Only non-null keys override.
@@ -971,6 +1004,21 @@ test "parse rejects unknown keys" {
         \\max_streamed_chunks = 10
     ;
     try std.testing.expectError(error.UnknownTomlKey, parse(std.testing.allocator, src));
+}
+
+test "parse rejects secrets misplaced in zdtd.toml" {
+    try std.testing.expectError(
+        error.SecretInToml,
+        parse(std.testing.allocator, "[sim]\npassword = \"nope\"\n"),
+    );
+    try std.testing.expectError(
+        error.SecretInToml,
+        parse(std.testing.allocator, "webui_secret = \"abcdefgh\"\n"),
+    );
+    try std.testing.expectError(
+        error.SecretInToml,
+        parse(std.testing.allocator, "[plugin]\nmcp_token = \"abcdefgh\"\n"),
+    );
 }
 
 test "parse rejects malformed assignments" {

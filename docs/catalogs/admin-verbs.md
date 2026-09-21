@@ -113,24 +113,24 @@ permission level (`src/server/admin_console.zig:307`).
 
 | Verb | Line |
 |---|---|
-| `help` | 90 |
-| `commands` | 90 |
-| `?` | 90 |
-| `gettime` | 90 |
-| `gt` | 90 |
-| `listplayers` | 90 |
-| `lp` | 90 |
-| `listents` | 91 |
-| `le` | 91 |
-| `say` | 91 |
-| `s` | 91 |
-| `version` | 91 |
-| `dm` | 91 |
-| `cm` | 91 |
-| `settempunit` | 92 |
-| `debugmenu` | 92 |
-| `listplayerids` | 92 |
-| `lpi` | 92 |
+| `help` | 87 |
+| `commands` | 87 |
+| `?` | 87 |
+| `gettime` | 87 |
+| `gt` | 87 |
+| `listplayers` | 87 |
+| `lp` | 87 |
+| `listents` | 88 |
+| `le` | 88 |
+| `say` | 88 |
+| `s` | 88 |
+| `version` | 88 |
+| `dm` | 88 |
+| `cm` | 88 |
+| `settempunit` | 89 |
+| `debugmenu` | 89 |
+| `listplayerids` | 89 |
+| `lpi` | 89 |
 
 
 ## Bot verbs (`src/server/game/bot.zig`)
@@ -139,12 +139,12 @@ Subcommands of the `bot` admin verb handled by the host servant.
 
 | Verb | Line |
 |---|---|
-| `bot spawn` | 551 |
-| `bot move` | 573 |
-| `bot look` | 592 |
-| `bot shoot` | 599 |
-| `bot remove` | 615 |
-| `bot count` | 626 |
+| `bot spawn` | 553 |
+| `bot move` | 575 |
+| `bot look` | 594 |
+| `bot shoot` | 601 |
+| `bot remove` | 617 |
+| `bot count` | 628 |
 
 
 ## Plugin host verbs (`src/plugin/wasm.zig`)

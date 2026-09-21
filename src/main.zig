@@ -658,6 +658,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
             .{ webui_mod.min_secret, webui_secret.len },
         );
     }
+    if (webui_port != 0 and webui_secret.len > webui_mod.max_secret) {
+        usageError(
+            "webui secret must be at most {d} characters (got {d}); shorten ZDTD_WEBUI_SECRET",
+            .{ webui_mod.max_secret, webui_secret.len },
+        );
+    }
+    if (webui_port != 0 and !webui_mod.secretCharsetOk(webui_secret)) {
+        usageError(
+            "webui secret has invalid characters (printable ASCII without whitespace, quotes, backslash, comma, or semicolon)",
+            .{},
+        );
+    }
     if (webui_port != 0 and !isLoopbackBind(webui_bind)) {
         usageError("--webui-bind must be loopback (127.0.0.1 or localhost); use a TLS reverse proxy for remote access", .{});
     }
@@ -794,24 +806,28 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
 
     var toml_path_buf: [1024]u8 = undefined;
-    const world_toml = std.fmt.bufPrint(&toml_path_buf, "{s}/zdtd.toml", .{world_dir}) catch blk: {
-        // World dir too long for the fixed buffer: do not silently run without
-        // the operator's per-world config.
-        std.debug.print("zdtd: world dir '{s}' too long; skipping world zdtd.toml\n", .{world_dir});
-        break :blk null;
+    // Fail closed: a truncated path would load CWD zdtd.toml (or nothing) and
+    // silently ignore the operator's per-world file.
+    const world_toml = std.fmt.bufPrint(&toml_path_buf, "{s}/zdtd.toml", .{world_dir}) catch {
+        fatal(
+            "world dir '{s}' too long for zdtd.toml path (need <= {d} bytes including /zdtd.toml)",
+            .{ world_dir, toml_path_buf.len },
+        );
     };
     const toml_path: ?[]const u8 = blk: {
-        if (world_toml) |wt| {
-            if (io_fs.fileExists(wt)) break :blk wt;
-        }
+        if (io_fs.fileExists(world_toml)) break :blk world_toml;
         if (io_fs.fileExists("zdtd.toml")) break :blk "zdtd.toml";
         break :blk null;
     };
     var toml_owned: ?zdtd_config.File = null;
     defer if (toml_owned) |*tf| tf.deinit();
     if (toml_path) |tp| {
-        toml_owned = zdtd_config.loadFromPath(gpa, tp) catch |err| {
-            fatal("cannot load zdtd.toml '{s}': {s}", .{ tp, @errorName(err) });
+        toml_owned = zdtd_config.loadFromPath(gpa, tp) catch |err| switch (err) {
+            error.SecretInToml => fatal(
+                "zdtd.toml '{s}' contains a credential key; put ServerPassword/TelnetPassword in serverconfig.xml and webui/MCP secrets in ZDTD_WEBUI_SECRET / ZDTD_MCP_TOKEN",
+                .{tp},
+            ),
+            else => fatal("cannot load zdtd.toml '{s}': {s}", .{ tp, @errorName(err) }),
         };
         log.info("zdtd: loaded {s}\n", .{tp});
     }

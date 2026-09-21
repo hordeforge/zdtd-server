@@ -10,33 +10,34 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 
 | Magic | File | Line | Enclosing function | Nearby doc |
 |---|---|---|---|---|
-| `ZAL1` | src/server/ally.zig | 206 | computeTransition | - |
-| `ZAL1` | src/server/ally.zig | 245 | computeTransition | - |
+| `ZAL1` | src/server/ally.zig | 204 | computeTransition | - |
+| `ZAL1` | src/server/ally.zig | 243 | computeTransition | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 16 | saveClock | - |
 | `ZCL1` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
-| `ZPV` | src/server/persist.zig | 88 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
-| `ZPV` | src/server/persist.zig | 586 | savePlayers | - |
-| `ZENT` | src/server/persist.zig | 1613 | saveEntities | - |
-| `ZENT` | src/server/persist.zig | 1773 | loadEntities | - |
-| `ZCLC` | src/server/persist.zig | 1937 | saveClaims | - |
-| `ZCLC` | src/server/persist.zig | 1970 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 2002 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 2022 | ztrScanLen | - |
-| `ZTR1` | src/server/persist.zig | 2085 | saveTraders | - |
-| `ZPV` | src/server/persist.zig | 2265 | zpv2DropName | - |
-| `ZCT2` | src/world/containers.zig | 186 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 204 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 271 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 271 | posFromGuid | - |
+| `ZPV` | src/server/persist.zig | 93 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
+| `ZPV` | src/server/persist.zig | 617 | savePlayers | - |
+| `ZEN2` | src/server/persist.zig | 1586 | saveEntities | - |
+| `ZEN2` | src/server/persist.zig | 1747 | loadEntities | - |
+| `ZENT` | src/server/persist.zig | 1748 | loadEntities | - |
+| `ZCLC` | src/server/persist.zig | 1912 | saveClaims | - |
+| `ZCLC` | src/server/persist.zig | 1945 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 1977 | loadClaims | - |
+| `ZTR1` | src/server/persist.zig | 1997 | ztrScanLen | - |
+| `ZTR1` | src/server/persist.zig | 2060 | saveTraders | - |
+| `ZPV` | src/server/persist.zig | 2240 | zpv2DropName | - |
+| `ZCT3` | src/world/containers.zig | 187 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 205 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 271 | posFromGuid | - |
 | `ZCT2` | src/world/containers.zig | 272 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 454 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 636 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 273 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 451 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 633 | posFromGuid | - |
 | `ZSG1` | src/world/signs.zig | 130 | - | - |
 | `ZSG1` | src/world/signs.zig | 156 | - | - |
-| `ZCH3` | src/world/store.zig | 2083 | biomeNameAt | - |
-| `ZCH3` | src/world/store.zig | 2107 | biomeNameAt | - |
+| `ZCH3` | src/world/store.zig | 2132 | biomeNameAt | - |
+| `ZCH3` | src/world/store.zig | 2156 | biomeNameAt | - |
 | `ZVNM1` | src/world/vending.zig | 152 | - | - |
 | `ZVNM` | src/world/vending.zig | 159 | - | - |
 | `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |

@@ -42,7 +42,6 @@ MAGIC_DENYLIST = {"EOS", "NOPE"}
 SAVE_SCAN = (
     "src/server/persist.zig",
     "src/server/game/clock_persist.zig",
-    "src/server/game/bans.zig",
     "src/server/ally.zig",
     "src/world/store.zig",
     "src/world/chunk_flush.zig",

@@ -250,10 +250,15 @@ pub const known_serverconfig_names = [_][]const u8{
     "DropOnDeath",
     "BuildCreate",
     "CameraRestrictionMode",
+    "DeathPenalty",
     "LandClaimSize",
     "LandClaimOnlineDurabilityModifier",
     "LandClaimOfflineDurabilityModifier",
     "LandClaimExpiryDays",
+    "LandClaimCount",
+    "LandClaimDeadZone",
+    "LandClaimOfflineDelay",
+    "LandClaimDecayMode",
     "LootRespawnDays",
     "SandboxPreset",
     "ServerDescription",
@@ -529,7 +534,10 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRangeNamed("MaxSpawnedAnimals", v, 0, 2048, cfg.max_spawned_animals);
     if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRangeNamed("AirDropFrequency", v, 0, 8760, cfg.air_drop_frequency);
     if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8Named("DropOnDeath", v, 0, 4, cfg.drop_on_death);
-    if (prop(raw, "BuildCreate")) |v| cfg.build_create = parseXmlBool(v) orelse cfg.build_create;
+    if (prop(raw, "BuildCreate")) |v| cfg.build_create = parseXmlBool(v) orelse blk: {
+        std.debug.print("zdtd: serverconfig BuildCreate '{s}' invalid; keeping {}\n", .{ v, cfg.build_create });
+        break :blk cfg.build_create;
+    };
     if (prop(raw, "CameraRestrictionMode")) |v| cfg.camera_restriction_mode = clampU8Named("CameraRestrictionMode", v, 0, 2, cfg.camera_restriction_mode);
     if (prop(raw, "DeathPenalty")) |v| cfg.death_penalty = clampU8Named("DeathPenalty", v, 0, 3, cfg.death_penalty);
     if (prop(raw, "LandClaimSize")) |v| {
@@ -972,6 +980,81 @@ test "parseXmlBool accepts stock spellings only" {
     try std.testing.expectEqual(@as(?bool, false), parseXmlBool("0"));
     try std.testing.expectEqual(@as(?bool, null), parseXmlBool(""));
     try std.testing.expectEqual(@as(?bool, null), parseXmlBool("on"));
+}
+
+test "known_serverconfig_names covers every applied prop key" {
+    // Keep the near-miss hint table aligned with parse(): a key we apply but
+    // omit here never gets a "did you mean" on typos.
+    const applied = [_][]const u8{
+        "ServerPort",
+        "ServerMaxPlayerCount",
+        "GameName",
+        "GameWorld",
+        "SandboxCode",
+        "SandboxPreset",
+        "ServerDescription",
+        "ServerWebsiteURL",
+        "Region",
+        "Language",
+        "ServerMatchmakingGroup",
+        "ServerPassword",
+        "AdminPort",
+        "TelnetEnabled",
+        "TelnetPort",
+        "TelnetPassword",
+        "TelnetFailedLoginLimit",
+        "TelnetFailedLoginsBlocktime",
+        "ViewRadius",
+        "ServerReservedSlots",
+        "ServerReservedSlotsPermission",
+        "ServerAdminSlots",
+        "ServerAdminSlotsPermission",
+        "GameDifficulty",
+        "BloodMoonFrequency",
+        "BloodMoonEnemyCount",
+        "PlayerKillingMode",
+        "DayNightLength",
+        "DayLightLength",
+        "MaxSpawnedZombies",
+        "BloodMoonRange",
+        "ZombieMove",
+        "ZombieMoveNight",
+        "ZombieFeralMove",
+        "ZombieBMMove",
+        "EnemyDifficulty",
+        "LootAbundance",
+        "XPMultiplier",
+        "BlockDamagePlayer",
+        "BlockDamageAI",
+        "BlockDamageAIBM",
+        "MaxSpawnedAnimals",
+        "AirDropFrequency",
+        "DropOnDeath",
+        "BuildCreate",
+        "CameraRestrictionMode",
+        "DeathPenalty",
+        "LandClaimSize",
+        "LandClaimOnlineDurabilityModifier",
+        "LandClaimOfflineDurabilityModifier",
+        "LandClaimExpiryDays",
+        "LandClaimCount",
+        "LandClaimDeadZone",
+        "LandClaimOfflineDelay",
+        "LandClaimDecayMode",
+        "LootRespawnDays",
+        "ZdtdAuthorityMode",
+    };
+    try std.testing.expectEqual(applied.len, known_serverconfig_names.len);
+    for (applied) |name| {
+        var found = false;
+        for (known_serverconfig_names) |kn| {
+            if (std.mem.eql(u8, kn, name)) {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
 
 test "BuildCreate and CameraRestrictionMode come from serverconfig" {
