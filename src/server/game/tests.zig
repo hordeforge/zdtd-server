@@ -8840,3 +8840,56 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
         try std.testing.expectApproxEqAbs(pdr_before, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
     }
 }
+
+test "equipping rogue boots grants the worn marker buff and unequipping removes it" {
+    // items.xml armorRogueBoots carries onSelfEquipStart AddBuff buffRogueBoots
+    // (plus tier-gated $rogueBootFallDMG cvar rows); the fall-damage path gates
+    // on the marker. The server diffs worn slots per tick and fires the equip
+    // rows, so the marker lands on equip and reaps on unequip.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const boots = g.items.byName("armorRogueBoots") orelse return error.SkipZigTest;
+    const marker = g.buffs.indexOfName("buffRogueBoots") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, boots.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == boots.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(marker) != null);
+    // Q6 seeds the fall-damage cvar through the tier-gated start rows.
+    try std.testing.expect(cl.cvars.get("$rogueBootFallDMG") > 0);
+    // Unequip: the marker reaps on the next tick.
+    var free: u16 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start], 0..) |s, i| {
+        if (s.count == 0) {
+            free = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(ecs.inventory.move(&g.sim, cl.slot, ecs.components.inv_equip_start, free, 1));
+    // Removal flags first and reaps on the buff tick: two steps to observe it.
+    try g.step();
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(marker) == null);
+}

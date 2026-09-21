@@ -181,6 +181,12 @@ pub const Trigger = enum(u8) {
     /// `onSelfDamagedBlock`: fired when the player damages a block (the check
     /// buff's church-bell spawn gate; TriggerHasTags reads the block's tags).
     block_damaged,
+    /// `onSelfEquipStart` / `onSelfEquipStop`: fired when an equipment item
+    /// is worn / removed (armor set marker buffs like buffRogueBoots, the
+    /// boot fall-damage cvars, miner healing cvars). The server reconciles
+    /// them per tick from the worn slots rather than tracking equip edges.
+    equip_start,
+    equip_stop,
     other,
 };
 
@@ -1590,6 +1596,8 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onCombatEntered")) return .combat_entered;
     if (std.mem.eql(u8, s, "onSelfFallImpact")) return .fall_impact;
     if (std.mem.eql(u8, s, "onSelfDamagedBlock")) return .block_damaged;
+    if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
+    if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;
     return .other;
 }
 

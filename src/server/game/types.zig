@@ -734,6 +734,11 @@ pub const Client = struct {
     /// Combat ledger: last DamageEntity mono ns + short burst count.
     last_damage_ns: u64 = 0,
     damage_burst: u8 = 0,
+    /// Last-tick worn equipment item ids (parallel to the equip slots), for
+    /// the equip-marker reconcile: a slot whose id changed fires the old
+    /// item's `onSelfEquipStop` rows and the new item's `onSelfEquipStart`
+    /// rows, instead of a per-tick wanted-set. Zeroed on slot clear.
+    equip_seen: [ecs.components.inv_equip_count]u16 = .{0} ** ecs.components.inv_equip_count,
     /// P4 guard policy state (windowed detector counts, quarantine bits, kick
     /// arm tick). Cleared for free by `clients[slot] = .{}` on kick/disconnect.
     guard: guard_policy.PeerState = .{},

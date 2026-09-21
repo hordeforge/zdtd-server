@@ -1937,6 +1937,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // Survival stage state: the thresholds decide which stage stays; the
             // engine's own rows brought them in above, so this only reaps.
             syncStageBuffs(self, ps, assets_buffs.survivalStages(sv, h));
+            // Equip edges: worn-slot diff fires equip_start/stop rows (armor
+            // set markers, boot fall-damage cvars, miner healing cvars).
+            syncEquipMarkers(self, c, ps, req_ctx);
             // Two queries, like stock: the max-stat/change-over-time consumers
             // call EffectManager.GetValue with no tags, and
             // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41
@@ -2269,6 +2272,92 @@ fn syncStageBuffs(self: *Game, ps: ecs.Slot, keep: assets_buffs.SurvivalStages) 
     }
     for (remove_ids[0..n_rem]) |id| {
         _ = ecs.buff.remove(set, id);
+    }
+}
+
+/// Equip-marker reconcile: an equipped item's `onSelfEquipStart` rows grant
+/// marker buffs (buffRogueBoots et al, which the fall-damage path gates on)
+/// and seed per-item cvars (boot fall-damage reductions, miner healing).
+/// Stock fires these on the equip edge; the server diffs the worn slots
+/// against `c.equip_seen` per tick and fires the old item's `onSelfEquipStop`
+/// rows plus the new item's `onSelfEquipStart` rows through the shared
+/// engine (gated, relayed, cvars written). Bounded by the equip slot count;
+/// no allocation.
+fn syncEquipMarkers(self: *Game, c: *Client, ps: ecs.Slot, base_ctx: requirements.Ctx) void {
+    if (!self.sim.mask[ps].inventory) return;
+    const inv = &self.sim.inventory[ps];
+    var req_counts: requirements.Counts = .{};
+    // No live sink: buff adds apply once through applyEquipStart/Stop below.
+    // (base_ctx carries the survival pass sink, which would double-apply and
+    // wrongly fire stack rows on the second add.)
+    var nosink_ctx = base_ctx;
+    nosink_ctx.sink = null;
+    nosink_ctx.other_sink = null;
+    var esi: usize = ecs.components.inv_equip_start;
+    while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+        const seen_idx = esi - ecs.components.inv_equip_start;
+        const slot = inv.slots[esi];
+        const cur_id: u16 = if (slot.count == 0) 0 else slot.item_id;
+        const prev_id = c.equip_seen[seen_idx];
+        if (cur_id == prev_id) continue;
+        c.equip_seen[seen_idx] = cur_id;
+        if (prev_id != 0) {
+            if (self.items.byId(prev_id)) |old_def| {
+                if (old_def.triggered.len != 0) {
+                    var sctx = nosink_ctx;
+                    sctx.item_equipped = true;
+                    const res = assets_buffs.evaluateRows(old_def.triggered, .equip_stop, sctx, &req_counts);
+                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                    applyEquipStop(self, ps, &res);
+                }
+            }
+        }
+        if (cur_id != 0) {
+            if (self.items.byId(cur_id)) |new_def| {
+                if (new_def.triggered.len != 0) {
+                    var sctx = nosink_ctx;
+                    sctx.item_equipped = true;
+                    sctx.item_active = (slot.flags & 1) != 0;
+                    sctx.item_tags = new_def.tags;
+                    sctx.item_quality = slot.quality;
+                    var mod_buf: [4]requirements.NameLevel = undefined;
+                    sctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &mod_buf);
+                    const res = assets_buffs.evaluateRows(new_def.triggered, .equip_start, sctx, &req_counts);
+                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                    applyEquipStart(self, c, ps, &res);
+                }
+            }
+        }
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// Apply an equip-start result: marker buffs land (gated adds relay), cvar
+/// writes already landed through the ctx store during evaluation.
+fn applyEquipStart(self: *Game, c: *Client, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult) void {
+    for (res.add_buffs[0..res.add_n]) |names| {
+        var it = std.mem.splitScalar(u8, names, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            _ = addCatalogBuff(self, c.entity_id, ps, name, c.entity_id);
+        }
+    }
+}
+
+/// Apply an equip-stop result: flagged removals reap through the buff tick
+/// (relayed once there), RemoveCVar lists already cleared during evaluation.
+fn applyEquipStop(self: *Game, ps: ecs.Slot, res: *const assets_buffs.TriggeredResult) void {
+    const set = self.sim.buffsMut(ps);
+    for (res.remove_buffs[0..res.remove_n]) |names| {
+        var it = std.mem.splitScalar(u8, names, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            const def_id = self.buffs.indexOfName(name) orelse continue;
+            _ = ecs.buff.remove(set, def_id);
+        }
     }
 }
 
