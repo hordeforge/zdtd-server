@@ -2298,10 +2298,11 @@ fn syncEquipMarkers(self: *Game, c: *Client, ps: ecs.Slot, base_ctx: requirement
         const seen_idx = esi - ecs.components.inv_equip_start;
         const slot = inv.slots[esi];
         const cur_id: u16 = if (slot.count == 0) 0 else slot.item_id;
-        const prev_id = c.equip_seen[seen_idx];
-        if (cur_id == prev_id) continue;
-        c.equip_seen[seen_idx] = cur_id;
-        if (prev_id != 0) {
+        const prev = c.equip_seen[seen_idx];
+        const prev_id: u16 = prev.id;
+        if (cur_id == prev_id and (cur_id == 0 or slot.quality == prev.quality)) continue;
+        c.equip_seen[seen_idx] = .{ .id = cur_id, .quality = slot.quality };
+        if (prev_id != 0 and cur_id != prev_id) {
             if (self.items.byId(prev_id)) |old_def| {
                 if (old_def.triggered.len != 0) {
                     var sctx = nosink_ctx;
@@ -2320,11 +2321,20 @@ fn syncEquipMarkers(self: *Game, c: *Client, ps: ecs.Slot, base_ctx: requirement
                     sctx.item_active = (slot.flags & 1) != 0;
                     sctx.item_tags = new_def.tags;
                     sctx.item_quality = slot.quality;
+                    // Item-parent curves index valueList by quality tier
+                    // (minevents.md Execute IL=154).
+                    sctx.item_level = slot.quality;
                     var mod_buf: [4]requirements.NameLevel = undefined;
                     sctx.item_mods = fillItemMods(self, slot.mods, slot.mod_qualities, &mod_buf);
-                    const res = assets_buffs.evaluateRows(new_def.triggered, .equip_start, sctx, &req_counts);
-                    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
-                    applyEquipStart(self, c, ps, &res);
+                    if (cur_id != prev_id) {
+                        const res = assets_buffs.evaluateRows(new_def.triggered, .equip_start, sctx, &req_counts);
+                        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                        applyEquipStart(self, c, ps, &res);
+                    } else {
+                        // Same piece, new quality: tier-curved cvars refresh.
+                        const res = assets_buffs.evaluateRows(new_def.triggered, .equip_update, sctx, &req_counts);
+                        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+                    }
                 }
             }
         }

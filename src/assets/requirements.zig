@@ -299,6 +299,11 @@ pub const Ctx = struct {
     /// ModifyCVar rows index `valueList[level-1]` from this (stock reads
     /// MinEventParams.ProgressionValue.CalculatedLevel). Null = no hint.
     progression_level: ?u8 = null,
+    /// Quality tier of the item whose rows are firing: item-parent
+    /// level-curved ModifyCVar rows index `valueList[quality-1]` (stock
+    /// scales valueList by item quality when ParentType is item,
+    /// minevents.md Execute IL=154). Null = no item in scope.
+    item_level: ?u8 = null,
     /// `WorldClock.day` for `IsDayNumber` (1-based, same as WorldTimeToDays).
     /// Null = no clock fold (refuse).
     day_number: ?u32 = null,

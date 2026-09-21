@@ -187,6 +187,10 @@ pub const Trigger = enum(u8) {
     /// them per tick from the worn slots rather than tracking equip edges.
     equip_start,
     equip_stop,
+    /// `onSelfEquipUpdate`: fired when a worn item's quality/mods change
+    /// (tier-curved cvars like $enforcerBuffResistance index valueList by
+    /// the item's quality). Same reconcile path as the equip edges.
+    equip_update,
     other,
 };
 
@@ -1598,6 +1602,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfDamagedBlock")) return .block_damaged;
     if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
     if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;
+    if (std.mem.eql(u8, s, "onSelfEquipUpdate")) return .equip_update;
     return .other;
 }
 
@@ -1842,9 +1847,12 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
                 // A level-curved `value="a,b,c"` indexes valueList[level-1]
                 // when the event carries the row's ProgressionValue (stock
                 // Execute IL: CalculatedLevel); the progression-update caller
-                // supplies the changing perk's level.
+                // supplies the changing perk's level. Item-parent rows index
+                // by the firing item's quality tier instead (minevents.md
+                // Execute IL=154 scales valueList by item quality).
+                const curve_level: u8 = ctx.item_level orelse ctx.progression_level orelse 1;
                 const v = if (tr.value_list_n > 0 and tr.value_cvar.len == 0)
-                    tr.value_list[@min(tr.value_list_n, @max(1, ctx.progression_level orelse 1)) - 1]
+                    tr.value_list[@min(tr.value_list_n, @max(1, curve_level)) - 1]
                 else if (tr.value_cvar.len > 0) store.get(tr.value_cvar) else tr.value;
                 _ = store.apply(tr.cvar, tr.cvar_op, v);
             },

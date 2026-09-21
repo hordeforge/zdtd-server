@@ -8877,8 +8877,9 @@ test "equipping rogue boots grants the worn marker buff and unequipping removes 
     try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
     try g.step();
     try std.testing.expect(g.sim.buffs[ps].find(marker) != null);
-    // Q6 seeds the fall-damage cvar through the tier-gated start rows.
-    try std.testing.expect(cl.cvars.get("$rogueBootFallDMG") > 0);
+    // Q6 seeds the tier-curved fall-damage cvar at its top tier (.08484):
+    // item-parent value lists index by quality (minevents.md Execute IL=154).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.08484), cl.cvars.get("$rogueBootFallDMG"), 0.0001);
     // Unequip: the marker reaps on the next tick.
     var free: u16 = 0;
     for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start], 0..) |s, i| {
