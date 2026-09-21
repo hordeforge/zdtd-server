@@ -3469,6 +3469,30 @@ test "reserved and admin slots let privileged players join a full server" {
     try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "1004" }));
 }
 
+test "ServerReservedSlots=0 disables the reserved over-cap tier" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    // reserved_slots defaults to 0 (= disabled). A perm-0 admin must not
+    // climb past max via the reserved formula privileged < max - 0.
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .max_players = 2,
+        .reserved_slots = 0,
+        .reserved_slots_permission = 0,
+        .admin_slots = 0,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "2001" });
+    _ = try g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "2002" });
+    try std.testing.expect(g.admin_list.add("Steam:2009", 0));
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, .{ .platform = "Steam", .id = "2009" }));
+}
+
 test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

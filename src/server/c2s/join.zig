@@ -113,11 +113,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // login time (after PackageIds), so the client shows "server
                 // full" instead of hanging. The tiered gate: normal players
                 // join while total < max; reserved-tier players (perm <=
-                // ServerReservedSlotsPermission) additionally need the
-                // reserved slots free (privileged occupants < max -
+                // ServerReservedSlotsPermission) need ServerReservedSlots > 0
+                // and free reserved seats (privileged occupants < max -
                 // ServerReservedSlots); the admin tier (ServerAdminSlots > 0
                 // and perm <= ServerAdminSlotsPermission) joins while total <
-                // max + ServerAdminSlots.
+                // max + ServerAdminSlots. A zero reserved/admin count disables
+                // that tier (GAME_OPTIONS).
                 const incoming_perm = self.permLevelOf(c);
                 var total: u16 = 0;
                 var privileged: u16 = 0;
@@ -127,7 +128,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (self.permLevelOf(cl) <= self.reserved_slots_permission) privileged += 1;
                 }
                 var cap_ok = total < self.max_players;
-                if (!cap_ok and incoming_perm <= self.reserved_slots_permission) {
+                // ServerReservedSlots=0 disables the reserved tier (GAME_OPTIONS /
+                // PlayerSlotsAuthorizer); without this gate a perm-0 admin could
+                // still climb past max via privileged < max - 0.
+                if (!cap_ok and self.reserved_slots > 0 and incoming_perm <= self.reserved_slots_permission) {
                     cap_ok = privileged < (self.max_players -| self.reserved_slots);
                 }
                 if (!cap_ok and self.admin_slots > 0 and incoming_perm <= self.admin_slots_permission) {

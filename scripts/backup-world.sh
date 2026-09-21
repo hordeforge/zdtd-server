@@ -15,12 +15,19 @@ if [[ $# -lt 1 || $# -gt 3 ]]; then
   exit 2
 fi
 
-WORLD_DIR=$(cd -- "$1" && pwd)
 KEEP=${3:-7}
 if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
   echo "zdtd: keep must be a positive integer, got '$KEEP'" >&2
   exit 2
 fi
+
+# Resolve after the existence check so a missing path prints our message
+# instead of a bare `cd: ... No such file or directory` from the shell.
+if [[ ! -d "$1" ]]; then
+  echo "zdtd: world_dir not a directory: $1" >&2
+  exit 1
+fi
+WORLD_DIR=$(cd -- "$1" && pwd)
 
 if [[ $# -ge 2 && -n "${2}" ]]; then
   mkdir -p -- "$2"
@@ -47,11 +54,6 @@ if [[ -e "$DEST" ]]; then
   DEST="$BACKUP_ROOT/${BASE}-${STAMP}.$$"
 fi
 
-if [[ ! -d "$WORLD_DIR" ]]; then
-  echo "zdtd: world_dir not a directory: $WORLD_DIR" >&2
-  exit 1
-fi
-
 # Staging dir then rename so a killed copy never looks like a complete backup.
 STAGE="$DEST.partial.$$"
 rm -rf -- "$STAGE"
@@ -72,8 +74,12 @@ fi
 mv -- "$STAGE" "$DEST"
 echo "zdtd: backup $DEST ($file_count files)"
 
-# Rotate: keep the newest KEEP backups for this world basename.
-mapfile -t OLD < <(ls -1d -- "$BACKUP_ROOT/${BASE}-"* 2>/dev/null | sort -r || true)
+# Rotate: keep the newest KEEP complete backups for this world basename.
+# Skip leftover `*.partial.*` staging dirs so an interrupted copy cannot
+# inflate the count and rotate a finished backup out.
+mapfile -t OLD < <(
+  ls -1d -- "$BACKUP_ROOT/${BASE}-"* 2>/dev/null | grep -v '\.partial\.' | sort -r || true
+)
 if ((${#OLD[@]} > KEEP)); then
   for ((i = KEEP; i < ${#OLD[@]}; i++)); do
     rm -rf -- "${OLD[$i]}"
