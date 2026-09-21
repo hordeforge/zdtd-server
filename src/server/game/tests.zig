@@ -1799,6 +1799,13 @@ test "setgamepref applies runtime GameStats prefs and broadcasts" {
     g.runAdminLine("setgamepref BloodMoonFrequency 14", "test");
     try std.testing.expectEqual(@as(u32, 14), g.sim.director.clock.bloodmoon_frequency);
 
+    // DropOnDeath mode 4 (delete all) is stock-valid; the runtime clamp must
+    // match serverconfig's 0..4, not stop at 3.
+    g.runAdminLine("setgamepref DropOnDeath 4", "test");
+    try std.testing.expectEqual(@as(u8, 4), g.drop_on_death);
+    g.runAdminLine("setgamepref DropOnDeath 9", "test");
+    try std.testing.expectEqual(@as(u8, 4), g.drop_on_death);
+
     // Unknown / startup-only prefs keep the read-only reply and touch nothing.
     const info_port_before = g.info_port;
     g.runAdminLine("setgamepref ServerPort 9999", "test");
@@ -8219,9 +8226,9 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     try std.testing.expectEqual(@as(u32, 3), g_on.sim.countKind(.zombie));
     try std.testing.expectEqual(@as(u32, 1), g_on.sim.countKind(.animal));
 
-    // `[sim] demo_seed = false` takes the whole near-spawn demo set with it:
-    // the trader, the minibike, the seed chest and the demo turret, not just
-    // the hostiles. docs/DIVERGENCES.md 6.2 documents the pair.
+    // `[sim] demo_seed = false` drops the props (trader, minibike, seed chest,
+    // demo turret) but leaves hostiles to `starter_zombies` (default true).
+    // Both false is the stock-lazy fresh world (docs/DIVERGENCES.md 6.2).
     const none_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "none" });
     defer std.testing.allocator.free(none_dir);
     io_fs.mkdirPath(none_dir);
@@ -8230,8 +8237,8 @@ test "starter_zombies gates the near-spawn demo hostiles" {
         g_none.deinit();
         std.testing.allocator.destroy(g_none);
     }
-    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.zombie));
-    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.animal));
+    try std.testing.expectEqual(@as(u32, 3), g_none.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 1), g_none.sim.countKind(.animal));
     try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.trader));
     try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.vehicle));
     try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.turret));
@@ -8239,6 +8246,35 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     try std.testing.expect(g_on.sim.countKind(.trader) > 0);
     try std.testing.expect(g_on.sim.countKind(.vehicle) > 0);
     try std.testing.expect(g_on.sim.countKind(.turret) > 0);
+}
+
+test "compact InvTx unknown op fails closed" {
+    // Compact InvTx is the loadgen/fixture fallback. Unknown ops past equip
+    // used to map to `.list` and ack success; they must reject instead.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, root, 0, .{
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const rejects_before = g.harness.counters.get(.c2s_rejects);
+    var txb: [32]u8 = undefined;
+    var fb: [128]u8 = undefined;
+    const bad = try packages.buildInvTxRequest(&txb, 99, 0, 0, 0, -1);
+    cap.clear();
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", bad));
+    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
+    const resp_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
+    const resp = cap.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), resp[0]);
 }
 
 test "spawn_starter_kit config replaces the built-in kit and fails closed" {

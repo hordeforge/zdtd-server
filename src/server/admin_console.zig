@@ -1018,7 +1018,8 @@ pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
     } else if (std.mem.eql(u8, name, "PlayerKillingMode")) {
         self.pvp_mode = @intCast(@min(@max(v, 0), 3));
     } else if (std.mem.eql(u8, name, "DropOnDeath")) {
-        self.drop_on_death = @intCast(@min(@max(v, 0), 3));
+        // Stock modes 0..4 (4 = delete all); matches serverconfig clamp in config.zig.
+        self.drop_on_death = @intCast(@min(@max(v, 0), 4));
     } else if (std.mem.eql(u8, name, "DeathPenalty")) {
         self.death_penalty = @intCast(@min(@max(v, 0), 3));
     } else if (std.mem.eql(u8, name, "LootRespawnDays")) {

@@ -389,7 +389,8 @@ fn applySandboxCode(cfg: *Config) void {
         } else if (std.mem.eql(u8, o.name, "AirDropFrequency")) {
             cfg.air_drop_frequency = sandboxIntU16(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "DropOnDeath")) {
-            cfg.drop_on_death = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            // Picker lists 0..6; sim/GameStats only define 0..4 (same as property path).
+            cfg.drop_on_death = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "DropOnQuit")) {
             cfg.drop_on_quit = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "AirDropMarker")) {
@@ -397,15 +398,15 @@ fn applySandboxCode(cfg: *Config) void {
         } else if (std.mem.eql(u8, o.name, "BiomeProgression")) {
             cfg.biome_progression = sandbox.valueI(o, set, g.index) != 0;
         } else if (std.mem.eql(u8, o.name, "DeathPenalty")) {
-            cfg.death_penalty = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            cfg.death_penalty = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 3);
         } else if (std.mem.eql(u8, o.name, "ZombieMove")) {
-            cfg.zombie_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            cfg.zombie_move = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "ZombieMoveNight")) {
-            cfg.zombie_move_night = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            cfg.zombie_move_night = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "ZombieFeralMove")) {
-            cfg.zombie_feral_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            cfg.zombie_feral_move = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "ZombieBMMove")) {
-            cfg.zombie_bm_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
+            cfg.zombie_bm_move = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         }
         // Accepted but with no zdtd consumer yet: skip silently (the code
         // still rides verbatim in GameStats(71) for the client's decode).
@@ -422,6 +423,12 @@ fn sandboxPct(v: f32) u16 {
 fn sandboxIntU8(v: i32) u8 {
     if (v < 0) return 0;
     if (v > 255) return 255;
+    return @intCast(v);
+}
+
+fn sandboxClampU8(v: i32, lo: u8, hi: u8) u8 {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
     return @intCast(v);
 }
 
@@ -676,6 +683,26 @@ test "sandbox code applies gameplay tuning (RE sandbox-options §5)" {
     // Untouched knobs keep stock defaults.
     try std.testing.expectEqual(@as(u8, 3), cfg.zombie_move_night);
     try std.testing.expectEqual(@as(u16, 100), cfg.block_damage_player);
+}
+
+test "sandbox DropOnDeath clamps picker 5/6 into sim range 0..4" {
+    // Option 27 DropOnDeath = "BB"; index 6 = 'G' -> picker value 6. Sim and
+    // serverconfig only define 0..4, so the overlay must clamp (not store 6).
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="SandboxCode" value="ABBG"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u8, 4), cfg.drop_on_death);
 }
 
 test "sandbox code invalid index falls back to option default" {

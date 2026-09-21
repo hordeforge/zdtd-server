@@ -889,11 +889,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             r = .{ .ok = self.tryCraft(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
         } else if (tx.op == @intFromEnum(invsys.Op.scrap)) {
             r = .{ .ok = self.tryScrap(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
+        } else if (tx.op > @intFromEnum(invsys.Op.equip)) {
+            // Compact path: craft/scrap are handled above; any other op past
+            // equip is unknown. Mapping unknowns to `.list` used to ack success
+            // with no mutation (fail-open); stock InvTx rejects instead.
+            r = .{ .ok = false };
+            self.harness.counters.inc(.c2s_rejects);
         } else {
-            const op: invsys.Op = if (tx.op <= @intFromEnum(invsys.Op.equip))
-                @enumFromInt(tx.op)
-            else
-                .list;
+            const op: invsys.Op = @enumFromInt(tx.op);
             // Per-surface quarantine, the same gate the Bag and TileEntity
             // arms apply. This one packet reaches both surfaces: open / take /
             // put mutate a container's contents, and place writes a world

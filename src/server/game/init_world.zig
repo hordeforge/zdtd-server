@@ -265,7 +265,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     var z1: ?i32 = null;
     var z2: ?i32 = null;
     var z3: ?i32 = null;
-    if (opts.starter_zombies and opts.demo_seed) {
+    // Hostiles are independent of `demo_seed` (trader/vehicle/chest/turret):
+    // both false is the stock-lazy fresh world (DIVERGENCES 6.2).
+    if (opts.starter_zombies) {
         const zdef = self.entities.defaultZombie();
         z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
         z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
