@@ -226,3 +226,31 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
+
+pub fn writeI32Le(buf: []u8, pos: *usize, v: i32) error{Overflow}!void {
+    if (pos.* + 4 > buf.len) return error.Overflow;
+    std.mem.writeInt(i32, buf[pos.*..][0..4], v, .little);
+    pos.* += 4;
+}
+
+pub fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!void {
+    var len = s.len;
+    while (true) {
+        if (pos.* >= buf.len) return error.Overflow;
+        // Low byte first; the | 0x80 below overwrites bit 7 with the
+        // continuation flag, so the discarded high bits shift down on the next
+        // iteration (same 7-bit length shape as the wire codec's writer).
+        const b: u8 = @truncate(len);
+        if (len < 0x80) {
+            buf[pos.*] = b;
+            pos.* += 1;
+            break;
+        }
+        buf[pos.*] = b | 0x80;
+        pos.* += 1;
+        len >>= 7;
+    }
+    if (pos.* + s.len > buf.len) return error.Overflow;
+    @memcpy(buf[pos.* .. pos.* + s.len], s);
+    pos.* += s.len;
+}

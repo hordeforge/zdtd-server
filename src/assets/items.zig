@@ -755,33 +755,8 @@ pub const ItemTable = struct {
     }
 };
 
-fn writeI32Le(buf: []u8, pos: *usize, v: i32) error{Overflow}!void {
-    if (pos.* + 4 > buf.len) return error.Overflow;
-    std.mem.writeInt(i32, buf[pos.*..][0..4], v, .little);
-    pos.* += 4;
-}
-
-fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!void {
-    var len = s.len;
-    while (true) {
-        if (pos.* >= buf.len) return error.Overflow;
-        // Low byte first; the | 0x80 below overwrites bit 7 with the
-        // continuation flag, so the discarded high bits shift down on the next
-        // iteration (same 7-bit length shape as the wire codec's writer).
-        const b: u8 = @truncate(len);
-        if (len < 0x80) {
-            buf[pos.*] = b;
-            pos.* += 1;
-            break;
-        }
-        buf[pos.*] = b | 0x80;
-        pos.* += 1;
-        len >>= 7;
-    }
-    if (pos.* + s.len > buf.len) return error.Overflow;
-    @memcpy(buf[pos.* .. pos.* + s.len], s);
-    pos.* += s.len;
-}
+const writeI32Le = item_parse.writeI32Le;
+const writeDotNetString = item_parse.writeDotNetString;
 
 /// Action0/1 Class property equals `want` (ItemActionEat → Class="Eat").
 const item_parse = @import("item_parse.zig");
