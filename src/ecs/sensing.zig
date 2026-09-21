@@ -12,6 +12,7 @@ const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const query = @import("query.zig");
 const senseDistSq = @import("ai_tasks.zig").senseDistSq;
+const applyGravity = @import("damage_apply.zig").applyGravity;
 
 pub fn lodScale(w: *const World, d2: f32) f32 {
     if (d2 < w.rules.ai.mid_dist_sq) return 1.0;
@@ -690,4 +691,96 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
     w2.smell_fn = &FarSmell.radius;
     const t2 = nearestPlayerSnap(&w2, &far_snaps, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, -1), t2.id);
+}
+
+test "AI move: collide-and-slide stops at a wall and slides along it" {
+    // RE entity-movement.md: the stock body is a CharacterController capsule,
+    // so a wall stops only the facing axis and the body slides along the face
+    // instead of clipping or gluing. Body radius 0.35, wall plane at x=5.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x == 5 and y >= 70 and y <= 72 and z >= -3 and z <= 3;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    // Straight into the wall: the body must stop short of x=5 (edge rests at
+    // the face, never entering the wall cell). ~42 ticks to cover 4.65 m.
+    for (0..80) |_| stepToward(&w, s, 50, 0, 2.2, 0.05);
+    try std.testing.expect(w.transform[s].x > 3.0 and w.transform[s].x < 5.0);
+    const x_blocked = w.transform[s].x;
+    // Diagonally (+x, +z): X stays blocked at the face while Z slides along it
+    // until the body reaches the wall's end (z edge stops at ~2.65).
+    const z_start = w.transform[s].z;
+    for (0..60) |_| stepToward(&w, s, 50, 8, 2.2, 0.05);
+    try std.testing.expectApproxEqAbs(x_blocked, w.transform[s].x, 0.02);
+    try std.testing.expect(w.transform[s].z > z_start + 1.0 and w.transform[s].z < 3.0);
+}
+test "AI move: a 1-high ledge is stepped up, not blocked" {
+    // Stock CC stepOffset: a horizontal move into a block is retried with the
+    // feet lifted by step_height, so a zombie climbs a full block. Ground at
+    // y=69 (top 70); the ledge block at (x=6, y=70) adds a 1-high step (top
+    // 71). Without step-up the body would pin at the ledge face; with it the
+    // zombie crosses and gravity re-settles it to the ground behind.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Ledge = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return y == 69 or (x == 6 and y == 70 and z >= -3 and z <= 3);
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ledge.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    for (0..120) |_| {
+        stepToward(&w, s, 12, 0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+    }
+    // Crossed the block; the body stepped up to 71 over the ledge and then
+    // settled back onto the ground (top 70) behind it.
+    try std.testing.expect(w.transform[s].x > 8.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 70.0), w.transform[s].y, 0.01);
+}
+test "AI move: airborne body falls under gravity and lands on the first solid cell" {
+    // RE entity-movement.md: the vertical leg integrates gravity and lands on
+    // the first solid cell below (block top y=71 for ground at y=70). An idle
+    // body (applyGravity alone, no horizontal intent) still settles.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y == 70;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Ground.solid;
+    const zs = w.spawnZombie(0, 75, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    for (0..200) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 71.0), w.transform[s].y, 0.001);
+    try std.testing.expectEqual(@as(f32, 0.0), w.zombie_ai[s].vy);
+}
+test "AI move: wander target inside a wall does not clip through it" {
+    // The old wander used a straight-line step, so a wander pick inside a
+    // building walked the body through the wall. The collide-and-slide stops
+    // the body at the face even when the goal cell is unreachable.
+    var w: World = .{ .rules = .{ .ai = .{ .body_radius = 0.35, .body_height = 1.8, .step_height = 1.0 } } };
+    defer w.deinit();
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+            return x >= 5 and x <= 8 and y >= 70 and y <= 72 and z >= -3 and z <= 3;
+        }
+    };
+    w.solid_ctx = null;
+    w.solid_fn = &Wall.solid;
+    const zs = w.spawnZombie(0, 70, 0, 40).?;
+    const s = w.slotOfNetId(zs).?;
+    // Goal inside the wall block: the body stops at the near face (x < 5).
+    for (0..80) |_| stepToward(&w, s, 6, 0, 2.2, 0.05);
+    try std.testing.expect(w.transform[s].x < 5.0);
 }

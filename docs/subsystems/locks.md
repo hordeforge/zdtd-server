@@ -6,7 +6,7 @@ Sources: [`src/ecs/poi_lock.zig`](../../src/ecs/poi_lock.zig), [`src/ecs/compone
 
 ## Ownership and boundary
 
-The lockout lives in the sim because every quest path already runs there: accepting a quest stores a POI rectangle on the quest slot, an `UnlockPOI` quest action releases the holder, and a quest that ends releases it again (`src/ecs/systems.zig:1041`, `:835`, `:983`). The table is a fixed ECS array of 64 entries, each holding a rectangle, up to eight quester entity ids, the locked flag, the lockout deadline and the grace applied when the last quester leaves (`src/ecs/poi_lock.zig:23`, `:28`):
+The lockout lives in the sim because every quest path already runs there: accepting a quest stores a POI rectangle on the quest slot, an `UnlockPOI` quest action releases the holder, and a quest that ends releases it again (`src/ecs/quest_trade.zig:543`, `:549`, `:267`). The table is a fixed ECS array of 64 entries, each holding a rectangle, up to eight quester entity ids, the locked flag, the lockout deadline and the grace applied when the last quester leaves (`src/ecs/poi_lock.zig:23`, `:28`):
 
 ```zig
 pub const Lock = struct {
@@ -50,7 +50,7 @@ Locking a live rectangle only adds a quester, so a shared party thickens one ent
         }
 ```
 
-Removing a quester swaps the tail into the hole; when the last quester leaves a still-locked entry, the lock flips to unlocked and the deadline is stamped at the world time plus the grace, with a saturating add so the world time cannot wrap it into the past (`src/ecs/poi_lock.zig:54`). An entry is removable only when unlocked and the world time is strictly past the deadline, which is stock's `CheckQuestLock` (`src/ecs/poi_lock.zig:70`). The read path drops an expired entry and otherwise reports the deadline (`src/ecs/poi_lock.zig:140`). Lookup is a linear scan over the live prefix on a point-in-rectangle test (`src/ecs/poi_lock.zig:81`), using the stock `Rect.Contains` convention, minimum edge inclusive and maximum edge exclusive (`src/ecs/components.zig:624`, `src/ecs/poi_lock.zig:171`). Exits are per-entity: a quest that ends or a player entity that dies drops that entity's quester row from every lock (`src/ecs/systems.zig:983`, `src/ecs/world.zig:840`).
+Removing a quester swaps the tail into the hole; when the last quester leaves a still-locked entry, the lock flips to unlocked and the deadline is stamped at the world time plus the grace, with a saturating add so the world time cannot wrap it into the past (`src/ecs/poi_lock.zig:54`). An entry is removable only when unlocked and the world time is strictly past the deadline, which is stock's `CheckQuestLock` (`src/ecs/poi_lock.zig:70`). The read path drops an expired entry and otherwise reports the deadline (`src/ecs/poi_lock.zig:140`). Lookup is a linear scan over the live prefix on a point-in-rectangle test (`src/ecs/poi_lock.zig:81`), using the stock `Rect.Contains` convention, minimum edge inclusive and maximum edge exclusive (`src/ecs/components.zig:624`, `src/ecs/poi_lock.zig:171`). Exits are per-entity: a quest that ends or a player entity that dies drops that entity's quester row from every lock (`src/ecs/quest_trade.zig:267`, `src/ecs/world.zig:840`).
 
 ## The rally-marker lockout
 
