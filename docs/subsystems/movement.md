@@ -159,7 +159,7 @@ resolves the hull from server state rather than from the packet, and a mount res
 claimed vehicle id and asks the sim (`src/server/c2s/misc.zig:1228-1244`).
 `systems.vehicleAttach` refuses a requested seat at or above the usable count, returns the
 seat already held, and otherwise requires the rider within `rules.ai.mount_range_sq` and
-detaches from any other hull first (`src/ecs/systems.zig:3368-3386`). `seatRider`
+detaches from any other hull first (`src/ecs/vehicle.zig:104-122`). `seatRider`
 broadcasts the resolved seat index, which is the whole of "passengers render in the right
 seat"; `unseatRider` broadcasts detach with vehicle id and slot both -1, and a late joiner
 gets current occupancy replayed (`src/server/game/vehicle.zig:14-71`). The sim copies the

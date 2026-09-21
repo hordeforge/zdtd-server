@@ -71,10 +71,10 @@ The rules are: a requested slot at or above `usableSeats()` is refused; re-reque
 already held, or `-1` while held, returns that seat unchanged; a fresh mount must be within
 `rules.ai.mount_range_sq` of the hull and detaches the rider from any other hull first; a full
 vehicle returns null; and an explicit request for an occupied seat is refused rather than evicting
-the sitting rider (`src/ecs/systems.zig:3382-3412`). `seat_any` is `-1`, the wire sentinel the stock
-client always mounts with (`src/ecs/systems.zig:3346-3348`). `vehicleDetach` resolves the hull from
+the sitting rider (`src/ecs/vehicle.zig:104-147`). `seat_any` is `-1`, the wire sentinel the stock
+client always mounts with (`src/ecs/vehicle.zig:73`). `vehicleDetach` resolves the hull from
 server occupancy, frees the seat, and stops the hull only when the freed seat is the driver seat
-(`src/ecs/systems.zig:3423-3431`).
+(`src/ecs/vehicle.zig:148-162`).
 
 `seatRider` calls the sim and broadcasts the resolved seat, which is the whole of "passengers render
 in the right seat" (`src/server/game/vehicle.zig:19-29`). `unseatRider` broadcasts detach with
@@ -119,11 +119,11 @@ pub const Vehicle = struct {
 
 `vehicleControl` requires a live vehicle with a seated driver, clamps speed to `max_speed` or the
 per-kind default when the XML value is missing, scales yaw by speed fraction and input, and burns
-fuel per block travelled for every kind except the bicycle (`src/ecs/systems.zig:3315-3333`). Kind
+fuel per block travelled for every kind except the bicycle (`src/ecs/vehicle.zig:31-60`). Kind
 defaults are the stock `velocityMax_turbo` first components: bicycle 6, minibike 7, motorcycle 9.8,
-4x4 10, gyrocopter 9 (`src/ecs/systems.zig:3305-3313`). `vehicleTickHeld` re-applies the last input
+4x4 10, gyrocopter 9 (`src/ecs/vehicle.zig:21-30`). `vehicleTickHeld` re-applies the last input
 every sim tick, because the stock client may send drive packages sparsely
-(`src/ecs/systems.zig:3345-3354`).
+(`src/ecs/vehicle.zig:61-72`).
 
 ## Sim tick
 
@@ -131,9 +131,9 @@ every sim tick, because the stock client may send drive packages sparsely
 (`src/ecs/schedule.zig:102`, `src/ecs/rules.zig:41`). It integrates vertical velocity with
 `rules.vehicle.gravity`, clamps the hull to the terrain top with no sink below the surface, and then
 copies the hull transform onto every seated rider with the Y offset of 1, because the client parents
-the rider to the seat itself (`src/ecs/systems.zig:3245-3290`). A rider whose entity no longer
+the rider to the seat itself (`src/ecs/vehicle.zig:164-209`). A rider whose entity no longer
 exists frees its seat, and losing seat 0 stops the hull so a dead driver cannot leave an undriveable
-vehicle (`src/ecs/systems.zig:3276-3281`).
+vehicle (`src/ecs/vehicle.zig:195-200`).
 
 ## Spawn, wire and persistence
 

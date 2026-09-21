@@ -1262,3 +1262,416 @@ test "isBestTask: approach preempts wander, wander cannot preempt approach" {
     try std.testing.expect(isBestTask(look, .none));
     try std.testing.expect(isBestTask(look, .look));
 }
+
+test "seekYawStep: wrap, per-tick clamp, slowdown floor, exact snap" {
+    // Far from target: full MaxTurnSpeed, clamped to speed*dt per tick.
+    const a = seekYawStep(0, 180, 250, 35, 20.0, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), a, 0.001);
+    // Shortest arc across the 0/360 seam: 350 -> 60 turns +70, not -290, and
+    // the 12.5 deg step wraps the result back into [0,360).
+    const b = seekYawStep(350, 60, 250, 35, 20.0, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), b, 0.001);
+    // And the other way: 10 -> 300 turns -70, wrapping below zero.
+    const cc = seekYawStep(10, 300, 250, 35, 20.0, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 357.5), cc, 0.001);
+    // Negative input yaw (stepToward writes atan2 in [-180,180]) normalizes.
+    try std.testing.expectApproxEqAbs(@as(f32, 350.0), seekYawStep(-10, -10, 250, 35, 20.0, 0.05), 0.001);
+    // Inside slow_at the speed is max_turn*(d/slow_at)^2: d=17.5 -> 250*0.25=62.5.
+    const d = seekYawStep(0, 17.5, 250, 35, 20.0, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.125), d, 0.001);
+    // Deep inside slow_at the 20 deg/s floor takes over: d=1 -> 250*(1/35)^2
+    // = 0.204 < 20, so speed 20 and a 0.05 s step of 1.0 exactly reaches it.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), seekYawStep(0, 1, 250, 35, 20.0, 0.05), 0.001);
+    // Never overshoot: a step larger than the remaining delta snaps exactly.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), seekYawStep(0, 0.5, 250, 35, 20.0, 1.0), 0.001);
+    // Zero delta is a no-op, not an oscillation.
+    try std.testing.expectApproxEqAbs(@as(f32, 90.0), seekYawStep(90, 90, 250, 35, 20.0, 0.05), 0.001);
+}
+
+test "system zombie looks around after reaching its wander destination" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    // Snap the destination onto the entity: stock's noPathAndNotPlanningOne
+    // (path finished) branch of EAIWander::Continue.
+    w.zombie_ai[zs].wander_tx = w.transform[zs].x;
+    w.zombie_ai[zs].wander_tz = w.transform[zs].z;
+    _ = systemZombieAi(&w, 0.05);
+    // Continue() failed -> task stopped -> EAIWander::Reset seeded lookTime.
+    try std.testing.expectEqual(c.TaskId.none, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.zombie_ai[zs].look_time >= w.rules.ai.wander_look_min_s);
+    try std.testing.expect(w.zombie_ai[zs].look_time <= w.rules.ai.wander_look_max_s);
+    // Wander is data-blocked while lookTime > 0, so the next pass picks Look.
+    var t: f32 = 0;
+    while (t < 8.0 and w.zombie_ai[zs].active_task != .look) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.look, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(@as(f32, 0), w.zombie_ai[zs].look_time);
+    try std.testing.expect(w.zombie_ai[zs].look_wait > 0);
+}
+test "system zombie look holds position, turns yaw, then wander resumes" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    // Seed the look directly (what Wander/ApproachSpot Reset does).
+    w.zombie_ai[zs].look_time = 3.0;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.look, w.zombie_ai[zs].active_task);
+    const x0 = w.transform[zs].x;
+    const z0 = w.transform[zs].z;
+    var yaw_prev = w.transform[zs].yaw;
+    var yaw_moved = false;
+    var t: f32 = 0;
+    while (t < 3.0 and w.zombie_ai[zs].active_task == .look) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (@abs(w.transform[zs].yaw - yaw_prev) > 0.001) yaw_moved = true;
+        yaw_prev = w.transform[zs].yaw;
+    }
+    try std.testing.expect(yaw_moved);
+    // Look does not move the entity (moveHelper.Stop()).
+    try std.testing.expectEqual(x0, w.transform[zs].x);
+    try std.testing.expectEqual(z0, w.transform[zs].z);
+    try std.testing.expectEqual(c.AiState.idle, w.zombie_ai[zs].state);
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+    // Owed time spent -> Continue() fails -> Wander is selectable again.
+    t = 0;
+    while (t < 10.0 and w.zombie_ai[zs].active_task != .wander) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
+}
+test "system zombie approach_spot arrival seeds a 5-8 s look" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].has_spot = true;
+    w.zombie_ai[zs].spot_x = 0.5;
+    w.zombie_ai[zs].spot_z = 0;
+    var t: f32 = 0;
+    while (t < 5.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].has_spot);
+    // One more pass: CanExecute fails, EAIApproachSpot::Reset runs.
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].look_time >= w.rules.ai.spot_look_base_s);
+    try std.testing.expect(w.zombie_ai[zs].look_time <= w.rules.ai.spot_look_base_s + w.rules.ai.spot_look_rand_s);
+}
+test "system zombie chases" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(3, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.transform[zs].x > 0.3);
+    // Task graph: a sensed player selects approach_attack and closes to melee.
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.attack, w.zombie_ai[zs].state);
+    try std.testing.expect(w.zombie_ai[zs].alert);
+}
+test "zombies chase faster at night (stock GetMoveSpeedAggro day/night split)" {
+    // RE entity-ai.md GetMoveSpeedAggro: dark → MoveSpeedAggro max (passive
+    // 134) else min (passive 133); the stock XML comment on the prop ("min/max
+    // (like day or night)") pins the split. A zombie with aggro 0.2/1.25
+    // closes on a far player faster at night (hour 1, dark) than at day
+    // (hour 12); World.IsDark IL=31 bounds night as hour < dawn || hour > dusk.
+    var day_x: f32 = 0;
+    var night_x: f32 = 0;
+    {
+        var w: World = .{};
+        defer w.deinit();
+        w.director.clock.hours = 12;
+        const z = w.spawnZombieDef(0, 70, 0, 40, .{
+            .name = "zombieBoe",
+            .hash = 1,
+            .kind = .zombie,
+            .chase_speed = 1.25,
+            .chase_speed_day = 0.2,
+            .wander_speed = 0.08,
+        }).?;
+        _ = w.spawnPlayer(8, 70, 0, 0);
+        const zs = w.slotOfNetId(z).?;
+        var t: f32 = 0;
+        while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+        day_x = w.transform[zs].x;
+    }
+    {
+        var w: World = .{};
+        defer w.deinit();
+        w.director.clock.hours = 1;
+        const z = w.spawnZombieDef(0, 70, 0, 40, .{
+            .name = "zombieBoe",
+            .hash = 1,
+            .kind = .zombie,
+            .chase_speed = 1.25,
+            .chase_speed_day = 0.2,
+            .wander_speed = 0.08,
+        }).?;
+        _ = w.spawnPlayer(8, 70, 0, 0);
+        const zs = w.slotOfNetId(z).?;
+        var t: f32 = 0;
+        while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+        night_x = w.transform[zs].x;
+    }
+    // Night chase (aggro max 1.25 ×1.6 ≈ 2 m/s) outpaces day chase (aggro min
+    // 0.2 ×1.6 ≈ 0.32 m/s) by a wide margin over the same 2 s window; day
+    // still closes (the chase task is active, not frozen).
+    try std.testing.expect(night_x > day_x * 2.0);
+    try std.testing.expect(day_x > 0.1);
+}
+test "system zombie paths around solid wall via A*" {
+    // Zombie at 0, player at 4: the straight line is blocked.
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = testWallStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 8.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    // Should have progressed toward the player (around the wall), not stuck at x~1.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+test "wandering zombie paths around a wall via A*" {
+    // Stock EAIWander walks to the spot on the navmesh; the straight-line
+    // stepToward slid a wanderer into the obstacle. With step_fn wired, the
+    // wander uses the same A* chase machinery and detours around the wall.
+    // (startTask(.wander) re-seeds the wander spot, so this drives
+    // wanderUpdate directly with a fixed target.)
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = testWallStep; // wall at x=2, z=-2..2
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    const ai = &w.zombie_ai[zs];
+    // Wander target beyond the wall.
+    ai.wander_tx = 6;
+    ai.wander_tz = 0;
+    var t: f32 = 0;
+    while (t < 10.0) : (t += 0.05) {
+        wanderUpdate(&w, zs, ai, 2.0, 0.05);
+        applyGravity(&w, zs, 0.05);
+    }
+    // Detoured around the z=-2..2 wall segment instead of sliding against it.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expectEqual(c.AiState.wander, ai.state);
+}
+test "chase reuses one solve for many steps instead of replanning per metre" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate stays open
+    w.class_table[1].sight_light_min = -2.0; // stock zombie threshold (noon reach)
+    w.class_table[1].sight_light_max = 150.0;
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(10, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
+    var replans: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        replans += w.path_replans.load(.monotonic);
+    }
+    // ~9 m of open-field chase: one solve buffers 8 cells, so a handful of
+    // replans, not one per waypoint arrival (which used to reset the throttle).
+    try std.testing.expect(w.transform[zs].x > 7.0);
+    try std.testing.expect(replans <= 4);
+}
+test "chase of a walking target stays under the replan throttle" {
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const p = w.spawnPlayer(6, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.slotOfNetId(p).?;
+    var replans: u32 = 0;
+    var ticks: u32 = 0;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) {
+        // Player walks away faster than the zombie closes, so the goal cell
+        // moves on most ticks.
+        w.transform[ps].x += 0.15;
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        replans += w.path_replans.load(.monotonic);
+        ticks += 1;
+    }
+    try std.testing.expect(w.transform[zs].x > 4.0);
+    // The throttle is 0.35 s, so 4 s of chase can afford about a dozen solves;
+    // one per tick (80) is what the old waypoint-arrival reset produced.
+    try std.testing.expect(replans <= 14);
+}
+test "budget-denied tick still walks the buffered path" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate stays open
+    w.class_table[1].sight_light_min = -2.0; // stock zombie threshold (noon reach)
+    w.class_table[1].sight_light_max = 150.0;
+    w.step_fn = path_mod.openStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    // Far enough that the buffer runs dry while still chasing (a body that
+    // reaches melee range clears its path instead of asking for a new one).
+    _ = w.spawnPlayer(14, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
+    // Prime the buffer, then close the budget on this slot.
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].currentWp() != null);
+    w.path_stride = 2;
+    w.path_tick = @intFromBool(zs % 2 == 0); // (slot + tick) % 2 != 0
+    try std.testing.expect(!w.pathBudgetAdmits(zs));
+    const x0 = w.transform[zs].x;
+    const before = w.path_replans.load(.monotonic);
+    // Long enough to walk the whole buffer dry, so a replan is really wanted.
+    var t: f32 = 0;
+    while (t < 5.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(before, w.path_replans.load(.monotonic));
+    try std.testing.expect(w.path_replans_denied.load(.monotonic) > 0);
+    try std.testing.expect(w.transform[zs].x > x0 + 0.5);
+}
+test "path budget stride spreads replans once demand exceeds the cap" {
+    var w: World = .{};
+    defer w.deinit();
+    // No demand: everyone is admitted.
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 1), w.path_stride);
+    w.path_replans.store(World.path_replans_per_tick * 3, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(@as(u32, 3), w.path_stride);
+    // Admission is a pure function of slot and tick, never of worker order.
+    // With stride 3 exactly one slot in three is admitted over a full cycle.
+    var admitted: u32 = 0;
+    var s: Slot = 0;
+    while (s < 30) : (s += 1) {
+        if (w.pathBudgetAdmits(s)) admitted += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 10), admitted);
+    // The stride never grows past the delay cap, whatever the demand.
+    w.path_replans.store(100000, .monotonic);
+    w.beginTick();
+    try std.testing.expectEqual(World.path_stride_max, w.path_stride);
+}
+test "zombie follows the path height instead of floating at spawn y" {
+    // Terrain rising one block per cell east; zombie spawned well above it.
+    const Ramp = struct {
+        fn step(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+            const h: i32 = 60 + @max(x, 0);
+            if (h - from_y > 1) return null;
+            return h;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = Ramp.step;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(5, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Snapped onto the ramp on the first solve, then climbed with it.
+    try std.testing.expect(w.transform[zs].x > 2.0);
+    try std.testing.expect(w.transform[zs].y >= 61);
+    try std.testing.expect(w.transform[zs].y <= 65);
+}
+test "zombie sealed in a box stays inside it" {
+    // 5x5 walled room around the origin, player outside.
+    const Box = struct {
+        fn step(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+            if (x <= -3 or x >= 3 or z <= -3 or z >= 3) return null;
+            return from_y;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = Box.step;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(8, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 6.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(w.transform[zs].x < 3.0);
+        try std.testing.expect(w.transform[zs].x > -3.0);
+    }
+    // Sealed in: the AI must ask for the wall to come down, not walk through it.
+    try std.testing.expect(w.zombie_ai[zs].path_blocked);
+}
+test "hurt zombie chases its attacker over the nearer player" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = w.spawnPlayer(3, 70, 0, 0); // near
+    const far = w.spawnPlayer(-20, 70, 0, 1).?;
+    var t: f32 = 0;
+    while (t < 0.5) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].target_id != far);
+    // Shot from behind by the far player: EAISetAsTargetIfHurt retargets,
+    // and the hit shoves the zombie away from the attacker (+x, toward the
+    // near player) with the knockback impulse.
+    const x_before = w.transform[zs].x;
+    _ = w.damageFrom(z, 5, far);
+    try std.testing.expect(w.zombie_ai[zs].kb_time > 0);
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(far, w.zombie_ai[zs].target_id);
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    try std.testing.expect(w.transform[zs].x > x_before + 0.2); // shove applied
+    // Let the shove finish, then verify the chase walks back toward the
+    // attacker: the 2 s run must move the body left of the shove endpoint.
+    while (w.zombie_ai[zs].kb_time > 0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const x_after_shove = w.transform[zs].x;
+    t = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.transform[zs].x < x_after_shove - 0.2);
+    // The window expires and the nearest-player sense takes over again.
+    w.zombie_ai[zs].revenge_time = 0.04;
+    _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[zs].revenge_target);
+}
+
+/// Wall at x=2, z=-2..2: passable everywhere else at the caller's own height.
+fn testWallStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
+    if (x == 2 and z >= -2 and z <= 2) return null;
+    return from_y;
+}
+
+/// Infinite wall at x=2: nothing gets past it.
+fn testSealedStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, _: i32) ?i32 {
+    if (x == 2) return null;
+    return from_y;
+}
+
+test "system zombie break_block when path fully blocked" {
+    // Impassable wall sealing zombie from player; A* fails → path_blocked → BreakBlock.
+    var w: World = .{};
+    defer w.deinit();
+    w.step_fn = testSealedStep;
+    w.step_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].path_blocked);
+    try std.testing.expectEqual(c.TaskId.break_block, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.chase, w.zombie_ai[zs].state);
+    try std.testing.expect(w.zombie_ai[zs].alert);
+}

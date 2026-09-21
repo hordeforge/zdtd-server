@@ -84,7 +84,7 @@ Trigger actuation is fail-closed: `activateTriggerAt` requires a registered trig
         var dirty = false;
 ```
 
-The call site is the server step, not the ECS schedule: the sim schedule documents that power resolution stays in `Game.step` because it needs the daylight flag (`src/ecs/schedule.zig:81`). The step computes `daylight` from the director clock and ticks the grid once per frame, then actuates powered doors and pushes the power visuals (`src/server/game/step.zig:265`). Turrets read the grid once per tick rather than scanning it per turret: the parallel turret pass snapshots a per-slot powered flag array first, and a turret with no power clears its target and does not fire (`src/ecs/systems.zig:3449`, `:3463`). A placed turret is registered as a consumer node linked to its entity id, and destroying the turret removes that node and its wires (`src/ecs/world.zig:1757`, `:854`).
+The call site is the server step, not the ECS schedule: the sim schedule documents that power resolution stays in `Game.step` because it needs the daylight flag (`src/ecs/schedule.zig:81`). The step computes `daylight` from the director clock and ticks the grid once per frame, then actuates powered doors and pushes the power visuals (`src/server/game/step.zig:265`). Turrets read the grid once per tick rather than scanning it per turret: the parallel turret pass snapshots a per-slot powered flag array first, and a turret with no power clears its target and does not fire (`src/ecs/turrets.zig:123`, `:137`). A placed turret is registered as a consumer node linked to its entity id, and destroying the turret removes that node and its wires (`src/ecs/world.zig:1757`, `:854`).
 
 ## Block data to node properties
 
