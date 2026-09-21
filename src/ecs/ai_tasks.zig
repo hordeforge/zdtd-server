@@ -2056,3 +2056,223 @@ fn seedDecoy(w: *World, x: f32, z: f32, lifetime: i32) i32 {
     };
     return bag;
 }
+
+test "system zombie wanders when no player sensed" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const x0 = w.transform[zs].x;
+    const z0 = w.transform[zs].z;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+    // Drifted somewhere (xorshift destination is off-origin).
+    const moved = @abs(w.transform[zs].x - x0) + @abs(w.transform[zs].z - z0);
+    try std.testing.expect(moved > 0.1);
+}
+test "system zombie falls back to wander when target removed (mutex release)" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const p = w.spawnPlayer(3, 70, 0, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    // Sense the player: approach wins.
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+    // Remove the target entity: approach.CanExecute fails, mutex frees, wander
+    // resumes on the next selection pass.
+    const ps = w.slotOfNetId(p).?;
+    w.destroy(ps);
+    t = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+}
+test "class_table attack/chase floors only when field is zero" {
+    var w: World = .{};
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20;
+    w.class_table[1].chase_speed_day = 1.0; // XML-scale day chase (aggro min); sim *1.6
+    w.class_table[1].chase_speed = 1.0; // XML-scale night chase (aggro max); sim *1.6
+    w.class_table[1].wander_speed = 0.2;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Melee used class attack_damage (20), not module floor 8.
+    try std.testing.expect(w.health[ps].hp <= hp0 - 15);
+    // Class chase applied (non-zero table field).
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+test "per-entity attack_damage beats the class_table row and the Rules floor" {
+    var w: World = .{ .rules = .{ .combat = .{ .attack_damage = 100.0 } } };
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20; // items.xml DamageEntity (via HandItem)
+    // spawnZombieDef carries the full resolved row (A35): the per-entity 5
+    // must win over the class_table 20 and the Rules 100 floor.
+    const z = w.spawnZombieDef(0, 70, 0, 40, .{
+        .name = "zombieFeral",
+        .max_hp = 60,
+        .kind = .zombie,
+        .hash = 123,
+        .attack_damage = 5,
+    }).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const lost = hp0 - w.health[ps].hp;
+    // Per-entity 5 x ~2 bites ~= 10. A class_table-only read would have dealt
+    // 20 (40+), and a Rules-only read 100 (death at 100).
+    try std.testing.expect(lost >= 5);
+    try std.testing.expect(lost < 25);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+test "configured attack floor never beats the entityclasses value" {
+    var w: World = .{ .rules = .{ .combat = .{ .attack_damage = 100.0 } } };
+    defer w.deinit();
+    w.class_table[1].attack_damage = 20; // items.xml DamageEntity (via HandItem)
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(1.2, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    const ps = w.playerByPeer(0).?;
+    const hp0 = w.health[ps].hp;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    const lost = hp0 - w.health[ps].hp;
+    // Class 20 x 2 bites ~= 40. The 100 floor must NOT apply (that would be 200).
+    try std.testing.expect(lost >= 20);
+    try std.testing.expect(lost < 80);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+test "configured chase floor never beats the entityclasses MoveSpeedAggro" {
+    var w: World = .{ .rules = .{ .ai = .{ .chase_speed = 100.0 } } };
+    defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate is open
+    // XML-scale aggro pair: min (day) 1.0 / max (night) 1.0 → sim ×1.6.
+    // The stock pair always carries both (entity-ai.md 3313-3314 ParseVec).
+    w.class_table[1].chase_speed_day = 1.0;
+    w.class_table[1].chase_speed = 1.0;
+    // Stock zombie sight-light threshold so the 12 m player is seen at noon
+    // (the (30,100) floor would blind the gate beyond ~11 m).
+    w.class_table[1].sight_light_min = -2.0;
+    w.class_table[1].sight_light_max = 150.0;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(12, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
+    var t: f32 = 0;
+    while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // Class 1.0 -> 1.6 blocks/s; 4 s closes only a few blocks. A 100 floor would
+    // have crossed 12 in under a second (160 blocks/s), so this bounds it.
+    try std.testing.expect(w.transform[zs].x < 25);
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
+}
+test "configured wander floor never beats the entityclasses MoveSpeed" {
+    var w: World = .{ .rules = .{ .ai = .{ .wander_speed = 50.0 } } };
+    defer w.deinit();
+    w.class_table[1].wander_speed = 0.2; // XML-scale; sim uses *10.0
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const x0 = w.transform[zs].x;
+    const z0 = w.transform[zs].z;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    const moved = @abs(w.transform[zs].x - x0) + @abs(w.transform[zs].z - z0);
+    // Class 0.2 -> 2.0 blocks/s with look pauses; a 50 floor would be 500/s.
+    try std.testing.expect(moved > 0.1);
+    try std.testing.expect(moved < 25);
+}
+test "spawn zombie loot_list comes from class_table not scrap" {
+    var w: World = .{};
+    defer w.deinit();
+    try std.testing.expectEqualStrings("EntityLootContainerRegular", w.class_table[1].loot_list);
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expectEqualStrings("EntityLootContainerRegular", w.class_id[zs].loot_list);
+    w.class_table[1].loot_list = "EntityLootContainerStrong";
+    const z2 = w.spawnZombieClass(1, 70, 1, 40, 1, w.class_table[1].loot_list).?;
+    const zs2 = w.slotOfNetId(z2).?;
+    try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[zs2].loot_list);
+}
+test "system zombie approaches spot and clears on arrive" {
+    // No player → active_scale 0.1; short spot so arrive fits the budget.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].has_spot = true;
+    w.zombie_ai[zs].spot_x = 2.5;
+    w.zombie_ai[zs].spot_z = 0;
+    const x0 = w.transform[zs].x;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.approach_spot, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.transform[zs].x > x0 + 0.2);
+    // ~2.5 m at chase*0.1 ≈ 0.22 m/s → clear within ~20 s.
+    t = 0;
+    while (t < 25.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].has_spot);
+    try std.testing.expect(w.transform[zs].x > 1.5);
+}
+test "system zombie destroy_area when rng gate hits while chase" {
+    // wander_rng % 16 == 1 arms DestroyArea at least once while player is sensed.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    _ = w.spawnPlayer(5, 70, 0, 0);
+    const zs = w.slotOfNetId(z).?;
+    w.zombie_ai[zs].wander_rng = 1;
+    var saw_destroy = false;
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].active_task == .destroy_area) saw_destroy = true;
+    }
+    try std.testing.expect(saw_destroy);
+    // May end in chase or attack once in range; alert must latch.
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    try std.testing.expect(w.zombie_ai[zs].state == .chase or w.zombie_ai[zs].state == .attack);
+}
+test "system zombie territorial walks home when far" {
+    // Spawn home at origin; drag entity past leash with no player.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(w.zombie_ai[zs].has_home);
+    w.transform[zs].x = 40;
+    w.transform[zs].z = 0;
+    const x0 = w.transform[zs].x;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.territorial, w.zombie_ai[zs].active_task);
+    try std.testing.expect(w.transform[zs].x < x0 - 0.2);
+    // Keep walking until inside leash (active_scale 0.1 without player).
+    t = 0;
+    while (t < 80.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        const dx = w.transform[zs].x - w.zombie_ai[zs].home_x;
+        const dz = w.transform[zs].z - w.zombie_ai[zs].home_z;
+        const terr2 = w.rules.ai.territorial_radius;
+        if (dx * dx + dz * dz <= terr2 * terr2) break;
+    }
+    const dx = w.transform[zs].x - w.zombie_ai[zs].home_x;
+    const dz = w.transform[zs].z - w.zombie_ai[zs].home_z;
+    const terr3 = w.rules.ai.territorial_radius;
+    try std.testing.expect(dx * dx + dz * dz <= terr3 * terr3);
+}
+

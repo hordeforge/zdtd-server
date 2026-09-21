@@ -10,6 +10,7 @@ const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
+const builtin = @import("builtin");
 
 /// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
 const dmg_scale: u32 = 100;
@@ -197,4 +198,25 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         }
     }
     return out;
+}
+
+test "concurrent turret owner follows deterministic slot order" {
+    if (builtin.single_threaded) return;
+    var value: u32 = 0;
+    const Worker = struct {
+        fn run(v: *u32, source: Slot) void {
+            recordTurretOwner(v, source, @intCast(source));
+        }
+    };
+    var threads: [8]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (&threads, 0..) |*thread, i| {
+        thread.* = std.Thread.spawn(.{}, Worker.run, .{ &value, @as(Slot, @intCast(i)) }) catch |err| {
+            for (threads[0..spawned]) |*started| started.join();
+            return err;
+        };
+        spawned += 1;
+    }
+    for (&threads) |*thread| thread.join();
+    try std.testing.expectEqual(@as(i16, threads.len - 1), turretOwner(value));
 }
