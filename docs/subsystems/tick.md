@@ -20,7 +20,7 @@ pub const tick_ns: u64 = 1_000_000_000 / ticks_per_second;
 
 `Game.step` derives its sim delta from the same constant rather than from a measured elapsed time (`src/server/game/step.zig:91`), so a late tick does not hand a larger `dt` to the sim.
 
-The `Game` fields the loop itself owns (`src/server/game.zig:442`):
+The `Game` fields the loop itself owns (`src/server/game.zig:363`):
 
 ```zig
     /// Load-shed valve: weak evidence + deferrable broadcasts are dropped while
@@ -30,7 +30,7 @@ The `Game` fields the loop itself owns (`src/server/game.zig:442`):
     running: bool = true,
 ```
 
-`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:4006`, `src/server/game.zig:4033`).
+`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3927`, `src/server/game.zig:3954`).
 
 Cadence gates are `InitOptions`/`Game` fields sampled as tick counts, not seconds. The compile-time defaults (`src/server/game/types.zig:87`):
 
@@ -83,7 +83,7 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game.zig:4003`):
+The only real-time pacer is `Game.run` (`src/server/game.zig:3924`):
 
 ```zig
     pub fn run(self: *Game) !void {

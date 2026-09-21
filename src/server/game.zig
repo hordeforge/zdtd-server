@@ -236,93 +236,12 @@ const wasmWithdraw = game_wasm_host.wasmWithdraw;
 const wasmSense = game_wasm_host.wasmSense;
 const wasmQuery = game_wasm_host.wasmQuery;
 
-/// on_player_damage verdict for the ECS damage path (zombie melee / deferred
-/// accumulator): routes to the plugin host + wasm host like the C2S path, with
-/// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
-pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    return game_plugin_compose.playerDamage(g, -1, victim, @trunc(amount));
-}
-
-/// Foreign-gated victim resist for the ECS damage path (zombie melee /
-/// deferred accumulator): evaluates the victim's `target="other"` GDR rows
-/// against the attacker's real class tags, and starts the Grace recharge
-/// buff when a row passes. Unset hook = no foreign rows.
-pub fn foreignResistHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) f32 {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const vs: ecs.Slot = victim_slot;
-    const as: ecs.Slot = attacker_slot;
-    if (as >= ecs.world.max_entities or !g.sim.alive[as]) return 0;
-    const hash = if (g.sim.class_id[as].hash != 0)
-        g.sim.class_id[as].hash
-    else
-        return 0;
-    const def = g.entities.byHash(hash) orelse return 0;
-    const fg = game_tick.foreignGatedResistTags(g, vs, def.tags);
-    if (fg > 0) {
-        const eid = g.sim.network_id[vs].id;
-        _ = g.addCatalogBuff(eid, vs, "buffSpectersGrace", eid);
-    }
-    return fg;
-}
-
-/// Victim-side hit trigger for the ECS damage path: fires the victim's
-/// `onOtherAttackedSelf` rows with the accumulator's attacker slot.
-pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) void {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const vs: ecs.Slot = victim_slot;
-    const as: ecs.Slot = attacker_slot;
-    if (vs >= ecs.world.max_entities or as >= ecs.world.max_entities) return;
-    if (!g.sim.mask[vs].player or !g.sim.alive[as]) return;
-    // ponytail: ECS damage hook has no HitBodyPart yet; wire C2S path passes d.body_part.
-    g.fireAttackedSelf(vs, as, 0);
-}
-
-/// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
-/// Wasm-first): runs the static then wasm hosts with the given attacker and
-/// returns the post-verdict amount - 0 when denied (<0), percent-scaled
-/// (>0), unchanged when no plugin votes (0). Used by damage sources outside
-/// the C2S/ECS melee paths: environmental survival damage (drowning,
-/// radiation, starvation, attacker -1) and explosion damage (attacker = the
-/// blaster), so a module shapes ALL damage directed at players.
-pub fn playerDamageVerdictAmount(g: *Game, attacker: i32, victim: i32, amount: f32) f32 {
-    const v = game_plugin_compose.playerDamage(g, attacker, victim, @trunc(amount));
-    if (v < 0) return 0;
-    if (v > 0) return amount * @as(f32, @floatFromInt(v)) / 100.0;
-    return amount;
-}
-
-/// Server chat broadcast for plugin announcements (`zdtd.queue say`): builds
-/// the stock chat body (sender 0 = server, global chat) and broadcasts it to
-/// every client. Guest-controlled bytes are sanitized to one printable line.
-pub fn announceChat(ctx: ?*anyopaque, msg: []const u8) void {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    var clean_buf: [128]u8 = undefined;
-    const n = @min(msg.len, clean_buf.len);
-    var m: usize = 0;
-    for (msg[0..n]) |b| {
-        clean_buf[m] = if (b == '\r' or b == '\n' or b == '\t') ' ' else b;
-        m += 1;
-    }
-    const clean = std.mem.trim(u8, clean_buf[0..m], " \t");
-    if (clean.len == 0) return;
-    var body_buf: [512]u8 = undefined;
-    const body = packages.buildStockChat(&body_buf, 0, 0, clean, &.{}) catch return;
-    g.broadcast("NetPackageChat", body) catch {};
-}
-
-/// Pre-trade price verdict (on_trade_price) for the sim trade path: routes to
-/// the plugin host + wasm host; <0 deny, 0 keep, >0 scale unit price by
-/// percent. `item` is the ECS item id.
-pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u32) i32 {
-    const g: *Game = @ptrCast(@alignCast(ctx.?));
-    // Clamp before the i32 cast (the verdict host takes i32): stock prices
-    // are u16, but a future caller or modded data must not trap the tick on
-    // a >i32max price. Same shape as the perk-spend cost clamp in misc.zig.
-    const p: i32 = @intCast(@min(unit_price, std.math.maxInt(i32)));
-    return game_plugin_compose.tradePrice(g, player, item, p);
-}
-const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
+pub const playerDamageVerdict = game_hooks.playerDamageVerdict;
+pub const foreignResistHook = game_hooks.foreignResistHook;
+pub const attackedSelfHook = game_hooks.attackedSelfHook;
+pub const playerDamageVerdictAmount = game_hooks.playerDamageVerdictAmount;
+pub const announceChat = game_hooks.announceChat;
+pub const tradePriceVerdict = game_hooks.tradePriceVerdict;
 
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
     return game_stability.stabilityFacts(ctx, id);
