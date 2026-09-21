@@ -37,6 +37,7 @@ pub const spawning = @import("spawning.zig");
 pub const buffs = @import("buffs.zig");
 pub const triggered = @import("triggered.zig");
 pub const requirements = @import("requirements.zig");
+pub const require_eval = @import("require_eval.zig");
 pub const cvars = @import("cvars.zig");
 pub const progression = @import("progression.zig");
 pub const vehicles = @import("vehicles.zig");
@@ -81,6 +82,7 @@ test {
     _ = buffs;
     _ = triggered;
     _ = requirements;
+    _ = require_eval;
     _ = cvars;
     _ = progression;
     _ = vehicles;
