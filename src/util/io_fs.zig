@@ -100,6 +100,9 @@ pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
     var file_writer = atomic_file.file.writer(io, &wbuf);
     file_writer.interface.writeAll(data) catch return file_writer.err.?;
     try file_writer.flush();
+    // Durable before rename: without sync, a crash after replace can leave a
+    // zero/truncated dest whose prior contents were already unlinked.
+    try atomic_file.file.sync(io);
     try atomic_file.replace(io);
 }
 

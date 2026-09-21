@@ -999,6 +999,9 @@ pub const Game = struct {
         // [perf] async_chunk_flush. Offline Game (port 0) runs force-serial, so
         // World.asyncEnabled() keeps writes inline there regardless.
         self.world.async_flush = opts.async_chunk_flush;
+        // Arm before any tick/worker can waitKey: otherwise the lock-free
+        // `started` early-out races the first submit's spawn-to-enqueue window.
+        if (opts.async_chunk_flush) self.world.flush.arm();
         try self.sim.ensureNetMap(allocator);
         // Back the ECS vehicle-physics ground hook with the real block store.
         self.sim.ground_ctx = self;

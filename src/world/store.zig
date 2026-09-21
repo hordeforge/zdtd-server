@@ -1521,6 +1521,9 @@ pub const World = struct {
         const io_a = std.heap.page_allocator;
         const payload = try encodeChunk(c, io_a);
         if (self.asyncEnabled()) {
+            // Publish before submit so concurrent waitKey takes mu instead of
+            // racing the spawn-to-enqueue window on the first async write.
+            self.flush.arm();
             const owned_path = io_a.dupe(u8, path) catch {
                 defer io_a.free(payload);
                 return io_fs.writeFile(path, payload);
@@ -2202,6 +2205,7 @@ test "async flush round-trips a save into a fresh World" {
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
     w.async_flush = true;
+    w.flush.arm();
     try std.testing.expect(w.asyncEnabled());
     try w.setBlockWorld(5, 70, 5, block_dirt);
     try w.setBlockWorld(6, 71, 5, block_stone);
@@ -2253,6 +2257,7 @@ test "asyncEnabled is false under force-serial (DST keeps the sync path)" {
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
     w.async_flush = true;
+    w.flush.arm();
     parallel.setForceSerial(true);
     defer parallel.setForceSerial(false);
     try std.testing.expect(!w.asyncEnabled());
@@ -2272,6 +2277,7 @@ test "evict then reload of a queued key reads the newest bytes" {
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
     w.async_flush = true;
+    w.flush.arm();
 
     _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
     _ = try w.getOrCreate(.{ .x = 2, .z = 0 });

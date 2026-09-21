@@ -80,6 +80,15 @@ pub const Flusher = struct {
         return !builtin.single_threaded;
     }
 
+    /// Publish that this flusher may accept async submits. Call once from the
+    /// main thread when `World.async_flush` is enabled, before any parallel
+    /// `waitKey` / `submit`. Makes `waitKey` take `mu` instead of lock-free
+    /// early-out, so it cannot miss an in-flight first submit.
+    pub fn arm(self: *Flusher) void {
+        if (!available()) return;
+        self.started.store(true, .release);
+    }
+
     /// Take ownership of `path` and `payload` (page_allocator) and queue a write.
     /// On error the caller still owns both and must write/free them itself.
     pub fn submit(self: *Flusher, key: u64, path: []u8, payload: []u8) SubmitError!void {
@@ -100,6 +109,8 @@ pub const Flusher = struct {
                 std.debug.print("zdtd: chunk flush writer spawn failed: {s}; writing inline\n", .{@errorName(err)});
                 return error.Shutdown;
             };
+            // Redundant with `arm`, but keeps submit self-sufficient if a
+            // caller enables async without arming (tests, eviction path).
             self.started.store(true, .release);
         }
         self.ring[(self.head + self.n) % max_pending] = .{ .key = key, .path = path, .payload = payload };
@@ -236,6 +247,7 @@ test "flusher writes every submitted payload" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
+    f.arm();
     defer f.deinit();
     var i: usize = 0;
     while (i < 8) : (i += 1) {
@@ -303,6 +315,25 @@ test "flusher waitKey returns immediately when idle" {
     try testing.expectEqual(@as(u64, 0), f.waits.load(.monotonic));
 }
 
+test "flusher armed waitKey blocks until submit finishes" {
+    if (!Flusher.available()) return error.SkipZigTest;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    var f: Flusher = .{};
+    f.arm();
+    defer f.deinit();
+    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&pbuf, "{s}/arm.bin", .{dir});
+    try f.submit(99, try dupPage(p), try dupPage("armed"));
+    f.waitKey(99);
+    const data = try io_fs.readFileAll(testing.allocator, p);
+    defer testing.allocator.free(data);
+    try testing.expectEqualStrings("armed", data);
+}
+
 test "flusher ring is FIFO per key" {
     if (!Flusher.available()) return error.SkipZigTest;
     var tmp = testing.tmpDir(.{});
@@ -311,6 +342,7 @@ test "flusher ring is FIFO per key" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
+    f.arm();
     defer f.deinit();
     var pbuf: [std.fs.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/fifo.bin", .{dir});
@@ -321,4 +353,36 @@ test "flusher ring is FIFO per key" {
     const data = try io_fs.readFileAll(testing.allocator, p);
     defer testing.allocator.free(data);
     try testing.expectEqualStrings("new", data);
+}
+
+test "flusher atomic attacker publish" {
+    // Mirrors the parallel AI attacker-slot publish (systems.AiCtx): concurrent
+    // stores to one victim index must not tear under the memory model.
+    if (builtin.single_threaded) return;
+    var slots: [64]u16 = .{std.math.maxInt(u16)} ** 64;
+    const victim: usize = 7;
+    var ready: std.atomic.Value(u8) = .init(0);
+    var go: std.atomic.Value(bool) = .init(false);
+    const Worker = struct {
+        fn run(out: []u16, v: usize, source: u16, r: *std.atomic.Value(u8), start: *std.atomic.Value(bool)) void {
+            _ = r.fetchAdd(1, .release);
+            while (!start.load(.acquire)) std.Thread.yield() catch {};
+            @atomicStore(u16, &out[v], source, .monotonic);
+        }
+    };
+    var threads: [8]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (&threads, 0..) |*thread, i| {
+        thread.* = std.Thread.spawn(.{}, Worker.run, .{ slots[0..], victim, @as(u16, @intCast(i)), &ready, &go }) catch |err| {
+            go.store(true, .release);
+            for (threads[0..spawned]) |*started| started.join();
+            return err;
+        };
+        spawned += 1;
+    }
+    while (ready.load(.acquire) != threads.len) std.Thread.yield() catch {};
+    go.store(true, .release);
+    for (&threads) |*thread| thread.join();
+    const got = @atomicLoad(u16, &slots[victim], .monotonic);
+    try testing.expect(got < threads.len);
 }

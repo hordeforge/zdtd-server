@@ -2564,10 +2564,10 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
             } else {
                 const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
-                // Attacker slot for the foreign-gated victim rows; the
-                // victim slot may be shared so the write is best-effort (a
-                // same-tick second attacker wins).
-                ctx.dmg_attacker[np.slot] = s;
+                // Attacker slot for the foreign-gated victim rows. Parallel
+                // workers may share a victim: atomic publish so the apply
+                // pass never reads a torn slot (same-tick last store wins).
+                @atomicStore(u16, &ctx.dmg_attacker[np.slot], s, .monotonic);
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
