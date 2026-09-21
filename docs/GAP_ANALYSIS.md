@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
-  *Anchors:* `src/wire/packages.zig:3484-3571` (`parseStockInvTx`),
+  *Anchors:* `src/wire/packages.zig:2910-3016` (`parseStockInvTx`),
   `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
