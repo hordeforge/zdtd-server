@@ -18826,3 +18826,91 @@ test "scenario trader restore rejects incomplete snapshots without changing stoc
     try std.testing.expectEqual(@as(u32, 7), stock.last_restock_day);
     try std.testing.expectEqual(@as(usize, 0), stock.n);
 }
+
+test "scenario material-based forge outputs survive queue validation" {
+    // recipes.xml material_based rows (forge smelter outputs from molten
+    // units: ironBars from unit_iron) used to be cleared by the queue
+    // validator. With a game dir the output resolves and the forge area
+    // matches, so the slot survives validation like any other recipe.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const pa = g.sim.playerByPeer(c.slot).?;
+    const wx: i32 = @trunc(g.sim.transform[pa].x);
+    const wy: i32 = @trunc(g.sim.transform[pa].y);
+    const wz: i32 = @trunc(g.sim.transform[pa].z);
+    const ws = @import("../world/workstations.zig");
+    const stock_te = packages.stock_te;
+    const stock_inv = packages.stock_inv;
+
+    const bars = g.items.byName("ammoDartIron") orelse return error.SkipZigTest;
+    const rd = g.recipes.byName("ammoDartIron") orelse return error.SkipZigTest;
+    try std.testing.expect(rd.material_based);
+    var recipe: [128]u8 = undefined;
+    var rw: @import("../wire/binary.zig").Writer = .{ .buf = &recipe };
+    try rw.writeU16(1);
+    try rw.writeI32(bars.stock_type);
+    try rw.writeI32(1);
+    try rw.writeBool(false);
+    try rw.writeF32(1.0);
+    try rw.writeI32(9);
+    try rw.writeString("forge");
+    try rw.writeI32(0);
+
+    const fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
+    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    var last_input_buf: [64]u8 = undefined;
+    var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
+    for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
+    const melt = [_]f32{0} ** ws.stock_melt_len;
+    var queue = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+    queue[queue.len - 1] = .{
+        .multiplier = 1,
+        .is_crafting = true,
+        .craft_time_left = 1.0,
+        .one_item_craft_time = 1.0,
+        .starting_entity_id = c.entity_id,
+        .output_type = bars.stock_type,
+        .output_count = 1,
+        .craft_exp_gain = 0,
+    };
+    queue[queue.len - 1].setRecipeBlob(rw.written());
+    const forge_id = g.blocks.byName("forge").?.id;
+
+    var body: [4096]u8 = undefined;
+    const c2s = try stock_te.buildWorkstationTeBody(&body, 3, wx, wy, wz, forge_id, .{
+        .fuel = fuel[0..],
+        .input = input[0..],
+        .tools = tools[0..],
+        .output = output[0..],
+        .last_input_count = ws.stock_last_input_len,
+        .last_input = liw.written(),
+        .queue = queue[0..],
+        .melt = melt[0..],
+        .is_burning = true,
+        .burn_time_left = 30,
+    });
+    var fb: [4096]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", c2s));
+    const st = g.workstations.get(wx, wy, wz).?;
+    // The material output survives validation with its server-side count.
+    try std.testing.expectEqual(bars.stock_type, st.queue[st.queue_len - 1].output_type);
+    try std.testing.expectEqual(@as(i16, 1), st.queue[st.queue_len - 1].output_count);
+    std.debug.print("PASS material queue: ammoDartIron survives validation at the forge\n", .{});
+}

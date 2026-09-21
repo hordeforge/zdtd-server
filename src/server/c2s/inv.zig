@@ -650,12 +650,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // CraftingAreaRecipes (or the block name when no list
                         // is declared), so a modified client cannot queue a
                         // forge output on a campfire. Material-based recipes
-                        // (the material system, 34 stock) have no queue here.
+                        // (forge smelter outputs from molten units) queue
+                        // like any other recipe once the area matches: the
+                        // unit ingredients ride the client's input arrays
+                        // the same way normal ingredients do.
                         if (rd.craft_area.len > 0 and !self.blocks.allowsCraftArea(@intCast(ws.block_id), rd.craft_area)) {
-                            dst.* = .{};
-                            continue;
-                        }
-                        if (rd.material_based) {
                             dst.* = .{};
                             continue;
                         }
