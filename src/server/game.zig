@@ -2592,11 +2592,7 @@ pub const Game = struct {
     }
 
     pub fn countJoined(self: *const Game) u16 {
-        var n: u16 = 0;
-        for (self.clients) |cl| {
-            if (cl.joined) n += 1;
-        }
-        return n;
+        return game_social.countJoined(self);
     }
 
     /// `AdminUsers.GetUserPermissionLevel` equivalent (PlayerSlotsAuthorizer
@@ -2609,16 +2605,7 @@ pub const Game = struct {
     /// closed for player saves). Name-keyed list entries apply only to
     /// no-platform sessions (loadgen / legacy).
     pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
-        if (c.puid_primary.get()) |pid| {
-            var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
-            const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
-            if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
-            return 1000;
-        }
-        if (c.name_len != 0) {
-            if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
-        }
-        return 1000;
+        return game_social.permLevelOf(self, c);
     }
 
     /// True when `c` hits `list` the way stock AdminUsers/Whitelist do:
@@ -2626,14 +2613,7 @@ pub const Game = struct {
     /// no-platform sessions. Used by the whitelist gate and ClientInfo admin
     /// flag so those surfaces cannot drift from `permLevelOf`.
     pub fn permissionListHit(self: *const Game, list: *const admin_cmds.PermissionList, c: *const Client) bool {
-        _ = self;
-        if (c.puid_primary.get()) |pid| {
-            var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
-            const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return false;
-            return list.find(key) != null;
-        }
-        if (c.name_len != 0) return list.find(c.name[0..c.name_len]) != null;
-        return false;
+        return game_social.permissionListHit(self, list, c);
     }
 
     pub fn resolveItemType(ctx: ?*anyopaque, item_id: u16) i32 {

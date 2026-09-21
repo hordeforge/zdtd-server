@@ -10,6 +10,7 @@ const ecs = @import("../../ecs/root.zig");
 const ally_mod = @import("../ally.zig");
 const systems = @import("../../ecs/systems.zig");
 const plugin_compose = @import("plugin_compose.zig");
+const admin_cmds = @import("../admin_cmds.zig");
 
 pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
     var name_buf: [packages.stock_buff.max_buff_name]u8 = undefined;
@@ -436,4 +437,49 @@ pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
         @intFromEnum(t.event_target),
     );
     try self.broadcast("NetPackageAllyResponse", resp);
+}
+
+pub fn countJoined(self: *const Game) u16 {
+    var n: u16 = 0;
+    for (self.clients) |cl| {
+        if (cl.joined) n += 1;
+    }
+    return n;
+}
+
+/// `AdminUsers.GetUserPermissionLevel` equivalent (PlayerSlotsAuthorizer
+/// and command gates): the stored level (0 = top admin) when the identity
+/// is in the admin list, else the 1000 default.
+///
+/// Stock `AdminUsers.HasEntry` (IL=30) keys on PlatformId/CrossplatformId
+/// only. A client-supplied display name must not mint admin rights when
+/// the peer already presented a platform id (same class of hole ADR 0038
+/// closed for player saves). Name-keyed list entries apply only to
+/// no-platform sessions (loadgen / legacy).
+pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
+    if (c.puid_primary.get()) |pid| {
+        var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
+        if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
+        return 1000;
+    }
+    if (c.name_len != 0) {
+        if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
+    }
+    return 1000;
+}
+
+/// True when `c` hits `list` the way stock AdminUsers/Whitelist do:
+/// platform composite when the client presented one; name only for
+/// no-platform sessions. Used by the whitelist gate and ClientInfo admin
+/// flag so those surfaces cannot drift from `permLevelOf`.
+pub fn permissionListHit(self: *const Game, list: *const admin_cmds.PermissionList, c: *const Client) bool {
+    _ = self;
+    if (c.puid_primary.get()) |pid| {
+        var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return false;
+        return list.find(key) != null;
+    }
+    if (c.name_len != 0) return list.find(c.name[0..c.name_len]) != null;
+    return false;
 }
