@@ -1027,3 +1027,19 @@ pub fn ruleTagsAllow(self: *Game, r: *const assets_spawning.Rule, x: f32, z: f32
     if (r.tags.len > 0 and !anySet(r.tags, poi)) return false;
     return true;
 }
+
+/// True when the block id is a bedroll (stock respawn bed): the classic
+/// bedroll plus the colored variants. Name-based via the runtime AssignIds
+/// dump, never a hardcoded id list.
+pub fn isBedrollId(self: *const Game, block_id: u16) bool {
+    const names = [_][]const u8{
+        "bedroll",      "bedrollRed",  "bedrollOrange", "bedrollYellow",
+        "bedrollGreen", "bedrollBlue", "bedrollPurple", "bedrollPink",
+    };
+    for (names) |n| {
+        if (self.maxdamage.idByName(n)) |id| {
+            if (id == block_id) return true;
+        }
+    }
+    return false;
+}
