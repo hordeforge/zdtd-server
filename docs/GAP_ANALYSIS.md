@@ -2099,7 +2099,7 @@ encoding is one day high.
   applies stock's Setup clamp to [-8, 8] per axis (protocol-packages.md
   §5.5.5). A knockback impulse beyond the stock band no longer ships
   non-stock motion values to peers.
-  *Anchors:* `src/wire/packages.zig:3015-3030`,
+  *Anchors:* `src/wire/packages.zig:2432-2447`,
   `src/server/c2s/misc.zig:591-604`
 
 - **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`
@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
-  *Anchors:* `src/wire/packages.zig:2910-3016` (`parseStockInvTx`),
+  *Anchors:* `src/wire/packages.zig:2384-2490` (`parseStockInvTx`),
   `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`

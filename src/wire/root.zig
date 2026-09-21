@@ -51,6 +51,7 @@ pub const stock_loginanswer = @import("stock_loginanswer.zig");
 pub const stock_localization = @import("stock_localization.zig");
 pub const stock_configfile = @import("stock_configfile.zig");
 pub const stock_ids = @import("stock_ids.zig");
+pub const stock_frame = @import("stock_frame.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
@@ -103,6 +104,7 @@ test {
     _ = stock_localization;
     _ = stock_configfile;
     _ = stock_ids;
+    _ = stock_frame;
     _ = stock_vehicle;
     _ = stock_te;
     _ = stock_sign;
