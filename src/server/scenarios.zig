@@ -7664,12 +7664,15 @@ test "scenario buff add relays to observers and expires on the server clock" {
     try std.testing.expect(!dropped.adding);
     try std.testing.expectEqualStrings("buffShocked", dropped.name);
 
-    // The observer saw every move, not just the grant. Three adds (the first
-    // grant, the one before the death clear, the one before this removal) and
-    // three removals (expiry, death clear, C2S drop) have run above; each is a
-    // different code path into relayBuff, which is why the count matters more
-    // than the last event.
-    try std.testing.expectEqual(@as(u32, 3), buff_seen_adds);
+    // The observer saw every move, not just the grant. Three buffShocked
+    // adds (the first grant, the one before the death clear, the one before
+    // this removal) and three removals (expiry, death clear, C2S drop) have
+    // run above, plus the respawn path's check-buff re-grant (this
+    // scenario's builtin catalog carries check01 but no spawn-protection
+    // names, so only that grant relays); each is a different code path
+    // into relayBuff, which is why the count matters more than the last
+    // event.
+    try std.testing.expectEqual(@as(u32, 4), buff_seen_adds);
     try std.testing.expectEqual(@as(u32, 3), buff_seen_removes);
     try std.testing.expectEqualStrings("buffShocked", buff_seen_name[0..buff_seen_name_len]);
     try std.testing.expectEqual(ca.entity_id, buff_seen_entity);
