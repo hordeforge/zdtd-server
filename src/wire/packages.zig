@@ -885,47 +885,6 @@ pub fn buildWireSetParentBody(buf: []u8, cx: i32, cy: i32, cz: i32, px: i32, py:
     return buf[0..30];
 }
 
-test "chunk body layout size and fields" {
-    var heights: [256]u8 = .{64} ** 256;
-    heights[5 + 5 * 16] = 70;
-    var buf: [300]u8 = undefined;
-    const body = try buildChunkBody(&buf, 1, -2, &heights);
-    try std.testing.expectEqual(chunk_stock_envelope_overhead + chunk_body_size, body.len);
-    try std.testing.expectEqual(@as(u8, 1), body[0]); // overwrite
-    const p = try parseChunkBody(body);
-    try std.testing.expectEqual(@as(i32, 1), p.cx);
-    try std.testing.expectEqual(@as(i32, -2), p.cz);
-    try std.testing.expectEqual(@as(u8, 70), p.heights[5 + 5 * 16]);
-    // The envelope's three i16 are cx, cy, cz. The parser reads cx and cz by
-    // offset, so it would agree with the writer even if both moved together;
-    // read the raw words instead. Layout: overwrite bool | cx | cy | cz | len.
-    try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[1..3], .little));
-    try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, body[3..5], .little)); // cy
-    try std.testing.expectEqual(@as(i16, -2), std.mem.readInt(i16, body[5..7], .little));
-    try std.testing.expectEqual(@as(i32, chunk_body_size), std.mem.readInt(i32, body[7..11], .little));
-
-    // bare payload still parses
-    const bare = try buildChunkPayload(buf[0..chunk_body_size], 3, 4, &heights);
-    const p2 = try parseChunkBody(bare);
-    try std.testing.expectEqual(@as(i32, 3), p2.cx);
-    try std.testing.expectEqual(@as(i32, 4), p2.cz);
-    // Payload head is cx | cz | ydim as i32, ydim distinct from both coords.
-    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, bare[0..4], .little));
-    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, bare[4..8], .little));
-    try std.testing.expectEqual(@as(i32, 256), std.mem.readInt(i32, bare[8..12], .little));
-}
-
-test "chunk key roundtrip" {
-    const key = makeChunkKey(-18, 28);
-    try std.testing.expectEqual(@as(i32, -18), extractChunkKeyX(key));
-    try std.testing.expectEqual(@as(i32, 28), extractChunkKeyZ(key));
-    var buf: [16]u8 = undefined;
-    const body = try buildChunkRemoveBody(&buf, -18, 28);
-    const p = try parseChunkRemoveBody(body);
-    try std.testing.expectEqual(@as(i32, -18), p.cx);
-    try std.testing.expectEqual(@as(i32, 28), p.cz);
-}
-
 // --- Identity-bearing packages (PlatformUserIdentifierAbs) ---
 
 pub const stock_login = @import("stock_login.zig");

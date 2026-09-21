@@ -28,3 +28,14 @@ pub fn parseChunkRemoveBody(body: []const u8) !struct { cx: i32, cz: i32 } {
     const key = std.mem.readInt(i64, body[0..8], .little);
     return .{ .cx = extractChunkKeyX(key), .cz = extractChunkKeyZ(key) };
 }
+
+test "chunk key roundtrip" {
+    const key = makeChunkKey(-18, 28);
+    try std.testing.expectEqual(@as(i32, -18), extractChunkKeyX(key));
+    try std.testing.expectEqual(@as(i32, 28), extractChunkKeyZ(key));
+    var buf: [16]u8 = undefined;
+    const body = try buildChunkRemoveBody(&buf, -18, 28);
+    const p = try parseChunkRemoveBody(body);
+    try std.testing.expectEqual(@as(i32, -18), p.cx);
+    try std.testing.expectEqual(@as(i32, 28), p.cz);
+}
