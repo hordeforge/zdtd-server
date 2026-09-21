@@ -43,6 +43,7 @@ pub const stock_claim = @import("stock_claim.zig");
 pub const stock_nav = @import("stock_nav.zig");
 pub const stock_explosion = @import("stock_explosion.zig");
 pub const stock_sleeper = @import("stock_sleeper.zig");
+pub const stock_lookat = @import("stock_lookat.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
@@ -87,6 +88,7 @@ test {
     _ = stock_nav;
     _ = stock_explosion;
     _ = stock_sleeper;
+    _ = stock_lookat;
     _ = stock_vehicle;
     _ = stock_te;
     _ = stock_sign;

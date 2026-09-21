@@ -125,7 +125,7 @@ pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u
 }
 ```
 
-An unlock the requester may not perform answers with `success = false` and an empty error message, the stock shape for nothing locked (`src/wire/packages.zig:3531`). A malformed request body is logged and dropped whole, so a truncated span cannot leave a half-written channel (`src/server/c2s/misc.zig:1217`). The parser bound is wider than the handler rule: it walks up to 64 targets because the deny echoes the request's list, while the handler refuses above the stock ceiling of five (`src/wire/packages.zig:3374`, `:3391`).
+An unlock the requester may not perform answers with `success = false` and an empty error message, the stock shape for nothing locked (`src/wire/stock_lock.zig:226`). A malformed request body is logged and dropped whole, so a truncated span cannot leave a half-written channel (`src/server/c2s/misc.zig:1217`). The parser bound is wider than the handler rule: it walks up to 64 targets because the deny echoes the request's list, while the handler refuses above the stock ceiling of five (`src/wire/packages.zig:3374`, `:3391`).
 
 ## Persistence
 
