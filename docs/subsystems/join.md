@@ -223,10 +223,10 @@ default (c2s/join.zig:441-450).
 A session ends three ways. `NetPackagePlayerDisconnect` saves the player record
 and calls `dropClientSlot` with reason "quit", accepting only the sender's own
 entity id (c2s/misc.zig:356-368). The tick reaper has three arms
-(tick.zig:1526-1588): a peer whose transport is already dead, a peer past the
+(world_tick.zig:255-320): a peer whose transport is already dead, a peer past the
 10 s auth-state cap that never echoed the challenge although its socket stays
 warm, and a peer silent past `peer_stale_ms` (types.zig:136). Armed guard-policy
-kicks drop through `dropClientSlot` on a later tick (tick.zig:1592-1601). Reaper
+kicks drop through `dropClientSlot` on a later tick (world_tick.zig:321-331). Reaper
 and guard sweep run once per tick right after the net poll (step.zig:81-82).
 
 `dropClientSlot` is the one teardown path (session_drop.zig:11). It notifies
@@ -238,7 +238,7 @@ quests, fans out `NetPackageEntityRemove`, destroys the sim entity, clears any
 turret still naming the slot, then resets the value (session_drop.zig:30-94).
 
 The three reap arms in `reapStalePeers` do not call it: they reset the slot in
-place after `clearLocksForPeer` (tick.zig:1547, tick.zig:1568, tick.zig:1584), so
+place after `clearLocksForPeer` (world_tick.zig:275, world_tick.zig:296, world_tick.zig:312), so
 that path skips the party, claim, shared-quest and `EntityRemove` teardown. The
 dead-peer arm of `clientFor` does call `dropClientSlot`, with a comment naming
 the ghost-player bug the inline reset used to leave behind (net.zig:449-453).

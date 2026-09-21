@@ -233,8 +233,8 @@ Removal mirrors it: for a known mob, any client now outside
 `.unloaded` and loses the knowledge bit (`src/server/game/replicate.zig:196`,
 `src/server/game/replicate.zig:201`). Dead knowledge is reconciled lazily, and
 only when a slot was freed this tick, as a word-wise intersection of
-`known_entities` with `alive_bits` (`src/server/game/tick.zig:1604`,
-`src/server/game/tick.zig:1609`).
+`known_entities` with `alive_bits` (`src/server/game/world_tick.zig:333`,
+`src/server/game/world_tick.zig:338`).
 
 Host-side bots are not ECS slots and carry their own `known_bots` bitset, "bit
 index = bot slot" (`src/server/game/types.zig:670`), max 16

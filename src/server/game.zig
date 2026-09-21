@@ -19,6 +19,7 @@ const protocol = @import("../protocol.zig");
 const replicate_te = @import("game/replicate_te.zig");
 const game_net = @import("game/net.zig");
 const game_tick = @import("game/tick.zig");
+const game_buff_events = @import("game/buff_events.zig");
 const game_world_tick = @import("game/world_tick.zig");
 const game_map = @import("game/map.zig");
 const game_bot = @import("game/bot.zig");
@@ -1895,91 +1896,91 @@ pub const Game = struct {
     }
 
     pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
-        return game_tick.addCatalogBuff(self, entity_id, ps, name, instigator_id);
+        return game_buff_events.addCatalogBuff(self, entity_id, ps, name, instigator_id);
     }
 
     pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
-        return game_tick.fireBuffFinish(self, ps, def_id);
+        return game_buff_events.fireBuffFinish(self, ps, def_id);
     }
 
     pub fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
-        return game_tick.fireBuffEvent(self, ps, def_id, event, other);
+        return game_buff_events.fireBuffEvent(self, ps, def_id, event, other);
     }
 
     pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
-        return game_tick.fireBuffStack(self, ps, def_id);
+        return game_buff_events.fireBuffStack(self, ps, def_id);
     }
 
     pub fn fireMobBuffEvent(self: *Game, vs: ecs.Slot, def_id: u16, event: assets_buffs.Trigger) void {
-        return game_tick.fireMobBuffEvent(self, vs, def_id, event);
+        return game_buff_events.fireMobBuffEvent(self, vs, def_id, event);
     }
 
     pub fn fireLeaveGame(self: *Game, ps: ecs.Slot) void {
-        return game_tick.fireLeaveGame(self, ps);
+        return game_buff_events.fireLeaveGame(self, ps);
     }
 
     pub fn fireDied(self: *Game, ps: ecs.Slot) void {
-        return game_tick.fireDied(self, ps);
+        return game_buff_events.fireDied(self, ps);
     }
 
     pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part: i16) void {
-        return game_tick.fireAttackedSelf(self, ps, attacker, body_part);
+        return game_buff_events.fireAttackedSelf(self, ps, attacker, body_part);
     }
 
     pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
-        return game_tick.fireAttackedOther(self, ps, victim, body_part);
+        return game_buff_events.fireAttackedOther(self, ps, victim, body_part);
     }
 
     pub fn fireClassRows(self: *Game, vs: ecs.Slot, event: assets_buffs.Trigger) void {
-        return game_tick.fireClassRows(self, vs, event);
+        return game_buff_events.fireClassRows(self, vs, event);
     }
 
     pub fn fireRayHit(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
-        return game_tick.fireRayHit(self, ps, victim, body_part);
+        return game_buff_events.fireRayHit(self, ps, victim, body_part);
     }
 
     pub fn noteCombat(self: *Game, slot: usize) void {
-        game_tick.noteCombat(self, slot);
+        game_buff_events.noteCombat(self, slot);
     }
 
     pub fn fireFallImpact(self: *Game, ps: ecs.Slot, impact_speed: f32) void {
-        game_tick.fireFallImpact(self, ps, impact_speed);
+        game_buff_events.fireFallImpact(self, ps, impact_speed);
     }
 
     pub fn fireJump(self: *Game, ps: ecs.Slot) void {
-        game_tick.fireJump(self, ps);
+        game_buff_events.fireJump(self, ps);
     }
 
     pub fn fireRespawn(self: *Game, ps: ecs.Slot) void {
-        game_tick.fireRespawn(self, ps);
+        game_buff_events.fireRespawn(self, ps);
     }
 
     pub fn fireAimEdge(self: *Game, ps: ecs.Slot, aiming: bool) void {
-        game_tick.fireAimEdge(self, ps, aiming);
+        game_buff_events.fireAimEdge(self, ps, aiming);
     }
 
     pub fn fireCrouchEdge(self: *Game, ps: ecs.Slot, crouching: bool) void {
-        game_tick.fireCrouchEdge(self, ps, crouching);
+        game_buff_events.fireCrouchEdge(self, ps, crouching);
     }
 
     pub fn fireBlockDamaged(self: *Game, ps: ecs.Slot, block_id: u16) void {
-        game_tick.fireBlockDamaged(self, ps, block_id);
+        game_buff_events.fireBlockDamaged(self, ps, block_id);
     }
 
     pub fn fireReloadStart(self: *Game, ps: ecs.Slot) void {
-        game_tick.fireReloadStart(self, ps);
+        game_buff_events.fireReloadStart(self, ps);
     }
 
     pub fn heldWeaponIsRanged(self: *Game, ps: ecs.Slot) bool {
-        return game_tick.heldWeaponIsRanged(self, ps);
+        return game_buff_events.heldWeaponIsRanged(self, ps);
     }
 
     pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
-        return game_tick.fireItemUseBuffs(self, ps, item_id);
+        return game_buff_events.fireItemUseBuffs(self, ps, item_id);
     }
 
     pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
-        return game_tick.fireKilledOther(self, ps, victim);
+        return game_buff_events.fireKilledOther(self, ps, victim);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS
