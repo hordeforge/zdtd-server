@@ -2447,46 +2447,13 @@ pub const Game = struct {
     /// Quarantine check at a C2S trust boundary. Observe mode records the flag
     /// but never denies (docs/AUTHORITY.md mode table).
     pub fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) bool {
-        if (!self.authorityCorrects()) return false;
-        const q = c.guard.quarantine;
-        const denied = switch (surf) {
-            .none => false,
-            .damage => q.damage,
-            .container => q.container,
-            .block => q.setblock,
-        };
-        if (!denied) return false;
-        self.harness.counters.inc(.quarantine_rejects);
-        const n = self.harness.counters.get(.quarantine_rejects);
-        if (n == 1 or n % 100 == 0) {
-            std.debug.print(
-                "zdtd: quarantine deny n={d} slot={d} surface={s}\n",
-                .{ n, c.slot, @tagName(surf) },
-            );
-        }
-        return true;
+        return game_guard.quarantineDenies(self, c, surf);
     }
 
     /// Weak (record-only) block-destroy rate. Soft by construction, so
     /// `guard_policy.evaluate` can never turn it into a quarantine or a kick.
     pub fn noteBlockBreak(self: *Game, c: *Client) void {
-        if (c.farm_window_tick == 0 or self.tick_n -% c.farm_window_tick >= self.guard.window_ticks) {
-            c.farm_window_tick = self.tick_n;
-            c.farm_breaks = 0;
-        }
-        c.farm_breaks +|= 1;
-        if (c.farm_breaks != self.guard.weak_break_rate_per_window) return;
-        const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
-        self.noteEvidence(
-            c,
-            peer_local,
-            c.entity_id,
-            .farming,
-            .soft,
-            .block,
-            @floatFromInt(c.farm_breaks),
-            @floatFromInt(self.guard.weak_break_rate_per_window),
-        );
+        return game_guard.noteBlockBreak(self, c);
     }
 
     pub fn takeInvToken(self: *Game, c: *Client) bool {

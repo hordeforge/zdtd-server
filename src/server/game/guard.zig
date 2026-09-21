@@ -173,3 +173,25 @@ fn armPolicyKick(self: *Game, c: *Client, det: evidence_mod.Detector) void {
     }
     std.debug.print("zdtd: guard kick armed slot={d} det={s} strong={d} hard={d} drop_tick={d}\n", .{ c.slot, @tagName(det), @popCount(c.guard.strong_mask), c.guard.hard_n, c.guard.kick_at_tick });
 }
+
+/// Weak (record-only) block-destroy rate. Soft by construction, so
+/// `guard_policy.evaluate` can never turn it into a quarantine or a kick.
+pub fn noteBlockBreak(self: *Game, c: *Client) void {
+    if (c.farm_window_tick == 0 or self.tick_n -% c.farm_window_tick >= self.guard.window_ticks) {
+        c.farm_window_tick = self.tick_n;
+        c.farm_breaks = 0;
+    }
+    c.farm_breaks +|= 1;
+    if (c.farm_breaks != self.guard.weak_break_rate_per_window) return;
+    const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
+    self.noteEvidence(
+        c,
+        peer_local,
+        c.entity_id,
+        .farming,
+        .soft,
+        .block,
+        @floatFromInt(c.farm_breaks),
+        @floatFromInt(self.guard.weak_break_rate_per_window),
+    );
+}
