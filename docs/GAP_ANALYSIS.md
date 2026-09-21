@@ -1830,7 +1830,7 @@ encoding is one day high.
   OR a `settime` jump (forward or backward) re-sends the stats on the next
   tick. A connected client always holds the current horde night.
   *Anchors:* `src/server/game.zig`, ``, ``, ``,
-  `src/wire/packages.zig:1998`, `src/server/game/step.zig`
+  `src/wire/stock_gamestats.zig:151`, `src/server/game/step.zig`
 
 - **Client blood-moon sky FX** `WORKS`
   Entirely client-side: `SkyManager::OnGameStatsChanged` latches bloodmoonDay from
@@ -1839,7 +1839,7 @@ encoding is one day high.
   stat 58 now carries the jittered horde day (CalcNextDay, not the plain
   frequency multiple), so the red moon lands on the actual horde night even with
   BloodMoonRange > 0.
-  *Anchors:* `asm.il:2041922`, `asm.il:2042093`, `src/wire/packages.zig:1998`,
+  *Anchors:* `asm.il:2041922`, `asm.il:2042093`, `src/wire/stock_gamestats.zig:151`,
   `src/ecs/aidirector.zig` (`bloodMoonDayFor`), `src/server/game.zig`
   `:1983`
 
@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
-  *Anchors:* `src/wire/packages.zig:1925-1967` (`parseStockInvTx`),
+  *Anchors:* `src/wire/packages.zig:1431-1473` (`parseStockInvTx`),
   `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`

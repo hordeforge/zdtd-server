@@ -497,3 +497,51 @@ test "player login truncated at any boundary is rejected" {
     _ = try parsePlayerLogin(full, &name_buf);
 }
 
+
+test "ally request round-trips both identities" {
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "1001" });
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "beef" });
+    try w.writeBool(true);
+
+    const req = try parseAllyRequest(w.written());
+    try std.testing.expect(req.source.matches(.{ .platform = "Steam", .id = "1001" }));
+    try std.testing.expect(req.target.matches(.{ .platform = "EOS", .id = "beef" }));
+    try std.testing.expect(req.add_ally);
+}
+test "ally request with a null identity parses but is not actionable" {
+    var body: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try platform_user.write(&w, null);
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "beef" });
+    try w.writeBool(false);
+    const full = w.written();
+
+    const req = try parseAllyRequest(full);
+    try std.testing.expect(req.source.get() == null);
+    try std.testing.expect(req.target.get() != null);
+    try std.testing.expect(!req.add_ally);
+    // Missing the trailing addAlly bool is a short body, not a default.
+    try std.testing.expectError(error.EndOfStream, parseAllyRequest(full[0 .. full.len - 1]));
+}
+test "ally response body layout" {
+    var buf: [128]u8 = undefined;
+    const out = try buildAllyResponseBody(
+        &buf,
+        .{ .platform = "Steam", .id = "1001" },
+        .{ .platform = "Steam", .id = "1002" },
+        1,
+        3,
+        6,
+    );
+    var r: binary.Reader = .{ .data = out };
+    var plat: [platform_user.max_platform_len]u8 = undefined;
+    var id: [platform_user.max_id_len]u8 = undefined;
+    try std.testing.expectEqualStrings("1001", (try platform_user.read(&r, &plat, &id)).?.id);
+    try std.testing.expectEqualStrings("1002", (try platform_user.read(&r, &plat, &id)).?.id);
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 3), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 6), try r.readByte());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
