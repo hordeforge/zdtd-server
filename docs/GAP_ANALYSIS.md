@@ -227,7 +227,7 @@ the arithmetic).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 34 | 0 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
-| [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
+| [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open, POI NPC placement and the WorldAreas compound package land; sell any item at EconomicValue x markdown |
 | [Blood moon](#6-blood-moon) | 25 | 0 | 0 | 25 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
@@ -279,7 +279,7 @@ area and the concrete work.
    fight back (`src/ecs/systems.zig:1280-1291`, `:1433-1447`,
    `src/server/game.zig`).
 
-2. **DONE 2026-08-06.** Traders: replicate the trader entity, then deliver
+2. **DONE 2026-08-06 (POI placement closed after).** Traders: replicate the trader entity, then deliver
    `TraderData`. Unfiltered `.trader` from both spawn paths
    (`src/server/game.zig`, ``), gave `class_table[3]` the real
    `npcTraderJen` hash (builtin and XML), and wired `TraderData` onto
@@ -287,7 +287,8 @@ area and the concrete work.
    (`src/wire/stock_entity.zig` `writeTraderDataBody`,
    `src/wire/packages.zig` `buildLockResponseTrader`). Proven by a wire test and
    the trader scenario (`server/scenarios.zig`); live stock-client visual check
-   still open. POI placement, restock rolls and quest offering remain.
+   still open. POI placement has since landed (see the Traders WORKS row);
+   restock rolls and quest offering remain.
 
 3. **DONE 2026-08-06.** POIs: remap prefab block ids through `<name>.blocks.nim` (also converts pre-v18 BlockValue layouts).
    `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
@@ -992,7 +993,7 @@ re-arms) with the population count as the quest target.
   The offer list follows the trader's class: the 5 trader class hashes
   (npcTraderJen/Bob/Hugh/Joel/Rekt, RE-computed) map to their parsed
   `trader_*_quests` lists, with jen as the fail-closed default, so each trader
-  offers its own list once POI placement spawns the other classes (scenario
+  offers its own list now that POI placement spawns the other classes (scenario
   `trader-lists` proves a rekt-class trader offers `trader_rekt_quests`).
   The offer list is filtered by the requested tier (stock DifficultyTier ==
   tierLevel, asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing
