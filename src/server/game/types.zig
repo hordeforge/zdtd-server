@@ -837,3 +837,45 @@ pub const Client = struct {
         return false;
     }
 };
+
+/// Last-sent EntityLookAt look target (world coords) for one entity slot.
+/// `gen` pins the entry to the slot's current occupant (network_id[].gen):
+/// a recycled slot must not inherit the previous entity's last-sent state,
+/// or the stale 0.0016 sqr-delta gate can swallow the new entity's look.
+pub const EntityLookSent = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    sent: bool = false,
+    gen: u32 = 0,
+};
+
+/// Last attack target published for a slot (RE EntityAlive::SetAttackTarget
+/// IL=70 and the OnUpdateLive expiry clear, both of which fan
+/// NetPackageSetAttackTarget out to tracking players). `id` is the wire value,
+/// so -1 is stock's "no target"; `sent` separates "cleared" from "never sent".
+/// `gen` pins the entry to the slot's current occupant like EntityLookSent.
+pub const AttackTargetSent = struct {
+    id: i32 = -1,
+    sent: bool = false,
+    gen: u32 = 0,
+};
+
+/// Last-sent TurretSync state (RE EntityTurret.lastTargetEntityId/lastIsOn).
+/// `gen` pins the entry to the slot's current occupant: a stale target/on
+/// pair that coincides with the new turret's initial state must not
+/// suppress its first TurretSync.
+pub const TurretSyncSent = struct {
+    target: i32 = -1,
+    on: bool = false,
+    sent: bool = false,
+    gen: u32 = 0,
+};
+
+/// Last-sent EntityVelocity vy for one entity slot. `gen` pins the entry to
+/// the slot's current occupant (recycled slots start fresh).
+pub const VelYSent = struct {
+    vy: f32 = 0,
+    gen: u32 = 0,
+};
+

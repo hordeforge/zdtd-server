@@ -7,7 +7,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const components = @import("../ecs/components.zig");
-const items_start_here: i32 = @import("items.zig").items_start_here;
+const items_start_here = @import("items.zig").items_start_here;
 const ItemTable = @import("items.zig").ItemTable;
 const loadFromPath = @import("items.zig").loadFromPath;
 
