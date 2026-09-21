@@ -2902,7 +2902,9 @@ test "PlayerItemCount compares the inventory count and HasTrackedEntity is dedi-
     try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{rich}, .{}, &counts));
     try std.testing.expectEqual(Kind.player_item_count, kindOf("PlayerItemCount"));
     const tracked = Requirement{ .kind = .has_tracked_entity, .list = "perkAT01" };
-    try std.testing.expect(all(&.{tracked}, .{ .has_tracked_entity = false }));
+    const not_tracked = Requirement{ .kind = .has_tracked_entity, .negated = true, .list = "perkAT01" };
+    try std.testing.expect(!all(&.{tracked}, .{ .has_tracked_entity = false }));
+    try std.testing.expect(all(&.{not_tracked}, .{ .has_tracked_entity = false }));
     try std.testing.expectEqual(Kind.has_tracked_entity, kindOf("HasTrackedEntity"));
     try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{tracked}, .{}, &counts));
 }
