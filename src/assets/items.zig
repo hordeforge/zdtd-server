@@ -26,25 +26,7 @@ pub const max_item_passives_total: usize = 8192;
 pub const max_triggered_per_item: usize = 64;
 pub const max_item_triggered_total: usize = 8192;
 
-/// Stock FastTags match between a passive's tag list and a drop row's tag
-/// list: an untagged passive applies to every drop; a tagged passive needs
-/// a shared tag with the drop (an untagged drop is only matched by
-/// untagged passives).
-fn tagsIntersect(row_tags: []const u8, drop_tags: []const u8) bool {
-    if (row_tags.len == 0) return true;
-    if (drop_tags.len == 0) return false;
-    var it = std.mem.splitScalar(u8, row_tags, ',');
-    while (it.next()) |rt| {
-        const t = std.mem.trim(u8, rt, " \t");
-        if (t.len == 0) continue;
-        var it2 = std.mem.splitScalar(u8, drop_tags, ',');
-        while (it2.next()) |dt| {
-            if (std.mem.eql(u8, t, std.mem.trim(u8, dt, " \t"))) return true;
-        }
-    }
-    return false;
-}
-
+const tagsIntersect = item_parse.tagsIntersect;
 /// Matches Block.ItemsStartHere (MAX_BLOCKS). Catalog constant; wire stock_inv
 /// keeps the same pin for encode. Assets must not import wire for this alone.
 pub const items_start_here: i32 = 65536;
@@ -60,11 +42,7 @@ pub const stock_default_stack: u16 = 0x1f4; // 500
 /// lookups that resolve to nothing.
 pub const no_item_id: u16 = 0;
 
-fn typeFromBuiltinId(item_id: u16) i32 {
-    if (item_id == 0) return 0;
-    return items_start_here + @as(i32, item_id);
-}
-
+const typeFromBuiltinId = item_parse.typeFromBuiltinId;
 /// items.xml HarvestCount passive (141) row on a held tool (RE GameUtils.
 /// HarvestOnAttack IL=623 + items.xml ops): the harvest-yield modifier for
 /// drop rows whose tag set intersects `tags` ("" = untagged, applies to
