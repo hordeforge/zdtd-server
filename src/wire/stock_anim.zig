@@ -262,3 +262,83 @@ test "variable-length relay bodies report where the stock body ends" {
     try std.testing.expectEqual(snd.len, trailing.wire_len);
     try std.testing.expectEqual(@as(i32, 107), trailing.entity_id);
 }
+
+/// One decoded NetPackageItemActionEffects body. The two Vector3 are optional
+/// on the wire (a presence bool covers both); `wire_len` is the consumed
+/// length so a relay forwards exactly what stock writes.
+pub const ItemActionEffects = struct {
+    entity_id: i32 = 0,
+    slot_idx: u8 = 0,
+    action_idx: u8 = 0,
+    firing_state: u8 = 0,
+    user_data: i32 = 0,
+    wire_len: usize = 0,
+};
+
+/// NetPackageItemActionEffects::read (IL=39,
+/// il/netpackages-v3.2.0/NetPackageItemActionEffects_il.txt:33): entityId i32
+/// | slotIdx u8 | actionIdx u8 | firingState u8 | a bool that, when set, is
+/// followed by startPos and direction as Vector3 (write IL=52 sets it only
+/// when either vector is non-zero, so a false here means both are zero).
+pub fn parseItemActionEffects(body: []const u8) binary.ReadError!ItemActionEffects {
+    var r: binary.Reader = .{ .data = body };
+    const eid = try r.readI32();
+    const slot = try r.readByte();
+    const action = try r.readByte();
+    const firing = try r.readByte();
+    if (try r.readBool()) {
+        var i: usize = 0;
+        while (i < 6) : (i += 1) _ = try r.readF32();
+    }
+    const user_data = try r.readI32();
+    return .{
+        .entity_id = eid,
+        .slot_idx = slot,
+        .action_idx = action,
+        .firing_state = firing,
+        .user_data = user_data,
+        .wire_len = r.pos,
+    };
+}
+
+/// One decoded NetPackageWireToolActions body. `operation` is the stock
+/// `WireActions` enum byte; `entity_id` is the player the client claims is
+/// holding the wire tool, which the server checks against the sender.
+pub const WireToolActions = struct {
+    operation: u8 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    entity_id: i32 = 0,
+};
+
+/// NetPackageWireToolActions::read (IL=13,
+/// il/netpackages-v3.2.0/NetPackageWireToolActions_il.txt:17):
+/// currentOperation u8 | tileEntityPosition Vector3i | entityID i32.
+/// GetLength() IL=2 returns 12, but the read is 17 bytes; the length hint is
+/// the pool size class, not the body size, so trust the read.
+pub fn parseWireToolActions(body: []const u8) binary.ReadError!WireToolActions {
+    var r: binary.Reader = .{ .data = body };
+    const op = try r.readByte();
+    const x = try r.readI32();
+    const y = try r.readI32();
+    const z = try r.readI32();
+    const eid = try r.readI32();
+    return .{ .operation = op, .x = x, .y = y, .z = z, .entity_id = eid };
+}
+
+/// Stock NetPackageWireActions SetParent body (asm.il:842779): op=0,
+/// tileEntityPosition=child, childCount=1, wireChildren[0]=parent, wiringEntityID.
+pub fn buildWireSetParentBody(buf: []u8, cx: i32, cy: i32, cz: i32, px: i32, py: i32, pz: i32, entity_id: i32) ![]u8 {
+    if (buf.len < 30) return error.Overflow;
+    buf[0] = 0;
+    std.mem.writeInt(i32, buf[1..5], cx, .little);
+    std.mem.writeInt(i32, buf[5..9], cy, .little);
+    std.mem.writeInt(i32, buf[9..13], cz, .little);
+    buf[13] = 1;
+    std.mem.writeInt(i32, buf[14..18], px, .little);
+    std.mem.writeInt(i32, buf[18..22], py, .little);
+    std.mem.writeInt(i32, buf[22..26], pz, .little);
+    std.mem.writeInt(i32, buf[26..30], entity_id, .little);
+    return buf[0..30];
+}
