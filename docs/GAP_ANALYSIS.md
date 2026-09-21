@@ -276,7 +276,7 @@ area and the concrete work.
    `NetPackageEntityStatChanged` for player HP from the tick replicate pass, the
    way stock's `EntityStats::SendStatChangePacket` does (asm.il:199650). Until
    this lands, combat has no stakes and a "dead" player is a ghost who cannot
-   fight back (`src/ecs/systems.zig:1280-1291`, `:1433-1447`,
+   fight back (`src/ecs/damage_apply.zig:58-140`,
    `src/server/game.zig`).
 
 2. **DONE 2026-08-06 (POI placement closed after).** Traders: replicate the trader entity, then deliver
@@ -1516,7 +1516,7 @@ parsed, and quest offering is unwired.
   its EconomicValue x EconomicSellScale x SellMarkdown via the Game's
   sell-price hook (stock lets you sell anything, RE GetSellPrice), with unit
   tests for the stocked, non-stocked and unset-hook paths.
-  *Anchors:* `src/ecs/systems.zig:1201-1298`, `src/server/game/hooks.zig`
+  *Anchors:* `src/ecs/quest_trade.zig:748-942`, `src/server/game/hooks.zig`
   (`traderSellPrice`), `src/ecs/world.zig` (`sell_price_fn`)
 
 - **Trader wallet / AvailableMoney** `WORKS` `(2026-08-22)`
@@ -1530,7 +1530,7 @@ parsed, and quest offering is unwired.
   traders.xml (nothing for the client to observe), and the restock timer is
   wired (the Restock timer row went WORKS).
   *Anchors:* `src/ecs/components.zig:746` TraderStock,
-  `src/ecs/systems.zig:1201` (trade), `:1288` (traderRestock),
+  `src/ecs/quest_trade.zig:748` (trade), `:943` (traderRestock),
   `src/server/game/trader_wire.zig`, `asm.il:861697`
 
 - **Haggling / barter perks** `WORKS` (was `PARTIAL (waived)`; closed
@@ -1617,7 +1617,7 @@ parsed, and quest offering is unwired.
   window). The inventory-roll/depth rows still own roll semantics.
   *Anchors:* `src/server/game/trader.zig:207` (maybeRestockTrader),
   `src/server/c2s/misc.zig:668`, `src/server/persist.zig` saveTraders/
-  loadTraders, `src/ecs/systems.zig:1288` (traderRestock),
+  loadTraders, `src/ecs/quest_trade.zig:943` (traderRestock),
   `asm.il:863657-863767`, `asm.il:863770-863910`
 
 - **Open hours and the closed-door behaviour** `WORKS` (door TE features residual)
@@ -2753,7 +2753,7 @@ gamestage, no wandering hordes, and no screamers.
   FatCop, Mutated pipe lists) stay unmapped: no native task, so they are omitted
   rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
   and PathTest have **zero AITask uses** in the stock file.
-  *Anchors:* `src/ecs/systems.zig:1341` zombie_tasks,
+  *Anchors:* `src/ecs/ai_tasks.zig:62` zombie_tasks,
   `$game/Data/Config/entityclasses.xml` lines 562-571, `asm.il` EAI* class list
 
 - **Per-class AITask/AITarget lists from entityclasses.xml** `WORKS` `(2026-09-07)`
@@ -2821,8 +2821,8 @@ gamestage, no wandering hordes, and no screamers.
   `pathStepAt` resolves through `world.standableWorld` (step-up, drop, headroom)
   with a lock-free terrain snapshot fast path, returning the destination feet Y
   rather than a bool, which is what makes POI floors under roofs distinguishable.
-  *Anchors:* `src/server/game.zig`, `src/ecs/systems.zig:1298-1313`,
-  `:1372-1387`
+  *Anchors:* `src/server/game.zig`, `src/ecs/sensing.zig:394-430`,
+  `src/server/game/hooks.zig:134-141`
 
 - **A* tick budget / replan throttle** `WORKS`
   0.35 s replan interval plus a slot-strided per-tick admission derived once on
@@ -2858,8 +2858,8 @@ gamestage, no wandering hordes, and no screamers.
   hold the chase projection; block damage at 2 Hz applies base 10 scaled by
   BlockDamageAI/AIBM, respects MaxDamage, and broadcasts on break. Replan clears
   the latch when a detour opens.
-  *Anchors:* `src/ecs/systems.zig:1072-1128`, `src/server/game.zig`,
-  `src/ecs/systems.zig:1337-1339`
+  *Anchors:* `src/ecs/ai_tasks.zig:619-700`, `src/server/game.zig`,
+  `src/ecs/ai_tasks.zig:2231`
 
 - **Daytime wildlife spawner** `WORKS` `(2026-08-22 re-audit)`
   One animal per 60 s during daylight up to the cap (MaxSpawnedAnimals). The
@@ -3029,7 +3029,7 @@ gamestage, no wandering hordes, and no screamers.
 - **Animation / ragdoll / look-at replication for AI** `PARTIAL (waived)`
   Server drives AI position/state; animation/ragdoll/look-at FX are client-predicted.
   Stock FX parity is out of scope (AGENTS: wire is contract, no fake FX - §2a).
-  *Anchors:* `src/server/game.zig`, `src/ecs/systems.zig:1247-1263`
+  *Anchors:* `src/server/game.zig`, `src/ecs/ai_tasks.zig:1190-1230`
 
 - **Spawn placement validity** `WORKS`
   Spawn Y is now ground-snapped through the world ground hook for every
