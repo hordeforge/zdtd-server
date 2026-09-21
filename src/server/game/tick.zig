@@ -1173,6 +1173,59 @@ pub fn fireJump(self: *Game, ps: ecs.Slot) void {
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
 
+/// The aim/crouch flag edges (`onSelfAimingGunStart/Stop`, `onSelfCrouch`,
+/// `onSelfStand`, `onSelfCrouchRun/Walk`): the client reports aim (0x0004)
+/// and crouch (0x0200) in the AliveFlags word. Setting aim adds
+/// buffHoldBreathAiming01 (gated `holdBreathAiming` held tag) and clearing
+/// removes it; crouch set/clear adds/removes buffCrouching, whose start and
+/// update rows apply the screen effect and whose own update row re-removes
+/// it when `_crouching` reads 0. Same shape as fireJump.
+pub fn fireAimEdge(self: *Game, ps: ecs.Slot, aiming: bool) void {
+    fireFlagBuffEdge(self, ps, if (aiming) .aim_start else .aim_stop);
+}
+
+/// The crouch flag edge also drives the `_crouching` mirror write (a set
+/// edge writes 1, a clear edge writes 0) before firing, so the buff's own
+/// `_crouching`-gated update row resolves against the live value.
+pub fn fireCrouchEdge(self: *Game, ps: ecs.Slot, crouching: bool) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    _ = c.cvars.apply("_crouching", .set, if (crouching) 1 else 0);
+    fireFlagBuffEdge(self, ps, if (crouching) .crouch else .stand);
+}
+
+fn fireFlagBuffEdge(self: *Game, ps: ecs.Slot, event: assets_buffs.Trigger) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    // The aiming/crouch rows gate on the held item (`holdBreathAiming`
+    // tags on buffHoldBreathAiming01): ride the held tags like the hit
+    // events so the gate resolves.
+    if (self.sim.mask[ps].inventory) {
+        const held = self.sim.inventory[ps].heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| ctx.item_tags = def.tags;
+        }
+    }
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, event, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
 /// The respawn buff rows (`onSelfRespawn`): stock fires it after the player
 /// respawns. The only stock row is buffNearDeathProtection's self-remove;
 /// fired in the respawn funnel after the check buffs are re-added so the

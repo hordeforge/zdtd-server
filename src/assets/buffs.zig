@@ -188,6 +188,17 @@ pub const Trigger = enum(u8) {
     /// removes itself here. Driven by the respawn funnel after the check
     /// buffs are re-added.
     respawn,
+    /// `onSelfAimingGunStart/Stop`: fired when the player starts/stops
+    /// aiming a gun (AliveFlags 0x0004 edge). One stock add row:
+    /// buffHoldBreathAiming01 on start (gated `holdBreathAiming` held tag);
+    /// its own stop/died/entered-game/equip-start rows remove it.
+    aim_start,
+    aim_stop,
+    /// `onSelfCrouch` / `onSelfStand`: fired on the crouch flag (0x0200)
+    /// set/clear edges. Crouch adds buffCrouching (its start/update rows
+    /// apply the screen effect); stand removes it.
+    crouch,
+    stand,
     /// `onSelfTeleported`: fired when the player is teleported (stock
     /// Entity teleport flow). One stock row: buffNearDeathProtection
     /// removes itself here. Currently unfired: no teleport path drives it.
@@ -1628,6 +1639,12 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfJump")) return .jump;
     if (std.mem.eql(u8, s, "onSelfRespawn")) return .respawn;
     if (std.mem.eql(u8, s, "onSelfTeleported")) return .teleported;
+    if (std.mem.eql(u8, s, "onSelfAimingGunStart")) return .aim_start;
+    if (std.mem.eql(u8, s, "onSelfAimingGunStop")) return .aim_stop;
+    if (std.mem.eql(u8, s, "onSelfCrouch")) return .crouch;
+    if (std.mem.eql(u8, s, "onSelfCrouchRun")) return .crouch;
+    if (std.mem.eql(u8, s, "onSelfCrouchWalk")) return .crouch;
+    if (std.mem.eql(u8, s, "onSelfStand")) return .stand;
     if (std.mem.eql(u8, s, "onSelfDamagedBlock")) return .block_damaged;
     if (std.mem.eql(u8, s, "onSelfEquipStart")) return .equip_start;
     if (std.mem.eql(u8, s, "onSelfEquipStop")) return .equip_stop;

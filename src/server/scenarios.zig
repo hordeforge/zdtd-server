@@ -12787,6 +12787,47 @@ test "scenario the alive-flags jump edge fires the leg buffs' onSelfJump rows" {
     std.debug.print("PASS jump edge: leg buffs escalate once per set edge\n", .{});
 }
 
+test "scenario the alive-flags aim and crouch edges drive their buffs" {
+    // Aim set (0x0004) fires the hold-breath rows: with a `holdBreathAiming`
+    // holder the buff lands, and aim clear removes it. Crouch set (0x0200)
+    // adds buffCrouching, clear removes it. Repeated bits with no edge fire
+    // nothing; a foreign entity id is refused like the other self-reports.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try g.step(); // grants the check buffs (buffStatusCheck01) on entered-game
+    const aim_id = g.buffs.indexOfName("buffHoldBreathAiming01") orelse return error.SkipZigTest;
+    const crouch_id = g.buffs.indexOfName("buffCrouching") orelse return error.SkipZigTest;
+    var body: [32]u8 = undefined;
+    var fb: [256]u8 = undefined;
+    // Without a breath-aiming holder the aim rows refuse (held-tag gate).
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, 0x0004)));
+    try std.testing.expect(g.sim.buffs[ps].find(aim_id) == null);
+    // Crouch set adds the crouch buff; repeat set fires nothing new.
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, 0x0200)));
+    try std.testing.expect(g.sim.buffs[ps].find(crouch_id) != null);
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, 0x0200)));
+    // Crouch clear removes it (flagged; the buff tick reaps).
+    try g.injectFramed(cl, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cl.entity_id, 0x0008)));
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(crouch_id) == null);
+    std.debug.print("PASS aim/crouch edges: hold-breath gated, crouch buff cycles\n", .{});
+}
+
 
 test "scenario the respawn funnel fires onSelfRespawn rows" {
     // Stock fires onSelfRespawn after the player respawns; the only stock

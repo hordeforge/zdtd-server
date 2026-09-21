@@ -1953,6 +1953,14 @@ pub const Game = struct {
         game_tick.fireRespawn(self, ps);
     }
 
+    pub fn fireAimEdge(self: *Game, ps: ecs.Slot, aiming: bool) void {
+        game_tick.fireAimEdge(self, ps, aiming);
+    }
+
+    pub fn fireCrouchEdge(self: *Game, ps: ecs.Slot, crouching: bool) void {
+        game_tick.fireCrouchEdge(self, ps, crouching);
+    }
+
     pub fn fireBlockDamaged(self: *Game, ps: ecs.Slot, block_id: u16) void {
         game_tick.fireBlockDamaged(self, ps, block_id);
     }

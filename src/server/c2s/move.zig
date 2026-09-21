@@ -185,6 +185,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // previous jump bit must be read before the verbatim store (stock
             // relay mirror).
             const was_jumping = (self.sim.flags[idx].bits & ecs.components.flag_jumping) != 0;
+            const was_aiming = (self.sim.flags[idx].bits & ecs.components.flag_aiming_gun) != 0;
+            const was_crouching = (self.sim.flags[idx].bits & packages.cF_crouching) != 0;
             // Store the client-reported word verbatim (stock relay mirror).
             // Server-side decisions never read these stored bits: crouch is
             // derived from the package directly below, and the S2C flags word
@@ -214,6 +216,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (f.entity_id == c.entity_id and jumping and !was_jumping) {
                     if (self.sim.playerByPeer(c.slot)) |ps| {
                         self.fireJump(ps);
+                    }
+                }
+                // Aim + crouch edges (own entity only, like jump): aim start
+                // adds buffHoldBreathAiming01 for `holdBreathAiming` holders,
+                // aim stop removes it; crouch set/clear adds/removes
+                // buffCrouching (screen-effect rows).
+                if (f.entity_id == c.entity_id) {
+                    if (self.sim.playerByPeer(c.slot)) |ps| {
+                        const aiming = (f.flags & ecs.components.flag_aiming_gun) != 0;
+                        if (aiming != was_aiming) self.fireAimEdge(ps, aiming);
+                        const crouching = (f.flags & packages.cF_crouching) != 0;
+                        if (crouching != was_crouching) self.fireCrouchEdge(ps, crouching);
                     }
                 }
             }
