@@ -126,7 +126,7 @@ pub const Phase = enum(u8) {
     buffs,
 ```
 
-The phase order is pinned by a test and a mode pack may disable an entry through `w.rules.systems.<name>` but never reorder one, because the order encodes the dependency (`src/ecs/schedule.zig:67`). The buff slot in the run order is the first entry (`src/ecs/schedule.zig:76`). `run` calls the system only when the toggle is on, so a disabled system leaves its slice of the tick result zero rather than running a stub (`src/ecs/schedule.zig:83`). The system walks the alive bitset, skips entities without the buffs component mask, and treats an entity whose health reached zero as dead, which skips the started and duration half of the tick (`src/ecs/systems.zig:2095`, `:2103`):
+The phase order is pinned by a test and a mode pack may disable an entry through `w.rules.systems.<name>` but never reorder one, because the order encodes the dependency (`src/ecs/schedule.zig:67`). The buff slot in the run order is the first entry (`src/ecs/schedule.zig:76`). `run` calls the system only when the toggle is on, so a disabled system leaves its slice of the tick result zero rather than running a stub (`src/ecs/schedule.zig:83`). The system walks the alive bitset, skips entities without the buffs component mask, and treats an entity whose health reached zero as dead, which skips the started and duration half of the tick (`src/ecs/systems.zig:2046`, `:2054`):
 
 ```zig
 pub fn systemBuffs(w: *World, out: []buff.Expiry) u8 {
