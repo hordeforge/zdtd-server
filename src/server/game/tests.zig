@@ -9492,3 +9492,53 @@ test "buying StrengthMastery refreshes a held miner tool's healing cvars" {
     try std.testing.expect(axe.triggered.len > 0);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), cl.cvars.get("$minerHealing"), 0.001);
 }
+
+test "a torch hit sets the victim burning" {
+    // meleeToolTorch's onSelfAttackedOther rows add buffBurningElement to
+    // the victim and seed its duration. These rows sat behind Action
+    // blocks and were dropped by the item walk until the skip fix.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const torch = g.items.byName("meleeToolTorch") orelse return error.SkipZigTest;
+    try std.testing.expect(torch.triggered.len > 0);
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, torch.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != torch.id) continue;
+        g.sim.inventory[ps].slots[i] = .{};
+        g.sim.inventory[ps].slots[0] = .{ .item_id = torch.id, .count = 1, .quality = 1 };
+        break;
+    }
+    g.sim.inventory[ps].holding = 0;
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.transform[ps] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    const burning = g.buffs.indexOfName("buffBurningElement") orelse return error.SkipZigTest;
+    // 30% ignite roll per hit: volley with fresh tick seeds.
+    var fbuf: [128]u8 = undefined;
+    var dmg: [256]u8 = undefined;
+    var hits: usize = 0;
+    while (hits < 40 and g.sim.buffs[zs].find(burning) == null) : (hits += 1) {
+        g.sim.health[zs].hp = 500;
+        capture.clear();
+        const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 5, false, cl.entity_id);
+        try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+        try g.step();
+    }
+    try std.testing.expect(g.sim.buffs[zs].find(burning) != null);
+}
