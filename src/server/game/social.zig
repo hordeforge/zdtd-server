@@ -149,6 +149,11 @@ pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
         const ex = r.buff_expired[i];
         const def = self.buffs.byId(ex.def_id) orelse continue;
         try relayBuff(self, ex.entity_id, def.name, false, -1, null);
+        // onSelfBuffRemove on duration expiry, before Finish (stock order):
+        // the buff tick reaps the slot the same tick it flags it, so the
+        // survival remove pass never sees expired buffs. Without this the
+        // respawn trauma chain (trigger .1 s expiry grants trauma+regen)
+        // and every other expiry-remove row silently dropped.
         // onSelfBuffFinish (87 buffs / 120 rows: stat restores, cvar clears,
         // cooldown Adds): stock fires it when the duration ends, after
         // onSelfBuffRemove. Player victims evaluate with their live ctx so
@@ -156,6 +161,7 @@ pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
         // and Spectral Grace reopens.
         if (self.sim.slotOfNetId(ex.entity_id)) |ps| {
             if (self.sim.mask[ps].player) {
+                self.fireBuffEvent(ps, ex.def_id, .remove, null);
                 self.fireBuffFinish(ps, ex.def_id);
             }
         }

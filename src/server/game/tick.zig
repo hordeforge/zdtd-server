@@ -1226,7 +1226,7 @@ fn progressionTriggeredRows(self: *const Game, name: []const u8) []const assets_
     return &.{};
 }
 
-fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
+pub fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
     const peer_slot = self.sim.player[ps].peer_slot;
     if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
     const c = &self.clients[@intCast(peer_slot)];

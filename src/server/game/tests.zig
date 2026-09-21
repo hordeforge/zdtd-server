@@ -8928,4 +8928,11 @@ test "respawn grants the stock spawn-protection and trauma buffs" {
     const trigger = g.buffs.indexOfName("buffNearDeathTraumaTrigger") orelse return error.SkipZigTest;
     try std.testing.expect(g.sim.buffs[ps].find(adjust) != null);
     try std.testing.expect(g.sim.buffs[ps].find(trigger) != null);
+    // The .1 s trigger expires through the remove event, which grants the
+    // trauma + regen buffs: the full stock chain self-drives server-side.
+    try stepTicks(g, 10);
+    const trauma = g.buffs.indexOfName("buffNearDeathTrauma") orelse return error.SkipZigTest;
+    const regen = g.buffs.indexOfName("buffNearDeathRegen") orelse return error.SkipZigTest;
+    try std.testing.expect(g.sim.buffs[ps].find(trauma) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(regen) != null);
 }

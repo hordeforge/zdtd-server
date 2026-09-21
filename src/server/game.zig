@@ -1896,6 +1896,10 @@ pub const Game = struct {
         return game_tick.fireBuffFinish(self, ps, def_id);
     }
 
+    pub fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
+        return game_tick.fireBuffEvent(self, ps, def_id, event, other);
+    }
+
     pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
         return game_tick.fireBuffStack(self, ps, def_id);
     }
