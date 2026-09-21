@@ -207,3 +207,100 @@ pub fn systemVehicles(w: *World, dt: f32) void {
         }
     }
 }
+
+test "vehicle falls under gravity and settles on terrain" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ground_fn = &testGround;
+    const id = w.spawnVehicle(.minibike, 0, 100, 0).?;
+    const s = w.slotOfNetId(id).?;
+    var t: f32 = 0;
+    while (t < 20.0) : (t += 0.05) {
+        systemVehicles(&w, 0.05);
+        try std.testing.expect(w.transform[s].y >= 65); // never sinks past ground
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 65), w.transform[s].y, 0.001);
+    try std.testing.expectEqual(@as(f32, 0), w.vehicle[s].vy);
+}
+test "vehicle below ground pops up in one tick, no-sink" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ground_fn = &testGround;
+    const id = w.spawnVehicle(.four_by_four, 0, 40, 0).?;
+    const s = w.slotOfNetId(id).?;
+    systemVehicles(&w, 0.05);
+    try std.testing.expectEqual(@as(f32, 65), w.transform[s].y);
+    try std.testing.expect(w.vehicle[s].vy >= 0);
+}
+test "vehicle physics skipped without ground hook (headless invariant)" {
+    var w: World = .{};
+    defer w.deinit();
+    const id = w.spawnVehicle(.bicycle, 0, 100, 0).?;
+    const s = w.slotOfNetId(id).?;
+    systemVehicles(&w, 0.05);
+    try std.testing.expectEqual(@as(f32, 100), w.transform[s].y);
+}
+test "driver seat tracks clamped vehicle y+1" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ground_fn = &testGround;
+    const vid = w.spawnVehicle(.motorcycle, 0, 100, 0).?;
+    const vs = w.slotOfNetId(vid).?;
+    const pid = w.spawnPlayer(0, 100, 0, 0).?;
+    const ps = w.slotOfNetId(pid).?;
+    try std.testing.expectEqual(@as(?u8, 0), vehicleAttach(&w, vs, pid, seat_any));
+    var t: f32 = 0;
+    while (t < 20.0) : (t += 0.05) {
+        systemVehicles(&w, 0.05);
+    }
+    try std.testing.expectApproxEqAbs(@as(f32, 65), w.transform[vs].y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 66), w.transform[ps].y, 0.001);
+}
+fn testGround(_: ?*anyopaque, _: i32, _: i32) f32 { return 65; }
+
+test "multi-seat: passenger rides the hull and cannot steer" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ground_fn = &testGround;
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    const drv = w.spawnPlayer(0, 70, 0, 0).?;
+    const pax = w.spawnPlayer(1, 70, 0, 1).?;
+    try std.testing.expectEqual(@as(?u8, 0), vehicleAttach(&w, vs, drv, seat_any));
+    try std.testing.expectEqual(@as(?u8, 1), vehicleAttach(&w, vs, pax, 1));
+    const pax_slot = w.slotOfNetId(pax).?;
+
+    vehicleControl(&w, vs, 1.0, 0.0, 0.05);
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) {
+        vehicleTickHeld(&w, 0.05);
+        systemVehicles(&w, 0.05);
+    }
+    try std.testing.expect(w.vehicle[vs].speed > 0);
+    try std.testing.expectApproxEqAbs(w.transform[vs].z, w.transform[pax_slot].z, 0.001);
+    try std.testing.expectApproxEqAbs(w.transform[vs].y + 1, w.transform[pax_slot].y, 0.001);
+    try std.testing.expectEqual(drv, w.vehicle[vs].driverNetId());
+}
+
+test "multi-seat: a destroyed rider releases its seat on the next tick" {
+    var w: World = .{};
+    defer w.deinit();
+    w.ground_fn = &testGround;
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    const drv = w.spawnPlayer(0, 70, 0, 0).?;
+    const pax = w.spawnPlayer(1, 70, 0, 1).?;
+    _ = vehicleAttach(&w, vs, drv, seat_any).?;
+    _ = vehicleAttach(&w, vs, pax, seat_any).?;
+    vehicleControl(&w, vs, 1.0, 0.0, 0.5);
+
+    w.destroy(w.slotOfNetId(pax).?);
+    systemVehicles(&w, 0.05);
+    try std.testing.expectEqual(@as(u8, 3), w.vehicle[vs].freeSeats());
+    try std.testing.expect(w.vehicle[vs].speed > 0); // driver kept the hull moving
+
+    w.destroy(w.slotOfNetId(drv).?);
+    systemVehicles(&w, 0.05);
+    try std.testing.expectEqual(@as(u8, 4), w.vehicle[vs].freeSeats());
+    try std.testing.expectEqual(@as(f32, 0), w.vehicle[vs].speed);
+}
