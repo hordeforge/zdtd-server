@@ -7,6 +7,8 @@ const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
 const stock_paths = @import("../util/stock_paths.zig");
+const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 
 /// Storage cap on parsed entity classes, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock entityclasses.xml
@@ -167,6 +169,9 @@ pub const EntityDef = struct {
     /// class when it enters the game (`EntityClass` ctor + the class's
     /// onSelfEnteredGame rows). The player class carries the status checks.
     buffs: []const []const u8 = &.{},
+    /// The class's `<triggered_effect>` rows (own effect_groups plus Extends
+    /// ancestors'): radiated regen on damaged, spawn heal, hazard timers.
+    triggered: []const buffs.Triggered = &.{},
     /// entityclasses `PhysicalDamageResist` (passive 41) percent: the stock
     /// armoured classes (zombieSoldier 50, zombieDemolition 60, the swarms 20)
     /// take that much less damage from every source. Applied where the SERVER
@@ -291,7 +296,71 @@ const RawClass = struct {
     /// (arena-owned; captured whole so Extends resolution can read per-field
     /// overrides). Null = the class never explodes.
     explosion: ?[]const u8 = null,
+    /// The class's own `<effect_group>` inner bodies (arena-owned slices),
+    /// for triggered_effect rows (radiated regen, spawn heal, hazard
+    /// timers). Extends ancestors contribute theirs at assembly.
+    effect_groups: []const []const u8 = &.{},
 };
+
+/// Collect a class body's top-level `<effect_group>` inners (arena-owned).
+/// Triggered rows scan from these at EntityDef assembly (own groups plus
+/// Extends ancestors').
+fn collectEffectGroups(arena: std.mem.Allocator, body: []const u8) ![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    var ij: usize = 0;
+    while (ij < body.len) {
+        const lt = std.mem.findPos(u8, body, ij, "<effect_group") orelse break;
+        const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
+        if (gt > lt and body[gt - 1] == '/') {
+            ij = gt + 1;
+            continue;
+        }
+        const close = std.mem.findPos(u8, body, gt, "</effect_group>") orelse break;
+        try out.append(arena, body[gt + 1 .. close]);
+        ij = close + "</effect_group>".len;
+    }
+    return out.items;
+}
+
+/// Scan one class's effect_group inners (own + Extends ancestors, own
+/// first) for triggered_effect rows through the shared scanner. Stock merges
+/// MinEvents down the EntityClass chain; ancestors contribute after the
+/// child's own rows.
+fn scanClassTriggered(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+    pool: *std.ArrayList(buffs.Triggered),
+    reqs: *std.ArrayList(requirements.Requirement),
+    ranges: *std.ArrayList(struct { usize, usize }),
+) !void {
+    var cur: ?[]const u8 = name;
+    var hops: usize = 0;
+    while (cur != null and hops < 8) : (hops += 1) {
+        const rc = classes.get(cur.?) orelse break;
+        for (rc.effect_groups) |ginner| {
+            var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+            defer group_reqs.deinit(allocator);
+            try requirements.scanChildren(allocator, arena, ginner, 0, ginner.len, &group_reqs);
+            var seen: usize = pool.items.len;
+            try buffs.scanTriggeredRows(
+                allocator,
+                arena,
+                ginner,
+                0,
+                ginner.len,
+                group_reqs.items,
+                pool,
+                reqs,
+                ranges,
+                std.math.maxInt(usize),
+                &seen,
+            );
+        }
+        cur = rc.extends;
+    }
+}
 
 fn resolveProp(
     classes: *const std.StringHashMapUnmanaged(RawClass),
@@ -924,6 +993,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .extends = ext_owned,
             .props = props,
             .explosion = explosion_body,
+            .effect_groups = try collectEffectGroups(arena, body),
         });
         i = if (body_end > gt) body_end + 15 else gt + 1;
         if (classes.count() >= max_entities_defs) break;
@@ -931,6 +1001,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
 
     var list: std.ArrayList(EntityDef) = .empty;
     defer list.deinit(allocator);
+    // Class triggered rows: one shared pool, ranges patched like items.xml.
+    var trig_pool: std.ArrayList(buffs.Triggered) = .empty;
+    defer trig_pool.deinit(allocator);
+    var trig_reqs: std.ArrayList(requirements.Requirement) = .empty;
+    defer trig_reqs.deinit(allocator);
+    var trig_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_ranges.deinit(allocator);
+    var trig_spans: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_spans.deinit(allocator);
 
     var it = classes.iterator();
     while (it.next()) |e| {
@@ -1172,6 +1251,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (f >= 0 and f <= 100_000) xp_gain = f;
             }
         }
+        const t0 = trig_pool.items.len;
+        try scanClassTriggered(allocator, arena, &classes, name, &trig_pool, &trig_reqs, &trig_ranges);
+        try trig_spans.append(allocator, .{ t0, trig_pool.items.len - t0 });
         try list.append(allocator, .{
             .name = name,
             .hash = unity_hash.getStableHashCode(name),
@@ -1216,6 +1298,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .phys_resist = phys_resist,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
+    }
+
+    // Freeze the triggered pool and patch gate slices + def spans (before
+    // the name sort, which trig_spans is aligned with).
+    const tpool = try arena.alloc(buffs.Triggered, trig_pool.items.len);
+    @memcpy(tpool, trig_pool.items);
+    if (trig_ranges.items.len != tpool.len) return error.MalformedEntities;
+    const treq_pool = try arena.alloc(requirements.Requirement, trig_reqs.items.len);
+    @memcpy(treq_pool, trig_reqs.items);
+    for (tpool, trig_ranges.items) |*tr, rg| {
+        tr.reqs = treq_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    if (trig_spans.items.len != list.items.len) return error.MalformedEntities;
+    for (list.items, trig_spans.items) |*d, sp| {
+        d.triggered = tpool[sp[0] .. sp[0] + sp[1]];
     }
 
     // Stable order: name sort for deterministic indexes.

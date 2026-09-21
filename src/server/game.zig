@@ -1920,6 +1920,10 @@ pub const Game = struct {
         return game_tick.fireAttackedOther(self, ps, victim, body_part);
     }
 
+    pub fn fireClassRows(self: *Game, vs: ecs.Slot, event: assets_buffs.Trigger) void {
+        return game_tick.fireClassRows(self, vs, event);
+    }
+
     pub fn fireRayHit(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
         return game_tick.fireRayHit(self, ps, victim, body_part);
     }

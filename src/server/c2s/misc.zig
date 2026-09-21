@@ -863,6 +863,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             } else {
                 self.fireAttackedOther(actor_slot, ei, d.body_part);
             }
+            // Victim entity-class rows (radiated regen on damaged): the
+            // class's own MinEvents with target=self. Players carry no such
+            // rows (their buffs cover it); zombies/animals do.
+            if (!self.sim.mask[ei].player) {
+                self.fireClassRows(ei, .other_damaged_self);
+            }
         }
         // Attribute the hit: stock's NetPackageDamageEntity carries
         // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt

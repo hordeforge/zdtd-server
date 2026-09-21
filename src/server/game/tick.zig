@@ -586,6 +586,44 @@ pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
     fireBuffEvent(self, ps, def_id, .stack, null);
 }
 
+/// Fire an entity class's own rows (radiated regen on damaged, spawn heal)
+/// for a non-player victim. The class resolves by the slot's class hash;
+/// zombie cvars attach lazily like buffs. Buff adds relay to trackers.
+pub fn fireClassRows(self: *Game, vs: ecs.Slot, event: assets_buffs.Trigger) void {
+    const hash = self.sim.class_id[vs].hash;
+    if (hash == 0) return;
+    const def = self.entities.byHash(hash) orelse return;
+    if (def.triggered.len == 0) return;
+    var req_counts: requirements.Counts = .{};
+    var ctx = requirements.Ctx{
+        .entity_tags = def.tags,
+        .alive = self.sim.alive[vs],
+    };
+    if (self.sim.mask[vs].health) {
+        const vh = &self.sim.health[vs];
+        if (vh.max_hp > 0) {
+            ctx.hp_frac = @max(0, @min(vh.hp / vh.max_hp, 1));
+            ctx.hp_max = vh.max_hp;
+        }
+    }
+    ctx.other_cvars = self.sim.cvarsMut(vs);
+    // Cvar rows write the victim's own store directly (no client merge).
+    ctx.cvars = self.sim.cvarsMut(vs);
+    const res = assets_buffs.evaluateRows(def.triggered, event, ctx, &req_counts);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    const vid = if (self.sim.mask[vs].network_id) self.sim.network_id[vs].id else -1;
+    for (res.add_buffs[0..res.add_n]) |names| {
+        var it = std.mem.splitScalar(u8, names, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            _ = addCatalogBuff(self, vid, vs, name, vid);
+        }
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
 /// Fire a victim buff's `onOtherAttackedSelf` rows when another entity lands
 /// a hit (concussion/fatigue counters, PackMule display buff). The attacker's
 /// tags ride `other_tags` so victim rows can filter on them.

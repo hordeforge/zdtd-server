@@ -9117,3 +9117,41 @@ test "reloading a penalty weapon grants the reload slow buff" {
     try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageItemReload", rbuf[0..4]));
     try std.testing.expect(g.sim.buffs[ps].find(slow) != null);
 }
+
+test "a damaged radiated zombie gains its regen buff and amount" {
+    // Radiated classes carry onOtherDamagedSelf rows setting
+    // RadiatedRegenAmount and adding buffRadiatedRegen (heal over time).
+    // The C2S damage path fires the victim class rows for non-players.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const zdef = g.entities.byName("zombieBoeRadiated") orelse return error.SkipZigTest;
+    try std.testing.expect(zdef.triggered.len > 0);
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].hash = zdef.hash;
+    g.sim.transform[ps] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    const regen = g.buffs.indexOfName("buffRadiatedRegen") orelse return error.SkipZigTest;
+    var fbuf: [128]u8 = undefined;
+    var dmg: [256]u8 = undefined;
+    capture.clear();
+    const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 5, false, cl.entity_id);
+    try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+    try g.step();
+    try std.testing.expect(g.sim.buffs[zs].find(regen) != null);
+}
