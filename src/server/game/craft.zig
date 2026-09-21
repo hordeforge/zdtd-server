@@ -975,3 +975,17 @@ test "getScrapableRecipe and tryScrap follow RE weight/category rules" {
     try std.testing.expect(!tryScrap(g, peer, 1, 1));
     try std.testing.expectEqual(@as(u16, 1), g.sim.inventory[ps].slots[1].count);
 }
+
+pub fn appendUnlockedRecipes(self: *const Game, slot: usize, out: [][]const u8) usize {
+    const SlotCtx = struct {
+        var peer: usize = 0;
+        var game: ?*const Game = null;
+        fn level(name: []const u8) u8 {
+            const g = game orelse return 0;
+            return g.skillLevelOf(peer, name);
+        }
+    };
+    SlotCtx.peer = slot;
+    SlotCtx.game = self;
+    return self.recipes.appendUnlockedFor(out, &self.progression_table, SlotCtx.level);
+}

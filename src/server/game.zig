@@ -1544,17 +1544,7 @@ pub const Game = struct {
     }
 
     pub fn appendUnlockedRecipes(self: *const Game, slot: usize, out: [][]const u8) usize {
-        const SlotCtx = struct {
-            var peer: usize = 0;
-            var game: ?*const Game = null;
-            fn level(name: []const u8) u8 {
-                const g = game orelse return 0;
-                return g.skillLevelOf(peer, name);
-            }
-        };
-        SlotCtx.peer = slot;
-        SlotCtx.game = self;
-        return self.recipes.appendUnlockedFor(out, &self.progression_table, SlotCtx.level);
+        return game_craft.appendUnlockedRecipes(self, slot, out);
     }
 
     pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
