@@ -137,7 +137,7 @@ and inject it with `injectFramed`, which routes through `onData`
 ```
 
 Bodies go into a caller-owned stack buffer, never a per-send allocation. Advance
-the sim with `g.step()` (`src/server/game.zig:3669`) and push interest with
+the sim with `g.step()` (`src/server/game.zig:3505`) and push interest with
 `replicateNow` (`src/server/game/harness.zig:94-96`). Do not re-implement a
 parser or call a sim system directly when a client package reaches that code.
 
