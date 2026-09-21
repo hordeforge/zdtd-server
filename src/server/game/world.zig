@@ -991,3 +991,39 @@ pub fn biomeRuleBudget(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Di
         }
         return .{};
     }
+
+/// World Y for spawning mobs next to a player (surface band, not void/float).
+pub fn spawnYNearPlayer(self: *Game, tr_x: f32, tr_y: f32, tr_z: f32) f32 {
+    const gx: i32 = std.math.lossyCast(i32, @floor(tr_x));
+    const gz: i32 = std.math.lossyCast(i32, @floor(tr_z));
+    const h_u16: u16 = self.world.heightWorld(gx, gz) catch {
+        return if (tr_y > 2) tr_y else @as(f32, @floatFromInt(self.world.primarySpawn().y)) + 1;
+    };
+    const surface: f32 = @floatFromInt(h_u16);
+    // Prefer surface+1; if player is already near surface, keep their y band.
+    if (tr_y > surface - 2 and tr_y < surface + 8) return tr_y;
+    return surface + 1.0;
+}
+
+pub fn ruleTagsAllow(self: *Game, r: *const assets_spawning.Rule, x: f32, z: f32) bool {
+    if (r.tags.len == 0 and r.notags.len == 0) return true;
+    const pf = if (self.world.prefabs) |*p| p else return r.tags.len == 0;
+    const poi = pf.poiTagsAt(x, z);
+    const anySet = struct {
+        fn call(needle: []const u8, hay: []const u8) bool {
+            var it = std.mem.splitScalar(u8, needle, ',');
+            while (it.next()) |tag| {
+                const t = std.mem.trim(u8, tag, " \t");
+                if (t.len == 0) continue;
+                var h = std.mem.splitScalar(u8, hay, ',');
+                while (h.next()) |ht| {
+                    if (std.mem.eql(u8, t, std.mem.trim(u8, ht, " \t"))) return true;
+                }
+            }
+            return false;
+        }
+    }.call;
+    if (r.notags.len > 0 and anySet(r.notags, poi)) return false;
+    if (r.tags.len > 0 and !anySet(r.tags, poi)) return false;
+    return true;
+}
