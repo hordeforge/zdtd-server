@@ -161,7 +161,7 @@ falls through to the ordinary loop, so a gate the operator installed stops
 gating). Both are spatial-composability violations: the binding names a
 provider that never declared it. Reachable whenever one discovered mod fails
 to load before a later claimant; no test covers a skipped load plus a claim
-(the claim tests at `wasm.zig:2541-2657` poke the table directly, and
+(the claim tests at `src/plugin/tests.zig:895-1043` poke the table directly, and
 `loadResolved` scenario tests load every module). Fix: map plan slot to
 loaded slot and translate at install.
 
@@ -218,7 +218,7 @@ Re-traced 2026-09-12 against the current tree (read-only, no gates run).
   `defineFuncCtx` import list (10) are the same set; `Hook` (24 variants) and
   `Hook.names` (24) agree. No host import is undeclarable, no hook is
   unnameable. A new import missing from `host_verbs` would be undeclarable;
-  the two lists are single-sourced by the `wasm.zig:2758` test.
+  the two lists are single-sourced by the `src/plugin/tests.zig:1149` test.
 - Reload (prompt check 1): `on_shutdown` -> withdraw -> deinit -> `loadInto` ->
   `on_enable`; the module name is duped before `deinit` (`wasm.zig:1154`);
   `rt_slot`/`plugin_slot` re-pointed; display/config/tier copied before

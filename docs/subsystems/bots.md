@@ -120,7 +120,7 @@ pub const Bot = struct {
 
 ## The sense snapshot
 
-One read-only snapshot is the whole read path. The guest calls `zdtd_sense(ptr, len, token)` and the host writes a flat little-endian buffer capped at `host_sense_max` = 2048 bytes (mods/fps_bot/fps_bot.c:53; src/plugin/wasm.zig:88). The `token` argument is unused; the server installs `wasmSense` as the context's `sense_fn` once at construction (src/plugin/wasm.zig:1738; src/server/game.zig:927).
+One read-only snapshot is the whole read path. The guest calls `zdtd_sense(ptr, len, token)` and the host writes a flat little-endian buffer capped at `host_sense_max` = 2048 bytes (mods/fps_bot/fps_bot.c:53; src/plugin/wasm.zig:88). The `token` argument is unused; the server installs `wasmSense` as the context's `sense_fn` once at construction (src/plugin/wasm.zig:122; src/server/game.zig:772).
 
 The payload contract, verbatim (src/server/game/bot.zig:91):
 
@@ -191,7 +191,7 @@ Nothing about bots persists. No bot state is written by the persistence layer, a
 - ADR 0026 lists `bot cfg <id> <key> <val>` as a host verb (docs/adr/0026-fps-bot-wasm-module.md:109) and mentions a `BotDef` component; the shipped host has neither, and `bot skill` / `bot cfg` are guest-local state (mods/fps_bot/fps_bot.c:1362, 1389).
 - `docs/IMPLEMENTATION_PLAN_BOTS.md` still describes bots as an ECS `Kind` with a `BotDef` column and `is_mob` replication, with line references that no longer resolve; the ADR 0026 amendment and `src/server/game/bot.zig:1` supersede it.
 - Two doc comments still say a 32-byte sense record (src/server/game/bot.zig:655; src/server/game/wasm_host.zig:286) while the record is 40 bytes (src/server/game/bot.zig:91).
-- Stock fidelity: a bot reaches the client as a stock player-mesh entity spawn plus `PosAndRot`, built by the stock builders (src/server/game/replicate.zig:390). No stock-client proof of bot appearance is cited in this page's sources; the integration test drives the committed guest through the host sense/queue boundary, which proves self-consistency, not stock compatibility (src/plugin/wasm.zig:3061).
+- Stock fidelity: a bot reaches the client as a stock player-mesh entity spawn plus `PosAndRot`, built by the stock builders (src/server/game/replicate.zig:390). No stock-client proof of bot appearance is cited in this page's sources; the integration test drives the committed guest through the host sense/queue boundary, which proves self-consistency, not stock compatibility (src/plugin/tests.zig:1254).
 
 ## See also
 
