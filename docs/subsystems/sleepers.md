@@ -128,14 +128,14 @@ pub const Sleeper = struct {
 The AI and damage paths push a wake request into a bounded ring, 16 entries, so a POI full of
 sleepers cannot stall the tick (`src/ecs/components.zig:1162-1172`, `src/ecs/world.zig:1015-1029`,
 `src/ecs/systems.zig:1962-1965`).
-Drain happens on the tick path (`src/server/game/tick.zig:1880`):
+Drain happens on the tick path (`src/server/game/world_tick.zig:407`):
 
 ```zig
 pub fn drainSleeperWakeups(self: *Game) void {
 ```
 
 A stirred sleeper sends `NetPackageSleeperPassiveChange` and plays the groan; a fully woken one sends
-`NetPackageSleeperWakeup` (`src/server/game/tick.zig:1891-1899`,
+`NetPackageSleeperWakeup` (`src/server/game/world_tick.zig:418-426`,
 `src/wire/packages.zig:1311-1317`). Both are broadcasts rather than interest-gated, matching the
 stock send with no target entity.
 

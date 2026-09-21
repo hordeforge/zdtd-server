@@ -19,6 +19,7 @@ const protocol = @import("../protocol.zig");
 const replicate_te = @import("game/replicate_te.zig");
 const game_net = @import("game/net.zig");
 const game_tick = @import("game/tick.zig");
+const game_world_tick = @import("game/world_tick.zig");
 const game_map = @import("game/map.zig");
 const game_bot = @import("game/bot.zig");
 const game_world = @import("game/world.zig");
@@ -1997,34 +1998,34 @@ pub const Game = struct {
     }
 
     pub fn worldHour(self: *const Game) u64 {
-        return game_tick.worldHour(self);
+        return game_world_tick.worldHour(self);
     }
 
     pub fn tickAirDrop(self: *Game) void {
-        return game_tick.tickAirDrop(self);
+        return game_world_tick.tickAirDrop(self);
     }
 
     pub fn tickZombieBlockDamage(self: *Game) void {
-        return game_tick.tickZombieBlockDamage(self);
+        return game_world_tick.tickZombieBlockDamage(self);
     }
     pub fn actuatePoweredDoors(self: *Game) void {
-        return game_tick.actuatePoweredDoors(self);
+        return game_world_tick.actuatePoweredDoors(self);
     }
 
     pub fn drainDigRequests(self: *Game) void {
-        return game_tick.drainDigRequests(self);
+        return game_world_tick.drainDigRequests(self);
     }
 
     pub fn drainSleeperWakeups(self: *Game) void {
-        return game_tick.drainSleeperWakeups(self);
+        return game_world_tick.drainSleeperWakeups(self);
     }
 
     pub fn tickEntityLookAt(self: *Game) void {
-        return game_tick.tickEntityLookAt(self);
+        return game_world_tick.tickEntityLookAt(self);
     }
 
     pub fn tickAttackTarget(self: *Game) void {
-        return game_tick.tickAttackTarget(self);
+        return game_world_tick.tickAttackTarget(self);
     }
 
     /// Stock PlayerStealth.TickServer S2C: broadcast NetPackageEntityStealth
@@ -2042,10 +2043,10 @@ pub const Game = struct {
     }
 
     pub fn tickClientInfo(self: *Game) void {
-        return game_tick.tickClientInfo(self);
+        return game_world_tick.tickClientInfo(self);
     }
     pub fn tickServerAdminReload(self: *Game) void {
-        game_tick.tickServerAdminReload(self);
+        game_world_tick.tickServerAdminReload(self);
     }
 
     pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
@@ -2380,11 +2381,11 @@ pub const Game = struct {
 
     /// Drop locks held longer than the lock stale window (tick path).
     pub fn reapStaleLocks(self: *Game) void {
-        return game_tick.reapStaleLocks(self);
+        return game_world_tick.reapStaleLocks(self);
     }
 
     pub fn reapStalePeers(self: *Game) void {
-        return game_tick.reapStalePeers(self);
+        return game_world_tick.reapStalePeers(self);
     }
 
     pub fn peerIpKey(peer: *const ln_peer.Peer) u32 {
@@ -2718,7 +2719,7 @@ pub const Game = struct {
     /// Drop armed policy kicks once the stock 0.5 s grace has elapsed.
     /// Bounded by max_clients per tick.
     pub fn reapPolicyKicks(self: *Game) void {
-        return game_tick.reapPolicyKicks(self);
+        return game_world_tick.reapPolicyKicks(self);
     }
 
     /// Shared peer teardown for admin kick/ban/wipeplayer and the guard policy.
@@ -3944,7 +3945,7 @@ pub const Game = struct {
     }
 
     pub fn clearDeadKnownEntities(self: *Game) void {
-        return game_tick.clearDeadKnownEntities(self);
+        return game_world_tick.clearDeadKnownEntities(self);
     }
 
     pub fn step(self: *Game) !void {
