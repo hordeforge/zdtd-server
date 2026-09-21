@@ -255,6 +255,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/root.zig` | Z | ECS package root: SoA world, components, systems, resources. |
 | `src/ecs/rules.zig` | R | Sim rule parameters (ADR 0021 decision 2): a game mode is mostly these numbers. Carried on `World.rules` (read as `w.rules.<group>.<field>`), set |
 | `src/ecs/schedule.zig` | Z | Explicit sim pipeline phases. Ordered only; parallel stays inside a phase (systemZombieAi / systemTurrets via util/parallel). No access-set scheduler |
+| `src/ecs/turrets.zig` | R | Turret system (parallel target scan, fire, kill reports). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/systems.zig` | R | ECS systems: pure functions over World SoA columns + resources. Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots  `classPhysResist` (per-entity class stat, else the class_table row) scales server-computed damage at the deferred accumulator and the turret apply loop (2026-09-14).|
 | `src/ecs/quest_trade.zig` | R | Quest + trader systems (journal phase graph, wallet, loot pickup, buy/sell/restock). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/vehicle.zig` | R | Vehicle sim (kind speeds, drive control, seat attach/detach). Split out of systems.zig, re-exported through the systems facade |

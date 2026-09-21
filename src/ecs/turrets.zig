@@ -1,0 +1,200 @@
+//! Turret system: parallel target scan, fire, kill reports.
+//!
+//! Split out of ecs/systems.zig (same code, moved verbatim);
+//! re-exported so existing `systems.*` call sites keep working.
+
+const std = @import("std");
+const World = @import("world.zig").World;
+const Slot = @import("world.zig").Slot;
+const max_entities = @import("world.zig").max_entities;
+const c = @import("components.zig");
+const query = @import("query.zig");
+const parallel = @import("../util/parallel.zig");
+
+/// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
+const dmg_scale: u32 = 100;
+
+fn fpDamage(fp: u32) f32 {
+    return @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
+}
+
+const TurretCtx = struct {
+    w: *World,
+    dt: f32,
+    dmg_fp: []u32,
+    /// Alive zombie slots with transform, snapshotted once per tick so each
+    /// turret does not rescan all entity slots.
+    zombies: []const Slot,
+    /// Live turret slots, slot-ascending snapshot. Workers index this rather
+    /// than the 512-slot table.
+    turrets: []const Slot,
+    /// Per-slot powered flags, resolved once per tick from the power grid so
+    /// each turret skips the O(node_n) isEntityPowered scan.
+    powered: *const [max_entities]bool,
+    /// Deterministic last-hit token per zombie (parallel to dmg_fp). The high
+    /// half is turret slot + 1 and the low half is its owner client slot.
+    owner_hit: []u32,
+
+    fn work(ctx: TurretCtx, begin: usize, end: usize) void {
+        var i: usize = begin;
+        while (i < end) : (i += 1) {
+            const s = ctx.turrets[i];
+            if (!ctx.w.alive[s] or !ctx.w.mask[s].turret or !ctx.w.mask[s].transform) continue;
+            var t = &ctx.w.turret[s];
+            if (t.fire_cd > 0) t.fire_cd -= ctx.dt;
+            const powered = ctx.powered[s];
+            if (!powered or t.ammo == 0) {
+                t.target_id = -1;
+                continue;
+            }
+            var best_id: i32 = -1;
+            var best_slot: ?Slot = null;
+            var best_d: f32 = t.range * t.range;
+            // Hoisted: workers only write other slots' transforms, so the
+            // compiler cannot prove these loads invariant across the loop.
+            const tx = ctx.w.transform[s].x;
+            const tz = ctx.w.transform[s].z;
+            for (ctx.zombies) |j| {
+                const dx = ctx.w.transform[j].x - tx;
+                const dz = ctx.w.transform[j].z - tz;
+                const d = dx * dx + dz * dz;
+                if (d < best_d) {
+                    best_d = d;
+                    best_id = ctx.w.network_id[j].id;
+                    best_slot = j;
+                }
+            }
+            t.target_id = best_id;
+            const zi = best_slot orelse continue;
+            const dx = ctx.w.transform[zi].x - tx;
+            const dz = ctx.w.transform[zi].z - tz;
+            ctx.w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+            if (t.fire_cd <= 0) {
+                t.fire_cd = t.fire_interval;
+                t.ammo -%= 1;
+                const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
+                _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
+                // Turret fire leaves dmg_attacker unset (matches no filter).
+                recordTurretOwner(&ctx.owner_hit[zi], s, t.owner_slot);
+            }
+        }
+    }
+};
+
+pub fn recordTurretOwner(value: *u32, turret_slot: Slot, owner_slot: i16) void {
+    // Parallel execution has no meaningful wall-clock "last" worker. Match
+    // the serial ascending-slot pass instead: the highest firing turret slot
+    // wins, with owner packed into the same atomic value so it cannot tear
+    // away from the winning source.
+    const token = (@as(u32, turret_slot) + 1) << 16 | @as(u16, @bitCast(owner_slot));
+    _ = @atomicRmw(u32, value, .Max, token, .monotonic);
+}
+
+pub fn turretOwner(value: u32) i16 {
+    if (value == 0) return -1;
+    return @bitCast(@as(u16, @truncate(value)));
+}
+
+pub const TurretTick = struct {
+    kills: u32 = 0,
+    /// Dead zombie net ids (for S2C EntityRemove).
+    killed_ids: [16]i32 = .{-1} ** 16,
+    killed_n: u8 = 0,
+    /// Owner client slot per kill (parallel to killed_ids; -1 unowned).
+    owner_slots: [16]i16 = .{-1} ** 16,
+    loot_bag_ids: [16]i32 = .{-1} ** 16,
+    loot_n: u8 = 0,
+};
+
+pub fn systemTurrets(w: *World, dt: f32) TurretTick {
+    if (w.countKind(.turret) == 0) return .{};
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    // Filtered copy of the cached zombie group (ascending, so target selection
+    // ties break identically to the old full scan). The parallel workers below
+    // never spawn or destroy, so the slice stays valid for the whole phase.
+    var zombie_slots: [max_entities]Slot = undefined;
+    var zn: usize = 0;
+    for (query.groupSlice(w, .zombie)) |zj| {
+        if (!w.mask[zj].transform) continue;
+        zombie_slots[zn] = zj;
+        zn += 1;
+    }
+    // One O(node_n) pass here replaces an O(node_n) scan per turret per tick.
+    var powered: [max_entities]bool = .{false} ** max_entities;
+    var ni: usize = 0;
+    while (ni < w.power.node_n) : (ni += 1) {
+        const node = &w.power.nodes[ni];
+        if (!node.powered or node.entity_id < 0) continue;
+        if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
+    }
+    var owner_hit: [max_entities]u32 = .{0} ** max_entities;
+    var turret_slots: [max_entities]Slot = undefined;
+    const tn = query.copyKindInto(w, .turret, &turret_slots);
+    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .turrets = turret_slots[0..tn], .powered = &powered, .owner_hit = owner_hit[0..] };
+    // Split the live turret list, not the 512-slot table.
+    if (tn < 64) TurretCtx.work(ctx, 0, tn) else parallel.forRanges(tn, ctx, TurretCtx.work);
+    var out: TurretTick = .{};
+    // Workers only wrote zombie slots (ascending), so apply in that order
+    // instead of probing the full slot table. Same kill-list tie-break as the
+    // open scan: first 16 deaths in slot order fill the report.
+    for (zombie_slots[0..zn]) |i| {
+        const fp = dmg_fp[i];
+        if (fp == 0) continue;
+        if (!w.alive[i] or !w.mask[i].health) continue;
+        if (w.kind[i] != .zombie) continue;
+        const amount = fpDamage(fp);
+        // Class PhysicalDamageResist (passive 41): turret fire is
+        // server-computed, so the zombie's own class row reduces it here.
+        const pr = w.classPhysResist(i);
+        const applied: f32 = if (pr > 0) amount * (1.0 - @min(pr, 100.0) / 100.0) else amount;
+        // Report lists full: stop before a kill nobody would be told about
+        // (destroy without EntityRemove leaves a permanent client ghost).
+        // Remaining damage re-accumulates next tick, like systemDespawnFar.
+        const would_kill = w.health[i].hp - applied <= 0;
+        if (would_kill and (out.killed_n >= out.killed_ids.len or out.loot_n >= out.loot_bag_ids.len)) break;
+        w.health[i].hp -= applied;
+        if (w.health[i].hp <= 0) {
+            const x = if (w.mask[i].transform) w.transform[i].x else 0;
+            const y = if (w.mask[i].transform) w.transform[i].y else 0;
+            const z = if (w.mask[i].transform) w.transform[i].z else 0;
+            const zid: i32 = if (w.mask[i].network_id) w.network_id[i].id else -1;
+            // Same drop_prob roll as player kills (class_id LootDropProb);
+            // read before the corpse marking, which keeps the slot.
+            const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
+            // Corpse dwell like player kills: the body stays at hp 0 for
+            // TimeStayAfterDeath; the tick sweep destroys it later. Fallback
+            // is the stock EntityAlive default 5 s (RE entity-ai.md); the XML
+            // values 30/300 flow via class_id.time_stay when declared. Horde
+            // kills gib 3x faster: stock cuts `timeStayAfterDeath /= 3` on
+            // horde spawns (`AIDirectorBloodMoonParty.SpawnZombie`), so the
+            // night's corpses clear instead of piling up.
+            var dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
+                w.class_id[i].time_stay
+            else
+                5.0;
+            if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) dwell /= 3.0;
+            w.health[i].hp = 0;
+            w.health[i].corpse_seconds = dwell;
+            if (w.mask[i].zombie_ai) {
+                w.zombie_ai[i].state = .idle;
+                w.zombie_ai[i].target_id = -1;
+                w.zombie_ai[i].alert = false;
+            }
+            out.kills += 1;
+            if (zid > 0 and out.killed_n < out.killed_ids.len) {
+                out.killed_ids[out.killed_n] = zid;
+                out.owner_slots[out.killed_n] = turretOwner(owner_hit[i]);
+                out.killed_n += 1;
+            }
+            if (w.rollLootDrop(zid, drop_prob)) {
+                if (w.spawnLootBag(x, y, z, 1, 5)) |lid| {
+                    if (out.loot_n < out.loot_bag_ids.len) {
+                        out.loot_bag_ids[out.loot_n] = lid;
+                        out.loot_n += 1;
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
