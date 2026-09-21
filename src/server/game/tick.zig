@@ -233,6 +233,20 @@ fn entityClassTags(self: *Game, ps: ecs.Slot) ?[]const u8 {
     return def.tags;
 }
 
+/// Project a victim slot's `_notAlerted` for foreign CVarCompare gates
+/// (NightStalker stealth damage needs an unalerted victim): true when the
+/// slot is a living non-player without the AI alert flag. Players and
+/// unknown slots leave the projection null (store read instead).
+fn projectVictimAlert(self: *Game, ctx: *requirements.Ctx, victim: ecs.Slot) void {
+    if (self.sim.mask[victim].player) return;
+    if (!self.sim.alive[victim]) {
+        ctx.other_not_alerted = false;
+        return;
+    }
+    const alerted = self.sim.mask[victim].zombie_ai and self.sim.zombie_ai[victim].alert;
+    ctx.other_not_alerted = !alerted;
+}
+
 /// Add and remove the catalog buffs a triggered row asked for, relaying each
 /// change to observers (the same contract as syncStageBuffs). Bounded by the
 /// result's fixed arrays; an unknown name is skipped (fail closed).
@@ -817,6 +831,7 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
     var req_counts: requirements.Counts = .{};
     var ctx = pctx.build(self, c, ps, h, sandbox_groups);
     ctx.other_tags = entityClassTags(self, victim);
+    projectVictimAlert(self, &ctx, victim);
     // `ItemHasTags` reads the attacker's held-item tags (params.ItemValue):
     // the Boomstick stun rows require a Boomstick-tagged gun in hand.
     if (self.sim.mask[ps].inventory) {
@@ -968,6 +983,7 @@ pub fn fireRayHit(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) v
     var req_counts: requirements.Counts = .{};
     var ctx = pctx.build(self, c, ps, h, sandbox_groups);
     ctx.other_tags = entityClassTags(self, victim);
+    projectVictimAlert(self, &ctx, victim);
     if (self.sim.mask[ps].inventory) {
         const held = self.sim.inventory[ps].heldItem();
         if (held.count > 0) {
@@ -1218,6 +1234,7 @@ pub fn fireKilledOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot) void {
     var req_counts: requirements.Counts = .{};
     var ctx = pctx.build(self, c, ps, h, sandbox_groups);
     ctx.other_tags = entityClassTags(self, victim);
+    projectVictimAlert(self, &ctx, victim);
     // Foreign fills mirror the hit event (no stock kill row needs them yet;
     // symmetry so the next row lands instead of refusing): victim perk
     // ledger, alive bit, live buff set, corpse/sleeper bits, Health

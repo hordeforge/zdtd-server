@@ -488,6 +488,11 @@ pub const Ctx = struct {
     /// (party-share fan-out supplies each member's store). Null = no other
     /// in scope → refuse.
     other_cvars: ?*cvars.Set = null,
+    /// The `other` entity's `_notAlerted` projection (1 when a zombie victim
+    /// is unalerted and alive): stock derives it from alertness ticks, which
+    /// the sim tracks as `zombie_ai.alert`. Checked before the store so an
+    /// unseeded zombie store still answers. Null = no projection (read store).
+    other_not_alerted: ?bool = null,
     /// One entry per worn equipment item: the item's `Tags` property as a comma
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
@@ -1285,7 +1290,12 @@ fn evalInSafeZone(r: Requirement) Verdict {
 /// negated by `invert`. target=other reads the supplied other_cvars store
 /// (party-share fan-out); without one the gate refuses.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
-    if (r.target == .other and ctx.other_cvars == null) return .unsupported;
+    if (r.target == .other and ctx.other_cvars == null and ctx.other_not_alerted == null) return .unsupported;
+    // `_notAlerted` projection for zombie victims: evaluated before the
+    // store so the gate resolves without a seeded cvar.
+    if (r.target == .other and std.mem.eql(u8, r.arg, "_notAlerted")) {
+        if (ctx.other_not_alerted) |na| return verdict(compare(if (na) 1 else 0, r.op, operand(ctx, r)), r.negated);
+    }
     return verdict(compare(cvarValue(ctx, r.arg), r.op, operand(ctx, r)), r.negated);
 }
 
@@ -2957,4 +2967,16 @@ test "all() is the AND over an empty and a multi-gate list" {
     const attached = Requirement{ .kind = .is_attached_to_entity };
     try testing.expect(all(&.{ alive, attached }, .{ .attached_to_entity = true }));
     try testing.expect(!all(&.{ alive, attached }, .{ .attached_to_entity = false }));
+}
+
+test "_notAlerted projection answers for zombie victims" {
+    // Stock derives it from alertness ticks; the sim projects zombie_ai
+    // alert into the foreign gate so NightStalker stealth damage resolves
+    // without a seeded cvar.
+    const row = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .target = .other, .arg = "_notAlerted", .op = .gt, .value = 0 };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{row}, .{ .other_not_alerted = true }, &counts));
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{row}, .{ .other_not_alerted = false }, &counts));
+    // No projection and no store: refuses like any unscoped foreign read.
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{row}, .{}, &counts));
 }
