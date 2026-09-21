@@ -206,3 +206,29 @@ pub fn buildInvDataResponseItems(
     try w.writeBytes(&manager_token);
     return w.written();
 }
+
+test "inventory data request stock layout and not-found response" {
+    var key: [16]u8 = .{1} ** 16;
+    var tok: [16]u8 = .{2} ** 16;
+    var req_buf: [36]u8 = undefined;
+    @memcpy(req_buf[0..16], &key);
+    std.mem.writeInt(i32, req_buf[16..20], 42, .little);
+    @memcpy(req_buf[20..36], &tok);
+    const req = try parseInvDataRequestStock(&req_buf);
+    try std.testing.expectEqual(@as(i32, 42), req.hash);
+    try std.testing.expectEqualSlices(u8, &key, &req.inventory_key);
+
+    var resp_buf: [128]u8 = undefined;
+    const resp = try buildInvDataResponseNotFound(&resp_buf, key, tok);
+    try std.testing.expectEqual(@as(u8, 0), resp[0]); // success false
+    // error string 7bit-len then UTF8; then key; then i16 -1
+    try std.testing.expect(resp.len > 20);
+
+    const items = [_]stock_inv.StockSlot{
+        .{ .type_id = stock_inv.items_start_here + 7, .count = 3, .quality = 1 },
+        .{},
+    };
+    const ok = try buildInvDataResponseItems(&resp_buf, key, tok, items[0..]);
+    try std.testing.expectEqual(@as(u8, 1), ok[0]);
+    try std.testing.expect(ok.len > resp.len);
+}
