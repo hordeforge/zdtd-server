@@ -1418,7 +1418,7 @@ parsed, and quest offering is unwired.
   + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
   the stock parse fails. A real stock client's post-trade push reaches the
   server.
-  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:1481-1523`,
+  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/stock_invtx.zig:60-102`,
   `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
-  *Anchors:* `src/wire/packages.zig:1431-1473` (`parseStockInvTx`),
+  *Anchors:* `src/wire/stock_invtx.zig:60` (`parseStockInvTx`),
   `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`

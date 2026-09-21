@@ -963,63 +963,6 @@ pub const buildExplosionClient = stock_explosion.buildExplosionClient;
 pub const ExplosionInitiate = stock_explosion.ExplosionInitiate;
 pub const parseExplosionInitiate = stock_explosion.parseExplosionInitiate;
 
-test "explosion initiate parse head" {
-    var buf: [128]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &buf };
-    try w.writeF32(1);
-    try w.writeF32(70);
-    try w.writeF32(2);
-    try w.writeI32(1);
-    try w.writeI32(70);
-    try w.writeI32(2);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(1);
-    try w.writeU16(0);
-    try w.writeI32(106);
-    try w.writeF32(0.5);
-    const p = try parseExplosionInitiate(w.written());
-    try std.testing.expectApproxEqAbs(@as(f32, 1), p.wx, 0.01);
-    try std.testing.expectEqual(@as(i32, 70), p.by);
-    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
-}
-
-test "explosion initiate parses ExplosionData blob positionally" {
-    var buf: [160]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &buf };
-    try w.writeF32(1);
-    try w.writeF32(70);
-    try w.writeF32(2);
-    try w.writeI32(1);
-    try w.writeI32(70);
-    try w.writeI32(2);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(1);
-    // ExplosionData blob: particle 3, duration 10, blockRadius raw 80 (=4.0),
-    // entityRadius 4, blastPower 100, blockDamage 250.0, entityDamage 60.0
-    var blob_buf: [64]u8 = undefined;
-    var bw: binary.Writer = .{ .buf = &blob_buf };
-    try bw.writeI16(3);
-    try bw.writeI16(10);
-    try bw.writeI16(80);
-    try bw.writeI16(4);
-    try bw.writeI16(100);
-    try bw.writeF32(250.0);
-    try bw.writeF32(60.0);
-    const blob = bw.written();
-    try w.writeU16(@intCast(blob.len));
-    try w.writeBytes(blob);
-    try w.writeI32(107);
-    try w.writeF32(0);
-    const p = try parseExplosionInitiate(w.written());
-    try std.testing.expectApproxEqAbs(@as(f32, 4.0), p.radius, 0.01);
-    try std.testing.expectEqual(@as(u16, 250), p.block_damage);
-    try std.testing.expectEqual(@as(i32, 107), p.entity_id);
-}
-
 /// zdtd-native quest accept/progress, **not a stock client wire body**:
 /// def_id u16, op u8 (0=list, 1=accept, 2=abandon). Kept for unit and loadgen
 /// fixtures. The stock quest C2S shapes are NetPackageNPCQuestList
@@ -1505,50 +1448,6 @@ test "name id mapping payload is version, count, then id before name" {
     const none = try buildNameIdMappingPayload(&buf, &.{});
     try std.testing.expectEqual(@as(usize, 8), none.len);
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, none[4..8], .little));
-}
-
-test "explosion blob decodes radii at their stock scales" {
-    // ExplosionData (RE protocol-packages.md, Read IL=82): Duration is stored
-    // x10 and BlockRadius x20, EntityRadius and BlastPower are raw. The stock
-    // cop/feral explosion is radius_blocks 5, radius_entities 6, so a blob
-    // carrying 100 and 6 must decode to 5.0 and 6.0 blocks.
-    var body: [128]u8 = undefined;
-    var w: binary.Writer = .{ .buf = &body };
-    try w.writeF32(10); // worldPos
-    try w.writeF32(70);
-    try w.writeF32(10);
-    try w.writeI32(10); // blockPos
-    try w.writeI32(70);
-    try w.writeI32(10);
-    try w.writeF32(0); // rotation quaternion
-    try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(1);
-
-    var blob: [64]u8 = undefined;
-    var bw: binary.Writer = .{ .buf = &blob };
-    try bw.writeI16(3); // particleIndex
-    try bw.writeI16(25); // duration, x10 -> 2.5 s
-    try bw.writeI16(100); // blockRadius, x20 -> 5 blocks
-    try bw.writeI16(6); // entityRadius, raw -> 6 blocks
-    try bw.writeI16(1); // blastPower
-    try bw.writeF32(120); // blockDamage
-    try bw.writeF32(45); // entityDamage
-    const blob_bytes = bw.written();
-
-    try w.writeU16(@intCast(blob_bytes.len));
-    try w.writeBytes(blob_bytes);
-    try w.writeI32(42); // entityId
-    try w.writeF32(0); // delay
-
-    const ex = try parseExplosionInitiate(w.written());
-    try std.testing.expectEqual(@as(i32, 42), ex.entity_id);
-    try std.testing.expectApproxEqAbs(@as(f32, 5), ex.radius, 0.001);
-    // The bug this pins: entity_radius was divided by 20 as well, so the stock
-    // value 6 arrived as 0.3 and the caller's 1 m floor swallowed it.
-    try std.testing.expectApproxEqAbs(@as(f32, 6), ex.entity_radius, 0.001);
-    try std.testing.expectEqual(@as(u16, 120), ex.block_damage);
-    try std.testing.expectApproxEqAbs(@as(f32, 45), ex.entity_damage, 0.001);
 }
 
 test "GameStats carries the config-driven creative, marker and camera values" {
