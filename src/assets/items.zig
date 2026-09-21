@@ -793,6 +793,8 @@ const firstGiveExp = item_parse.firstGiveExp;
 const fastRoundToInt = item_parse.fastRoundToInt;
 const boolProp = item_parse.boolProp;
 const itemStatsBody = item_parse.itemStatsBody;
+pub const tryLoad = item_parse.tryLoad;
+const rootMaxQualityTier = item_parse.rootMaxQualityTier;
 const max_scaled_stack: i32 = item_parse.max_scaled_stack;
 pub const item_builtin = @import("item_builtin.zig");
 pub const builtin_defs = item_builtin.builtin_defs;
@@ -2131,22 +2133,4 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .stock_econ_scales = ssc,
         .max_quality_tier = rootMaxQualityTier(clean),
     };
-}
-
-/// `<items max_quality_tier="N">`: stock parses it into the static and falls
-/// back to 6 when absent or unparsable. A value outside 1..255 keeps the
-/// default rather than producing a degenerate quality axis.
-fn rootMaxQualityTier(src: []const u8) u8 {
-    const ri = std.mem.findPos(u8, src, 0, "<items") orelse return components.max_quality_tiers;
-    const v = xml.attr(src, ri, "max_quality_tier") orelse return components.max_quality_tiers;
-    const n = xml.parseU8(v) orelse return components.max_quality_tiers;
-    // 0 would collapse every quality axis (stock assigns the parsed value
-    // unchecked and divides by it); fail closed on the default instead.
-    if (n == 0) return components.max_quality_tiers;
-    return n;
-}
-
-pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
-    const paths = @import("paths.zig");
-    return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
 }

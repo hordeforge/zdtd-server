@@ -6,6 +6,9 @@
 //!
 const std = @import("std");
 const xml = @import("xml_util.zig");
+const components = @import("../ecs/components.zig");
+const ItemTable = @import("items.zig").ItemTable;
+const loadFromPath = @import("items.zig").loadFromPath;
 
 pub fn itemActionClassIs(body: []const u8, want: []const u8) bool {
     // Prefer nested <property class="Action0"> ... Class=Eat
@@ -204,3 +207,22 @@ pub fn itemStatsBody(body: []const u8) ?[]const u8 {
     const close = std.mem.findPos(u8, body, gt, "</stats>") orelse return null;
     return body[gt + 1 .. close];
 }
+
+/// `<items max_quality_tier="N">`: stock parses it into the static and falls
+/// back to 6 when absent or unparsable. A value outside 1..255 keeps the
+/// default rather than producing a degenerate quality axis.
+pub fn rootMaxQualityTier(src: []const u8) u8 {
+    const ri = std.mem.findPos(u8, src, 0, "<items") orelse return components.max_quality_tiers;
+    const v = xml.attr(src, ri, "max_quality_tier") orelse return components.max_quality_tiers;
+    const n = xml.parseU8(v) orelse return components.max_quality_tiers;
+    // 0 would collapse every quality axis (stock assigns the parsed value
+    // unchecked and divides by it); fail closed on the default instead.
+    if (n == 0) return components.max_quality_tiers;
+    return n;
+}
+
+pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
+    const paths = @import("paths.zig");
+    return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
+}
+
