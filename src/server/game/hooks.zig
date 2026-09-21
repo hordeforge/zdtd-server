@@ -879,3 +879,21 @@ pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u
 }
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
+
+/// One water-leveler fill: send the cell as a plain SetBlock to observers.
+/// Stock streams water deltas with NetPackageWaterSimChunkUpdate, but the
+/// client's Chunk::SetBlockRaw turns an isWater BlockValue into air plus
+/// SetWater(Full), so a SetBlock renders the same result without modelling
+/// the native water sim. Best-effort: the store is authoritative and a
+/// dropped packet only delays the paint until the chunk is re-streamed.
+pub fn broadcastWaterFill(ctx: ?*anyopaque, x: i32, y: i32, z: i32, id: u16) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var buf: [96]u8 = undefined;
+    const sb = packages.buildSetBlockBodyRaw(&buf, x, y, z, id, 0, -1, -1) catch {
+        g.harness.counters.inc(.encode_errors);
+        return;
+    };
+    g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), g.interest_range) catch {
+        g.harness.counters.inc(.net_send_errors);
+    };
+}
