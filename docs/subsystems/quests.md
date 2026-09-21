@@ -115,7 +115,7 @@ pub const FlatObjective = struct {
 };
 ```
 
-All progress lands in one function, called by every producer. It adds the delta to each matching objective of the current phase plus always-active phase-0 objectives (src/ecs/systems.zig:881):
+All progress lands in one function, called by every producer. It adds the delta to each matching objective of the current phase plus always-active phase-0 objectives (src/ecs/quest_trade.zig:164):
 
 ```zig
 fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: quest.PhaseKind, n: u16) void {

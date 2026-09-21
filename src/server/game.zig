@@ -2873,273 +2873,7 @@ pub const Game = struct {
     }
 
     pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
-        // Snap to solid surface (callers may pass raw primarySpawn Y that floats above DTM).
-        // sy is intentionally ignored: DTM surface is authoritative for join/respawn.
-        _ = sy;
-        const surf = self.spawnSurface(sx, sz);
-        const sx2 = surf.x;
-        const sy2 = surf.y;
-        const sz2 = surf.z;
-        // Do NOT re-send WorldInfo: second WorldInfo restarts createWorld mid-session → NRE flood.
-        // Order: PlayerId (spawn pos in PDF) → id map → optional join chunk → Spawned → time.
-        // First join: bLoaded=true so ToPlayer applies bag. Death re-bundle: false.
-        const first_join = !c.entered;
-        c.entered = true;
-        self.markClaimsForEntity(eid, true);
-        // Spawn/respawn resets movement envelope (teleport budget).
-        c.move_valid = false;
-        c.move_x = @floatFromInt(sx2);
-        c.move_y = @as(f32, @floatFromInt(sy2)) + 0.08;
-        c.move_z = @floatFromInt(sz2);
-        c.move_tick = self.tick_n;
-        if (first_join) {
-            game_plugin_compose.playerJoin(self, @intCast(c.slot), eid);
-        }
-        const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
-        // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).
-        // questAcceptStarter refuses a starter already active or completed in an
-        // earlier session; a fresh grant is shared with the (post-join) party.
-        if (systems.questAcceptStarter(&self.sim, c.slot)) {
-            self.shareQuestWithParty(c, self.sim.catalog.starter_id);
-        }
-        // GAP 12: the join PDF journal was capped at 2 quests while the sim
-        // journal holds max_journal (8); a third active quest silently vanished
-        // from the client. All stores now size to the sim journal.
-        var qbuf: [ecs.components.max_journal]packages.stock_quest.StockQuestWrite = undefined;
-        var reward_store: [ecs.components.max_journal][ecs.quest.max_reward_flags]packages.stock_quest.RewardWire = undefined;
-        var obj_val_store: [ecs.components.max_journal][ecs.quest.max_phases]u8 = undefined;
-        // Caller-frame storage for every slice StockQuestWrite points into:
-        // the journal writer reads them after this frame's callees return, so
-        // a callee-local store would dangle (kind_store used to live inside
-        // fillStockJournalWrites and the body writer could read garbage).
-        var kind_store: [ecs.components.max_journal][ecs.quest.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
-        var pos_store: [ecs.components.max_journal][max_quest_position_data]packages.stock_quest.PositionEntry = undefined;
-        const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
-        // Cap always_unlocked list so PlayerId stays under body_buf slice.
-        var unlock_names: [64][]const u8 = undefined;
-        const unlock_n = self.appendUnlockedRecipes(c.slot, &unlock_names);
-        // Restored inventory (players.zsv v2) rides the join PDF: toolbelt =
-        // sim slots 0..9, bag = 10.. (client PDF apply keeps that split).
-        var tb_slots: [ecs.components.inv_bag_start]packages.stock_inv.StockSlot = undefined;
-        var bag_slots: [ecs.components.inv_bag_count]packages.stock_inv.StockSlot = undefined;
-        var tb_n: usize = 0;
-        var bag_n: usize = 0;
-        if (self.sim.playerByPeer(c.slot)) |ps| {
-            if (self.sim.mask[ps].inventory) {
-                const inv = &self.sim.inventory[ps];
-                var any = false;
-                for (inv.slots) |s| {
-                    if (s.count > 0 and s.item_id != 0) {
-                        any = true;
-                        break;
-                    }
-                }
-                if (any) {
-                    while (tb_n < tb_slots.len) : (tb_n += 1) {
-                        tb_slots[tb_n] = packages.stock_inv.slotFromEcs(inv.slots[tb_n], resolveItemType, self);
-                    }
-                    while (bag_n < bag_slots.len) : (bag_n += 1) {
-                        const src = inv.slots[ecs.components.inv_bag_start + bag_n];
-                        bag_slots[bag_n] = packages.stock_inv.slotFromEcs(src, resolveItemType, self);
-                    }
-                }
-            }
-        }
-        if (first_join) {
-            // PDF pads bag to CarryCapacity (45); leave headroom for unlocks/quests.
-            // The character-sheet counters ride the PDF too: they are restored
-            // from players.zsv (ZPV14) so the join does not reset a returning
-            // player's kills/deaths, which stock keeps in PlayerDataFile.
-            const pid = try packages.buildPlayerIdBodyWithOpts(
-                self.body_buf[384..16384],
-                eid,
-                0,
-                dim,
-                sx2,
-                sy2,
-                sz2,
-                .{
-                    .quests = qbuf[0..qn],
-                    .unlocked_recipes = unlock_names[0..unlock_n],
-                    .toolbelt = tb_slots[0..tb_n],
-                    .bag = bag_slots[0..bag_n],
-                    .b_loaded = true,
-                    .game_stage_born_at = c.game_stage_born_world_time,
-                    .player_kills = c.player_kills,
-                    .zombie_kills = c.zombie_kills,
-                    .deaths = c.deaths,
-                    // The client's own character: stock stores the profile it
-                    // sent in RequestToSpawnPlayer on the PDF's ECD, and the
-                    // client applies it with bLoaded=true instead of falling
-                    // back to its local profile.
-                    .profile = if (c.profile_ok) c.profile.view() else null,
-                    .player_name = c.name[0..c.name_len],
-                },
-            );
-            try self.sendGameCritical(peer, "NetPackagePlayerId", pid);
-            // PersistentPlayerState(Login): entityId → name mapping. Without it the
-            // client shows GMSG "Player '' joined" and party UI has no names.
-            {
-                // Stock builds PersistentPlayerData with PrimaryId =
-                // ClientInfo.InternalId and NativeId = ClientInfo.PlatformId
-                // (asm.il 1885235). A client that sent no identity still needs a
-                // PPD or its name never reaches other clients, so fall back to a
-                // stable per-entity id rather than dropping the package.
-                var sid_buf: [24]u8 = undefined;
-                const fallback: platform_user.Id = .{
-                    .platform = "Steam",
-                    .id = std.fmt.bufPrint(&sid_buf, "7656119{d:0>10}", .{@as(u32, @intCast(eid))}) catch "76561190000000000",
-                };
-                const primary_id = c.puid_primary.get() orelse fallback;
-                const native_id = c.puid_native.get() orelse primary_id;
-                // lpBlocks: this player's own land-protection blocks (stock
-                // PersistentPlayerData.Write lpBlockCount + Vector3i list, RE
-                // server-lifecycle.md 6.1). owner_entity is re-mapped to the
-                // login entity id by reclaimForName, so match on it. Capped at
-                // the buffer's list budget; a player past it keeps the claims,
-                // only the overlay tail is dropped.
-                var lp_buf: [max_lp_blocks_on_wire][3]i32 = undefined;
-                var lp_n: usize = 0;
-                for (self.land_claims[0..self.land_claims_n]) |*claim| {
-                    if (claim.owner_entity != eid) continue;
-                    if (lp_n >= lp_buf.len) break;
-                    lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
-                    lp_n += 1;
-                }
-                // OwnedVendingMachinePositions: the machines this player still
-                // rents, so the client re-draws their map markers on rejoin
-                // (RE save-region.md, PPD.Write fields 25-28). An expired
-                // rental is not owned any more, so the day check here matches
-                // the one the rent path applies before it clears a machine.
-                var vm_buf: [packages.stock_inv.max_vending_positions_on_wire][3]i32 = undefined;
-                var vm_n: usize = 0;
-                const today: i32 = @intCast(self.sim.director.clock.day);
-                for (&self.vending.items, self.vending.used) |*vm, used| {
-                    if (!used or vm.rental_end_day <= 0) continue;
-                    if (today > vm.rental_end_day) continue;
-                    if (!vm.owner.matches(primary_id)) continue;
-                    if (vm_n >= vm_buf.len) break;
-                    vm_buf[vm_n] = .{ vm.pos.x, vm.pos.y, vm.pos.z };
-                    vm_n += 1;
-                }
-                if (packages.stock_inv.buildPersistentPlayerState(
-                    self.body_buf[9728..][0..packages.stock_inv.persistent_player_state_max_len],
-                    eid,
-                    c.name[0..c.name_len],
-                    primary_id,
-                    native_id,
-                    sx2,
-                    sy2,
-                    sz2,
-                    lp_buf[0..lp_n],
-                    vm_buf[0..vm_n],
-                )) |pps| {
-                    try self.broadcast("NetPackagePersistentPlayerState", pps);
-                } else |_| {}
-            }
-            try self.sendItemIdMapping(peer);
-            try self.sendQuestNavObjects(peer, c.slot, eid);
-            // Stock re-registers the live crates per joining player
-            // (RefreshCrates, join step 11); the crate marker is a server push,
-            // so nothing else would ever put it on this client's map.
-            try self.sendAirDropNavObjects(peer);
-            try self.sendHoldingOnly(peer, c);
-            try self.sendPlayerVitals(peer, c);
-            // Latch IsSpawned before heavy chunk/entity stream (playtest saw
-            // vitals OK but IsSpawned=false when Spawned arrived late/lost).
-            {
-                const spawned_early = try packages.buildSpawnedBody(
-                    self.body_buf[256..384],
-                    @intFromEnum(packages.RespawnType.enter_multiplayer),
-                    sx2,
-                    sy2,
-                    sz2,
-                    eid,
-                );
-                try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned_early);
-            }
-            try self.sendStockEntitySpawns(peer, c, sx, sz);
-            // Multiplayer bodies: every other player in view spawns to this
-            // peer, and this peer's body spawns to every client that sees it.
-            try game_join.sendPlayerSpawns(self, peer, c, sx, sz);
-            // Buffs already on the other players (their AddRemoveBuff relays
-            // predate this peer).
-            try self.sendBuffSync(peer, c);
-            // The joiner's own active buffs (the PDF buff section is written
-            // empty; the explicit bundle keeps buff icons across a rejoin).
-            try self.sendOwnBuffs(peer, c);
-            try self.sendSeatedRiders(peer);
-            // The owner's parked vehicles for their map (stock
-            // UpdateVehicleWaypointsForPlayer; no-op without owned vehicles).
-            try self.sendVehicleWaypoints(peer, c.slot);
-            // This player's dropped-bag markers. They only ever went out on
-            // the events that change them (a death, a collect), so a marker
-            // restored from the player record never reached anyone and the
-            // bag sat on the map unmarked. Stock broadcasts this to every
-            // client rather than the owner alone (RE protocol-packages.md
-            // 2139), which is also what re-arms clients that were connected
-            // through the drop. An empty body is legitimate: it clears stale
-            // markers just as well.
-            try self.broadcastPlayerBackpack(c);
-            // The markers already on the map: every other player's list went
-            // out on an event that predates this peer, so without a replay this
-            // client sees no bag but its own.
-            try self.sendOtherPlayerBackpacks(peer, c);
-            // The ally pairs that already stand. Same reason as the markers
-            // above: the response only goes out on a transition, so pairs
-            // formed before this connection (or loaded from disk at boot)
-            // never reach this client.
-            try self.sendAllySnapshot(peer);
-            if (self.wire_chunks) {
-                const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
-                try self.sendSpawnArea(peer, sx2, sz2, r);
-            }
-            // Confirm Spawned after stream (EnterMultiplayer; pos = surface snap).
-            const spawned = try packages.buildSpawnedBody(
-                self.body_buf[256..384],
-                @intFromEnum(packages.RespawnType.enter_multiplayer),
-                sx2,
-                sy2,
-                sz2,
-                eid,
-            );
-            try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
-        } else {
-            // Death re-bundle: never re-send PlayerId (CreateEntity NREs). Re-send
-            // Spawned(died) so client IsSpawned latches; refresh vitals/teleport.
-            const spawned = try packages.buildSpawnedBody(
-                self.body_buf[256..384],
-                @intFromEnum(packages.RespawnType.died),
-                sx2,
-                sy2,
-                sz2,
-                eid,
-            );
-            try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
-            if (packages.buildEntityTeleportBody(&self.body_buf, eid, @as(f32, @floatFromInt(sx2)), @as(f32, @floatFromInt(sy2)) + 0.08, @as(f32, @floatFromInt(sz2)), 0, 0, 0, true)) |tb| {
-                try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-            } else |_| {}
-            try self.sendHoldingOnly(peer, c);
-            try self.sendPlayerVitals(peer, c);
-            try self.sendQuestNavObjects(peer, c.slot, eid);
-            try self.sendAirDropNavObjects(peer);
-        }
-        const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
-        try self.sendGame(peer, "NetPackageWorldTime", wt);
-        try self.sendGameStats(peer);
-        // Blood-moon music is edge-triggered on the broadcast path (rising /
-        // falling edge each tick), so a client joining (or respawning) during
-        // an active horde would never hear it; replay the current per-player
-        // eligibility here (RE aidirector.md DynamicMusic.Conductor eligibility;
-        // stock EntityPlayer.bloodMoonParty).
-        if (self.playerBloodMoonMusic(c)) {
-            const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], true);
-            try self.sendGame(peer, "NetPackageBloodmoonMusic", bm_body);
-            c.bloodmoon_music = true;
-        }
-        // Weather only once the client has already completed first join (re-bundle /
-        // respawn). First join: client InitPackages may still be null → underrun kick.
-        if (!first_join) try self.sendWeather(peer);
+        return game_join.sendJoinBundle(self, c, peer, sx, sy, sz, eid);
     }
 
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).
@@ -3217,7 +2951,7 @@ pub const Game = struct {
     }
 
     /// Map markers for active journal quests (stock class names only).
-    fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
+    pub fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
         return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid);
     }
 
@@ -3290,12 +3024,12 @@ pub const Game = struct {
 
     /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
     /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
-    fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
+    pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
         return game_join.sendStockEntitySpawns(self, peer, c, px, pz);
     }
 
     /// Stock EntityStatChanged for core vitals (Health/Stamina/Food/Water).
-    fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+    pub fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
         return game_join.sendPlayerVitals(self, peer, c);
     }
 
@@ -3433,7 +3167,7 @@ pub const Game = struct {
         return packages.buildInventoryBodyStockResolved(buf, &self.sim.inventory[ps], resolveItemType, self);
     }
 
-    fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         return game_join.sendItemIdMapping(self, peer);
     }
 
@@ -3441,11 +3175,11 @@ pub const Game = struct {
     /// Join: send empty held stack (entityId + count=0 + index). Full ItemValue held
     /// stacks have underrun'd stock HoldingItem.read mid-join when framing/window is tight;
     /// PDF already carries toolbelt. Echo path after InvTx still sends resolved hold.
-    fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
+    pub fn sendHoldingOnly(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
         return game_join.sendHoldingOnly(self, peer, c);
     }
 
-    fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void {
+    pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stack: bool) !void {
         return game_join.sendHoldingOnlyEx(self, peer, c, full_stack);
     }
 
@@ -4182,14 +3916,14 @@ pub const Game = struct {
         return game_social.handleAddRemoveBuff(self, c, body);
     }
 
-    fn sendBuffSync(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
+    pub fn sendBuffSync(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
         return game_social.sendBuffSync(self, peer, c);
     }
 
     /// The joining player's OWN active buffs (the PDF buff section is empty
     /// in zdtd; the client needs an explicit AddRemoveBuff bundle on rejoin).
     /// See game/social.zig.
-    fn sendOwnBuffs(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
+    pub fn sendOwnBuffs(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
         return game_social.sendOwnBuffs(self, peer, c);
     }
 
@@ -4222,7 +3956,7 @@ pub const Game = struct {
         return game_weather.buildWeatherBodyFromBiomes(self);
     }
 
-    fn sendWeather(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn sendWeather(self: *Game, peer: *ln_peer.Peer) !void {
         try game_weather.sendWeather(self, peer);
     }
 
@@ -4250,7 +3984,7 @@ pub const Game = struct {
 
     /// Replay current occupancy to one peer so a late joiner draws riders in
     /// their seats instead of standing on the hull.
-    fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
+    pub fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
         try game_vehicle.sendSeatedRiders(self, peer);
     }
 
@@ -4360,7 +4094,7 @@ pub const Game = struct {
         return @import("game/social.zig").clientByEntityId(self, entity_id);
     }
 
-    fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
+    pub fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
         return @import("game/social.zig").shareQuestWithParty(self, c, def_id);
     }
 };
