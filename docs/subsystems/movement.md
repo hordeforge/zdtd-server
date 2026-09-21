@@ -215,10 +215,10 @@ and a floor under a roof are expressible (`src/ecs/path.zig:15-21`). `greedyTowa
 fallback; `bfsToward` and `aStarToward` cap expansions and node count and fall back to
 greedy when the goal is unreachable, which the AI reads as `path_blocked`
 (`src/ecs/path.zig:119-181`, `src/ecs/path.zig:234-330`). The sim caller is the zombie
-chase planner (`src/ecs/systems.zig:2580-2600`); the fuzz target drives the same
+chase planner (`src/ecs/ai_tasks.zig:878-900`); the fuzz target drives the same
 invariants (`src/fuzz.zig:1594`). Replans are metered per tick at 16
 replans with a stride cap of 8 ticks, and the granted count feeds an APM counter
-(`src/ecs/world.zig:898-911`, `src/ecs/systems.zig:4096`).
+(`src/ecs/world.zig:898-911`, `src/ecs/ai_tasks.zig:631-640`).
 
 ## Per-tick work, wire traffic, and persistence
 

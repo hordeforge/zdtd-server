@@ -31,6 +31,7 @@ pub const stealth = @import("stealth.zig");
 pub const ai_tasks = @import("ai_tasks.zig");
 pub const buff_tick = @import("buff_tick.zig");
 pub const damage_apply = @import("damage_apply.zig");
+pub const sensing = @import("sensing.zig");
 pub const despawn = @import("despawn.zig");
 pub const dig = @import("dig.zig");
 pub const quest_trade = @import("quest_trade.zig");
@@ -73,6 +74,7 @@ test {
     _ = ai_tasks;
     _ = buff_tick;
     _ = damage_apply;
+    _ = sensing;
     _ = despawn;
     _ = dig;
     _ = quest_trade;
