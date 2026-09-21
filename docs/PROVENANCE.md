@@ -385,6 +385,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_positions.zig` | R | Positions body (persistent player-positions broadcast). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_turret.zig` | R | Turret-sync body (entityId + target + isOn + None item value). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_clientinfo.zig` | R | Client-info bodies (player-list broadcast + backpack position marker). Split out of the packages.zig facade, same builders and tests |
+| `src/wire/stock_anim.zig` | R | Animation + relay bodies (ragdoll, animation data, laser sight, relay framing). Split out of the packages.zig facade, same code and tests |
 | `src/wire/stock_weather.zig` | R | Weather bodies (biome snapshot + broadcast builder). Split out of the packages.zig facade, same code and tests |
 | `src/wire/stock_velocity.zig` | R | Velocity body (EntityVelocity build with the stock clamp). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_areas.zig` | R | World-areas bodies (trader compound entries + WorldAreas builder). Split out of the packages.zig facade, same code and test |
