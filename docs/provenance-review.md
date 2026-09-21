@@ -107,7 +107,8 @@ A coverage gate proves ledger coverage, not the truth of the stock claims.
 - Keep evidence and classification here; stock-data loader/config ownership
   belongs to docs/prompts/hardcoded-data-review.md. Standing AGENTS.md /
   docs/AGENTS.md path and gate drift belongs to
-  docs/prompts/agentrules-review.md. Do not duplicate those audits
+  docs/prompts/agentrules-review.md. ADR/PRD/RFC registry and cite drift
+  belongs to docs/prompts/specs-review.md. Do not duplicate those audits
   or modify sibling repositories to make a citation pass.
 
 # Done looks like
