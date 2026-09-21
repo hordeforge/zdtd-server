@@ -8,6 +8,8 @@ const sleepers_mod = @import("../../world/sleepers.zig");
 const parallel_util = @import("../../util/parallel.zig");
 const comps = @import("../../ecs/components.zig");
 const rng_util = @import("../../util/rng.zig");
+const assets_gamestages = @import("../../assets/gamestages.zig");
+const assets_entities = @import("../../assets/entities.zig");
 
 // Mirrors Game internals needed by the sleeper loop; kept here to avoid
 // re-exporting private Game helpers via game.zig. The wake/stage radius is the
@@ -280,4 +282,22 @@ pub fn tickSleeperRearm(self: *Game) void {
         vol.respawn_time = if (days > 0) wt + @as(u64, days) * 24000 else std.math.maxInt(u64);
         vol.spawned_alive = 0;
     }
+}
+
+pub fn resolveSleeperClass(
+    self: *Game,
+    name: []const u8,
+    stage_spawn: ?assets_gamestages.SpawnGroup,
+    seed: u32,
+) assets_entities.EntityDef {
+    if (stage_spawn) |sg| {
+        if (self.entitygroups.pick(sg.group, seed)) |cname| {
+            if (self.entities.byName(cname)) |d| return d;
+        }
+    }
+    if (self.entities.byName(name)) |d| return d;
+    if (self.entitygroups.pick(name, seed)) |cname| {
+        if (self.entities.byName(cname)) |d| return d;
+    }
+    return self.entities.defaultZombie();
 }

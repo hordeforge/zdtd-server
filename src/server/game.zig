@@ -2931,16 +2931,7 @@ pub const Game = struct {
         stage_spawn: ?assets_gamestages.SpawnGroup,
         seed: u32,
     ) assets_entities.EntityDef {
-        if (stage_spawn) |sg| {
-            if (self.entitygroups.pick(sg.group, seed)) |cname| {
-                if (self.entities.byName(cname)) |d| return d;
-            }
-        }
-        if (self.entities.byName(name)) |d| return d;
-        if (self.entitygroups.pick(name, seed)) |cname| {
-            if (self.entities.byName(cname)) |d| return d;
-        }
-        return self.entities.defaultZombie();
+        return game_sleeper.resolveSleeperClass(self, name, stage_spawn, seed);
     }
 
     pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
