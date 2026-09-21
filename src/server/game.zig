@@ -2200,27 +2200,7 @@ pub const Game = struct {
 
     /// Stock GameServerInfo.ToString(true) body used as NetPackagePlayerLoginAnswer.data.
     pub fn buildLoginGsiText(self: *Game, buf: []u8) ![]const u8 {
-        const info = serverinfo_tcp.ServerInfo{
-            .game_name = "zdtd",
-            .game_host = "zdtd",
-            .level_name = self.world_name,
-            .ip = "127.0.0.1",
-            .info_port = self.info_port,
-            .max_players = self.max_players,
-            .current_players = @intCast(self.countJoined()),
-            .server_version = version.stock_wire_gsi_version,
-            .world_size = self.worldSize(),
-            .eac_enabled = false,
-            .password_protected = self.password.len > 0,
-            .sandbox_preset = self.sandbox_preset,
-            .sandbox_code = self.sandbox_code,
-            .server_description = self.server_description,
-            .server_website_url = self.server_website_url,
-            .region = self.region,
-            .language = self.language,
-            .play_group = self.play_group,
-        };
-        return try serverinfo_tcp.buildInfoText(buf, info);
+        return game_join.buildLoginGsiText(self, buf);
     }
 
     pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {

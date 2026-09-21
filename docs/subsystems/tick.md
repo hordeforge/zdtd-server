@@ -30,7 +30,7 @@ The `Game` fields the loop itself owns (`src/server/game.zig:274`):
     running: bool = true,
 ```
 
-`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3307`, `src/server/game.zig:3334`).
+`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3233`, `src/server/game.zig:3260`).
 
 Cadence gates are `InitOptions`/`Game` fields sampled as tick counts, not seconds. The compile-time defaults (`src/server/game/types.zig:87`):
 
@@ -83,7 +83,7 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game.zig:3250`):
+The only real-time pacer is `Game.run` (`src/server/game.zig:3230`):
 
 ```zig
     pub fn run(self: *Game) !void {
