@@ -23,6 +23,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
+const plugin_compose = @import("plugin_compose.zig");
 const game_social = @import("social.zig");
 
 /// Vehicle tank cap and the InvTx refuel pickup reach are
@@ -410,8 +411,7 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     // stable key. Plugins gate which recipes a player may craft / how many.
     {
         const pid: i32 = if (self.sim.mask[ps].network_id) self.sim.network_id[ps].id else -1;
-        const sv = self.plugins.craftRequest(pid, recipe.name, n);
-        const v = if (sv != 0) sv else self.wasm_plugins.craftRequest(pid, recipe.name, n);
+        const v = plugin_compose.craftRequest(self, pid, recipe.name, n);
         if (v < 0) return false;
         if (v > 0) n = @intCast(@min(@as(u32, n), @as(u32, @intCast(v))));
     }

@@ -7,6 +7,7 @@ const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/world.zig");
 const persist = @import("../persist.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -14,8 +15,7 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // for plugins (announcements/observers), not native behavior. Mirrors the
     // on_player_join notification; pre-join drops have no entity to report.
     if (self.clients[slot].joined and self.clients[slot].entity_id > 0) {
-        self.plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
-        self.wasm_plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
+        plugin_compose.playerLeave(self, @intCast(slot), self.clients[slot].entity_id);
     }
     // Persist before anything here starts tearing the session down: this
     // function ends at `clients[slot] = .{}`, which drops the in-memory record

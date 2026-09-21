@@ -14,14 +14,14 @@ const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
 const packages = @import("../../wire/packages.zig");
 const utf8_util = @import("../../util/utf8.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 const max_land_claims = game_mod.max_land_claims;
 
 /// Combined block-damage verdict: static host first, then Wasm (first non-zero
 /// wins; 0 = no plugin vetoes/scales, keep today's behaviour).
 fn blockDamageVerdict(self: *Game, x: i32, y: i32, z: i32, dmg: i32) i32 {
-    const sv = self.plugins.blockDamage(x, y, z, dmg);
-    return if (sv != 0) sv else self.wasm_plugins.blockDamage(x, y, z, dmg);
+    return plugin_compose.blockDamage(self, x, y, z, dmg);
 }
 
 /// Register (or replace) a land claim owned by `owner_entity` at a keystone.

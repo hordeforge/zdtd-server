@@ -13,6 +13,7 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const utf8_util = @import("../../util/utf8.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 /// Fixed bot capacity (ADR 0026 MaxBots-style cap; bounded array, no heap).
 pub const max_bots: usize = 16;
@@ -335,8 +336,7 @@ pub const BotManager = struct {
         // on_player_damage plugin verdict (PvP/friendly-fire, damage scaling).
         if (g.sim.slotOfNetId(target)) |es| {
             if (g.sim.mask[es].player) {
-                const sv = g.plugins.playerDamage(shooter, target, @trunc(dmg));
-                const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(shooter, target, @trunc(dmg));
+                const v = plugin_compose.playerDamage(g, shooter, target, @trunc(dmg));
                 if (v < 0) return;
                 if (v > 0) {
                     _ = g.sim.damageFrom(target, dmg * @as(f32, @floatFromInt(v)) / 100.0, shooter);

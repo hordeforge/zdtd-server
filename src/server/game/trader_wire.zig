@@ -10,6 +10,7 @@ const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("replicate_te.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const vending_mod = @import("../../world/vending.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 /// Trader/vending trade reach (blocks). The client can only open the trade
 /// window by activating the NPC or machine in use range, so an echo from
@@ -89,8 +90,7 @@ pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
     // plugin, not native code (kind 1 buy / 2 sell; stock side 0=buy 1=sell).
     if (traded) {
         const kind: i32 = if (t.side == 0) 1 else 2;
-        self.plugins.traderEvent(c.entity_id, t.trader_entity, kind);
-        self.wasm_plugins.traderEvent(c.entity_id, t.trader_entity, kind);
+        plugin_compose.traderEvent(self, c.entity_id, t.trader_entity, kind);
     }
     if (c.peer) |p| {
         const ts = self.sim.slotOfNetId(t.trader_entity);

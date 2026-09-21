@@ -2,13 +2,9 @@
 //! Pure helpers (no Game / net types). Extracted from game.zig for navigability.
 
 const std = @import("std");
-const utf8_util = @import("../util/utf8.zig");
 
 /// Max UTF-8 bytes in a player Global chat message (stock UI is short; caps flood payload).
 pub const max_chat_msg_len: usize = 256;
-
-/// Re-export: fixed buffers and display caps cut on a codepoint boundary.
-pub const utf8TruncLen = utf8_util.truncLen;
 
 /// True when `s` equals any of the given alternatives (console verb aliases).
 pub fn eqAny(s: []const u8, alts: []const []const u8) bool {
@@ -89,7 +85,7 @@ pub const player_console_allowlist = [_][]const u8{
     "settempunit", "debugmenu", "listplayerids", "lpi",
 };
 
-pub fn isPlayerConsoleCommandAllowlist() []const []const u8 {
+pub fn playerConsoleAllowlist() []const []const u8 {
     return &player_console_allowlist;
 }
 
@@ -184,13 +180,6 @@ test "sanitizePlayerName drops zero-width padding used as a second identity" {
     // ZWJ in an emoji ZWJ sequence is kept (not padding).
     const n3 = sanitizePlayerName(&buf, "A\u{200d}B");
     try std.testing.expectEqualStrings("A\u{200d}B", buf[0..n3]);
-}
-
-test "utf8TruncLen never cuts inside a codepoint" {
-    try std.testing.expectEqual(@as(usize, 3), utf8TruncLen("abc", 8));
-    try std.testing.expectEqual(@as(usize, 2), utf8TruncLen("abc", 2));
-    try std.testing.expectEqual(@as(usize, 3), utf8TruncLen("日本", 5));
-    try std.testing.expectEqual(@as(usize, 0), utf8TruncLen("\u{1f680}", 3));
 }
 
 test "chatMsgOk length and control bounds" {

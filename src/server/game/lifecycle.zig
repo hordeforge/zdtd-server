@@ -5,6 +5,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const apm = @import("../../apm/root.zig");
 const util_sim = @import("../../util/sim.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 pub fn deinit(self: *Game) void {
     const leave_sim = self.info_port == 0;
@@ -32,8 +33,7 @@ pub fn deinit(self: *Game) void {
     self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);
     self.saveClock() catch |e| game_mod.logPersistErr(self, "save clock", e);
     self.land_claims_n = 0;
-    self.plugins.shutdown();
-    self.wasm_plugins.shutdown();
+    plugin_compose.shutdown(self);
     deinitStores(self);
     self.admin.deinit();
     self.webui.deinit();

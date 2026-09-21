@@ -14,6 +14,7 @@ const items = @import("../../assets/items.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assignids = @import("../../assets/assignids_comptime.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -392,8 +393,7 @@ pub fn questAcceptAt(ctx: ?*anyopaque, peer_slot: i32, def_id: u16) i32 {
         const ps: usize = @intCast(peer_slot);
         if (g.sim.mask[ps].network_id) player = g.sim.network_id[ps].id;
     }
-    const sv = g.plugins.questAccept(player, def_id);
-    return if (sv != 0) sv else g.wasm_plugins.questAccept(player, def_id);
+    return plugin_compose.questAccept(g, player, def_id);
 }
 
 /// Stock item name → ECS id. Wired to World.item_id_fn so spawnPlayer's

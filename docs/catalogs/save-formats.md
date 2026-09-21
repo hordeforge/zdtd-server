@@ -36,8 +36,8 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCT2` | src/world/containers.zig | 633 | posFromGuid | - |
 | `ZSG1` | src/world/signs.zig | 130 | - | - |
 | `ZSG1` | src/world/signs.zig | 156 | - | - |
-| `ZCH3` | src/world/store.zig | 2132 | biomeNameAt | - |
-| `ZCH3` | src/world/store.zig | 2156 | biomeNameAt | - |
+| `ZCH3` | src/world/store.zig | 2135 | biomeNameAt | - |
+| `ZCH3` | src/world/store.zig | 2159 | biomeNameAt | - |
 | `ZVNM1` | src/world/vending.zig | 152 | - | - |
 | `ZVNM` | src/world/vending.zig | 159 | - | - |
 | `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |

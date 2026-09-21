@@ -8,6 +8,7 @@ const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const assets_item_mods = @import("../../assets/item_modifiers.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
     const id = self.items.ecsIdByName(name);
@@ -38,8 +39,7 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks, .{});
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
-    const sv = self.plugins.lootRoll(list_name, @intCast(n));
-    const v = if (sv != 0) sv else self.wasm_plugins.lootRoll(list_name, @intCast(n));
+    const v = plugin_compose.lootRoll(self, list_name, @intCast(n));
     if (v < 0) return;
     // Re-cap after the percent scale: a large plugin verdict must not push n
     // past the stacks array (the loop below would read out of bounds).

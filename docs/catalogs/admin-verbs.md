@@ -96,14 +96,14 @@ union above.
 
 | Verbs (aliases grouped) | Line |
 |---|---|
-| `help`, `commands`, `?` | 357 |
-| `gettime`, `gt` | 362 |
-| `listplayers`, `lp` | 369 |
-| `listplayerids`, `lpi` | 377 |
-| `listents`, `le` | 387 |
-| `say`, `s` | 391 |
-| `version` | 402 |
-| `dm`, `cm`, `settempunit`, `debugmenu` | 404 |
+| `help`, `commands`, `?` | 359 |
+| `gettime`, `gt` | 364 |
+| `listplayers`, `lp` | 371 |
+| `listplayerids`, `lpi` | 379 |
+| `listents`, `le` | 389 |
+| `say`, `s` | 393 |
+| `version` | 404 |
+| `dm`, `cm`, `settempunit`, `debugmenu` | 406 |
 
 
 ## Player console allowlist (`src/server/c2s_text.zig`)
@@ -113,24 +113,24 @@ permission level (`src/server/admin_console.zig:307`).
 
 | Verb | Line |
 |---|---|
-| `help` | 87 |
-| `commands` | 87 |
-| `?` | 87 |
-| `gettime` | 87 |
-| `gt` | 87 |
-| `listplayers` | 87 |
-| `lp` | 87 |
-| `listents` | 88 |
-| `le` | 88 |
-| `say` | 88 |
-| `s` | 88 |
-| `version` | 88 |
-| `dm` | 88 |
-| `cm` | 88 |
-| `settempunit` | 89 |
-| `debugmenu` | 89 |
-| `listplayerids` | 89 |
-| `lpi` | 89 |
+| `help` | 83 |
+| `commands` | 83 |
+| `?` | 83 |
+| `gettime` | 83 |
+| `gt` | 83 |
+| `listplayers` | 83 |
+| `lp` | 83 |
+| `listents` | 84 |
+| `le` | 84 |
+| `say` | 84 |
+| `s` | 84 |
+| `version` | 84 |
+| `dm` | 84 |
+| `cm` | 84 |
+| `settempunit` | 85 |
+| `debugmenu` | 85 |
+| `listplayerids` | 85 |
+| `lpi` | 85 |
 
 
 ## Bot verbs (`src/server/game/bot.zig`)

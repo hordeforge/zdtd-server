@@ -222,6 +222,7 @@ pub const LandClaim = game_types.LandClaim;
 pub const Client = game_types.Client;
 
 const game_wasm_host = @import("game/wasm_host.zig");
+const game_plugin_compose = @import("game/plugin_compose.zig");
 pub const killVerdict = game_wasm_host.killVerdict;
 pub const withdrawDisabled = game_wasm_host.withdrawDisabled;
 /// World.op_src_withdrawn_fn: is the plugin that queued this op withdrawn?
@@ -238,8 +239,7 @@ const wasmQuery = game_wasm_host.wasmQuery;
 /// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
 pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const sv = g.plugins.playerDamage(-1, victim, @trunc(amount));
-    return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @trunc(amount));
+    return game_plugin_compose.playerDamage(g, -1, victim, @trunc(amount));
 }
 
 /// Foreign-gated victim resist for the ECS damage path (zombie melee /
@@ -284,8 +284,7 @@ pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) 
 /// radiation, starvation, attacker -1) and explosion damage (attacker = the
 /// blaster), so a module shapes ALL damage directed at players.
 pub fn playerDamageVerdictAmount(g: *Game, attacker: i32, victim: i32, amount: f32) f32 {
-    const sv = g.plugins.playerDamage(attacker, victim, @trunc(amount));
-    const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(attacker, victim, @trunc(amount));
+    const v = game_plugin_compose.playerDamage(g, attacker, victim, @trunc(amount));
     if (v < 0) return 0;
     if (v > 0) return amount * @as(f32, @floatFromInt(v)) / 100.0;
     return amount;
@@ -319,8 +318,7 @@ pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u
     // are u16, but a future caller or modded data must not trap the tick on
     // a >i32max price. Same shape as the perk-spend cost clamp in misc.zig.
     const p: i32 = @intCast(@min(unit_price, std.math.maxInt(i32)));
-    const sv = g.plugins.tradePrice(player, item, p);
-    return if (sv != 0) sv else g.wasm_plugins.tradePrice(player, item, p);
+    return game_plugin_compose.tradePrice(g, player, item, p);
 }
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
@@ -990,8 +988,7 @@ pub const Game = struct {
             self.admin.deinit();
             self.info_tcp.stop();
             self.net.deinit();
-            self.plugins.shutdown();
-            self.wasm_plugins.shutdown();
+            game_plugin_compose.shutdown(self);
             @import("game/lifecycle.zig").deinitStores(self);
             self.world.deinit();
             @import("game/lifecycle.zig").deinitCreateOwned(self);
@@ -1761,24 +1758,21 @@ pub const Game = struct {
     /// on_perk_spend verdict (ADR 0033): <0 denies the spend, 0 keeps, >0
     /// scales the skill-point cost by percent. Native first, then wasm.
     pub fn perkSpendVerdict(self: *Game, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
-        const sv = self.plugins.perkSpend(player, skill, level, cost);
-        return if (sv != 0) sv else self.wasm_plugins.perkSpend(player, skill, level, cost);
+        return game_plugin_compose.perkSpend(self, player, skill, level, cost);
     }
 
     /// on_game_event verdict (ADR 0035): <0 denies the event (no response),
     /// 0 keeps the stock APPROVED ack, >0 keeps it too. Native first, then
     /// wasm; the gameevents.xml phase-machine engine is plugin territory.
     pub fn gameEventVerdict(self: *Game, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
-        const sv = self.plugins.gameEvent(player, event, target, var_count);
-        return if (sv != 0) sv else self.wasm_plugins.gameEvent(player, event, target, var_count);
+        return game_plugin_compose.gameEvent(self, player, event, target, var_count);
     }
 
     /// on_stat_changed observer (ADR 0034): fire both plugin hosts. The sim
     /// stays the authority; plugins react/announce. Bounded: one call per
     /// changed player per tick (the survival pass) or per XP award.
     pub fn statChangedObserver(self: *Game, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
-        self.plugins.statChanged(player, hp, food, water, stamina, level, xp);
-        self.wasm_plugins.statChanged(player, hp, food, water, stamina, level, xp);
+        game_plugin_compose.statChanged(self, player, hp, food, water, stamina, level, xp);
     }
 
     /// on_evidence observer (T21): fire both plugin hosts with the guard's
@@ -1786,8 +1780,7 @@ pub const Game = struct {
     /// the guest return is discarded. Bounded: one call per recorded
     /// evidence event.
     pub fn evidenceObserver(self: *Game, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
-        self.plugins.evidence(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
-        self.wasm_plugins.evidence(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
+        game_plugin_compose.evidence(self, tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
     }
 
     pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
@@ -2855,8 +2848,7 @@ pub const Game = struct {
         c.move_z = @floatFromInt(sz2);
         c.move_tick = self.tick_n;
         if (first_join) {
-            self.plugins.playerJoin(@intCast(c.slot), eid);
-            self.wasm_plugins.playerJoin(@intCast(c.slot), eid);
+            game_plugin_compose.playerJoin(self, @intCast(c.slot), eid);
         }
         const dim: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
         // Server journal + stock PDF Quest.Write (RewardItem includes ItemStack).

@@ -324,6 +324,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/types.zig` | R | Game-owned types extracted from game.zig: InitOptions, defaults, LandClaim, Client. Canonical definitions live here; game.zig re-exports them so exist |
 | `src/server/game/vehicle.zig` | R | Vehicle seat + positions S2C helpers - extracted verbatim from game.zig. seatRider / unseatRider (NetPackageEntityAttach) and the periodic |
 | `src/server/game/wasm_host.zig` | R | Wasm host shims for Game - callbacks the plugin layer calls back into. Extracted verbatim so game.zig keeps only a re-export |
+| `src/server/game/plugin_compose.zig` | Z | Dual-host plugin composition (static PluginHost then WasmHost): one place for verdict/observer/deny ordering |
 | `src/server/game/weather.zig` | R | Weather S2C helpers - extracted verbatim from game.zig. anyEnteredClient, the NetPackageWeather body builder and its send paths |
 | `src/server/game/world.zig` | R | Domain - extracted from game.zig; helpers take *Game World / claims / block meta / locks. Bodies copied verbatim from game.zig |
 | `src/server/guard_policy.zig` | Z | P4 guard policy: what the server *does* with detector evidence. |
@@ -495,6 +496,7 @@ field-by-field provenance.
 | Constant | Value | B | Stock source |
 |---|---|:-:|---|
 | `util/clock.zig` `dotnet_unix_epoch_ticks` | `621355968000000000` | R | .NET DateTime ticks at Unix epoch (LiteNetLib pong UtcNow.Ticks; KickPlayerData.banUntil via ToBinary). Not `std.time.epoch.clr` (two days off). |
+| `util/sim.zig` `challenge_mix` | `0xC4A11E46_E5EED` | Z | Domain tag XOR'd into DST `fillChallenge` so challenge streams stay distinct from other `initFromU64` sites that share the run seed; production path stays CSPRNG |
 | `assets/gamestages.zig ticks_per_day` | 24000 | A | Stock sim day length (24000 ticks @ 20 TPS); gamestages.xml stage math uses it |
 | `ecs/electric.zig default_trigger_pulse_s` | 0.5 | R | Trigger pulse width (RE: PowerItemTypes; tile-entities-power.md) |
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |

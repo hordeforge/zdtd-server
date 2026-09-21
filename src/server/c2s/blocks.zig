@@ -16,6 +16,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../game/replicate_te.zig");
+const plugin_compose = @import("../game/plugin_compose.zig");
 
 /// Cap on the C2S-claimed explosion radii (block + entity). RE: the largest
 /// stock ExplosionData.EntityRadius is 6 (entities.xml `explosion` on
@@ -319,8 +320,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // may deny (no progress) or scale the delta.
                     if (abs > cur_dmg) {
                         const delta = abs - cur_dmg;
-                        const sv = self.plugins.blockDamage(b.x, b.y, b.z, @intCast(delta));
-                        const v = if (sv != 0) sv else self.wasm_plugins.blockDamage(b.x, b.y, b.z, @intCast(delta));
+                        const v = plugin_compose.blockDamage(self, b.x, b.y, b.z, @intCast(delta));
                         if (v < 0) {
                             abs = cur_dmg;
                         } else if (v > 0) {

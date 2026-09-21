@@ -29,6 +29,7 @@ const logPersistErr = game_mod.logPersistErr;
 const reverseItemType = game_mod.Game.reverseItemType;
 const max_chat_msg_len = c2s_text.max_chat_msg_len;
 const chatMsgOk = c2s_text.chatMsgOk;
+const plugin_compose = @import("../game/plugin_compose.zig");
 
 /// Honored-`fatal` kill amount vs NPC kinds (zombies/animals). Stock fatal
 /// damage is client-computed; the server honors the flag only against NPCs
@@ -834,8 +835,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
                 const atk = self.sim.network_id[actor_slot].id;
-                const sv = self.plugins.playerDamage(atk, d.entity_id, @trunc(amount));
-                const v = if (sv != 0) sv else self.wasm_plugins.playerDamage(atk, d.entity_id, @trunc(amount));
+                const v = plugin_compose.playerDamage(self, atk, d.entity_id, @trunc(amount));
                 if (v < 0) return true;
                 if (v > 0) amount = amount * @as(f32, @floatFromInt(v)) / 100.0;
                 if (foreign_resist > 0) {
@@ -1172,8 +1172,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                     // Wasm-first: the window-open announcement rides a plugin
                     // (kind 0 = trader open), not native code.
-                    self.plugins.traderEvent(c.entity_id, self.sim.network_id[ts].id, 0);
-                    self.wasm_plugins.traderEvent(c.entity_id, self.sim.network_id[ts].id, 0);
+                    plugin_compose.traderEvent(self, c.entity_id, self.sim.network_id[ts].id, 0);
                 } else if (vending_pos) |vp| {
                     // Vending machines are always open (trader_info has no
                     // hours). The LockResponse carries the machine's
@@ -1463,14 +1462,7 @@ fn relayBodyExcept(self: *Game, pkg: []const u8, body: []const u8, except_entity
 /// Native then Wasm chat filter chain. Returns the possibly-rewritten text
 /// (aliasing one of the scratch buffers), or null when policy drops it.
 fn filteredChatText(self: *Game, c: *Client, msg: []const u8, native_buf: []u8, wasm_buf: []u8) ?[]const u8 {
-    if (self.plugins.chatFilter(c.entity_id, msg, native_buf)) |f| {
-        if (f.len == 0) return null;
-        if (!chatMsgOk(f)) return null;
-        // f aliases native_buf; return it directly rather than copying onto
-        // itself ("@memcpy arguments alias").
-        return f;
-    }
-    if (self.wasm_plugins.chatFilter(c.entity_id, msg, wasm_buf)) |f| {
+    if (plugin_compose.chatFilter(self, c.entity_id, msg, native_buf, wasm_buf)) |f| {
         if (f.len == 0) return null;
         if (!chatMsgOk(f)) return null;
         return f;

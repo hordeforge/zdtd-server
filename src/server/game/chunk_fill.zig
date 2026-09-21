@@ -17,6 +17,7 @@ const sandbox = @import("../../assets/sandbox.zig");
 const game_tick = @import("tick.zig");
 const game_player = @import("player.zig");
 const game_loot = @import("loot.zig");
+const plugin_compose = @import("plugin_compose.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
@@ -530,8 +531,7 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
-    const sv = self.plugins.lootRoll(loot_name, @intCast(n));
-    const v = if (sv != 0) sv else self.wasm_plugins.lootRoll(loot_name, @intCast(n));
+    const v = plugin_compose.lootRoll(self, loot_name, @intCast(n));
     if (v < 0) return;
     if (v > 0) {
         const scaled: usize = n * @as(usize, @intCast(v)) / 100;

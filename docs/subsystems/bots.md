@@ -151,7 +151,7 @@ Two properties matter for anyone extending this. The snapshot is global, not sco
 
 ## The queue boundary
 
-The write path is the `zdtd.queue` import, dispatched per queued line. Bot verbs are applied immediately at the queue call, not parked in the ECS command buffer, and anything not starting with `bot` falls through to the ECS verbs (`spawn`, `despawn`, `damage`, `glide`) (src/server/game/wasm_host.zig:91):
+The write path is the `zdtd.queue` import, dispatched per queued line. Bot verbs are applied immediately at the queue call, not parked in the ECS command buffer, and anything not starting with `bot` falls through to the ECS verbs (`spawn`, `despawn`, `damage`, `glide`) (src/server/game/wasm_host.zig:88):
 
 ```zig
     if (cmd.len > max_plugin_cmd_len) {

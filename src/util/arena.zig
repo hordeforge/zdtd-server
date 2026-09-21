@@ -26,4 +26,3 @@ pub fn destroyHolder(arena_ptr: *?*std.heap.ArenaAllocator) void {
         arena_ptr.* = null;
     }
 }
-

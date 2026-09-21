@@ -9,6 +9,7 @@ const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const ally_mod = @import("../ally.zig");
 const systems = @import("../../ecs/systems.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
     var name_buf: [packages.stock_buff.max_buff_name]u8 = undefined;
@@ -139,8 +140,7 @@ pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: boo
     // the whole set rather than the one path that happened to be wired.
     // Wasm-first (AGENTS rule 29): reacting to a buff is behaviour, so it
     // belongs on the plugin boundary rather than in a native special case.
-    self.plugins.buff(entity_id, buff_name, adding);
-    self.wasm_plugins.buff(entity_id, buff_name, adding);
+    plugin_compose.buff(self, entity_id, buff_name, adding);
 }
 
 pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {

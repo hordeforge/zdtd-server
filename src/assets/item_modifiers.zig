@@ -63,7 +63,6 @@ pub const ModTable = struct {
     pub fn deinit(self: *ModTable) void {
         self.defs = &.{};
         arena_util.destroyHolder(&self.arena_ptr);
-
     }
 
     pub fn byName(self: *const ModTable, name: []const u8) ?ModDef {

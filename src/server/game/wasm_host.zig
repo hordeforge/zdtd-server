@@ -10,6 +10,7 @@ const c2s_text = @import("../c2s_text.zig");
 const nav = @import("../../world/nav.zig");
 const game_step = @import("step.zig");
 const util_log = @import("../../util/log.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
@@ -51,14 +52,8 @@ pub fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
 pub fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32) i32 {
     const g = gameFromPtr(ctx orelse return 0);
     return switch (kind) {
-        .player => blk: {
-            const sv = g.plugins.playerDeath(victim);
-            break :blk if (sv != 0) sv else g.wasm_plugins.playerDeath(victim);
-        },
-        else => blk: {
-            const sv = g.plugins.entityKilled(victim, attacker);
-            break :blk if (sv != 0) sv else g.wasm_plugins.entityKilled(victim, attacker);
-        },
+        .player => plugin_compose.playerDeath(g, victim),
+        else => plugin_compose.entityKilled(g, victim, attacker),
     };
 }
 

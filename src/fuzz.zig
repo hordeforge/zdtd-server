@@ -544,17 +544,13 @@ const signable_te_corpus = [_][]const u8{
     }),
     // feat_size underflow (< 4)
     &(signTeOuter(30) ++ [_]u8{
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        18, 0, 0, 0,
-        742 & 0xff, (742 >> 8) & 0xff, 0, 0,
-        0, 1,
+        0,  0, 0, 0, 0,          0,                 0, 0, 0, 0, 0, 0,
+        18, 0, 0, 0, 742 & 0xff, (742 >> 8) & 0xff, 0, 0, 0, 1,
     } ++ std.mem.asBytes(&stock_te.feature_hash_signable).* ++ [_]u8{ 2, 0, 0, 0 }),
     // overlong 7-bit string length inside a signable feature
     &(signTeOuter(40) ++ [_]u8{
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        28, 0, 0, 0,
-        742 & 0xff, (742 >> 8) & 0xff, 0, 0,
-        0, 1,
+        0,  0, 0, 0, 0,          0,                 0, 0, 0, 0, 0, 0,
+        28, 0, 0, 0, 742 & 0xff, (742 >> 8) & 0xff, 0, 0, 0, 1,
     } ++ std.mem.asBytes(&stock_te.feature_hash_signable).* ++
         [_]u8{ 16, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 0x0f }),
 };

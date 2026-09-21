@@ -21,6 +21,8 @@ const sys_metrics = @import("../util/sys_metrics.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const c2s_text = @import("c2s_text.zig");
+const plugin_compose = @import("game/plugin_compose.zig");
+const utf8_util = @import("../util/utf8.zig");
 const protocol = @import("../protocol.zig");
 const config_mod = @import("config.zig");
 const util_log = @import("../util/log.zig");
@@ -80,7 +82,7 @@ pub fn adminReply(self: *Game, text: []const u8) void {
     if (self.admin_reply_sink) |sink| {
         const room = sink.len -% self.admin_reply_len;
         if (room == 0) return;
-        const n = c2s_text.utf8TruncLen(text, room);
+        const n = utf8_util.truncLen(text, room);
         @memcpy(sink[self.admin_reply_len..][0..n], text[0..n]);
         self.admin_reply_len += n;
     }
@@ -211,7 +213,7 @@ pub fn fillWebuiSnap(self: *Game) void {
     const wn = self.world_name;
     // World names come from config/CLI and may be non-ASCII: cut on a codepoint
     // boundary so the dashboard header is not mojibake.
-    const ncopy = c2s_text.utf8TruncLen(wn, s.world_name.len);
+    const ncopy = utf8_util.truncLen(wn, s.world_name.len);
     @memcpy(s.world_name[0..ncopy], wn[0..ncopy]);
     s.world_name_len = @intCast(ncopy);
     var pi: usize = 0;
@@ -225,7 +227,7 @@ pub fn fillWebuiSnap(self: *Game) void {
             .joined = cl.joined,
             .entered = cl.entered,
         };
-        const nl = c2s_text.utf8TruncLen(cl.name[0..cl.name_len], webui_mod.max_name);
+        const nl = utf8_util.truncLen(cl.name[0..cl.name_len], webui_mod.max_name);
         @memcpy(row.name[0..nl], cl.name[0..nl]);
         row.name_len = @intCast(nl);
         if (cl.entity_id > 0) {
@@ -246,7 +248,7 @@ pub fn fillWebuiSnap(self: *Game) void {
     for (0..@min(wp.n, s.modules.len)) |i| {
         const p = &wp.slots[i];
         var row: webui_mod.ModuleRow = .{ .used = true, .disabled = p.disabled };
-        const nl = c2s_text.utf8TruncLen(p.name, row.name.len);
+        const nl = utf8_util.truncLen(p.name, row.name.len);
         @memcpy(row.name[0..nl], p.name[0..nl]);
         row.name_len = @intCast(nl);
         s.modules[i] = row;
@@ -1138,7 +1140,7 @@ pub fn adminTargetId(self: *const Game, t: admin_mod.Target, buf: []u8) []const 
     };
     // The copy becomes the stored ban/permission key, so an over-long name is
     // cut on a codepoint boundary rather than mid-sequence.
-    const n = c2s_text.utf8TruncLen(src, buf.len);
+    const n = utf8_util.truncLen(src, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     return buf[0..n];
 }
@@ -1165,11 +1167,7 @@ fn tryDispatchPluginAdmin(self: *Game, line: []const u8) bool {
     // Bounded reply buffer: plugin admin commands are informational, not bulk
     // dumps. 4k matches the largest single admin formatter (ban list).
     var out: [4096]u8 = undefined;
-    if (self.plugins.adminCommand(line, &out)) |reply| {
-        self.adminReply(reply);
-        return true;
-    }
-    if (self.wasm_plugins.adminCommand(line, &out)) |reply| {
+    if (plugin_compose.adminCommand(self, line, &out)) |reply| {
         self.adminReply(reply);
         return true;
     }
@@ -1973,7 +1971,7 @@ test "player console help matches the c2s_text allowlist" {
     const structural = [_][]const u8{ "<msg>", "(client-side)" };
 
     // 1. Every allowlisted verb (except the help triggers) appears in the help.
-    for (c2s_text.isPlayerConsoleCommandAllowlist()) |v| {
+    for (c2s_text.playerConsoleAllowlist()) |v| {
         var is_exempt = false;
         for (exempt) |e| {
             if (std.mem.eql(u8, v, e)) {

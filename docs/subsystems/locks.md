@@ -117,7 +117,7 @@ A channel lock is a lease, so the path refuses by default. The server clamps the
 
 Release exists so a departing player cannot pin a channel. Clearing server state alone would leave other clients showing the container as locked, so the disconnect path force-unlocks every channel the peer held and tells the remaining clients (`src/server/game/locks.zig:124`, `src/server/game/session_drop.zig:34`). That body uses `locking = false`, routing the client to its unlock-response branch (`src/wire/packages.zig:3431`).
 
-A denial is always a reply. The plain denial is a `NetPackageLockResponse` with `locking` echoed, `success` false and a reason string, and the handler supplies `locked`, `closed`, `null target` and `too many targets` for the four refusal classes (`src/server/c2s/misc.zig:1085`, `src/wire/packages.zig:3403`):
+A denial is always a reply. The plain denial is a `NetPackageLockResponse` with `locking` echoed, `success` false and a reason string, and the handler supplies `locked`, `closed`, `null target` and `too many targets` for the four refusal classes (`src/server/c2s/misc.zig:1085`, `src/wire/packages.zig:3402`):
 
 ```zig
 pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {

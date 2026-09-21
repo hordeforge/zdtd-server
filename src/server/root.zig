@@ -69,6 +69,7 @@ pub const game_replicate_health = @import("game/replicate_health.zig");
 pub const game_step = @import("game/step.zig");
 pub const game_harness = @import("game/harness.zig");
 pub const game_wasm_host = @import("game/wasm_host.zig");
+pub const game_plugin_compose = @import("game/plugin_compose.zig");
 pub const game_constants = @import("game/constants.zig");
 pub const game_lifecycle = @import("game/lifecycle.zig");
 pub const game_tests = @import("game/tests.zig");
@@ -149,6 +150,7 @@ test {
     _ = game_step;
     _ = game_harness;
     _ = game_wasm_host;
+    _ = game_plugin_compose;
     _ = game_constants;
     _ = game_lifecycle;
     _ = game_tests;

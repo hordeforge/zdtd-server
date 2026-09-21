@@ -44,6 +44,8 @@ case "$BACKUP_ROOT" in
     echo "zdtd: backup_root must not be inside world_dir ($WORLD_DIR)" >&2
     exit 2
     ;;
+  *)
+    ;;
 esac
 
 BASE=$(basename -- "$WORLD_DIR")
@@ -78,7 +80,13 @@ echo "zdtd: backup $DEST ($file_count files)"
 # Skip leftover `*.partial.*` staging dirs so an interrupted copy cannot
 # inflate the count and rotate a finished backup out.
 mapfile -t OLD < <(
-  ls -1d -- "$BACKUP_ROOT/${BASE}-"* 2>/dev/null | grep -v '\.partial\.' | sort -r || true
+  shopt -s nullglob
+  for path in "$BACKUP_ROOT/${BASE}-"*; do
+    case "$path" in
+      *.partial.*) continue ;;
+      *) printf '%s\n' "$path" ;;
+    esac
+  done | sort -r
 )
 if ((${#OLD[@]} > KEEP)); then
   for ((i = KEEP; i < ${#OLD[@]}; i++)); do

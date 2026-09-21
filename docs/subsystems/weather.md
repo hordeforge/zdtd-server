@@ -61,7 +61,7 @@ pub const Manager = struct {
     weather_n: u8 = 0,
 ```
 
-The entry struct the server fills (`src/wire/packages.zig:4083`):
+The entry struct the server fills (`src/wire/packages.zig:4082`):
 
 ```zig
 pub const WeatherBiome = struct {

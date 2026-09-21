@@ -21,6 +21,7 @@ const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
 const plugin_mod = @import("../../plugin/root.zig");
+const plugin_compose = @import("plugin_compose.zig");
 
 /// Cap datagram polls per tick: one chatty peer must not monopolize the
 /// tick (the loop breaks on `.none` anyway; this bounds a flood).
@@ -406,8 +407,7 @@ pub fn step(self: *Game) !void {
         }
         if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
         if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
-        self.plugins.onTick();
-        self.wasm_plugins.onTick();
+        plugin_compose.onTick(self);
         // Pending commands are withdrawn immediately before drainCommands
         // (World.pre_drain_fn). This pass despawns applied spawns the same
         // tick a module disables during onTick, rather than waiting for the
@@ -428,8 +428,7 @@ pub fn step(self: *Game) !void {
             const peer: usize = @intCast(peer_i);
             if (peer >= self.clients.len) continue;
             const d = self.sim.catalog.byId(cq.def_id) orelse continue;
-            const sv = self.plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
-            const v = if (sv != 0) sv else self.wasm_plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
+            const v = plugin_compose.questComplete(self, self.sim.network_id[cq.slot].id, cq.def_id);
             if (v < 0) continue;
             const pct: u32 = if (v > 0) @intCast(v) else 100;
             // reward_coin through the same verdict (deny withholds, >0
