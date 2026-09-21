@@ -9,6 +9,10 @@ const frame = @import("frame.zig");
 const stock_ids = @import("stock_ids.zig");
 const idOf = stock_ids.idOf;
 const default_mappings = stock_ids.default_mappings;
+const stock_map = @import("stock_map.zig");
+const buildChunkBody = stock_map.buildChunkBody;
+const chunk_body_size: usize = stock_map.chunk_body_size;
+const chunk_stock_envelope_overhead: usize = stock_map.chunk_stock_envelope_overhead;
 
 /// Stock `NetPackage.get_Channel` override set: bulk world data rides envelope
 /// channel 1 so it does not sit in the same queue as control traffic.
@@ -75,4 +79,25 @@ test "only the five stock get_Channel overrides ride channel 1" {
         if (overridden) continue;
         try std.testing.expectEqual(@as(u8, 0), channelFor(n));
     }
+}
+
+test "NetPackageChunk resolves to an id and frames at that id" {
+    // The id itself is not a contract: ids are negotiated through
+    // NetPackagePackageIds, so the client uses whatever index this table
+    // advertises. What must hold is that the name resolves and that `framed`
+    // stamps the same id `idOf` returns - a mismatch there would send terrain
+    // under a header the client resolves to some other package.
+    const chunk_id = idOf("NetPackageChunk") orelse return error.TestUnexpectedResult;
+    var heights: [256]u8 = .{70} ** 256;
+    var body_buf: [512]u8 = undefined;
+    const body = try buildChunkBody(&body_buf, -18, 28, &heights);
+    try std.testing.expectEqual(@as(usize, chunk_stock_envelope_overhead + chunk_body_size), body.len);
+    var frame_buf: [512]u8 = undefined;
+    const fr = try framed(&frame_buf, "NetPackageChunk", body);
+    // framePackage: channel 1 | payloadSize i32 | compressed 1 | encrypted 1 |
+    // count u16 | contentLen i32, then the package id.
+    const pkg_id_off: usize = 1 + 4 + 1 + 1 + 2 + 4;
+    try std.testing.expectEqual(chunk_id, std.mem.readInt(u16, fr[pkg_id_off..][0..2], .little));
+    // LiteNet channeled total must fit pending_bytes (1200).
+    try std.testing.expect(fr.len + 4 < 1200);
 }
