@@ -171,7 +171,7 @@ pub const TrackedDeltas = struct {
     stamina_ot: f32 = 0,
 ```
 
-Rows outside that surface are counted but not simulated, which the file states as recorded rather than guessed (`src/assets/buffs.zig:990`). Every delta is clamped to a named ceiling, 1e6 for finite values, with NaN folding to zero, so a pathological modded curve cannot reach the tick's integer casts (`src/assets/buffs.zig:1059`). The fold over an entity's active buffs is recomputation, not incremental state, so removing a buff drops its contribution exactly (`src/assets/buffs.zig:1358`):
+Rows outside that surface are counted but not simulated, which the file states as recorded rather than guessed (`src/assets/buffs.zig:990`). Every delta is clamped to a named ceiling, 1e6 for finite values, with NaN folding to zero, so a pathological modded curve cannot reach the tick's integer casts (`src/assets/buffs.zig:1059`). The fold over an entity's active buffs is recomputation, not incremental state, so removing a buff drops its contribution exactly (`src/assets/buffs.zig:1107`):
 
 ```zig
 pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
@@ -186,7 +186,7 @@ pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requir
 }
 ```
 
-Perk and attribute levels take the same route: `trackedDeltasAtLevel` folds a progression value's passive rows at the purchased level, curve segment `i` applying at level `i + 1`, gated by the row requirements, and `perkTotals` sums that over the player's skill ledger (`src/assets/progression.zig:235`, `:265`). The consumers add buff, perk and item contributions into one delta before applying it: a stamina regeneration pass computes `effectTotals` for the active buffs plus `perkTotals` for the ledger plus the held and equipped item rows (`src/server/game/tick.zig:851`). Named multiplicative passives leave the additive surface and use a separate chained fold, which is how `BuffResistance` is read from the active set (`src/assets/buffs.zig:1374`, `src/server/game/tick.zig:330`).
+Perk and attribute levels take the same route: `trackedDeltasAtLevel` folds a progression value's passive rows at the purchased level, curve segment `i` applying at level `i + 1`, gated by the row requirements, and `perkTotals` sums that over the player's skill ledger (`src/assets/progression.zig:235`, `:265`). The consumers add buff, perk and item contributions into one delta before applying it: a stamina regeneration pass computes `effectTotals` for the active buffs plus `perkTotals` for the ledger plus the held and equipped item rows (`src/server/game/tick.zig:851`). Named multiplicative passives leave the additive surface and use a separate chained fold, which is how `BuffResistance` is read from the active set (`src/assets/buffs.zig:1123`, `src/server/game/tick.zig:330`).
 
 What is incomplete is the triggered-effects virtual machine, and `docs/GAP_ANALYSIS.md` scores the perk and attribute passive-effects row as the one PARTIAL entry in Player progression, with the requirement vocabulary and the foreign-target kinds as the named shortfall (`docs/GAP_ANALYSIS.md:3689`). In this repository the bounded action set is evaluated for the tracked stats; every other action rides item, combat, weather or Twitch triggers and has no server-side consumer, which the same row records. `BuffDef.triggered` keeps the parsed rows, and the buff lifecycle consumes only the actions it implements (`src/assets/buffs.zig:215`).
 
