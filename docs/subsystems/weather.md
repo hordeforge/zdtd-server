@@ -61,7 +61,7 @@ pub const Manager = struct {
     weather_n: u8 = 0,
 ```
 
-The entry struct the server fills (`src/wire/packages.zig:848`):
+The entry struct the server fills (`src/wire/packages.zig:750`):
 
 ```zig
 pub const WeatherBiome = struct {
@@ -77,7 +77,7 @@ pub const WeatherBiome = struct {
 };
 ```
 
-`group_count` never reaches the wire; it only bounds the index the client will use unchecked, so an out-of-range `group_index` is emitted as 0 (`src/wire/packages.zig:868`):
+`group_count` never reaches the wire; it only bounds the index the client will use unchecked, so an out-of-range `group_index` is emitted as 0 (`src/wire/packages.zig:770`):
 
 ```zig
 pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
@@ -94,7 +94,7 @@ pub fn buildWeatherBody(buf: []u8, biomes: []const WeatherBiome) ![]u8 {
 
 One entry is 23 bytes, `biomeId u8 + groupIndex u8 + remainingSeconds u8 + 5 x f32`, and the sender checks the produced length against `weather_count * weather_entry_bytes` and prints a diagnostic on mismatch instead of sending something else (`src/server/game/weather.zig:21`, `src/server/game/weather.zig:82`). With no biomes.xml loaded at all the builder emits five mild default entries on the raw 0..100 XML scale so an unmodded client still reads a well-formed body (`src/server/game/weather.zig:24`, `src/server/game/weather.zig:52`). When the table has weather biomes the manager has no state for, the count is kept and the extra entries copy the last real state with the ids named from `weather_ids` rather than guessed (`src/server/game/weather.zig:63`).
 
-Sending happens on three paths. `broadcastWeather` refuses to build anything when no client has entered, then broadcasts one body (`src/server/game/weather.zig:12`, `src/server/game/weather.zig:90`). The tick calls the state machine, then that broadcast, inside the same `tick_n % world_time_send_ticks == 0` branch that sends `NetPackageWorldTime`, and skips the broadcast while load shedding is armed (`src/server/game/step.zig:383`, `src/server/game/step.zig:386`, `src/server/game/step.zig:391`). The default cadence is 20 ticks, one second at 20 TPS (`src/server/game/types.zig:87`). Finally, `sendWeather` goes to one peer at the end of the enter/respawn bundle, but deliberately not on first join, because the client's `InitPackages` may still be null and an early `NetPackageWeather` underruns into a kick; a first-join client picks weather up on the next cadence broadcast (`src/server/game.zig:3039`, `src/server/game.zig:4098`). The wire test pins the entry layout by byte offset and the scenario tests read the produced body back (`src/wire/packages.zig:868`, `src/server/scenarios.zig:5217`); both show self-consistency against the server's own assumed shape, not stock-client acceptance, and no stock round trip is claimed here.
+Sending happens on three paths. `broadcastWeather` refuses to build anything when no client has entered, then broadcasts one body (`src/server/game/weather.zig:12`, `src/server/game/weather.zig:90`). The tick calls the state machine, then that broadcast, inside the same `tick_n % world_time_send_ticks == 0` branch that sends `NetPackageWorldTime`, and skips the broadcast while load shedding is armed (`src/server/game/step.zig:383`, `src/server/game/step.zig:386`, `src/server/game/step.zig:391`). The default cadence is 20 ticks, one second at 20 TPS (`src/server/game/types.zig:87`). Finally, `sendWeather` goes to one peer at the end of the enter/respawn bundle, but deliberately not on first join, because the client's `InitPackages` may still be null and an early `NetPackageWeather` underruns into a kick; a first-join client picks weather up on the next cadence broadcast (`src/server/game.zig:3039`, `src/server/game.zig:4098`). The wire test pins the entry layout by byte offset and the scenario tests read the produced body back (`src/wire/packages.zig:770`, `src/server/scenarios.zig:5217`); both show self-consistency against the server's own assumed shape, not stock-client acceptance, and no stock round trip is claimed here.
 
 ## Sky and light parameters
 

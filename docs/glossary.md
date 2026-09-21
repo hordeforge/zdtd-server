@@ -52,7 +52,7 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
 - **chunk body**: The body of `NetPackageChunk`: `overwrite=false | dataLen |
   stock Chunk.write payload` (`src/wire/stock_chunk.zig:852`). The
   `cx | cz | ydim | 256 heights` shape is a test helper
-  (`src/wire/packages.zig:1768`).
+  (`src/wire/stock_map.zig:79`).
 - **TTS**: A prefab's `.tts` block paint file: block values, density, damage,
   texture and water per flat index (`src/world/tts.zig:1`).
 - **DTM**: The baked map height plane (`dtm.raw`, `dtm_processed.raw`) the flat
