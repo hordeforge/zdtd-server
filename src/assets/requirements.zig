@@ -242,6 +242,16 @@ pub const Kind = enum(u8) {
     /// `HitLocation` IL=27: `(bodyParts & params.DamageResponse.HitBodyPart) != 0`,
     /// invert-aware. Null HitBodyPart refuses (no damage fold in scope).
     hit_location,
+    /// `PlayerItemCount` IL=67: `Inventory.GetItemCount + Bag.GetItemCount`
+    /// for `item_name`, compared with the row op/value. `ctx.item_count`
+    /// carries the caller-supplied count (the tick fills it from the live
+    /// inventory); null refuses (no inventory in scope).
+    player_item_count,
+    /// `HasTrackedEntity` IL=93: `target is EntityPlayerLocal` plus a tagged
+    /// entity inside the tracker's bounds. Dedicated server never hosts
+    /// EntityPlayerLocal, so always false when Ctx is filled (IL returns
+    /// false when target is not local). Null Ctx refuses.
+    has_tracked_entity,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -310,6 +320,14 @@ pub const Ctx = struct {
     /// Always false on dedi (no EntityPlayerLocal / shelterPercent).
     /// Null = no identity fold (refuse).
     is_sheltered: ?bool = null,
+    /// Always false on dedi (no EntityPlayerLocal to track from).
+    /// Null = no identity fold (refuse).
+    has_tracked_entity: ?bool = null,
+    /// Inventory + bag count of an item name for `PlayerItemCount`
+    /// (`Inventory.GetItemCount + Bag.GetItemCount`, IL=67). Null = no
+    /// inventory fold in scope (refuse).
+    item_count_ctx: ?*const anyopaque = null,
+    item_count: ?*const fn (ctx: *const anyopaque, item_name: []const u8) u32 = null,
     /// Always false on dedi (no Unity EModelSDCS). Null = no identity fold (refuse).
     is_sdcs: ?bool = null,
     /// Always false on dedi (no local player / IsFriendOfLocalPlayer).
@@ -599,6 +617,8 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "IsStatAtMax")) return .is_stat_at_max;
     if (std.mem.eql(u8, name, "InSafeZone")) return .in_safe_zone;
     if (std.mem.eql(u8, name, "HitLocation")) return .hit_location;
+    if (std.mem.eql(u8, name, "PlayerItemCount")) return .player_item_count;
+    if (std.mem.eql(u8, name, "HasTrackedEntity")) return .has_tracked_entity;
     return .unsupported;
 }
 
@@ -657,6 +677,7 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) std.me
         xml.attr(hay, tag_start, "stat") orelse
         xml.attr(hay, tag_start, "skill_name") orelse
         xml.attr(hay, tag_start, "key") orelse
+        xml.attr(hay, tag_start, "item_name") orelse
         xml.attr(hay, tag_start, "mod_name") orelse "");
     r.list = try arena.dupe(u8, xml.attr(hay, tag_start, "buff") orelse
         xml.attr(hay, tag_start, "tags") orelse "");
@@ -1036,6 +1057,21 @@ fn evalIsFpv(r: Requirement, ctx: Ctx) Verdict {
 fn evalIsSheltered(r: Requirement, ctx: Ctx) Verdict {
     const sheltered = ctx.is_sheltered orelse return .unsupported;
     return verdict(sheltered, r.negated);
+}
+
+/// `HasTrackedEntity::IsValid` IL=93: target must be EntityPlayerLocal and a
+/// tagged entity must sit in the tracker's bounds. No local player on dedi.
+fn evalHasTrackedEntity(r: Requirement, ctx: Ctx) Verdict {
+    const tracked = ctx.has_tracked_entity orelse return .unsupported;
+    return verdict(tracked, r.negated);
+}
+
+/// `PlayerItemCount::IsValid` IL=67: inventory + bag count of `item_name`
+/// vs the row op/value. Null lookup refuses (no inventory in scope).
+fn evalPlayerItemCount(r: Requirement, ctx: Ctx) Verdict {
+    const lookup = ctx.item_count orelse return .unsupported;
+    const holder = ctx.item_count_ctx orelse return .unsupported;
+    return verdict(compare(@floatFromInt(lookup(holder, r.arg)), r.op, operand(ctx, r)), r.negated);
 }
 
 /// `IsSDCS::IsValid` IL=27: emodel is EModelSDCS; no Unity model on dedi → false.
@@ -1455,6 +1491,8 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .perks_unlocked => return evalPerksUnlocked(r, ctx),
         .is_stat_at_max => return evalIsStatAtMax(r, ctx),
         .in_safe_zone => return evalInSafeZone(r),
+        .player_item_count => return evalPlayerItemCount(r, ctx),
+        .has_tracked_entity => return evalHasTrackedEntity(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -2840,6 +2878,33 @@ test "InSafeZone reads false without a Twitch integration" {
     try std.testing.expectEqual(Verdict.fail, evaluate(&.{safe}, .{}, &counts));
     try std.testing.expectEqual(Verdict.pass, evaluate(&.{not_safe}, .{}, &counts));
     try std.testing.expectEqual(@as(u32, 2), counts.resolved);
+}
+
+test "PlayerItemCount compares the inventory count and HasTrackedEntity is dedi-false" {
+    // `PlayerItemCount::IsValid` IL=67: casinoCoin GTE 5000 gates the
+    // Great Heist fall-damage row; `HasTrackedEntity::IsValid` IL=93 needs
+    // EntityPlayerLocal, which a dedi never hosts.
+    const Counter = struct {
+        n: u32,
+        fn count(holder: *const anyopaque, name: []const u8) u32 {
+            const self: *@This() = @ptrCast(@alignCast(@constCast(holder)));
+            _ = name;
+            return self.n;
+        }
+    };
+    var counter = Counter{ .n = 5000 };
+    const rich = Requirement{ .kind = .player_item_count, .op = .ge, .value = 5000, .arg = "casinoCoin" };
+    const poor_ctx = Ctx{ .item_count_ctx = &counter, .item_count = Counter.count };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{rich}, poor_ctx, &counts));
+    counter.n = 4999;
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{rich}, poor_ctx, &counts));
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{rich}, .{}, &counts));
+    try std.testing.expectEqual(Kind.player_item_count, kindOf("PlayerItemCount"));
+    const tracked = Requirement{ .kind = .has_tracked_entity, .list = "perkAT01" };
+    try std.testing.expect(all(&.{tracked}, .{ .has_tracked_entity = false }));
+    try std.testing.expectEqual(Kind.has_tracked_entity, kindOf("HasTrackedEntity"));
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{tracked}, .{}, &counts));
 }
 
 test "EntityTagCompare target=other reads the other tags" {

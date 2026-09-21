@@ -40,6 +40,21 @@ const BuffNameLookup = struct {
     }
 };
 
+/// Requirement-gate bridge: `PlayerItemCount` counts `item_name` over the
+/// live inventory (`Inventory.GetItemCount + Bag.GetItemCount`, IL=67).
+/// An unknown item name counts 0, like stock's null-ItemValue path.
+const ItemCountLookup = struct {
+    game: *Game,
+    ps: ecs.Slot,
+
+    fn count(ctx: *const anyopaque, item_name: []const u8) u32 {
+        const self: *const ItemCountLookup = @ptrCast(@alignCast(ctx));
+        if (!self.game.sim.mask[self.ps].inventory) return 0;
+        const def = self.game.items.byName(item_name) orelse return 0;
+        return self.game.sim.inventory[self.ps].countItem(def.id);
+    }
+};
+
 /// The tag `Equipment::GetTotalPhysicalArmorRating` (IL=887) adds to its
 /// passive-41 query; the attacking item's own tags ride the per-hit path.
 const armor_query_tags = "coredamageresist";
@@ -63,11 +78,13 @@ pub const PlayerCtx = struct {
     armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined,
     worn_tags_buf: [ecs.components.inv_equip_count][]const u8 = undefined,
     sink_impl: BuffSink = undefined,
+    item_count_lookup: ItemCountLookup = .{ .game = undefined, .ps = 0 },
 
     pub fn init(self: *PlayerCtx, game: *Game, c: *Client, ps: ecs.Slot) void {
         self.buff_lookup = .{ .table = &game.buffs };
         self.buff_names = .{ .ctx = &self.buff_lookup, .resolve = BuffNameLookup.resolve };
         self.sink_impl = .{ .game = game, .entity_id = c.entity_id, .ps = ps };
+        self.item_count_lookup = .{ .game = game, .ps = ps };
     }
 
     pub fn build(
@@ -97,6 +114,11 @@ pub const PlayerCtx = struct {
             .is_fpv = false,
             // Dedicated server: never EntityPlayerLocal.shelterPercent (RE IsSheltered IL=24).
             .is_sheltered = false,
+            // Dedicated server: never EntityPlayerLocal tracking bounds (RE HasTrackedEntity IL=93).
+            .has_tracked_entity = false,
+            // Inventory + bag count by item name (RE PlayerItemCount IL=67).
+            .item_count_ctx = &self.item_count_lookup,
+            .item_count = ItemCountLookup.count,
             // Dedicated server: never Unity EModelSDCS (RE IsSDCS IL=27).
             .is_sdcs = false,
             // Dedicated server: never IsFriendOfLocalPlayer (RE IsAlly IL=36).
