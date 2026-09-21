@@ -415,3 +415,23 @@ pub fn resetPoiBlocks(self: *Game, wx: i32, wz: i32) void {
         world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, ph_arg, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
+
+/// True when quest id is likely present in stock client QuestClass.
+pub fn isStockClientQuestName(self: *Game, name: []const u8) bool {
+    if (name.len == 0) return false;
+    // A stock quests.xml catalog is client-known by construction: both the
+    // server and the stock client load the same Data/Config/quests.xml, so
+    // every def in it has a client QuestClass entry. The prefix gate below
+    // only proxies the client catalog for builtin/offline defs (audit B28).
+    if (self.sim.catalog.source == .stock_xml) return true;
+    if (std.mem.startsWith(u8, name, "quest_")) return true;
+    if (std.mem.startsWith(u8, name, "tier")) return true;
+    // Other stock quest-name families the client's quests.xml knows
+    // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*,
+    // treasure_* - stock ships 7 treasure maps).
+    if (std.mem.startsWith(u8, name, "intro_")) return true;
+    if (std.mem.startsWith(u8, name, "test_")) return true;
+    if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
+    if (std.mem.startsWith(u8, name, "treasure_")) return true;
+    return false;
+}

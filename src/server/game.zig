@@ -2535,22 +2535,7 @@ pub const Game = struct {
 
     /// True when quest id is likely present in stock client QuestClass.
     pub fn isStockClientQuestName(self: *Game, name: []const u8) bool {
-        if (name.len == 0) return false;
-        // A stock quests.xml catalog is client-known by construction: both the
-        // server and the stock client load the same Data/Config/quests.xml, so
-        // every def in it has a client QuestClass entry. The prefix gate below
-        // only proxies the client catalog for builtin/offline defs (audit B28).
-        if (self.sim.catalog.source == .stock_xml) return true;
-        if (std.mem.startsWith(u8, name, "quest_")) return true;
-        if (std.mem.startsWith(u8, name, "tier")) return true;
-        // Other stock quest-name families the client's quests.xml knows
-        // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*,
-        // treasure_* - stock ships 7 treasure maps).
-        if (std.mem.startsWith(u8, name, "intro_")) return true;
-        if (std.mem.startsWith(u8, name, "test_")) return true;
-        if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
-        if (std.mem.startsWith(u8, name, "treasure_")) return true;
-        return false;
+        return game_quest.isStockClientQuestName(self, name);
     }
 
     pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
