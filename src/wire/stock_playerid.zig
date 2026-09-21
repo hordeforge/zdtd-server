@@ -616,3 +616,25 @@ test "player id PDF bag is CarryCapacity empties" {
     }
     try std.testing.expectEqual(@as(usize, 4), nonempty);
 }
+
+test "ConfirmSpawnEntity golden layout: i64 id + 16-byte request key (V3.2.0)" {
+    const key = [16]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    var buf: [32]u8 = undefined;
+    const body = try buildConfirmSpawnEntityBody(&buf, -5, &key);
+    try std.testing.expectEqual(@as(usize, 24), body.len);
+    try std.testing.expectEqual(@as(i64, -5), std.mem.readInt(i64, body[0..8], .little));
+    try std.testing.expectEqualSlices(u8, &key, body[8..24]);
+}
+
+/// NetPackageConfirmSpawnEntity body (V3.2.0, changelog-3.2.0 §3.3):
+/// createdEntityId:i64 (an Int32 field widened on write) + requestKey
+/// Guid.ToByteArray bytes[16]. Sent only for client-requested entity spawns
+/// (EntityCreationData.requestedBy/requestKey). zdtd drops generic spawn
+/// requests (c2s/misc.zig RequestToSpawnEntity), so no live flow emits this;
+/// the builder pins the shape for that path and for goldens.
+pub fn buildConfirmSpawnEntityBody(buf: []u8, created_entity_id: i64, key: *const [16]u8) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI64(created_entity_id);
+    try w.writeBytes(key);
+    return w.written();
+}
