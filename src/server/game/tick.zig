@@ -597,12 +597,30 @@ pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
 /// Uses the victim's own cvar store; granted buffs apply silently (mob
 /// buffs have no S2C buff-list sync).
 pub fn fireMobBuffStart(self: *Game, vs: ecs.Slot, def_id: u16) void {
+    self.fireMobBuffEvent(vs, def_id, .start);
+}
+
+/// Fire a mob buff's rows for any event (remove/finish on expiry) with the
+/// victim's own store. Granted buffs apply silently through addCatalogBuff
+/// (which itself fires their start rows); removals flag for the buff-tick
+/// reap.
+pub fn fireMobBuffEvent(self: *Game, vs: ecs.Slot, def_id: u16, event: assets_buffs.Trigger) void {
     var req_counts: requirements.Counts = .{};
     var ctx = requirements.Ctx{ .alive = self.sim.alive[vs] };
     ctx.cvars = self.sim.cvarsMut(vs);
-    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .start, ctx, &req_counts);
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, event, ctx, &req_counts);
     if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
     const vid = if (self.sim.mask[vs].network_id) self.sim.network_id[vs].id else -1;
+    const set = self.sim.buffsMut(vs);
+    for (res.remove_buffs[0..res.remove_n]) |names| {
+        var it = std.mem.splitScalar(u8, names, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            const rid = self.buffs.indexOfName(name) orelse continue;
+            _ = ecs.buff.remove(set, rid);
+        }
+    }
     for (res.add_buffs[0..res.add_n]) |names| {
         var it = std.mem.splitScalar(u8, names, ',');
         while (it.next()) |seg| {
@@ -614,8 +632,6 @@ pub fn fireMobBuffStart(self: *Game, vs: ecs.Slot, def_id: u16) void {
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
-
-/// Fire an entity class's own rows (radiated regen on damaged, spawn heal)
 /// for a non-player victim. The class resolves by the slot's class hash;
 /// zombie cvars attach lazily like buffs. Buff adds relay to trackers.
 pub fn fireClassRows(self: *Game, vs: ecs.Slot, event: assets_buffs.Trigger) void {

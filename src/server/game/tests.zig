@@ -9371,3 +9371,32 @@ test "a burning zombie seeds its duration and self-extinguishes" {
     while (ti < 30 and g.sim.buffs[zs].find(burning) != null) : (ti += 1) try g.step();
     try std.testing.expect(g.sim.buffs[zs].find(burning) == null);
 }
+
+test "a stunned zombie gains its cooldown on expiry" {
+    // buffInjuryStunned00's finish row adds buffInjuryStunned01Cooldown.
+    // Mob expiry runs Remove-before-Finish with the victim's own store,
+    // so the cooldown chain fires like the player path.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    _ = g.addCatalogBuff(zid, zs, "buffInjuryStunned00", zid);
+    const cd = g.buffs.indexOfName("buffInjuryStunned01Cooldown") orelse return error.SkipZigTest;
+    var ti: usize = 0;
+    while (ti < 120 and g.sim.buffs[zs].find(cd) == null) : (ti += 1) try g.step();
+    try std.testing.expect(g.sim.buffs[zs].find(cd) != null);
+}

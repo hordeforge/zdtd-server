@@ -163,6 +163,11 @@ pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
             if (self.sim.mask[ps].player) {
                 self.fireBuffEvent(ps, ex.def_id, .remove, null);
                 self.fireBuffFinish(ps, ex.def_id);
+            } else if (self.sim.kind[ps] == .zombie or self.sim.kind[ps] == .animal) {
+                // Mob expiry runs the same Remove-before-Finish order with
+                // the victim's own store (stun/knockdown cooldown chains).
+                self.fireMobBuffEvent(ps, ex.def_id, .remove);
+                self.fireMobBuffEvent(ps, ex.def_id, .finish);
             }
         }
     }

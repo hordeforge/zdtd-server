@@ -1909,6 +1909,10 @@ pub const Game = struct {
         return game_tick.fireBuffStack(self, ps, def_id);
     }
 
+    pub fn fireMobBuffEvent(self: *Game, vs: ecs.Slot, def_id: u16, event: assets_buffs.Trigger) void {
+        return game_tick.fireMobBuffEvent(self, vs, def_id, event);
+    }
+
     pub fn fireLeaveGame(self: *Game, ps: ecs.Slot) void {
         return game_tick.fireLeaveGame(self, ps);
     }
