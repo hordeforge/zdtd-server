@@ -1981,11 +1981,6 @@ fn consumeCombatNoise(w: *World) void {
     w.noise_n = 0;
 }
 
-pub fn systemDirector(w: *World, dt: f32) struct { spawned: u32, world_time: u64 } {
-    const r = w.director.tick(w, dt);
-    return .{ .spawned = r.spawned, .world_time = r.world_time };
-}
-
 pub const falling = @import("falling.zig");
 pub const systemFallingBlocks = falling.systemFallingBlocks;
 

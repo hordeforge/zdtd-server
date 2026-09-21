@@ -95,7 +95,7 @@ pub fn run(w: *World, dt: f32) TickResult {
     // the `director` toggle is applied inside it (spawning only), not here.
     // Wildlife (`[systems] animals`) is the SpawnManagerBiomes pass inside
     // Director.tick, independently gated from zombie spawning.
-    const dr = systems.systemDirector(w, dt);
+    const dr = w.director.tick(w, dt);
     if (on.stealth) systems.systemStealth(w);
     const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;
     if (on.ai) systems.systemDigUpdate(w);
