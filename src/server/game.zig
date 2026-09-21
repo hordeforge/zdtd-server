@@ -54,6 +54,7 @@ const game_rescue = @import("game/rescue.zig");
 const game_guard = @import("game/guard.zig");
 const game_session_drop = @import("game/session_drop.zig");
 const game_init_assets = @import("game/init_assets.zig");
+const game_init_world = @import("game/init_world.zig");
 const persist = @import("persist.zig");
 const admin_console = @import("admin_console.zig");
 const game_types = @import("game/types.zig");
@@ -2883,51 +2884,7 @@ pub const Game = struct {
     /// per entity so a class not preloaded into the fixed class_table still
     /// spawns as itself (HP/speeds/damage/hash/loot/is_enemy).
     pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.EntityClass {
-        return .{
-            .name = d.name,
-            .max_hp = d.max_hp,
-            .kind = d.kind,
-            .hash = d.hash,
-            .loot_list = d.loot_list,
-            .drop_prob = d.loot_drop_prob,
-            .chase_speed = d.chase_speed,
-            .chase_speed_day = d.chase_speed_day,
-            .wander_speed = d.wander_speed,
-            .wander_speed_night = d.wander_speed_night,
-            .move_speed_rand_min = d.move_speed_rand_min,
-            .move_speed_rand_max = d.move_speed_rand_max,
-            .attack_damage = self.handItemDamage(d.hand_item),
-            .time_stay = d.time_stay,
-            .sight_range = d.sight_range,
-            .hurt_target_classes = d.hurt_target_classes,
-            .block_if_alert_only = d.block_if_alert_only,
-            .target_player_see = d.target_player_see,
-            .target_player_hear = d.target_player_hear,
-            .sight_light_min = d.sight_light_min,
-            .sight_light_max = d.sight_light_max,
-            .sleeper_wake_near_min = d.sleeper_wake_near_min,
-            .sleeper_wake_near_max = d.sleeper_wake_near_max,
-            .sleeper_wake_far_min = d.sleeper_wake_far_min,
-            .sleeper_wake_far_max = d.sleeper_wake_far_max,
-            .is_enemy = d.is_enemy,
-            .ai_attack = d.ai_attack,
-            .ai_tasks = d.ai_tasks,
-            .xp_gain = d.xp_gain,
-            .explode_threshold = d.explode_threshold,
-            .explode_delay_s = d.explode_delay_s,
-            .explosion_radius = d.explosion.radius_blocks,
-            .explosion_radius_e = d.explosion.radius_entities,
-            .explosion_block_dmg = d.explosion.block_damage,
-            .explosion_entity_dmg = d.explosion.entity_damage,
-            .explosion_bonus_cat = d.explosion.bonus_cat,
-            .explosion_bonus_mult = d.explosion.bonus_mult,
-            .explosion_bonus_n = d.explosion.bonus_n,
-            .dismember_head = d.dismember_head,
-            .dismember_arms = d.dismember_arms,
-            .dismember_legs = d.dismember_legs,
-            .leg_cripple_scale = d.leg_cripple_scale,
-            .leg_crawler_threshold = d.leg_crawler_threshold,
-        };
+        return game_init_world.entityClassOf(self, d);
     }
 
     pub fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {

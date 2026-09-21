@@ -30,7 +30,7 @@ The `Game` fields the loop itself owns (`src/server/game.zig:319`):
     running: bool = true,
 ```
 
-`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3725`, `src/server/game.zig:3752`).
+`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game.zig:3725`, `src/server/game.zig:3662`).
 
 Cadence gates are `InitOptions`/`Game` fields sampled as tick counts, not seconds. The compile-time defaults (`src/server/game/types.zig:87`):
 
@@ -83,7 +83,7 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game.zig:3675`):
+The only real-time pacer is `Game.run` (`src/server/game.zig:3632`):
 
 ```zig
     pub fn run(self: *Game) !void {
@@ -122,7 +122,7 @@ The only real-time pacer is `Game.run` (`src/server/game.zig:3675`):
 
 The policy this encodes: sleep to the absolute deadline; on overrun count the tick and rate-limit the log to the first and every hundredth; then re-anchor. Because the re-anchor sets `next_t = now + tick_ns` when the deadline is already in the past, missed ticks are dropped rather than replayed - there is no catch-up burst, and a process that stalls for a second resumes at the current time instead of running twenty ticks back to back. One loop iteration counts at most one overrun regardless of how many tick periods it lost.
 
-The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game.zig:3738`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
+The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game.zig:3648`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
 
 Time comes from one leaf module so the loop can be made deterministic without touching callers. `clock.monoNs` reads `CLOCK_MONOTONIC` in production but returns the virtual counter when one is active (`src/util/clock.zig:48`), `sleepNs` advances that counter and returns immediately instead of sleeping (`src/util/clock.zig:97`), and `enableVirtual` switches the process over (`src/util/clock.zig:25`). The offline path enables the seeded virtual clock at init (`src/server/game/init_world.zig:109`) and the local `util/sim` layer advances it one tick per completed step (`src/server/game/step.zig:38`), so a `--ticks N` run is reproducible from its seed and does not depend on host speed. `wallNs`/`wallSeconds` exist for values that cross the process boundary, such as report timestamps and ban expiry, and also follow the virtual clock (`src/util/clock.zig:62`, `src/util/clock.zig:73`).
 

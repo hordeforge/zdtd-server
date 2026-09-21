@@ -74,7 +74,7 @@ pub fn seededOnPos(x: i32, y: i32, z: i32, seed: i32) GameRandom {
 }
 ```
 
-Callers pass a `*GameRandom` into asset-table rolls (`src/assets/items.zig:118`) and construct one per roll from an explicit seed (`src/server/game.zig:3764`); the blockplaceholder per-cell roll is the stock-fidelity path (`src/assets/blockplaceholders.zig:131`). The fidelity limit is worth stating plainly: the unit goldens are five draws per seed against Mono's `System.Random`, which proves the algorithm port (`src/util/game_random.zig:11`), not that every stock draw site in the server has been routed through it.
+Callers pass a `*GameRandom` into asset-table rolls (`src/assets/items.zig:118`) and construct one per roll from an explicit seed (`src/server/game.zig:3673`); the blockplaceholder per-cell roll is the stock-fidelity path (`src/assets/blockplaceholders.zig:131`). The fidelity limit is worth stating plainly: the unit goldens are five draws per seed against Mono's `System.Random`, which proves the algorithm port (`src/util/game_random.zig:11`), not that every stock draw site in the server has been routed through it.
 
 ## Filesystem and scratch arenas
 
