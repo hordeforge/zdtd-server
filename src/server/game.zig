@@ -2398,13 +2398,7 @@ pub const Game = struct {
     /// Reach + land-claim gate for a block edit requested by `c` (ADR 0004).
     /// Shared by every C2S path that mutates world blocks or plants entities.
     pub fn placeAllowed(self: *Game, c: *const Client, x: i32, y: i32, z: i32) bool {
-        const ps = self.sim.playerByPeer(c.slot) orelse return false;
-        const p = self.sim.transform[ps];
-        if (!self.withinEditReach(p.x, p.y, p.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
-        if (self.claimCovering(x, z)) |claim| {
-            if (claim.owner_entity != self.sim.network_id[ps].id) return false;
-        }
-        return true;
+        return game_guard.placeAllowed(self, c, x, y, z);
     }
 
     /// World Y for spawning mobs next to a player (surface band, not void/float).
