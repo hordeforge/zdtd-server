@@ -2661,17 +2661,7 @@ pub const Game = struct {
     /// here so the spawn and stats bodies cannot disagree about what a player
     /// is holding.
     pub fn playerHoldingStock(self: *Game, slot: ecs.Slot) ?packages.stock_inv.StockSlot {
-        if (!self.sim.mask[slot].inventory) return null;
-        const inv = &self.sim.inventory[slot];
-        if (inv.holding >= ecs.components.inv_toolbelt) return null;
-        const s = inv.slots[inv.holding];
-        if (s.count == 0 or s.item_id == 0) return null;
-        return .{
-            .type_id = resolveItemType(self, s.item_id),
-            .count = s.count,
-            .quality = s.quality,
-            .meta = s.meta,
-        };
+        return game_player.playerHoldingStock(self, slot);
     }
 
     /// Per-player blood-moon-music eligibility (stock EntityPlayer.bloodMoonParty):
@@ -2680,21 +2670,7 @@ pub const Game = struct {
     /// old global bool made every player on a multi-party server hear horde
     /// music when any party was horded.
     pub fn playerBloodMoonMusic(self: *const Game, c: *const Client) bool {
-        if (!self.sim.director.bloodmoon_active) return false;
-        const ps = self.sim.playerByPeer(c.slot) orelse return false;
-        if (!self.sim.mask[ps].transform) return false;
-        const x = self.sim.transform[ps].x;
-        const z = self.sim.transform[ps].z;
-        const j2 = self.sim.rules.bloodmoon.party_join_dist;
-        const j2sq = j2 * j2;
-        const d = &self.sim.director;
-        for (d.bm_parties[0..d.bm_party_n]) |*bm| {
-            if (bm.alive == 0) continue;
-            const dx = bm.focus_x - x;
-            const dz = bm.focus_z - z;
-            if (dx * dx + dz * dz <= j2sq) return true;
-        }
-        return false;
+        return game_player.playerBloodMoonMusic(self, c);
     }
 
     pub fn reverseItemType(ctx: ?*anyopaque, stock_type: i32) u16 {

@@ -1907,3 +1907,44 @@ pub fn spawnDeathBag(self: *Game, victim_slot: ecs.Slot) void {
         }
     }
 }
+
+/// The held toolbelt stack in stock wire form, or null when the player
+/// holds nothing. Every package carrying `holdingItemStack` reads it from
+/// here so the spawn and stats bodies cannot disagree about what a player
+/// is holding.
+pub fn playerHoldingStock(self: *Game, slot: ecs.Slot) ?packages.stock_inv.StockSlot {
+    if (!self.sim.mask[slot].inventory) return null;
+    const inv = &self.sim.inventory[slot];
+    if (inv.holding >= ecs.components.inv_toolbelt) return null;
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return null;
+    return .{
+        .type_id = self.items.stockTypeFor(s.item_id),
+        .count = s.count,
+        .quality = s.quality,
+        .meta = s.meta,
+    };
+}
+
+/// Per-player blood-moon-music eligibility (stock EntityPlayer.bloodMoonParty):
+/// true only while the horde is active AND the player's own blood-moon
+/// party (focus within party_join_dist) still has alive horde zombies. The
+/// old global bool made every player on a multi-party server hear horde
+/// music when any party was horded.
+pub fn playerBloodMoonMusic(self: *const Game, c: *const Client) bool {
+    if (!self.sim.director.bloodmoon_active) return false;
+    const ps = self.sim.playerByPeer(c.slot) orelse return false;
+    if (!self.sim.mask[ps].transform) return false;
+    const x = self.sim.transform[ps].x;
+    const z = self.sim.transform[ps].z;
+    const j2 = self.sim.rules.bloodmoon.party_join_dist;
+    const j2sq = j2 * j2;
+    const d = &self.sim.director;
+    for (d.bm_parties[0..d.bm_party_n]) |*bm| {
+        if (bm.alive == 0) continue;
+        const dx = bm.focus_x - x;
+        const dz = bm.focus_z - z;
+        if (dx * dx + dz * dz <= j2sq) return true;
+    }
+    return false;
+}
