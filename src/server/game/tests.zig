@@ -9271,3 +9271,37 @@ test "a burning zombie takes damage over time" {
     try g.step();
     try std.testing.expect(g.sim.health[zs].hp < 400);
 }
+
+test "a placed torch feeds the AI heat map" {
+    // TorchHeatMap-class blocks carry HeatMapStrength and burn constantly:
+    // placing one registers it, and the craft tick feeds its strength into
+    // the director's region activity. Breaking it unregisters.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const torch = g.blocks.byName("wallTorchLightPlayer") orelse return error.SkipZigTest;
+    try std.testing.expect(g.blocks.heatStrength(torch.id) > 0);
+    g.noteBlockAdded(256, 70, 256, torch.id);
+    try std.testing.expectEqual(@as(usize, 1), g.heat_block_n);
+    // The workstation/heat feed runs on the sleeper-tick cadence, not every
+    // tick.
+    var ti: usize = 0;
+    while (ti < 40 and g.sim.director.heat_n == 0) : (ti += 1) try g.step();
+    try std.testing.expect(g.sim.director.heat_n > 0);
+    try std.testing.expect(g.sim.director.heat[0].activity > 0);
+    g.noteBlockRemoved(256, 70, 256, torch.id);
+    try std.testing.expectEqual(@as(usize, 0), g.heat_block_n);
+}

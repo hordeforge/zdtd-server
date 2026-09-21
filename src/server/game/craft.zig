@@ -632,6 +632,11 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
             self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, self.sim.rules.director.heat_event_ticks);
         }
     }
+    // Placed heat blocks (torches/candles/barrels burn constantly, no fuel
+    // state): same feed, same duration.
+    for (self.heat_blocks[0..self.heat_block_n]) |h| {
+        self.sim.director.notifyActivity(@floatFromInt(h.x), @floatFromInt(h.z), h.strength, self.sim.rules.director.heat_event_ticks);
+    }
     try replicate_te.broadcastDirtyWorkstations(self);
 }
 

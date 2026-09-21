@@ -608,6 +608,11 @@ pub const Game = struct {
     /// `signs`, the signs.xml catalog.
     sign_texts: signs_mod.SignStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
+    /// Placed heat blocks (torches/candles/barrels with HeatMapStrength):
+    /// fed to the AI heat map every tick while placed. Workstations feed
+    /// through their own burn-state loop and never enter here.
+    heat_blocks: [game_types.max_heat_blocks]game_types.HeatBlock = [_]game_types.HeatBlock{.{}} ** game_types.max_heat_blocks,
+    heat_block_n: usize = 0,
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
     vending: vending_mod.VendingStore = .{},
@@ -2271,6 +2276,14 @@ pub const Game = struct {
 
     pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
         return game_world.noteBlockAdded(self, x, y, z, new_id);
+    }
+
+    pub fn trackHeatBlock(self: *Game, x: i32, y: i32, z: i32, id: u16) void {
+        return game_world.trackHeatBlock(self, x, y, z, id);
+    }
+
+    pub fn untrackHeatBlock(self: *Game, x: i32, y: i32, z: i32) void {
+        return game_world.untrackHeatBlock(self, x, y, z);
     }
 
     /// Drain Demolition explode requests (entity + block AoE). Runs after the
