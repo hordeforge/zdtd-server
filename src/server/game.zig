@@ -243,14 +243,6 @@ pub const playerDamageVerdictAmount = game_hooks.playerDamageVerdictAmount;
 pub const announceChat = game_hooks.announceChat;
 pub const tradePriceVerdict = game_hooks.tradePriceVerdict;
 
-fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
-    return game_stability.stabilityFacts(ctx, id);
-}
-
-fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
-    return game_stability.bloodMoonDayFor(clk);
-}
-
 /// Any comma-list tag of `needle` present in `hay` (stock FastTags
 /// Test_AnySet; the POI tags and the spawning.xml tags/notags lists).
 fn tagsAnySet(needle: []const u8, hay: []const u8) bool {
@@ -2817,7 +2809,7 @@ pub const Game = struct {
             // its stock integer rate, never derived back out of a float scale
             // (stock seeds both straight from GamePrefs; server-lifecycle.md:168).
             .day_night_length = @intCast(clk.day_night_length),
-            .blood_moon_day = bloodMoonDayFor(clk),
+            .blood_moon_day = game_stability.bloodMoonDayFor(clk),
             .block_damage_player = self.block_damage_player,
             .block_damage_ai = self.block_damage_ai,
             .block_damage_ai_bm = self.block_damage_ai_bm,
