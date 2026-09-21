@@ -1053,10 +1053,10 @@ pub fn savePlayers(self: *Game) !void {
 
 /// Remove all players.zsv records whose login name equals `name`.
 /// Returns how many records were dropped. FileNotFound → 0 (no-op).
-/// Does not log the name (operator reply only). Before rewriting, copies the
-/// prior file to `players.zsv.bak` in the same world dir so a fat-finger wipe
-/// can be undone by restoring that file over `players.zsv` (instance still
-/// present). Fails closed if the `.bak` write cannot complete.
+/// Does not log the name (operator reply only). Right-to-erasure: any
+/// leftover `players.zsv.bak` beside the primary is deleted so a wiped login
+/// does not linger in a side file. Operators who need undo keep their own
+/// world-dir backups before wiping.
 pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
     if (name.len == 0 or name.len > 32) return 0;
     var path_buf: [512]u8 = undefined;
@@ -1071,7 +1071,10 @@ pub fn wipePlayerRecordsByName(self: *Game, name: []const u8) !u32 {
     if (filtered.removed == 0) return 0;
     var bak_buf: [520]u8 = undefined;
     const bak = try std.fmt.bufPrint(&bak_buf, "{s}.bak", .{path});
-    try io_fs.writeFile(bak, data);
+    // Drop any prior bak that still held this login (or other leftover PII from
+    // an older wipe that wrote a full-file copy). Fail closed on the primary
+    // rewrite only; bak cleanup is best-effort.
+    io_fs.deleteFile(bak);
     try io_fs.writeFile(path, filtered.blob.?);
     return filtered.removed;
 }
@@ -2306,7 +2309,7 @@ test "player save upgrades offline v15 inventory slots" {
     try std.testing.expectEqualSlices(u8, saved, again);
 }
 
-test "wipePlayerRecordsByName writes players.zsv.bak before rewrite" {
+test "wipePlayerRecordsByName erases without leaving players.zsv.bak" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -2328,13 +2331,13 @@ test "wipePlayerRecordsByName writes players.zsv.bak before rewrite" {
     try data.append(std.testing.allocator, 0); // inv_n
     try data.append(std.testing.allocator, 0); // jn
     try io_fs.writeFile(path, data.items);
-    const removed = try wipePlayerRecordsByName(g, "a");
-    try std.testing.expectEqual(@as(u32, 1), removed);
+    // A stale bak from an older build must not keep the wiped login either.
     var bak_buf: [520]u8 = undefined;
     const bak = try std.fmt.bufPrint(&bak_buf, "{s}.bak", .{path});
-    const bak_blob = try io_fs.readFileAll(std.testing.allocator, bak);
-    defer std.testing.allocator.free(bak_blob);
-    try std.testing.expectEqualSlices(u8, data.items, bak_blob);
+    try io_fs.writeFile(bak, data.items);
+    const removed = try wipePlayerRecordsByName(g, "a");
+    try std.testing.expectEqual(@as(u32, 1), removed);
+    try std.testing.expectError(error.FileNotFound, io_fs.readFileAll(std.testing.allocator, bak));
     const after = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(after);
     try std.testing.expect(after.len >= 8);

@@ -295,7 +295,7 @@ Load modules with `[plugin] modules = "a.wasm, b.wasm"` in zdtd.toml.
 
 - Caps: max hooks per id, max commands per tick per plugin, max log rate  
 - Admin commands require admin TCP auth as today  
-- Evidence/PII: plugins should use host logging redaction helpers  
+- Evidence/PII: host `zdtd.log` redacts joined login names and platform ids before process stdout  
 - Malicious plugin = same trust as operator code (ADR: cannot stop evil admin)
 
 ## Testing

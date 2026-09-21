@@ -6874,7 +6874,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
 | Quest journal save | HAVE (players.zsv ZPV12) |
 | Vehicle / turret persistence | WORKS (`entities.zen`; power wire edges persist by position; trader quest offers are derived from quest_list + journal, see appendix "Vehicle, turret, power and quest-NPC persistence") |
-| Atomic save / backup rotation | WORKS (temp+rename on stores; `scripts/backup-world.sh` rotates dated copies; wipe keeps `players.zsv.bak`) |
+| Atomic save / backup rotation | WORKS (temp+rename on stores; `scripts/backup-world.sh` rotates dated copies; wipe deletes leftover `players.zsv.bak`) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | WORKS (platform identity per ZPV15; stock `PrimaryId.CombinedString`, asm.il 1884842. A legacy name-only row is matched once by name and re-keyed on save) |
 | Ally relationships | PARTIAL (`src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |

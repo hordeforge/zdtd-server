@@ -27,21 +27,82 @@ fn queryCoordLegal(v: f32) bool {
 /// player data into the operator log; the cap bounds one line's exposure.
 pub const max_wasm_log_len: usize = 200;
 
+/// Shortest token redacted from wasm logs. One- and two-byte login names would
+/// shred ordinary English; platform ids are always longer than this.
+const min_redact_token_len: usize = 3;
+
+const redact_placeholder: []const u8 = "[redacted]";
+
 /// Plugin callbacks receive the `*Game` installed at WasmHost.init as
 /// `HostCtx.data` or the kill-verdict `anyopaque` ctx.
 fn gameFromPtr(ptr: *anyopaque) *Game {
     return @ptrCast(@alignCast(ptr));
 }
 
+/// Replace known login names and platform user ids in `src` with
+/// `[redacted]`. Writes into `dst` (must be at least `src.len` when no
+/// replacements shrink the line; grows when placeholder is longer than a
+/// token, so callers pass `max_wasm_log_len`). Returns the written length.
+/// Tokens shorter than `min_redact_token_len` are left alone.
+pub fn redactPlayerPii(g: *const Game, src: []const u8, dst: []u8) usize {
+    var out_n: usize = 0;
+    var i: usize = 0;
+    while (i < src.len) {
+        var hit: ?[]const u8 = null;
+        var hit_len: usize = 0;
+        for (&g.clients) |*cl| {
+            if (cl.name_len >= min_redact_token_len) {
+                const nm = cl.name[0..cl.name_len];
+                if (i + nm.len <= src.len and std.mem.eql(u8, src[i..][0..nm.len], nm) and nm.len > hit_len) {
+                    hit = nm;
+                    hit_len = nm.len;
+                }
+            }
+            inline for (.{ cl.puid_primary, cl.puid_native }) |slot| {
+                if (slot.get()) |pid| {
+                    if (pid.id.len >= min_redact_token_len and i + pid.id.len <= src.len and
+                        std.mem.eql(u8, src[i..][0..pid.id.len], pid.id) and pid.id.len > hit_len)
+                    {
+                        hit = pid.id;
+                        hit_len = pid.id.len;
+                    }
+                }
+            }
+        }
+        if (hit) |_| {
+            const pl = redact_placeholder;
+            if (out_n + pl.len > dst.len) break;
+            @memcpy(dst[out_n..][0..pl.len], pl);
+            out_n += pl.len;
+            i += hit_len;
+            continue;
+        }
+        if (out_n >= dst.len) break;
+        dst[out_n] = src[i];
+        out_n += 1;
+        i += 1;
+    }
+    return out_n;
+}
+
 pub fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
-    _ = ctx;
     const tag = wasm_log_level_tags[@min(@as(usize, level), wasm_log_level_tags.len - 1)];
     // Guest-controlled bytes: C0/DEL would let a plugin forge whole log lines
     // (the operator audit trail is line-oriented stderr), so reuse the C2S text
     // sanitizer, which also drops invalid UTF-8 and truncates on a codepoint.
     var line: [max_wasm_log_len]u8 = undefined;
     const n = c2s_text.sanitizePlayerName(&line, msg);
-    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, line[0..n] });
+    // Hooks receive login names and platform ids; redact those tokens before
+    // they reach process stdout (docs/PLUGIN_API.md redaction helper).
+    var safe: [max_wasm_log_len]u8 = undefined;
+    const sn: usize = if (ctx.data) |ptr|
+        redactPlayerPii(gameFromPtr(ptr), line[0..n], &safe)
+    else
+        blk: {
+            @memcpy(safe[0..n], line[0..n]);
+            break :blk n;
+        };
+    std.debug.print("zdtd wasm: {s}: {s}\n", .{ tag, safe[0..sn] });
 }
 
 pub fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
@@ -609,4 +670,28 @@ test "plugin queue verbs fail closed on out-of-range coordinates" {
     try std.testing.expect(queryCoordLegal(0));
     try std.testing.expect(queryCoordLegal(game_mod.max_player_coord));
     try std.testing.expect(!queryCoordLegal(-game_mod.max_player_coord - 1));
+}
+
+test "redactPlayerPii strips login names and platform ids from wasm log lines" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    g.clients[0].name_len = 5;
+    @memcpy(g.clients[0].name[0..5], "Alice");
+    try g.clients[0].puid_primary.set(.{ .platform = "Steam", .id = "76561198000000001" });
+    var dst: [max_wasm_log_len]u8 = undefined;
+    const n = redactPlayerPii(g, "kick Alice id=76561198000000001 done", &dst);
+    try std.testing.expectEqualStrings("kick [redacted] id=[redacted] done", dst[0..n]);
+    // Short tokens (len < 3) stay; no false positive on "an".
+    g.clients[0].name_len = 2;
+    @memcpy(g.clients[0].name[0..2], "an");
+    try g.clients[0].puid_primary.set(null);
+    const n2 = redactPlayerPii(g, "an apple", &dst);
+    try std.testing.expectEqualStrings("an apple", dst[0..n2]);
 }

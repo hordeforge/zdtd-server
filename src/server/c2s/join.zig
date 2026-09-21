@@ -170,7 +170,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const name_slice = if (c.name_len > 0) c.name[0..c.name_len] else "";
             if (plugin_compose.playerLoginDeny(self, @intCast(c.slot), name_slice, &deny_buf)) |reason| {
                 self.harness.counters.inc(.join_fail);
-                std.debug.print("zdtd: PlayerLogin plugin deny slot={d} reason={s}\n", .{ c.slot, reason });
+                // Reason length only: the guest may echo the login name into the
+                // deny text (hooks receive the name), and process logs must not
+                // hold that string (same rule as PlayerLogin name_len).
+                std.debug.print("zdtd: PlayerLogin plugin deny slot={d} reason_len={d}\n", .{ c.slot, reason.len });
                 self.dropClientSlot(c.slot, "plugin-deny");
                 return true;
             }
