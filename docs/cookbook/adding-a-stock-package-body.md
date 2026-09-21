@@ -113,8 +113,8 @@ that turns a received id back into a name
 directions, and [PACKAGES.md](../wire/PACKAGES.md) records the advertised count.
 
 If the stock package overrides `get_Channel`, add it to `channelFor`
-(`src/wire/packages.zig:2514`). The channel for every advertised name is pinned
-by a table test (`src/wire/packages.zig:2528`), so a missing or extra override
+(`src/wire/stock_frame.zig:32`). The channel for every advertised name is pinned
+by a table test (`src/wire/stock_frame.zig:46`), so a missing or extra override
 fails there.
 
 ## 5. Send it

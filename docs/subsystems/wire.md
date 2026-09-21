@@ -41,7 +41,7 @@ The reader's counterpart plus the truncating variant (src/wire/binary.zig:63):
 
 An inbound game message is not a `NetPackage` body: it is the channel envelope `channel u8 | payloadSize i32 | compressed u8 | encrypted u8 | count u16`, then `count` packages of `contentLen i32 | id u16 | body`, where `contentLen` covers the id and body only (`src/wire/frame.zig:98`, pinned by the offset test at `src/wire/frame.zig:257`). `payloadSize` counts bytes after the 9-byte header (`src/wire/frame.zig:136`).
 
-`framePackage` writes the uncompressed single-package form, which is the common S2C path (`src/wire/frame.zig:213`). `packages.framed` resolves the id and channel, then delegates to it (`src/wire/packages.zig:2523`).
+`framePackage` writes the uncompressed single-package form, which is the common S2C path (`src/wire/frame.zig:213`). `packages.framed` resolves the id and channel, then delegates to it (`src/wire/stock_frame.zig:41`).
 
 The parsed package record (src/wire/frame.zig:28):
 
@@ -70,7 +70,7 @@ pub const DeflateFramer = struct {
 
 Callers must pass a `body_len` to `begin` before the first body byte, then push exactly that many bytes and call `finish`, which patches `payloadSize` with the post-compression count (`src/wire/frame.zig:199`, `src/wire/frame.zig:205`). The 64 KiB window is a buffer size, not a wire divergence: `flate.max_window_len` is twice `flate.history_len`, and the emitted back-reference distance stays inside stock's 32 KiB (`src/wire/frame.zig:351`). Only the six stock `get_Compress`-true package names zdtd emits take this path (`src/server/game/net.zig:111`).
 
-`channelFor` returns 1 for exactly five names (`NetPackageChunk`, `NetPackageChunkRemove`, `NetPackageDynamicMesh`, `NetPackageMapChunks`, `NetPackageWorldFolder`) and 0 otherwise (`src/wire/packages.zig:2514`, `src/wire/packages.zig:2528`). The separate `protocol.zig` root leaf owns the challenge echo (`0xCA` plus 16 GUID bytes), the 20 TPS constants, the wire geometry profile, and the damage-type table; it is imported directly and deliberately not re-exported by `wire` (`src/protocol.zig:10`, `src/protocol.zig:5`).
+`channelFor` returns 1 for exactly five names (`NetPackageChunk`, `NetPackageChunkRemove`, `NetPackageDynamicMesh`, `NetPackageMapChunks`, `NetPackageWorldFolder`) and 0 otherwise (`src/wire/stock_frame.zig:32`, `src/wire/stock_frame.zig:46`). The separate `protocol.zig` root leaf owns the challenge echo (`0xCA` plus 16 GUID bytes), the 20 TPS constants, the wire geometry profile, and the damage-type table; it is imported directly and deliberately not re-exported by `wire` (`src/protocol.zig:10`, `src/protocol.zig:5`).
 
 ## Package ids: registry and resolution
 

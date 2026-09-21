@@ -49,6 +49,7 @@ pub const stock_remove = @import("stock_remove.zig");
 pub const stock_bloodmoon = @import("stock_bloodmoon.zig");
 pub const stock_chunkremove = @import("stock_chunkremove.zig");
 pub const stock_collect = @import("stock_collect.zig");
+pub const stock_gamestats = @import("stock_gamestats.zig");
 pub const stock_loginanswer = @import("stock_loginanswer.zig");
 pub const stock_localization = @import("stock_localization.zig");
 pub const stock_configfile = @import("stock_configfile.zig");
@@ -104,6 +105,7 @@ test {
     _ = stock_bloodmoon;
     _ = stock_chunkremove;
     _ = stock_collect;
+    _ = stock_gamestats;
     _ = stock_loginanswer;
     _ = stock_localization;
     _ = stock_configfile;

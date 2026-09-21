@@ -986,7 +986,7 @@ re-arms) with the population count as the quest target.
 - **NetPackageNPCQuestList FetchList + QuestPacketEntry wire** `WORKS`
   Byte-for-byte the stock `QuestPacketEntry::read/write` order; `parseNpcQuestList`
   matches the stock read switch including the per-event tails.
-  *Anchors:* `src/wire/stock_quest.zig:112`, `src/wire/packages.zig:2674`,
+  *Anchors:* `src/wire/stock_quest.zig:112`, `src/wire/stock_quest.zig:457`,
   `asm.il:827300-827326`, `asm.il:827512-827630`
 
 - **Trader quest offers** `WORKS` `(2026-08-21)`
@@ -1418,7 +1418,7 @@ parsed, and quest offering is unwired.
   + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
   the stock parse fails. A real stock client's post-trade push reaches the
   server.
-  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:2447-2553`,
+  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/packages.zig:1980-2116`,
   `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
