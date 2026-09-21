@@ -1427,6 +1427,19 @@ pub fn fireDied(self: *Game, ps: ecs.Slot) void {
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
     }
+    // Player-class died rows (hazard timer reset/clear on playerMale):
+    // same engine, same ctx; cvar writes land through the player store.
+    const hash = if (self.sim.mask[ps].class_id and self.sim.class_id[ps].hash != 0)
+        self.sim.class_id[ps].hash
+    else
+        assets_unity_hash.class_player_male;
+    if (self.entities.byHash(hash)) |cdef| {
+        if (cdef.triggered.len != 0) {
+            const res = assets_buffs.evaluateRows(cdef.triggered, .died, ctx, &req_counts);
+            if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+            applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+        }
+    }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
