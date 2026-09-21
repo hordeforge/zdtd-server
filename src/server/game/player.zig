@@ -1862,3 +1862,48 @@ test "barter scales discount buying and bonus selling off the same fold" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.1), barterSellScale(ctx, 0), 0.0001);
     std.debug.print("PASS barter-scale: buy 0.9x sell 1.1x at level 2\n", .{});
 }
+
+/// Stock DropOnDeath (0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete):
+/// spawn the victim's death bag at their position holding the real
+/// inventory range (not a placeholder unit) and mark the dropped-backpack
+/// marker for the death screen / map. Called from the C2S kill path and the
+/// hp-replicate AI-kill detector; the callers coordinate through
+/// `Client.bagged_this_death`, which respawn clears, so one death is never
+/// bagged twice and the next one still bags.
+pub fn spawnDeathBag(self: *Game, victim_slot: ecs.Slot) void {
+    const dod = self.drop_on_death;
+    if (dod < 1 or dod > 3) return;
+    if (!self.sim.alive[victim_slot] or !self.sim.mask[victim_slot].inventory) return;
+    const t = self.sim.transform[victim_slot];
+    const start: usize = switch (dod) {
+        2 => 0, // toolbelt only
+        3 => ecs.components.inv_bag_start, // backpack only
+        else => 0, // all (toolbelt + backpack)
+    };
+    const end: usize = switch (dod) {
+        2 => ecs.components.inv_toolbelt,
+        else => ecs.components.inv_equip_start,
+    };
+    if (self.sim.spawnLootBagFrom(t.x, t.y, t.z, &self.sim.inventory[victim_slot], start, end)) |bag_nid| {
+        // A death bag is the Backpack entity class, not the DroppedLootContainer
+        // the block spills use: stock's client creates EntityBackpack in
+        // EntityPlayerLocal.dropBackpack and the server broadcasts the class
+        // it spawned. Set before broadcastLootSpawn so the class is right.
+        if (self.sim.slotOfNetId(bag_nid)) |bs| self.sim.loot_bag[bs].backpack = true;
+        // Stock DropOnDeath MOVES the range into the bag. The copy above
+        // left the victim holding it too, so every death duplicated the
+        // dropped slice: loot your own bag and you had it twice, and the
+        // DropOnDeath setting only chose which slice to duplicate.
+        // Clear after the bag exists, so a spawn failure drops nothing.
+        var ci: usize = start;
+        while (ci < end and ci < ecs.components.max_inv_slots) : (ci += 1) {
+            self.sim.inventory[victim_slot].slots[ci] = .{};
+        }
+        self.broadcastLootSpawn(bag_nid) catch {};
+        if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
+            vic.bagged_this_death = true;
+            vic.addBackpack(@trunc(t.x), @trunc(t.y), @trunc(t.z));
+            self.broadcastPlayerBackpack(vic) catch {};
+        }
+    }
+}
