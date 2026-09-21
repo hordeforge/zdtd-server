@@ -160,3 +160,50 @@ pub fn vehicleStop(v: *c.Vehicle) void {
     v.throttle = 0;
     v.steer = 0;
 }
+
+pub fn systemVehicles(w: *World, dt: f32) void {
+    // Vehicle physics does not change entity membership, so the dense group
+    // avoids a full-capacity scan on every tick, especially for parked fleets.
+    for (query.groupSlice(w, .vehicle)) |i| {
+        if (!w.mask[i].vehicle or !w.mask[i].transform) continue;
+        var v = &w.vehicle[i];
+
+        // Vertical physics: gravity accumulator + terrain-top clamp. Runs for
+        // every vehicle (parked included). Skipped when no terrain hook is set.
+        // rules.vehicle.gravity (RE EntityVehicle::cGravity, asm.il:536018;
+        // distinct from World::Gravity 0.08) is the config surface (ADR 0021).
+        const t = &w.transform[i];
+        if (w.groundY(t.x, t.z)) |gy| {
+            if (t.y > gy) {
+                v.vy += w.rules.vehicle.gravity * dt;
+                t.y += v.vy * dt;
+                if (t.y <= gy) { // landed / no-fly
+                    t.y = gy;
+                    v.vy = 0;
+                }
+            } else { // no-sink: snap up to surface, kill downward velocity
+                t.y = gy;
+                v.vy = @max(v.vy, 0);
+            }
+        }
+
+        // Every occupied seat rides the hull. The client parents the rider to
+        // the seat transform itself (EntityVehicle::GetAttachedToInfo,
+        // asm.il:542503), so the server only owns the hull-relative position.
+        for (&v.seats, 0..) |*rider, s| {
+            if (rider.* < 0) continue;
+            const pi = w.slotOfNetId(rider.*) orelse {
+                // The rider entity is gone (death, despawn): free the seat, or
+                // the hull stays occupied and, for seat 0, undriveable forever.
+                rider.* = -1;
+                if (s == c.driver_seat) vehicleStop(v);
+                continue;
+            };
+            if (!w.mask[pi].transform) continue;
+            w.transform[pi].x = w.transform[i].x;
+            w.transform[pi].y = w.transform[i].y + 1;
+            w.transform[pi].z = w.transform[i].z;
+            w.transform[pi].yaw = w.transform[i].yaw;
+        }
+    }
+}
