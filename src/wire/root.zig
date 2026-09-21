@@ -47,6 +47,7 @@ pub const stock_lookat = @import("stock_lookat.zig");
 pub const stock_horde = @import("stock_horde.zig");
 pub const stock_remove = @import("stock_remove.zig");
 pub const stock_bloodmoon = @import("stock_bloodmoon.zig");
+pub const stock_loginanswer = @import("stock_loginanswer.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
 pub const stock_sign = @import("stock_sign.zig");
@@ -95,6 +96,7 @@ test {
     _ = stock_horde;
     _ = stock_remove;
     _ = stock_bloodmoon;
+    _ = stock_loginanswer;
     _ = stock_vehicle;
     _ = stock_te;
     _ = stock_sign;

@@ -326,24 +326,8 @@ pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []cons
     return w.written();
 }
 
-/// NetPackagePlayerLoginAnswer (RE inventories/netpackage-bodies.md, write
-/// IL=46): `bAllowed` bool | `data` string | `platformLobbyId`
-/// (PlatformLobbyId.Write) | host identity (ToStream + string) | server
-/// identity (ToStream + string). zdtd writes the lobby and both identity pairs
-/// as null: a headless EAC-off dedi has no platform lobby and no host token, so
-/// a fabricated identity is exactly what rule 3 forbids. A null
-/// PlatformUserIdentifier is one 0 byte, which is the stock null path.
-pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeBool(allowed);
-    try w.writeString(data);
-    try w.writeByte(0); // lobby
-    try w.writeByte(0); // platform null
-    try w.writeString("");
-    try w.writeByte(0);
-    try w.writeString("");
-    return w.written();
-}
+pub const stock_loginanswer = @import("stock_loginanswer.zig");
+pub const buildLoginAnswerBody = stock_loginanswer.buildLoginAnswerBody;
 
 /// Stock `NetPackageLocalization` body (write IL=30): seqNr i32 | totalParts
 /// i32 | dataLen i32 (-1 when null) | data bytes. `Compress()` is false for

@@ -368,6 +368,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
 | `src/wire/stock_damage.zig` | R | Stock NetPackageDamageEntity body (V3.2.0 packed-flags head + 30-field body; RE inventories/netpackage-bodies.md write IL=144, changelog-3.2.0 §3.1). Split out of the packages.zig facade, same builders and golden tests |
 | `src/wire/stock_vehicle.zig` | R | Vehicle bodies (DataSync header, native 13-byte control parse/build). Split out of the packages.zig facade, moved verbatim |
+| `src/wire/stock_loginanswer.zig` | R | Login-answer body (bAllowed + null lobby/identity pairs). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_bloodmoon.zig` | R | Bloodmoon-music body (single eligibility bool). Split out of the packages.zig facade, same builder and test |
 | `src/wire/stock_remove.zig` | R | Remove bodies (entity-remove with reason byte). Split out of the packages.zig facade, same builders and test |
 | `src/wire/stock_horde.zig` | R | Horde-event body (event byte + pos + maxDist). Split out of the packages.zig facade, same builder and test |
