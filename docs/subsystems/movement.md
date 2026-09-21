@@ -86,7 +86,7 @@ because the tick path casts transforms to block indices and a clamped attacker c
 would still be a teleport to the ceiling (`src/server/game/movement_helpers.zig:52-61`).
 The sim ceiling is `max_player_coord` = 1_000_000 blocks
 (`src/server/game/constants.zig:10-24`); the wire parser holds a separate, wider `1 << 24`
-limit (`src/wire/packages.zig:944-954`). The first packet after spawn applies directly,
+limit (`src/wire/stock_motion.zig:60-77`). The first packet after spawn applies directly,
 because `move_valid` is false and there is no prior sample to measure against
 (`src/server/game/movement_helpers.zig:62-64`). The vertical cap is not fixed: an armed
 glide flag replaces it with `rules.glide.sink_vy_mps`, and a positive

@@ -1876,7 +1876,7 @@ encoding is one day high.
   `GetPackage<NetPackageHordeEvent>()` anywhere in the stock assembly, so stock
   never emits it either. No player impact relative to stock. The repo doc cites a
   stale line range.
-  *Anchors:* `src/wire/packages.zig:930`, `asm.il:822185`, `asm.il:518546`,
+  *Anchors:* `src/wire/stock_horde.zig:27`, `asm.il:822185`, `asm.il:518546`,
   `docs/GAP_ANALYSIS.md:889`
 
 - **Blood-moon weather override** `WORKS`

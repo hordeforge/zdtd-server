@@ -387,3 +387,45 @@ test "parseStockInvTx reads the stock InventoryTransaction layout" {
     var native: [11]u8 = .{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 };
     try std.testing.expectError(error.EndOfStream, parseStockInvTx(&native));
 }
+
+test "id mapping body is name, then length, then bytes" {
+    // The join path builds this for the item NameIdMapping and nothing read it
+    // back: swapping the name string with the i32 length left the whole suite
+    // green while the body no longer matched `NetPackageIdMapping::read`
+    // (IL=13: ReadString, ReadInt32, ReadBytes).
+    var buf: [64]u8 = undefined;
+    const body = try buildIdMappingBody(&buf, "items", &.{ 7, 8, 9 });
+
+    var r: binary.Reader = .{ .data = body };
+    var name_buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("items", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 3), try r.readI32());
+    try std.testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, body[r.pos..]);
+}
+test "name id mapping payload is version, count, then id before name" {
+    // The join path built this inline in game/join.zig, where neither the
+    // mutant tool nor the coverage counts reach: swapping the id with the name
+    // left the whole suite green while the payload stopped matching
+    // `NameIdMapping::SaveToWriter` (IL=72: per entry Write(Int32) the id then
+    // Write(String) the name).
+    var buf: [128]u8 = undefined;
+    const payload = try buildNameIdMappingPayload(&buf, &.{
+        .{ .id = 65543, .name = "meleeToolStoneAxe" },
+        .{ .id = 65545, .name = "gunHandgunT1Pistol" },
+    });
+
+    var r: binary.Reader = .{ .data = payload };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // version
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // backfilled count
+    var name_buf: [32]u8 = undefined;
+    try std.testing.expectEqual(@as(i32, 65543), try r.readI32());
+    try std.testing.expectEqualStrings("meleeToolStoneAxe", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 65545), try r.readI32());
+    try std.testing.expectEqualStrings("gunHandgunT1Pistol", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+
+    // An empty map still carries a well-formed header.
+    const none = try buildNameIdMappingPayload(&buf, &.{});
+    try std.testing.expectEqual(@as(usize, 8), none.len);
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, none[4..8], .little));
+}
