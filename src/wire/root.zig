@@ -38,6 +38,7 @@ pub const stock_areas = @import("stock_areas.zig");
 pub const stock_velocity = @import("stock_velocity.zig");
 pub const stock_weather = @import("stock_weather.zig");
 pub const stock_anim = @import("stock_anim.zig");
+pub const stock_poi = @import("stock_poi.zig");
 pub const stock_clientinfo = @import("stock_clientinfo.zig");
 pub const stock_turret = @import("stock_turret.zig");
 pub const stock_positions = @import("stock_positions.zig");
@@ -96,6 +97,7 @@ test {
     _ = stock_velocity;
     _ = stock_weather;
     _ = stock_anim;
+    _ = stock_poi;
     _ = stock_clientinfo;
     _ = stock_turret;
     _ = stock_positions;
