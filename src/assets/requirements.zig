@@ -585,6 +585,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "StatCompareCurrent")) return .stat_compare_current;
     if (std.mem.eql(u8, name, "EntityTagCompare")) return .entity_tag_compare;
     if (std.mem.eql(u8, name, "IsNight")) return .is_night;
+    if (std.mem.eql(u8, name, "IsDay")) return .is_day;
     if (std.mem.eql(u8, name, "IsBloodMoon")) return .is_blood_moon;
     if (std.mem.eql(u8, name, "IsEquipped")) return .is_equipped;
     if (std.mem.eql(u8, name, "IsItemActive")) return .is_item_active;
@@ -1971,6 +1972,10 @@ test "IsDay reads the clock and refuses without one" {
     var counts: Counts = .{};
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{day}, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "kindOf maps IsDay to the day gate (IL=19)" {
+    try testing.expectEqual(Kind.is_day, kindOf("IsDay"));
 }
 
 test "IsMale reads gender and refuses without identity" {
