@@ -140,7 +140,7 @@ Removals land in a 16-entry result buffer on the tick result (`src/ecs/schedule.
 
 ## Catalog shape from buffs.xml
 
-`assets/buffs.zig` parses the catalog into a `Table` and never touches an entity. Each buff keeps its class fields, its tag list, its passive rows, its stat mods, its stat thresholds and its bounded triggered surface (`src/assets/buffs.zig:200`):
+`assets/buffs.zig` parses the catalog into a `Table` and never touches an entity. Each buff keeps its class fields, its tag list, its passive rows, its stat mods, its stat thresholds and its bounded triggered surface (`src/assets/buffs.zig:126`):
 
 ```zig
 pub const BuffDef = struct {
