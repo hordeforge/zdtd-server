@@ -97,7 +97,7 @@ adjust** a proposed outcome rather than only observe it.
 ### 5. A `Rules` field is a floor, never a replacement for stock data
 
 Where stock ships per-entity or per-item data, that data wins. The AI speed and
-damage constants are already written this way: `systems.zig:1344` reads
+damage constants are already written this way: `src/ecs/ai_tasks.zig:893` reads
 `if (ct.attack_damage > 0) ct.attack_damage else attack_damage`, so the constant
 is an offline floor for when `entityclasses.xml` is absent or the field is 0.
 Moving such a constant into `Rules` must preserve that ordering. A mode that

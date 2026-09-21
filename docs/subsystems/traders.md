@@ -59,7 +59,7 @@ pub const StockEntry = struct {
     markup: i8 = 0,
 ```
 
-The comment above `markup` describes stock behavior that the zdtd trade path deliberately does not reproduce: `systems.trade` changes no markup on either side (src/ecs/systems.zig:1533-1538 and :1628-1629). `docs/GAMEPLAY.md:98` still states the +100 / -4 rule, so the doc and the code disagree here as of this reading.
+The comment above `markup` describes stock behavior that the zdtd trade path deliberately does not reproduce: `systems.trade` changes no markup on either side (src/ecs/quest_trade.zig:834-839). `docs/GAMEPLAY.md:98` still states the +100 / -4 rule, so the doc and the code disagree here as of this reading.
 
 Trader money resolves through one helper: a trader with a nonzero `wallet_default` reports its live wallet, anything else falls back to the `[sim] trader_wallet_dukes` default (src/server/game/trader.zig:17). Hours come from `open_time` / `close_time` as `"H:MM"`, converted to minutes and compared against a 24000-tick world clock rescaled to a day (src/server/game/trader.zig:36-46). A trader whose `trader_info` is missing or vending is always open (src/server/game/trader.zig:38-40).
 
@@ -134,7 +134,7 @@ The price assignment (src/server/game/trader.zig:253-260):
         };
 ```
 
-`econ` is `items.xml EconomicValue`, `bundle` is `EconomicBundleSize` with a floor of 1, and `sell_scale` is `EconomicSellScale` (src/assets/items.zig:224, :235, :239). The quality lerp `qmod` is `qualityPriceMod(iqmin, iqmax, quality)`, a lerp from the minimum multiplier at quality 1 to the maximum at quality 6 (src/ecs/systems.zig:1441-1445). The per-item `TraderQualityMod` pair wins over the trader's root `quality_mod` when the item declares one (src/server/game/trader.zig:245-248; item fields at src/assets/items.zig:230-231). The buy side multiplies `econ` by the resolved buy markup and the sell side by `sell_scale * sell_markup`. When no `trader_info` override and no root row exist (the offline builtin catalog), the defaults are `default_buy_markup = 1.0` and `default_sell_markdown = 0.02` (src/assets/traders.zig:108-109, used at src/server/game/trader.zig:214-217).
+`econ` is `items.xml EconomicValue`, `bundle` is `EconomicBundleSize` with a floor of 1, and `sell_scale` is `EconomicSellScale` (src/assets/items.zig:224, :235, :239). The quality lerp `qmod` is `qualityPriceMod(iqmin, iqmax, quality)`, a lerp from the minimum multiplier at quality 1 to the maximum at quality 6 (src/ecs/quest_trade.zig:732-737). The per-item `TraderQualityMod` pair wins over the trader's root `quality_mod` when the item declares one (src/server/game/trader.zig:245-248; item fields at src/assets/items.zig:230-231). The buy side multiplies `econ` by the resolved buy markup and the sell side by `sell_scale * sell_markup`. When no `trader_info` override and no root row exist (the offline builtin catalog), the defaults are `default_buy_markup = 1.0` and `default_sell_markdown = 0.02` (src/assets/traders.zig:108-109, used at src/server/game/trader.zig:214-217).
 
 Stock quality rules are shared by both roll sites: `Game.qualityPolicy` is built from `[rules.trader]` plus the items table so neither the trader stock nor the vending store carries private defaults (src/server/game/trader.zig:131-144).
 

@@ -279,7 +279,7 @@ Two hard limits in today's code define the shard sizing:
 
 - `max_entities = 512` (`ecs/entity.zig:3`), fixed-size SoA columns
   (`ecs/world.zig`). Systems scan `0..max_entities` every tick
-  (`ecs/systems.zig:1451`, `ecs/world.zig`), so cost is O(capacity), not
+  (`ecs/group.zig:11`, `ecs/world.zig`), so cost is O(capacity), not
   O(alive). Raising the cap to hold 10k entities on one node linearly slows
   every tick. **Conclusion: bound entities per shard (~512..2048), scale out by
   adding shards, do not grow one array to 10k.**

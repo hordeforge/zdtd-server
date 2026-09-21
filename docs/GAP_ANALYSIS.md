@@ -2828,7 +2828,7 @@ gamestage, no wandering hordes, and no screamers.
   0.35 s replan interval plus a slot-strided per-tick admission derived once on
   the main thread so the answer is worker-independent. Over-budget bodies keep
   walking the stored buffer. Counters surface on TickResult.
-  *Anchors:* `src/ecs/world.zig:360-366`, `src/ecs/systems.zig:1345-1371`,
+  *Anchors:* `src/ecs/world.zig:360-366`, `src/ecs/ai_tasks.zig:618-641`,
   `src/ecs/schedule.zig:30-35`
 
 - **Pathfinding fidelity vs stock navmesh** → **non-goal** (2026-08-25):
@@ -3091,8 +3091,7 @@ gamestage, no wandering hordes, and no screamers.
   wants a deliberate call plus a loadgen pass on the AI tick cost, not a
   drive-by edit. The tick-budget reason the throttle exists is real; it is
   the coupling to speed that is unintended.
-  *Anchors:* `src/ecs/systems.zig:1428-1449`, `:929-945`, `:24-28`, `:1892`,
-  `:1959`, `:2276`
+  *Anchors:* `src/ecs/ai_tasks.zig:771-809`, `:444-447`, `src/ecs/sensing.zig:16`, `:380`
 
 ---
 

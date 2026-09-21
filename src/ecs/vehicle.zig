@@ -304,3 +304,71 @@ test "multi-seat: a destroyed rider releases its seat on the next tick" {
     try std.testing.expectEqual(@as(u8, 4), w.vehicle[vs].freeSeats());
     try std.testing.expectEqual(@as(f32, 0), w.vehicle[vs].speed);
 }
+
+test "multi-seat: four riders fill a truck, the fifth is refused" {
+    var w: World = .{};
+    defer w.deinit();
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    var riders: [5]i32 = undefined;
+    for (&riders, 0..) |*r, i| r.* = w.spawnPlayer(1, 70, 0, @intCast(i)).?;
+    for (riders[0..4], 0..) |r, i| {
+        try std.testing.expectEqual(@as(?u8, @intCast(i)), vehicleAttach(&w, vs, r, seat_any));
+    }
+    try std.testing.expectEqual(@as(?u8, null), vehicleAttach(&w, vs, riders[4], seat_any));
+    try std.testing.expectEqual(@as(u8, 0), w.vehicle[vs].freeSeats());
+}
+test "multi-seat: out-of-range seat request is refused" {
+    var w: World = .{};
+    defer w.deinit();
+    const vid = w.spawnVehicleEx(.gyrocopter, 0, 70, 0, 250, 20, 2).?;
+    const vs = w.slotOfNetId(vid).?;
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    try std.testing.expectEqual(@as(?u8, null), vehicleAttach(&w, vs, p, 3));
+    try std.testing.expectEqual(@as(?u8, null), vehicleAttach(&w, vs, p, 2));
+    try std.testing.expectEqual(@as(?u8, 1), vehicleAttach(&w, vs, p, 1));
+}
+test "multi-seat: re-attaching with -1 keeps the held seat" {
+    var w: World = .{};
+    defer w.deinit();
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    try std.testing.expectEqual(@as(?u8, 2), vehicleAttach(&w, vs, p, 2));
+    try std.testing.expectEqual(@as(?u8, 2), vehicleAttach(&w, vs, p, seat_any));
+    try std.testing.expectEqual(@as(?u8, 2), vehicleAttach(&w, vs, p, 2));
+    try std.testing.expectEqual(@as(u8, 3), w.vehicle[vs].freeSeats());
+}
+test "multi-seat: an occupied seat is never stolen from its rider" {
+    var w: World = .{};
+    defer w.deinit();
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    const a = w.spawnPlayer(0, 70, 0, 0).?;
+    const b = w.spawnPlayer(1, 70, 0, 1).?;
+    try std.testing.expectEqual(@as(?u8, 0), vehicleAttach(&w, vs, a, 0));
+    try std.testing.expectEqual(@as(?u8, null), vehicleAttach(&w, vs, b, 0));
+    try std.testing.expectEqual(a, w.vehicle[vs].driverNetId());
+}
+test "multi-seat: only the driver leaving stops the hull" {
+    var w: World = .{};
+    defer w.deinit();
+    const vid = w.spawnVehicleEx(.four_by_four, 0, 70, 0, 300, 14, 4).?;
+    const vs = w.slotOfNetId(vid).?;
+    const drv = w.spawnPlayer(0, 70, 0, 0).?;
+    const pax = w.spawnPlayer(1, 70, 0, 1).?;
+    _ = vehicleAttach(&w, vs, drv, seat_any).?;
+    _ = vehicleAttach(&w, vs, pax, 2).?;
+    vehicleControl(&w, vs, 1.0, 0.0, 0.5);
+    try std.testing.expect(w.vehicle[vs].speed > 0);
+
+    const pax_out = vehicleDetach(&w, pax).?;
+    try std.testing.expectEqual(vid, pax_out.vehicle_net);
+    try std.testing.expectEqual(@as(u8, 2), pax_out.seat);
+    try std.testing.expect(w.vehicle[vs].speed > 0);
+
+    const drv_out = vehicleDetach(&w, drv).?;
+    try std.testing.expectEqual(@as(u8, 0), drv_out.seat);
+    try std.testing.expectEqual(@as(f32, 0), w.vehicle[vs].speed);
+    try std.testing.expectEqual(@as(u8, 4), w.vehicle[vs].freeSeats());
+}
