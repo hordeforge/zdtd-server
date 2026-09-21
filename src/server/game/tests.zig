@@ -9155,3 +9155,56 @@ test "a damaged radiated zombie gains its regen buff and amount" {
     try g.step();
     try std.testing.expect(g.sim.buffs[zs].find(regen) != null);
 }
+
+test "worn rogue boots soften the fall impact computation" {
+    // Full boot chain: equip rows seed $rogueBootFallDMG by quality tier;
+    // buffPlayerFallingDamage's start rows subtract it from .impactSpeed,
+    // which drives the break/sprain counters. Same fall with and without
+    // Q6 boots: the impact speed reads lower with boots on.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    _ = g.addCatalogBuff(cl.entity_id, ps, "buffStatusCheck01", cl.entity_id);
+    const boots = g.items.byName("armorRogueBoots") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, boots.id, 1));
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id != boots.id) continue;
+        g.sim.inventory[ps].slots[i] = .{};
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = boots.id, .count = 1, .quality = 6 };
+        break;
+    }
+    try g.step();
+    g.fireFallImpact(ps, 25);
+    try g.step();
+    const with_boots = cl.cvars.get(".impactSpeed");
+    // Unequip: the marker and cvar go, the next fall computes unsoftened.
+    var free: u16 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start], 0..) |s, i| {
+        if (s.count == 0) {
+            free = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(ecs.inventory.move(&g.sim, cl.slot, ecs.components.inv_equip_start, free, 1));
+    try g.step();
+    try g.step();
+    _ = cl.cvars.remove(".impactSpeed");
+    g.fireFallImpact(ps, 25);
+    try g.step();
+    const bare = cl.cvars.get(".impactSpeed");
+    try std.testing.expect(with_boots < bare);
+}
