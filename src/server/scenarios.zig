@@ -7381,6 +7381,12 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     var t: u32 = 0;
     while (t < 60 and g.sim.health[ps].hp >= 100) : (t += 1) try g.step();
     try std.testing.expect(g.sim.health[ps].hp < 100);
+    // The strike sets its anim edge inside the sim phase; replicate flushes
+    // it (same step, or once an observer window is active). Keep stepping a
+    // few ticks so the flush is observable regardless of where the strike
+    // fell relative to the motion period.
+    t = 0;
+    while (t < 6) : (t += 1) try g.step();
 
     // Stock AvatarZombieController::StartAnimationAttack fires on the landed
     // strike and updateNetworkAnimData flushes it as
@@ -7388,6 +7394,8 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     // local avatar plays the swing from this param list. The zombie's network
     // id rides the NetPackageEntityTargeted base; count 3 = Attack int,
     // AttackBlend float, AttackTrigger, hashes pinned by animatorStringHash.
+    const zslot = g.sim.slotOfNetId(znid).?;
+    try std.testing.expect(!g.sim.zombie_ai[zslot].strike_anim); // drain consumed the edge
     const anim_id = packages.idOf("NetPackageEntityAnimationData").?;
     const ab = cap.findPkgId(anim_id) orelse return error.NoAttackAnimPackage;
     try std.testing.expectEqual(znid, std.mem.readInt(i32, ab[0..4], .little));

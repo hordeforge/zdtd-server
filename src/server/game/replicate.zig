@@ -309,8 +309,12 @@ pub fn replicate(self: *Game) !void {
                     if (packages.framed(&anim_frame_buf, "NetPackageEntityAnimationData", ab)) |af| {
                         anim_framed = af;
                         self.harness.counters.inc(.packages_encoded);
-                    } else |_| {}
-                } else |_| {}
+                    } else |_| {
+                        self.harness.counters.inc(.encode_errors);
+                    }
+                } else |_| {
+                    self.harness.counters.inc(.encode_errors);
+                }
             }
             // Vertical motion (RE NetEntityDistributionEntry velocity updates):
             // a falling/jumping zombie streams its vy so the client renders the
@@ -369,6 +373,7 @@ pub fn replicate(self: *Game) !void {
             if (speeds_framed) |sf| self.sendFramedUnreliable(peer, sf);
             if (flags_framed) |ff| self.sendFramedDroppable(peer, ff);
             if (vel_framed) |vf| self.sendFramedUnreliable(peer, vf);
+            if (anim_framed) |af| self.sendFramedDroppable(peer, af);
             if (turret_framed) |tf| self.sendFramedReliable(peer, "NetPackageTurretSync", tf, game_mod.window_retry_budget_ns, false) catch self.harness.counters.inc(.net_send_errors);
             self.harness.counters.add(.replicate_fanouts, per_viewer);
         }
