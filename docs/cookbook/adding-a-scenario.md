@@ -124,7 +124,7 @@ it.
 
 Build the body with the `packages` builder, frame it with `packages.framed`,
 and inject it with `injectFramed`, which routes through `onData`
-(`src/server/game/harness.zig:89-92`). Copy the shape from
+(`src/server/game/harness.zig:88-91`). Copy the shape from
 `src/server/scenarios.zig:259-264`:
 
 ```zig

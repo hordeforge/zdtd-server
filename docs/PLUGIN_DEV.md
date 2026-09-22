@@ -286,7 +286,7 @@ behavior, not server.
 | Block-damage policy | **Plugin already** | `on_block_damage` verdict (`src/server/game/world.zig:20`; also the C2S player-dig delta since 2026-08-20 - every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
-| Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`src/server/c2s/join.zig:144`) |
+| Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`src/server/c2s/join_spawn.zig:115`) |
 | Bot brains | **Plugin already** | `mods/fps_bot` (ADR 0026) |
 | Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `plugins/core_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** - technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |

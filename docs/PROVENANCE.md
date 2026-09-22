@@ -416,6 +416,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/persist_traders.zig` | Z | Trader persistence (traders.zst ZTR1 + pure blob scanner). Split out of persist.zig verbatim |
 | `src/server/persist_claims.zig` | Z | Land-claim persistence (claims.zlc ZCLC). Split out of persist.zig verbatim |
 | `src/server/persist_entities.zig` | Z | Entity persistence (entities.zen ZEN2; ZENT loads). Split out of persist.zig verbatim |
+| `src/server/persist_players.zig` | Z | Player persistence (players.zsv ZPV17 save-all merge-write and restore-one). Split out of persist.zig verbatim |
 | `src/server/phase_gate.zig` | R | Per-package C2S phase allowlist (join SM × package name). Hot path: string compares against static tables; no heap |
 | `src/server/game/replicate_te.zig` | R | Tile-entity replication: the S2C wire out for workstations, storage containers, vending machines and powered blocks  Vending fill stocks from traderAlways only when the `trader_info` row is unresolved (2026-09-13).|
 | `src/server/root.zig` | Z | Server process layer: Game orchestration, config, admin/GSI TCP, scenarios. |

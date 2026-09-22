@@ -672,7 +672,7 @@ will strand more of them, including anchors written today.
    pointing each at the file and function that actually holds the logic
    today (several are already known from this pass: "Autosave and shutdown
    save" → `src/server/game/lifecycle.zig`; "questOnTraderOpen reached"
-   → `src/server/c2s/quest.zig:219` / `src/server/c2s/misc.zig:469`, and
+   → `src/server/c2s/quest_trade.zig:204` / `src/server/c2s/misc_lock.zig:32`, and
    `questOnTraderOpen` itself is `src/ecs/quest_trade.zig:414`; "Vehicle, turret,
    power... persistence" → `src/server/persist.zig` `saveEntities`/
    `loadEntities`, `src/server/game/chunk_fill.zig` `scanChunkPower`).

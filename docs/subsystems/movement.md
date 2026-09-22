@@ -32,21 +32,21 @@ pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y:
 
 The handler keeps the yaw already in the sim column rather than the parsed rotation,
 because that rotation is not stored and passing `0` would fabricate a north facing on
-every move (`src/server/c2s/move.zig:47-52`). `NetPackageEntityRelPosAndRot` is a delta in
+every move (`src/server/c2s/move_state.zig:40-45`). `NetPackageEntityRelPosAndRot` is a delta in
 1/32-block i16 units on a variable-width rotation base, so the delta offset is 21 when
 `bUseQRotation` is set and 11 otherwise; a fixed offset 11 would decode quaternion bytes
-as movement (`src/server/c2s/move.zig:136-156`). Both packages must name the sender's own
-entity id (`src/server/c2s/move.zig:30-33`, `src/server/c2s/move.zig:131-135`).
+as movement (`src/server/c2s/move_state.zig:129-149`). Both packages must name the sender's own
+entity id (`src/server/c2s/move.zig:30-33`, `src/server/c2s/move_state.zig:124-128`).
 
 Motion claims are relayed, never applied. `NetPackageEntityAliveFlags` stores the client
 word verbatim and fans a re-encoded body rather than the raw one, because the parsers
 accept a minimum while stock's bodies are exactly i32+u16 and 13 bytes, so trailing bytes
-must not be forwarded (`src/server/c2s/move.zig:196-206`). `NetPackageEntitySpeeds` sets
-sprint magnitude and movement tag the same way (`src/server/c2s/move.zig:208-241`).
+must not be forwarded (`src/server/c2s/move_state.zig:42-52`). `NetPackageEntitySpeeds` sets
+sprint magnitude and movement tag the same way (`src/server/c2s/move_state.zig:54-87`).
 `NetPackageEntityAddVelocity` is ownership checked and reduced to a dirty bit
-(`src/server/c2s/move.zig:278-287`, `docs/DIVERGENCES.md` 1.6). `NetPackageEntityPhysics`
+(`src/server/c2s/move_state.zig:124-133`, `docs/DIVERGENCES.md` 1.6). `NetPackageEntityPhysics`
 is length-validated against the stock 58-byte body and dropped, since zdtd's movement,
-vehicle and falling-block sims are authoritative (`src/server/c2s/misc.zig:245-259`,
+vehicle and falling-block sims are authoritative (`src/server/c2s/misc_turret.zig:67-81`,
 `docs/DIVERGENCES.md` 1.4). The per-client envelope sample, updated by `noteAcceptedMove`
 from the server tick counter, with `vy_blocks_per_s` derived from the previous accepted
 position and power-grid triggers activated at the feet cell and the cell below
@@ -114,9 +114,9 @@ peer learns the truth from the next replicated position or from the clamp snap.
 
 `NetPackageEntityTeleport` runs the same envelope as an absolute position, so a client
 cannot bypass the gate and rebaseline it through `noteAcceptedMove`
-(`src/server/c2s/move.zig:252-266`). Only an unclamped teleport is relayed, trimmed to the
+(`src/server/c2s/move_state.zig:98-112`). Only an unclamped teleport is relayed, trimmed to the
 parsed body length, so trailing bytes and a clamped or Y-only-clamped claim never reach
-peers (`src/server/c2s/move.zig:267-275`). Denial policy sits above this module:
+peers (`src/server/c2s/move_state.zig:113-121`). Denial policy sits above this module:
 `.movement` is `client_informed`, so its `.hard` severity is downgraded and a kick needs
 the guard ladder; its surface is `.none`, so a quarantine locks all three surfaces
 (`docs/AUTHORITY.md`).
@@ -131,7 +131,7 @@ measurement against the previous one (`src/server/game.zig:2785-2790`,
 
 Respawn calls `World.respawnPlayer`, which revives the slot, clears death buffs, restores
 each stat to its own maximum, writes the transform and marks position and health dirty
-(`src/ecs/world.zig:872-896`); `c2s/join.zig:480-534` then runs the DeathPenalty-selected
+(`src/ecs/world.zig:872-896`); `src/server/c2s/join_spawn.zig:121-156` then runs the DeathPenalty-selected
 `game_on_respawn_*` sequence and sends `NetPackagePlayerSpawnedInWorld` followed by a
 stock `EntityTeleport`. The admin path clamps each axis to `max_player_coord`, resets the
 envelope for the owning peer, and broadcasts `NetPackageEntityTeleport`
@@ -148,15 +148,15 @@ plus 0.9, sends `EntityTeleport` when asked, and returns that Y
 (`src/server/game/rescue.zig:12-27`). The absolute-position and teleport paths pass
 `do_teleport = true` and reset the envelope afterwards, so interim client packets still
 falling are not counted as rejects against a legitimate player
-(`src/server/c2s/move.zig:36-46`, `src/server/c2s/move.zig:256-262`). The
+(`src/server/c2s/move_state.zig:29-39`, `src/server/c2s/move_state.zig:102-108`). The
 relative-position path can also walk Y into the void, so it re-snaps and only then records
-the accepted move (`src/server/c2s/move.zig:165-170`).
+the accepted move (`src/server/c2s/move_state.zig:158-163`).
 
 ## Vehicles and attached entities
 
 Seating is a server decision. A C2S `NetPackageEntityAttach` is sender-gated; a detach
 resolves the hull from server state rather than from the packet, and a mount resolves the
-claimed vehicle id and asks the sim (`src/server/c2s/misc.zig:1228-1244`).
+claimed vehicle id and asks the sim (`src/server/c2s/misc_lock.zig:27-43`).
 `systems.vehicleAttach` refuses a requested seat at or above the usable count, returns the
 seat already held, and otherwise requires the rider within `rules.ai.mount_range_sq` and
 detaches from any other hull first (`src/ecs/vehicle.zig:104-122`). `seatRider`
@@ -184,9 +184,9 @@ pub const Vehicle = struct {
 
 Drive input arrives as a 13-byte zdtd-shaped control body under the stock
 `NetPackageVehicleSpawn` name, gated on that exact length because a real stock body is at
-least 32 bytes and can never be read as this one (`src/server/c2s/misc.zig:1212-1226`,
+least 32 bytes and can never be read as this one (`src/server/c2s/misc_damage.zig:24-38`,
 `src/wire/stock_vehicle.zig:37-61`). Only seat 0 steers
-(`src/server/c2s/misc.zig:1220-1222`). zdtd implements no client-requested vehicle
+(`src/server/c2s/misc_damage.zig:32-34`). zdtd implements no client-requested vehicle
 spawning, so a stock `VehicleSpawn` body falls through unhandled (`docs/DIVERGENCES.md`,
 "Six zdtd-shaped bodies" 1a4).
 
@@ -233,14 +233,14 @@ positions every `vehicle_pos_send_ticks` (default 5), skipped while guard load s
 open (`src/server/game/step.zig:406`, `src/server/game/vehicle.zig:99-119`,
 `src/server/game/types.zig:85-88`); and the sprint lapse, where `sprint_stale_cd` expiry
 stops the reported sprint speed and movement tag from being claimed
-(`src/server/game/tick.zig:1203-1206`), whose tag maps state 0 to idle, 1 and 2 to walking
+(`src/server/game/tick_equip.zig:161-164`), whose tag maps state 0 to idle, 1 and 2 to walking
 and everything else to running (`src/server/game/types.zig:531-537`).
 
 Persistence is partial. The player record stores world x, y, z and wallet, with `y < 2`
-substituted by the primary spawn height (`src/server/persist.zig:852-859`), and the load
+substituted by the primary spawn height (`src/server/persist_players.zig:292-299`), and the load
 path restores the transform with the same floor and yaw 0
-(`src/server/persist.zig:1282-1290`). Vehicles persist kind, position, yaw, fuel,
-`seat_count` and `max_speed` in `entities.zen` (`src/server/persist.zig:1618-1632`); seat
+(`src/server/persist_players.zig:695-703`). Vehicles persist kind, position, yaw, fuel,
+`seat_count` and `max_speed` in `entities.zen` (`src/server/persist.zig:736-750`); seat
 occupancy does not persist, and `owner_slot` is set by no production path, which leaves
 the parked-vehicle waypoint list empty (`src/ecs/components.zig:522-527`).
 

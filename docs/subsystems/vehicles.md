@@ -61,7 +61,7 @@ waypoint list is empty (`src/ecs/components.zig:523-527`, `src/server/game/vehic
 ## Seats and riders
 
 Mounting is a sim decision, not a client claim. `vehicleAttach` takes the requested wire slot and
-returns the seat that was actually granted, or null (`src/ecs/vehicle.zig:103`):
+returns the seat that was actually granted, or null (`src/ecs/vehicle.zig:102`):
 
 ```zig
 pub fn vehicleAttach(w: *World, vslot: Slot, player_net: i32, requested: i16) ?u8 {
@@ -88,9 +88,9 @@ player receives their parked hulls as an `EntityWaypointList` with list type `Ve
 
 The client drives with a zdtd-shaped 13-byte body carried under the stock `NetPackageVehicleSpawn`
 name. The handler gates on that exact length, so a real stock body (entity type, position, rotation,
-ItemValue, placing entity) can never be decoded as this one (`src/server/c2s/misc.zig:1247`,
+ItemValue, placing entity) can never be decoded as this one (`src/server/c2s/misc_lock.zig:46`,
 `src/wire/stock_vehicle.zig:37-61`). The op byte selects enter, exit or drive, and only seat 0
-steers (`src/server/c2s/misc.zig:1251-1257`). The parser rejects non-finite throttle or steer values
+steers (`src/server/c2s/misc_lock.zig:50-56`). The parser rejects non-finite throttle or steer values
 (`src/wire/stock_vehicle.zig:46`):
 
 ```zig
@@ -99,10 +99,10 @@ pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, t
 
 `NetPackageVehicleDataSync` is relayed, not applied: the sender must name its own entity, the named
 vehicle must be a live vehicle, and the sender must be that vehicle's driver, after which the opaque
-sync blob is forwarded to every other peer (`src/server/c2s/misc.zig:1236-1244`).
+sync blob is forwarded to every other peer (`src/server/c2s/misc_lock.zig:35-43`).
 `NetPackageEntityAttach` is sender-gated the same way; a detach type resolves the hull from server
 state because the stock detach carries vehicle id `-1`, and an attach type resolves the claimed
-vehicle id before asking the sim for a seat (`src/server/c2s/misc.zig:1263-1265`).
+vehicle id before asking the sim for a seat (`src/server/c2s/misc.zig:72-74`).
 
 Drive physics is `rules.vehicle`, which is zdtd-owned because the stock dedicated server has no
 vehicle sim (`src/ecs/rules.zig:598-618`):

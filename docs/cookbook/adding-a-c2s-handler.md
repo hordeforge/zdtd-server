@@ -130,7 +130,7 @@ Four gates exist, all keyed on per-client state in `Client`
 | `takeDamageToken` | damage claims |
 
 A throttled package is not a hard failure: return `true` so the name stays
-claimed and increment `c2s_throttle` (`src/server/c2s/inv.zig:86`):
+claimed and increment `c2s_throttle` (`src/server/c2s/inv_txn.zig:56`):
 
 ```zig
         if (!self.takeInvToken(c)) {
@@ -147,13 +147,13 @@ and periods are `Game` fields bound from `[sim]`; do not hardcode a second set.
 Write the change into the sim or the world store first, then send the resulting
 state to the peers the stock package reaches. Blocks and tile-entity writes go
 through `world.setBlockRawWorld` and the interest broadcast helpers
-(`src/server/c2s/blocks.zig:377`). Three rules apply to the fanout:
+(`src/server/c2s/blocks_explosion.zig:47`). Three rules apply to the fanout:
 
 - Never echo to the sender. Use `broadcastExcept` or the interest helpers, and
   assert the exclusion in the scenario (AGENTS rule 19).
 - Never relay a raw client body. Re-encode from the parsed fields, or trim to
   the parsed wire length, so a peer cannot append bytes that fan out
-  (`src/server/c2s/move.zig:201`).
+  (`src/server/c2s/move_state.zig:47`).
 - Broadcast the result, not the request. If the server clamps a value, peers see
   the clamped value.
 

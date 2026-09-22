@@ -125,7 +125,7 @@ when the cell is above one, so a placement is local unless it genuinely adds sup
 
 ## Collapse behaviour
 
-The server wrapper is `stabilityAfterSetBlock` (`src/server/game/stability.zig:24`):
+The server wrapper is `stabilityAfterSetBlock` (`src/server/game/stability.zig:23`):
 
 ```zig
 pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
@@ -151,7 +151,7 @@ SetBlock collapses continue lets fallers accumulate (`src/ecs/rules.zig:41-46`,
 
 Stability runs on the block edit, not on a timer. The C2S block handler calls the wrapper only when
 the block type actually changed, after the world write and the tile entity bookkeeping
-(`src/server/c2s/blocks.zig:377-394`). There is no periodic stability pass in the tick; the only
+(`src/server/c2s/blocks_explosion.zig:47-64`). There is no periodic stability pass in the tick; the only
 recurring stability-shaped name in the tick path is `bloodMoonDayFor`, which is a clock helper that
 happens to live in the same file (`src/server/game/step.zig:234`). A chunk loaded from disk gets its
 plane on the first edit that touches it, because `removeBlockAt` and `placeBlockAt` both call

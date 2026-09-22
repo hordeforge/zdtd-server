@@ -775,7 +775,7 @@ possible client action.
 ### Enum-cast sweep (2026-09-02)
 
 The save-format audit found a raw disk byte cast onto an exhaustive enum
-(`persist.zig:1207`, `VehicleKind`), so the same question was put to every
+(`src/server/persist_players.zig:620`, `VehicleKind`), so the same question was put to every
 `@enumFromInt` in `src/`. Result, recorded so it is not redone: no live defect.
 Wire parsers all guard the ordinal first; `litenet/packet.zig` keeps `Property`
 non-exhaustive by design; the remaining sites cast comptime field values or a

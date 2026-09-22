@@ -35,7 +35,7 @@ pub fn attachJoinedClient(self: *Game, capture: ?*@import("../../litenet/peer.zi
 
 `attachJoinedClientAs` takes the first dead peer slot, marks it alive, assigns the next local id, gives it a loopback address on a synthetic port, and then drives the real join state machine through that peer: `onConnected`, the challenge echo built by `wire_frame.buildChallenge`, a `NetPackagePlayerLogin` body with the name `Bot` and an optional platform id, `NetPackageRequestToEnterGame`, and `NetPackageRequestToSpawnPlayer` (`src/server/game/harness.zig:36-84`). It returns `error.JoinFailed` unless the client ends up joined with a positive entity id (`src/server/game/harness.zig:85`). Every step goes through `self.onData`, so the phase gates and C2S handlers on the production path are the ones under test.
 
-Two helpers carry the rest of a scenario (`src/server/game/harness.zig:89-96`):
+`injectFramed` carries the rest of a scenario (`src/server/game/harness.zig:88-91`):
 
 ```zig
 pub fn injectFramed(self: *Game, c: *Client, framed: []const u8) !void {

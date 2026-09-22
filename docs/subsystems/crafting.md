@@ -50,7 +50,7 @@ so the wire list matches the catalog (`src/assets/recipes.zig:161-188`).
 ## The inventory craft path
 
 The C2S `InvTx` route dispatches op `craft` to `tryCraft` with the bag slot and count
-(`src/server/c2s/inv.zig:886-887`, `src/server/game/craft.zig:381-384`). Only recipes with no
+(`src/server/c2s/inv_txn.zig:128-129`, `src/server/game/craft.zig:381-384`). Only recipes with no
 workstation, tool or material requirement are accepted on this path, because the stock inventory
 never offers the others and accepting them would bypass the station gate or mint items from a
 zero-ingredient scrap stub (`src/server/game/craft.zig:386-395`):
@@ -107,7 +107,7 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
 
 The ledger cause reuses `.craft`, because there is no scrap-specific cause
 (`src/server/game/craft.zig:566`). The C2S route reaches it through the same `InvTx` op table
-(`src/server/c2s/inv.zig:888-889`).
+(`src/server/c2s/inv_txn.zig:130-131`).
 
 ## Loot rolls
 
@@ -174,13 +174,13 @@ A filled bag reaches clients through `broadcastLootSpawn`, which picks the stock
 kind (`Backpack` for a death drop, `DroppedLootContainer` for a block spill) and sends the slots
 inside `NetPackageEntitySpawn` (`src/server/game/loot.zig:151-181`). A container's contents leave
 through `NetPackageInventoryDataResponse`, built after `ensureContainerLoot` has rolled the table
-(`src/server/c2s/inv.zig:1001-1038`).
+(`src/server/c2s/inv_txn.zig:243-280`).
 
 The workstation craft is a different trust boundary. The client queue blob is not trusted: when a
 stock recipes.xml is loaded, each queued output type is resolved to a name, looked up in the recipe
 table, checked against the station's `CraftingAreaRecipes`, rejected when material-based, checked
 against the unlock gate, and finally rewritten with the recipe's own output count and craft time
-(`src/server/c2s/inv.zig:608-672`). The workstation tick then burns fuel, melts forge input and
+(`src/server/c2s/inv_txn.zig:209-273`). The workstation tick then burns fuel, melts forge input and
 re-broadcasts only the stations it changed
 (`src/server/game/craft.zig:596-636`). The item ids and stack rules for those bodies are owned by
 the inventory and container pages; this page owns only what produced the stack. Container, bag and

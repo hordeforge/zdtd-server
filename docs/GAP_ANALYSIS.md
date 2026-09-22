@@ -1418,7 +1418,7 @@ parsed, and quest offering is unwired.
   + `applyTraderDataCopyFrom`); the legacy 9-byte trade body is only tried after
   the stock parse fails. A real stock client's post-trade push reaches the
   server.
-  *Anchors:* `src/server/c2s/quest.zig:212-228`, `src/wire/stock_invtx.zig:60-102`,
+  *Anchors:* `src/server/c2s/quest_trade.zig:197-213`, `src/wire/stock_invtx.zig:60-102`,
   `src/server/game/trader_wire.zig`, `asm.il:860724-860742`
 
 - **traders.xml trader_item_group parsing with nested group refs** `WORKS`
@@ -1616,7 +1616,7 @@ parsed, and quest offering is unwired.
   skipped entry; scenario `trader-persist` round-trips a traded-against
   window). The inventory-roll/depth rows still own roll semantics.
   *Anchors:* `src/server/game/trader.zig:207` (maybeRestockTrader),
-  `src/server/c2s/misc.zig:668`, `src/server/persist.zig` saveTraders/
+  `src/server/c2s/misc_vehicle.zig:44`, `src/server/persist.zig` saveTraders/
   loadTraders, `src/ecs/quest_trade.zig:943` (traderRestock),
   `asm.il:863657-863767`, `asm.il:863770-863910`
 
@@ -1721,7 +1721,7 @@ parsed, and quest offering is unwired.
   offer into the journal (tier-filtered, giver position = the offering trader)
   and re-sends the list without it. Scenario `trader-quest-open` drives the
   open → accept → turn-in loop.
-  *Anchors:* `src/server/c2s/quest.zig:250-330`, `src/server/game/replicate.zig:80-155`,
+  *Anchors:* `src/server/c2s/quest_trade.zig:160-240`, `src/server/game/replicate.zig:80-155`,
   `src/assets/npc.zig`, `asm.il:827745-827765`
 
 - **Quest turn-in / phase advance on trader open** `WORKS` `(2026-08-22)`
@@ -1736,8 +1736,8 @@ parsed, and quest offering is unwired.
   the second lock-open with the coin reward, and a fetch quest parked at
   ready_turn_in completes on a single open.
   *Anchors:* `src/ecs/quest_trade.zig:414` questOnTraderOpen,
-  `src/server/c2s/misc.zig:674` (lock-open call site),
-  `src/server/c2s/quest.zig:342` (TraderData fallback), scenario
+  `src/server/c2s/misc_vehicle.zig:50` (lock-open call site),
+  `src/server/c2s/quest_trade.zig:252` (TraderData fallback), scenario
   `trader-quest-open`
 
 - **Trader dialog window, greeting, voice, radial commands** `WORKS` `(2026-09-07)`
@@ -2100,7 +2100,7 @@ encoding is one day high.
   §5.5.5). A knockback impulse beyond the stock band no longer ships
   non-stock motion values to peers.
   *Anchors:* `src/wire/stock_velocity.zig:19-29`,
-  `src/server/c2s/misc.zig:591-604`
+  `src/server/c2s/misc_lock.zig:195-208`
 
 - **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`
   The V3.1.0 SandboxCode path is implemented end to end (the row's
@@ -3212,7 +3212,7 @@ unvalidated, and durability, mods and repair do not exist.
   stays client-driven (stock's client-side progress model). Documented
   residuals, not stock-parity gaps.
   *Anchors:* `src/assets/recipes.zig:151-186`, `:21`, `:161-163`,
-  `src/server/game/craft.zig:124-128`, `src/server/c2s/inv.zig:427-432`,
+  `src/server/game/craft.zig:124-128`, `src/server/c2s/inv_txn.zig:28-33`,
   `asm.il:1392695-1392710`
 
 - **Server craft execution** `WORKS` (2026-08-25):
@@ -3241,7 +3241,7 @@ unvalidated, and durability, mods and repair do not exist.
   surface. Scenario `stock InventoryTransaction applies and acks` pins the
   apply + ack.
   *Anchors:* `src/wire/stock_invtx.zig:60` (`parseStockInvTx`),
-  `src/server/c2s/inv.zig:536-591` (stock apply + ack),
+  `src/server/c2s/inv_txn.zig:137-192` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 
@@ -3416,7 +3416,7 @@ unvalidated, and durability, mods and repair do not exist.
   `AI kill drops the player's real inventory` proves the AI path; unit test
   pins the range copy.
   *Anchors:* `src/server/game.zig` spawnDeathBag,
-  `src/server/game/replicate_health.zig:26`, `src/server/c2s/misc.zig:529`,
+  `src/server/game/replicate_health.zig:26`, `src/server/c2s/misc_lock.zig:133`,
   `src/ecs/world.zig:1000` spawnLootBagFrom
 
 - **Storage TileEntity S2C** `WORKS` `(2026-08-22)`
@@ -3466,7 +3466,7 @@ unvalidated, and durability, mods and repair do not exist.
   `InventoryTransaction.Write` ops (SetAbsolute/SetRelative/SetAll) on the
   player inventory with the minimal stock ack (GAP InvTx row, 2026-08-22), so
   a mutation made through this path lands instead of being dropped.
-  *Anchors:* `src/server/game.zig`, `src/server/c2s/inv.zig:536-591`,
+  *Anchors:* `src/server/game.zig`, `src/server/c2s/inv_txn.zig:137-192`,
   `asm.il:613064-613088`, `asm.il:613124-613223`
 
 - **Loot respawn and destroy_on_close** `WORKS` `(2026-08-22)`
@@ -3484,7 +3484,7 @@ unvalidated, and durability, mods and repair do not exist.
   stock `DroppedEntityClass` block-property override for the drop bag is not
   modeled (rare; the stock default EntityLootContainer is used).
   *Anchors:* `src/server/game/chunk_fill.zig:293-322,363-415`,
-  `src/server/c2s/misc.zig:568` (LockRequest), `src/assets/loot.zig` parse,
+  `src/server/c2s/misc_lock.zig:172` (LockRequest), `src/assets/loot.zig` parse,
   `src/world/containers.zig` loot_list,
   `../../7dtd-engine-research/docs/gameplay/loot-economy.md:454-456,458-465`
 
@@ -4224,7 +4224,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   damage verdicts (on_player_damage), held-tool durability wear, combat noise and
   knockback-velocity fan-out on top of the validated apply; the row carried no
   documented residual and the stale `PARTIAL` marker is corrected.
-  *Anchors:* `src/server/c2s/misc.zig:381-520`, `src/ecs/world.zig:665-710`,
+  *Anchors:* `src/server/c2s/misc_damage.zig:44-395`, `src/ecs/world.zig:665-710`,
   `src/ecs/components.zig:22-30`
 
 - **Zombie melee damage replicated to the victim** `WORKS` (2026-08-06)
@@ -4299,7 +4299,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   EntityStatChanged 100/100 (the redundant world-spawn teleport that flashed
   the client to spawn before the bed was removed 2026-08-22; the stat now
   follows the spawn confirm so it cannot be discarded in the death state).
-  *Anchors:* `src/server/c2s/join.zig:323-381`,
+  *Anchors:* `src/server/c2s/join_spawn.zig:91-149`,
   scenario `bedroll respawn`, `finale/player_respawn`
 
 - **Respawn zeroes food and water** `WORKS`
@@ -4333,7 +4333,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   client-side on stock too: the window, the method buttons, and the near-
   bedroll/backpack scatter. No server packet carries the choice.
   *Anchors:* `src/server/c2s/join.zig` (RequestToSpawn + SpawnedInWorld arms),
-  `src/server/c2s/inv.zig:754-759`, `src/server/game/world.zig:284-294`,
+  `src/server/c2s/inv_txn.zig:201-206`, `src/server/game/world.zig:284-294`,
   `src/server/persist.zig:729-741`, `src/wire/packages.zig`
   (`parseSpawnedBody`), scenarios `bedroll respawn`, `spawn confirm`,
   IL `XUiC_SpawnSelectionWindow` (buttons b__19_2..7, switch IL_0126),
@@ -4354,7 +4354,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   it redundant and it proves no ownership), so the "single scrap" placeholder
   bag the row described is gone.
   *Anchors:* `src/server/game.zig` (`spawnDeathBag`),
-  `src/server/c2s/misc.zig:513-536`, `src/server/game/replicate_health.zig:30`,
+  `src/server/c2s/misc_lock.zig:117-140`, `src/server/game/replicate_health.zig:30`,
   scenario `AI kill drops the player's real inventory as a death bag`
 
 - **DeathPenalty server option** `WORKS`
@@ -4458,7 +4458,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   survival loop's first tick pushes HP/food/water/max and stamina via
   `NetPackageEntityStatChanged` immediately after spawn (`survival_sync_cd`
   starts at 0), so the client's HUD reads the same stats with no waiting.
-  *Anchors:* `src/server/persist.zig` ZPV8/9 tail, `src/server/c2s/join.zig:203,230`
+  *Anchors:* `src/server/persist.zig` ZPV8/9 tail, `src/server/c2s/join_spawn.zig:174,230`
   (restore before/after spawn), `src/server/game/tick.zig:131` (first-tick sync),
   `src/server/game/join.zig` sendSurvivalStats / sendStaminaStats
 
@@ -4758,7 +4758,7 @@ a finer server encoding.
   `setBlockWorld` remains for air/terrain edits where rotation does not
   apply.
   *Anchors:* `src/world/store.zig:779-783` setBlockRawWorld,
-  `src/server/c2s/blocks.zig:68,160` (placement), `src/wire/stock_chunk.zig:44`,
+  `src/server/c2s/blocks_fx.zig:45,160` (placement), `src/wire/stock_chunk.zig:44`,
   test `rotation raw lives in the chunk plane and survives save/reload`
 
 - **Block damage in the chunk wire** `WORKS`
@@ -4990,7 +4990,7 @@ a finer server encoding.
   1024) is gone: any number of distinct damaged blocks keeps its absolute value
   mid-fight, survives chunk eviction and restarts, and the chunk wire damage
   channel reads the plane directly (no store scan per cell).
-  *Anchors:* `src/server/c2s/blocks.zig:63-135`, `src/server/game/world.zig`
+  *Anchors:* `src/server/c2s/blocks_explosion.zig:51-123`, `src/server/game/world.zig`
   (`setBlockHp`/`getBlockHp`/`clearBlockHp`), `src/world/store.zig`
   (`Chunk.damages`, `setDmg`/`dmgAt`), `src/server/game/chunk_fill.zig`
   (`DmgCtx`)
@@ -5016,7 +5016,7 @@ a finer server encoding.
   client-side stock mechanics (the client deducts materials during its own
   upgrade flow and our dig/repair path already grants mining XP), documented
   as such.
-  *Anchors:* `src/server/c2s/blocks.zig:148-153` (target validation),
+  *Anchors:* `src/server/c2s/blocks_explosion.zig:136-141` (target validation),
   `src/assets/maxdamage.zig:75-76,208-210` (UpgradeBlock table),
   `asm.il:96718-96762`, `asm.il:657572`
 
@@ -5072,7 +5072,7 @@ a finer server encoding.
 
   **Residual (found 2026-09-09): the durability modifier applies to player
   block damage only.** The multiplier is read at exactly one site, the
-  `SetBlock` C2S handler (`c2s/blocks.zig:196-201`), gated on
+  `SetBlock` C2S handler (`src/server/c2s/blocks_explosion.zig:184-189`), gated on
   `claim.owner_entity == editor_ent`. Every other path that destroys a block
   calls plain `maxDamageForBlock(id)` and never looks a claim up: zombie chew
   (`game/tick.zig:486`), zombie dig (`game/tick.zig:637`) and explosion AoE
@@ -5101,7 +5101,7 @@ a finer server encoding.
   which way stock resolves it: two damage sources against the same block
   disagree about its HP, and the row said nothing about it.
   *Anchors:* `src/server/game.zig` registerClaim/claimCovering,
-  `:5995-6005`, `src/server/c2s/blocks.zig:196-201`,
+  `:5995-6005`, `src/server/c2s/blocks_explosion.zig:184-189`,
   `src/server/game/tick.zig:486`, `:637`, `src/server/game/world.zig:439`
 
 - **Land claim removal when the keystone is destroyed** `WORKS`
@@ -5311,7 +5311,7 @@ persists so little that a restart visibly damages a built base.
   relays. The vending C2S buy residual is tracked by the Vending machines
   row.)
   *Anchors:* `src/server/game.zig`, `src/server/c2s/quest.zig`
-  (NetPackageWaypoint), `src/server/c2s/misc.zig:205` (EntityRagdoll relay),
+  (NetPackageWaypoint), `src/server/c2s/misc.zig:75` (EntityRagdoll relay),
   `asm.il:791490-791510`,
   `asm.il:793038-793060`
 
@@ -5613,7 +5613,7 @@ persists so little that a restart visibly damages a built base.
   ServerAdminSlotsPermission add admin headroom (total < max + adminSlots);
   0 = disabled, so the default gate degenerates to the plain cap.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
-  `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
+  `src/server/c2s/join_spawn.zig:93`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `src/server/game/tick.zig` (`tickServerAdminReload`),
   `../7dtd-engine-research/docs/meta/dedicated-misc-systems.md` (AdminBlacklist)
 
@@ -5991,7 +5991,7 @@ persists so little that a restart visibly damages a built base.
   the last autosave (bag markers, bedroll, skills). The save now lives inside
   `dropClientSlot`, so no call site can omit it, and the reaps keep their own
   (they clear the slot directly and never route through the drop).
-  *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
+  *Anchors:* `src/server/c2s/misc_turret.zig:54-65`, `src/server/game/tick.zig`
   `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
 - **Per-peer memory footprint** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
@@ -6131,7 +6131,7 @@ nobody re-opens a closed row from a stale one.
 |---|---|
 | Earlier `GAP_ANALYSIS.md` trader-window note and `docs/STATUS.md:2789`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
 | Earlier `GAP_ANALYSIS.md` note: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
-| `docs/GAP_ANALYSIS.md:6470`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` src/ecs/world.zig:891), a placed bedroll records the respawn point (c2s/inv.zig:714-721) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
+| `docs/GAP_ANALYSIS.md:6470`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` src/ecs/world.zig:891), a placed bedroll records the respawn point (src/server/c2s/inv_txn.zig:315-322) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
 | `docs/GAP_ANALYSIS.md:6471`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
 | `docs/STATUS.md:2784`: "Player death → respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
 | `docs/GAP_ANALYSIS.md:7221`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |

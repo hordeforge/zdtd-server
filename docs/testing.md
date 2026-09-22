@@ -73,8 +73,8 @@ lines, which is the closest thing to a client-side A/B that runs unattended.
 (`src/server/game/harness.zig:36`) walks a real join: connect, challenge echo,
 `NetPackagePlayerLogin`, `NetPackageRequestToEnterGame`,
 `NetPackageRequestToSpawnPlayer`, all through `Game.onData`. `injectFramed`
-(`src/server/game/harness.zig:88`) sends any later package, and `replicate`
-(`src/server/game/harness.zig:94`) runs the interest pass.
+(`src/server/game/harness.zig:88`) sends any later package, and `Game.replicate`
+(`src/server/game/replicate.zig:20`) runs the interest pass.
 
 Representative coverage: join bundle completeness
 (`src/server/scenarios.zig:6509`), paced spawn-area streaming

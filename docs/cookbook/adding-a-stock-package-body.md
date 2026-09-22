@@ -149,7 +149,7 @@ or zero-pad to a guessed size, because that desyncs the client's `BinaryReader`
 ```
 
 So the caller's job is to count the failure and skip the send, which is the
-shape used for every optional S2C body (`src/server/c2s/move.zig:201`):
+shape used for every optional S2C body (`src/server/c2s/move_state.zig:47`):
 
 ```zig
         const flags_body = packages.buildAliveFlagsBody(&flags_buf, f.entity_id, f.flags) catch {

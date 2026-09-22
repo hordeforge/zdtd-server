@@ -140,7 +140,7 @@ Removals land in a 16-entry result buffer on the tick result (`src/ecs/schedule.
 
 ## Catalog shape from buffs.xml
 
-`assets/buffs.zig` parses the catalog into a `Table` and never touches an entity. Each buff keeps its class fields, its tag list, its passive rows, its stat mods, its stat thresholds and its bounded triggered surface (`src/assets/buffs.zig:126`):
+`assets/buffs.zig` parses the catalog into a `Table` and never touches an entity. Each buff keeps its class fields, its tag list, its passive rows, its stat mods, its stat thresholds and its bounded triggered surface (`src/assets/buffs.zig:123`):
 
 ```zig
 pub const BuffDef = struct {
@@ -229,7 +229,7 @@ pub const AddRemoveBuff = struct {
 };
 ```
 
-`parseAddRemoveBuff` reads the same order off untrusted input, bounds-checking every field and capping the name through the caller's buffer (`src/wire/stock_buff.zig:113`). The C2S route is registered with the other social packages in the quest-domain handler, then delegated to `handleAddRemoveBuff` (`src/server/c2s/quest.zig:366`, `:374`). That handler parses the body, rejects a malformed one and a body whose entity id is not the sender's, increments the buff-reject counter, then resolves the name through the catalog and refuses an unknown name rather than inventing a def (`src/server/game/social.zig:15`, `:20`, `:25`). A successful add or remove is relayed to every other peer through one function, which is also the single place the server applies, drops or clears a buff, so hooking it gives an observer the whole set rather than the one path that happened to be wired (`src/server/game/social.zig:121`, `:136`).
+`parseAddRemoveBuff` reads the same order off untrusted input, bounds-checking every field and capping the name through the caller's buffer (`src/wire/stock_buff.zig:113`). The C2S route is registered with the other social packages in the quest-domain handler, then delegated to `handleAddRemoveBuff` (`src/server/c2s/quest_buff.zig:16`, `:374`). That handler parses the body, rejects a malformed one and a body whose entity id is not the sender's, increments the buff-reject counter, then resolves the name through the catalog and refuses an unknown name rather than inventing a def (`src/server/game/social.zig:15`, `:20`, `:25`). A successful add or remove is relayed to every other peer through one function, which is also the single place the server applies, drops or clears a buff, so hooking it gives an observer the whole set rather than the one path that happened to be wired (`src/server/game/social.zig:121`, `:136`).
 
 Two rejoin paths exist because the player data file's buff section is written empty in the fresh form. `sendBuffSync` sends a `NetPackageEntityStatsBuff` per other player with a non-empty blob (`src/server/game/social.zig:54`), and `sendOwnBuffs` sends one adding `AddRemoveBuff` per active buff of the joining player, without which the client's icons vanish on rejoin even though the server kept the state (`src/server/game/social.zig:93`). Both build from the same instance fields, and the wire tests assert the encoder against hand-built byte arrays taken from the client IL rather than against the decoder, which is what pins the field order (`src/wire/stock_buff.zig:135`, `:147`).
 
