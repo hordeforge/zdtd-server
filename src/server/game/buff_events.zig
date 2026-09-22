@@ -427,8 +427,14 @@ pub fn applyTriggeredBuffsAoe(self: *Game, holder: ecs.Slot, res: *const assets_
     if (res.add_aoe_n == 0) return;
     if (!self.sim.mask[holder].transform) return;
     const vp = self.sim.transform[holder];
-    var s: ecs.Slot = 0;
-    while (s < ecs.world.max_entities) : (s += 1) {
+    // Walk the packed live set (slot-ascending, same order as an open scan) so
+    // the fan-out costs the entities the server has, not the slot table it was
+    // sized with. Snapshotted by value: a buff row that frees a slot mid-walk
+    // must not shift the iteration, and the alive re-check below still holds.
+    var live = self.sim.alive_bits;
+    var it_live = live.iterator(.{});
+    while (it_live.next()) |si| {
+        const s: ecs.Slot = @intCast(si);
         if (s == holder) continue;
         // Candidates are live damageable entities: players always qualify;
         // zombies/animals qualify even without a buff set yet (addCatalogBuff

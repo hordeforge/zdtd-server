@@ -383,7 +383,9 @@ pub const World = struct {
     /// is never recycled within one tick: per-client known_entities is keyed
     /// by slot and only reconciled against alive[] once per tick, so same-tick
     /// reuse (destroy then spawnLootBag) would suppress the EntitySpawn.
-    freed_this_tick: [max_entities]bool = .{false} ** max_entities,
+    /// Word-packed like `alive_bits` so allocSlot unions the two sets instead
+    /// of walking a byte per slot.
+    freed_this_tick: std.StaticBitSet(max_entities) = std.StaticBitSet(max_entities).initEmpty(),
     /// True when any destroy() ran since beginTick. Replicate skips the
     /// known_entities reconcile when no slots were freed this tick.
     any_freed_this_tick: bool = false,
@@ -807,15 +809,17 @@ pub const World = struct {
     }
 
     fn allocSlot(self: *World) ?Slot {
-        var i: Slot = 0;
-        while (i < max_entities) : (i += 1) {
-            if (!self.alive[i] and !self.freed_this_tick[i]) return i;
-        }
+        // Lowest slot that is neither live nor freed this tick, off the packed
+        // sets: a horde tick spawns many entities and each one used to walk the
+        // `alive[]` byte column twice.
+        var taken = self.alive_bits;
+        taken.setUnion(self.freed_this_tick);
+        taken.toggleAll();
+        if (taken.findFirstSet()) |i| return @intCast(i);
         // At capacity: fall back to just-freed slots rather than failing the spawn.
-        i = 0;
-        while (i < max_entities) : (i += 1) {
-            if (!self.alive[i]) return i;
-        }
+        var dead = self.alive_bits;
+        dead.toggleAll();
+        if (dead.findFirstSet()) |i| return @intCast(i);
         return null;
     }
 
@@ -828,7 +832,7 @@ pub const World = struct {
         // sees the same truth as alive[]: this slot is gone.
         self.alive[slot] = false;
         self.alive_bits.unset(slot);
-        self.freed_this_tick[slot] = true;
+        self.freed_this_tick.set(slot);
         self.any_freed_this_tick = true;
         // Release the ambient spawn-rule budget (kill attrition, spawning.md
         // §3): a zombie spawned by the biome drip decrements its rule's count.
@@ -924,7 +928,7 @@ pub const World = struct {
     /// Clear tick locals at the start of each sim frame (schedule / tickAll).
     pub fn beginTick(self: *World) void {
         self.sim_tick +%= 1;
-        @memset(&self.freed_this_tick, false);
+        self.freed_this_tick = .initEmpty();
         // Budget for this tick from last tick's demand (granted + refused).
         // Read on the main thread with the AI phase quiesced, so the sum is a
         // plain deterministic total, not a racy sample.

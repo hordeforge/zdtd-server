@@ -447,6 +447,36 @@ test "alive_bits and dirty_bits survive random spawn destroy churn" {
     try std.testing.expectEqual(@as(usize, max_entities), w.alive_bits.count());
 }
 
+test "allocSlot skips slots freed this tick, then reuses them at capacity" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    // Two low slots, both freed inside one tick.
+    const a = w.slotOfNetId(w.spawnZombie(0, 70, 0, 40).?).?;
+    const b = w.slotOfNetId(w.spawnZombie(1, 70, 1, 40).?).?;
+    w.beginTick();
+    w.destroy(a);
+    w.destroy(b);
+    // Same tick: the next spawns take fresh slots, never the two just freed,
+    // or a client keyed on slot would miss the EntitySpawn.
+    const fresh1 = w.slotOfNetId(w.spawnZombie(2, 70, 2, 40).?).?;
+    const fresh2 = w.slotOfNetId(w.spawnZombie(3, 70, 3, 40).?).?;
+    try std.testing.expect(fresh1 != a and fresh1 != b);
+    try std.testing.expect(fresh2 != a and fresh2 != b);
+    // Full table: the freed-slot fallback is the only way to keep spawning.
+    while (w.spawnZombie(4, 70, 4, 40) != null) {}
+    try std.testing.expect(w.alive_bits.isSet(a));
+    try std.testing.expect(w.alive_bits.isSet(b));
+    try std.testing.expectEqual(@as(usize, max_entities), w.alive_bits.count());
+    // At capacity with nothing dead, the spawn fails closed.
+    try std.testing.expect(w.spawnZombie(5, 70, 5, 40) == null);
+    // One free slot and it was freed this tick: the fallback still hands it
+    // out rather than refusing a spawn the table has room for.
+    w.beginTick();
+    w.destroy(a);
+    try std.testing.expectEqual(a, w.slotOfNetId(w.spawnZombie(6, 70, 6, 40).?).?);
+}
+
 test "slot recycle does not inherit the previous tenant's dirty bit" {
     var w: World = .{};
     defer w.deinit();

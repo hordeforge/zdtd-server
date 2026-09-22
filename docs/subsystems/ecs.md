@@ -153,24 +153,26 @@ Per-domain state that lives in these columns has its own page or doc section: in
 
 ## Spawn, despawn, and slot reuse
 
-There is no free list. `allocSlot` linearly scans for the lowest slot that is neither alive nor freed this tick, and only falls back to a just-freed slot when the table is full (`src/ecs/world.zig:792`):
+There is no free list. `allocSlot` takes the lowest slot that is neither alive nor freed this tick off the packed sets, and only falls back to a just-freed slot when the table is full (`src/ecs/world.zig:811`):
 
 ```zig
     fn allocSlot(self: *World) ?Slot {
-        var i: Slot = 0;
-        while (i < max_entities) : (i += 1) {
-            if (!self.alive[i] and !self.freed_this_tick[i]) return i;
-        }
+        // Lowest slot that is neither live nor freed this tick, off the packed
+        // sets: a horde tick spawns many entities and each one used to walk the
+        // `alive[]` byte column twice.
+        var taken = self.alive_bits;
+        taken.setUnion(self.freed_this_tick);
+        taken.toggleAll();
+        if (taken.findFirstSet()) |i| return @intCast(i);
         // At capacity: fall back to just-freed slots rather than failing the spawn.
-        i = 0;
-        while (i < max_entities) : (i += 1) {
-            if (!self.alive[i]) return i;
-        }
+        var dead = self.alive_bits;
+        dead.toggleAll();
+        if (dead.findFirstSet()) |i| return @intCast(i);
         return null;
     }
 ```
 
-`freed_this_tick` is the reason a slot is never recycled within one tick (`src/ecs/world.zig:379`). Per-client `known_entities` is keyed by slot and reconciled against `alive[]` once per tick, so a destroy-then-spawn in the same tick would suppress an `EntitySpawn` the client still needs. `beginTick` clears the flag array (`src/ecs/world.zig:914`), and `destroy` sets `any_freed_this_tick` so replicate knows whether it must reconcile at all (`src/ecs/world.zig:382`). A soft warning fires once when `entity_count` crosses 80 percent of capacity (`src/ecs/entity.zig:3`, `src/ecs/world.zig:1129`).
+`freed_this_tick` is the reason a slot is never recycled within one tick (`src/ecs/world.zig:388`). Per-client `known_entities` is keyed by slot and reconciled against `alive[]` once per tick, so a destroy-then-spawn in the same tick would suppress an `EntitySpawn` the client still needs. It is a `StaticBitSet` alongside `alive_bits` so the two sets union in a few word ops. `beginTick` resets it (`src/ecs/world.zig:931`), and `destroy` sets `any_freed_this_tick` so replicate knows whether it must reconcile at all (`src/ecs/world.zig:391`). A soft warning fires once when `entity_count` crosses 80 percent of capacity (`src/ecs/entity.zig:3`, `src/ecs/world.zig:1144`).
 
 `spawnBase` is the single insertion point (`src/ecs/world.zig:1122`). It allocates a network id and then a slot, marks the entity alive in both `alive[]` and `alive_bits`, increments `entity_count`, inserts into the kind group, sets the base mask, writes transform, health, generation and `Flags` with `flag_spawned`, seeds `class_id` from the fixed `class_table` index that its `Kind` selects, and registers the id in `net_to_slot`. Specialised helpers (`spawnPlayer`, `spawnZombieDef`, `spawnAnimalDef`, `spawnSleeperDef`, `spawnLootBag`, `spawnFallingBlocks`, `spawnTrader`, `spawnVehicleEx`, `spawnTurret`) call it and then set their component's fields; `spawnZombieDef` exists so a class resolved from XML carries its stats on the entity even when its index was never preloaded into the fixed class table (`src/ecs/components.zig:99`, `src/ecs/world.zig:1206`).
 
