@@ -368,7 +368,7 @@ fn resolveProp(
     key: []const u8,
     depth: u8,
 ) ?[]const u8 {
-    if (depth > 24) return null;
+    if (depth > max_extends_depth) return null;
     const rc = classes.get(name) orelse return null;
     if (rc.props.get(key)) |v| return v;
     if (rc.extends) |ex| return resolveProp(classes, ex, key, depth + 1);
@@ -426,7 +426,7 @@ fn resolveExplosion(
     var cur: ?[]const u8 = name;
     var depth: u8 = 0;
     while (cur) |cn| : (depth += 1) {
-        if (depth > 24) break;
+        if (depth > max_extends_depth) break;
         const rc = classes.get(cn) orelse break;
         const eb = rc.explosion orelse {
             cur = rc.extends;
@@ -497,60 +497,62 @@ fn orTaskName(mask: *u16, raw: []const u8) void {
 /// One parsed `SetNearestEntityAsTarget class=` player triple (hear/see
 /// distances in metres; hear 0 reads 50 stock-side per the targetClasses
 /// parse IL, see 0 = unset).
+/// Extends-chain recursion limit. A cycle or a pathological template chain
+/// stops the walk instead of spinning; stock chains are a handful deep.
+const max_extends_depth: u8 = 24;
+
 pub const TargetPlayerSense = struct {
     hear: f32 = 0,
     see: f32 = 0,
 };
 
-/// Walk the Extends chain like resolveProp. `AITarget` pipe blobs and
-/// numbered `AITarget-N` props both count; a child pipe blob replaces the
-/// parent list, numbered keys merge unless the child also ships a pipe blob
-/// (same rule as resolvedAiTasks). Returns the first EntityPlayer triple
-/// found walking from the child up, or null when no entry names the player.
+/// Walk the Extends chain like resolveProp, pulling the first `AITarget`
+/// entry that `parse` accepts. `AITarget` pipe blobs and numbered
+/// `AITarget-N` props both count; a child pipe blob replaces the parent list
+/// (a pipe with no accepted entry stops the walk), numbered keys merge upward
+/// (same rule as resolvedAiTasks). Null when no class in the chain has one.
+fn resolvedAiTargetEntry(
+    comptime T: type,
+    comptime parse: fn ([]const u8) ?T,
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) ?T {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > max_extends_depth) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: ?T = null;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = e.value_ptr.*;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                if (parse(std.mem.trim(u8, rest[0..cut], " \t\r\n"))) |v| {
+                    if (is_pipe) return v;
+                    if (numbered == null) numbered = v;
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered;
+        }
+        if (numbered) |v| return v;
+        cur = rc.extends;
+    }
+    return null;
+}
+
+/// First `SetNearestEntityAsTarget` EntityPlayer triple in the Extends chain.
 fn resolvedTargetPlayerSense(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
 ) ?TargetPlayerSense {
-    var cur: ?[]const u8 = name;
-    var depth: u8 = 0;
-    while (cur) |cn| : (depth += 1) {
-        if (depth > 24) break;
-        const rc = classes.get(cn) orelse break;
-        var numbered: ?TargetPlayerSense = null;
-        var it = rc.props.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            const val = e.value_ptr.*;
-            const is_pipe = std.mem.eql(u8, key, "AITarget");
-            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
-            if (!is_pipe and !is_numbered) continue;
-            var rest = val;
-            while (rest.len > 0) {
-                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
-                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
-                if (cut >= rest.len) {
-                    if (parseTargetPlayerEntry(entry)) |s| {
-                        if (is_pipe) return s;
-                        if (numbered == null) numbered = s;
-                    }
-                    break;
-                }
-                if (parseTargetPlayerEntry(entry)) |s| {
-                    if (is_pipe) return s;
-                    if (numbered == null) numbered = s;
-                }
-                rest = rest[cut + 1 ..];
-            }
-            if (is_pipe) {
-                // A child pipe blob replaces the parent list: a pipe with no
-                // player entry stops the walk (same rule as resolvedAiTasks).
-                return numbered;
-            }
-        }
-        if (numbered) |s| return s;
-        cur = rc.extends;
-    }
-    return null;
+    return resolvedAiTargetEntry(TargetPlayerSense, parseTargetPlayerEntry, classes, name);
 }
 
 /// Parse one `SetNearestEntityAsTarget class=...` entry for its EntityPlayer
@@ -577,9 +579,9 @@ fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
         n += 1;
     }
     var i: usize = 0;
-    while (i + 2 < n + 1 and i < n) : (i += 3) {
+    while (i + 1 < n) : (i += 3) {
         if (!std.mem.eql(u8, parts[i], "EntityPlayer")) continue;
-        const hear: f32 = if (i + 1 < n) std.fmt.parseFloat(f32, parts[i + 1]) catch 0 else 0;
+        const hear: f32 = std.fmt.parseFloat(f32, parts[i + 1]) catch 0;
         const see: f32 = if (i + 2 < n) std.fmt.parseFloat(f32, parts[i + 2]) catch 0 else 0;
         return .{ .hear = if (hear == 0) 50 else hear, .see = see };
     }
@@ -589,8 +591,9 @@ fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
 /// Parse one `SetAsTargetIfHurt class=...` entry into the victim-class bit
 /// set (bit 0 = filtered entry exists, bit 1 = EntityPlayer, bit 2 =
 /// EntityBandit, bit 3 = EntityEnemyAnimal; `EAISetAsTargetIfHurt` SetData IL
-/// splits `class` on comma). A bare entry (no class=) returns 0, keeping the
-/// legacy always-retarget path. Null unless the entry is SetAsTargetIfHurt.
+/// splits `class` on comma). Null unless the entry is a SetAsTargetIfHurt
+/// that carries a `class=` filter; a bare entry keeps the legacy
+/// always-retarget path, which the resolver reports as 0 bits.
 fn parseHurtTargetClasses(entry: []const u8) ?u8 {
     var name = entry;
     var data: []const u8 = "";
@@ -600,7 +603,7 @@ fn parseHurtTargetClasses(entry: []const u8) ?u8 {
     }
     if (!std.mem.eql(u8, name, "SetAsTargetIfHurt")) return null;
     const marker = "class=";
-    const ci = std.mem.find(u8, data, marker) orelse return 0;
+    const ci = std.mem.find(u8, data, marker) orelse return null;
     var bits: u8 = 1;
     var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
     while (it.next()) |p| {
@@ -648,7 +651,7 @@ fn parseBlockIfAlert(entry: []const u8) ?u8 {
         n += 1;
     }
     var i: usize = 0;
-    while (i + 2 < n + 1 and i < n) : (i += 3) {
+    while (i + 1 < n) : (i += 3) {
         // The stock row is `alert e 0`: unalerted evaluates true, so the
         // executing BlockIf holds the target mutex over sense acquisition.
         // Any alert arm (e or ne, any value) marks the class gated; the gate
@@ -658,91 +661,21 @@ fn parseBlockIfAlert(entry: []const u8) ?u8 {
     return bits;
 }
 
-/// Same Extends walk as resolvedTargetPlayerSense, but for the BlockIf
-/// alert gate: the first BlockIf entry walking from the child up wins (a
-/// child list without one falls through to the parent template, matching
-/// the pipe/numbered merge rule of the sense resolvers above).
+/// BlockIf alert-gate bits for the class, 0 when the chain has no BlockIf.
 fn resolvedBlockIfAlert(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
 ) u8 {
-    var cur: ?[]const u8 = name;
-    var depth: u8 = 0;
-    while (cur) |cn| : (depth += 1) {
-        if (depth > 24) break;
-        const rc = classes.get(cn) orelse break;
-        var numbered: u8 = 0;
-        var saw_numbered = false;
-        var it = rc.props.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            const val = e.value_ptr.*;
-            const is_pipe = std.mem.eql(u8, key, "AITarget");
-            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
-            if (!is_pipe and !is_numbered) continue;
-            var rest = val;
-            while (rest.len > 0) {
-                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
-                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
-                if (parseBlockIfAlert(entry)) |b| {
-                    if (b != 0) {
-                        if (is_pipe) return b;
-                        numbered = b;
-                        saw_numbered = true;
-                    }
-                }
-                if (cut >= rest.len) break;
-                rest = rest[cut + 1 ..];
-            }
-            if (is_pipe) return numbered;
-        }
-        if (saw_numbered) return numbered;
-        cur = rc.extends;
-    }
-    return 0;
+    return resolvedAiTargetEntry(u8, parseBlockIfAlert, classes, name) orelse 0;
 }
 
-/// Same Extends walk as resolvedTargetPlayerSense, but for the hurt-task
-/// class filter: the first class-filtered entry walking from the child up
-/// wins; a bare entry (or none) returns 0.
+/// SetAsTargetIfHurt victim-class bits for the class, 0 when the chain has no
+/// class-filtered entry (the legacy always-retarget path).
 fn resolvedHurtTargetClasses(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
 ) u8 {
-    var cur: ?[]const u8 = name;
-    var depth: u8 = 0;
-    while (cur) |cn| : (depth += 1) {
-        if (depth > 24) break;
-        const rc = classes.get(cn) orelse break;
-        var numbered: u8 = 0;
-        var saw_numbered = false;
-        var it = rc.props.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            const val = e.value_ptr.*;
-            const is_pipe = std.mem.eql(u8, key, "AITarget");
-            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
-            if (!is_pipe and !is_numbered) continue;
-            var rest = val;
-            while (rest.len > 0) {
-                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
-                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
-                if (parseHurtTargetClasses(entry)) |b| {
-                    if (b != 0) {
-                        if (is_pipe) return b;
-                        numbered = b;
-                        saw_numbered = true;
-                    }
-                }
-                if (cut >= rest.len) break;
-                rest = rest[cut + 1 ..];
-            }
-            if (is_pipe) return numbered;
-        }
-        if (saw_numbered) return numbered;
-        cur = rc.extends;
-    }
-    return 0;
+    return resolvedAiTargetEntry(u8, parseHurtTargetClasses, classes, name) orelse 0;
 }
 fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
@@ -753,7 +686,7 @@ fn resolvedAiTasks(
     var cur: ?[]const u8 = name;
     var depth: u8 = 0;
     while (cur) |cn| : (depth += 1) {
-        if (depth > 24) break;
+        if (depth > max_extends_depth) break;
         const rc = classes.get(cn) orelse break;
         var numbered: u16 = 0;
         var numbered_n: u8 = 0;

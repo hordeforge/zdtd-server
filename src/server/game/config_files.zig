@@ -64,15 +64,18 @@ pub fn cacheBuiltForTest() bool {
 /// Raw-Deflate `src` into an owned buffer. A result that does not fit the
 /// blob cap fails with `error.ConfigBlobTooLarge` (never truncate, PRD R12).
 fn deflateBlob(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
-    const sink_cap = max_config_blob_len + 1024;
-    const out_buf = try allocator.alloc(u8, sink_cap);
-    defer allocator.free(out_buf);
+    // One byte of slack past the cap so an exactly-at-cap blob still fits and
+    // an over-cap one is rejected by the explicit check, not by a writer
+    // overflow that cannot tell "too large" from "encoder broke".
+    const out_buf = try allocator.alloc(u8, max_config_blob_len + 1);
+    errdefer allocator.free(out_buf);
     var window: [flate.max_window_len]u8 = undefined;
     var sink: std.Io.Writer = .fixed(out_buf);
     var comp = flate.Compress.init(&sink, &window, .raw, .default) catch return error.Overflow;
     comp.writer.writeAll(src) catch return error.ConfigBlobTooLarge;
     comp.finish() catch return error.ConfigBlobTooLarge;
-    return try allocator.dupe(u8, out_buf[0..sink.end]);
+    if (sink.end > max_config_blob_len) return error.ConfigBlobTooLarge;
+    return try allocator.realloc(out_buf, sink.end);
 }
 
 /// Build the Deflate cache from the same patched bytes the loaders use
@@ -250,4 +253,22 @@ pub fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
         .{ summary.count, summary.bytes, framed.len },
     );
+}
+
+test "deflateBlob rejects a blob past the cap instead of shipping it" {
+    const gpa = std.testing.allocator;
+
+    const small = try deflateBlob(gpa, "<configs><a/><b/></configs>");
+    defer gpa.free(small);
+    try std.testing.expect(small.len > 0);
+    try std.testing.expect(small.len <= max_config_blob_len);
+
+    // Seeded noise is incompressible, so raw Deflate lands just past its
+    // input: 1 MiB of it must trip the cap, not silently ride out on the
+    // sink's slack and desync the client's BinaryReader.
+    const noise = try gpa.alloc(u8, 1024 * 1024);
+    defer gpa.free(noise);
+    var prng = std.Random.DefaultPrng.init(0x7d7d);
+    prng.random().bytes(noise);
+    try std.testing.expectError(error.ConfigBlobTooLarge, deflateBlob(gpa, noise));
 }
