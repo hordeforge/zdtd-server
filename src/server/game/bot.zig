@@ -499,7 +499,7 @@ pub const BotManager = struct {
     }
 
     /// Live bots attributed to `src` (src 0 = the native console's own bots).
-    fn countFor(self: *const BotManager, src: i16) u32 {
+    pub fn countFor(self: *const BotManager, src: i16) u32 {
         var n: u32 = 0;
         for (&self.bots) |*b| {
             if (b.alive and b.src == src) n += 1;
