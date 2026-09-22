@@ -346,6 +346,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, trader and vending window open, unlock). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
+| `src/server/c2s/move_position.zig` | R | C2S movement arms (absolute/relative position, collect, alive flags). Split out of move.zig verbatim |
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
 | `src/server/c2s/quest_party.zig` | R | C2S quest arms (land-claim repair, shared quests, party actions). Split out of quest.zig verbatim |
 | `src/server/c2s/quest_waypoint.zig` | R | C2S quest arms (goto/treasure points, allies, waypoints, kill awards). Split out of quest.zig verbatim |
