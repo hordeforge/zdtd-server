@@ -16,6 +16,10 @@ const admin_xml = @import("../admin_xml.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const game_wasm_host = @import("wasm_host.zig");
 
+/// traders.xml `trader_info` id for Trader Jen in stock npc.xml (V3.2.0 b10).
+/// Offline demo only: with a game-dir the id comes from npc.xml.
+const demo_jen_trader_info_id: u16 = 2;
+
 pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: game_mod.InitOptions, had_saved_entities: bool) !void {
     // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn
     // first, then the rest of the map (max_volumes bounds the volume store;
@@ -276,13 +280,21 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
     }
     // Stock npc.xml maps Trader Jen / npcTraderJen to traders.xml id 2.
-    // Offline fixtures have no npc.xml, so traderIdForClass returns 0; keep the
-    // stock Jen id so TraderData.get_TraderInfo() is non-null for showrestock.
+    // Offline fixtures have no npc.xml, so traderIdForClass returns 0; the
+    // stock Jen pin keeps TraderData.get_TraderInfo() non-null for showrestock
+    // on the no-game-dir demo. With a game-dir the miss fails closed (rule 15):
+    // a trader carrying an invented trader_info id is worse than no trader.
     const jen_info_id: u16 = blk: {
+        if (!opts.demo_seed) break :blk 0;
         const id = self.npc.traderIdForClass("Trader Jen");
-        break :blk if (id != 0) id else 2;
+        if (id != 0) break :blk id;
+        if (self.stock_catalogs_requested) {
+            util_log.warn("zdtd: npc.xml has no Trader Jen row; demo trader not seeded\n", .{});
+            break :blk 0;
+        }
+        break :blk demo_jen_trader_info_id;
     };
-    if (opts.demo_seed) {
+    if (jen_info_id != 0) {
         if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, jen_info_id, self.trader_wallet_dukes)) |trader_id| {
             self.fillTraderFromXml(trader_id);
         }
