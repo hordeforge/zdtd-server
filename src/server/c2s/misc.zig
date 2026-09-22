@@ -19,6 +19,7 @@ const misc_admin = @import("misc_admin.zig");
 const misc_damage = @import("misc_damage.zig");
 const misc_lock = @import("misc_lock.zig");
 const misc_vehicle = @import("misc_vehicle.zig");
+const misc_wire = @import("misc_wire.zig");
 const misc_drop = @import("misc_drop.zig");
 const protocol = @import("../../protocol.zig");
 const replicate_te = @import("../game/replicate_te.zig");
@@ -48,10 +49,9 @@ const plugin_compose = @import("../game/plugin_compose.zig");
 /// this alias keeps the name resolving for any out-of-tree caller.
 const fatal_kill_amount = misc_damage.fatal_kill_amount;
 
-/// Highest `WireActions` value NetPackageWireToolActions::ProcessPackage
-/// (IL=254) acts on: the switch takes 0 (SetParent) and 1 (RemoveParent) and
-/// returns for anything else, so a higher op never reaches its rebroadcast.
-const wire_tool_max_op: u8 = 1;
+/// Highest `WireActions` value. Lives in misc_wire.zig with the wire arms;
+/// this alias keeps the name resolving for any out-of-tree caller.
+const wire_tool_max_op = misc_wire.wire_tool_max_op;
 
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -69,6 +69,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try misc_damage.handleDamage(self, c, peer, name, body)) return true;
     if (try misc_lock.handleLock(self, c, peer, name, body)) return true;
     if (try misc_vehicle.handleVehicle(self, c, peer, name, body)) return true;
+    if (try misc_wire.handleWire(self, c, peer, name, body)) return true;
     // Accepted and dropped on purpose (phase-gated above, so this is a
     // deliberate no-op, not an unhandled package). Each is a documented
     // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
@@ -109,43 +110,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageWireActions")) {
-        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
-        // this broadcast out to every other peer for free (bandwidth DoS).
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        // Stock parent/child wiring (SetParent/RemoveParent) drives powered state.
-        _ = self.sim.power.applyWireActionsStock(body);
-        // Rebroadcast raw package so peers get the client-side wire visual.
-        try self.broadcastExcept("NetPackageWireActions", body, c.slot);
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageWireToolActions")) {
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        // Tool handshake carries one endpoint + player: visual only, no graph
-        // mutation (mirrors stock ProcessPackage re-Setup+SendPackage to peers).
-        // read IL=13: currentOperation u8 | tileEntityPosition Vector3i |
-        // entityID i32. ProcessPackage IL=254 opens with
-        // ValidEntityIdForSender(entityID, false) and returns on failure, so a
-        // body naming another player is dropped, not relayed. It also returns
-        // for any operation outside {0,1} before reaching either SendPackage.
-        const tool = packages.parseWireToolActions(body) catch {
-            self.harness.counters.inc(.c2s_malformed);
-            return true;
-        };
-        if (tool.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
-        if (tool.operation > wire_tool_max_op) return true;
-        try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAnimationData")) {
