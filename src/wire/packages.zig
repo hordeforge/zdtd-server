@@ -8,6 +8,7 @@
 
 pub const platform_user = @import("platform_user.zig");
 pub const stock_inv = @import("stock_inv.zig");
+pub const stock_inv_apply = @import("stock_inv_apply.zig");
 pub const stock_chunk = @import("stock_chunk.zig");
 pub const stock_deco = @import("stock_deco.zig");
 pub const stock_nameid = @import("stock_nameid.zig");

@@ -477,6 +477,10 @@ pub fn skipEcdNetworkWriteFalse(r: *binary.Reader) binary.ReadError!struct { ent
     return .{ .entity_id = entity_id, .x = x, .y = y, .z = z };
 }
 
+/// Parse stock NetPackagePlayerInventory body. Lives in stock_inv_apply.zig;
+/// this alias keeps the name resolving for existing callers.
+pub const applyPlayerInventoryBody = @import("stock_inv_apply.zig").applyPlayerInventoryBody;
+
 /// Apply PlayerDataFile.WriteNetwork body (ECD + toolbelt/bag/equip sections).
 /// Stops after Equipment.Write; rest of PDF (quests, waypoints, meta) is ignored for sim.
 pub fn applyPlayerDataNetwork(
@@ -785,94 +789,6 @@ pub fn readItemStackList(r: *binary.Reader, out: []StockSlot) binary.ReadError!u
     return take;
 }
 
-/// Parse stock NetPackagePlayerInventory body and apply present sections into ECS Inventory.
-/// reverse maps absolute stock type → ecs item_id (0 = empty/unknown skipped as empty).
-pub fn applyPlayerInventoryBody(
-    body: []const u8,
-    inv: *components.Inventory,
-    reverse: ?ReverseResolver,
-    ctx: ?*anyopaque,
-) binary.ReadError!void {
-    var r: binary.Reader = .{ .data = body };
-
-    const has_tb = try r.readBool();
-    if (has_tb) {
-        var slots: [toolbelt_slots]StockSlot = [_]StockSlot{.{}} ** toolbelt_slots;
-        const n = try readItemStackList(&r, slots[0..]);
-        var i: usize = 0;
-        while (i < toolbelt_slots) : (i += 1) {
-            if (i < n) {
-                inv.slots[i] = toEcs(slots[i], reverse, ctx);
-            } else {
-                inv.slots[i] = .{};
-            }
-        }
-    }
-
-    const has_bag = try r.readBool();
-    if (has_bag) {
-        // Bag.Write: version byte, u16 count, stacks, locked?, touched?, prefs?
-        const bag_ver = try r.readByte();
-        const bag_n = try r.readU16();
-        var i: usize = 0;
-        while (i < bag_n) : (i += 1) {
-            const s = try readItemStack(&r);
-            if (i < components.inv_bag_count) {
-                inv.slots[components.inv_bag_start + i] = toEcs(s, reverse, ctx);
-            }
-        }
-        // clear remaining bag slots if client sent shorter bag
-        while (i < components.inv_bag_count) : (i += 1) {
-            inv.slots[components.inv_bag_start + i] = .{};
-        }
-        const has_locked = try r.readBool();
-        if (has_locked) {
-            // PackedBoolArray: skip best-effort (length-prefixed bits). Read count if present.
-            // Stock PackedBoolArray.Read: typically length then bytes. Skip remaining carefully:
-            // For empty lock array Write is only false bool; when true, Read reconstructs.
-            // Minimal: if stream has u16 length then that many bits packed.
-            // Use versioned bag path: after locks, version>=1 has touched + prefs.
-            _ = try skipPackedBoolArray(&r);
-        }
-        if (bag_ver >= 1) {
-            _ = try r.readBool(); // touched
-            const has_prefs = try r.readBool();
-            if (has_prefs) {
-                // PreferenceTracker.Write: playerId:i32 + optional toolbelt/equip/bag stacks.
-                // Skip fully so equipment/drag sections after bag still parse.
-                try skipPreferenceTracker(&r);
-            }
-        }
-    }
-
-    const has_eq = try r.readBool();
-    if (has_eq) {
-        const eq_n = try r.readU16();
-        var i: usize = 0;
-        while (i < eq_n) : (i += 1) {
-            const present = try r.readBool();
-            var s: StockSlot = .{};
-            if (present) s = try readItemValue(&r);
-            if (i < components.inv_equip_count) {
-                inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
-            }
-        }
-        // cosmetic i32 per eq slot + unlocked list
-        var ci: usize = 0;
-        while (ci < eq_n) : (ci += 1) _ = try r.readI32();
-        const unlocked = try r.readI32();
-        var ui: i32 = 0;
-        while (ui < unlocked) : (ui += 1) _ = try r.readI32();
-    }
-
-    const has_drag = try r.readBool();
-    if (has_drag) {
-        // GameUtils.ReadItemStack: count + stacks; first is drag
-        var drag_slots: [1]StockSlot = .{.{}};
-        _ = try readItemStackList(&r, drag_slots[0..]);
-        // ECS has no drag slot; ignore contents but parse for stream correctness.
-    }
-}
 
 /// NetPackagePlayerEquipment body after the entityId (`Equipment::Read` IL=93,
 /// Equipment.il.txt:1673): version byte (5 slots when <= 2, 8 when == 3, else
@@ -937,7 +853,7 @@ pub fn countEatableInPlayerInventoryBody(
     return .{ .total = total, .first_stock = first_stock, .first_ecs = first_ecs };
 }
 
-fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
+pub fn skipPreferenceTracker(r: *binary.Reader) binary.ReadError!void {
     _ = try r.readI32(); // PlayerID
     if (try r.readBool()) {
         var tmp: [64]StockSlot = [_]StockSlot{.{}} ** 64;
