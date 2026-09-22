@@ -9,7 +9,10 @@
 # See docs/archive/HARDCODE_AUDIT_2026-08-08.md and docs/GAME_OPTIONS.md.
 
 [stream]
-max_streamed_chunks = 169
+# Compile cap (src/server/zdtd_config.zig max_streamed_chunks_cap) and default.
+# The stream radius is clamped to what this budget squares to, so a lower
+# value silently caps stream_radius_max (169 would pull the 9 below to 6).
+max_streamed_chunks = 625
 chunk_adds_per_stream_tick = 8
 stream_radius_min = 7
 stream_radius_max = 9

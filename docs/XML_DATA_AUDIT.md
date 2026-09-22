@@ -38,7 +38,7 @@ server (client-side or unimplemented surface).
 |---|---|---|
 | archetypes.xml | - | `-` (client-side quest objective templates) |
 | biomes.xml | `biome_layers.zig` (weather groups, layers), `world/biomes.zig` (biomemap colors) | yes |
-| blockplaceholders.xml | - | `-` |
+| blockplaceholders.xml | `blockplaceholders.zig` (weighted replacement lists, biome + sandbox gates) | yes |
 | blocks.xml | `blocks.zig`, `maxdamage.zig` (HP/watts/Class/id↔name), `storage_pairs.zig`, `block_textures.zig` | yes |
 | buffs.xml | `buffs.zig` | yes |
 | challenges.xml | - | `-` (no challenge wire; client-side) |
@@ -47,7 +47,7 @@ server (client-side or unimplemented surface).
 | entityclasses.xml | `entities.zig` (HP, loot, speeds, explosion, XP) | yes |
 | entitygroups.xml | `entitygroups.zig` | yes |
 | events.xml | - | `-` |
-| gameevents.xml | - | `-` |
+| gameevents.xml | `gameevents.zig` (`game_on_death_*` / `game_on_respawn_*` action sequences) | yes |
 | gamestages.xml | `gamestages.zig` | yes |
 | item_modifiers.xml | `item_modifiers.zig` (mod attachment tag gates, RE items.md ItemModificationsFromXml) | yes |
 | items.xml | `items.zig` (stack, econ, fuel, eat, distraction, **Blockname**) | yes |
@@ -79,8 +79,9 @@ server (client-side or unimplemented surface).
 | vehicles.xml | `vehicles.zig` | yes |
 | videos.xml | - | `-` (client) |
 | weathersurvival.xml | - | `F`; server weather params driven by `biomes.xml` `<weather>` groups; TemperatureSurvival gate echoed via sandbox code |
-| worldglobal.xml | - | `-` (day length etc. from serverconfig) |
-| XUi_* / XML.txt / .csv / .txt | - | `-` (client UI / metadata) |
+| worldglobal.xml | `worldglobal.zig` (`<environment>` day/night ambient scales) | yes (ambient leg only; day length stays serverconfig) |
+| Localization.csv | `localization.zig` (base header + modlet-patched cells) | yes (merged, then shipped as `NetPackageLocalization`) |
+| XUi_* / XML.txt / other .csv / .txt | - | `-` (client UI / metadata) |
 
 ## Violations fixed in this audit
 

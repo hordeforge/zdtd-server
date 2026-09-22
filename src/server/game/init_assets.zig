@@ -44,11 +44,6 @@ const ecs = @import("../../ecs/root.zig");
 /// same value here.
 const ecs_aidirector = @import("../../ecs/aidirector.zig");
 
-/// Report a catalog load failure and fall back to the builtin table.
-/// `tryLoad` returns null for "stock file absent" and an error for a real
-/// parse/IO failure, so a bare `catch null` hides the second case: the server
-/// then runs forever on builtin defaults while the operator believes the stock
-/// XML is loaded. Mirrors the blocks/items loaders above.
 /// Items-table lookup for `assets_vehicles.Table.resolveMaxHp`: the item's
 /// `DegradationMax` (0 when the name is unknown, which keeps the floor).
 fn vehicleItemDegradation(ctx: ?*anyopaque, name: []const u8) ?u32 {
@@ -58,6 +53,11 @@ fn vehicleItemDegradation(ctx: ?*anyopaque, name: []const u8) ?u32 {
     return d.degradation_max;
 }
 
+/// Report a catalog load failure and fall back to the builtin table.
+/// `tryLoad` returns null for "stock file absent" and an error for a real
+/// parse/IO failure, so a bare `catch null` hides the second case: the server
+/// then runs forever on builtin defaults while the operator believes the stock
+/// XML is loaded.
 fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result)).error_union.payload {
     return result catch |err| {
         util_log.err("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
