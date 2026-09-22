@@ -85,6 +85,7 @@ pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
 pub const c2s_misc = @import("c2s/misc.zig");
 pub const c2s_misc_chat = @import("c2s/misc_chat.zig");
+pub const c2s_misc_relay = @import("c2s/misc_relay.zig");
 pub const c2s_join = @import("c2s/join.zig");
 pub const c2s_dispatch = @import("c2s/dispatch.zig");
 
@@ -171,6 +172,7 @@ test {
     _ = c2s_quest;
     _ = c2s_misc;
     _ = c2s_misc_chat;
+    _ = c2s_misc_relay;
     _ = c2s_join;
     _ = c2s_dispatch;
 }
