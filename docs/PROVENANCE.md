@@ -319,6 +319,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc_relay.zig` | R | C2S verbatim + avatar-state relays (GameMessage, SoundAtPosition, ParticleEffect, EntityPhysics, EntityRagdoll, PlayerLaserSight). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_drop.zig` | R | C2S validate-and-drop arms (stealth, stat-changed, game-event response). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_session.zig` | R | C2S session arms (PlayerData validate, PlayerDisconnect quit path). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_av.zig` | R | C2S audio + map arms (positional-audio relay, minimap drive). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
