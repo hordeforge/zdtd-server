@@ -12,6 +12,7 @@ pub const xml_util = @import("xml_util.zig");
 pub const unity_hash = @import("unity_hash.zig");
 pub const quests = @import("quests.zig");
 pub const blocks = @import("blocks.zig");
+pub const block_tests = @import("block_tests.zig");
 pub const items = @import("items.zig");
 pub const item_tests = @import("item_tests.zig");
 pub const item_stats = @import("item_stats.zig");
@@ -67,6 +68,7 @@ test {
     _ = unity_hash;
     _ = quests;
     _ = blocks;
+    _ = block_tests;
     _ = items;
     _ = item_tests;
     _ = item_stats;
