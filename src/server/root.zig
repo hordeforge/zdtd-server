@@ -32,6 +32,7 @@ pub const persist_claims = @import("persist_claims.zig");
 pub const persist_entities = @import("persist_entities.zig");
 pub const game_net = @import("game/net.zig");
 pub const game_tick = @import("game/tick.zig");
+pub const game_tick_equip = @import("game/tick_equip.zig");
 pub const game_world_tick = @import("game/world_tick.zig");
 pub const game_buff_events = @import("game/buff_events.zig");
 pub const game_world = @import("game/world.zig");
@@ -155,6 +156,7 @@ test {
     _ = game_net;
     _ = game_game_events;
     _ = game_tick;
+    _ = game_tick_equip;
     _ = game_buff_events;
     _ = game_world_tick;
     _ = game_world;

@@ -50,7 +50,7 @@ drops its tests.
 ## 3. Keep the contract
 
 Every domain handler has the same signature and the same contract
-(`src/server/c2s/inv.zig:78`):
+(`src/server/c2s/inv.zig:30`):
 
 ```zig
 /// True when `name` belongs to this domain and was handled.

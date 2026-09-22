@@ -106,7 +106,7 @@ element named; `zig build test` green.
    - Divergence (document in code comment): stock skips rows with a null cache;
      zdtd sends `-1` instead so a vanilla client's `WaitForConfigsFromServer`
      always completes (proven today), falling back to local files.
-3. Join order is already correct: `c2s/join.zig:236` sends config files after
+3. Join order is already correct: `c2s/join_enter.zig:60` sends config files after
    `sendBlockIdMapping` and before `WorldInfo` / `ChunkClusterInfo` / spawn
    points, matching `RequestToEnterGame` (RE §5.6). No ordering change.
 

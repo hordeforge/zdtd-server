@@ -131,7 +131,7 @@ pub fn writePlayerInventory(
 
 ## C2S operations and validation
 
-`handle` claims nine names on the shared contract (src/server/c2s/inv.zig:79): `ItemReload`, `PlayerInventory`, `HoldingItem`, `ItemDrop`, `Bag`, `DropItemsContainer`, `TileEntity`, `InventoryTransactionRequest`, `InventoryDataRequest`. Every arm that mutates inventory or fans a relay out to peers takes the per-client inventory token bucket first and counts `c2s_throttle` when it is empty (src/server/game/rate_limits.zig:29). Container writes are additionally refused for a peer its guard policy quarantined off the container surface (src/server/c2s/inv.zig:324, 902). Ownership is enforced per target kind (src/server/c2s/inv.zig:338):
+`handle` claims nine names on the shared contract (src/server/c2s/inv.zig:79): `ItemReload`, `PlayerInventory`, `HoldingItem`, `ItemDrop`, `Bag`, `DropItemsContainer`, `TileEntity`, `InventoryTransactionRequest`, `InventoryDataRequest`. Every arm that mutates inventory or fans a relay out to peers takes the per-client inventory token bucket first and counts `c2s_throttle` when it is empty (src/server/game/rate_limits.zig:29). Container writes are additionally refused for a peer its guard policy quarantined off the container surface (src/server/c2s/inv.zig:324, 902). Ownership is enforced per target kind (src/server/c2s/inv_holding.zig:116):
 
 ```zig
         } else if (self.sim.slotOfNetId(entity_id)) |si| {
