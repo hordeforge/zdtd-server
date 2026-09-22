@@ -320,6 +320,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/inv.zig` | R | C2S inventory and block editing: player inventory snapshots, holding/item drop/bag, tile-entity edits, inventory transactions, block trigger/setblock. NetPackageItemReload: entity-gated relay to every peer but the sender (ItemReloadServer IL=32) |
 | `src/server/c2s/join.zig` | R | Join state machine - extracted from game.zig handlePackage (stock SM). Owns the 7 join packages that must stay coherent: PlayerLogin → | Login VersionAuthorizer gate (LongStringNoBuild compVersion compare, EKickReason.VersionMismatch) player-cap gate (PlayerLimitExceeded) at login
 | `src/server/c2s/inv_reload.zig` | R | C2S inventory arms (item reload, player inventory snapshot). Split out of inv.zig verbatim |
+| `src/server/c2s/join_login.zig` | R | C2S join arm (PlayerLogin validate, spawn, join bundle). Split out of join.zig verbatim |
 | `src/server/c2s/inv_holding.zig` | R | C2S inventory arms (holding item, item drop, bag access). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_te.zig` | R | C2S tile-entity arms (drop-container refusal, TE edits). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_txn.zig` | R | C2S inventory arms (transaction requests, data requests). Split out of inv.zig verbatim |
