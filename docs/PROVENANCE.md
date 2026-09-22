@@ -326,6 +326,8 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc_spawn.zig` | R | C2S spawn arms (quest entity spawn, request-to-spawn-entity). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_admin.zig` | R | C2S admin arms (console command, editor volume drop). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_damage.zig` | R | C2S damage arm (kill claims, XP awards, score updates). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_lock.zig` | R | C2S lock arm (container/door lock requests). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, trader and vending window open, unlock). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
