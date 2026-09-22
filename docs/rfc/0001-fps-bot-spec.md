@@ -9,9 +9,10 @@ This document records the contract as built; build order history is in
 [IMPLEMENTATION_PLAN_BOTS.md](../IMPLEMENTATION_PLAN_BOTS.md).
 **Owner:** Wasm plugin (ADR 0020) + a small, fixed host sense/act surface
 (ADR 0026).
-**Reference implementation for behaviour:** `../../../7dtd-fps-bots` C# mod and its
-`../q3-inspiration-notes.md` (Q3 / Doom 3 `BotAimAtEnemy`, `BotCheckAttack`,
-`BotChangeViewAngles`, `BotCharacter` skill blocks).
+**Reference implementation for behaviour:** the `../../../7dtd-fps-bots` C# mod,
+read through [q3-inspiration-notes.md](../q3-inspiration-notes.md) (Q3 / Doom 3
+`BotAimAtEnemy`, `BotCheckAttack`, `BotChangeViewAngles`, `BotCharacter`
+skill blocks).
 
 This document is the **technical contract**: what crosses the plugin boundary,
 in what shape, and what responsibility the host keeps. The product intent,

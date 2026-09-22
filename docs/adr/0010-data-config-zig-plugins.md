@@ -86,6 +86,10 @@ the dedi process.
   inject arbitrary wire bytes or skip authority (ADR 0004).
 - **Gamemode** = config pack + optional static plugin (e.g. `modes/pve.toml` +
   `plugins/pve_rules.zig` linked in; dynlib only after static is proven).
+  The pack half shipped and was later renamed: packs live in `presets/<name>.toml`
+  behind `--preset` ([ADR 0021](0021-config-driven-game-modes.md) decision 3).
+  The static-plugin half is the part [ADR 0020](0020-wasm-only-plugin-api.md)
+  supersedes.
 - **Sandboxed guest code (preferred shape: Wasm)** may be added **later**, only
   as a **guest behind the native plugin host** (see "Wasm modding API" below).
   It is not a substitute for layers 1–3 and not on the raw tick/wire path.

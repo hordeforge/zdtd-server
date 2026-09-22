@@ -4,8 +4,10 @@
 
 Numbered product-requirements documents for zdtd. Format: background →
 scope → requirements (R1…) → acceptance. Status is one of: **draft**,
-**in review**, **shipped** (see each doc's `**Status:**` line). New PRDs
-start from [TEMPLATE.md](TEMPLATE.md).
+**in review**, **partial**, **shipped** (see each doc's `**Status:**` line).
+**partial** means some requirements shipped and the rest are named as gaps in
+the doc, not silently dropped. New PRDs start from
+[TEMPLATE.md](TEMPLATE.md).
 **Related:** [RFC](../rfc/README.md) (design) · [ADR](../adr/README.md) (decisions) · [INDEX.md](../INDEX.md) (doc map)
 
 | PRD | Title | Status |

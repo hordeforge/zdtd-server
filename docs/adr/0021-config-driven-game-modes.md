@@ -68,17 +68,21 @@ access path exist) and hangs off `Game` for the server-side rules.
 `Rules` is the config surface for sim behaviour. `InitOptions` stays what it is,
 an internal argument bag, and is not exposed as a user file.
 
-### 3. A mode pack is a full overlay, not a key subset
+### 3. A pack is a full overlay, not a key subset
 
-`modes/<name>.toml` may set any `Rules` field plus the stock serverconfig keys
-it already supports. Precedence is unchanged and stays operator-wins:
+A pack may set any `Rules` field plus the stock serverconfig keys it already
+supports. Precedence is unchanged and stays operator-wins:
 
 ```
-CLI > env > world/zdtd.toml > CWD zdtd.toml > mode pack > serverconfig > defaults
+CLI > env > world/zdtd.toml > CWD zdtd.toml > preset pack > serverconfig > defaults
 ```
 
-A mode ships a coherent set of defaults; an operator can still override any
+A pack ships a coherent set of defaults; an operator can still override any
 single value without editing the pack.
+
+Shipped naming: the pack directory is `presets/<name>.toml`, selected by
+`--preset NAME` or `[preset] name`; `--mode` is kept as a deprecated alias.
+The Context above uses the pre-decision `modes/` naming on purpose.
 
 ### 4. Behaviour that is not a parameter goes to Wasm, not to config
 

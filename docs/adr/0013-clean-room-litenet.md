@@ -37,8 +37,9 @@ runtime. The Zig process must speak the **client wire** with EAC off.
   explicit gaps rather than accidental stock behavior.
 - The stock `UnsyncedEvents=true` receive-thread design races
   `ConnectionManager.Clients` enumeration under join churn (a managed race,
-  not native: research `docs/network.md` §4.0); the clean-room stack owns its
-  event dispatch and avoids that class of bug by construction.
+  not native: `../../../7dtd-engine-research/docs/network/network.md` §4.0); the
+  clean-room stack owns its event dispatch and avoids that class of bug by
+  construction.
 
 ## Alternatives considered
 
