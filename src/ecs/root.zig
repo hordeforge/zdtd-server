@@ -29,6 +29,7 @@ pub const turrets = @import("turrets.zig");
 pub const falling = @import("falling.zig");
 pub const stealth = @import("stealth.zig");
 pub const ai_tasks = @import("ai_tasks.zig");
+pub const ai_steer = @import("ai_steer.zig");
 pub const buff_tick = @import("buff_tick.zig");
 pub const damage_apply = @import("damage_apply.zig");
 pub const sensing = @import("sensing.zig");
@@ -73,6 +74,7 @@ test {
     _ = falling;
     _ = stealth;
     _ = ai_tasks;
+    _ = ai_steer;
     _ = buff_tick;
     _ = damage_apply;
     _ = sensing;

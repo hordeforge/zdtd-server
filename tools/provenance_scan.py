@@ -644,6 +644,7 @@ def main():
     allowed_wire_writers = {
         # Writes to disk, not to the wire.
         "src/server/persist.zig",
+        "src/server/persist_entities.zig",
         # Test-only bodies: fixtures the tests feed themselves.
         "src/server/scenarios.zig",
         "src/server/game/tests.zig",

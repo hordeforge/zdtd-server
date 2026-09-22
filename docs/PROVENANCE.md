@@ -265,6 +265,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/damage_apply.zig` | R | Deferred damage (gravity integrate, fixed-point accumulator apply). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/buff_tick.zig` | R | Buff tick system (expiry sweep). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/ai_tasks.zig` | R | Combat AI task graph (EAITask priority/mutex, approach/wander/attack tasks, parallel dispatch). Split out of systems.zig, re-exported through the systems facade |
+| `src/ecs/ai_steer.zig` | R | AI steering math (yaw wrap + SeekYaw speed law). Split out of ai_tasks.zig verbatim |
 | `src/ecs/falling.zig` | R | Falling-block system (stability-collapse fall, crush, hit counts). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/stealth.zig` | R | Stealth + noise system (heat events, noise notify, per-player tick). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/dig.zig` | R | Dig system (zombie block-chew cadence). Split out of systems.zig, re-exported through the systems facade |
