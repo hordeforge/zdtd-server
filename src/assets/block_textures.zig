@@ -47,8 +47,8 @@ pub fn parseTextureValue(s: []const u8) u64 {
 }
 
 pub const Table = struct {
-    by_id: std.AutoHashMapUnmanaged(u16, u64) = .{},
-    name_tex: std.StringHashMapUnmanaged(u64) = .{},
+    by_id: std.AutoHashMapUnmanaged(u16, u64) = .empty,
+    name_tex: std.StringHashMapUnmanaged(u64) = .empty,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {
@@ -106,7 +106,7 @@ pub const Table = struct {
     }
 
     const NameIndex = struct {
-        map: std.StringHashMapUnmanaged(usize) = .{},
+        map: std.StringHashMapUnmanaged(usize) = .empty,
     };
 
     fn blockAt(clean: []const u8, pos: usize) bool {

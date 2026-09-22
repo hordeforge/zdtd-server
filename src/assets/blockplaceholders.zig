@@ -82,7 +82,7 @@ pub const LoadCtx = struct {
 
 pub const Table = struct {
     placeholders: []const Placeholder = &.{},
-    by_name: std.StringHashMapUnmanaged(u32) = .{},
+    by_name: std.StringHashMapUnmanaged(u32) = .empty,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {

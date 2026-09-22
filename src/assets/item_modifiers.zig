@@ -270,7 +270,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
     // Extends pass: EconomicValue/Stacknumber/quality inherit from the parent
     // (modGeneralMaster carries econ 400). A child can precede its parent in
     // the file, so this is a second walk.
-    var idx: std.StringHashMapUnmanaged(usize) = .{};
+    var idx: std.StringHashMapUnmanaged(usize) = .empty;
     for (out, 0..) |d, di| try idx.put(arena, d.name, di);
     for (out) |*d| {
         var cur = d.extends;

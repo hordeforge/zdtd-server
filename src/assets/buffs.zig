@@ -168,7 +168,7 @@ pub const Table = struct {
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     /// Lowercased name -> defs index, built once at load (XML tables only;
     /// small builtin/empty tables fall back to the linear scan below).
-    name_index: std.StringHashMapUnmanaged(u16) = .{},
+    name_index: std.StringHashMapUnmanaged(u16) = .empty,
 
     pub fn empty() Table {
         return .{};
@@ -682,7 +682,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             .{ truncated_passives, truncated_triggered, max_passives_per_buff, max_triggered_per_buff },
         );
     }
-    var name_index: std.StringHashMapUnmanaged(u16) = .{};
+    var name_index: std.StringHashMapUnmanaged(u16) = .empty;
     try name_index.ensureTotalCapacity(arena, @intCast(defs.len));
     for (defs, 0..) |d, di| {
         const lower = try arena.alloc(u8, d.name.len);

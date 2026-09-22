@@ -126,7 +126,7 @@ pub fn loadColorTable(allocator: std.mem.Allocator, path: []const u8) !ColorTabl
     const arena = ap.allocator();
 
     // name → id from <biomemap id="09" name="burnt_forest"/>
-    var name_to_id: std.StringHashMapUnmanaged(u8) = .{};
+    var name_to_id: std.StringHashMapUnmanaged(u8) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const mi = std.mem.findPos(u8, clean, i, "<biomemap") orelse break;

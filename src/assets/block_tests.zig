@@ -755,7 +755,7 @@ test "material collidable=false clears the undeclared Collide default" {
     };
     var t = try loadFromPath(std.testing.allocator, cpath, Ctx.lookup, null);
     defer t.deinit();
-    var map: std.StringHashMapUnmanaged(bool) = .{};
+    var map: std.StringHashMapUnmanaged(bool) = .empty;
     defer map.deinit(std.testing.allocator);
     try map.put(std.testing.allocator, "Mair", false);
     try map.put(std.testing.allocator, "Mwater", false);

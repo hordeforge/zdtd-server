@@ -358,7 +358,7 @@ const StubTable = struct {
         output_per_charge: ?f32 = null,
     };
     rows: []const Row,
-    power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
 
     fn idByName(self: *const StubTable, name: []const u8) ?u16 {
         for (self.rows) |r| if (std.mem.eql(u8, r.name, name)) return r.id;

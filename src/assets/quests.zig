@@ -824,9 +824,9 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, policy: q
     // Pre-scan quest tags: name → inner body and template, for the two-pass
     // template resolution below (a derived quest's content comes from the
     // template; 67 stock quests use it, and without it they parse empty).
-    var quest_body: std.StringHashMapUnmanaged([]const u8) = .{};
+    var quest_body: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer quest_body.deinit(allocator);
-    var quest_tpl: std.StringHashMapUnmanaged([]const u8) = .{};
+    var quest_tpl: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer quest_tpl.deinit(allocator);
     {
         var si: usize = 0;

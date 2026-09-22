@@ -45,127 +45,127 @@ const falling_mass_scale: f32 = 8.0;
 /// assets→ecs allowed, ecs→assets forbidden - production wiring uses hooks).
 pub const Table = struct {
     /// name → MaxDamage
-    by_name: std.StringHashMapUnmanaged(u16) = .{},
+    by_name: std.StringHashMapUnmanaged(u16) = .empty,
     /// AssignIds → MaxDamage (filled when .blocks.nim / dump loaded)
-    by_id: std.AutoHashMapUnmanaged(u16, u16) = .{},
+    by_id: std.AutoHashMapUnmanaged(u16, u16) = .empty,
     /// AssignIds → true for blocks with LootList or CompositeTileEntity class
-    storage_ids: std.AutoHashMapUnmanaged(u16, void) = .{},
+    storage_ids: std.AutoHashMapUnmanaged(u16, void) = .empty,
     /// name → true (storage from blocks.xml); keys live in arena
-    storage_names: std.StringHashMapUnmanaged(void) = .{},
+    storage_names: std.StringHashMapUnmanaged(void) = .empty,
     /// block name → blocks.xml LootList (the loot.xml container the block rolls).
-    loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// block name → blocks.xml LootStageMod.
-    loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// block name → blocks.xml LootStageBonus.
-    loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// AssignIds → LootList (filled from the dump/nim merge; arena values).
-    loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
+    loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .empty,
     /// AssignIds → blocks.xml LootStageMod (container GetLootStage multiplier).
-    loot_stage_mod_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
+    loot_stage_mod_by_id: std.AutoHashMapUnmanaged(u16, f32) = .empty,
     /// AssignIds → blocks.xml LootStageBonus (container GetLootStage additive).
-    loot_stage_bonus_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
+    loot_stage_bonus_by_id: std.AutoHashMapUnmanaged(u16, f32) = .empty,
     /// block name → AssignIds runtime id (every dump row, not just MaxDamage hits).
-    id_by_name: std.StringHashMapUnmanaged(u16) = .{},
+    id_by_name: std.StringHashMapUnmanaged(u16) = .empty,
     /// Reverse of `id_by_name`, written by the same merge. Without it `idName`
     /// walked all ~25k dump rows per call, on the per-packet block-edit and
     /// craft-queue paths.
-    name_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
+    name_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .empty,
     /// block name → power watts (MaxPower for sources, else RequiredPower for
     /// consumers). From blocks.xml DynamicProperties, keyed by name like by_name.
-    power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    power_watts_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// block name → turret combat stats (blocks.xml autoTurret/shotgunTurret
     /// MaxDistance/EntityDamage/BurstFireRate/BurstRoundCount). Rule 15: the
     /// placed turret's range/damage/fire interval come from the block data,
     /// never hardcoded sim defaults.
-    turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{},
+    turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .empty,
     /// block name → blocks.xml Class (Generator, BatteryBank, …). Arena keys.
-    power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// Block names whose Extends-resolved Class is "Sleeper" (BlockSleeper's
     /// ctor sets IsSleeperBlock, asm.il 133430-133460; RE world-generation.md).
     /// The stock set is 34 blocks, 16 of them named infestedSleeper* which a
     /// "sleeper" name prefix misses.
-    sleeper_class_names: std.StringHashMapUnmanaged(void) = .{},
+    sleeper_class_names: std.StringHashMapUnmanaged(void) = .empty,
     /// Generator MaxFuel (blocks.xml); missing → no fuel budget entry.
-    power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// Generator OutputPerFuel (blocks.xml).
-    power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// Battery OutputPerCharge (blocks.xml); used as capacity scale with MaxPower.
-    power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// OutputPerStack (solar/battery/gen sub-cell scale).
-    power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml id → MaxDamage (e.g. Mhay → 50). Used when block has no
     /// MaxDamage property and only a Material ref.
-    material_max: std.StringHashMapUnmanaged(u16) = .{},
+    material_max: std.StringHashMapUnmanaged(u16) = .empty,
     /// material name → materials.xml `Experience` (harvest XP; RE items.md
     /// AddLevelExp(material.Experience * count)). 0 = none.
-    material_exp: std.StringHashMapUnmanaged(f32) = .{},
+    material_exp: std.StringHashMapUnmanaged(f32) = .empty,
     /// block name → blocks.xml `Stage2Health` (42 stock doors, all 1): the
     /// wire damage caps at this threshold (RE blocks.md §5 "Stage2Health, if
     /// set, caps the applied value at the stage-2 threshold") while the
     /// internal damage keeps accumulating to MaxDamage for destruction.
-    stage2_health: std.StringHashMapUnmanaged(u16) = .{},
+    stage2_health: std.StringHashMapUnmanaged(u16) = .empty,
     /// block name → material id (from blocks.xml Material property).
-    block_material: std.StringHashMapUnmanaged([]const u8) = .{},
+    block_material: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// block name → resolved `UpgradeBlock.ToBlock` after the Extends chain.
     /// Stock Block.UpgradeBlock (property class) names the block a hammer
     /// upgrade turns this one into; absent means no upgrade path.
-    upgrade_to: std.StringHashMapUnmanaged([]const u8) = .{},
+    upgrade_to: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// block name → resolved `DowngradeBlock` after the Extends chain. Stock
     /// names the block a destroyed block turns into instead of being removed
     /// (RE Block.OnBlockDamaged IL_021D-030D); absent means no downgrade.
-    downgrade_to: std.StringHashMapUnmanaged([]const u8) = .{},
+    downgrade_to: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// block name → resolved `IsDistantDecoration` (blocks.xml property, after
     /// the Extends chain). Only `true` entries are stored; absent means false,
     /// so an unparsed or unknown name fails closed out of the deco tables.
-    distant_deco: std.StringHashMapUnmanaged(void) = .{},
+    distant_deco: std.StringHashMapUnmanaged(void) = .empty,
     /// block name → resolved `MultiBlockDim` (absent means 1x1x1, single block).
-    multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{},
+    multi_block_dim: std.StringHashMapUnmanaged(Dim) = .empty,
     /// block name → resolved `StabilitySupport == false` after the Extends
     /// chain. Stock Block.StabilitySupport defaults true; only explicit false
     /// is stored. A non-support block caps its stability byte at 1.
-    non_support: std.StringHashMapUnmanaged(void) = .{},
+    non_support: std.StringHashMapUnmanaged(void) = .empty,
     /// block name → resolved `StabilityIgnore` (default false): exempt from the
     /// stability plane, never falls and never carries support.
-    stability_ignore_names: std.StringHashMapUnmanaged(void) = .{},
+    stability_ignore_names: std.StringHashMapUnmanaged(void) = .empty,
     /// blocks.xml ShowModelOnFall="false" names (default true per Block.il.txt
     /// 1876-18A2; only explicit false is stored).
-    no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{},
+    no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .empty,
     /// `Shape == "DistantDecoTree"` names after Extends resolution: the shape
     /// whose `BlockShape::Has45DegreeRotations` is true, which makes a random
     /// placeholder rotation use stock's eight-way band.
-    shape45_names: std.StringHashMapUnmanaged(void) = .{},
+    shape45_names: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
-    material_hardness: std.StringHashMapUnmanaged(f32) = .{},
-    material_mass: std.StringHashMapUnmanaged(f32) = .{},
+    material_hardness: std.StringHashMapUnmanaged(f32) = .empty,
+    material_mass: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml damage_category per material id (e.g. Mdirt → "earth").
     /// Explosion DamageBonus multipliers key on this (stock cop: earth → 0).
-    material_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    material_category: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// materials.xml forge_category per material id (e.g. Mmetal → "iron").
     /// Forge melt matches this (case-insensitive) against InputMaterials.
-    material_forge_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    material_forge_category: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// materials.xml StabilitySupport per material id (23 stock rows, 19
     /// false). BlocksFromXml IL_06DE-070F: a block whose resolved property
     /// dictionary does not declare StabilitySupport takes the material's value.
-    material_stability_support: std.StringHashMapUnmanaged(bool) = .{},
+    material_stability_support: std.StringHashMapUnmanaged(bool) = .empty,
     /// Block names whose resolved property dictionary declares StabilitySupport
     /// (so the material default must not override it).
-    stability_explicit: std.StringHashMapUnmanaged(void) = .{},
+    stability_explicit: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml explosionresistance per material id (24 stock rows, the
     /// `(1 - resistance)` numerator of Explosion::AttackBlocks IL_03D0-040E).
-    material_explosion_resist: std.StringHashMapUnmanaged(f32) = .{},
+    material_explosion_resist: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml collidable per material id (4 stock rows false: Mair,
     /// Mwater, Mhay). The block collision default when no Collide mask exists
     /// (BlocksFromXml IL_04D5-04EB).
-    material_collidable: std.StringHashMapUnmanaged(bool) = .{},
+    material_collidable: std.StringHashMapUnmanaged(bool) = .empty,
     /// materials.xml `CanDestroy` (only Mbedrock declares false). Stock only
     /// consults it in `ItemActionAttack::Hit` IL_028A-029D, where it zeroes the
     /// block-damage scalar; `MaterialBlock::.ctor` defaults it true.
-    material_can_destroy: std.StringHashMapUnmanaged(bool) = .{},
+    material_can_destroy: std.StringHashMapUnmanaged(bool) = .empty,
     /// materials.xml movement_factor per material id (7 stock rows).
-    material_movement_factor: std.StringHashMapUnmanaged(f32) = .{},
+    material_movement_factor: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml lightopacity per material id (18 stock rows).
-    material_light_opacity: std.StringHashMapUnmanaged(i32) = .{},
+    material_light_opacity: std.StringHashMapUnmanaged(i32) = .empty,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -983,23 +983,23 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     }
     const arena = arena_holder.allocator();
 
-    var by_name: std.StringHashMapUnmanaged(u16) = .{};
-    var storage_names: std.StringHashMapUnmanaged(void) = .{};
-    var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
-    var loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{};
-    var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
-    var power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{};
-    var block_material: std.StringHashMapUnmanaged([]const u8) = .{};
-    var stage2_map: std.StringHashMapUnmanaged(u16) = .{};
+    var by_name: std.StringHashMapUnmanaged(u16) = .empty;
+    var storage_names: std.StringHashMapUnmanaged(void) = .empty;
+    var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .empty;
+    var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .empty;
+    var block_material: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var stage2_map: std.StringHashMapUnmanaged(u16) = .empty;
     // Own facts first; Extends chains are resolved in a second pass because a
     // child can appear before its parent in the file.
-    var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .{};
+    var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
@@ -1133,16 +1133,16 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         i = body_end;
     }
 
-    var distant_deco: std.StringHashMapUnmanaged(void) = .{};
-    var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
-    var non_support: std.StringHashMapUnmanaged(void) = .{};
-    var stability_explicit: std.StringHashMapUnmanaged(void) = .{};
-    var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
-    var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
-    var shape45_names: std.StringHashMapUnmanaged(void) = .{};
-    var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
-    var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
-    var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
+    var distant_deco: std.StringHashMapUnmanaged(void) = .empty;
+    var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .empty;
+    var non_support: std.StringHashMapUnmanaged(void) = .empty;
+    var stability_explicit: std.StringHashMapUnmanaged(void) = .empty;
+    var stability_ignore_names: std.StringHashMapUnmanaged(void) = .empty;
+    var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .empty;
+    var shape45_names: std.StringHashMapUnmanaged(void) = .empty;
+    var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var sleeper_class_names: std.StringHashMapUnmanaged(void) = .empty;
     // Property inheritance through Extends (stock BlocksFromXml CreateProperties
     // copies the parent's resolved dictionary minus the child's param1 list).
     // MaxDamage is the headline case: 318 blocks declare it, 1449 inherit it,

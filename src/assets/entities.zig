@@ -840,7 +840,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     }
     const arena = arena_holder.allocator();
 
-    var classes: std.StringHashMapUnmanaged(RawClass) = .{};
+    var classes: std.StringHashMapUnmanaged(RawClass) = .empty;
     defer {
         var it = classes.iterator();
         while (it.next()) |e| e.value_ptr.props.deinit(allocator);
@@ -850,7 +850,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     // <replace_passive_effect> name -> value map (the stock HP list:
     // healthSlim 125 ... healthBruteInfernal 3100). passive_effect rows that
     // start with '^' reference these.
-    var hp_vars: std.StringHashMapUnmanaged([]const u8) = .{};
+    var hp_vars: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer hp_vars.deinit(allocator);
     if (std.mem.findPos(u8, clean, 0, "<replace_passive_effect")) |rv| {
         const rv_end = std.mem.findPos(u8, clean, rv, "</replace_passive_effect>") orelse clean.len;
@@ -867,7 +867,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     // <replace_properties> name -> value map (chargedMoveSpeedPattern, the
     // xpSlim01..xpStrongFeral03 XP ladder, ...). Plain <property> rows
     // (ExperienceGain among them) reference these with a leading '^'.
-    var prop_vars: std.StringHashMapUnmanaged([]const u8) = .{};
+    var prop_vars: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer prop_vars.deinit(allocator);
     if (std.mem.findPos(u8, clean, 0, "<replace_properties")) |rv| {
         const rv_end = std.mem.findPos(u8, clean, rv, "</replace_properties>") orelse clean.len;
@@ -897,7 +897,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         }
         const body = clean[gt + 1 .. body_end];
 
-        var props: std.StringHashMapUnmanaged([]const u8) = .{};
+        var props: std.StringHashMapUnmanaged([]const u8) = .empty;
         var pi: usize = 0;
         while (pi < body.len) {
             // property rows and the HealthMax passive_effect row share the

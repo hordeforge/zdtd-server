@@ -2649,7 +2649,7 @@ test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     // has none, so seed two synthetic power block ids through the same build
     // path a stock install would use.
     const PowerStub = struct {
-        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
         pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
             if (std.mem.eql(u8, name, "generatorbank")) return 20001;
             if (std.mem.eql(u8, name, "batterybank")) return 20002;
@@ -2708,7 +2708,7 @@ test "a latched switch comes back on after a restart, not off" {
         std.testing.allocator.destroy(g);
     }
     const SwitchStub = struct {
-        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
         pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
             if (std.mem.eql(u8, name, "switch")) return 20003;
             return null;
@@ -7888,7 +7888,7 @@ test "a generator's remaining fuel survives a restart instead of refilling" {
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     const PowerStub = struct {
-        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
         pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
             if (std.mem.eql(u8, name, "generatorbank")) return 20001;
             return null;

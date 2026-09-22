@@ -154,18 +154,14 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // cells. dens_at stays as the scalar fallback when raws are absent
         // (non-stock profile) or the planes are incomplete.
         .dens_at = if (ch.densities == null) null else BlockCtx.dens,
-        .dens_plane = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
-            const d = ch.densities.?;
-            // Slice length asserted above; ptrCast to fixed array for SIMD dens pack.
-            std.debug.assert(d.len >= 65536);
-            break :blk @as(*const [65536]u8, @ptrCast(d.ptr));
-        } else null,
-        .dens_set = if (profile.isStock() and ch.densities != null and ch.dens_set != null) blk: {
-            const s = ch.dens_set.?;
-            // Slice length asserted above; ptrCast to fixed array for dens bitset.
-            std.debug.assert(s.len >= 8192);
-            break :blk @as(*const [8192]u8, @ptrCast(s.ptr));
-        } else null,
+        .dens_plane = if (profile.isStock() and ch.densities != null and ch.dens_set != null)
+            ch.densities.?[0..packages.stock_chunk.stock_plane_cells]
+        else
+            null,
+        .dens_set = if (profile.isStock() and ch.densities != null and ch.dens_set != null)
+            ch.dens_set.?[0..packages.stock_chunk.stock_dens_set_bytes]
+        else
+            null,
         .water_block_id = self.world.terrain_ids.water,
         // Same gate as dens_at: with no damage plane every cell reads 0, and
         // writeDamageChannel's null branch (sameValue 0 per layer) writes the
@@ -177,12 +173,10 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // encode skips the 65536-cell scratch fill and the density/water SIMD
         // packs read it directly. Scratch remains the fallback when blocks are
         // still lazy (height-only / unmaterialized). Stock dialect only.
-        .raws = if (profile.isStock() and ch.blocks != null) blk: {
-            const b = ch.blocks.?;
-            // Slice length asserted above; ptrCast to fixed [65536]u32 for encode SIMD.
-            std.debug.assert(b.len >= 65536);
-            break :blk @as(*const [65536]u32, @ptrCast(b.ptr));
-        } else null,
+        .raws = if (profile.isStock() and ch.blocks != null)
+            ch.blocks.?[0..packages.stock_chunk.stock_plane_cells]
+        else
+            null,
         .raws_scratch = if (profile.isStock()) &self.chunk_raws else null,
         // Per-cell biome (GAP per-chunk-biome row): the biome map under each
         // column, so transitions follow biomes.png / the proc field instead of

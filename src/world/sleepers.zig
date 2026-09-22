@@ -412,13 +412,13 @@ pub fn loadFromPrefabs(
     defer list.deinit(allocator);
 
     // Cache xml body by prefab name.
-    var xml_cache: std.StringHashMapUnmanaged([]const u8) = .{};
+    var xml_cache: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer xml_cache.deinit(allocator);
 
     // Cache prefab voxel data (`.tts`) and local-id name map (`.blocks.nim`) by
     // prefab name for authored spawn-point extraction. Null = tried and absent.
-    var tts_cache: std.StringHashMapUnmanaged(?*tts_rot.TtsBlocks) = .{};
-    var nim_cache: std.StringHashMapUnmanaged(?*blocks_nim.Map) = .{};
+    var tts_cache: std.StringHashMapUnmanaged(?*tts_rot.TtsBlocks) = .empty;
+    var nim_cache: std.StringHashMapUnmanaged(?*blocks_nim.Map) = .empty;
     defer {
         var tit = tts_cache.valueIterator();
         while (tit.next()) |v| if (v.*) |p| {

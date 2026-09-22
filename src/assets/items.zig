@@ -1534,34 +1534,34 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     // stock items get their econ from a master, e.g. armorAssassinBoots ->
     // armorMediumMaster econ 1000; no stock item declares EconomicValue="0").
     {
-        var own_stack_map: std.StringHashMapUnmanaged(u16) = .{};
+        var own_stack_map: std.StringHashMapUnmanaged(u16) = .empty;
         defer own_stack_map.deinit(allocator);
-        var own_sellable_map: std.StringHashMapUnmanaged(bool) = .{};
+        var own_sellable_map: std.StringHashMapUnmanaged(bool) = .empty;
         defer own_sellable_map.deinit(allocator);
-        var own_tq_min_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_tq_min_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_tq_min_map.deinit(allocator);
-        var own_tq_max_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_tq_max_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_tq_max_map.deinit(allocator);
-        var own_econ_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_econ_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_econ_map.deinit(allocator);
-        var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
+        var own_bundle_map: std.StringHashMapUnmanaged(u16) = .empty;
         defer own_bundle_map.deinit(allocator);
-        var own_weight_map: std.StringHashMapUnmanaged(u16) = .{};
+        var own_weight_map: std.StringHashMapUnmanaged(u16) = .empty;
         defer own_weight_map.deinit(allocator);
-        var own_melt_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_melt_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_melt_map.deinit(allocator);
-        var own_material_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        var own_material_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer own_material_map.deinit(allocator);
         // Hand-item Range / DamageBlock and the item Tags list inherit too
         // (meleeHandZombieFeral takes its parent's Action0 Range; the loot mod
         // roll and the attachment scrub read the inherited Tags).
-        var own_range_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_range_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_range_map.deinit(allocator);
-        var own_dmgblock_map: std.StringHashMapUnmanaged(f32) = .{};
+        var own_dmgblock_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_dmgblock_map.deinit(allocator);
-        var own_tags_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        var own_tags_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer own_tags_map.deinit(allocator);
-        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
@@ -1717,7 +1717,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         // the first ancestor that declares one (gunHandgunT1Pistol ->
         // gunHandgunMaster).
         {
-            var own_quality_map: std.StringHashMapUnmanaged(bool) = .{};
+            var own_quality_map: std.StringHashMapUnmanaged(bool) = .empty;
             defer own_quality_map.deinit(allocator);
             for (stock_names.items, 0..) |n, idx| {
                 if (stock_effect_group_declared.items[idx])
@@ -1740,13 +1740,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         // PDR rows): the first ancestor with a row wins (stock property
         // inheritance; RE items.md Extends).
         {
-            var own_pdr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+            var own_pdr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .empty;
             defer own_pdr_map.deinit(allocator);
-            var own_pdrn_map: std.StringHashMapUnmanaged(u8) = .{};
+            var own_pdrn_map: std.StringHashMapUnmanaged(u8) = .empty;
             defer own_pdrn_map.deinit(allocator);
-            var own_edr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+            var own_edr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .empty;
             defer own_edr_map.deinit(allocator);
-            var own_edrn_map: std.StringHashMapUnmanaged(u8) = .{};
+            var own_edrn_map: std.StringHashMapUnmanaged(u8) = .empty;
             defer own_edrn_map.deinit(allocator);
             for (stock_names.items, 0..) |n, idx| {
                 if (stock_pdr_n.items[idx] > 0) {
@@ -1783,9 +1783,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // ModSlots inherits through Extends like the resist curves: an
             // item that only overrides damage keeps its base's mod budget.
             {
-                var own_mslots_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+                var own_mslots_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .empty;
                 defer own_mslots_map.deinit(allocator);
-                var own_mslotsn_map: std.StringHashMapUnmanaged(u8) = .{};
+                var own_mslotsn_map: std.StringHashMapUnmanaged(u8) = .empty;
                 defer own_mslotsn_map.deinit(allocator);
                 for (stock_names.items, 0..) |n, idx| {
                     if (stock_mslots_n.items[idx] > 0) {
@@ -1808,9 +1808,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             }
             // CraftingSmeltTime inherits through Extends (same as ModSlots).
             {
-                var own_smelt_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+                var own_smelt_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .empty;
                 defer own_smelt_map.deinit(allocator);
-                var own_smeltn_map: std.StringHashMapUnmanaged(u8) = .{};
+                var own_smeltn_map: std.StringHashMapUnmanaged(u8) = .empty;
                 defer own_smeltn_map.deinit(allocator);
                 for (stock_names.items, 0..) |n, idx| {
                     if (stock_smelt_n.items[idx] > 0) {
@@ -1841,12 +1841,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     // valid against the arena copy.
     var item_passives: []const buffs.Passive = &.{};
     {
-        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
-        var own_passive_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .{};
+        var own_passive_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .empty;
         defer own_passive_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (stock_passive_ranges.items[idx][1] > 0)
@@ -1882,12 +1882,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     // reads; most items declare none).
     var item_triggered: []const buffs.Triggered = &.{};
     {
-        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
-        var own_trig_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .{};
+        var own_trig_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .empty;
         defer own_trig_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (stock_triggered_ranges.items[idx][1] > 0)

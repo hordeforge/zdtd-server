@@ -40,6 +40,10 @@ const stock_layers: usize = 64;
 /// carry the full value (light-mesh-water.md section 4).
 pub const water_mass_full: u16 = 19500;
 const cells_per_layer: usize = 1024; // 16*16*4
+/// Dense plane cell count for the stock 16x16x256 chunk (x + z*16 + y*256).
+pub const stock_plane_cells: usize = stock_layers * cells_per_layer;
+/// Density-override bitset covering `stock_plane_cells`, one bit per cell.
+pub const stock_dens_set_bytes: usize = stock_plane_cells / 8;
 
 /// Block rawData provider: (lx, y, lz) -> full BlockValue.rawData (type + rot + meta).
 pub const BlockAtFn = *const fn (ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32;
@@ -94,24 +98,25 @@ pub const EncodeOpts = struct {
     /// paired client mod.
     layers: usize = stock_layers,
     y_dim: usize = 256,
-    /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
+    /// Dense precomputed raw plane (`stock_plane_cells` BlockValue cells, x + z*16 + y*256).
     /// When set, the block-layer loop and density/water SIMD packs read it
     /// directly. When null, `raws_scratch` is filled once (height-band SIMD or
     /// block_at) and then used the same way.
     /// Stock-only: the plane type is the 256-tall layout, so non-stock
     /// profiles must pass null here and rely on the per-layer block_at
     /// callback path.
-    raws: ?*const [65536]u32 = null,
+    raws: ?*const [stock_plane_cells]u32 = null,
     /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Used
     /// only when `raws` is null. Null disables the memoization: channels fall
     /// back to the block_at callback.
-    raws_scratch: ?*[65536]u32 = null,
+    raws_scratch: ?*[stock_plane_cells]u32 = null,
     /// TTS density paint plane (stock sbyte as u8) + bitset of painted cells.
-    /// Both null, or both stock-length (65536 dens / 8192 set bytes). When set
-    /// with `raws`, writeDensityChannel SIMD-packs from raws then overlays
-    /// painted cells so POI chunks keep the fast path instead of dens_at.
-    dens_plane: ?*const [65536]u8 = null,
-    dens_set: ?*const [8192]u8 = null,
+    /// Both null, or both stock-length (`stock_plane_cells` dens bytes /
+    /// `stock_dens_set_bytes` set bytes). When set with `raws`,
+    /// writeDensityChannel SIMD-packs from raws then overlays painted cells
+    /// so POI chunks keep the fast path instead of dens_at.
+    dens_plane: ?*const [stock_plane_cells]u8 = null,
+    dens_set: ?*const [stock_dens_set_bytes]u8 = null,
 };
 
 fn texAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u64 {
@@ -146,7 +151,7 @@ fn defaultBlockAt(heights: *const [256]u8, lx: i32, y: i32, lz: i32) u32 {
 /// Fill a dense 16×256×16 raw plane from the height map (`defaultBlockAt`).
 /// Vectorized over 16-wide XZ runs per Y. Scalar equivalent: `out[i] =
 /// defaultBlockAt(heights, i%16, i/256, (i/16)%16)`.
-pub fn fillDefaultRawsFromHeights(heights: *const [256]u8, out: *[65536]u32) void {
+pub fn fillDefaultRawsFromHeights(heights: *const [256]u8, out: *[stock_plane_cells]u32) void {
     const lanes = 16;
     const V = @Vector(lanes, u32);
     const Vu = @Vector(lanes, u16);
@@ -703,7 +708,7 @@ fn densityAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u8 {
 /// `base` is the absolute plane index of dens[0] (y0*256). dens_set bits are
 /// 1 = dens_plane[idx] is a TTS override. Scalar equivalent: per cell, if the
 /// set bit is on write dens_plane else keep the raw-derived density.
-fn overlayDensPaint(dens: *[cells_per_layer]u8, dens_plane: *const [65536]u8, dens_set: *const [8192]u8, base: usize) void {
+fn overlayDensPaint(dens: *[cells_per_layer]u8, dens_plane: *const [stock_plane_cells]u8, dens_set: *const [stock_dens_set_bytes]u8, base: usize) void {
     const lanes: usize = 8;
     var c: usize = 0;
     while (c + lanes <= cells_per_layer) : (c += lanes) {
@@ -1299,7 +1304,7 @@ test "fillDefaultRawsFromHeights SIMD matches defaultBlockAt" {
                 else => rnd.int(u8),
             };
         }
-        var plane: [65536]u32 = undefined;
+        var plane: [stock_plane_cells]u32 = undefined;
         fillDefaultRawsFromHeights(&heights, &plane);
         var i: usize = 0;
         while (i < plane.len) : (i += 1) {
@@ -1387,7 +1392,7 @@ test "dens_at always-null callback matches dens_at null encode (SIMD path)" {
     // plane. This pins that the always-null-callback scalar density loop and
     // the SIMD packDensityFromRaws path produce identical wire bytes.
     var heights: [256]u8 = .{60} ** 256;
-    var plane: [65536]u32 = undefined;
+    var plane: [stock_plane_cells]u32 = undefined;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
         const lx: i32 = @intCast(i % 16);
@@ -1486,9 +1491,9 @@ test "simd packU16Plane and fillWaterMassFromRaws match scalar" {
 test "simd density channel with dens_plane overlay matches dens_at scalar" {
     // POI path: raws + TTS dens_plane/dens_set must match dens_at callback bytes.
     var heights: [256]u8 = .{60} ** 256;
-    var plane: [65536]u32 = undefined;
-    var dens_plane: [65536]u8 = .{0} ** 65536;
-    var dens_set: [8192]u8 = .{0} ** 8192;
+    var plane: [stock_plane_cells]u32 = undefined;
+    var dens_plane: [stock_plane_cells]u8 = .{0} ** stock_plane_cells;
+    var dens_set: [stock_dens_set_bytes]u8 = .{0} ** stock_dens_set_bytes;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
         const lx: i32 = @intCast(i % 16);
@@ -1510,8 +1515,8 @@ test "simd density channel with dens_plane overlay matches dens_at scalar" {
         dens_set[idx / 8] |= @as(u8, 1) << @intCast(idx % 8);
     }
     const DensCtx = struct {
-        dens: *const [65536]u8,
-        set: *const [8192]u8,
+        dens: *const [stock_plane_cells]u8,
+        set: *const [stock_dens_set_bytes]u8,
         fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) ?u8 {
             const self: *const @This() = @ptrCast(@alignCast(ctx.?));
             const idx: usize = @intCast(lx + lz * 16 + y * 256);
@@ -1548,7 +1553,7 @@ test "simd density channel with dens_plane overlay matches dens_at scalar" {
 test "simd density channel with raws plane matches dens_at-less scalar encode" {
     // Full memoized raw plane: SIMD density path must match callback-only encode.
     var heights: [256]u8 = .{60} ** 256;
-    var plane: [65536]u32 = undefined;
+    var plane: [stock_plane_cells]u32 = undefined;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
         const lx: i32 = @intCast(i % 16);
@@ -1567,7 +1572,7 @@ test "simd density channel with raws plane matches dens_at-less scalar encode" {
         .raws = &plane,
     });
     const Ctx = struct {
-        plane: *const [65536]u32,
+        plane: *const [stock_plane_cells]u32,
         fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32 {
             const self: *const @This() = @ptrCast(@alignCast(ctx.?));
             return self.plane[@intCast(lx + lz * 16 + y * 256)];
@@ -1587,7 +1592,7 @@ test "simd density channel with raws plane matches dens_at-less scalar encode" {
 test "raws_scratch memo reaches density channel (SIMD path)" {
     // raws_scratch alone must fill opts_memo.raws so density/water see the plane.
     var heights: [256]u8 = .{55} ** 256;
-    var scratch: [65536]u32 = undefined;
+    var scratch: [stock_plane_cells]u32 = undefined;
     var buf_scratch: [131072]u8 = undefined;
     var buf_raws: [131072]u8 = undefined;
     const via_scratch = try encodeNetworkChunk(&buf_scratch, .{
@@ -1597,7 +1602,7 @@ test "raws_scratch memo reaches density channel (SIMD path)" {
         .raws_scratch = &scratch,
     });
     // Same content as an explicit plane fill with defaultBlockAt.
-    var plane: [65536]u32 = undefined;
+    var plane: [stock_plane_cells]u32 = undefined;
     var i: usize = 0;
     while (i < plane.len) : (i += 1) {
         const lx: i32 = @intCast(i % 16);

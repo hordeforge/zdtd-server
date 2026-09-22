@@ -104,7 +104,7 @@ pub const Sequence = struct {
 
 pub const Table = struct {
     sequences: []const Sequence = &.{},
-    by_name: std.StringHashMapUnmanaged(u32) = .{},
+    by_name: std.StringHashMapUnmanaged(u32) = .empty,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {

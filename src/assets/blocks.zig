@@ -533,7 +533,7 @@ pub fn loadFromPath(
 
     var list: std.ArrayList(BlockDef) = .empty;
     defer list.deinit(allocator);
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(allocator);
 
     // Raw per-block props for Class / TraderID / Extends, keyed by name, so the
@@ -599,7 +599,7 @@ pub fn loadFromPath(
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
-    var name_idx: std.StringHashMapUnmanaged(usize) = .{};
+    var name_idx: std.StringHashMapUnmanaged(usize) = .empty;
     defer name_idx.deinit(allocator);
 
     var i: usize = 0;

@@ -44,7 +44,7 @@ pub const Entry = struct {
 };
 
 pub const Table = struct {
-    map: std.StringHashMapUnmanaged(Noise) = .{},
+    map: std.StringHashMapUnmanaged(Noise) = .empty,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {

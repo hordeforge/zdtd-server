@@ -736,15 +736,15 @@ pub fn loadFromPath(
 
     // Parse each <biome name="..."> … </biome> for layer stack; keep the body slice
     // so weather groups are only parsed for the biomes a biomemap id points at.
-    var stacks_by_name: std.StringHashMapUnmanaged(Stack) = .{};
+    var stacks_by_name: std.StringHashMapUnmanaged(Stack) = .empty;
     defer stacks_by_name.deinit(allocator);
-    var bodies_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
+    var bodies_by_name: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer bodies_by_name.deinit(allocator);
-    var decos_by_name: std.StringHashMapUnmanaged(DecoSet) = .{};
+    var decos_by_name: std.StringHashMapUnmanaged(DecoSet) = .empty;
     defer decos_by_name.deinit(allocator);
-    var subs_by_name: std.StringHashMapUnmanaged([]SubBiome) = .{};
+    var subs_by_name: std.StringHashMapUnmanaged([]SubBiome) = .empty;
     defer subs_by_name.deinit(allocator);
-    var mods_by_name: std.StringHashMapUnmanaged(BiomeMods) = .{};
+    var mods_by_name: std.StringHashMapUnmanaged(BiomeMods) = .empty;
     defer mods_by_name.deinit(allocator);
     const deco_ok = is_distant_deco orelse noDistantDeco;
     i = 0;

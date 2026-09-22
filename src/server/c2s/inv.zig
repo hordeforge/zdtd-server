@@ -676,7 +676,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // default (and never the client's spoofed time).
                         dst.one_item_craft_time = game_craft.craftTimeFor(self, rd);
                         dst.craft_time_left = dst.one_item_craft_time;
-                        dst.craft_exp_gain = if (rd.craft_exp_gain >= 0) rd.craft_exp_gain else 0;
+                        dst.craft_exp_gain = @max(rd.craft_exp_gain, 0);
                     }
                 } else {
                     @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
