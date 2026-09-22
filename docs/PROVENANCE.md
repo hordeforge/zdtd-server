@@ -407,6 +407,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/weather.zig` | R | Weather S2C helpers - extracted verbatim from game.zig. anyEnteredClient, the NetPackageWeather body builder and its send paths |
 | `src/server/game/world.zig` | R | Domain - extracted from game.zig; helpers take *Game World / claims / block meta / locks. Bodies copied verbatim from game.zig |
 | `src/server/game/world_tick.zig` | R | World-tick drivers (powered doors, airdrop, zombie block damage, stale locks/peers/policy, dead-entity reconcile, dig/sleeper drains, look-at/attack-target, admin reload, client info). Split out of tick.zig, forwarded through game.zig |
+| `src/server/game/world_explosion.zig` | R | World explosion sim (deferred detonation drain, block blast). Split out of world.zig verbatim |
 | `src/server/guard_policy.zig` | Z | P4 guard policy: what the server *does* with detector evidence. |
 | `src/server/mcp_transport.zig` | Z | MCP transport bridge (ADR 0031): HTTP listener + token auth + frame/response copy for the MCP plugin guest. Protocol from the public MCP spec (modelcontextprotocol.io, JSON-RPC 2.0), no stock code |
 | `src/server/preset.zig` | Z | Preset = config pack (+ optional static plugin flag). ADR 0010 step 3. Data-only TOML under presets/<name>.toml (a config-only mod ships its own preset inside the mod folder; renamed from mode.zig 2026-08-29). No script VM |

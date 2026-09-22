@@ -36,6 +36,7 @@ pub const game_tick_equip = @import("game/tick_equip.zig");
 pub const game_world_tick = @import("game/world_tick.zig");
 pub const game_buff_events = @import("game/buff_events.zig");
 pub const game_world = @import("game/world.zig");
+pub const game_world_explosion = @import("game/world_explosion.zig");
 pub const game_map = @import("game/map.zig");
 pub const game_player = @import("game/player.zig");
 pub const game_player_tests = @import("game/player_tests.zig");
@@ -160,6 +161,7 @@ test {
     _ = game_buff_events;
     _ = game_world_tick;
     _ = game_world;
+    _ = game_world_explosion;
     _ = game_map;
     _ = game_player;
     _ = game_player_tests;
