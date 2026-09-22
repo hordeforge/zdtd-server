@@ -109,6 +109,12 @@ pub const ClassId = struct {
     /// entityclasses MoveSpeedRand "min,max" roll range; 0,0 = no roll.
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
+    /// entityclasses JumpMaxDistance rolled per spawn (stock EAILeap's
+    /// jumpMaxDistance bound, entity-ai.md 3363; default midpoint of the
+    /// stock (1.9, 2.1) cctor range, so a class without the prop never
+    /// reaches EAILeap's 2.8 m lower bound). Set by applyEntityClassStats /
+    /// the kind-default spawn.
+    jump_max: f32 = 2.0,
     attack_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
     /// class; 0 = class_table[id] then no resist. Applied only at the
@@ -229,6 +235,11 @@ pub const TaskId = enum(u8) {
     /// exactly as in the stock zombie AITask list (entityclasses.xml:562-571).
     look,
     wander,
+    /// EAILeap (full-v3.2.0 EAILeap.il.txt; MutexBits 3): the pounce. First in
+    /// the zombieSpider / animalMountainLion AITask lists. Appended last so
+    /// the existing task bits keep their values; selection order comes from
+    /// the zombie_tasks table, not from this enum.
+    leap,
 };
 
 /// entityclasses.xml parsed a task list (pipe `AITask` or numbered `AITask-N`).
@@ -297,6 +308,27 @@ pub const ZombieAi = struct {
     /// snap is suppressed so the impulse is not zeroed on its own tick; the
     /// flag clears at the apex (vy < 0) and the fall lands normally.
     jumping: bool = false,
+    /// EAILeap flight (full-v3.2.0 EAILeap.il.txt + EntityAlive StartJumpMotion):
+    /// while set, advanceLeap owns x/z/y as a closed-form ballistic and the
+    /// task machinery holds (stock's jump state owns the entity the same way).
+    /// The arc ends exactly at (ox,oy,oz) + horizontal leapDist toward
+    /// leap_yaw and vertical leap_dy.
+    leaping: bool = false,
+    /// Aim-phase budget from EAILeap.Start abortTime (5 s): drains while the
+    /// task turns toward leap_yaw; zeroed at launch so Continue fails after
+    /// the landing instead of re-leaping.
+    leap_time: f32 = 0,
+    /// Flight clock and launch frame: t/dur seconds, origin (ox,oy,oz), yaw to
+    /// fly, horizontal distance, and heightDiff (stock jumpDistance /
+    /// jumpHeightDiff inputs to StartJumpMotion).
+    leap_t: f32 = 0,
+    leap_dur: f32 = 0,
+    leap_ox: f32 = 0,
+    leap_oy: f32 = 0,
+    leap_oz: f32 = 0,
+    leap_yaw: f32 = 0,
+    leap_dist: f32 = 0,
+    leap_dy: f32 = 0,
     /// MoveHelper dig state (RE entity-ai.md DigStart/DigUpdate): a fully
     /// blocked, grounded, non-jumping AI digs the block in its move direction.
     /// dig_for_ticks is the remaining dig budget (DigStop at 0), dig_ticks the

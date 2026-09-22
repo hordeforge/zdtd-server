@@ -81,6 +81,12 @@ pub const EntityDef = struct {
     /// entity-ai.md 3318-3320). 0,0 = unset (no roll).
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
+    /// entityclasses JumpMaxDistance "min,max" (stock zombieTemplateMale
+    /// "2.8, 3.9", zombieSpider "7, 9", animalMountainLion "6, 7"; EntityClass
+    /// cctor default (1.9, 2.1), entity-ai.md 3363): EAILeap's jumpMaxDistance
+    /// range bound, rolled per spawn into ClassId.jump_max.
+    jump_max_min: f32 = 1.9,
+    jump_max_max: f32 = 2.1,
     /// TimeStayAfterDeath seconds a corpse lingers (30 zombies, 300 animals).
     time_stay: f32 = 0,
     /// HandItem name (items.xml melee hand); empty = unset.
@@ -462,15 +468,11 @@ fn parseBoolLoose(s: []const u8) bool {
 }
 
 /// First token of one AITask list entry (pipe form carries `class=` / `data=`
-/// after the name). Empty stays unmapped. Leap / RangedAttackTarget are real
-/// stock entries with no native task yet (measured 2026-09-22, entity-ai.md
-/// census): RangedAttackTarget on the five acid-spitter zombies (Rancher,
-/// Chuck, FatCop, Mutated, MutatedRadiated), Leap on zombieSpider (pounce)
-/// and animalMountainLion (AITask-1, legs=4). Both classes fall back to the
-/// remaining melee/approach tasks until the tasks land; the delivery contract
-/// is RE-closed (entity-ai.md 2026-09-22): stock's server applies the vomit
-/// projectile hit itself behind the isEntityRemote gate, and EAILeap drives
-/// the shared StartJump primitive.
+/// after the name). Empty / RangedAttackTarget stay unmapped:
+/// RangedAttackTarget has no native task yet (measured 2026-09-22, entity-ai.md
+/// census: five acid-spitter zombies; its delivery contract is RE-closed but
+/// the task and its projectile flight are not wired). Leap ships: EAILeap on
+/// zombieSpider (pounce) and animalMountainLion (AITask-1, legs=4).
 fn taskNameToId(name: []const u8) ?components.TaskId {
     if (std.mem.eql(u8, name, "BreakBlock")) return .break_block;
     if (std.mem.eql(u8, name, "DestroyArea")) return .destroy_area;
@@ -478,6 +480,7 @@ fn taskNameToId(name: []const u8) ?components.TaskId {
     if (std.mem.eql(u8, name, "Territorial")) return .territorial;
     if (std.mem.eql(u8, name, "ApproachDistraction")) return .approach_distraction;
     if (std.mem.eql(u8, name, "ApproachSpot")) return .approach_spot;
+    if (std.mem.eql(u8, name, "Leap")) return .leap;
     if (std.mem.eql(u8, name, "RunawayWhenHurt")) return .runaway;
     if (std.mem.eql(u8, name, "RunawayFromEntity")) return .runaway;
     if (std.mem.eql(u8, name, "Look")) return .look;
@@ -1054,6 +1057,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.parseF32(lo)) |f| rand_min = f;
             if (xml.parseF32(hi)) |f| rand_max = f;
         }
+        // JumpMaxDistance "min,max" (stock zombieTemplateMale "2.8, 3.9",
+        // zombieSpider "7, 9"; EntityClass default (1.9, 2.1),
+        // entity-ai.md 3363): EAILeap's range bound, rolled per spawn.
+        var jump_max_min: f32 = 1.9;
+        var jump_max_max: f32 = 2.1;
+        if (resolveProp(&classes, name, "JumpMaxDistance", 0)) |jmd| {
+            const comma = std.mem.findScalar(u8, jmd, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, jmd[0..ci], " ") else jmd;
+            const hi = if (comma) |ci| std.mem.trim(u8, jmd[ci + 1 ..], " ") else jmd;
+            if (xml.parseF32(lo)) |f| jump_max_min = f;
+            if (xml.parseF32(hi)) |f| jump_max_max = f;
+        }
         // SightRange is per class in stock (zombies 27-40 m). Bounded: a
         // crafted value must not make one zombie sense the whole world.
         var sight: f32 = 0;
@@ -1214,6 +1229,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .wander_speed_night = wander_night,
             .move_speed_rand_min = rand_min,
             .move_speed_rand_max = rand_max,
+            .jump_max_min = jump_max_min,
+            .jump_max_max = jump_max_max,
             .time_stay = time_stay,
             .sight_range = sight,
             .sight_light_min = sight_light_min,

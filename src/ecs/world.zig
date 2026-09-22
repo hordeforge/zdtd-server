@@ -86,6 +86,19 @@ fn rollChaseDay(def: EntityClass, x: f32, z: f32) f32 {
     return out;
 }
 
+/// entityclasses JumpMaxDistance "min,max" rolled for one spawn (stock rolls
+/// the same vec per entity at CopyPropertiesFromEntityClass,
+/// entity-ai.md 3363; zdtd rolls from position + class hash, same Wyhash
+/// shape as rollChaseDay: deterministic, no spawn-site RNG plumbing).
+fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
+    const lo = def.jump_max_min;
+    const hi = def.jump_max_max;
+    if (hi <= lo) return lo;
+    const h = std.hash.Wyhash.hash(0x1ea9, std.mem.asBytes(&.{ x, z, @as(f32, @floatFromInt(def.hash)) }));
+    const frac = @as(f32, @floatFromInt(h >> 32)) / @as(f32, @floatFromInt(std.math.maxInt(u32)));
+    return lo + (hi - lo) * frac;
+}
+
 /// Copy resolved EntityClass stats onto a live entity ClassId (A35). Keeps
 /// `id` (kind-default or table index). Rolls day chase once via rollChaseDay.
 /// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
@@ -100,6 +113,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.wander_speed_night = def.wander_speed_night;
     cid.move_speed_rand_min = def.move_speed_rand_min;
     cid.move_speed_rand_max = def.move_speed_rand_max;
+    cid.jump_max = rollJumpMax(def, x, z);
     cid.attack_damage = def.attack_damage;
     cid.phys_resist = def.phys_resist;
     cid.block_chew = def.block_chew;
@@ -164,6 +178,12 @@ pub const EntityClass = struct {
     /// 0,0 = unset (no roll).
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
+    /// entityclasses JumpMaxDistance "min,max": the EAILeap range bound,
+    /// rolled once per spawn into ClassId.jump_max. Defaults to the stock
+    /// EntityClass cctor range (1.9, 2.1) (entity-ai.md 3363): below
+    /// EAILeap's 2.8 m floor, so an unparsed class never pounces.
+    jump_max_min: f32 = 1.9,
+    jump_max_max: f32 = 2.1,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
     /// class's own rows (Extends-resolved). Applied only where the server
     /// computes the damage (turrets, the deferred accumulator), never to a
@@ -1182,6 +1202,7 @@ pub const World = struct {
             .loot_list = ct.loot_list,
             .drop_prob = ct.drop_prob,
             .time_stay = ct.time_stay,
+            .jump_max = rollJumpMax(ct, x, z),
             .ai_attack = ct.ai_attack,
             .ai_tasks = ct.ai_tasks,
             .explode_threshold = ct.explode_threshold,
@@ -1248,6 +1269,7 @@ pub const World = struct {
                 .id = class_id,
                 .hash = ct.hash,
                 .loot_list = ct.loot_list,
+                .jump_max = rollJumpMax(ct, x, z),
                 .ai_attack = ct.ai_attack,
                 .ai_tasks = ct.ai_tasks,
             };

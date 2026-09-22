@@ -393,6 +393,8 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .wander_speed_night = d.wander_speed_night,
         .move_speed_rand_min = d.move_speed_rand_min,
         .move_speed_rand_max = d.move_speed_rand_max,
+        .jump_max_min = d.jump_max_min,
+        .jump_max_max = d.jump_max_max,
         .attack_damage = self.handItemDamage(d.hand_item),
         .time_stay = d.time_stay,
         .sight_range = d.sight_range,
