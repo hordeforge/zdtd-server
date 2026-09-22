@@ -87,6 +87,7 @@ pub const c2s_inv_txn = @import("c2s/inv_txn.zig");
 pub const c2s_blocks = @import("c2s/blocks.zig");
 pub const c2s_blocks_trigger = @import("c2s/blocks_trigger.zig");
 pub const c2s_blocks_pickup = @import("c2s/blocks_pickup.zig");
+pub const c2s_blocks_setblock = @import("c2s/blocks_setblock.zig");
 pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
 pub const c2s_misc = @import("c2s/misc.zig");
@@ -193,6 +194,7 @@ test {
     _ = c2s_blocks;
     _ = c2s_blocks_trigger;
     _ = c2s_blocks_pickup;
+    _ = c2s_blocks_setblock;
     _ = c2s_move;
     _ = c2s_quest;
     _ = c2s_misc;
