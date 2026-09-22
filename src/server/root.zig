@@ -82,6 +82,7 @@ pub const game_tests = @import("game/tests.zig");
 pub const c2s_inv = @import("c2s/inv.zig");
 pub const c2s_inv_reload = @import("c2s/inv_reload.zig");
 pub const c2s_inv_holding = @import("c2s/inv_holding.zig");
+pub const c2s_inv_te = @import("c2s/inv_te.zig");
 pub const c2s_blocks = @import("c2s/blocks.zig");
 pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
@@ -184,6 +185,7 @@ test {
     _ = c2s_inv;
     _ = c2s_inv_reload;
     _ = c2s_inv_holding;
+    _ = c2s_inv_te;
     _ = c2s_blocks;
     _ = c2s_move;
     _ = c2s_quest;
