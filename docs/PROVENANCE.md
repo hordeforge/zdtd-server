@@ -329,6 +329,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc_lock.zig` | R | C2S lock arm (container/door lock requests). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_vehicle.zig` | R | C2S vehicle + attach arms (data sync, spawn control, entity attach). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_wire.zig` | R | C2S wire arms (block wire actions, wire-tool parent ops). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_turret.zig` | R | C2S turret arms (animation-data relay, turret spawn). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, trader and vending window open, unlock). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
