@@ -116,7 +116,15 @@ pub fn run(w: *World, dt: f32) TickResult {
     // Deferred ops from systems/plugins: apply after sim mutations settle.
     // Drain clears the buffer (frame leftover). apm: commands_applied counter
     // on TickResult is enough without importing apm from ecs (cycle).
-    const cmd = if (on.commands) w.drainCommands() else @TypeOf(w.drainCommands()){};
+    // Phase off: the queued ops are not applied, and they must not survive the
+    // tick either. Banking them filled the 64-slot buffer permanently (every
+    // later push refused), left a withdrawn plugin's pending ops queued past
+    // its disable (ADR 0030), and replayed a stale batch the moment the toggle
+    // came back on.
+    const cmd = if (on.commands) w.drainCommands() else blk: {
+        w.commands.clear();
+        break :blk @TypeOf(w.drainCommands()){};
+    };
 
     var out: TickResult = .{
         .ai_hits = hits,
@@ -196,6 +204,23 @@ test "default pipeline order is pinned" {
         try std.testing.expect(@as(*const bool, @ptrCast(f.default_value_ptr.?)).*);
     }
     try std.testing.expectEqual(order.len, std.meta.fields(Systems).len);
+}
+
+test "the commands phase off drops queued ops instead of banking them" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    w.rules.systems.commands = false;
+    try std.testing.expect(w.pushCommand(.{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } }));
+    _ = run(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
+    try std.testing.expectEqual(@as(usize, 0), w.commands.len());
+
+    // Re-enabling must not replay what was queued while the phase was off.
+    w.rules.systems.commands = true;
+    const r = run(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 0), r.commands_applied);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
 }
 
 test "a disabled system is skipped and the rest still run" {

@@ -15247,9 +15247,9 @@ test "scenario the attack target is published on change and cleared when it dies
     g.tickAttackTarget();
     try std.testing.expect(cap.findPkgIdEntity(at_id, z1) == null);
 
-    // A target that stops being alive reads as no target, exactly like the
-    // stock expiry clear: the id stays in the sim but must not go out.
-    g.sim.alive[ps] = false;
+    // A dead target reads as no target, like the stock expiry clear. Player
+    // death keeps the entity, so the pass has to read hp, not alive[].
+    g.sim.markPlayerDead(ps);
     cap.clear();
     g.tickAttackTarget();
     const cleared = cap.findPkgIdEntity(at_id, z1) orelse return error.TestUnexpectedResult;
@@ -15258,7 +15258,7 @@ test "scenario the attack target is published on change and cleared when it dies
     // The pass must be wired into the real tick, not just callable: a fresh
     // zombie has to reach the client through g.step() alone. Without this the
     // rest of the test still passes with the step.zig call site deleted.
-    g.sim.alive[ps] = true;
+    g.sim.health[ps].hp = g.sim.health[ps].max_hp;
     const z2 = g.sim.spawnZombie(pp.x + 4, pp.y, pp.z, 100) orelse
         return error.TestUnexpectedResult;
     cap.clear();

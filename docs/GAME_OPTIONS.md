@@ -249,6 +249,12 @@ test, so a retune cannot land silently).
 | `step_height` | 1.0 | Step-up limit, blocks: a blocked horizontal move is retried with the feet lifted by this much (stock CC stepOffset; zombies climb a full block). Policy floor |
 | `jump_height` | 1.3 | Jump hop height, blocks: a fully blocked, grounded AI hops over the obstacle (stock MoveHelper StartJump heightDiff ~1.3, entity-ai.md 2030-2034). Policy floor |
 | `jump_delay_s` | 1.0 | Min seconds between jumps (stock EntityAlive jumpDelay default 1 x20 ticks = 1 s, entity-ai.md 3228). Prevents bunny-hop on a sealed wall |
+| `leap_min_dist` | 2.8 | EAILeap lower range bound, blocks: a class whose rolled `ClassId.jump_max` sits under this never pounces, and a target nearer than this is walked to instead (stock EAILeap CanExecute floor, entity-ai.md 3363). Policy floor |
+| `leap_abort_s` | 5.0 | EAILeap.Start abortTime, seconds: the aim budget. The task turns toward the target for at most this long; on expiry it gives up instead of launching |
+| `leap_aim_tol_deg` | 12.0 | Aim tolerance, degrees: the leap launches once the body's yaw is within this of the target bearing (stock Continue gate is 1 degree; zdtd ships a wider default so short-range pounces commit without a full stop-turn) |
+| `leap_turn_deg_s` | 360.0 | Yaw turn rate while aiming, degrees/s (stock Entity::SeekYaw during the EAILeap aim phase) |
+| `leap_speed` | 7.0 | Horizontal flight speed, blocks/s: sets the arc duration from the launch distance (`leap_dur = leap_dist / leap_speed`) |
+| `leap_arc_height` | 0.9 | Extra apex height above the straight launch-to-landing line, blocks (the pounce parabola over the stock leapV.y line) |
 | `fall_max_vy` | -30.0 | Hard terminal fall velocity cap, blocks/s (safety bound; the stock 0.98 y-drag already self-caps ~ -3.9) |
 | `swim_gravity_per` | 0.025 | Swim gravity fraction (stock cSwimGravityPer): a submerged AI body falls with gravity*0.025 |
 | `swim_drag_y` | 0.91 | Swim y-drag (stock cSwimDragY): the vertical drag while submerged |

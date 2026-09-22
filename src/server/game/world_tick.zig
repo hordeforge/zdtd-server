@@ -505,7 +505,12 @@ pub fn tickAttackTarget(self: *Game) void {
         const tid = self.sim.zombie_ai[s].target_id;
         if (tid >= 0) {
             if (self.sim.slotOfNetId(tid)) |t| {
-                if (self.sim.alive[t]) want = tid;
+                // alive[] is slot occupancy, not vitality: markPlayerDead and
+                // markCorpse both keep the slot and only clamp hp to 0, so an
+                // alive[] test alone advertised a corpse as the target until
+                // the sweep recycled it. No health column keeps the old answer.
+                const dead = self.sim.mask[t].health and self.sim.health[t].hp <= 0;
+                if (self.sim.alive[t] and !dead) want = tid;
             }
         }
         if (st.sent and st.id == want) continue;

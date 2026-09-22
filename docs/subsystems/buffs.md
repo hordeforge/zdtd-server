@@ -136,7 +136,7 @@ pub fn systemBuffs(w: *World, out: []buff.Expiry) u8 {
     while (it.next()) |idx| {
 ```
 
-Removals land in a 16-entry result buffer on the tick result (`src/ecs/schedule.zig:56`, `:129`). The step drains that buffer after the sim tick and broadcasts one `AddRemoveBuff` per expiry with `adding = false`, so every observer drops the icon (`src/server/game/step.zig:372`, `src/server/game/social.zig:148`). A tick that removes more than 16 buffs still clears all of them; only the report saturates, matching the saturating report inside `tick` (`src/ecs/buff.zig:169`).
+Removals land in a 16-entry result buffer on the tick result (`src/ecs/schedule.zig:56`, `:137`). The step drains that buffer after the sim tick and broadcasts one `AddRemoveBuff` per expiry with `adding = false`, so every observer drops the icon (`src/server/game/step.zig:372`, `src/server/game/social.zig:148`). A tick that removes more than 16 buffs still clears all of them; only the report saturates, matching the saturating report inside `tick` (`src/ecs/buff.zig:169`).
 
 ## Catalog shape from buffs.xml
 

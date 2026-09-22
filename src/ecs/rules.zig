@@ -47,8 +47,8 @@ pub const Systems = struct {
     /// Far-entity despawn. Off means director spawns accumulate; pair it with
     /// `director = false` or a lower spawn cap.
     despawn: bool = true,
-    /// Deferred SimCommand drain (plugins, admin). Off means queued commands
-    /// are never applied, so leave it on unless a mode owns the queue.
+    /// Deferred SimCommand drain (plugins, admin). Off drops a tick's queued
+    /// ops at the end of it instead of applying them; leave it on.
     commands: bool = true,
 };
 
