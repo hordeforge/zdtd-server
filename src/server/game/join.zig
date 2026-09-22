@@ -887,7 +887,8 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         },
     });
     for (&self.clients, 0..) |*cl, ci| {
-        if (ci == c.slot or !cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
+        if (ci == c.slot or !cl.joined or cl.entity_id <= 0) continue;
+        const opeer = cl.peer orelse continue;
         const os = self.sim.playerByPeer(ci) orelse continue;
         if (!self.sim.mask[os].transform) continue;
         const oradius: i32 = if (cl.view_radius < 1) self.view_radius else cl.view_radius;
@@ -898,9 +899,9 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
             self.sim.transform[js].z,
             oradius,
         )) continue;
-        try self.sendGame(cl.peer.?, "NetPackageEntitySpawn", jbody);
+        try self.sendGame(opeer, "NetPackageEntitySpawn", jbody);
         cl.known_entities.set(js);
-        try sendPlayerStatsTo(self, cl.peer.?, c, jnid);
+        try sendPlayerStatsTo(self, opeer, c, jnid);
     }
 }
 

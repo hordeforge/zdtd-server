@@ -443,9 +443,10 @@ pub fn broadcastVendingTe(self: *Game, x: i32, y: i32, z: i32) !void {
     var i: usize = 0;
     while (i < self.clients.len) : (i += 1) {
         const cl = &self.clients[i];
-        if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
+        if (!cl.joined or cl.entity_id <= 0) continue;
+        const peer = cl.peer orelse continue;
         if (!self.clientObserves(cl, @floatFromInt(x), @floatFromInt(z))) continue;
-        try sendVendingTe(self, cl.peer.?, x, y, z);
+        try sendVendingTe(self, peer, x, y, z);
     }
 }
 

@@ -396,12 +396,13 @@ pub fn step(self: *Game) !void {
             // client's edge is tracked; the old single global bool made every
             // player hear horde music when any party was horded.
             for (&self.clients) |*cl| {
-                if (!cl.joined or cl.peer == null) continue;
+                if (!cl.joined) continue;
+                const peer = cl.peer orelse continue;
                 const on = self.playerBloodMoonMusic(cl);
                 if (on != cl.bloodmoon_music) {
                     cl.bloodmoon_music = on;
                     const bm_body = try packages.buildBloodmoonMusicBody(self.body_buf[0..1], on);
-                    try self.sendGame(cl.peer.?, "NetPackageBloodmoonMusic", bm_body);
+                    try self.sendGame(peer, "NetPackageBloodmoonMusic", bm_body);
                 }
             }
         }

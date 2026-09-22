@@ -124,13 +124,13 @@ pub fn handleWaypoint(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         const inviter_id = c.puid_primary.get() orelse return true;
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.entity_id == c.entity_id) continue;
-            if (cl.peer == null) continue;
+            const target_peer = cl.peer orelse continue;
             if (wp.invite_mode == 0) {
                 const target_id = cl.puid_primary.get() orelse continue;
                 if (!self.allies.isAlly(inviter_id, target_id)) continue;
             }
             const relay = packages.buildWaypointInviteBody(self.body_buf[0..512], &wp, c.entity_id) catch continue;
-            self.sendGame(cl.peer.?, "NetPackageWaypoint", relay) catch |err| {
+            self.sendGame(target_peer, "NetPackageWaypoint", relay) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 std.debug.print("zdtd: send Waypoint failed: {s}\n", .{@errorName(err)});
             };

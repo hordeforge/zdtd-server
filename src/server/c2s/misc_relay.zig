@@ -21,11 +21,12 @@ pub fn relayBodyAll(self: *Game, pkg: []const u8, body: []const u8, label: []con
 /// client (stock allButAttachedToEntityId fan-out); null relays to all.
 pub fn relayBodyExcept(self: *Game, pkg: []const u8, body: []const u8, except_entity_id: ?i32, label: []const u8) void {
     for (&self.clients) |*cl| {
-        if (!cl.joined or cl.peer == null) continue;
+        if (!cl.joined) continue;
+        const peer = cl.peer orelse continue;
         if (except_entity_id) |eid| {
             if (cl.entity_id == eid) continue;
         }
-        self.sendGame(cl.peer.?, pkg, body) catch |err| {
+        self.sendGame(peer, pkg, body) catch |err| {
             self.harness.counters.inc(.net_send_errors);
             std.debug.print("zdtd: send {s} failed: {s}\n", .{ label, @errorName(err) });
         };

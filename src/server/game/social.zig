@@ -283,7 +283,8 @@ pub fn broadcastPartySnapshot(
         .disband = disband,
     });
     for (&self.clients) |*cl| {
-        if (!cl.joined or cl.peer == null) continue;
+        if (!cl.joined) continue;
+        const peer = cl.peer orelse continue;
         const is_member = !disband and blk: {
             for (members) |m| {
                 if (m == cl.entity_id) break :blk true;
@@ -291,7 +292,6 @@ pub fn broadcastPartySnapshot(
             break :blk false;
         };
         if (!is_member and cl.entity_id != changed) continue;
-        const peer = cl.peer.?;
         self.sendGame(peer, "NetPackagePartyData", body) catch |err| {
             self.harness.counters.inc(.net_send_errors);
             std.debug.print("zdtd: send PartyData failed: {s}\n", .{@errorName(err)});
