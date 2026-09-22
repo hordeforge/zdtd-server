@@ -269,7 +269,7 @@ pub fn resolve(
         if (replaced.contains(m.name.?)) continue;
         if (preset_pack != null) return error.DuplicatePreset;
         if (m.dir.len == 0) return error.PresetOutsideMod;
-        preset_pack = try std.fs.path.join(a, &.{ m.dir, pr });
+        preset_pack = try std.Io.Dir.path.join(a, &.{ m.dir, pr });
     }
 
     // Legacy [plugin] modules: synthesized user mods, appended after discovery.

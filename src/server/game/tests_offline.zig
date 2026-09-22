@@ -46,7 +46,7 @@ test "evidence JSONL flush writes the ring to a file (P4)" {
     // formatted JSONL lines (no secrets, no packets).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -55,7 +55,7 @@ test "evidence JSONL flush writes the ring to a file (P4)" {
     }
     g.evidence.record(.{ .tick = 7, .peer_local = 2, .entity_id = 103, .detector = .bounds, .severity = .strong, .surface = .block, .observed = 100, .bound = 96 });
     g.evidence.record(.{ .tick = 9, .detector = .phase, .severity = .hard });
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{world_dir});
     const n = try g.dumpEvidenceFile(path);
     try std.testing.expectEqual(@as(usize, 2), n);

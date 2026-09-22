@@ -324,12 +324,12 @@ fn parseCsvLine(line: []const u8, out: *[max_columns][]const u8) usize {
 test "localization CSV parses quoted fields and merges in mod order" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var cfg_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cfg_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir});
     io_fs.mkdirPath(cfg);
-    var base_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const base_path = try std.fmt.bufPrint(&base_buf, "{s}/Localization.csv", .{cfg});
     try io_fs.writeFile(base_path,
         \\Key,File,Type,UsedInMainMenu,NoTranslate,KeepLoaded,english,Context,german
@@ -337,10 +337,10 @@ test "localization CSV parses quoted fields and merges in mod order" {
         \\buffBase,buffs,Buff,,,,Base buff,,
         \\
     );
-    var mod_a_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_a_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mod_a = try std.fmt.bufPrint(&mod_a_buf, "{s}/modA/Config", .{dir});
     io_fs.mkdirPath(mod_a);
-    var mod_a_csv_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_a_csv_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mod_a_csv = try std.fmt.bufPrint(&mod_a_csv_buf, "{s}/Localization.csv", .{mod_a});
     try io_fs.writeFile(mod_a_csv,
         \\Key,english
@@ -348,10 +348,10 @@ test "localization CSV parses quoted fields and merges in mod order" {
         \\modOnly,"He said ""hi"""
         \\
     );
-    var mod_b_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_b_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mod_b = try std.fmt.bufPrint(&mod_b_buf, "{s}/modB/Config", .{dir});
     io_fs.mkdirPath(mod_b);
-    var mod_b_csv_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_b_csv_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mod_b_csv = try std.fmt.bufPrint(&mod_b_csv_buf, "{s}/Localization.csv", .{mod_b});
     try io_fs.writeFile(mod_b_csv,
         \\Key,german
@@ -390,21 +390,21 @@ test "localization CSV parses quoted fields and merges in mod order" {
 test "the localization blob is raw deflate the client can inflate" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var cfg_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var cfg_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir});
     io_fs.mkdirPath(cfg);
-    var base_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     try io_fs.writeFile(try std.fmt.bufPrint(&base_buf, "{s}/Localization.csv", .{cfg}),
         \\Key,english
         \\a,one
         \\
     );
-    var mod_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mod = try std.fmt.bufPrint(&mod_buf, "{s}/m/Config", .{dir});
     io_fs.mkdirPath(mod);
-    var mod_csv_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mod_csv_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     try io_fs.writeFile(try std.fmt.bufPrint(&mod_csv_buf, "{s}/Localization.csv", .{mod}),
         \\Key,english
         \\zzPatched,patched value

@@ -138,7 +138,7 @@ test "zpv2DropName accepts the current ZPV12 save (wipeplayer on a v12 file)" {
 test "players zpv7 round-trips use_times (tool durability) across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -178,7 +178,7 @@ test "players zpv7 round-trips use_times (tool durability) across restart" {
 test "players zpv8 round-trips hp (relog keeps wounds) across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -216,7 +216,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     // walk stays aligned, and a restart must still see a live player.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [512]u8 = undefined;
@@ -249,7 +249,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     o += 1;
     buf[o] = 0; // bed_present (v4+ tail layout)
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -285,7 +285,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
 test "players zpv9 round-trips game-stage born time (days-alive) across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -330,7 +330,7 @@ test "players zpv11 round-trips skill points and purchased perk levels" {
     // so the level-scaled VM effects restore: purchases are no longer lost.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -381,7 +381,7 @@ test "players zpv12 round-trips item mods across restart" {
     // effects are client-side; the ids re-render the attachments).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -426,7 +426,7 @@ test "players v14 record gains an absent identity section on save (ZPV15 migrati
     // by name until its owner logs in with a platform id.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     const persist_mod = @import("../persist.zig");
@@ -471,7 +471,7 @@ test "players v14 record gains an absent identity section on save (ZPV15 migrati
     o += 1;
     @memset(buf[o..][0..persist_mod.zpv_stats_tail_len], 0); // ZPV14 counters
     o += persist_mod.zpv_stats_tail_len;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -510,7 +510,7 @@ test "players restore matches on platform identity, not on a typed name (ZPV15)"
     const id_b: platform_user.Id = .{ .platform = "EOS", .id = "acct-b" };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -567,7 +567,7 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     // and the record length is consistent across the carried boundary.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     // Hand-build the smallest v10 file: one record, no inventory/journal, a
@@ -605,7 +605,7 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     o += 1;
     buf[o] = 0; // bed_present 0
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -639,7 +639,7 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
     const persist = @import("../persist.zig");
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [256]u8 = undefined;
@@ -671,7 +671,7 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
     buf[o] = 0;
     o += 1;
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -703,7 +703,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     // v9 tail walk stays aligned, and a restart must restore the tail values.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [512]u8 = undefined;
@@ -738,7 +738,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     o += 1;
     buf[o] = 0; // bed_present
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -779,7 +779,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     // 11-byte shape) and a restart must restore the item and tail values.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [512]u8 = undefined;
@@ -832,7 +832,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     o += 1;
     buf[o] = 0; // bed_present
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -876,7 +876,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     // and a restart must restore the item.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [256]u8 = undefined;
@@ -905,7 +905,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     o += 1;
     buf[o] = 0; // prog: no tail (so no v4 bed byte either)
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -944,7 +944,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
 test "players zpv3 preserves every inventory slot across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     {
@@ -983,7 +983,7 @@ test "players zpv3 preserves every inventory slot across restart" {
 test "players zpv3 round-trips level xp stats and buffs across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     // Two full save/restart cycles: the second proves the round-trip is not
@@ -1047,7 +1047,7 @@ test "players zpv3 round-trips level xp stats and buffs across restart" {
 test "players save keeps a joined-but-not-writable client record" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     // Seed a persisted record: a joined, spawned player with a real inventory
@@ -1104,7 +1104,7 @@ test "players save keeps a joined-but-not-writable client record" {
 test "players zpv3 restore skips a preceding record's progression tail" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     // Hand-built ZPV3 file: Alice first WITH a progression tail, then Bot with
@@ -1145,7 +1145,7 @@ test "players zpv3 restore skips a preceding record's progression tail" {
     }.call;
     writeRec(&buf, &o, "Alice", 3, 100, 50);
     writeRec(&buf, &o, "Bot", 9, 555, 42);
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 
@@ -1169,7 +1169,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     // file stays uniformly parseable, then a restart restores the same quest.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var buf: [256]u8 = undefined;
@@ -1202,7 +1202,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     o += 1;
     buf[o] = 0; // prog: no tail (so no v4 bed byte either)
     o += 1;
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
     try io_fs.writeFile(zsv, buf[0..o]);
 

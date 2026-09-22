@@ -2402,7 +2402,7 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     // application/json (ADR 0040).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
@@ -2709,7 +2709,7 @@ test "GET /api/state.json carries the modlet roster as a populated array" {
     // shows its no-mods note while real XML-only mods are loaded (ADR 0040).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);

@@ -339,7 +339,7 @@ test "a no-op transition never changes the stored status" {
 test "ally store persists across restart (allies.zal)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     {
         var store: Store = .{};
@@ -359,7 +359,7 @@ test "ally store persists across restart (allies.zal)" {
         .{ .platform = "Steam", .id = "1001" },
     ));
     // Corrupt file fails closed, not silently empty.
-    var bad_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var bad_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const bad_path = try std.fmt.bufPrint(&bad_path_buf, "{s}/allies.zal", .{dir});
     try io_fs.writeFile(bad_path, "ZAL1\x00\x01\xff");
     var bad: Store = .{};
@@ -369,9 +369,9 @@ test "ally store persists across restart (allies.zal)" {
 test "an out-of-range status byte fails closed instead of panicking" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
 
     // One well-formed record (four length-prefixed strings) whose trailing

@@ -685,10 +685,10 @@ pub const Table = struct {
             if (self.id_by_name.count() > 0) return;
         }
         // zig-out/bin/zdtd → ../../src/assets/… via /proc/self/exe
-        var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var exe_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         if (io_fs.readLinkAbsolute("/proc/self/exe", &exe_buf)) |exe| {
-            if (std.fs.path.dirname(exe)) |bin_dir| {
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            if (std.Io.Dir.path.dirname(exe)) |bin_dir| {
+                var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
                 // Release artifact layout: `make release` copies the dump flat
                 // beside the binary, so neither the cwd-relative repo paths above
                 // nor the zig-out/bin/../.. walk below can find it.
@@ -703,8 +703,8 @@ pub const Table = struct {
                     };
                     if (self.id_by_name.count() > 0) return;
                 } else |_| {}
-                if (std.fs.path.dirname(bin_dir)) |out_dir| {
-                    if (std.fs.path.dirname(out_dir)) |root| {
+                if (std.Io.Dir.path.dirname(bin_dir)) |out_dir| {
+                    if (std.Io.Dir.path.dirname(out_dir)) |root| {
                         if (std.fmt.bufPrint(&path_buf, "{s}/src/assets/{s}", .{ root, bundled_assignids_name })) |p| {
                             // Best-effort bundled dump; missing path is fine (logged inside on real I/O errors).
                             self.mergeAssignIdsDump(allocator, p) catch |err| {
@@ -1453,9 +1453,9 @@ test "deco facts follow Extends chains and fail closed" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_deco.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
 
@@ -1789,11 +1789,11 @@ test "MaxDamage falls back to the Extends-resolved material's own MaxDamage" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var blocks_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_mhp.xml", .{dir});
-    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mats_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials.xml", .{dir});
     try io_fs.writeFile(blocks_path, blocks_src);
     try io_fs.writeFile(mats_path, materials_src);
@@ -1842,11 +1842,11 @@ test "materials.xml CanDestroy gates block damage" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var blocks_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_cd.xml", .{dir});
-    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var mats_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials_cd.xml", .{dir});
     try io_fs.writeFile(blocks_path, blocks_src);
     try io_fs.writeFile(mats_path, materials_src);

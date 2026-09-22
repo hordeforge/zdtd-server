@@ -243,7 +243,7 @@ test "flusher writes every submitted payload" {
     if (!Flusher.available()) return error.SkipZigTest;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
@@ -251,7 +251,7 @@ test "flusher writes every submitted payload" {
     defer f.deinit();
     var i: usize = 0;
     while (i < 8) : (i += 1) {
-        var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+        var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const p = try std.fmt.bufPrint(&pbuf, "{s}/f_{d}.bin", .{ dir, i });
         const path = try dupPage(p);
         const payload = try dupPage(&[_]u8{@intCast(i)} ** 4);
@@ -263,7 +263,7 @@ test "flusher writes every submitted payload" {
 
     i = 0;
     while (i < 8) : (i += 1) {
-        var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+        var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const p = try std.fmt.bufPrint(&pbuf, "{s}/f_{d}.bin", .{ dir, i });
         const data = try io_fs.readFileAll(testing.allocator, p);
         defer testing.allocator.free(data);
@@ -275,11 +275,11 @@ test "flusher deinit drains pending writes" {
     if (!Flusher.available()) return error.SkipZigTest;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
-    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/drain.bin", .{dir});
     try f.submit(7, try dupPage(p), try dupPage("drained"));
     // No waitAll: deinit alone must land the write.
@@ -319,13 +319,13 @@ test "flusher armed waitKey blocks until submit finishes" {
     if (!Flusher.available()) return error.SkipZigTest;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
     f.arm();
     defer f.deinit();
-    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/arm.bin", .{dir});
     try f.submit(99, try dupPage(p), try dupPage("armed"));
     f.waitKey(99);
@@ -338,13 +338,13 @@ test "flusher ring is FIFO per key" {
     if (!Flusher.available()) return error.SkipZigTest;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     var f: Flusher = .{};
     f.arm();
     defer f.deinit();
-    var pbuf: [std.fs.max_path_bytes]u8 = undefined;
+    var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/fifo.bin", .{dir});
     // Same key twice: the newest submit must be the file that survives.
     try f.submit(42, try dupPage(p), try dupPage("old"));

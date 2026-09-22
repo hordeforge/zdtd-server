@@ -220,7 +220,7 @@ test "sign store save and load round-trip" {
     _ = st.put(.{ .x = -5, .y = 71, .z = 9 }, 900, &body);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try st.save(dir, std.testing.allocator);
     var st2: SignStore = .{};

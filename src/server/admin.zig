@@ -285,7 +285,7 @@ pub const Server = struct {
             @memcpy(buf[0..end], self.recv_bufs[i][0..end]);
             const consumed = newline + 1;
             const remaining = total - consumed;
-            std.mem.copyForwards(u8, self.recv_bufs[i][0..remaining], self.recv_bufs[i][consumed..total]);
+            @memmove(self.recv_bufs[i][0..remaining], self.recv_bufs[i][consumed..total]);
             self.recv_lens[i] = remaining;
             if (!self.authed[i]) {
                 // Password attempts never reach the dispatcher, and an empty line

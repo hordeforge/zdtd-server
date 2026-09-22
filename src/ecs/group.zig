@@ -47,7 +47,7 @@ pub const Groups = struct {
         if (n >= max_entities) return;
         const at = std.sort.lowerBound(Slot, self.dense[k][0..n], slot, orderSlot);
         if (at < n and self.dense[k][at] == slot) return;
-        std.mem.copyBackwards(Slot, self.dense[k][at + 1 .. n + 1], self.dense[k][at..n]);
+        @memmove(self.dense[k][at + 1 .. n + 1], self.dense[k][at..n]);
         self.dense[k][at] = slot;
         self.len[k] = n + 1;
     }
@@ -59,7 +59,7 @@ pub const Groups = struct {
         const n = self.len[k];
         const at = std.sort.lowerBound(Slot, self.dense[k][0..n], slot, orderSlot);
         if (at >= n or self.dense[k][at] != slot) return;
-        std.mem.copyForwards(Slot, self.dense[k][at .. n - 1], self.dense[k][at + 1 .. n]);
+        @memmove(self.dense[k][at .. n - 1], self.dense[k][at + 1 .. n]);
         self.len[k] = n - 1;
     }
 

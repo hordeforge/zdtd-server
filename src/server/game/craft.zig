@@ -831,7 +831,7 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
 test "armorMitigation honors zero and missing XML resistance without offline floors" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -853,7 +853,7 @@ test "armorMitigation honors zero and missing XML resistance without offline flo
         \\<effect_group><passive_effect name="PhysicalDamageResist" operation="base_add" value="8"/></effect_group></item>
         \\</items>
     });
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{world_dir});
     const loaded = try assets_items.loadFromPath(std.testing.allocator, path);
     g.items.deinit();
@@ -869,7 +869,7 @@ test "armorMitigation honors zero and missing XML resistance without offline flo
 test "itemIsArmor does not use offline pins after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -900,7 +900,7 @@ test "getScrapableRecipe and tryScrap follow RE weight/category rules" {
     // when forge_category matches; no_scrapping and overweight output reject.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {

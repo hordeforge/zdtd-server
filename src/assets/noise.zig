@@ -68,7 +68,7 @@ pub const Table = struct {
     /// and the keys were lowercased the same way when `AddAudioData` (IL=85)
     /// built the map. Over-long or empty claims cannot be stock group keys.
     pub fn getClip(self: *const Table, name: []const u8) ?Noise {
-        const base = if (std.mem.lastIndexOfScalar(u8, name, '/')) |i| name[i + 1 ..] else name;
+        const base = if (std.mem.findScalarLast(u8, name, '/')) |i| name[i + 1 ..] else name;
         if (base.len == 0 or base.len > max_clip_name) return null;
         var buf: [max_clip_name]u8 = undefined;
         return self.map.get(std.ascii.lowerString(buf[0..base.len], base));
@@ -190,9 +190,9 @@ test "noise scan survives a self-closing node and matches tags case-insensitivel
     // after it).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/sounds.xml", .{dir});
     try io_fs.writeFile(path,
         \\<Sounds>

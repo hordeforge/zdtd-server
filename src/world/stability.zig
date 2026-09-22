@@ -583,7 +583,7 @@ test "stability: terrain supports a column; cutting the base fells it" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
@@ -627,7 +627,7 @@ test "stability: overhang beyond support falls after the support goes" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
@@ -665,7 +665,7 @@ test "stability: non-support blocks cap at 1 and never carry support" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
@@ -710,7 +710,7 @@ test "stability: a dig whose plane computes after the cell is air does not under
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
@@ -735,7 +735,7 @@ test "stability reset: row kernel matches the scalar reference" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
@@ -782,7 +782,7 @@ test "stability distribute: row scan matches the scalar reference" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);

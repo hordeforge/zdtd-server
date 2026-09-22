@@ -311,7 +311,7 @@ pub const Manifest = struct {
 /// Parse a manifest.toml from `dir_path` into a Manifest. All strings are duped
 /// through `a`; call `free` to release. `dir` is set to `dir_path`.
 pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
-    const path = try std.fs.path.join(a, &.{ dir_path, "manifest.toml" });
+    const path = try std.Io.Dir.path.join(a, &.{ dir_path, "manifest.toml" });
     defer a.free(path);
     const bytes = try io_fs.readFileAll(a, path);
     defer a.free(bytes);
@@ -326,7 +326,7 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
     // Optional self-contained config: raw text passed to the guest verbatim.
     // A missing or oversized file is not a load error (config is optional;
     // fail closed to no config, never a truncated blob).
-    const cfg_path = try std.fs.path.join(a, &.{ dir_path, "config.toml" });
+    const cfg_path = try std.Io.Dir.path.join(a, &.{ dir_path, "config.toml" });
     defer a.free(cfg_path);
     if (io_fs.fileExists(cfg_path)) {
         const cfg = try io_fs.readFileAll(a, cfg_path);
@@ -377,10 +377,10 @@ pub fn discover(a: std.mem.Allocator, root: []const u8) ![]Manifest {
         out.deinit(a);
     }
     for (names) |name| {
-        const dir_path = try std.fs.path.join(a, &.{ root, name });
+        const dir_path = try std.Io.Dir.path.join(a, &.{ root, name });
         defer a.free(dir_path);
         // Only directories that contain manifest.toml are mods.
-        const manifest_path = try std.fs.path.join(a, &.{ dir_path, "manifest.toml" });
+        const manifest_path = try std.Io.Dir.path.join(a, &.{ dir_path, "manifest.toml" });
         defer a.free(manifest_path);
         if (!io_fs.fileExists(manifest_path)) continue;
         const m = bindManifest(a, dir_path) catch |err| {

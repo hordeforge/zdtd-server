@@ -594,11 +594,11 @@ test "the guest contract version is read and a newer one is refused" {
     // loadAll is the shipping path: a newer guest is skipped, not loaded.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const cur_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "cur.wasm" });
+    const cur_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "cur.wasm" });
     defer std.testing.allocator.free(cur_path);
-    const next_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "next.wasm" });
+    const next_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "next.wasm" });
     defer std.testing.allocator.free(next_path);
     try io_fs.writeFile(cur_path, &cur);
     try io_fs.writeFile(next_path, &next);
@@ -776,14 +776,14 @@ test "plugin reload re-reads config.toml for a manifest-backed module" {
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const a = std.testing.allocator;
-    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
     defer a.free(wasm_path);
-    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });
     defer a.free(man_path);
-    const cfg_path = try std.fs.path.join(a, &.{ dir, "config.toml" });
+    const cfg_path = try std.Io.Dir.path.join(a, &.{ dir, "config.toml" });
     defer a.free(cfg_path);
     try io_fs.writeFile(wasm_path, &declaring_test_wasm);
     try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
@@ -1006,22 +1006,22 @@ test "reload reconciles the module's manifest point claims" {
     };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const a = std.testing.allocator;
 
     // m0 and m1 both export loot.roll; m2 does not.
-    const wasm0 = try std.fs.path.join(a, &.{ dir, "m0", "m.wasm" });
+    const wasm0 = try std.Io.Dir.path.join(a, &.{ dir, "m0", "m.wasm" });
     defer a.free(wasm0);
-    const wasm1 = try std.fs.path.join(a, &.{ dir, "m1", "m.wasm" });
+    const wasm1 = try std.Io.Dir.path.join(a, &.{ dir, "m1", "m.wasm" });
     defer a.free(wasm1);
-    const wasm2 = try std.fs.path.join(a, &.{ dir, "m2", "m.wasm" });
+    const wasm2 = try std.Io.Dir.path.join(a, &.{ dir, "m2", "m.wasm" });
     defer a.free(wasm2);
-    const man0 = try std.fs.path.join(a, &.{ dir, "m0", "manifest.toml" });
+    const man0 = try std.Io.Dir.path.join(a, &.{ dir, "m0", "manifest.toml" });
     defer a.free(man0);
-    const man1 = try std.fs.path.join(a, &.{ dir, "m1", "manifest.toml" });
+    const man1 = try std.Io.Dir.path.join(a, &.{ dir, "m1", "manifest.toml" });
     defer a.free(man1);
-    const man2 = try std.fs.path.join(a, &.{ dir, "m2", "manifest.toml" });
+    const man2 = try std.Io.Dir.path.join(a, &.{ dir, "m2", "manifest.toml" });
     defer a.free(man2);
     try io_fs.writeFile(wasm0, &with_hook);
     try io_fs.writeFile(wasm1, &with_hook);
@@ -1094,9 +1094,9 @@ test "point claims bind to the loaded slot, not the plan index" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const gone_dir = try std.fs.path.join(a, &.{ dir, "gone" });
+    const gone_dir = try std.Io.Dir.path.join(a, &.{ dir, "gone" });
     defer a.free(gone_dir);
     io_fs.mkdirPath(gone_dir);
 
@@ -1144,12 +1144,12 @@ test "queued-verb policy: module deny, operator right-bias, reload" {
     };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const a = std.testing.allocator;
-    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
     defer a.free(wasm_path);
-    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });
     defer a.free(man_path);
     try io_fs.writeFile(wasm_path, &plain);
     try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\ndeny = \"say\"\n");
@@ -2081,13 +2081,13 @@ test "a legacy [plugin] modules slot is not manifest-backed" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     // A .wasm with a config.toml beside it and NO manifest.toml: the shape an
     // operator gets from `modules = ["<path>.wasm"]`.
-    const wasm_path = try std.fs.path.join(a, &.{ dir, "legacy.wasm" });
+    const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "legacy.wasm" });
     defer a.free(wasm_path);
-    const cfg_path = try std.fs.path.join(a, &.{ dir, "config.toml" });
+    const cfg_path = try std.Io.Dir.path.join(a, &.{ dir, "config.toml" });
     defer a.free(cfg_path);
     try io_fs.writeFile(wasm_path, &declaring_test_wasm);
     try io_fs.writeFile(cfg_path, "greeting = \"hi\"\n");

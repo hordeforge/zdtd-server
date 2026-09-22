@@ -209,8 +209,8 @@ pub const Buffer = struct {
     fn recordSpawn(self: *Buffer, src: i16, net_id: i32) void {
         if (src == 0) return;
         if (self.spawn_n >= max_commands) {
-            std.mem.copyForwards(i16, self.spawn_srcs[0 .. self.spawn_n - 1], self.spawn_srcs[1..self.spawn_n]);
-            std.mem.copyForwards(i32, self.spawn_ids[0 .. self.spawn_n - 1], self.spawn_ids[1..self.spawn_n]);
+            @memmove(self.spawn_srcs[0 .. self.spawn_n - 1], self.spawn_srcs[1..self.spawn_n]);
+            @memmove(self.spawn_ids[0 .. self.spawn_n - 1], self.spawn_ids[1..self.spawn_n]);
             self.spawn_n -= 1;
             self.spawn_evicted += 1;
         }
@@ -314,8 +314,8 @@ pub const Buffer = struct {
         }
         const leftover = self.n - count;
         if (leftover > 0) {
-            std.mem.copyForwards(Op, self.ops[0..leftover], self.ops[count..self.n]);
-            std.mem.copyForwards(i16, self.srcs[0..leftover], self.srcs[count..self.n]);
+            @memmove(self.ops[0..leftover], self.ops[count..self.n]);
+            @memmove(self.srcs[0..leftover], self.srcs[count..self.n]);
         }
         self.n = leftover;
         return r;

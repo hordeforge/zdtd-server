@@ -755,7 +755,7 @@ pub fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
 test "itemStackFor fails closed after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -772,7 +772,7 @@ test "itemStackFor fails closed after catalogs requested" {
 test "storage pins are not a second authority after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {

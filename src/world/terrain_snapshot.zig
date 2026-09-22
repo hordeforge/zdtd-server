@@ -176,7 +176,7 @@ fn tmpWorld(dir: []const u8) !store.World {
 test "snapshot answers what the locked standable probe would, for every column" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
     var w = try tmpWorld(dir);
     defer w.deinit();
@@ -218,7 +218,7 @@ test "snapshot answers what the locked standable probe would, for every column" 
 test "snapshot returns null outside the window and counts the miss" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
     var w = try tmpWorld(dir);
     defer w.deinit();
@@ -236,7 +236,7 @@ test "snapshot returns null outside the window and counts the miss" {
 test "snapshot rebuild is idempotent and player-order independent" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
     var w = try tmpWorld(dir);
     defer w.deinit();

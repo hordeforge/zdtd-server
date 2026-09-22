@@ -567,7 +567,7 @@ test "the compressed set is exactly the stock get_Compress overrides we emit" {
 test "reliable send pumping defers queued game payloads" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
@@ -593,7 +593,7 @@ test "reliable send pumping defers queued game payloads" {
 test "broadcast soft-drops only droppable packages under WindowFull" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
@@ -616,7 +616,7 @@ test "broadcast soft-drops only droppable packages under WindowFull" {
 test "chunk removal retries without forgetting the client chunk" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
@@ -658,7 +658,7 @@ test "a broadcast fan-out shares one retry window across wedged peers" {
     // one window regardless of peer count (AGENTS rule 20).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {

@@ -36,7 +36,7 @@ const prefabs = store.prefabs;
 test "proc worldgen getOrCreate heights from seed" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -72,7 +72,7 @@ test "proc worlds persist only edited chunks" {
     // dirty and persists.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -98,7 +98,7 @@ test "proc worlds derive a spawn from the generated surface" {
     // which can bury the player or leave them mid-air for a random seed.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -123,7 +123,7 @@ test "a clean proc session writes no world files (mods leave no trace)" {
     // edits are the player's data).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -153,7 +153,7 @@ test "a clean proc session writes no world files (mods leave no trace)" {
 test "flat world set dig persist" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -178,7 +178,7 @@ test "flat world set dig persist" {
 test "standableY answers the walk surface, not the column top" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -217,7 +217,7 @@ test "standableY answers the walk surface, not the column top" {
 test "standableY clamps at world floor and ceiling" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -237,7 +237,7 @@ test "standableY clamps at world floor and ceiling" {
 test "standableWorld crosses chunk borders and refuses a sealed column" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -251,7 +251,7 @@ test "standableWorld crosses chunk borders and refuses a sealed column" {
 test "evictOneChunk picks the coldest chunk, min key on ties (DST)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -281,7 +281,7 @@ test "evictOneChunk picks the coldest chunk, min key on ties (DST)" {
 test "paint clear on setBlock and ZCH3 texture density roundtrip" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -313,7 +313,7 @@ test "paint clear on setBlock and ZCH3 texture density roundtrip" {
 test "ZCH3 damage plane roundtrips and stays per-cell" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -344,7 +344,7 @@ test "ZCH3 damage plane roundtrips and stays per-cell" {
 test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -380,7 +380,7 @@ test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
     try std.testing.expectEqual(@as(u8, 0x80), c2.topsoil[1]);
 
     // Pre-topsoil save (16-byte hdr + heights only): loads all-clear.
-    var path_buf2: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf2: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path2 = try std.fmt.bufPrint(&path_buf2, "{s}/c_0_0.zch", .{dir});
     var old: [16 + 256]u8 = .{0} ** (16 + 256);
     old[0] = 'Z';
@@ -399,9 +399,9 @@ test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
 test "torn or misplaced chunk save cannot partially replace generated state" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/c_0_0.zch", .{dir});
 
     var torn: [16 + 256]u8 = .{0} ** (16 + 256);
@@ -472,7 +472,7 @@ test "async flush round-trips a save into a fresh World" {
     if (!chunk_flush.Flusher.available()) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var w = try World.init(std.testing.allocator, dir);
@@ -499,7 +499,7 @@ test "rotation raw lives in the chunk plane and survives save/reload" {
     // second client or a relog re-renders the rotation instead of a bare id.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     const raw_door: u32 = block_dirt | (@as(u32, 0x0005) << 16); // arbitrary upper meta bits
@@ -525,7 +525,7 @@ test "rotation raw lives in the chunk plane and survives save/reload" {
 test "asyncEnabled is false under force-serial (DST keeps the sync path)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -545,7 +545,7 @@ test "evict then reload of a queued key reads the newest bytes" {
     if (!chunk_flush.Flusher.available()) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -592,7 +592,7 @@ test "isSolidWorld: a closed door is solid, an open door is passable" {
     // blocks the AI probes; without the hook it stays solid.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -675,7 +675,7 @@ test "water sources fill lake columns with water blocks" {
 test "procBiomeAt follows the surface fill field deterministically" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -708,7 +708,7 @@ test "procBiomeAt follows the surface fill field deterministically" {
 test "resolveTerrainIds seeds default stack from live dump ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -744,7 +744,7 @@ test "resolveTerrainIds seeds default stack from live dump ids" {
 test "syncWorldgenBiomes keeps XML stacks for a single biome" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -769,7 +769,7 @@ fn carveAirColumn(w: *World, x: i32, lo: i32, hi: i32) !void {
 test "water leveling: digging beside a lake pours the connected basin to its surface" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -813,7 +813,7 @@ test "water leveling notifies every filled cell so the Game can broadcast" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -837,7 +837,7 @@ test "water leveling notifies every filled cell so the Game can broadcast" {
 test "water leveling: a deep dig not connected to water stays dry" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -857,7 +857,7 @@ test "water leveling: a deep dig not connected to water stays dry" {
 test "water leveling: placed water cascades down its column and puddles" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -877,7 +877,7 @@ test "water leveling: placed water cascades down its column and puddles" {
 test "water leveling: the puddle cap bounds sideways spread on a flat floor" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -900,7 +900,7 @@ test "water leveling: the puddle cap bounds sideways spread on a flat floor" {
 test "water leveling: the spread cap bounds one pour" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -928,7 +928,7 @@ test "chunk pointers stay valid across map resizes (pointer-stable store)" {
     // resizes, and the mid-scan create pattern stays readable.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
@@ -959,7 +959,7 @@ test "Collide verbs decide movement and sight" {
     // (containers, most glass), so both predicates matter.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();

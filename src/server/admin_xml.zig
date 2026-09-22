@@ -280,9 +280,9 @@ test "serveradmin.xml sections merge into the operator lists" {
     var bans: admin_cmds.BanList = .{};
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
+    const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
     defer std.testing.allocator.free(path);
     try io_fs.writeFile(path, xml_text);
     try load(std.testing.allocator, path, &admins, &whitelist, &bans);
@@ -340,9 +340,9 @@ test "serveradmin.xml accepts the older <admins><users> nesting" {
     var bans: admin_cmds.BanList = .{};
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    const path = try std.fs.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
+    const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
     defer std.testing.allocator.free(path);
     try io_fs.writeFile(path, xml_text);
     try load(std.testing.allocator, path, &admins, &whitelist, &bans);

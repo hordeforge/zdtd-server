@@ -306,7 +306,7 @@ test "directory listings sort names and exclude symlinks" {
     try tmp.dir.symLink(io, "a.xml", "file_link", .{});
     try tmp.dir.symLink(io, "a_dir", "dir_link", .{ .is_directory = true });
     try tmp.dir.symLink(io, "missing", "dangling", .{});
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = buf[0..try tmp.dir.realPath(io, &buf)];
     const files = try listFileNames(a, path);
     defer {
@@ -330,9 +330,9 @@ test "write read roundtrip under cache dir" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_test.txt", .{dir});
     try writeFile(p, "hello");
     const got = try readFileAll(a, p);
@@ -351,9 +351,9 @@ test "injectWriteFailures fails then recovers" {
     defer injectWriteFailures(0);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_fault.txt", .{dir});
     injectWriteFailures(2);
     try std.testing.expectEqual(@as(u32, 2), pendingWriteFailures());
@@ -368,9 +368,9 @@ test "injectReadFailures fails then recovers" {
     defer injectReadFailures(0);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_read_fault.txt", .{dir});
     try writeFile(p, "payload");
     injectReadFailures(1);

@@ -120,7 +120,7 @@ test "scenario a wrong challenge echo does not authenticate the peer" {
     // right length authenticated, left the suite green.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -161,7 +161,7 @@ test "scenario the stale-peer reap tears the session down like a disconnect" {
     // (dropClientSlot) owns persist, EntityRemove fan-out and sim destroy.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try game_mod.Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -200,7 +200,7 @@ test "scenario a peer that never echoes is reaped past the auth age" {
     // age must survive (its challenge_ns cleared on echo).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -242,7 +242,7 @@ test "scenario a peer that never echoes is reaped past the auth age" {
 test "scenario pre-login world package is rejected by production dispatch" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -549,7 +549,7 @@ test "scenario item drop commits with EntitySpawnResponse" {
     // Without it the thrown stack lingers in the client bag until re-sync.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -602,7 +602,7 @@ test "scenario item drop commits with EntitySpawnResponse" {
 test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -1147,9 +1147,9 @@ test "scenario gameevents: the respawn sequence drives the stat restore" {
     }
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/gameevents.xml", .{dir});
     try io_fs.writeFile(path,
         \\<gameevents>
@@ -1340,7 +1340,7 @@ test "scenario land claim: a stranger's blast meets the claim hardness" {
     // 1 (a zombie's blast ignores claims entirely).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2141,7 +2141,7 @@ test "scenario party mate's shared quest advances on the killer's kill" {
     // quest copies advance; same GameStats[54] range as the XP share).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2197,7 +2197,7 @@ test "scenario an armoured zombie halves the claimed damage" {
     // runs EntityAlive.DamageEntity on the victim). zombieSoldier is 50%.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2257,7 +2257,7 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     // the client's buff icons vanish on rejoin while the server keeps state.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2348,7 +2348,7 @@ test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
     // alert<<15 | crouch bit 0) so other clients render the meter.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -2725,7 +2725,7 @@ test "scenario powered trigger TE: malformed body leaves containers alone" {
 test "scenario persist: block write, process restart, read-back, rejoin" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -3034,7 +3034,7 @@ test "scenario always-on radius effect: radiated barrel grants buffRadiation01" 
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -3163,7 +3163,7 @@ test "scenario persist with stock map: edit survives restart under same --map" {
     if (!stockMapPresent()) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -3294,11 +3294,11 @@ test "scenario synthetic DTM fixture always runs" {
     // Tiny 32×32 DTM on disk → loadStockMap path without Steam tree.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var root_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = root_buf[0..try tmp.dir.realPath(std.testing.io, &root_buf)];
-    var map_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var map_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const map_dir = try std.fmt.bufPrint(&map_buf, "{s}/map", .{root});
-    var save_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var save_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const save_dir = try std.fmt.bufPrint(&save_buf, "{s}/save", .{root});
     io_fs.mkdirPath(map_dir);
     io_fs.mkdirPath(save_dir);
@@ -3356,7 +3356,7 @@ fn writeFixtureMap(dir: []const u8) !void {
 test "scenario stock fixture quests.xml load" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3435,7 +3435,7 @@ test "scenario quest accept kill complete and trader buy" {
     // would refuse to re-grant it (GAP starter-quest row).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -3741,7 +3741,7 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     // command surface with the reply captured into the response.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4022,9 +4022,9 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const tdir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var tpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var tpath_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const tpath = try std.fmt.bufPrint(&tpath_buf, "{s}/traders_close.xml", .{tdir});
     try io_fs.writeFile(tpath, tsrc);
     const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
@@ -4276,7 +4276,7 @@ test "scenario vehicle refuel caps at the tank and refunds when full" {
     // refunded (mirrors the generator refuel refund).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4320,7 +4320,7 @@ test "scenario drowning damages a submerged player" {
     // drowning_damage_per_second (2 hp/s) in 1 s ticks.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4366,7 +4366,7 @@ test "scenario radiated biome damages the player" {
     // damage over time; the server is authoritative for the hp loss.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4417,7 +4417,7 @@ test "scenario explosion damages entities and credits the kill" {
     // zombie close enough dies and the thrower gets quest/XP/score credit.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4498,7 +4498,7 @@ test "scenario bedroll respawn: placed bed is listed and used on death" {
     // it after the world spawn and RequestToSpawnPlayer respawns there.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4561,7 +4561,7 @@ test "scenario spawn confirm: forged echo dropped, own echo relayed to the other
     // must reach the tracking client with its entity intact.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -4613,7 +4613,7 @@ test "scenario spawn confirm: forged echo dropped, own echo relayed to the other
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -5478,7 +5478,7 @@ test "scenario a locked tile entity stays locked on a different channel" {
     // and the sweep is skipped there; a real block target is what reaches it.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -5700,7 +5700,7 @@ test "scenario inventory keep-open refreshes the lock stale window" {
     // stock's 10s.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -5762,7 +5762,7 @@ test "scenario entity physics body length matches the stock layout" {
     // logged every 100th.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -5803,7 +5803,7 @@ test "scenario SetBlock beyond edit reach is rejected" {
     // never streamed. The reach is max_edit_range (96) from the editor.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -5848,7 +5848,7 @@ test "scenario NetPackageBag naming another player is refused" {
     // writing a *different* player's inventory.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -6739,7 +6739,7 @@ test "scenario plugin disable withdraws pending commands before drain" {
     // leave the hit applied.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -7091,7 +7091,7 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     // overwritten with the recipe's count (3) and craft_time (3.0).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -7183,7 +7183,7 @@ test "scenario POIStayWithin bounds the stay zone to the quest POI rect" {
     // It now maps to stay_within and the zone is the quest's bound POI rect.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -8328,7 +8328,7 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     // on_block_damage assert is absolute (WORK_PLAN W3).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -8404,7 +8404,7 @@ test "scenario journal PDF carries max_journal quests (GAP 12)" {
     // quest (all client-known fixture defs) reaches the PDF snapshot.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -8604,7 +8604,7 @@ test "scenario quest journal ZPV5 resolves the quest by name, not stored def_id"
 test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/craft/stay/block/rally)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -8738,7 +8738,7 @@ test "scenario treasure radius break fires the quest TreasureRadiusReduction amb
     // chance=1 so the roll always fires). The event must NOT advance a phase.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -8816,7 +8816,7 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -8896,7 +8896,7 @@ test "scenario vending rent state machine (loot-economy §6)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9051,7 +9051,7 @@ test "scenario TraderData copy-back: out-of-reach ignored, in-reach applied" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9187,7 +9187,7 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9292,7 +9292,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
     // and the GameStats wire value the client is told, so the two agree.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9340,7 +9340,7 @@ test "scenario weather storm state survives a restart" {
     // storm instead of re-rolling the opening groups.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     // Cycle 1: push biome 0 into an active storm; deinit persists it.
@@ -9438,7 +9438,7 @@ test "scenario quest completion pays out item and exp rewards" {
     // and the join would refuse to re-grant it (GAP starter-quest row).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9485,7 +9485,7 @@ test "scenario quest reward items carry the stock stat roll" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -9540,7 +9540,7 @@ test "scenario quest reward items carry the stock stat roll" {
 test "scenario land claims persist across restart and re-map on login" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -9681,7 +9681,7 @@ test "scenario a land claim blocks a non-owner's SetBlock" {
     // the claim and not the reach or bounds gate.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10152,7 +10152,7 @@ fn buildPartyActionBody(buf: []u8, action: u8, invited_by: i32, invited: i32) ![
 test "scenario party: accept invite fans a snapshot, leave disbands, disconnect removes" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10230,7 +10230,7 @@ test "scenario party: accept invite fans a snapshot, leave disbands, disconnect 
 test "scenario party shared kill XP splits and sends SharedPartyKill to the mate" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10353,7 +10353,7 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
 test "scenario chat routes by recipient list and preserves the channel" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10463,7 +10463,7 @@ test "scenario chat routes by recipient list and preserves the channel" {
 test "scenario party shared quest: accept shares to the party, disconnect removes" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10536,7 +10536,7 @@ test "scenario shared quest member journal carries the owner code" {
     // moves with the quest the player is actually running.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10601,7 +10601,7 @@ test "scenario shared quest member journal carries the owner code" {
 test "scenario shared quest member add/remove reach the owner, not the sender" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -10683,7 +10683,7 @@ test "scenario shared quest member add/remove reach the owner, not the sender" {
 test "scenario party quest change fans objective deltas to the other members" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -11178,7 +11178,7 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     // one server-push nav marker case, sent alongside the loot-bag spawn.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -11363,7 +11363,7 @@ test "scenario bedroll ownership survives a restart" {
     // in memory before; a restart used to drop them silently.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11406,7 +11406,7 @@ test "scenario bedroll: a save with no bedroll tail loads with has_bed false" {
     // not a corrupt-file error.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11446,7 +11446,7 @@ test "scenario a burning workstation grants its ActiveRadiusEffects buff to near
     // radius; a player outside it, or the same block unlit, gets nothing.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -11505,7 +11505,7 @@ test "scenario a burning workstation grants its ActiveRadiusEffects buff to near
 test "scenario bot shoot is LOS-gated by solid voxels" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11554,7 +11554,7 @@ test "scenario bot host config flows from options (headshot multiplier)" {
     // reach the BotManager and apply to headshot shots (ADR 0021 / ADR 0026).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11585,7 +11585,7 @@ test "scenario bot host config flows from options (headshot multiplier)" {
 test "scenario on_player_damage verdict denies PvP via the real core_pvp module" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11698,7 +11698,7 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     // 100-casinoCoin Item reward pays 150; without a module it pays 100.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -11861,7 +11861,7 @@ test "scenario core_adminverbs wave verb spawns zombies" {
 test "scenario player dig routes the on_block_damage verdict (plugin_rules doubles)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11909,7 +11909,7 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -11967,7 +11967,7 @@ test "scenario harvest count scales by the held tool's HarvestCount passive" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12036,7 +12036,7 @@ test "scenario fall-event drops re-place debris at landing (terrDirt)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12091,7 +12091,7 @@ test "scenario destroy-event drops roll the bag at the blast (bathroomStallDoor)
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12142,7 +12142,7 @@ test "scenario sound relay fans out to peers, excluding the sender" {
     // allButAttachedToEntityId = entityId); a spoofed entity id is dropped.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12207,7 +12207,7 @@ test "scenario forge completion dings NetPackageSoundAtPosition" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12258,7 +12258,7 @@ test "scenario forge completion dings NetPackageSoundAtPosition" {
 test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12296,7 +12296,7 @@ test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
 test "scenario on_craft_request verdict gates crafting (real core_craftgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12340,7 +12340,7 @@ test "scenario on_craft_request verdict gates crafting (real core_craftgate)" {
 test "scenario on_loot_roll verdict halves loot (real core_lootgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12381,7 +12381,7 @@ test "scenario collect rejects a bag claimed in another player's name" {
     // by an honest one.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -12432,7 +12432,7 @@ test "scenario a bag write beyond reach is rejected" {
     // and rewriting a bag on the far side of the map by id.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12508,7 +12508,7 @@ test "scenario wrench pickup applies to the world and honours reach and claims" 
     // top (reach, land claim) were untested for the same reason.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12584,7 +12584,7 @@ test "scenario block paint lands in the world and honours its gates" {
     // sender entity, reach, claim) had no scenario either.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12679,7 +12679,7 @@ test "scenario a client-reported XP add mints nothing" {
     // is what makes it a regression risk rather than a decision.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12730,7 +12730,7 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     // relayed to every peer as if the owner had sent them.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12799,7 +12799,7 @@ test "scenario the alive-flags jump edge fires the leg buffs' onSelfJump rows" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12843,7 +12843,7 @@ test "scenario the alive-flags aim and crouch edges drive their buffs" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12884,7 +12884,7 @@ test "scenario the respawn funnel fires onSelfRespawn rows" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -12925,7 +12925,7 @@ test "scenario a quest entity spawn summons one entity for the sender only" {
     // ProcessPackage (IL=37) spawns exactly one per package.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13007,7 +13007,7 @@ test "scenario walking away does not reset the decorations we sent" {
     // that keeps it off the unload path had no test.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13052,7 +13052,7 @@ test "scenario walking away does not reset the decorations we sent" {
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -13085,7 +13085,7 @@ test "scenario bots are grounded to terrain height on spawn and move" {
 test "scenario a player can damage a bot and the bot records the attacker" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -13151,7 +13151,7 @@ test "scenario a player can damage a bot and the bot records the attacker" {
 test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -13195,7 +13195,7 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
 test "scenario wasmQuery path: nav path across loaded chunks" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -13246,7 +13246,7 @@ test "scenario wasmQuery path: nav path across loaded chunks" {
 test "scenario zombies aggro and melee bots (revenge + proximity)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
@@ -13289,7 +13289,7 @@ test "scenario zombies aggro and melee bots (revenge + proximity)" {
 test "scenario bot count floor spawns bots and fillSense emits them" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13318,7 +13318,7 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
 test "scenario applyCountFloor tops up across repeated calls" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13354,7 +13354,7 @@ test "scenario applyCountFloor tops up across repeated calls" {
 test "scenario bots collide with walls and slide instead of phasing through" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13389,7 +13389,7 @@ test "scenario persist: blood-moon schedule survives restart (ZCL2)" {
     // saves the clock (lifecycle) and Game.create restores it.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13429,7 +13429,7 @@ test "scenario dig wears the held tool (ItemValue.UseTimes)" {
     // dig C2S path (blocks.zig) calls degradeUse on the holding slot.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -13631,7 +13631,7 @@ test "scenario stock InventoryTransaction applies and acks" {
     // the array) and replies with the stock minimal ack (success + count 0).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14052,7 +14052,7 @@ test "scenario mod scrub rejects illegal attachments server-authoritatively" {
     // (fail closed). The client's next inventory sync corrects its view.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14104,9 +14104,9 @@ test "scenario powered door opens while powered, closes on power loss" {
     // the zombie door-open path) and closes when the power drops.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cfg_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var xml_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var xml_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const xml_path = try std.fmt.bufPrint(&xml_buf, "{s}/blocks.xml", .{cfg_dir});
     try io_fs.writeFile(xml_path,
         \\<blocks>
@@ -14158,7 +14158,7 @@ test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
     // 192) so the client clears IsSleeperPassive and plays the groan.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14195,7 +14195,7 @@ test "scenario a woken sleeper broadcasts NetPackageSleeperWakeup" {
     // sleeper is announced at all.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14234,7 +14234,7 @@ test "scenario a recycled slot does not inherit the previous look-at target" {
     // a zombie facing the wrong way for as long as it holds that target.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14291,7 +14291,7 @@ test "scenario a reload naming no live entity is not relayed" {
     // the id check, since the body is one i32 a client picks.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14339,7 +14339,7 @@ test "scenario light tile entities ride the chunk stream" {
     // what carries intensity, range and colour, and it is only ever sent here.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14428,7 +14428,7 @@ test "scenario a vending allow-list with a hole ships no empty identity" {
     // the wire; without it the client reads a count it cannot satisfy.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14535,9 +14535,9 @@ test "scenario a vending fill skips items this build cannot resolve" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const tdir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var tpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var tpath_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const tpath = try std.fmt.bufPrint(&tpath_buf, "{s}/traders_fill.xml", .{tdir});
     try io_fs.writeFile(tpath, tsrc);
     const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
@@ -14585,7 +14585,7 @@ test "scenario animation data relays to the other players" {
     // re-broadcasts the raw body to the entity's tracked players.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14762,7 +14762,7 @@ test "scenario animation data relays to the other players" {
 test "scenario fall_sink clamps player vertical delta without the glide flag (moon_gravity)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14800,7 +14800,7 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     // The server counts kills on its own authoritative death path.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -14959,7 +14959,7 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     // path is rate-limited per client, so it cannot share one).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15045,7 +15045,7 @@ test "scenario every registered package id survives dispatch with a malformed bo
     // docs/DIVERGENCES.md 3b carries the per-package reasoning.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15201,7 +15201,7 @@ test "scenario the attack target is published on change and cleared when it dies
     // targets in the sim and published none until 2026-09-06.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15277,7 +15277,7 @@ test "scenario a kill notifies the killer's client so kill challenges advance" {
     // server-side and sent nothing, so kill challenges never advanced.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15364,7 +15364,7 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     // to broadcast the package to every peer and repair nothing.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15451,7 +15451,7 @@ test "scenario a landed hit fans the applied damage to the victim's trackers" {
     // so no hit was ever visible to anyone but the attacker's own client.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15501,7 +15501,7 @@ test "scenario a leg hit past the crawler threshold crawlers the zombie" {
     // is 0 (path off); a class carrying .175 crawlers on a 20%-hp hit.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15573,7 +15573,7 @@ test "scenario a perked attacker's dismember bonus reaches the S2C damage body" 
     // the bonus.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -15708,9 +15708,9 @@ test "scenario player death sends the deficit sequence action under XPOnly" {
     // server-side action (no response of its own).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/gameevents.xml", .{dir});
     try io_fs.writeFile(path,
         \\<gameevents>
@@ -16146,7 +16146,7 @@ test "scenario shared quest member events reach only the sharer, and only in a p
     // could push a party-membership event at the whole server.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -17578,7 +17578,7 @@ test "scenario the loot rate and party range the sim uses reach the GameStats wi
     // client another.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -17625,7 +17625,7 @@ test "scenario the world clock runs and advertises the stock TimeOfDayIncPerSec 
     // drifted ahead of the server's.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -17686,7 +17686,7 @@ test "scenario PlayerStats carries the held item, not bare hands" {
     // PlayerStats carries the same field and was missed.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18366,7 +18366,7 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18457,9 +18457,9 @@ test "scenario mob spawn ground follows blocks.xml CanMobsSpawnOn" {
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var world_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var world_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = try std.fmt.bufPrint(&world_buf, "{s}/spawn_ground", .{dir});
     const g = try game_mod.Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
         .map_dir = map,
@@ -18575,7 +18575,7 @@ test "scenario sign data request serves the layered catalog" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18634,7 +18634,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18714,7 +18714,7 @@ test "scenario buff finish chains the injury cooldown" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18760,7 +18760,7 @@ test "scenario preacher armor resists zombie hits more" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18818,7 +18818,7 @@ test "scenario seated players read attached" {
     // reads true, a standing player false.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18855,7 +18855,7 @@ test "scenario comma buff lists apply each name" {
     // siblings instead of dropping the row.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18888,7 +18888,7 @@ test "scenario buff stack fires its rows" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18918,7 +18918,7 @@ test "scenario victim hit fires concussion counter" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
@@ -18954,7 +18954,7 @@ test "scenario victim hit fires concussion counter" {
 test "scenario trader restore rejects incomplete snapshots without changing stock" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try game_mod.Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .starter_zombies = false,
@@ -18974,7 +18974,7 @@ test "scenario trader restore rejects incomplete snapshots without changing stoc
     stock.n = 0;
     try g.saveTraders();
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{dir});
     const saved = try io_fs.readFileAll(std.testing.allocator, path);
     defer std.testing.allocator.free(saved);
@@ -19011,7 +19011,7 @@ test "scenario material-based forge outputs survive queue validation" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};

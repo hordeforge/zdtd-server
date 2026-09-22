@@ -519,14 +519,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // (game/init_world.zig, game/lifecycle.zig), so this one is ours to free.
     defer if (serveradmin_path) |p| gpa.free(p);
     if (serverconfig_path) |scp| {
-        var p: [std.fs.max_path_bytes]u8 = undefined;
+        var p: [std.Io.Dir.max_path_bytes]u8 = undefined;
         if (serverAdminSiblingPath(&p, scp)) |c| {
             if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
         }
     }
     if (serveradmin_path == null) {
         if (config_dir) |cd| {
-            var p: [std.fs.max_path_bytes]u8 = undefined;
+            var p: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{cd}) catch null;
             if (cand) |c| {
                 if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
@@ -535,7 +535,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
     if (serveradmin_path == null) {
         if (game_dir) |gd| {
-            var p: [std.fs.max_path_bytes]u8 = undefined;
+            var p: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const cand = std.fmt.bufPrint(&p, "{s}/serveradmin.xml", .{gd}) catch null;
             if (cand) |c| {
                 if (io_fs.fileExists(c)) serveradmin_path = try gpa.dupe(u8, c);
@@ -1251,12 +1251,12 @@ test {
 }
 
 fn serverAdminSiblingPath(buf: []u8, serverconfig_path: []const u8) ?[]const u8 {
-    const dir = std.fs.path.dirname(serverconfig_path) orelse ".";
+    const dir = std.Io.Dir.path.dirname(serverconfig_path) orelse ".";
     return std.fmt.bufPrint(buf, "{s}/serveradmin.xml", .{dir}) catch null;
 }
 
 test "serveradmin sibling path accepts bare and qualified config names" {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     try std.testing.expectEqualStrings("./serveradmin.xml", serverAdminSiblingPath(&buf, "serverconfig.xml").?);
     try std.testing.expectEqualStrings("./serveradmin.xml", serverAdminSiblingPath(&buf, "./serverconfig.xml").?);
     try std.testing.expectEqualStrings("config/serveradmin.xml", serverAdminSiblingPath(&buf, "config/serverconfig.xml").?);
@@ -1379,7 +1379,7 @@ test "server port must leave room for LiteNet offset" {
 test "integration world persist + damage + packages" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};

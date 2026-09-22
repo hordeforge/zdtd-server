@@ -164,8 +164,8 @@ fn recordHit(f: *c.FallingBlocks, nid: i32) void {
         f.hit_n += 1;
     } else {
         // Table full: drop the oldest so a new victim can still be counted.
-        std.mem.copyForwards(i32, f.hit_ids[0 .. f.hit_n - 1], f.hit_ids[1..f.hit_n]);
-        std.mem.copyForwards(u8, f.hit_counts[0 .. f.hit_n - 1], f.hit_counts[1..f.hit_n]);
+        @memmove(f.hit_ids[0 .. f.hit_n - 1], f.hit_ids[1..f.hit_n]);
+        @memmove(f.hit_counts[0 .. f.hit_n - 1], f.hit_counts[1..f.hit_n]);
         f.hit_ids[f.hit_n - 1] = nid;
         f.hit_counts[f.hit_n - 1] = 1;
     }

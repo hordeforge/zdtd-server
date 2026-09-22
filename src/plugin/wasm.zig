@@ -1035,7 +1035,7 @@ pub const WasmHost = struct {
             // Path = <manifest dir>/<wasm> for discovered mods; synthetic
             // explicit modules carry the full path as wasm with dir "".
             const full_path = if (rm.manifest.dir.len > 0)
-                (std.fs.path.join(allocator, &.{ rm.manifest.dir, rm.manifest.wasm.? }) catch {
+                (std.Io.Dir.path.join(allocator, &.{ rm.manifest.dir, rm.manifest.wasm.? }) catch {
                     std.debug.print("zdtd: mod '{s}' bad wasm path; skipping\n", .{rm.manifest.name.?});
                     continue;
                 })
@@ -1075,8 +1075,8 @@ pub const WasmHost = struct {
                 // plugins load): the manifest has no dir, so derive the
                 // self-contained config from the wasm's own folder - a plugin
                 // stays self-contained no matter how it is loaded.
-                if (std.fs.path.dirname(full_path)) |wdir| {
-                    const cfg_path = std.fs.path.join(allocator, &.{ wdir, "config.toml" }) catch null;
+                if (std.Io.Dir.path.dirname(full_path)) |wdir| {
+                    const cfg_path = std.Io.Dir.path.join(allocator, &.{ wdir, "config.toml" }) catch null;
                     if (cfg_path) |cp| {
                         defer allocator.free(cp);
                         if (io_fs.fileExists(cp)) {
@@ -1300,7 +1300,7 @@ pub const WasmHost = struct {
     /// must not keep the pre-reload copy. Missing, oversized or unreadable
     /// fails closed to no config, the same rule `loadResolved` applies.
     fn rereadConfig(self: *WasmHost, idx: usize, path: []const u8) void {
-        const dir = std.fs.path.dirname(path) orelse {
+        const dir = std.Io.Dir.path.dirname(path) orelse {
             self.setSlotConfig(idx, "");
             return;
         };
@@ -1341,7 +1341,7 @@ pub const WasmHost = struct {
         // but an unreadable or invalid one must not silently release
         // exclusivity or lift the deny list the module booted with (review F9;
         // a later restart re-reads it with validate()).
-        const dir = std.fs.path.dirname(path) orelse {
+        const dir = std.Io.Dir.path.dirname(path) orelse {
             for (&self.claims) |*c| {
                 if (c.* == idx) c.* = no_claim;
             }

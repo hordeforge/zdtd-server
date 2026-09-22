@@ -252,7 +252,7 @@ fn testWorld(dir: []const u8) !store.World {
 test "single block deco only fills air and leaves terrain height alone" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(4, 4);
@@ -277,7 +277,7 @@ test "single block deco only fills air and leaves terrain height alone" {
 test "multiblock tree writes parent plus children" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(9, 11);
@@ -308,7 +308,7 @@ test "multiblock tree writes parent plus children" {
 test "multiblock spanning a chunk edge writes into both chunks" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     var w = try testWorld(dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)]);
     defer w.deinit();
     const h = try w.heightWorld(15, 15);

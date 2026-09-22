@@ -507,13 +507,7 @@ pub const Peer = struct {
         // handlePacket's Merged branch pushes then pops, and popExtra reclaims
         // extra_used to 0 once the queue drains, so Server.drainControl re-pushes
         // a slice that overlaps dst (exactly, for a single-payload Merged).
-        if (dst.ptr != user.ptr) {
-            if (@intFromPtr(dst.ptr) < @intFromPtr(user.ptr)) {
-                std.mem.copyForwards(u8, dst, user);
-            } else {
-                std.mem.copyBackwards(u8, dst, user);
-            }
-        }
+        if (dst.ptr != user.ptr) @memmove(dst, user);
         self.extra_used += user.len;
         self.extra_q[self.extra_n] = .{ .off = off, .len = @intCast(user.len) };
         self.extra_n += 1;

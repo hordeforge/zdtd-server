@@ -521,7 +521,7 @@ test "disabled modlets are listed but their patches are not applied" {
     // Config/ dir is left out of the patch list.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);

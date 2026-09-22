@@ -77,10 +77,12 @@ pub const ColorTable = struct {
     }
 };
 
-/// Fallback when biomes.xml is missing (offline tests). Keys and ids are the
-/// stock `biomemapcolor` / `<biomemap>` pairs (verified against the operator
-/// install's `Data/Config/biomes.xml`, 2026-09-22).
-pub fn colorToId(r: u8, g: u8, b: u8) u8 {
+/// `fallback_colors` lookup, for the test that pins its stock rows. Callers
+/// take the loaded table (`decode` falls back to `fallback_colors` itself), so
+/// this stays file-private. Keys and ids are the stock `biomemapcolor` /
+/// `<biomemap>` pairs (verified against the operator install's
+/// `Data/Config/biomes.xml`, 2026-09-22).
+fn colorToId(r: u8, g: u8, b: u8) u8 {
     return fallback_colors.lookup(r, g, b);
 }
 

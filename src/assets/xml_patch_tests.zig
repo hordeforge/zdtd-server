@@ -463,7 +463,7 @@ test "a realistic xml-only modlet applies through the scan and patch path" {
     // Localization.csv that the server tolerates without reading.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const mod_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods/SimpleMod", .{root});
     defer std.testing.allocator.free(mod_dir);
@@ -547,7 +547,7 @@ test "a realistic xml-only modlet applies through the scan and patch path" {
 test "include with @modfolder token pulls another patch file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
@@ -556,7 +556,7 @@ test "include with @modfolder token pulls another patch file" {
     const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/Config", .{mod_dir});
     defer std.testing.allocator.free(cfg_dir);
     io_fs.mkdirPath(cfg_dir);
-    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const mi = try std.fmt.bufPrint(&p_buf, "{s}/ModInfo.xml", .{mod_dir});
     try io_fs.writeFile(mi, "<xml><Name value=\"A\"/><DisplayName value=\"A\"/><Version value=\"1.0\"/></xml>");
     const main_f = try std.fmt.bufPrint(&p_buf, "{s}/main.xml", .{cfg_dir});
@@ -589,14 +589,14 @@ test "include filename resolves against the including patch file's directory" {
     // a miss as fatal, so those modlets refused the boot.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var sub_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var sub_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const sub = try std.fmt.bufPrint(&sub_buf, "{s}/Agility", .{dir});
     io_fs.mkdirPath(sub);
-    var main_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var main_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const main_path = try std.fmt.bufPrint(&main_buf, "{s}/main.xml", .{sub});
-    var inc_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var inc_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const inc_path = try std.fmt.bufPrint(&inc_buf, "{s}/Init.xml", .{sub});
     try io_fs.writeFile(main_path,
         \\<configs>

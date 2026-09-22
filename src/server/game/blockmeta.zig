@@ -109,7 +109,7 @@ test "block metadata buffer holds both stores at capacity" {
 test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};

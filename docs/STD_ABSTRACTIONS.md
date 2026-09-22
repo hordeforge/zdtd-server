@@ -26,7 +26,7 @@ FS path (AGENTS rule 26 confinement list).
 | Area | Preferred API | State |
 |---|---|---|
 | **Ordinary FS** | `util/io_fs` → `std.Io.Dir`/`File` | **Done** |
-| **Paths** | `std.fs.path`, `std.fs.max_path_bytes` | **OK** |
+| **Paths** | `std.Io.Dir.path`, `std.Io.Dir.max_path_bytes` | **Done** (the `std.fs.*` aliases are 0.16-deprecated) |
 | **UDP LiteNet** | `litenet/udp_socket` → `std.Io.net` | **Done** |
 | **Monotonic time** | `util/clock` → `posix.system.clock_gettime` (vDSO; no Threaded) | **Done** |
 | **Sleep** | `posix.system.nanosleep` | **Done** |

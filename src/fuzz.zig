@@ -2132,9 +2132,9 @@ test "fuzz allies.zal loader" {
     // part of every `zig build fuzz`, not just a real fuzzing session.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
     for (ally_corpus) |seed| {
         try io_fs.writeFile(path, seed);
@@ -2156,9 +2156,9 @@ fn fuzzAllyStore(_: void, smith: *std.testing.Smith) !void {
     // (tests never write into the repo).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
     try io_fs.writeFile(path, storage[0..len]);
 
@@ -2250,7 +2250,7 @@ test "fuzz sleepers cleared/triggered loaders" {
     // seeds above would otherwise never be parsed in a default build.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     for (sleeper_corpus) |seed| {
         try sleeperLoadBoth(dir, seed);
@@ -2268,13 +2268,13 @@ fn sleeperLoadBoth(dir: []const u8, bytes: []const u8) !void {
         .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
     };
     var sleeper_store: sleepers.Store = .{ .volumes = &vols };
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
     const cleared = try std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{dir});
     try io_fs.writeFile(cleared, bytes);
     sleeper_store.loadCleared(std.testing.allocator, dir);
 
-    var path_buf2: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf2: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const triggered = try std.fmt.bufPrint(&path_buf2, "{s}/sleepers_triggered.zst", .{dir});
     try io_fs.writeFile(triggered, bytes);
     sleeper_store.loadTriggered(std.testing.allocator, dir);
@@ -2293,7 +2293,7 @@ fn fuzzSleeperStores(_: void, smith: *std.testing.Smith) !void {
     const len: usize = smith.slice(&storage);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try sleeperLoadBoth(dir, storage[0..len]);
 }

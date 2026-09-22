@@ -264,10 +264,10 @@ fn policyNameMatches(entry_name: []const u8, p: *const plugin_mod.wasm.Plugin) b
         const before = p.name[p.name.len - entry_name.len - 1];
         if (before == '/' or before == '\\') return true;
     }
-    const stem = std.fs.path.stem(p.name);
+    const stem = std.Io.Dir.path.stem(p.name);
     if (std.mem.eql(u8, entry_name, stem)) return true;
-    if (std.fs.path.dirname(p.name)) |dir| {
-        if (std.mem.eql(u8, entry_name, std.fs.path.basename(dir))) return true;
+    if (std.Io.Dir.path.dirname(p.name)) |dir| {
+        if (std.mem.eql(u8, entry_name, std.Io.Dir.path.basename(dir))) return true;
     }
     return false;
 }
@@ -275,7 +275,7 @@ fn policyNameMatches(entry_name: []const u8, p: *const plugin_mod.wasm.Plugin) b
 /// Display name for the policy log: the manifest name, else the wasm stem.
 fn pluginPolicyName(p: *const plugin_mod.wasm.Plugin, buf: []u8) []const u8 {
     if (p.display.len > 0) return p.display;
-    const stem = std.fs.path.stem(p.name);
+    const stem = std.Io.Dir.path.stem(p.name);
     const n = @min(stem.len, buf.len);
     @memcpy(buf[0..n], stem[0..n]);
     return buf[0..n];
@@ -681,7 +681,7 @@ test "plugin queue verbs fail closed on out-of-range coordinates" {
 test "redactPlayerPii strips login names and platform ids from wasm log lines" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {

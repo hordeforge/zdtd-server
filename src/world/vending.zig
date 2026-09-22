@@ -380,7 +380,7 @@ test "vending store round-trips through the ZVNM1 save format" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try st.save(dir);
 
@@ -419,11 +419,11 @@ test "a forged password length on disk is rejected, not stored" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try st.save(dir);
 
-    var path: [std.fs.max_path_bytes]u8 = undefined;
+    var path: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/vending.zvn", .{dir});
     const raw = try io_fs.readFileAll(std.testing.allocator, p);
     defer std.testing.allocator.free(raw);
@@ -475,7 +475,7 @@ test "a dropped ZVNM record does not desync the records after it" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try src.save(dir);
 

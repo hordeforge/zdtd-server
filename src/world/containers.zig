@@ -360,7 +360,7 @@ test "container store saves past the old 256 cap (GAP 12)" {
     // containers); the encode now buffers on the heap sized for max_containers.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
     // containers) and overflows the 8 MB test thread stack.
@@ -400,7 +400,7 @@ test "container store save load roundtrip" {
     c.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 2, .meta = 3 });
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
     const s2_box = try std.testing.allocator.create(ContainerStore);
@@ -427,7 +427,7 @@ test "container store ZCT2 persists the observed grid size" {
     c.size_y = 2; // stock 6x2 wooden chest
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
     const s2_box = try std.testing.allocator.create(ContainerStore);
@@ -507,10 +507,10 @@ test "container save order is pos-sorted not slot-order" {
     _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var zct_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var zct_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const zct = try std.fmt.bufPrint(&zct_buf, "{s}/containers.zct", .{dir});
     const data = try io_fs.readFileAll(std.testing.allocator, zct);
     defer std.testing.allocator.free(data);
@@ -568,7 +568,7 @@ test "container persistence retains every full-capacity container" {
     }
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
     const s2_box = try std.testing.allocator.create(ContainerStore);

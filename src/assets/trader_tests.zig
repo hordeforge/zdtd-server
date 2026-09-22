@@ -239,9 +239,9 @@ test "trader_info scan survives adjacent blocks with no whitespace" {
 test "traders root economy attributes parse (currency_item, markup)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/traders.xml", .{dir});
     try io_fs.writeFile(path, "<traders buy_markup=\"3\" sell_markdown=\"0.2\" currency_item=\"dukeCoin\" >\n" ++
         "  <trader_item_group name=\"groupTest\">\n" ++
@@ -259,7 +259,7 @@ test "traders root economy attributes parse (currency_item, markup)" {
     try std.testing.expectEqual(@as(f32, 0.2), t.sell_markdown);
     try std.testing.expectEqualStrings("dukeCoin", t.currency_item);
     // Unset currency_item stays empty (Game falls back to the stock name).
-    var p2: [std.fs.max_path_bytes]u8 = undefined;
+    var p2: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path2 = try std.fmt.bufPrint(&p2, "{s}/traders2.xml", .{dir});
     try io_fs.writeFile(path2, "<traders buy_markup=\"2\" >\n" ++
         "  <trader_item_group name=\"groupTest\">\n" ++
