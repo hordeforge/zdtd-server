@@ -9,6 +9,7 @@
 const std = @import("std");
 const misc_chat = @import("misc_chat.zig");
 const misc_relay = @import("misc_relay.zig");
+const misc_session = @import("misc_session.zig");
 const misc_drop = @import("misc_drop.zig");
 const protocol = @import("../../protocol.zig");
 const replicate_te = @import("../game/replicate_te.zig");
@@ -51,66 +52,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try misc_relay.handleRelay(self, c, peer, name, body)) return true;
     if (try misc_drop.handleDrop(self, c, peer, name, body)) return true;
     if (try misc_relay.handleAvatar(self, c, peer, name, body)) return true;
-    if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
-        const ps = self.sim.playerByPeer(c.slot);
-        if (ps) |slot| {
-            if (self.sim.mask[slot].inventory) {
-                if (packages.stock_inv.applyPlayerDataNetwork(body, &self.sim.inventory[slot], reverseItemType, self)) |h| {
-                    self.clampInventoryStacks(&self.sim.inventory[slot]);
-                    // Entity ids are minted by sim.spawnPlayer; a mismatch is
-                    // a client claiming someone else's body, never adoption.
-                    // Do NOT apply ECD pos either: client PDF pos is
-                    // Unity-origin relative after Origin Reposition (y=0
-                    // artifacts); PosAndRot is the world-space source of truth.
-                    // Success path is silent (periodic PDF is normal). Mismatch
-                    // is the operator-visible signal: counter + rate-limited log.
-                    if (h.entity_id != c.entity_id) {
-                        self.harness.counters.inc(.ownership_rejects);
-                        const n = self.harness.counters.get(.ownership_rejects);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: PlayerData ownership reject n={d} claimed={d} expected={d} local_id={d}\n",
-                                .{ n, h.entity_id, c.entity_id, peer.local_id },
-                            );
-                        }
-                    }
-                } else |_| {
-                    // Fall back to ECD head only. Parse-skip is rare; log once per 100
-                    // decode rejects so a broken client is visible without per-packet noise.
-                    // Parsed for validation only: the ECD head proves the body
-                    // is a well-formed PlayerData write, and the save itself
-                    // comes from server state.
-                    if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {
-                        self.harness.counters.inc(.decode_rejects);
-                        const n = self.harness.counters.get(.decode_rejects);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: PlayerData parse skip n={d} body_len={d} local_id={d}\n",
-                                .{ n, body.len, peer.local_id },
-                            );
-                        }
-                    }
-                }
-            }
-        } else if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {}
-        // Defer file write to the periodic save tick (no open/rewrite per packet).
-        self.players_dirty = true;
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect")) {
-        // Stock quit signal (extends PlayerData: entity id, protocol-packages.md
-        // NetPackagePlayerDisconnect).
-        // Take the same removal path as the transport peer-death poll, but
-        // immediately and after saving, so a quit is never lost to the
-        // autosave interval. Accept only the sender's own entity.
-        if (body.len >= 4) {
-            const eid = std.mem.readInt(i32, body[0..4], .little);
-            if (eid != c.entity_id) return true;
-        }
-        self.savePlayers() catch |e| logPersistErr(self, "save players", e);
-        self.dropClientSlot(c.slot, "quit");
-        return true;
-    }
+    if (try misc_session.handleSession(self, c, peer, name, body)) return true;
     // Accepted and dropped on purpose (phase-gated above, so this is a
     // deliberate no-op, not an unhandled package). Each is a documented
     // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
