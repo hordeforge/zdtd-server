@@ -462,8 +462,13 @@ fn parseBoolLoose(s: []const u8) bool {
 }
 
 /// First token of one AITask list entry (pipe form carries `class=` / `data=`
-/// after the name). Empty / Leap / RangedAttackTarget stay unmapped: Leap is
-/// cosmetic on the mountain lion; RangedAttackTarget has no native task yet.
+/// after the name). Empty stays unmapped. Leap / RangedAttackTarget are real
+/// stock entries with no native task yet (measured 2026-09-22, entity-ai.md
+/// census): RangedAttackTarget on the five acid-spitter zombies (Rancher,
+/// Chuck, FatCop, Mutated, MutatedRadiated), Leap on zombieSpider (pounce)
+/// and animalMountainLion (AITask-1, legs=4). Both classes fall back to the
+/// remaining melee/approach tasks until the ranged attack has a server-side
+/// damage leg (ItemActionVomit fires a client GameObject projectile).
 fn taskNameToId(name: []const u8) ?components.TaskId {
     if (std.mem.eql(u8, name, "BreakBlock")) return .break_block;
     if (std.mem.eql(u8, name, "DestroyArea")) return .destroy_area;

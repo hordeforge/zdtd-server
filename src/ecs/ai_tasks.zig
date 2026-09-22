@@ -45,8 +45,11 @@ const rng_util = @import("../util/rng.zig");
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
 // Nine real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
-// ApproachDistraction, Territorial, ApproachSpot, Look, Wander. Rest of stock EAI
-// (Dodge, Leap, RangedAttack, ...) remains a gap (docs/GAP_ANALYSIS.md).
+// ApproachDistraction, Territorial, ApproachSpot, Look, Wander. The two remaining
+// stock entries with native consumers are unmapped (measured 2026-09-22): RangedAttackTarget
+// on the five acid-spitter zombies and Leap on zombieSpider/animalMountainLion
+// (docs/../7dtd-engine-research/docs/entities/entity-ai.md census);
+// Dodge is client-animator only and unreferenced by stock XML.
 // BreakBlock/DestroyArea use mutex 0 so isBestTask allows them while Approach
 // executes when path_blocked; movement tasks still share bit 0. Collapsing
 // executingTasks to one TaskId stays exact for this set.

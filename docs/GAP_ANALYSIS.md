@@ -2749,8 +2749,12 @@ gamestage, no wandering hordes, and no screamers.
   (`approachDistractionCanExecute` + the decoy scenario) and the fear task
   flees a wolf/zombie/player (`runawayCanExecute` + the flee tests), so a
   thrown distraction is chased and a timid animal flees a wolf. Leap
-  (animalMountainLion AITask-1) and RangedAttackTarget (zombieRancher, Chuck,
-  FatCop, Mutated pipe lists) stay unmapped: no native task, so they are omitted
+  (zombieSpider pounce + animalMountainLion AITask-1 legs=4) and
+  RangedAttackTarget (the five acid spitters: zombieRancher, zombieChuck,
+  zombieFatCop, zombieMutated, zombieMutatedRadiated - measured 2026-09-22
+  against the installed entityclasses.xml, see
+  `../7dtd-engine-research/docs/entities/entity-ai.md` census) stay unmapped:
+  no native task, so they are omitted
   rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
   and PathTest have **zero AITask uses** in the stock file.
   *Anchors:* `src/ecs/ai_tasks.zig:62` zombie_tasks,
@@ -2764,7 +2768,8 @@ gamestage, no wandering hordes, and no screamers.
   with no list keeps the shared `zombie_tasks` table. `entityClassOf` used to
   drop `ai_attack`, so XML timid animals could hunt; that field (and the new
   mask) now copy onto every spawn path.
-  Residual: Leap (mountain lion) and RangedAttackTarget (rancher/cop/chuck)
+  Residual: Leap (zombieSpider + mountain lion AITask-1) and RangedAttackTarget
+  (rancher/cop/chuck/mutated/mutatedRadiated, the acid spitters)
   have no native task yet, so those names stay unmapped rather than faked.
   AITarget rows (SetAsTargetIfHurt / SetNearestEntityAsTarget) are still the
   native sense/revenge path. Moving the brain into a Wasm plugin (AGENTS rule
