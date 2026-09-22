@@ -317,6 +317,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc.zig` | R | C2S misc domain: chat, player data / disconnect, dropped packages, game events, quest entity spawns, console commands, damage, lock requests, the NetPackageEntityAnimationData relay (client-originated avatar anim params, stock ProcessPackage IL=64),  The C2S damage claim applies the non-player victim's class PhysicalDamageResist (victim-side state) to the claimed strength (2026-09-14).|
 | `src/server/c2s/misc_chat.zig` | R | C2S chat packages (NetPackageChat / NetPackageSimpleChat). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_relay.zig` | R | C2S verbatim relays (GameMessage, SoundAtPosition, ParticleEffect). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_drop.zig` | R | C2S validate-and-drop arms (stealth, stat-changed, game-event response). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
