@@ -989,7 +989,7 @@ pub const Director = struct {
             // floor: a floor would stretch a 7-hour respawn to a full day.
             // Deterministic midpoint (1.0x) instead of the 0.9-1.1 roll: the
             // budget has no per-rule RNG stream.
-            const ticks: u64 = @intFromFloat(@max(0, budget.respawn_days) * @as(f32, ticks_per_day));
+            const ticks: u64 = @trunc(@max(0, budget.respawn_days) * @as(f32, ticks_per_day));
             st.next_respawn_wt = w.director.clock.worldTimeBits() + ticks;
         }
     }
@@ -1167,9 +1167,9 @@ pub const Director = struct {
         // The caller's y is the stand cell (groundY = surface + 1), so the
         // ground block sits one below it.
         if (self.mob_spawn_ok_fn) |ok| {
-            const gx: i32 = @intFromFloat(@floor(x));
-            const gy: i32 = @as(i32, @intFromFloat(@floor(y))) - 1;
-            const gz: i32 = @intFromFloat(@floor(z));
+            const gx: i32 = @floor(x);
+            const gy: i32 = @as(i32, @floor(y)) - 1;
+            const gz: i32 = @floor(z);
             if (!ok(self.mob_spawn_ok_ctx, gx, gy, gz)) return null;
         }
         var ct = w.class_table[1];

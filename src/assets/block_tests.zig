@@ -30,9 +30,9 @@ test "block Tags parses for TriggerHasTags gates" {
     var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
     defer t.deinit();
     const bell = t.byName("churchBell") orelse return error.SkipZigTest;
-    try std.testing.expect(std.mem.indexOf(u8, bell.tags, "churchbell") != null);
+    try std.testing.expect(std.mem.find(u8, bell.tags, "churchbell") != null);
     const hanging = t.byName("churchBellHanging") orelse return error.SkipZigTest;
-    try std.testing.expect(std.mem.indexOf(u8, hanging.tags, "churchbell") != null);
+    try std.testing.expect(std.mem.find(u8, hanging.tags, "churchbell") != null);
 }
 
 test "signable composite flag parses and follows Extends" {

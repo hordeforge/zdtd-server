@@ -1474,8 +1474,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                         .game_stage = game_stage,
                         .chance = chance,
                         // C# `(short)float` truncates toward zero.
-                        .min = @intFromFloat(@trunc(vmin / gs_stat_scale)),
-                        .max = @intFromFloat(@trunc(vmax / gs_stat_scale)),
+                        .min = @trunc(vmin / gs_stat_scale),
+                        .max = @trunc(vmax / gs_stat_scale),
                     });
                 }
             }

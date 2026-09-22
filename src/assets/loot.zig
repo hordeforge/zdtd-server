@@ -386,7 +386,7 @@ pub const Stack = struct {
 pub fn randomUseTimes(max_use: u32, s: u32) f32 {
     if (max_use == 0) return 0;
     const f = 0.2 + 0.6 * unitRoll(s);
-    return @floatFromInt(@as(u32, @intFromFloat(@as(f32, @floatFromInt(max_use)) * f)));
+    return @floatFromInt(@as(u32, @trunc(@as(f32, @floatFromInt(max_use)) * f)));
 }
 
 /// One quality-template level band: the loot stage window, the fallback
@@ -511,7 +511,7 @@ pub const LootTable = struct {
         if (e.loot_stage_count_mod == 0 or loot_stage <= 0 or cnt == 0) return cnt;
         const extra = @round(@as(f32, @floatFromInt(cnt)) * e.loot_stage_count_mod * @as(f32, @floatFromInt(loot_stage)));
         if (!(extra > 0)) return cnt;
-        const total = @as(u32, cnt) + @as(u32, @intFromFloat(extra));
+        const total = @as(u32, cnt) + @as(u32, @trunc(extra));
         return @intCast(@min(total, std.math.maxInt(u16)));
     }
 
@@ -553,7 +553,7 @@ pub const LootTable = struct {
         if (mult <= 0) return 0;
         if (!apply_abundance or (self.abundance_pct == 100 and mult == 1.0)) return @max(cnt, 1);
         const pct: f32 = @as(f32, @floatFromInt(self.abundance_pct)) * mult;
-        const pct_i: u32 = @intFromFloat(@max(0, @min(pct, 65535.0)));
+        const pct_i: u32 = @trunc(@max(0, @min(pct, 65535.0)));
         const scaled = (@as(u32, cnt) * pct_i) / 100;
         // Clamp before the cast: a modded loot.xml count with a high
         // LootAbundance (stock range 1..1000) can exceed u16; saturate at

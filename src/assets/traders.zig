@@ -194,7 +194,7 @@ pub const TraderTable = struct {
         var n: usize = 0;
         for (refs) |r| {
             const count = randomSpawnCount(rng, r.count_min, r.count_max);
-            const count_final: i32 = @intFromFloat(@max(1.0, @as(f32, @floatFromInt(count)) * abundance));
+            const count_final: i32 = @trunc(@max(1.0, @as(f32, @floatFromInt(count)) * abundance));
             if (r.group) {
                 spawnItemsFromGroup(self, r.name, count_final, rng, r.unique_only, policy, out, &n, 0);
             } else {

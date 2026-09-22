@@ -351,7 +351,7 @@ test "qty_scale scales spawned counts and drops zeroed stacks" {
             const f: *@This() = @ptrCast(@alignCast(ctx.?));
             f.seen_name = item_name;
             _ = entry_tags;
-            return @intFromFloat(@as(f32, @floatFromInt(base)) * f.mult);
+            return @trunc(@as(f32, @floatFromInt(base)) * f.mult);
         }
     };
     var stacks: [4]Stack = undefined;

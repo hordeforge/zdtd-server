@@ -572,7 +572,7 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
             .give_exp => {
                 // Gated rows sum: an ungated base row plus the owned tier's
                 // gated row both land (bandage 10 + Physician bonus).
-                out.give_exp +|= @intFromFloat(@max(0, tr.value));
+                out.give_exp +|= @trunc(@max(0, tr.value));
             },
             .add_or_remove_buff => unreachable, // handled above (toggle, not gate)
             .other => continue,

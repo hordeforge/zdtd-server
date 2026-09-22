@@ -168,7 +168,7 @@ pub fn elevToBlockYPlane(elev: []const f32, out: []u8) void {
         const nan = e != e;
         const y = sea + e * inv12;
         const clamped = @max(lo, @min(y, hi));
-        const bytes: @Vector(lanes, u8) = @intFromFloat(@trunc(clamped));
+        const bytes: @Vector(lanes, u8) = @trunc(clamped);
         out[i..][0..lanes].* = @select(u8, nan, nan_y, bytes);
     }
     while (i < elev.len) : (i += 1) {

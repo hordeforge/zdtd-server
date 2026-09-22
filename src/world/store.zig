@@ -156,7 +156,7 @@ pub fn projectPlane(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32
         const v = offset + scale * elev;
         const c = @max(zero, @min(v, ceil_v));
         const clamped = @min(c, max255);
-        heights[i..][0..lanes].* = @as(@Vector(lanes, u8), @intFromFloat(@trunc(clamped)));
+        heights[i..][0..lanes].* = @as(@Vector(lanes, u8), @trunc(clamped));
     }
     while (i < heights.len) : (i += 1) {
         heights[i] = @intCast(@min(255, geo.project(@floatFromInt(heights[i]), profile_max)));

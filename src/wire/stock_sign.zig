@@ -109,7 +109,7 @@ fn writeWarp(w: *binary.Writer, x: signs.Warp) !void {
         signs.warp_kaleido => {
             try w.writeF32(x.f[0]);
             try w.writeF32(x.f[1]);
-            try w.writeI32(@intFromFloat(x.f[2]));
+            try w.writeI32(@trunc(x.f[2]));
             try w.writeF32(x.f[3]);
             try w.writeF32(x.f[4]);
         },
@@ -133,7 +133,7 @@ fn writeWarp(w: *binary.Writer, x: signs.Warp) !void {
             try w.writeF32(x.f[5]);
         },
         signs.warp_grid => {
-            try w.writeI32(@intFromFloat(x.f[0]));
+            try w.writeI32(@trunc(x.f[0]));
             try w.writeF32(x.f[1]);
             try w.writeF32(x.f[2]);
             try w.writeF32(x.f[3]);

@@ -737,12 +737,12 @@ pub fn qualityPriceMod(min_mod: f32, max_mod: f32, quality: u8) f32 {
 
 /// Clamp a float dukes unit price into the u16 trader/wire slot. Non-finite
 /// (Inf from EconomicValue="inf", NaN from a bad markup) or non-positive fails
-/// closed to `fallback` instead of trapping `@intFromFloat` / `@as(u64, …)` on
+/// closed to `fallback` instead of trapping `@trunc` / `@as(u64, …)` on
 /// values past the integer domain. Clamp in the float domain first so a
 /// modded EconomicValue of 1e20 cannot overflow the cast before `@min(…, 65535)`.
 pub fn clampDukesUnitPrice(scaled: f64, fallback: u16) u16 {
     if (!std.math.isFinite(scaled) or scaled <= 0) return fallback;
-    return @intFromFloat(@min(@trunc(scaled), 65535.0));
+    return @trunc(@min(scaled, 65535.0));
 }
 
 pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16, side: u8, coin_item_id: u16) bool {

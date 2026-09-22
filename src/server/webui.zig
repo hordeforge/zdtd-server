@@ -1133,13 +1133,13 @@ fn acceptsGzip(head: []const u8) bool {
     var lines = std.mem.splitSequence(u8, head, "\r\n");
     _ = lines.next() orelse return false; // request line
     while (lines.next()) |line| {
-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const colon = std.mem.findScalar(u8, line, ':') orelse continue;
         const name = std.mem.trim(u8, line[0..colon], " \t");
         if (!std.ascii.eqlIgnoreCase(name, "accept-encoding")) continue;
         var codings = std.mem.splitScalar(u8, line[colon + 1 ..], ',');
         while (codings.next()) |raw_coding| {
             const coding = std.mem.trim(u8, raw_coding, " \t");
-            const semi = std.mem.indexOfScalar(u8, coding, ';');
+            const semi = std.mem.findScalar(u8, coding, ';');
             const token = std.mem.trim(u8, if (semi) |i| coding[0..i] else coding, " \t");
             if (!std.ascii.eqlIgnoreCase(token, "gzip")) continue;
             if (semi) |i| {
@@ -2586,7 +2586,7 @@ test "GET / gzips the shell only when the client asks for it" {
     try std.testing.expect(std.mem.find(u8, gz, "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, gz, "Content-Encoding: gzip") != null);
     try std.testing.expect(std.mem.find(u8, gz, "Vary: Accept-Encoding") != null);
-    const gz_body = gz[(std.mem.indexOf(u8, gz, "\r\n\r\n") orelse unreachable) + 4 ..];
+    const gz_body = gz[(std.mem.find(u8, gz, "\r\n\r\n") orelse unreachable) + 4 ..];
     try std.testing.expectEqual(@as(u8, 0x1f), gz_body[0]);
     // The compressed page must inflate to exactly the page the plain request gets.
     var in: std.Io.Reader = .fixed(gz_body);
@@ -2603,7 +2603,7 @@ test "GET / gzips the shell only when the client asks for it" {
     try testServeHttp(&s, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept-Encoding: gzip\r\n\r\n");
     try std.testing.expect(s.shell_gz.?.ptr == cached_ptr.ptr);
     const gz2 = s.testResp();
-    const gz2_body = gz2[(std.mem.indexOf(u8, gz2, "\r\n\r\n") orelse unreachable) + 4 ..];
+    const gz2_body = gz2[(std.mem.find(u8, gz2, "\r\n\r\n") orelse unreachable) + 4 ..];
     try std.testing.expectEqual(gz_body.len, gz2_body.len);
     // A truncation bug would slip through a body-only check: the compressed
     // response must also be smaller than the uncompressed one.

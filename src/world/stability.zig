@@ -735,7 +735,7 @@ test "stability reset: row kernel matches the scalar reference" {
     try testing.expectEqualSlices(u8, expect, plane);
     // The fixture must actually contain all three outcomes, or the comparison
     // proves nothing.
-    try testing.expect(std.mem.indexOfScalar(u8, plane, stability_full) != null);
-    try testing.expect(std.mem.indexOfScalar(u8, plane, 1) != null);
-    try testing.expect(std.mem.indexOfScalar(u8, plane, 0) != null);
+    try testing.expect(std.mem.findScalar(u8, plane, stability_full) != null);
+    try testing.expect(std.mem.findScalar(u8, plane, 1) != null);
+    try testing.expect(std.mem.findScalar(u8, plane, 0) != null);
 }

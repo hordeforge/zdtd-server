@@ -352,7 +352,7 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
     }
     const tier: f32 = @trunc(v);
     if (!(tier >= 1)) return 1;
-    return @intFromFloat(@min(tier, @as(f32, @floatFromInt(qmax))));
+    return @trunc(@min(tier, @as(f32, @floatFromInt(qmax))));
 }
 
 /// Deposit a crafted output. A HasQuality item carries the crafting tier as its

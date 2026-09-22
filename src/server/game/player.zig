@@ -190,7 +190,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         const ctx: requirements.Ctx = .{ .item_tags = def.tags, .item_quality = held_slot.quality };
         break :blk assets_buffs.namedPassiveFold("ExperienceGain", def.passives, itemQualityAxis(self, held_slot.quality), ctx, 1.0, &counts);
     };
-    // A modded held ExperienceGain curve can yield NaN/Inf/negative; @intFromFloat
+    // A modded held ExperienceGain curve can yield NaN/Inf/negative; @trunc
     // of those traps the tick. Fail closed to an unscaled 1.0 multiplier.
     const held: f32 = if (std.math.isFinite(held_xp) and held_xp > 0) held_xp else 1.0;
     // Percent in integer space (base is xpGainFor-clamped to i32 range so the
@@ -201,7 +201,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
     const base_scaled: u64 = if (!std.math.isFinite(product) or product <= 0)
         0
     else
-        @intFromFloat(@min(product, @as(f64, @floatFromInt(std.math.maxInt(u64)))));
+        @trunc(@min(product, @as(f64, @floatFromInt(std.math.maxInt(u64)))));
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
     // V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
@@ -1087,7 +1087,7 @@ pub fn lootQtyScale(self: *Game, peer_slot: usize, ps: ecs.Slot, item_name: []co
     if (!(v >= 0) or !std.math.isFinite(v)) return 0;
     // Stock truncates ((int)GetValue); saturate at the stack cap like the
     // abundance path instead of trapping.
-    return @intCast(@min(@as(u32, @intFromFloat(v)), std.math.maxInt(u16)));
+    return @intCast(@min(@as(u32, @trunc(v)), std.math.maxInt(u16)));
 }
 
 /// Fold PlayerExpGain (87) onto an XP award — same layers as
@@ -1147,7 +1147,7 @@ fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64
     }
     if (!(v >= 0) or !std.math.isFinite(v)) v = 0;
     // Round toward nearest like a float→int XP grant; clamp to u64.
-    const rounded: u128 = @intFromFloat(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
+    const rounded: u128 = @trunc(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
     return @intCast(@min(rounded, @as(u128, std.math.maxInt(u64))));
 }
 
@@ -1543,7 +1543,7 @@ pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
         if (row.len == 0) continue;
         var name = row;
         var count: u16 = 1;
-        if (std.mem.indexOfScalar(u8, row, ':')) |colon| {
+        if (std.mem.findScalar(u8, row, ':')) |colon| {
             name = std.mem.trim(u8, row[0..colon], " \t");
             const ctext = std.mem.trim(u8, row[colon + 1 ..], " \t");
             count = std.fmt.parseInt(u16, ctext, 10) catch {

@@ -215,7 +215,7 @@ pub const PlayerCtx = struct {
             .is_day = !game.sim.director.clock.isNight(),
             .is_blood_moon = game.sim.director.clock.isBloodMoonNight(),
             .day_number = game.sim.director.clock.day,
-            .time_of_day_ticks = @intFromFloat(@trunc(game.sim.director.clock.hours * 1000.0)),
+            .time_of_day_ticks = @trunc(game.sim.director.clock.hours * 1000.0),
             // The entity's class Tags (`entityclasses.xml`), read by
             // EntityTagCompare for the default self target.
             .entity_tags = entityClassTags(game, ps),
@@ -1446,7 +1446,7 @@ fn applyKillMods(self: *Game, ps: ecs.Slot, res: *const assets_buffs.TriggeredRe
 /// (stock coroutine; 20 ticks per second). A full row drops (bounded).
 fn deferMod(self: *Game, slot: usize, stat: []const u8, value: f32, delay_s: f32) void {
     const c = &self.clients[slot];
-    const due = self.tick_n + @as(u64, @intFromFloat(@max(1, delay_s * 20)));
+    const due = self.tick_n + @as(u64, @trunc(@max(1, delay_s * 20)));
     for (&c.pending_mods) |*p| {
         if (p.due_tick != 0) continue;
         const n = @min(stat.len, p.stat.len);

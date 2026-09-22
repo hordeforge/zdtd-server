@@ -121,7 +121,7 @@ pub fn ingredientCount(
     // caller (Recipe::CanCraft IL_0097 FastMax), after the sandbox
     // CraftingInput multiplier.
     if (!(v > 0)) return 0;
-    return @intFromFloat(@min(@trunc(v), 65535.0));
+    return @trunc(@min(v, 65535.0));
 }
 
 pub const RecipeTable = struct {

@@ -189,9 +189,10 @@ pub fn fastRoundToInt(v: f32) i32 {
     const f = @floor(v);
     if (v - f == 0.5) {
         // Midpoint: the even neighbour wins.
-        return @intFromFloat(if (@mod(f, 2.0) == 0) f else f + 1);
+        const even: f32 = if (@mod(f, 2.0) == 0) f else f + 1;
+        return @trunc(even);
     }
-    return @intFromFloat(@round(v));
+    return @round(v);
 }
 
 pub fn boolProp(v: []const u8) ?bool {

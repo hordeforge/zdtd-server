@@ -2082,7 +2082,7 @@ encoding is one day high.
   `zdtd.queue` `spawn` (coords + hp), `bot spawn`, `bot move` (dest + speed),
   and the `cover` / `path` queries. Without the bound a finite-but-huge
   coordinate (e.g. `3e38`, which no wire reader filters on the admin/plugin
-  paths) lands in the sim transform and traps the tick-path `@intFromFloat`
+  paths) lands in the sim transform and traps the tick-path `@trunc`
   casts (radius-effect scans, trigger activation, bot grounding) - same crash
   class as the settime day ceiling.
   *Anchors:* `src/server/game/constants.zig:17-23`,
@@ -6467,8 +6467,8 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Plugin verdict scaling | WORKS (2026-08-28: the on_loot_roll count scale is re-capped to the stacks array (a large verdict could read OOB), and the on_block_damage verdict scales (c2s blocks + the addBlockDamage choke) widen to u64 before the multiply - a u32 product of a u16 damage times a large i32 verdict overflowed) |
 | Inventory ledger deltas | WORKS (2026-08-28: the give path's ledger delta is clamped to i16 like the other recordInv callers - admin give parses u16 counts up to 65535, which trapped the cast to the i16 ledger delta) |
 | Blood-moon budget casts | WORKS (2026-08-28: the spawn ceiling and wave-size casts clamp the config-scaled products in f64 before the u32 cast - [rules.bloodmoon] budget_scale/wave_frac have no declared range, so a large operator value could trap; f32 cannot hold u32 max exactly, f64 can) |
-| Harvest drop counts | WORKS (2026-08-28: the drop roll and the HarvestCount held-tool multiplier casts are clamped to 65535 before @intFromFloat - the XML count values parse as unbounded u32 and a modded row or HarvestCount row could exceed u32 and trap; the final stack store is u16 anyway) |
-| Explosion block AoE | WORKS (2026-08-28: the per-block damage cast is clamped to u16 like the chew path and the ExplosionClient broadcast - the loader caps BlockDamage at 1e6 and a modded blast times a DamageBonus multiplier can exceed 65535, which trapped the @intFromFloat cast) |
+| Harvest drop counts | WORKS (2026-08-28: the drop roll and the HarvestCount held-tool multiplier casts are clamped to 65535 before @trunc - the XML count values parse as unbounded u32 and a modded row or HarvestCount row could exceed u32 and trap; the final stack store is u16 anyway) |
+| Explosion block AoE | WORKS (2026-08-28: the per-block damage cast is clamped to u16 like the chew path and the ExplosionClient broadcast - the loader caps BlockDamage at 1e6 and a modded blast times a DamageBonus multiplier can exceed 65535, which trapped the @trunc cast) |
 | Disconnect cleanup | WORKS (2026-08-28: `dropClientSlot` destroys the sim player entity after the EntityRemove fan-out, and the transport peer-reap path now delegates to `dropClientSlot` instead of a partial hand-rolled reset - previously a dropped client's sim entity stayed alive until the slot was reused, a ghost player visible to listents/mem counts and a spawn-on-approach candidate for late joiners) |
 | Party (membership) | WORKS (real `Party` state machine + `PartyData` snapshots; shared scope SHIPPED: kill-XP split (killer gets base x (1 - 0.1 x in-range members), GameStats[54] range, `killXpAward` + `NetPackageSharedPartyKill` tooltip), shared quests (in-range mate's shared quest advances on the killer's kill), party loot stage + highest game stage feed the director; §AUTHGATE) |
 | Allies | PARTIAL (identity-keyed AllyStore + AllyResponse, allies.zal persisted; no faction tiers) |

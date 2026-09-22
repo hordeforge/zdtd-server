@@ -103,7 +103,7 @@ pub const GameRandom = struct {
 
     /// `Next(Int32 maxValue)` (IL=551): `(int)(Sample() * maxValue)`.
     pub fn nextBelow(self: *GameRandom, max_value: i32) i32 {
-        return @intFromFloat(self.sample() * @as(f64, @floatFromInt(max_value)));
+        return @trunc(self.sample() * @as(f64, @floatFromInt(max_value)));
     }
 
     /// `Next(Int32 minValue, Int32 maxValue)` (IL=512), including the
@@ -111,9 +111,9 @@ pub const GameRandom = struct {
     pub fn nextRange(self: *GameRandom, min_value: i32, max_value: i32) i32 {
         const span: i64 = @as(i64, max_value) - @as(i64, min_value);
         if (span <= mbig) {
-            return @as(i32, @intFromFloat(self.sample() * @as(f64, @floatFromInt(span)))) + min_value;
+            return @as(i32, @trunc(self.sample() * @as(f64, @floatFromInt(span)))) + min_value;
         }
-        const offset: i64 = @intFromFloat(self.getSampleForLargeRange() * @as(f64, @floatFromInt(span)));
+        const offset: i64 = @trunc(self.getSampleForLargeRange() * @as(f64, @floatFromInt(span)));
         return @intCast(offset + min_value);
     }
 

@@ -45,80 +45,12 @@ const fatal_kill_amount: f32 = 9999;
 /// returns for anything else, so a higher op never reaches its rebroadcast.
 const wire_tool_max_op: u8 = 1;
 
-/// Exact stock NetPackageEntityPhysics body size: Flags u16 | EntityId i32 |
-/// 13xf32. `GetLength` (IL=2) returns 58, matching the read (IL=74).
-const entity_physics_body_len: usize = 58;
-
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (try misc_chat.handleChat(self, c, peer, name, body)) return true;
     if (try misc_relay.handleRelay(self, c, peer, name, body)) return true;
     if (try misc_drop.handleDrop(self, c, peer, name, body)) return true;
-    if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
-        // Stock NetPackageEntityPhysics (read IL=74, GetLength IL=2 = 58):
-        // Flags u16, EntityId i32, then 13xf32 (pos 3, quat 4, velocity 3,
-        // angular 3) = 58 bytes. The entity's physics master reports
-        // pos/rot/velocity so the server mirrors it (ProcessPackage IL=87
-        // gates on isPhysicsMaster). zdtd's movement, falling-block and
-        // vehicle sims are server-authoritative (broadcast PosAndRot /
-        // VehiclePositions / EntityVelocity), so the report is a redundant
-        // echo (DIVERGENCES.md 1.4): validate the body and drop. The gate was
-        // 62, so every valid 58-byte report was counted c2s_malformed.
-        if (body.len < entity_physics_body_len) {
-            self.harness.counters.inc(.c2s_malformed);
-            return true;
-        }
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageEntityRagdoll")) {
-        // Stock NetPackageEntityRagdoll (write IL=59): entityId i32, flags
-        // u8, then conditionally (flags&1) duration/bodyPart/three vectors,
-        // (flags&2) mode, (flags&4) state. The owner's client forces the
-        // local ragdoll (EntityBuffs buff trigger / EModelBase.DoRagdoll);
-        // the server re-broadcasts to the entity's tracked players
-        // (SendPacketToTrackedPlayersAndTrackedEntity), so a verbatim relay
-        // to the other clients matches stock - the owner already ragdolled.
-        const rg = packages.parseRagdollInvoke(body) catch {
-            self.harness.counters.inc(.c2s_malformed);
-            return true;
-        };
-        // Owner already ragdolled (SendPacketToTrackedPlayersAndTrackedEntity).
-        // Same rate gate as the other cosmetic relays (SoundAtPosition /
-        // ParticleEffect): an unthrottled spam loop would fan the raw body
-        // out to every other peer for free.
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        // Trim to the parsed body: the flag-gated tails make the length
-        // variable, so a raw relay would forward bytes a peer appended.
-        relayBodyExcept(self, "NetPackageEntityRagdoll", body[0..rg.wire_len], rg.entity_id, "EntityRagdoll");
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackagePlayerLaserSight")) {
-        // Stock ProcessPackage (IL=70): on the server the body is re-sent to
-        // every client except the sender's own entity, so a player sees a
-        // mate's laser dot. Pure relay, no server state.
-        const ls = packages.parseLaserSight(body) catch {
-            self.harness.counters.inc(.c2s_malformed);
-            return true;
-        };
-        // Only speak for your own entity: without this a peer could paint a
-        // dot on anyone. Stock leans on the sender's ClientInfo for the
-        // exclusion; zdtd checks the claimed id directly.
-        if (ls.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
-        // Same rate gate as the other cosmetic relays: the client sends on
-        // aim changes, so an unthrottled loop would fan out for free.
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        relayBodyExcept(self, "NetPackagePlayerLaserSight", body[0..ls.wire_len], ls.entity_id, "PlayerLaserSight");
-        return true;
-    }
+    if (try misc_relay.handleAvatar(self, c, peer, name, body)) return true;
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {
