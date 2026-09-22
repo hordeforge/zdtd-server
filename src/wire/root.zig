@@ -29,6 +29,7 @@ pub const stock_estats = @import("stock_estats.zig");
 pub const stock_invtx = @import("stock_invtx.zig");
 pub const stock_lock = @import("stock_lock.zig");
 pub const stock_playerid = @import("stock_playerid.zig");
+pub const playerid_tests = @import("playerid_tests.zig");
 pub const stock_trade = @import("stock_trade.zig");
 pub const stock_denied = @import("stock_denied.zig");
 pub const stock_login = @import("stock_login.zig");
@@ -90,6 +91,7 @@ test {
     _ = stock_invtx;
     _ = stock_lock;
     _ = stock_playerid;
+    _ = playerid_tests;
     _ = stock_trade;
     _ = stock_denied;
     _ = stock_login;

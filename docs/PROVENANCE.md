@@ -479,6 +479,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_trade.zig` | R | Player-action bodies (trader trade + ToServer header, vending access, pickup-block, item reload, set-block texture) plus the TraderData stock snapshot builder (moved from stock_motion.zig where it was miscategorized). Split out of the packages.zig facade, moved verbatim |
 | `src/wire/stock_playerid.zig` | R | PlayerId + spawned-in-world bodies (join PlayerId variants with PDF/journal writes). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_lock.zig` | R | Lock bodies (request parse, grant/deny/force-unlock/trader/unlock responses). Split out of the packages.zig facade, same builders and tests |
+| `src/wire/playerid_tests.zig` | R | Player-id wire tests (login, spawn, profile). Split out of stock_playerid.zig verbatim |
 | `src/wire/stock_invtx.zig` | R | Inventory-transaction bodies (compact InvTx request/response, legacy data request, stock InventoryData request/response, IdMapping). Split out of the packages.zig facade, same builders and test |
 | `src/wire/stock_estats.zig` | R | Entity stat bodies (StatChanged/EnumStat, award-kill, attack target, stealth bodies). Split out of the packages.zig facade, same builders and tests |
 | `src/wire/stock_world.zig` | R | World bodies (time, sign-data terminator, init info, world info, folder transfer, chunk-cluster info). Split out of the packages.zig facade, same builders and tests |
