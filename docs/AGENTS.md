@@ -2,8 +2,7 @@
 
 This file defines where each fact lives in `docs/`, the writing rules, and the
 gates that keep the documents honest. The root [AGENTS.md](../AGENTS.md) carries
-standing orders (including: no em dashes, no AI attribution, evidence needs an
-IL anchor or a client observation); this file carries the subtree rules.
+the standing orders; this file carries the subtree rules.
 
 ## One home per fact
 
@@ -32,7 +31,7 @@ Each fact has exactly one home. Everywhere else, link to it.
 | [archive/](archive/) | frozen snapshots, never current authority | anything current |
 | [INDEX.md](INDEX.md) | the doc map and the conflict rule | duplicated content |
 
-Placement: a bug goes to a postmortem; rationale to an ADR; a procedure to the
+Placement: a bug to a postmortem; rationale to an ADR; a procedure to the
 cookbook; a type to `subsystems/`; behavior to ARCHITECTURE.md; status to
 STATUS.md.
 
@@ -40,22 +39,20 @@ STATUS.md.
 
 - Document current state. History lives in git, an ADR, or a postmortem.
 - One home per fact. If you are about to restate a rule or a table, link it.
-- Cite `file.zig:LINE` for every non-obvious claim about code. Stock claims
-  need an IL anchor (`../7dtd-engine-research/il/`), a loadgen golden, or an
-  observation from the real client. A green zdtd round trip proves
-  self-consistency, never stock compatibility.
-- Quote declarations verbatim in fenced blocks and name the file and line above
-  the block. `tools/check_docs.py` fails a block that no longer matches source.
+- Cite `file.zig:LINE` for every non-obvious claim about code. A stock claim
+  needs an IL anchor (`../7dtd-engine-research/il/`), a loadgen golden or a
+  real-client observation: a green zdtd round trip proves self-consistency,
+  never stock compatibility.
+- Quote declarations verbatim in fenced blocks, naming the file and line above
+  the block; the gate fails a block that drifted from source.
 - Relative links only for repository files. Dead links fail the same gate.
 - No em dashes. No AI attribution. Prose is either one paragraph per physical
-  line (what the subsystem pages do) or hard-wrapped at 80 columns (what the
-  older references do); pick one per page and leave tables and lists as they
-  are. No wrap gate exists, deliberately: adding one would force a reflow of
-  every standing reference to catch no defect.
-- No status annotations in reference prose ("implemented", "future work").
-  STATUS.md owns status; a reference states what is.
-- Mark anything you could not verify as unverified in one clause. Missing beats
-  fake in documents too.
+  line (the subsystem pages) or hard-wrapped at 80 columns (the older
+  references); pick one per page, and leave tables and lists alone. No wrap
+  gate, deliberately: it would reflow every reference to catch no defect.
+- No status annotations in reference prose ("implemented", "future work"):
+  STATUS.md owns status.
+- Mark anything unverified in one clause. Missing beats fake in documents too.
 
 ## Gates
 
@@ -69,17 +66,18 @@ STATUS.md.
 | `scripts/lint-webui.sh` | webui TypeScript and page freshness | `make lint` |
 | `scripts/lint-html.sh` | webui HTML/CSS (vnu) | `make lint` |
 | `scripts/lint-plugins.sh` | committed plugin `.wasm` matches a fresh rebuild | `make lint` |
+| `scripts/lint-cycles.sh` | import cycles outside the `src/server/` delegation | `make lint` |
+| `scripts/lint-wire.sh` | wire heuristics (ripgrep; ast-grep has no Zig grammar) | `make lint` |
+| `tools/check_xml_audit.py` | [XML_DATA_AUDIT.md](XML_DATA_AUDIT.md) covers every stock `Data/Config/*.xml`; no stock-name literal outside the loaders | `make check` |
+| `python3 -m unittest discover -s tools` | the gate scripts' own unit tests | `make check` |
 
-## Slop checklist
-
-Run this list over any doc change.
+## Slop checklist (run over any doc change)
 
 - Duplicated rules: grep a distinctive phrase; keep one home, link the rest.
-- Hand-restated catalogs, tables or inventories where a generator exists or
-  should exist.
+- Hand-restated catalogs or inventories where a generator exists.
 - Status annotations and roadmaps inside reference prose.
-- Reasoning transcripts: step-by-step narration of how the code was derived,
-  test walkthroughs, rejected local alternatives.
+- Reasoning transcripts: how the code was derived, test walkthroughs,
+  rejected alternatives.
 - Paragraph walls carrying several rules at once.
 - Emphasis inflation: bold and CAPS everywhere means nothing stands out.
 - Spec-speak in an implemented reference ("should", "will eventually").
@@ -88,9 +86,9 @@ Run this list over any doc change.
 
 ## Adding a document
 
-1. Pick the tier from the table above; a reference goes to its owning subject.
-2. Take the next number from the series README for a numbered series.
-3. Add the row to the owning registry ([INDEX.md](INDEX.md), the series README,
+1. Pick the tier from the table above.
+2. For a numbered series, take the next number from its README.
+3. Add the row to the owning registry ([INDEX.md](INDEX.md), the series README
    or [subsystems/README.md](subsystems/README.md)) and to
    [budgets.json](budgets.json).
 4. Write it under the rules above, then run `make lint`.

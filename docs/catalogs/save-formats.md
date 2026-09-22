@@ -18,15 +18,7 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
 | `ZPV` | src/server/persist.zig | 93 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
 | `ZPV` | src/server/persist.zig | 617 | savePlayers | - |
-| `ZEN2` | src/server/persist.zig | 1589 | saveEntities | - |
-| `ZEN2` | src/server/persist.zig | 1750 | loadEntities | - |
-| `ZENT` | src/server/persist.zig | 1751 | loadEntities | - |
-| `ZCLC` | src/server/persist.zig | 1915 | saveClaims | - |
-| `ZCLC` | src/server/persist.zig | 1948 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 1980 | loadClaims | - |
-| `ZTR1` | src/server/persist.zig | 2000 | ztrScanLen | - |
-| `ZTR1` | src/server/persist.zig | 2063 | saveTraders | - |
-| `ZPV` | src/server/persist.zig | 2243 | zpv2DropName | - |
+| `ZPV` | src/server/persist.zig | 1508 | zpv2DropName | - |
 | `ZCT3` | src/world/containers.zig | 187 | posFromGuid | - |
 | `ZCT3` | src/world/containers.zig | 205 | posFromGuid | - |
 | `ZCT3` | src/world/containers.zig | 271 | posFromGuid | - |
@@ -36,8 +28,6 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCT2` | src/world/containers.zig | 633 | posFromGuid | - |
 | `ZSG1` | src/world/signs.zig | 130 | - | - |
 | `ZSG1` | src/world/signs.zig | 156 | - | - |
-| `ZCH3` | src/world/store.zig | 2135 | biomeNameAt | - |
-| `ZCH3` | src/world/store.zig | 2159 | biomeNameAt | - |
 | `ZVNM1` | src/world/vending.zig | 152 | - | - |
 | `ZVNM` | src/world/vending.zig | 159 | - | - |
 | `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |

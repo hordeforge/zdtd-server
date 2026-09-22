@@ -86,7 +86,7 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 28. **Bots stay Wasm plugins (ADR 0026).** All bot brain logic - target selection, aim, movement and combat decisions - lives in the `mods/fps_bot` guest; the host `BotManager` stays a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs + host policy knobs). Never port brain decisions into Zig, and never let the host drive bots without the module.
 29. **Wasm-first for behavioral add-ons (ADR 0020).** Anything that is *technically* expressible over the plugin boundary - `zdtd.sense` / `zdtd.queue` / `zdtd.query` + the hooks and verdicts - ships as a Wasm plugin: bots, chat commands/filters, announcements and kill-feeds, event observers, custom verdicts, admin tooling, reward scaling. Native Zig is for what the boundary *cannot* express: wire encode/emit, LiteNet, interest/replication and the chunk stream, direct sim mutation (ECS authority, inventory, blocks, quests, trading), world store and persistence, config loading, the plugin runtime, APM instrumentation. "It is core" is not a reason to keep something native; prove that the boundary cannot carry it. When a feature needs an affordance the boundary lacks, extend the boundary (an ADR-worthy decision) rather than adding native behavior.
 30. **Spatiotemporal composability for plugins (Cordis paper, adopted 2026-08-20).** Plugins are runtime components, so their lifecycle and effects must be bounded the way the paper's fibers are: (a) **reloadable** - a module can be disposed and reinstantiated in place without a server restart (`plugin reload <name>`; dispose runs `on_shutdown`, reclaims fuel/memory, re-arms the budget, re-activates `on_enable`); (b) **revertible effects** - every `zdtd.queue` command is attributed to its issuing plugin (1-based slot src) and a disabled/trapped module's still-pending effects are withdrawn before the drain; never let a broken module's queued effects execute; (c) **declarative dependencies** - modules export `_zdtd_requires` naming the hooks + host verbs they need, validated fail-closed at load (a typo'd hook must be a loud load rejection, not a silent never-fire). When adding a plugin affordance, keep it compatible with all three; review plugin-runtime changes against `docs/prompts/plugin-composability-review.md`.
-31. **Core plugins are Zig.** Every first-party core plugin under `plugins/` ships a Zig source (`plugins/core_<topic>/core_<topic>.zig`, shared `plugins/core_main.zig` build wrapper + `mods/plugin_common.zig`) rebuilt by `scripts/build-plugins.sh`; the committed `.wasm` is its build output, and `scripts/lint-plugins.sh` (`make lint`) fails when a committed binary no longer matches a fresh rebuild. Addons (`fps_bot`, `mcp`, `example_chat_filter`) live under `mods/`; `fps_bot` is C by design (ADR 0026). New core plugins follow the same layout and the naming/manifest rules in `docs/PLUGIN_STANDARDS.md`.
+31. **Core plugins are Zig.** Every first-party core plugin under `plugins/` ships a Zig source (`plugins/core_<topic>/core_<topic>.zig`, shared `plugins/core_main.zig` build wrapper + `mods/plugin_common.zig`) rebuilt by `scripts/build-plugins.sh`; the committed `.wasm` is its build output, and `scripts/lint-plugins.sh` (`make lint`) fails when a committed binary no longer matches a fresh rebuild. Addons live under `mods/`: Zig guests (`mcp`, `parachute`), C guests (`fps_bot` by design (ADR 0026), `example_chat_filter`), and config-only mods with no wasm at all (`infinite_world`, `moon_gravity`, manifest + `preset.toml`). New core plugins follow the same layout and the naming/manifest rules in `docs/PLUGIN_STANDARDS.md`.
 
 ## Commands
 
@@ -161,7 +161,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
 | Metrics | `apm/*` via `Game.harness` | 7dtd-server-apm bridge |
 
-- Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`, `litenet`, `wire`, `assets`, `ecs`, `world`, `server`) and `wire/packages.zig` for stock bodies. Leaf files stay importable. Avoid cycles; world must not import wire (TE domain types in world, wire re-exports).
+- Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`, `litenet`, `wire`, `assets`, `ecs`, `world`, `plugin`, `server`) and `wire/packages.zig` for stock bodies. Leaf files stay importable. Avoid cycles; world must not import wire (TE domain types in world, wire re-exports).
 - `src/server/c2s/` and `src/server/game/` are subfolders of `server`; every file there is aggregated via `src/server/root.zig` (lint recurses one level, so new helpers must be added there or tests silently drop).
 - `pub` only for intended API. Helpers file-private by default.
 - Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make check`) fails on forbidden `@import`. Fix imports to respect the boundary; change the gate only for an explicitly requested architecture contract change, with rationale and regression coverage.
@@ -198,13 +198,12 @@ How to use:
   keep links and cross-references in sync when a doc moves or renumbers.
 
 **Doc standard:** [`docs/AGENTS.md`](docs/AGENTS.md) owns the tier map (one home
-per fact), the writing rules and the gate list; [`docs/cookbook/`](docs/cookbook/README.md)
-holds the numbered how-tos and [`docs/subsystems/`](docs/subsystems/README.md)
-the per-subsystem reference pages. `make lint` runs `tools/check_docs.py`: dead
-relative links, `file:LINE` citations out of range, quoted `zig` blocks that
-drifted from source, and the word ceilings in [`docs/budgets.json`](docs/budgets.json).
-The catalogs under [`docs/catalogs/`](docs/catalogs/README.md) are generated with
-`make docs-catalogs` and freshness-gated in `make check`.
+per fact), the writing rules and the doc gate list (what each gate checks and
+which target runs it); [`docs/cookbook/`](docs/cookbook/README.md) holds the
+numbered how-tos and [`docs/subsystems/`](docs/subsystems/README.md) the
+per-subsystem reference pages. Word ceilings live in
+[`docs/budgets.json`](docs/budgets.json); the generated catalogs under
+[`docs/catalogs/`](docs/catalogs/README.md) are rebuilt with `make docs-catalogs`.
 
 ## Zig style
 

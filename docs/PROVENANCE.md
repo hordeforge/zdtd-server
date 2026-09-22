@@ -649,6 +649,7 @@ field-by-field provenance.
 | `server/game/wasm_host.zig redact_placeholder` | [redacted] | Z | **zdtd-owned** replacement string written over redacted player PII in wasm log lines (`redactPlayerPii`) |
 
 | `server/webui.zig gzip_min_bytes` | 1024 | Z | **zdtd-owned** transfer-policy floor: `gzip_min_bytes` is the size below which a body goes uncompressed because the gzip container costs more than it saves (`/api/state.json` sits just under it, the pages far above). Not a stock value |
+| `world/stability.zig` `row_lanes` | 16 | A | Cells sharing one (y,z) in the stock chunk plane layout `x + z*16 + y*256`: the chunk X dimension, so one contiguous run in both the block plane and the stability plane. Layout constant, not a tunable |
 ### 3.9 Divergence register (provenance for the differences)
 
 Places zdtd does **not** reproduce stock values today. Each row states the

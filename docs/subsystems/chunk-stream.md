@@ -168,14 +168,14 @@ One send does four things before it encodes (`src/server/game/chunk_fill.zig:40-
 
 The TE scan is bounded and can be truncated by `te_scan_block_cap` / `te_scan_te_cap`; `te_scanned` is written only when the prefab TE walk completed under the cap, so a truncated scan retries on the next send (`src/server/game/chunk_fill.zig:318`, `src/server/game/chunk_fill.zig:401-410`). A clean procedural chunk skips the 65536-cell walk entirely (`src/server/game/chunk_fill.zig:260-269`). `scanChunkPower` re-fetches the chunk by position and guards on `power_scanned`, because the storage scan can re-enter the chunk store and move the map (`src/server/game/chunk_fill.zig:205-214`).
 
-Encoding goes through `packages.stock_chunk.buildNetPackageChunkNew` into `Game.body_buf` (`src/server/game/chunk_fill.zig:130`). `body_buf` is 512 KiB (`src/server/game.zig:457`) and the encode reuses one raw-plane scratch buffer per `Game` (`chunk_raws`, 65536 u32, `src/server/game.zig:461`). That scratch is the build-once reuse inside a single send: the dense per-cell `BlockValue` plane is materialized once and the block-layer loop, the density channel and the water channel all read it, instead of re-invoking the per-cell callback three times (`src/wire/stock_chunk.zig:487-509`, `src/wire/stock_chunk.zig:643-656`). The knob is explicit in the option struct (`src/wire/stock_chunk.zig:104-108`):
+Encoding goes through `packages.stock_chunk.buildNetPackageChunkNew` into `Game.body_buf` (`src/server/game/chunk_fill.zig:130`). `body_buf` is 512 KiB (`src/server/game.zig:457`) and the encode reuses one raw-plane scratch buffer per `Game` (`chunk_raws`, 65536 u32, `src/server/game.zig:461`). That scratch is the build-once reuse inside a single send: the dense per-cell `BlockValue` plane is materialized once and the block-layer loop, the density channel and the water channel all read it, instead of re-invoking the per-cell callback three times (`src/wire/stock_chunk.zig:487-509`, `src/wire/stock_chunk.zig:643-656`). The knob is explicit in the option struct (`src/wire/stock_chunk.zig:108-112`):
 
 ```zig
-    raws: ?*const [65536]u32 = null,
+    raws: ?*const [stock_plane_cells]u32 = null,
     /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Used
     /// only when `raws` is null. Null disables the memoization: channels fall
     /// back to the block_at callback.
-    raws_scratch: ?*[65536]u32 = null,
+    raws_scratch: ?*[stock_plane_cells]u32 = null,
 ```
 
 The envelope is a five-byte prefix around the network-mode `Chunk.write` payload (`src/wire/stock_chunk.zig:852-867`), with `bOverwriteExisting = false` so the client allocates and `Chunk.read`s during package read (`src/wire/stock_chunk.zig:850-851`). The payload's own entity count and tile entity count are zero (`src/wire/stock_chunk.zig:661-664`); tile entities travel as separate `NetPackageTileEntity` bodies from `sendContainersInChunk`, which `sendSpawnChunk` calls after a delivery is confirmed (`src/server/game/chunk_fill.zig:188-190`). That scan walks the container, sign, vending, light and workstation stores and sends every entry whose position falls in the 16x16 column, with workstations gated on known geometry (`src/server/game/chunk_stream.zig:37-85`, `src/server/game/replicate_te.zig:105-110`). The decoration follow-up for a newly streamed chunk is `game_join.sendDecoForStreamedChunk`, tracked per 128-block deco chunk (`src/server/game/chunk_stream.zig:346-353`, `src/server/game/join.zig:195-231`).
