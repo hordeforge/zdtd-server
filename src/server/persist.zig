@@ -576,7 +576,6 @@ pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
 }
 
-
 /// Remove all players.zsv records whose login name equals `name`.
 /// Returns how many records were dropped. FileNotFound → 0 (no-op).
 /// Does not log the name (operator reply only). Right-to-erasure: any

@@ -511,7 +511,6 @@ pub fn savePlayers(self: *Game) !void {
     try io_fs.writeFile(path, out.items);
 }
 
-
 pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     if (c.name_len == 0) return;
     var path_buf: [512]u8 = undefined;

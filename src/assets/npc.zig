@@ -91,4 +91,3 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !NpcTable {
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?NpcTable {
     return paths.tryLoadConfig("npc.xml", NpcTable, loadFromPath, allocator, game_dir, config_dir);
 }
-

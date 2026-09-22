@@ -789,7 +789,6 @@ pub fn readItemStackList(r: *binary.Reader, out: []StockSlot) binary.ReadError!u
     return take;
 }
 
-
 /// NetPackagePlayerEquipment body after the entityId (`Equipment::Read` IL=93,
 /// Equipment.il.txt:1673): version byte (5 slots when <= 2, 8 when == 3, else
 /// the ctor's 12) | N x `ItemValue::ReadOrNull` | when version >= 2, N x
@@ -1279,4 +1278,3 @@ pub fn buildPlayerDataBodyForTest(
     while (ei < equipment_slots) : (ei += 1) try w.writeI32(0);
     try w.writeI32(0);
 }
-

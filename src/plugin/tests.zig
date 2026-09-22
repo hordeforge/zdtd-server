@@ -892,6 +892,86 @@ test "plugin reload failure frees the display copy and reports false" {
     try std.testing.expectEqual(no_claim, host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
 }
 
+/// Capture for the failed-reload src remap: the owner's attribution table
+/// stands in for the command buffer, bots and glide flags the Game shifts.
+var shift_dropped: i16 = 0;
+var shift_calls: u32 = 0;
+
+test "a failed reload asks the owner to remap the compacted srcs" {
+    // Slot 0 dies and slot 1 becomes slot 0, so every effect the owner still
+    // attributes to src 2 belongs to src 1 now (paper 3.1: an effect stays
+    // attributable to the module that made it). The remap used to live in the
+    // admin verb, which left any other caller of reload with a table pointing
+    // at the wrong module.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+        fn shiftFn(_: *HostCtx, dropped: i16) void {
+            shift_dropped = dropped;
+            shift_calls += 1;
+        }
+    };
+    shift_dropped = 0;
+    shift_calls = 0;
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .shift_srcs_fn = &Cap.shiftFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{ "plugins/core_tradefeed/core_tradefeed.wasm", "assets/fixtures/plugin_hello.wasm" },
+        &ctx,
+        .{},
+    );
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 2), host.n);
+    try std.testing.expect(!host.reload(0, "/no/such/plugin.wasm"));
+    try std.testing.expectEqual(@as(u32, 1), shift_calls);
+    try std.testing.expectEqual(@as(i16, 1), shift_dropped);
+    // A reload that succeeds keeps every slot where it was: no remap.
+    try std.testing.expect(host.reload(0, "assets/fixtures/plugin_hello.wasm"));
+    try std.testing.expectEqual(@as(u32, 1), shift_calls);
+}
+
+test "takeWithdrawn never reports more srcs than the caller's buffer holds" {
+    // The caller slices `out[0..n]`, so a count past `out.len` is an
+    // out-of-bounds read; marking the overflow withdrawn anyway would also
+    // burn the one withdrawal those modules get. A src that does not fit stays
+    // pending for the next pass instead.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{ "plugins/core_tradefeed/core_tradefeed.wasm", "assets/fixtures/plugin_hello.wasm" },
+        &ctx,
+        .{},
+    );
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 2), host.n);
+    host.slots[0].disabled = true;
+    host.slots[1].disabled = true;
+    var one: [1]i16 = undefined;
+    try std.testing.expectEqual(@as(usize, 1), host.takeWithdrawn(&one));
+    try std.testing.expectEqual(@as(i16, 1), one[0]);
+    // The src that did not fit is still pending, not silently consumed.
+    try std.testing.expectEqual(@as(usize, 1), host.takeWithdrawn(&one));
+    try std.testing.expectEqual(@as(i16, 2), one[0]);
+    try std.testing.expectEqual(@as(usize, 0), host.takeWithdrawn(&one));
+}
+
 test "reload reconciles the module's manifest point claims" {
     // Paper 5.2.1/5.2.2: a reload reconciles the declarative configuration, not
     // just the code. The claim table is built once by loadResolved, so before

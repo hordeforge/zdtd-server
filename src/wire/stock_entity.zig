@@ -522,4 +522,3 @@ pub fn buildWorldSpawnPointsBody(buf: []u8, points: []const SpawnPointEntry) ![]
     }
     return w.written();
 }
-

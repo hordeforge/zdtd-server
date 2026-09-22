@@ -375,4 +375,3 @@ pub fn parseRequestToSpawnProfile(body: []const u8) !stock_entity.OwnedProfile {
     _ = try r.readI16();
     return stock_entity.readOwnedProfile(&r);
 }
-

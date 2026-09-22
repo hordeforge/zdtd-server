@@ -94,6 +94,12 @@ pub const HostCtx = struct {
     /// commands queued during shutdown and applied spawns do not outlive the
     /// disposed instance. Null in tests that do not own a command buffer.
     withdraw_fn: ?*const fn (ctx: *HostCtx, src: i16) void = null,
+    /// Owner remaps its per-plugin attribution after a failed reload drops the
+    /// slot and later modules compact down: `dropped` is the 1-based src that
+    /// left, and every surviving src above it decrements. Without it a later
+    /// withdrawal targets the wrong module (paper 3.1 attribution must survive
+    /// compaction). Null in tests that hold no attributed state.
+    shift_srcs_fn: ?*const fn (ctx: *HostCtx, dropped: i16) void = null,
     /// Build a read-only world snapshot into `out`, returning bytes written.
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
@@ -162,7 +168,7 @@ One boundary worth naming: the manifest is validated but not the module. The res
 
 A manifest-backed slot re-reads its declaration before going live: `rereadConfig` reloads `config.toml` (`src/plugin/wasm.zig:1268`) and `reconcileClaims` rebuilds its point claims and module `deny` mask from disk, refusing a claim whose hook is absent or whose point another live module holds (`src/plugin/wasm.zig:1303`, `src/plugin/wasm.zig:1345`). The reload path applies the same `require_declaration` rule as boot for manifest-backed modules, so a module swapped on disk to drop `_zdtd_requires` cannot load here and then be refused at the next restart (`src/plugin/wasm.zig:1229`). `refreshDenied` then recombines module and operator masks and `on_enable` runs on the new instance (`src/plugin/wasm.zig:1258`).
 
-A reload that fails to parse or instantiate does not leave a hole in the slot table. `dropDisposedSlot` compacts later modules down, re-points each moved module's `rt_slot` and `plugin_slot` backlink, and shifts or releases override-point claims (`src/plugin/wasm.zig:1361`). The Game side then remaps the numeric srcs held by the command buffer and the bot manager so later withdrawal still addresses the right module (`src/server/game/wasm_host.zig:578`).
+A reload that fails to parse or instantiate does not leave a hole in the slot table. `dropDisposedSlot` compacts later modules down, re-points each moved module's `rt_slot` and `plugin_slot` backlink, and shifts or releases override-point claims (`src/plugin/wasm.zig:1361`). `reload` then calls the owner's `shift_srcs_fn`, which remaps the numeric srcs held by the command buffer, the bot manager and the applied glide flags so later withdrawal still addresses the right module (`src/server/game/wasm_host.zig:130`). The call lives in `reload`, not in the admin verb, so every caller of the reload cycle keeps attribution intact.
 
 Effect withdrawal has three entry points. The periodic pass, `takeWithdrawn`, reports the 1-based slots of modules that disabled themselves since the last call and marks each once (`src/plugin/wasm.zig:1418`); `withdrawDisabledPlugins` builds the fixed array and calls `withdrawPluginSrc` for each (`src/server/game/step.zig:655`). That function drops the src's pending commands, counts effects with no inverse in `plugin_effects_not_reverted` rather than pretending they were reverted (`src/server/game/step.zig:672`), broadcasts `NetPackageEntityRemove` for applied spawns before destroying them so a client that was told about the entity is told it is gone (`src/server/game/step.zig:681`), clears attributed glide flags, and calls `BotManager.dropFrom` (`src/server/game/step.zig:691`, `src/server/game/step.zig:697`). The third is the mid-drain gate: the pre-drain pass cannot see a module that goes disabled while an op is being applied, so `World.drainCommands` asks `srcWithdrawn` once per op (`src/plugin/wasm.zig:1670`, `src/ecs/world.zig:1951`).
 

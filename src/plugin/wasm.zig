@@ -119,6 +119,12 @@ pub const HostCtx = struct {
     /// commands queued during shutdown and applied spawns do not outlive the
     /// disposed instance. Null in tests that do not own a command buffer.
     withdraw_fn: ?*const fn (ctx: *HostCtx, src: i16) void = null,
+    /// Owner remaps its per-plugin attribution after a failed reload drops the
+    /// slot and later modules compact down: `dropped` is the 1-based src that
+    /// left, and every surviving src above it decrements. Without it a later
+    /// withdrawal targets the wrong module (paper 3.1 attribution must survive
+    /// compaction). Null in tests that hold no attributed state.
+    shift_srcs_fn: ?*const fn (ctx: *HostCtx, dropped: i16) void = null,
     /// Build a read-only world snapshot into `out`, returning bytes written.
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
@@ -1257,6 +1263,13 @@ pub const WasmHost = struct {
             // The disposed slot cannot stay inside 0..n (hooks and deinit
             // would run on undefined memory): drop it from the active range.
             self.dropDisposedSlot(idx);
+            // Later modules just compacted down, so the owner's attribution
+            // (pending commands, applied spawns and bots, glide flags) has to
+            // follow them or a later withdrawal hits the wrong module. This is
+            // an invariant of the runtime, not a duty of whoever called reload.
+            if (self.ctx) |ctx| {
+                if (ctx.shift_srcs_fn) |sf| sf(ctx, @intCast(idx + 1));
+            }
             if (display_copy.len > 0) self.allocator.free(display_copy);
             if (config_copy.len > 0) self.allocator.free(config_copy);
             return false;
@@ -1399,6 +1412,10 @@ pub const WasmHost = struct {
             ctx.rt_slot[self.n - 1] = null;
             ctx.plugin_slot[self.n - 1] = null;
         }
+        // The vacated tail keeps the departing module's withdrawal mark
+        // otherwise; `loadInto` clears it for a slot it fills, but a slot left
+        // empty must not hand a stale mark to whoever lands there next.
+        self.withdrawn[self.n - 1] = false;
         for (&self.claims) |*c| {
             if (c.* == no_claim) continue;
             if (c.* == idx) {
@@ -1440,7 +1457,12 @@ pub const WasmHost = struct {
         var n: usize = 0;
         for (0..self.n) |i| {
             if (!self.slots[i].disabled or self.withdrawn[i]) continue;
-            if (n < out.len) out[n] = @intCast(i + 1);
+            // A src that does not fit stays unmarked so the next pass still
+            // reports it: marking it here would return a count past `out.len`
+            // (the caller slices `out[0..n]`) and silently skip the only
+            // withdrawal that module will ever get.
+            if (n >= out.len) break;
+            out[n] = @intCast(i + 1);
             self.withdrawn[i] = true;
             n += 1;
         }

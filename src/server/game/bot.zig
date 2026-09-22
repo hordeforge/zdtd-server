@@ -768,4 +768,3 @@ fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
     }
     b.y = g.groundHeight(@floor(b.x), @floor(b.z));
 }
-

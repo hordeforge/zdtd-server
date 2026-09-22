@@ -1564,8 +1564,6 @@ pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
     }
 }
 
-
-
 /// Stock DropOnDeath (0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete):
 /// spawn the victim's death bag at their position holding the real
 /// inventory range (not a placeholder unit) and mark the dropped-backpack

@@ -29,4 +29,3 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try quest_trade.handleTrade(self, c, peer, name, body)) return true;
     return false;
 }
-

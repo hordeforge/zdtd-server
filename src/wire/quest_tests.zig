@@ -550,4 +550,3 @@ test "quest treasure point body branches on the action byte" {
 
     try std.testing.expectError(error.EndOfStream, parseQuestTreasurePoint(reply[0 .. reply.len - 1]));
 }
-

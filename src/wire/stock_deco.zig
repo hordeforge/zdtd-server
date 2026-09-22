@@ -397,4 +397,3 @@ pub fn buildDecoResetWorldChunk(buf: []u8, cx: i32, cz: i32) ![]u8 {
     std.mem.writeInt(i64, buf[4..12], key, .little);
     return buf[0..12];
 }
-

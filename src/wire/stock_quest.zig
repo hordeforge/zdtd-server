@@ -694,4 +694,3 @@ pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
         .op = body[2],
     };
 }
-

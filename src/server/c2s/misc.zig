@@ -66,8 +66,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     return false;
 }
 
-
-
 /// Relay `body` verbatim to every joined client, including the sender
 /// (stock GameMessageServer re-broadcasts to all peers, sender included).
 fn relayBodyAll(self: *Game, pkg: []const u8, body: []const u8, label: []const u8) void {

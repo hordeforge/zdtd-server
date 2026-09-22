@@ -461,7 +461,6 @@ pub fn downgradeBreakRaw(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) u32 {
 /// explosion_block_damage through the single addBlockDamage choke point
 /// (breaking when max hp is exceeded). Consume-owns-drain, like the noise
 /// ring. Runs after the sim AI pass each tick (Game.step).
-
 /// Stock `Explosion::AttackBlocks` distance falloff for one cell:
 /// `V_21 = FastMax(0, |blockCenter - blastPos| - 0.5)` then
 /// `1 - V_21 / radius` (IL_0201-0222, IL_02A7-02B5). `Vector3i::ToVector3Center`
@@ -541,7 +540,6 @@ pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, in
 /// this path yet, GAP "Land claim blast hardness").
 ///
 /// Returns true when the block changed (damaged, downgraded or destroyed).
-
 pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
     const key = packBlockKey(x, y, z);
     var i: usize = 0;

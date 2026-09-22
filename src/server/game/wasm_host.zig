@@ -126,6 +126,18 @@ pub fn wasmWithdraw(ctx: *plugin_mod.wasm.HostCtx, src: i16) void {
     game_step.withdrawPluginSrc(g, src);
 }
 
+/// Owner callback for HostCtx.shift_srcs_fn: a failed reload dropped slot
+/// `dropped` (1-based) and every later module shifted down, so decrement the
+/// attribution this Game holds for them (pending commands and applied spawns,
+/// live bots and the bot population floor, applied glide flags). Without it a
+/// later withdrawal would target whichever module moved into the slot.
+pub fn wasmShiftSrcs(ctx: *plugin_mod.wasm.HostCtx, dropped: i16) void {
+    const g = gameFromPtr(ctx.data orelse return);
+    g.sim.commands.shiftSrcsAfter(dropped);
+    g.bots.shiftSrcsAfter(dropped);
+    g.sim.shiftGlideSrcsAfter(dropped);
+}
+
 /// World.pre_drain_fn: withdraw every plugin that disabled itself since the
 /// last pass, immediately before drainCommands applies queued ops.
 pub fn withdrawDisabled(ctx: ?*anyopaque) void {
@@ -630,15 +642,10 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
         // queued during shutdown cannot land on the replacement.
         const src: i16 = @intCast(idx + 1);
         game_step.withdrawPluginSrc(self, src);
-        const n_before = self.wasm_plugins.n;
+        // A failed reload drops the slot and later modules compact; the
+        // runtime remaps the remaining command/bot/glide srcs itself through
+        // HostCtx.shift_srcs_fn (wasmShiftSrcs).
         const ok = self.wasm_plugins.reload(idx, path);
-        // A failed reload drops the slot and later modules compact: remap
-        // remaining command/bot/glide srcs so later withdrawal still matches.
-        if (!ok and self.wasm_plugins.n < n_before) {
-            self.sim.commands.shiftSrcsAfter(src);
-            self.bots.shiftSrcsAfter(src);
-            self.sim.shiftGlideSrcsAfter(src);
-        }
         self.adminReply(if (ok) "plugin reloaded\n" else "plugin reload failed; see server log\n");
         return;
     }

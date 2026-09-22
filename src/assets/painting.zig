@@ -96,4 +96,3 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("painting.xml", Table, loadFromPath, allocator, game_dir, config_dir);
 }
-

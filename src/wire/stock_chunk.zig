@@ -901,4 +901,3 @@ pub fn buildNetPackageChunkNew(buf: []u8, opts: EncodeOpts) ![]u8 {
     std.mem.writeInt(i32, buf[1..5], @intCast(payload.len), .little);
     return buf[0..total];
 }
-

@@ -206,6 +206,7 @@ const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
 const wasmWithdraw = game_wasm_host.wasmWithdraw;
+const wasmShiftSrcs = game_wasm_host.wasmShiftSrcs;
 const wasmSense = game_wasm_host.wasmSense;
 const wasmQuery = game_wasm_host.wasmQuery;
 
@@ -760,6 +761,7 @@ pub const Game = struct {
                 .tick_fn = &wasmTick,
                 .queue_fn = &wasmQueue,
                 .withdraw_fn = &wasmWithdraw,
+                .shift_srcs_fn = &wasmShiftSrcs,
                 .sense_fn = &wasmSense,
                 .query_fn = &wasmQuery,
             },

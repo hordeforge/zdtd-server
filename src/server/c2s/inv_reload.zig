@@ -52,7 +52,6 @@ pub fn scrubIllegalMods(self: *Game, ps: ecs.Slot) void {
 }
 
 /// True when `name` belongs to this domain and was handled.
-
 /// True when `name` is a reload/inventory package and was handled.
 pub fn handleReload(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageItemReload")) {

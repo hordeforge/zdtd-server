@@ -409,4 +409,3 @@ pub fn resolveCraftTime(def: RecipeDef, componentTime: fn ([]const u8) f32) f32 
     }
     return total;
 }
-

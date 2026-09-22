@@ -1234,4 +1234,3 @@ pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world
     try w.writeBytes(pw.written());
     return w.written();
 }
-
