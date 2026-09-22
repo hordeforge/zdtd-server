@@ -27,6 +27,7 @@
 
 const std = @import("std");
 const store = @import("store.zig");
+const tts = @import("tts.zig");
 
 /// Stability grid cell value for a fully-supported block (stock
 /// StabilityInitializer fills to maxStability; 15 matches the stock grid's
@@ -80,12 +81,75 @@ fn stabAtWorld(w: *store.World, x: i32, y: i32, z: i32) u8 {
     return c.stabilityAt(t.lx, y, t.lz);
 }
 
+/// Cells sharing one (y,z) in the plane layout `x + z*16 + y*256`: one
+/// contiguous run in both the block plane and the stability plane.
+const row_lanes: usize = 16;
+
+/// One-entry memo for the per-id `Facts` probe. A chunk reset walks long runs
+/// of a single id (stone and dirt bands), so the callback fires once per run
+/// instead of once per cell. `id` starts at air, which the scan never probes.
+const FactsMemo = struct {
+    id: u16 = 0,
+    facts: Facts = .{ .support = false, .ignore = true },
+
+    fn get(self: *FactsMemo, id: u16, ctx: ?*anyopaque, probe: FactsFn) Facts {
+        if (id != self.id) {
+            self.id = id;
+            self.facts = probe(ctx, id);
+        }
+        return self.facts;
+    }
+};
+
 /// Compute the plane for a chunk if absent: reset (15 support / 1 non-support)
-/// then distribute. Init/load path (allocation allowed).
+/// then distribute. Runs on the first block edit in a chunk, so the reset walks
+/// the whole plane on the tick: it goes row by row (sequential in both planes)
+/// and skips all-air rows with one 16-wide compare. Scalar equivalent is
+/// `resetScalar`, which the golden test holds it to.
 pub fn ensureComputed(w: *store.World, c: *store.Chunk, allocator: std.mem.Allocator, fctx: ?*anyopaque, facts: FactsFn) !void {
     if (c.stability != null) return;
     const plane = try c.ensureStability(allocator);
-    _ = plane;
+    if (c.blocks) |blocks| {
+        // Same cells the scalar reset reaches: `setStabilityByte` drops y past
+        // the chunk's own plane, and the loop stopped at the world profile.
+        const y_lim: usize = @min(@as(usize, c.y_dim), @as(usize, @intCast(@max(w.yDim(), 0))));
+        const rows = @min(@min(blocks.len, plane.len) / row_lanes, y_lim * 16);
+        resetRows(plane, blocks, rows, fctx, facts);
+    } else {
+        // No block plane: ids come from the height-map fallback, one cell at a
+        // time (offline and freshly generated chunks only).
+        resetScalar(w, c, fctx, facts);
+    }
+    distribute(w, c, fctx, facts);
+}
+
+/// Reset the first `rows` 16-cell rows of the plane from the dense block plane.
+/// Both planes share the `x + z*16 + y*256` layout, so a row is contiguous in
+/// each. Stack only. Scalar equivalent: `resetScalar`.
+fn resetRows(plane: []u8, blocks: []const u32, rows: usize, fctx: ?*anyopaque, facts: FactsFn) void {
+    const V = @Vector(row_lanes, u32);
+    const zero: V = @splat(0);
+    const type_mask: V = @splat(tts.type_mask);
+    std.debug.assert(rows * row_lanes <= @min(plane.len, blocks.len));
+    var memo: FactsMemo = .{};
+    var row: usize = 0;
+    while (row < rows) : (row += 1) {
+        const base = row * row_lanes;
+        const ids = @as(V, blocks[base..][0..row_lanes].*) & type_mask;
+        if (@reduce(.And, ids == zero)) continue;
+        const row_ids: [row_lanes]u32 = ids;
+        for (row_ids, 0..) |raw_id, lane| {
+            if (raw_id == 0) continue;
+            const f = memo.get(@intCast(raw_id), fctx, facts);
+            if (f.ignore) continue;
+            plane[base + lane] = if (f.support) stability_full else 1;
+        }
+    }
+}
+
+/// Scalar reference for the `ensureComputed` reset, and the live path for a
+/// chunk with no materialized block plane.
+fn resetScalar(w: *store.World, c: *store.Chunk, fctx: ?*anyopaque, facts: FactsFn) void {
     var x: i32 = 0;
     while (x < 16) : (x += 1) {
         var z: i32 = 0;
@@ -100,7 +164,6 @@ pub fn ensureComputed(w: *store.World, c: *store.Chunk, allocator: std.mem.Alloc
             }
         }
     }
-    distribute(w, c, fctx, facts);
 }
 
 /// Stock StabilityInitializer::DistributeStability: spread from every block
@@ -628,4 +691,51 @@ test "stability: a dig whose plane computes after the cell is air does not under
     var fallen: [max_fallen]Pos = undefined;
     const n = removeBlockAt(w, 4, 61, 4, gpa, null, testFacts, &fallen);
     try testing.expectEqual(@as(usize, 0), n);
+}
+
+test "stability reset: row kernel matches the scalar reference" {
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
+    defer {
+        w.deinit();
+        gpa.destroy(w);
+    }
+    const t = store.World.worldToChunk(0, 0);
+    const c = w.chunks.get((store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }).hash()).?;
+
+    // Mixed ids so every branch runs: air (skipped rows and lone cells),
+    // support, non-support and ignore, plus upper rawData bits the type mask
+    // has to drop.
+    var prng = std.Random.DefaultPrng.init(0x57ab_1117);
+    const rnd = prng.random();
+    const blocks = c.blocks.?;
+    for (blocks, 0..) |*b, i| {
+        if (i % 331 < 200) {
+            b.* = 0;
+            continue;
+        }
+        b.* = rnd.intRangeAtMost(u32, 1, 3) | (@as(u32, rnd.int(u16)) << 16);
+    }
+
+    const plane = try c.ensureStability(gpa);
+    resetRows(plane, blocks, plane.len / row_lanes, null, testFacts);
+    const expect = try gpa.dupe(u8, plane);
+    defer gpa.free(expect);
+
+    @memset(plane, 0);
+    resetScalar(w, c, null, testFacts);
+    try testing.expectEqualSlices(u8, expect, plane);
+    // The fixture must actually contain all three outcomes, or the comparison
+    // proves nothing.
+    try testing.expect(std.mem.indexOfScalar(u8, plane, stability_full) != null);
+    try testing.expect(std.mem.indexOfScalar(u8, plane, 1) != null);
+    try testing.expect(std.mem.indexOfScalar(u8, plane, 0) != null);
 }

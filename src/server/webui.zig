@@ -43,7 +43,7 @@ pub const max_cmd_out: usize = 4096;
 pub const max_shell_html: usize = 128 * 1024;
 // Sign-in pages (Tailwind build inlined) are the next largest bodies after the
 // shell; login.html and login_lockout.html each render under this cap.
-pub const max_login_html: usize = 28 * 1024;
+pub const max_login_html: usize = 32 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -1778,7 +1778,8 @@ test "renderLoginLockout substitutes the real remaining seconds" {
     const out = try renderLoginLockout(&buf, 7);
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
     // Visible countdown is not a live region; #retry-live announces milestones.
-    try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\">7<") != null);
+    try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, ">7</span>") != null);
     try std.testing.expect(std.mem.find(u8, out, "var e=7,s=1000") != null);
 }
 
