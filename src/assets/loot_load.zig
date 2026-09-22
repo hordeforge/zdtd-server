@@ -9,6 +9,7 @@ const requirements = @import("requirements.zig");
 const sandbox = @import("sandbox.zig");
 const io_fs = @import("../util/io_fs.zig");
 const loot = @import("loot.zig");
+const paths = @import("paths.zig");
 const LootTable = loot.LootTable;
 const LootEntry = loot.LootEntry;
 const LootGroup = loot.LootGroup;
@@ -464,6 +465,5 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?LootTable {
-    const paths = @import("paths.zig");
     return paths.tryLoadConfig("loot.xml", LootTable, loadFromPath, allocator, game_dir, config_dir);
 }

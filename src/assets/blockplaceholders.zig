@@ -30,6 +30,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const sandbox = @import("sandbox.zig");
 const game_random = @import("../util/game_random.zig");
+const paths = @import("paths.zig");
 
 pub const max_placeholders: usize = 1024;
 pub const max_targets_per_placeholder: usize = 64;
@@ -280,7 +281,6 @@ pub fn tryLoad(
     config_dir: ?[]const u8,
     ctx: LoadCtx,
 ) !?Table {
-    const paths = @import("paths.zig");
     const logFail = struct {
         fn f(what: []const u8, err: anyerror) void {
             std.debug.print("zdtd: blockplaceholders.xml {s} failed: {s}\n", .{ what, @errorName(err) });
@@ -299,10 +299,9 @@ pub fn tryLoad(
     defer allocator.free(merged);
     // The patched catalog is cached beside the cwd like blocks.xml, so the
     // loader keeps one file path entry point.
-    const io_fs2 = @import("../util/io_fs.zig");
-    io_fs2.mkdirPath(".zdtd_cfg_cache");
+    io_fs.mkdirPath(".zdtd_cfg_cache");
     const cp = ".zdtd_cfg_cache/blockplaceholders.xml";
-    io_fs2.writeFile(cp, merged) catch return null;
+    io_fs.writeFile(cp, merged) catch return null;
     const t = loadFromPath(allocator, cp, ctx) catch |err| {
         logFail("load patched", err);
         return null;

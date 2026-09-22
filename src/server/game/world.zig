@@ -23,6 +23,7 @@ const plugin_compose = @import("plugin_compose.zig");
 const max_land_claims = game_mod.max_land_claims;
 const ecs = @import("../../ecs/root.zig");
 const assets_spawning = @import("../../assets/spawning.zig");
+const io_fs = @import("../../util/io_fs.zig");
 
 /// Combined block-damage verdict: static host first, then Wasm (first non-zero
 /// wins; 0 = no plugin vetoes/scales, keep today's behaviour).
@@ -690,7 +691,6 @@ test "blockRawAt prefers resident chunk over a stale sparse mirror" {
     // prior SetBlock hit in block_raw that outranked the chunk. Preferring
     // the resident plane keeps readers coherent even when a write site
     // forgets the mirror.
-    const io_fs = @import("../../util/io_fs.zig");
     io_fs.mkdirPath(".zdtd_cfg_cache");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/block_raw_cohere", 0, .{});
     defer {

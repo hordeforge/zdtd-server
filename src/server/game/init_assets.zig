@@ -42,6 +42,10 @@ const ecs = @import("../../ecs/root.zig");
 /// on the clock that runs at that rate; the weather scheduler is handed the
 /// same value here.
 const ecs_aidirector = @import("../../ecs/aidirector.zig");
+const assets_paths = @import("../../assets/paths.zig");
+const modlets = @import("../../assets/modlets.zig");
+const io_fs = @import("../../util/io_fs.zig");
+const assignids_pins = @import("../../assets/assignids_comptime.zig");
 
 /// Items-table lookup for `assets_vehicles.Table.resolveMaxHp`: the item's
 /// `DegradationMax` (0 when the name is unknown, which keeps the floor).
@@ -65,15 +69,12 @@ fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result))
 }
 
 pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.InitOptions) !void {
-    const assets_paths = @import("../../assets/paths.zig");
-    const modlets = @import("../../assets/modlets.zig");
     // Stock Mods/ scan (PRD R1) + self-contained manifest mods' Config/ dirs
     // (PRD 0003): merged into one patch list so both apply to the patched
     // catalogs - stock Mods/ first, then manifest mods (each existence-
     // checked). Operator --config-overrides still apply last (PRD R6 order).
     // Scan/parse failures are fatal: a modlet that cannot be applied changes
     // AssignIds vs the client.
-    const io_fs = @import("../../util/io_fs.zig");
     var merged_mod_dirs = std.ArrayList(modlets.ModDir).empty;
     // Stock scan ModDirs are owned by the global `installed` Scan (freed at
     // teardown), so only the manifest-allocated tail is freed here.
@@ -759,20 +760,19 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 if (self_t.t.idByName(name)) |id| return id;
                 // Comptime pins only when AssignIds map empty (offline / no dump).
                 if (self_t.t.id_by_name.count() > 0) return null;
-                const a = @import("../../assets/assignids_comptime.zig");
-                if (std.mem.eql(u8, name, "terrStone")) return a.terr_stone;
-                if (std.mem.eql(u8, name, "terrBedrock")) return a.terr_bedrock;
-                if (std.mem.eql(u8, name, "terrDirt")) return a.terr_dirt;
-                if (std.mem.eql(u8, name, "terrForestGround")) return a.terr_forest_ground;
-                if (std.mem.eql(u8, name, "terrBurntForestGround")) return a.terr_burnt_forest_ground;
-                if (std.mem.eql(u8, name, "terrDesertGround")) return a.terr_desert_ground;
-                if (std.mem.eql(u8, name, "terrSand")) return a.terr_sand;
-                if (std.mem.eql(u8, name, "terrSandStone")) return a.terr_sand_stone;
-                if (std.mem.eql(u8, name, "terrSnow")) return a.terr_snow;
-                if (std.mem.eql(u8, name, "terrTopSoil")) return a.terr_topsoil;
-                if (std.mem.eql(u8, name, "terrDestroyedStone")) return a.terr_destroyed_stone;
-                if (std.mem.eql(u8, name, "terrDestroyedGrass")) return a.terr_destroyed_grass;
-                if (std.mem.eql(u8, name, "water")) return a.water;
+                if (std.mem.eql(u8, name, "terrStone")) return assignids_pins.terr_stone;
+                if (std.mem.eql(u8, name, "terrBedrock")) return assignids_pins.terr_bedrock;
+                if (std.mem.eql(u8, name, "terrDirt")) return assignids_pins.terr_dirt;
+                if (std.mem.eql(u8, name, "terrForestGround")) return assignids_pins.terr_forest_ground;
+                if (std.mem.eql(u8, name, "terrBurntForestGround")) return assignids_pins.terr_burnt_forest_ground;
+                if (std.mem.eql(u8, name, "terrDesertGround")) return assignids_pins.terr_desert_ground;
+                if (std.mem.eql(u8, name, "terrSand")) return assignids_pins.terr_sand;
+                if (std.mem.eql(u8, name, "terrSandStone")) return assignids_pins.terr_sand_stone;
+                if (std.mem.eql(u8, name, "terrSnow")) return assignids_pins.terr_snow;
+                if (std.mem.eql(u8, name, "terrTopSoil")) return assignids_pins.terr_topsoil;
+                if (std.mem.eql(u8, name, "terrDestroyedStone")) return assignids_pins.terr_destroyed_stone;
+                if (std.mem.eql(u8, name, "terrDestroyedGrass")) return assignids_pins.terr_destroyed_grass;
+                if (std.mem.eql(u8, name, "water")) return assignids_pins.water;
                 return null;
             }
             /// blocks.xml IsDistantDecoration, the filter that decides which

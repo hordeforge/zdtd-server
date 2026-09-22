@@ -11,6 +11,7 @@ const nav = @import("../../world/nav.zig");
 const game_step = @import("step.zig");
 const util_log = @import("../../util/log.zig");
 const plugin_compose = @import("plugin_compose.zig");
+const bot_mod = @import("bot.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
@@ -362,7 +363,6 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // Reserve room for the event trailer up front so a full record set still
     // leaves space for it (the guest parses the trailer after the records; a
     // truncated tail would desync its offsets).
-    const bot_mod = @import("bot.zig");
     const trailer_cap = (bot_mod.max_sense_info + bot_mod.max_sense_events) * bot_mod.sense_event_len;
     const rec_len = bot_mod.sense_record_len;
     const max_records = if (out.len >= sense_header_len + trailer_cap) (out.len - sense_header_len - trailer_cap) / rec_len else (out.len - sense_header_len) / rec_len;

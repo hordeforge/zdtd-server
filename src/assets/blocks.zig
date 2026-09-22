@@ -7,6 +7,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_log = @import("../util/log.zig");
 const assignids = @import("assignids_comptime.zig");
+const paths = @import("paths.zig");
 /// Test-only: the stock AssignIds dump, to pin that a stock install never
 /// enters the leftover-id path. Production passes the resolver in as a
 /// callback, so the dependency stays one-way.
@@ -1127,7 +1128,6 @@ pub fn tryLoad(
     id_by_name: IdByNameFn,
     ctx: ?*anyopaque,
 ) !?BlockTable {
-    const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "blocks.xml", game_dir, config_dir) orelse return null;
     if (!paths.hasPatches()) {

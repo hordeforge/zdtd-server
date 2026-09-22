@@ -10,6 +10,7 @@ const world_store = @import("../../world/store.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_spawning = @import("../../assets/spawning.zig");
+const ecs_components = @import("../../ecs/components.zig");
 
 /// float world position, so the damage is symmetric around the real blast
 /// rather than around the cell index the loop iterates - the difference is
@@ -24,7 +25,6 @@ pub fn blastFalloff(block_x: i32, block_y: i32, block_z: i32, px: f32, py: f32, 
 }
 
 pub fn drainExplosions(self: *Game) void {
-    const ecs_components = @import("../../ecs/components.zig");
     const n = @min(self.sim.explode_n, ecs_components.explode_cap);
     self.sim.explode_n = 0;
     var i: usize = 0;

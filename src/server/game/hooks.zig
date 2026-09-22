@@ -18,6 +18,7 @@ const plugin_compose = @import("plugin_compose.zig");
 const game_tick = @import("tick.zig");
 const game_wasm_host = @import("wasm_host.zig");
 const packages = @import("../../wire/packages.zig");
+const world_tts = @import("../../world/tts.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -43,7 +44,7 @@ pub fn spawnPoiTraders(self: *Game) void {
         var cname_buf: [64]u8 = undefined;
         const cname = std.fmt.bufPrint(&cname_buf, "npcTrader{s}", .{qd.trader_tag[6..]}) catch continue;
         const def = self.entities.byName(cname) orelse continue;
-        const r = @import("../../world/tts.zig").rotateLocalXZ(qd.trader_x, qd.trader_z, d.size_x, d.size_z, d.rot);
+        const r = world_tts.rotateLocalXZ(qd.trader_x, qd.trader_z, d.size_x, d.size_z, d.rot);
         const wx: f32 = @floatFromInt(d.x + r.x);
         const wy: f32 = @floatFromInt(d.stampY() + qd.trader_y);
         const wz: f32 = @floatFromInt(d.z + r.z);

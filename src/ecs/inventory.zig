@@ -626,8 +626,7 @@ fn restoreTaken(inv: *c.Inventory, slot: u16, taken: c.InvSlot, holding_before: 
 }
 
 test "move and drop and use" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -692,8 +691,7 @@ test "move and drop and use" {
 }
 
 test "open container refuses another player's inventory" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -702,8 +700,7 @@ test "open container refuses another player's inventory" {
 }
 
 test "failed container put restores exact source stack and holding slot" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -724,8 +721,7 @@ test "failed container put restores exact source stack and holding slot" {
 }
 
 test "container take and put preserve quality and meta" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -758,8 +754,7 @@ test "container take and put preserve quality and meta" {
 }
 
 test "open container rejects far vertical targets" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -777,8 +772,7 @@ test "scrap op reserved" {
 }
 
 test "place fuel item yields refuel_amount" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -806,8 +800,7 @@ test "place fuel item yields refuel_amount" {
 }
 
 test "generalDamageResist clamps at 1 and keeps vulnerabilities" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0);
     const ps = w.playerByPeer(0).?;
@@ -825,8 +818,7 @@ test "generalDamageResist clamps at 1 and keeps vulnerabilities" {
 }
 
 test "equip armor and place wood" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -896,8 +888,7 @@ fn testAllBroken(_: ?*anyopaque, _: u16, _: u8, use_times: f32) f32 {
 }
 
 test "degradeUse counts uses upward from a pristine zero" {
-    const WorldT = @import("world.zig").World;
-    var w: WorldT = .{};
+    var w: World = .{};
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     _ = w.spawnPlayer(0, 70, 0, 0);

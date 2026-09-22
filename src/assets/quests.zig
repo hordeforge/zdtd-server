@@ -9,6 +9,7 @@ const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("xml_util.zig");
 const quest = @import("../ecs/quest.zig");
+const paths = @import("paths.zig");
 
 pub const max_list_entries: usize = 64;
 
@@ -1069,7 +1070,6 @@ pub fn tryLoad(
     quests_path: ?[]const u8,
     policy: quest.QuestPolicy,
 ) !?quest.Catalog {
-    const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     // Parse/I/O failures must not look like "quests absent" (callers catch null).
     const loadLogged = struct {

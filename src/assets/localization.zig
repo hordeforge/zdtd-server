@@ -19,6 +19,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
+const mods = @import("modlets.zig");
 const paths = @import("paths.zig");
 
 /// Column cap: stock's base header has 17 columns (Key, File, Type,
@@ -141,8 +142,7 @@ pub fn deflate(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 /// Load the base header and merge every mod's `Config/Localization.csv`.
 /// Null when the base file is absent (nothing to patch against).
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
-    const mod_dirs = @import("paths.zig").mod_dirs;
-    return tryLoadWithMods(allocator, game_dir, config_dir, mod_dirs);
+    return tryLoadWithMods(allocator, game_dir, config_dir, paths.mod_dirs);
 }
 
 /// Testable form of `tryLoad`: the mod dirs are passed in.
@@ -150,7 +150,7 @@ pub fn tryLoadWithMods(
     allocator: std.mem.Allocator,
     game_dir: ?[]const u8,
     config_dir: ?[]const u8,
-    mod_dirs: []const @import("modlets.zig").ModDir,
+    mod_dirs: []const mods.ModDir,
 ) !?Table {
     var path_buf: [2048]u8 = undefined;
     const base_path = paths.resolveConfigXml(&path_buf, "Localization.csv", game_dir, config_dir) orelse return null;
@@ -359,7 +359,6 @@ test "localization CSV parses quoted fields and merges in mod order" {
         \\
     );
 
-    const mods = @import("modlets.zig");
     const dirs = [_]mods.ModDir{
         .{ .config_dir = mod_a, .mod_path = dir },
         .{ .config_dir = mod_b, .mod_path = dir },
@@ -410,7 +409,6 @@ test "the localization blob is raw deflate the client can inflate" {
         \\zzPatched,patched value
         \\
     );
-    const mods = @import("modlets.zig");
     const dirs = [_]mods.ModDir{.{ .config_dir = mod, .mod_path = dir }};
     var t = (try tryLoadWithMods(std.testing.allocator, null, cfg, &dirs)).?;
     defer t.deinit();

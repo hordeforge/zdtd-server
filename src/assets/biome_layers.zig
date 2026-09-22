@@ -10,6 +10,7 @@ const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("maxdamage.zig");
 const assignids = @import("assignids_comptime.zig");
 const stock_paths = @import("../util/stock_paths.zig");
+const paths = @import("paths.zig");
 
 pub const max_layers: usize = 8;
 pub const max_biomemap_id: usize = 50;
@@ -849,7 +850,6 @@ pub fn tryLoad(
     is_distant_deco: ?*const fn (?*anyopaque, []const u8) bool,
     ctx: ?*anyopaque,
 ) !?Table {
-    const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "biomes.xml", game_dir, config_dir) orelse return null;
     // Parse/I/O failures must not look like "biomes absent": an operator's

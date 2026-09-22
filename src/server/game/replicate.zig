@@ -9,6 +9,7 @@ const apm = @import("../../apm/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
 const gbot = @import("bot.zig");
+const ln_peer = @import("../../litenet/peer.zig");
 
 /// Display name for a bot spawn body; bots always carry a bounded name, so this
 /// is non-empty for live bots (fallback backstop only).
@@ -480,7 +481,6 @@ fn replicateBots(
 }
 
 test "bot spawn encodes once for multiple viewers" {
-    const ln_peer = @import("../../litenet/peer.zig");
     const gpa = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

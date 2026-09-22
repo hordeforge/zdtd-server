@@ -7,6 +7,7 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const arena_util = @import("../util/arena.zig");
+const paths = @import("paths.zig");
 
 /// Pack 6 face indices with 8 bits each (TTS paint samples for ids ≤255).
 pub fn packFaces8(faces: [6]u8) u64 {
@@ -202,7 +203,6 @@ pub fn tryLoad(
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
     ctx: ?*anyopaque,
 ) !?Table {
-    const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     var t: Table = .{};
     errdefer t.deinit();

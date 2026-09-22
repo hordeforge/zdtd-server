@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const apm = @import("../../apm/root.zig");
 const util_sim = @import("../../util/sim.zig");
 const plugin_compose = @import("plugin_compose.zig");
+const clock = @import("../../util/clock.zig");
 
 pub fn deinit(self: *Game) void {
     const leave_sim = self.info_port == 0;
@@ -107,7 +108,6 @@ pub fn refreshInfoPlayers(self: *Game) void {
 
 pub fn run(self: *Game) !void {
     const tick_ns: u64 = @import("../../protocol.zig").tick_ns;
-    const clock = @import("../../util/clock.zig");
     var next_t = clock.monoNs() + tick_ns;
     while (self.running) {
         try self.step();

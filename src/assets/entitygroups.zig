@@ -5,6 +5,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const stock_paths = @import("../util/stock_paths.zig");
+const paths = @import("paths.zig");
 
 pub const Entry = struct {
     name: []const u8 = "",
@@ -164,7 +165,6 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?GroupTable {
-    const paths = @import("paths.zig");
     return paths.tryLoadConfig("entitygroups.xml", GroupTable, loadFromPath, allocator, game_dir, config_dir);
 }
 

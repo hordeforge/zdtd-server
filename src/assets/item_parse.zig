@@ -10,6 +10,7 @@ const components = @import("../ecs/components.zig");
 const items_start_here = @import("items.zig").items_start_here;
 const ItemTable = @import("items.zig").ItemTable;
 const loadFromPath = @import("items.zig").loadFromPath;
+const paths = @import("paths.zig");
 
 pub fn itemActionClassIs(body: []const u8, want: []const u8) bool {
     // Prefer nested <property class="Action0"> ... Class=Eat
@@ -224,7 +225,6 @@ pub fn rootMaxQualityTier(src: []const u8) u8 {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
-    const paths = @import("paths.zig");
     return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
 }
 

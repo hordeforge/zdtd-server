@@ -9,6 +9,7 @@ const arena_util = @import("../util/arena.zig");
 const blocks_nim = @import("blocks_nim.zig");
 const components = @import("../ecs/components.zig");
 const stock_paths = @import("../util/stock_paths.zig");
+const paths = @import("paths.zig");
 
 /// Bundled V3.1.4 full client AssignIds dump (ZDTD_DUMP_BLOCK_IDS Postfix).
 /// Pins verified: treeDeadTree02=24626, cntWoodenChestClosed=18671. No stale saves.
@@ -1277,7 +1278,6 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
-    const paths = @import("paths.zig");
     // Patched blocks.xml (overrides apply); materials merged after.
     var tbl = (try paths.tryLoadConfig("blocks.xml", Table, loadFromBlocksXml, allocator, game_dir, config_dir)) orelse return null;
     errdefer tbl.deinit();

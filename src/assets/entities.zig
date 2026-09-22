@@ -7,6 +7,7 @@ const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
+const paths = @import("paths.zig");
 
 /// Storage cap on parsed entity classes, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock entityclasses.xml
@@ -1301,6 +1302,5 @@ fn nameList(arena: std.mem.Allocator, value: []const u8) ![]const []const u8 {
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?EntityTable {
-    const paths = @import("paths.zig");
     return paths.tryLoadConfig("entityclasses.xml", EntityTable, loadFromPath, allocator, game_dir, config_dir);
 }

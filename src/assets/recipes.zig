@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const util_log = @import("../util/log.zig");
+const paths = @import("paths.zig");
 
 /// Storage cap on parsed recipes, a zdtd bound rather than a stock rule: stock
 /// has no limit. Measured against V3.2.0 `Data/Config` (2026-09-04): stock
@@ -391,7 +392,6 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?RecipeTable {
-    const paths = @import("paths.zig");
     return paths.tryLoadConfig("recipes.xml", RecipeTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
