@@ -80,7 +80,7 @@ the writer is `store.zig encodeChunk`):
 
 ```text
 v3 (stock 256-tall chunks): 'Z''C''H''3' | cx:i32 | cz:i32 | flags[4]
-v4 (non-stock [wire] profile): 'Z''C''H''4' | cx:i32 | cz:i32 | flags[4] | y_dim:u32
+v4 (non-stock column height): 'Z''C''H''4' | cx:i32 | cz:i32 | flags[4] | y_dim:u32
 heights:u8[y_dim*256]                 // v4 channels sized by y_dim (ADR 0036)
 if flags[12]: blocks:u32[65536]       // full rawData
 if flags[13]: textures:u64[65536]     // textureFull paint (optional)
@@ -90,7 +90,9 @@ if flags[15]: damages:u16[65536]      // absolute damage plane (2026-08-22)
 
 A chunk whose column height != 256 writes ZCH4; a stock loader rejects it and
 a non-stock loader rejects any y_dim mismatch (fail closed). Stock chunks stay
-ZCH3 byte-identical.
+ZCH3 byte-identical. The branch is unreachable today: the `[wire] profile`
+config that selected a taller column was withdrawn 2026-09-20 (ADR 0036
+amendment), so zdtd pins `stock_profile` and only ever writes ZCH3.
 
 Legacy: ZCH2 u16 type-only loads heights only (blocks regen). Pre-paint ZCH3
 files (flags[13]/[14]=0) remain valid. In-memory paint is co-owned with the cell

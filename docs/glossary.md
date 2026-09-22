@@ -75,8 +75,9 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
 
 - **ZCH3**: The per-chunk `.zch` file: magic, position, flags, heights, then
   optional planes ([world-store.md](subsystems/world-store.md)).
-- **ZCH4**: The non-stock wire-profile variant of ZCH3 that carries the column
-  height in the header; a stock loader rejects it (`src/world/store.zig:1385`).
+- **ZCH4**: The non-stock column-height variant of ZCH3; a stock loader rejects
+  it (`src/world/store.zig:1385`). Unreachable since the `[wire] profile` config
+  was withdrawn (ADR 0036 amendment).
 - **ZPV17**: The player record format; v16 added per-slot `ItemValue` stats and
   v17 appends `flags`/`mod_n`/`mod_qualities` (`src/server/persist.zig:124`).
 - **ZCT3, ZSG1, ZVNM, ZWS1**: The container, sign, vending machine and

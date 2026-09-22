@@ -474,7 +474,7 @@ operator host under the world directory and on the wire between client and serve
 
 | Store / surface | Contents | Retention / control |
 |---|---|---|
-| `<world>/players.zsv` | Login name, last position, coins, inventory stacks, quest journal, progression (level/XP/food/water/buffs); magic ZPV3 (ZPV2 still read) | Kept until `wipeplayer <name>` or the operator deletes the file/world |
+| `<world>/players.zsv` | Login name, **platform identity** (`puid_primary`/`puid_native`, the record key since ZPV15), last position, coins, inventory stacks, quest journal, progression (level/XP/food/water/buffs), kill/death counters; magic ZPV17 (ZPV2 onward still read) | Kept until `wipeplayer <name>` or the operator deletes the file/world |
 | `<world>/claims.zlc` | Land claim position + **owner login name** | Released by claim expiry (`land_claim_expiry_days`), keystone destruction, or `wipeplayer <name>` |
 | `<world>/allies.zal` | Ally pairs keyed by **platform identity** (e.g. Steam/EOS id) + status | Kept until the pair is removed in game or `wipeplayer <name>` erases both sides of the identity |
 | `<world>/bans.zsv` | Banned player id, ban expiry, operator-written reason | Kept until the ban expires or admin `ban remove <id>` |

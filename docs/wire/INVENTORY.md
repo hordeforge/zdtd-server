@@ -106,8 +106,9 @@ version 1, slot count u16 (45 padded, `bag_slots`), stacks, locked=false, touche
 ## Join
 
 Starter kit: stone axe (8), food×5 (2), wood×20 (7), currency×50 (traders.xml `currency_item`, stock casinoCoin / offline id 6). Full inventory + holding sent in join bundle.
-`players.zsv` restores inventory by **login name** (persist key; no platform id
-yet; [ADR 0017](../adr/0017-player-identity-login-name.md)).
+`players.zsv` restores inventory by the owner's **platform identity**
+(`puid_primary`, ZPV15 tail; login name is a legacy fallback for older rows;
+[ADR 0038](../adr/0038-player-persist-platform-identity.md)).
 
 ## Admin
 

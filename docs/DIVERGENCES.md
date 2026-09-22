@@ -157,22 +157,21 @@ accepts this with its consequence written down ("dupes / client-invented stacks
 are possible on the hold path until full authority lands"). The direction of
 travel is toward server authority, not away from it.
 
-The second, found 2026-09-02 while reconciling this page against
-[GAP_ANALYSIS](GAP_ANALYSIS.md): **player saves are keyed by login name alone**
-(`persist.zig` matches `cl.name` against the record name; ADR 0017). Stock keys
-the player data file on `PrimaryId.CombinedString` (asm.il 1884842), a platform
-identity the client cannot choose. On zdtd a client that picks another player's
-name loads that player's save: inventory, level, XP, bedroll. `ServerPassword`
-gates entry to the server, not identity between players already on it, so this
-is live on any open or shared-password world.
+A second one was found 2026-09-02 while reconciling this page against
+[GAP_ANALYSIS](GAP_ANALYSIS.md) and **closed 2026-09-11**: player saves were
+keyed by login name alone, so a client that picked another player's name loaded
+that player's save (inventory, level, XP, bedroll). `ServerPassword` gates entry
+to the server, not identity between players already on it, so it was live on any
+open or shared-password world.
 
-This is a security divergence, not the naming inconvenience ADR 0017's
-consequences describe ("two players cannot safely share one login name"). The
-severity was recorded in GAP_ANALYSIS and not here, which is precisely the kind
-of split this page exists to prevent. Closing it needs a save migration to a
-platform-keyed identity (ZPV4-style bump or flagged extension), tracked in
-GAP_ANALYSIS §10; ADR 0017 should be superseded rather than edited when it
-lands.
+[ADR 0038](adr/0038-player-persist-platform-identity.md) supersedes ADR 0017 and
+closes it: `players.zsv` rows carry the owner's platform identity
+(`puid_primary`) in a ZPV15 tail and match on it, the way stock keys
+PlayerDataFile on `PrimaryId.CombinedString` (asm.il 1884842). The login name is
+a legacy fallback only - a pre-ZPV15 row matches by name once, gains the
+identity on the next save, and is identity-only after that
+(`persist.zig:459` `matchesClient`). **Residual:** a row that has never been re-saved
+since the upgrade is still name-matchable for exactly one join.
 
 ## 1a2. Two relays still forward the raw client body
 

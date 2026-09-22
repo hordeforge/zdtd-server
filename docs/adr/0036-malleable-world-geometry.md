@@ -1,6 +1,8 @@
 # ADR 0036: Malleable world geometry - elevation projection + wire profiles
 
-- **Status:** accepted
+- **Status:** accepted (decision 2 amended 2026-09-20: the `[wire] profile`
+  config surface and the `tall-512` dialect were withdrawn; see "Amendment"
+  below. Decision 1 stands unchanged.)
 - **Date:** 2026-08-28
 - **Related:** ADR 0011 (ZCH save formats), ADR 0021 (rules as data),
   ADR 0020 (Wasm plugins; wire encode stays native)
@@ -73,3 +75,23 @@ elevation model is the generator's own params) - documented, not silent.
 **Boundary:** geometry choice is data (rules/manifest/config); wire encode,
 interest and persistence stay native (ADR 0020). This does not open a plugin
 boundary for world geometry - plugins gate *behavior*, not format.
+
+## Amendment 2026-09-20: decision 2's config surface withdrawn
+
+`refactor(wire): emit only the stock 256-tall chunk dialect` removed the
+`[wire] profile` key, the `profileForName` startup resolution and the
+`tall-512` scenario. The reason is the one decision 2 already named as its own
+cost: no real client reads a non-stock dialect, so the config surface only ever
+selected a synthetic, test-only profile while costing an operator-visible key
+that could break a world.
+
+What remains: `protocol.WireProfile` is a fixed-height carry for the save and
+chunk wire builders, pinned to `stock_profile` in `src/main.zig`
+(`protocol.zig:81`), and `store.zig` still writes the ZCH4 header variant when
+a column height is not 256 (unreachable while only `stock_profile` is
+selected). Decision 1 (`[rules.geometry]` elevation projection) is unaffected
+and ships.
+
+Re-opening a non-stock dialect means restoring the config surface with a
+paired client mod, and a new ADR recording that the tradeoff changed. Scored
+in [GAP_ANALYSIS](../GAP_ANALYSIS.md) under the chunk wire format.

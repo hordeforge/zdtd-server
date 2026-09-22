@@ -108,7 +108,8 @@ counts now come from the `lootcontainer` size attribute).
 
 **What you are is mostly saved now.** Level, XP, survival stats (food/water)
 and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
-`awardXp` feeds it; login-name keyed per ADR 0017). Progression ships
+`awardXp` feeds it; keyed on the owner's platform identity per ADR 0038,
+login name as legacy fallback). Progression ships
 2026-08-26: `NetPackagePlayerStats` S2C snapshots go to every peer (join +
 level-up push, so other players see your level), attribute/perk spending is
 server-authoritative (`NetPackageEntitySetSkillLevelServer` C2S validated
@@ -360,8 +361,9 @@ area and the concrete work.
    server builds and relays its own snapshot on progression change, so peers
    see your level; distance/time/craft counters in the stock body stay
    defaults), purchased perk levels + skill points persist via the ZPV11 skill tail (the
-   spend ledger and the level-scaled VM effects restore), and identity stays
-   login-name keyed per ADR 0017 rather than platform user id.
+   spend ledger and the level-scaled VM effects restore). Identity was
+   login-name keyed at the time; ZPV15 re-keyed it on the platform user id
+   (2026-09-11, ADR 0038).
 
 10. **DONE 2026-08-06 (persistence 2026-08-07).** World: make land claims real.
     `removeClaimAt` drops the claim when the keystone breaks and `expireClaims`
@@ -5882,17 +5884,19 @@ persists so little that a restart visibly damages a built base.
   play path); stock-format import/export stays a documented non-goal.
   *Anchors:* `src/world/store.zig:694-695`, `:702-727`, `:736-780`
 
-- **Player save (players.zsv)** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
-  **ZPV12** records (ZPV2-11 still read and upgraded in place) keyed by **login
-  name** per ADR 0017 (not platform id, so two players with the same name share
-  a save and a rename loses it). Each record holds position, coins, inventory
-  slots (11-byte with use_times), journal quests (name + POI rect +
+- **Player save (players.zsv)** `WORKS` `(non-client-visible, 2026-09-11 re-audit)`
+  **ZPV17** records (ZPV2-16 still read and upgraded in place) keyed by the
+  owner's **platform identity** (`puid_primary`, ZPV15 tail) per ADR 0038, with
+  the login name as a legacy fallback for rows saved before ZPV15. Each record
+  holds position, coins, inventory
+  slots (13-byte from ZPV10, widened by the ZPV16 stats block and the ZPV17
+  activated/mod-quality bytes), journal quests (name + POI rect +
   per-objective progress), plus a progression tail: level, XP, food/water, HP
   (ZPV8), game-stage born time (ZPV9, so days-alive survives), active buffs,
-  the bedroll (ZPV4) and the ZPV11 skill tail (skill_points + purchased
+  the bedroll (ZPV4), the ZPV11 skill tail (skill_points + purchased
   attribute/perk levels, so the spend ledger and the level-scaled VM effects
-  restore). Not stored: stamina, temperature, map exploration, waypoints,
-  kill/death stats.
+  restore), the ZPV13 dropped-bag markers and the ZPV14 kill/death counters.
+  Not stored: stamina, temperature, map exploration, waypoints.
   Documented per the parity rules as **non-client-
   visible**: the client never reads players.zsv (stock persists its own
   PlayerDataFile blob; the client's state comes over the wire), so the absent
@@ -7360,10 +7364,10 @@ HONEST GAPS:
   stock keeps them in `PersistentPlayerList`. The saved file is zdtd-owned like
   claims.zlc. What stock has and zdtd still lacks is party state (above), not
   ally persistence.
-- **Player save key.** Persistence is still keyed on the login name, so a client
-  can claim another player's save by picking their name. Stock loads the PDF from
-  `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration
-  with a name-keyed fallback for existing players.
+- **Player save key.** Closed 2026-09-11 (ADR 0038): ZPV15 keys the record on
+  `puid_primary`, the way stock loads the PDF from `PrimaryId.CombinedString`
+  (asm.il 1884842). A pre-ZPV15 row still matches by name once, gains the
+  identity on the next save, and is identity-only after that.
 - **Platform verification.** Neither auth token is decoded or checked, so an
   identity is a claim, not a proof (EAC-off scope; see §2).
 - **Reported read calls.** `docs/wire/PACKAGES.md` under-reports these packages

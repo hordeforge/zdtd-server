@@ -74,15 +74,15 @@ save/load test or scenario. Format IDs are the magic in the store files.
 
 | State | Store | Format | Reference |
 |---|---|---|---|
-| Player records (inventory, XP, quests, journal, bedroll, last logout) | `players.zsv` | ZPV13 (reads ZPV2+) | `src/server/persist.zig` |
-| Persistent entities | `entities.zen` | ZENT1 | `src/server/persist.zig` |
-| Land claims | `claims.zlc` | ZCLC | `src/server/persist.zig` |
+| Player records (inventory, XP, quests, journal, bedroll, last logout) | `players.zsv` | ZPV17 (reads ZPV2+) | `src/server/persist_players.zig` |
+| Persistent entities | `entities.zen` | ZEN2 (reads ZENT) | `src/server/persist_entities.zig` |
+| Land claims | `claims.zlc` | ZCLC | `src/server/persist_claims.zig` |
 | World clock + blood-moon schedule | `clock.zcl` | ZCL2 | `src/server/game/clock_persist.zig` |
-| Weather state | `weather.zwt` | ZWTH1 | `src/server/persist.zig` |
-| Workstation fuel/input/output + smelting queue (craft-complete, melt) | `workstations.zws` | ZWS1 | TODO "Workstation persistence" |
+| Weather state | `weather.zwt` | ZWTH1 | `src/world/weather.zig` |
+| Workstation fuel/input/output + smelting queue (craft-complete, melt) | `workstations.zws` | ZWS1 | `src/world/workstations.zig` |
 | Cleared sleeper volumes (cleared POI stays clear) | `sleepers_cleared.zsc` | ZSCL1 | `src/world/sleepers.zig` |
 | Chunk terrain + blockmeta | `*.zch` | ZCH3 | `src/world/` |
-| Trader stock | `traders.zst` | ZTR1 | `src/server/persist.zig` |
+| Trader stock | `traders.zst` | ZTR1 | `src/server/persist_traders.zig` |
 | Operator config | zdtd.toml / serverconfig + modlet patches | - | [GAME_OPTIONS.md](../GAME_OPTIONS.md), [PRD 0003](../prd/0003-modlets.md) |
 | Webui operator session | derived, no file | HMAC(secret, fixed label) | R1 below, [WEBUI.md](../WEBUI.md) |
 
