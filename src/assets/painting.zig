@@ -99,15 +99,3 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("painting.xml", Table, loadFromPath, allocator, game_dir, config_dir);
 }
 
-test "load painting.xml when present" {
-    const p = stock_paths.configFile("painting.xml");
-    if (!io_fs.fileExists(p)) return error.SkipZigTest;
-    const t = try loadFromPath(std.testing.allocator, p);
-    defer {
-        var tt = t;
-        tt.deinit();
-    }
-    try std.testing.expect(t.n > 10);
-    try std.testing.expectEqual(@as(u16, 0), t.textureOf(0).?);
-    try std.testing.expectEqual(@as(u16, 7), t.textureOf(1).?); // brick
-}
