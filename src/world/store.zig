@@ -97,6 +97,33 @@ pub fn blockIndex(lx: i32, y: i32, lz: i32) usize {
     return @intCast(lx + lz * 16 + y * 256);
 }
 
+/// Cells compared per vector in `nextNonAir`.
+const scan_lanes: usize = 16;
+
+/// Index of the first cell at or after `from` whose block type is not air, or
+/// null when the rest of `raws` is air. A y-plane is 256 contiguous cells and a
+/// chunk is mostly air, so the whole-chunk scans (TE storage, power) skip
+/// `scan_lanes` cells per compare instead of one. Scalar equivalent:
+/// `while (i < raws.len) : (i += 1) if (typeId(raws[i]) != 0) return i;`.
+pub fn nextNonAir(raws: []const u32, from: usize) ?usize {
+    const mask: @Vector(scan_lanes, u32) = @splat(tts.type_mask);
+    const zero: @Vector(scan_lanes, u32) = @splat(0);
+    var i = from;
+    while (i + scan_lanes <= raws.len) : (i += scan_lanes) {
+        const block: @Vector(scan_lanes, u32) = raws[i..][0..scan_lanes].*;
+        const hit = (block & mask) != zero;
+        if (@reduce(.Or, hit)) {
+            inline for (0..scan_lanes) |k| {
+                if (hit[k]) return i + k;
+            }
+        }
+    }
+    while (i < raws.len) : (i += 1) {
+        if (typeId(raws[i]) != 0) return i;
+    }
+    return null;
+}
+
 /// Dense plane fill from a uniform biome stack + height plane. Hot first-touch
 /// path (DTM/flat). `out` must hold `16 * column_h * 16` cells. Stack scratch
 /// only (16 column templates). Scalar equivalent: per-column `fillColumn` + write.

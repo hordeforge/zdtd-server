@@ -1075,3 +1075,40 @@ test "fillBlocksFromStack SIMD matches per-column fillColumn write" {
     }
     try std.testing.expectEqualSlices(u32, &scalar_plane, &simd_plane);
 }
+
+test "nextNonAir matches a scalar walk" {
+    // Random planes with heavy air bias: the vector scan must yield exactly the
+    // non-air indices, in order, for aligned and unaligned starts alike.
+    var rng = std.Random.DefaultPrng.init(0xA17);
+    const r = rng.random();
+    var plane: [259]u32 = undefined;
+    for (0..32) |_| {
+        for (&plane) |*cell| {
+            // Type in the low 16 bits; upper bits carry flags that must not
+            // make an air cell look occupied.
+            const ty: u32 = if (r.uintLessThan(u8, 8) == 0) r.intRangeAtMost(u32, 1, 0xFFFF) else 0;
+            cell.* = ty | (@as(u32, r.int(u16)) << 16);
+        }
+        for ([_]usize{ 0, 1, 7, 16, 17, 250, 259 }) |from| {
+            var i = from;
+            var want = from;
+            while (true) {
+                while (want < plane.len and store.typeId(plane[want]) == 0) want += 1;
+                const got = store.nextNonAir(&plane, i);
+                if (want >= plane.len) {
+                    try std.testing.expectEqual(@as(?usize, null), got);
+                    break;
+                }
+                try std.testing.expectEqual(@as(?usize, want), got);
+                i = want + 1;
+                want = i;
+            }
+        }
+    }
+    // All-air and empty inputs terminate without a hit.
+    var air: [256]u32 = .{0} ** 256;
+    try std.testing.expectEqual(@as(?usize, null), store.nextNonAir(&air, 0));
+    air[255] = 9;
+    try std.testing.expectEqual(@as(?usize, 255), store.nextNonAir(&air, 0));
+    try std.testing.expectEqual(@as(?usize, null), store.nextNonAir(&.{}, 0));
+}

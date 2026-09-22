@@ -15,6 +15,13 @@ const stock_paths = @import("../util/stock_paths.zig");
 /// biomes.xml is not loaded, never when the stock file resolved the id.
 pub const offline_default_biome_id: u8 = 3;
 
+/// Color keys compared per vector in `ColorTable.lookup` (stock biomes.xml
+/// carries ~10 biomemapcolor rows, so one block covers most tables).
+const lookup_lanes: usize = 8;
+
+/// Bytes unfiltered per vector in the PNG `Up` scanline filter.
+const unfilter_lanes: usize = 16;
+
 /// RGB packed 0xRRGGBB → biomemap id. Loaded from biomes.xml; fallback for tests.
 pub const ColorTable = struct {
     /// sparse: we store pairs in parallel arrays (small N).
@@ -46,10 +53,24 @@ pub const ColorTable = struct {
         return null;
     }
 
+    /// Biomemap id for one RGB key, first match wins. Called once per biomes.png
+    /// pixel, so the key table is compared `lookup_lanes` colors at a time.
+    /// Scalar equivalent: `for (colors, ids) |c, id| if (c == rgb) return id;`.
     pub fn lookup(self: *const ColorTable, r: u8, g: u8, b: u8) u8 {
         const rgb: u32 = (@as(u32, r) << 16) | (@as(u32, g) << 8) | b;
-        for (self.colors, self.ids) |c, id| {
-            if (c == rgb) return id;
+        const key: @Vector(lookup_lanes, u32) = @splat(rgb);
+        var i: usize = 0;
+        while (i + lookup_lanes <= self.colors.len) : (i += lookup_lanes) {
+            const block: @Vector(lookup_lanes, u32) = self.colors[i..][0..lookup_lanes].*;
+            const eq = block == key;
+            if (@reduce(.Or, eq)) {
+                inline for (0..lookup_lanes) |k| {
+                    if (eq[k]) return self.ids[i + k];
+                }
+            }
+        }
+        while (i < self.colors.len) : (i += 1) {
+            if (self.colors[i] == rgb) return self.ids[i];
         }
         return self.default_id;
     }
@@ -340,33 +361,18 @@ pub fn parsePng(allocator: std.mem.Allocator, file: []const u8, colors: ?*const 
     errdefer allocator.free(out_ids);
 
     // Unfilter scanlines → biomemap id via RGB color key.
+    const ct = colors orelse &fallback_colors;
     var prev: []const u8 = &[_]u8{};
     var y: usize = 0;
     var row_off: usize = 0;
     while (y < height) : (y += 1) {
         const filter = inflated[row_off];
         const row = inflated[row_off + 1 .. row_off + 1 + stride];
-        var x: usize = 0;
-        while (x < stride) : (x += 1) {
-            const left: u8 = if (x >= bpp) row[x - bpp] else 0;
-            const up: u8 = if (prev.len > x) prev[x] else 0;
-            const up_left: u8 = if (prev.len > x and x >= bpp) prev[x - bpp] else 0;
-            const recon: u8 = switch (filter) {
-                0 => row[x],
-                1 => row[x] +% left,
-                2 => row[x] +% up,
-                3 => row[x] +% @as(u8, @truncate((@as(u16, left) + up) / 2)),
-                4 => row[x] +% paeth(left, up, up_left),
-                else => return error.BadFilter,
-            };
-            // write back for next left
-            @constCast(row.ptr)[x] = recon;
-        }
+        try unfilterRow(filter, row, prev, bpp);
         // RGB → biomemap id (not raw R)
         var px: usize = 0;
         while (px < width) : (px += 1) {
             const o = px * bpp;
-            const ct = colors orelse &fallback_colors;
             out_ids[y * width + px] = ct.lookup(row[o], row[o + 1], row[o + 2]);
         }
         prev = row;
@@ -383,6 +389,67 @@ pub fn parsePng(allocator: std.mem.Allocator, file: []const u8, colors: ?*const 
         .half_w = @divTrunc(w, 2),
         .half_h = @divTrunc(h, 2),
     };
+}
+
+/// Reconstruct one PNG scanline in place (bit depth 8, no interlace). `prev` is
+/// the already-reconstructed previous line, empty on row 0. The filter type is
+/// resolved once per row instead of per byte, and `Up` has no left dependency
+/// so it runs `unfilter_lanes` bytes at a time. Scalar equivalent:
+/// `unfilterRowScalar`.
+fn unfilterRow(filter: u8, row: []u8, prev: []const u8, bpp: usize) !void {
+    switch (filter) {
+        0 => {}, // None
+        1 => { // Sub: bytes below bpp have left = 0, so they are unchanged.
+            var x: usize = bpp;
+            while (x < row.len) : (x += 1) row[x] +%= row[x - bpp];
+        },
+        2 => { // Up
+            if (prev.len == 0) return; // up = 0 everywhere
+            var x: usize = 0;
+            while (x + unfilter_lanes <= row.len) : (x += unfilter_lanes) {
+                const cur: @Vector(unfilter_lanes, u8) = row[x..][0..unfilter_lanes].*;
+                const up: @Vector(unfilter_lanes, u8) = prev[x..][0..unfilter_lanes].*;
+                row[x..][0..unfilter_lanes].* = cur +% up;
+            }
+            while (x < row.len) : (x += 1) row[x] +%= prev[x];
+        },
+        3 => { // Average
+            var x: usize = 0;
+            while (x < row.len) : (x += 1) {
+                const left: u16 = if (x >= bpp) row[x - bpp] else 0;
+                const up: u16 = if (prev.len > x) prev[x] else 0;
+                row[x] +%= @truncate((left + up) / 2);
+            }
+        },
+        4 => { // Paeth
+            var x: usize = 0;
+            while (x < row.len) : (x += 1) {
+                const left: u8 = if (x >= bpp) row[x - bpp] else 0;
+                const up: u8 = if (prev.len > x) prev[x] else 0;
+                const up_left: u8 = if (prev.len > x and x >= bpp) prev[x - bpp] else 0;
+                row[x] +%= paeth(left, up, up_left);
+            }
+        },
+        else => return error.BadFilter,
+    }
+}
+
+/// Scalar reference for `unfilterRow`. Tests only.
+fn unfilterRowScalar(filter: u8, row: []u8, prev: []const u8, bpp: usize) !void {
+    var x: usize = 0;
+    while (x < row.len) : (x += 1) {
+        const left: u8 = if (x >= bpp) row[x - bpp] else 0;
+        const up: u8 = if (prev.len > x) prev[x] else 0;
+        const up_left: u8 = if (prev.len > x and x >= bpp) prev[x - bpp] else 0;
+        row[x] = switch (filter) {
+            0 => row[x],
+            1 => row[x] +% left,
+            2 => row[x] +% up,
+            3 => row[x] +% @as(u8, @truncate((@as(u16, left) + up) / 2)),
+            4 => row[x] +% paeth(left, up, up_left),
+            else => return error.BadFilter,
+        };
+    }
 }
 
 fn paeth(a: u8, b: u8, c: u8) u8 {
@@ -425,6 +492,53 @@ test "colorToId stock keys" {
     try std.testing.expectEqual(@as(u8, 9), colorToId(186, 0, 255));
     try std.testing.expectEqual(@as(u8, 19), colorToId(0, 18, 52));
     try std.testing.expectEqual(@as(u8, 3), colorToId(1, 2, 3));
+}
+
+test "unfilterRow matches the scalar reference for every filter" {
+    var rng = std.Random.DefaultPrng.init(0x5eed);
+    const r = rng.random();
+    // Widths around the 16-byte Up block: exact, short, and with a tail.
+    for ([_]usize{ 3, 4, 12, 48, 64, 67 }) |stride| {
+        for ([_]usize{ 3, 4 }) |bpp| {
+            for ([_]u8{ 0, 1, 2, 3, 4 }) |filter| {
+                for ([_]bool{ false, true }) |have_prev| {
+                    var raw: [67]u8 = undefined;
+                    var prev_buf: [67]u8 = undefined;
+                    r.bytes(raw[0..stride]);
+                    r.bytes(prev_buf[0..stride]);
+                    const prev: []const u8 = if (have_prev) prev_buf[0..stride] else &.{};
+                    var a: [67]u8 = raw;
+                    var b: [67]u8 = raw;
+                    try unfilterRow(filter, a[0..stride], prev, bpp);
+                    try unfilterRowScalar(filter, b[0..stride], prev, bpp);
+                    try std.testing.expectEqualSlices(u8, b[0..stride], a[0..stride]);
+                }
+            }
+        }
+    }
+    var one: [4]u8 = .{ 1, 2, 3, 4 };
+    try std.testing.expectError(error.BadFilter, unfilterRow(5, &one, &.{}, 3));
+}
+
+test "ColorTable.lookup scans past one vector block" {
+    // A table longer than lookup_lanes must keep first-match order across the
+    // vector blocks and the scalar tail, and fall back to default_id on a miss.
+    var colors: [19]u32 = undefined;
+    var ids: [19]u8 = undefined;
+    for (&colors, &ids, 0..) |*c, *id, i| {
+        c.* = @intCast(0x010000 * (i + 1));
+        id.* = @intCast(i + 1);
+    }
+    // Duplicate key late in the table: the first entry must win.
+    colors[17] = colors[2];
+    const t: ColorTable = .{ .colors = &colors, .ids = &ids, .default_id = 42 };
+    for (colors, 0..) |c, i| {
+        const want: u8 = if (i == 17) ids[2] else ids[i];
+        try std.testing.expectEqual(want, t.lookup(@truncate(c >> 16), @truncate(c >> 8), @truncate(c)));
+    }
+    try std.testing.expectEqual(@as(u8, 42), t.lookup(1, 2, 3));
+    const empty_t: ColorTable = .{ .default_id = 7 };
+    try std.testing.expectEqual(@as(u8, 7), empty_t.lookup(0, 0, 0));
 }
 
 test "load navezgane biomes.png if present" {

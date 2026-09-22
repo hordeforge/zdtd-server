@@ -36,6 +36,9 @@ const te_types = packages.te_types;
 const topsoil_broken = [_]u8{0xFF} ** 32;
 /// Harvest/destroy XML counts parse as unbounded u32; the stack store is u16.
 const max_drop_count: u32 = std.math.maxInt(u16);
+/// Cells in one chunk y-plane (16x16), the contiguous run the whole-chunk
+/// block scans walk (`blockIndex` y stride).
+const cells_per_plane: usize = 256;
 
 pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool {
     // Resident miss = disk load or procedural gen (worldgen W2 runs here,
@@ -222,33 +225,34 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
     const base_z = cz * 16;
     var last_id: u16 = 0;
     var last_power: ?ecs.powerblocks.Resolved = null;
+    // Air is never a power block, so the plane scan skips runs of it 16 cells
+    // at a time; the cells it yields keep the old x-then-z-then-y visit order.
     var y: i32 = 0;
     while (y < live.y_dim) : (y += 1) {
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                const raw = blocks[live.blockIndex(lx, y, lz)];
-                const id: u16 = world_store.typeId(raw);
-                if (id != last_id) {
-                    last_id = id;
-                    last_power = self.power_registry.lookup(id);
-                }
-                const pn = last_power orelse continue;
-                const wx = base_x + lx;
-                const wz = base_z + lz;
-                if (self.sim.power.addNodeAt(pn.kind, wx, y, wz, pn.watts)) |nid| {
-                    if (self.sim.power.indexOfId(nid)) |ni| {
-                        pn.applyToNode(&self.sim.power.nodes[ni]);
-                        // applyToNode latches a switch off, which is right for
-                        // a freshly placed one. Here the block came off disk
-                        // with the player's own latch in its meta (the SetBlock
-                        // path writes it and the ZCH3 plane keeps it), so a
-                        // restart used to switch every powered base back off.
-                        if (pn.is_switch) {
-                            const on = (packages.blockMeta(raw) & packages.block_meta_on) != 0;
-                            self.sim.power.nodes[ni].on = on;
-                        }
+        const plane = blocks[@intCast(y * 256)..][0..cells_per_plane];
+        var i: usize = 0;
+        while (world_store.nextNonAir(plane, i)) |k| {
+            i = k + 1;
+            const raw = plane[k];
+            const id: u16 = world_store.typeId(raw);
+            if (id != last_id) {
+                last_id = id;
+                last_power = self.power_registry.lookup(id);
+            }
+            const pn = last_power orelse continue;
+            const wx = base_x + @as(i32, @intCast(k % 16));
+            const wz = base_z + @as(i32, @intCast(k / 16));
+            if (self.sim.power.addNodeAt(pn.kind, wx, y, wz, pn.watts)) |nid| {
+                if (self.sim.power.indexOfId(nid)) |ni| {
+                    pn.applyToNode(&self.sim.power.nodes[ni]);
+                    // applyToNode latches a switch off, which is right for
+                    // a freshly placed one. Here the block came off disk
+                    // with the player's own latch in its meta (the SetBlock
+                    // path writes it and the ZCH3 plane keeps it), so a
+                    // restart used to switch every powered base back off.
+                    if (pn.is_switch) {
+                        const on = (packages.blockMeta(raw) & packages.block_meta_on) != 0;
+                        self.sim.power.nodes[ni].on = on;
                     }
                 }
             }
@@ -291,38 +295,37 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     var last_is_storage = false;
     // y outermost so idx advances contiguously (y stride is 1 KiB; the old
     // y-inner order made all 65k reads cache misses across a 256 KiB array).
+    // Within a plane, `nextNonAir` clears runs of air 16 cells per compare and
+    // yields the remaining cells in the same x-then-z order as a scalar walk.
     var y: i32 = 0;
     while (y < ch.y_dim) : (y += 1) {
-        var lz: i32 = 0;
-        while (lz < 16) : (lz += 1) {
-            var lx: i32 = 0;
-            while (lx < 16) : (lx += 1) {
-                cells += 1;
-                const idx = ch.blockIndex(lx, y, lz);
-                const id: u16 = world_store.typeId(blocks[idx]);
-                if (id == 0) continue;
-                if (id != last_id) {
-                    last_id = id;
-                    last_is_storage = self.isStorageBlockId(id);
-                }
-                if (!last_is_storage) continue;
-                const wx = base_x + lx;
-                const wz = base_z + lz;
-                const pos = containers_mod.PosKey{ .x = wx, .y = y, .z = wz };
-                if (self.containers.get(pos) != null) continue;
-                const cont = self.containers.getOrCreate(pos, 8, id) orelse continue;
-                // World container (not player-placed): eligible for loot respawn.
-                cont.player_storage = false;
-                if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
-                    // Fail closed (audit A31): a storage block with no
-                    // LootList stays empty instead of inventing woodenChest.
-                    if (self.maxdamage.lootListFor(id)) |ll| {
-                        self.setContainerSizeFromLoot(cont, ll);
-                    }
-                }
-                found += 1;
-                if (found >= self.te_scan_block_cap) return;
+        cells += cells_per_plane;
+        const plane = blocks[@intCast(y * 256)..][0..cells_per_plane];
+        var i: usize = 0;
+        while (world_store.nextNonAir(plane, i)) |k| {
+            i = k + 1;
+            const id: u16 = world_store.typeId(plane[k]);
+            if (id != last_id) {
+                last_id = id;
+                last_is_storage = self.isStorageBlockId(id);
             }
+            if (!last_is_storage) continue;
+            const wx = base_x + @as(i32, @intCast(k % 16));
+            const wz = base_z + @as(i32, @intCast(k / 16));
+            const pos = containers_mod.PosKey{ .x = wx, .y = y, .z = wz };
+            if (self.containers.get(pos) != null) continue;
+            const cont = self.containers.getOrCreate(pos, 8, id) orelse continue;
+            // World container (not player-placed): eligible for loot respawn.
+            cont.player_storage = false;
+            if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
+                // Fail closed (audit A31): a storage block with no
+                // LootList stays empty instead of inventing woodenChest.
+                if (self.maxdamage.lootListFor(id)) |ll| {
+                    self.setContainerSizeFromLoot(cont, ll);
+                }
+            }
+            found += 1;
+            if (found >= self.te_scan_block_cap) return;
         }
     }
     // Prefab TE list (TileEntityType Loot=5, SecureLoot=10, Composite=25).
