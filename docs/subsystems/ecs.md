@@ -208,7 +208,7 @@ Two phases parallelise through `util/parallel`: the AI pass runs over a `copyKin
 
 Systems and plugins do not mutate the world out of phase. They enqueue into the fixed 64-entry command buffer, which the last phase drains serially (`src/ecs/command.zig:8`, `src/ecs/schedule.zig:119`). The op set is `spawn_zombie { x, y, z, hp }`, `despawn { net_id }`, `damage { net_id, amount }`, `say { text: [64]u8, len: u8 }` and `glide { net_id, on }` (`src/ecs/command.zig:17`); every op is classified at compile time as revertible or irrevocable so a plugin withdrawal has a defined story (`src/ecs/command.zig:38`).
 
-A full buffer drops new ops and counts the drop rather than growing (`src/ecs/command.zig:111`). Every op carries a source field, and the drain runs a pre-drain hook so a disabled plugin's pending effects are withdrawn before any of them execute (`src/ecs/command.zig:83`, `src/ecs/world.zig:2007`). `TickLocals` in `locals.zig` is the other piece of tick scratch: five `u8` counters cleared by `beginTick`, with the id lists moved out into `TickResult` (`src/ecs/locals.zig:8`, `src/ecs/locals.zig:15`).
+A full buffer drops new ops and counts the drop rather than growing (`src/ecs/command.zig:111`). Every op carries a source field, and the drain runs a pre-drain hook so a disabled plugin's pending effects are withdrawn before any of them execute (`src/ecs/command.zig:83`, `src/ecs/world.zig:1946`). `TickLocals` in `locals.zig` is the other piece of tick scratch: five `u8` counters cleared by `beginTick`, with the id lists moved out into `TickResult` (`src/ecs/locals.zig:8`, `src/ecs/locals.zig:15`).
 
 ## Rules: the sim parameter surface
 

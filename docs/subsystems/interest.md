@@ -117,7 +117,7 @@ pub const Dirty = packed struct(u8) {
 ```
 
 The candidate-set helpers intersect and replace that word against `alive_bits`
-(src/ecs/world.zig:94):
+(src/ecs/world_bits.zig:22):
 ```zig
     pub fn intersectFromStatic(self: *AtomicBits, src: std.StaticBitSet(max_entities)) void {
         for (&self.words, src.masks) |*w, m| _ = w.fetchAnd(m, .monotonic);

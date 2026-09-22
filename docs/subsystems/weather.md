@@ -125,7 +125,7 @@ The per-tick fold lives in the tick path and is the only consumer of these funct
         self.sim.ambient_light = luma * sky.moonAmbientScale(moon, day_pct);
 ```
 
-`clk.dawn` and `clk.dusk` come from the clock, recomputed from the daylight length rather than fixed at the stock 4 and 22 (`src/ecs/aidirector.zig:46`, `src/ecs/aidirector.zig:47`). The night floor comes from `worldglobal.xml` `<environment>` ambient scales, whose stock rows are the defaults baked into the table, so a minimal or modded file degrades to them (`src/assets/worldglobal.zig:18`, `src/assets/worldglobal.zig:50`, `src/assets/worldglobal.zig:78`). The parsed table is loaded once at init into the `Game` field (`src/server/game/init_assets.zig:570`, `src/server/game.zig:592`). The computed value is written to one sim field each tick before the ECS pass, and the stealth light legs read it (`src/ecs/world.zig:291`, `src/ecs/world.zig:295`):
+`clk.dawn` and `clk.dusk` come from the clock, recomputed from the daylight length rather than fixed at the stock 4 and 22 (`src/ecs/aidirector.zig:46`, `src/ecs/aidirector.zig:47`). The night floor comes from `worldglobal.xml` `<environment>` ambient scales, whose stock rows are the defaults baked into the table, so a minimal or modded file degrades to them (`src/assets/worldglobal.zig:18`, `src/assets/worldglobal.zig:50`, `src/assets/worldglobal.zig:78`). The parsed table is loaded once at init into the `Game` field (`src/server/game/init_assets.zig:570`, `src/server/game.zig:592`). The computed value is written to one sim field each tick before the ECS pass, and the stealth light legs read it (`src/ecs/world.zig:267`, `src/ecs/world.zig:271`):
 
 ```zig
     ambient_light: f32 = 0,
