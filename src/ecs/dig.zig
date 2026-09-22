@@ -7,7 +7,6 @@ const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const query = @import("query.zig");
 
-
 /// MoveHelper dig cadence (RE entity-ai.md DigUpdate IL=261): each digging AI
 /// counts windup/attack ticks and pushes a DigRequest every `dig_windup_ticks`
 /// (stock fires the attack after the 18-tick windup, then every 4+14 = 18);

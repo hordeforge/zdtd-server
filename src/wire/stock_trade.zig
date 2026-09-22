@@ -12,7 +12,6 @@ const platform_user = @import("platform_user.zig");
 const stock_inv = @import("stock_inv.zig");
 const components = @import("../ecs/components.zig");
 
-
 /// Trader buy/sell, **not a stock package body**: trader_entity i32 | item u16
 /// | qty u16 | side u8 (0=buy, 1=sell), exactly 9 bytes. Stock has no
 /// NetPackageTraderTrade; a real client's trade shows up as its post-trade
@@ -226,7 +225,6 @@ pub fn buildSetBlockTextureBody(buf: []u8, t: SetBlockTexture) ![]u8 {
     try w.writeByte(t.channel);
     return w.written();
 }
-
 
 pub const TraderStockEntry = stock_entity.TraderStockEntry;
 

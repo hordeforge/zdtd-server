@@ -8,7 +8,6 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const framed = @import("stock_frame.zig").framed;
 
-
 /// GameUtils/EKickReason (asm.il:1913681-1913720). Only the values zdtd emits:
 /// an operator `kick` and a server-side guard-policy decision. zdtd has no EAC
 /// integration, so the Eac* reasons are never sent.

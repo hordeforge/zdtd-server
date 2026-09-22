@@ -273,7 +273,7 @@
     color: var(--color-term-ok);
   }
   span.meta {
-    color: var(--color-muted);
+    color: var(--color-term-faint);
     font-size: 0.8rem;
   }
 }

@@ -1020,4 +1020,3 @@ test "the gamestage stat roll follows stock's draw order" {
     const n7 = rollGsStats(&staged, 0, 0, &r7, &out7);
     try std.testing.expectEqual(@as(usize, 0), n7);
 }
-

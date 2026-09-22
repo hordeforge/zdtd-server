@@ -77,9 +77,12 @@ pub const HostCtx = struct {
     data: ?*anyopaque = null,
     /// Set by the loader for the duration of a discovered-mod load: a mod's
     /// manifest is a claim about its capabilities, so `_zdtd_requires` presence
-    /// is fail-closed for it. False on the raw load path (in-repo test
-    /// fixtures, legacy `[plugin] modules`), where `--export-all` fixtures
-    /// would otherwise be refused for exporting hooks they never meant to claim.
+    /// is fail-closed for it. `loadResolved` sets it for every planned module,
+    /// legacy `[plugin] modules` entries included: an operator-listed path is
+    /// as much a capability claim as a discovered manifest. False on the raw
+    /// `loadAll`/`loadInto` path (in-repo test fixtures), where `--export-all`
+    /// fixtures would otherwise be refused for exporting hooks they never meant
+    /// to claim.
     require_declaration: bool = false,
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,

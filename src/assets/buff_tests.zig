@@ -110,7 +110,6 @@ test "namedPassiveFold scales GlobalGameStageModifier from base 1" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), namedPassiveFold("BiomeGameStageModifier", &rows, .{ .level = 1 }, ctx, 1.0, &counts), 1e-4);
 }
 
-
 test "the quality axis evaluates item rows at the item's tier" {
     var counts: requirements.Counts = .{};
     // A single-segment row is level-independent (ModValue's `_levels == null`,
@@ -1250,4 +1249,3 @@ test "GiveExp rows sum the passing gates" {
     const bare = evaluateRows(&rows, .primary_action_end, .{}, &counts);
     try std.testing.expectEqual(@as(u32, 10), bare.give_exp);
 }
-

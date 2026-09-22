@@ -83,7 +83,6 @@ test "scaleCount saturates at the u16 cap instead of trapping" {
     try std.testing.expectEqual(@as(u16, 0), lt.scaleCount(100, true, 0.0));
 }
 
-
 test "builtin loot roll" {
     const t = LootTable.builtin();
     var stacks: [max_roll_stacks]Stack = undefined;

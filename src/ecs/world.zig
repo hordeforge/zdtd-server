@@ -50,7 +50,6 @@ pub const TickLocals = locals_mod.TickLocals;
 const world_bits = @import("world_bits.zig");
 pub const AtomicBits = world_bits.AtomicBits;
 
-
 /// Stock zombieTemplateMale SleeperSightToWakeMin/Max (entityclasses.xml):
 /// the per-entity wake-threshold ROLL ranges used when a class carries no
 /// sleeper wake props (offline table). RE entity-ai.md D8.6 step 5.

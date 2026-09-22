@@ -44,7 +44,7 @@ Surveyed surfaces (Mach `main` / 0.4 line):
 | **`schedule` as ordered fn list** | Document `tickAll` + plugin phase hooks as data; optional comptime validate list |
 | **Field/object dirty (`updated`)** | Per-entity or per-field dirty for serialize-once interest (manual mark API) |
 | **`dynLibOpen` style** | Plugin load errors (`.so` path dropped by [ADR 0020](0020-wasm-only-plugin-api.md)) |
-| **Friendly module boundary** | `src/plugin` and `src/guard` as modules with explicit exported systems list |
+| **Friendly module boundary** | `src/plugin` and the anti-cheat surface (`src/server/guard_policy.zig`, [ADR 0022](0022-anti-cheat-architecture.md)) as modules with an explicit exported systems list |
 
 ### Medium
 

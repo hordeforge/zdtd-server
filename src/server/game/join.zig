@@ -1055,115 +1055,115 @@ test "quest nav class names exist in stock nav_objects.xml" {
 }
 
 pub fn gameStatsValues(self: *const Game) packages.GameStatsValues {
-        const clk = self.sim.director.clock;
-        return .{
-            .game_difficulty = self.sim.director.difficulty,
-            .blood_moon_enemy_count = self.sim.director.bloodmoon_enemy_count,
-            .enemy_difficulty = self.sim.director.enemy_difficulty,
-            .day_light_length = @trunc(clk.dusk - clk.dawn),
-            // GameStats[72]/[11] come from the clock's configured day length and
-            // its stock integer rate, never derived back out of a float scale
-            // (stock seeds both straight from GamePrefs; server-lifecycle.md:168).
-            .day_night_length = @intCast(clk.day_night_length),
-            .blood_moon_day = game_stability.bloodMoonDayFor(clk),
-            .block_damage_player = self.block_damage_player,
-            .block_damage_ai = self.block_damage_ai,
-            .block_damage_ai_bm = self.block_damage_ai_bm,
-            .xp_multiplier = self.xp_multiplier,
-            .death_penalty = self.death_penalty,
-            .player_killing_mode = self.pvp_mode,
-            .drop_on_death = self.drop_on_death,
-            .drop_on_quit = self.drop_on_quit,
-            .build_create = self.build_create,
-            .camera_restriction_mode = self.camera_restriction_mode,
-            .air_drop_marker = self.air_drop_marker,
-            .biome_progression = self.biome_progression,
-            .land_claim_size = self.land_claim_size,
-            .land_claim_online_dur = self.land_claim_online_dur,
-            .land_claim_offline_dur = self.land_claim_offline_dur,
-            .loot_respawn_days = self.loot_respawn_days,
-            // The sim already scales every loot roll by this (assets/loot.zig
-            // applyAbundance), so telling the client the struct default while
-            // the server rolls a different rate is a straight divergence.
-            .loot_abundance = @intCast(self.loot.abundance_pct),
-            // Same for the party XP-share radius: player.zig gates the share
-            // on this distance, so the client must hear the value in force.
-            .party_shared_kill_range = @trunc(self.party_shared_kill_range),
-            .land_claim_expiry_time = self.land_claim_expiry_days,
-            .land_claim_count = self.land_claim_count,
-            .land_claim_dead_zone = self.land_claim_dead_zone,
-            .land_claim_decay_mode = self.land_claim_decay_mode,
-            .land_claim_offline_delay = self.land_claim_offline_delay,
-            // Stock GameStat.AirDropFrequency is in DAYS (default 3/3 days;
-            // aidirector.md airdrop schedule); the config key + sim interval
-            // are in game hours (config.zig), so convert for the wire.
-            .air_drop_frequency = if (self.air_drop_interval_hours == 0)
-                0
-            else
-                @divTrunc(self.air_drop_interval_hours, 24),
-            // Stock TimeOfDayIncPerSec = world-time units per real second
-            // (24000-unit day; live-observed 6 at the default 60 minute day).
-            // The clock's rate *is* this value, so the wire cannot disagree
-            // with the sim (RE server-lifecycle.md:168).
-            .time_of_day_inc_per_sec = @intCast(clk.time_of_day_inc_per_sec),
-            .storm_freq = self.storm_frequency,
-            .sandbox_preset = self.sandbox_preset,
-            .sandbox_code = self.sandbox_code,
-        };
-    }
+    const clk = self.sim.director.clock;
+    return .{
+        .game_difficulty = self.sim.director.difficulty,
+        .blood_moon_enemy_count = self.sim.director.bloodmoon_enemy_count,
+        .enemy_difficulty = self.sim.director.enemy_difficulty,
+        .day_light_length = @trunc(clk.dusk - clk.dawn),
+        // GameStats[72]/[11] come from the clock's configured day length and
+        // its stock integer rate, never derived back out of a float scale
+        // (stock seeds both straight from GamePrefs; server-lifecycle.md:168).
+        .day_night_length = @intCast(clk.day_night_length),
+        .blood_moon_day = game_stability.bloodMoonDayFor(clk),
+        .block_damage_player = self.block_damage_player,
+        .block_damage_ai = self.block_damage_ai,
+        .block_damage_ai_bm = self.block_damage_ai_bm,
+        .xp_multiplier = self.xp_multiplier,
+        .death_penalty = self.death_penalty,
+        .player_killing_mode = self.pvp_mode,
+        .drop_on_death = self.drop_on_death,
+        .drop_on_quit = self.drop_on_quit,
+        .build_create = self.build_create,
+        .camera_restriction_mode = self.camera_restriction_mode,
+        .air_drop_marker = self.air_drop_marker,
+        .biome_progression = self.biome_progression,
+        .land_claim_size = self.land_claim_size,
+        .land_claim_online_dur = self.land_claim_online_dur,
+        .land_claim_offline_dur = self.land_claim_offline_dur,
+        .loot_respawn_days = self.loot_respawn_days,
+        // The sim already scales every loot roll by this (assets/loot.zig
+        // applyAbundance), so telling the client the struct default while
+        // the server rolls a different rate is a straight divergence.
+        .loot_abundance = @intCast(self.loot.abundance_pct),
+        // Same for the party XP-share radius: player.zig gates the share
+        // on this distance, so the client must hear the value in force.
+        .party_shared_kill_range = @trunc(self.party_shared_kill_range),
+        .land_claim_expiry_time = self.land_claim_expiry_days,
+        .land_claim_count = self.land_claim_count,
+        .land_claim_dead_zone = self.land_claim_dead_zone,
+        .land_claim_decay_mode = self.land_claim_decay_mode,
+        .land_claim_offline_delay = self.land_claim_offline_delay,
+        // Stock GameStat.AirDropFrequency is in DAYS (default 3/3 days;
+        // aidirector.md airdrop schedule); the config key + sim interval
+        // are in game hours (config.zig), so convert for the wire.
+        .air_drop_frequency = if (self.air_drop_interval_hours == 0)
+            0
+        else
+            @divTrunc(self.air_drop_interval_hours, 24),
+        // Stock TimeOfDayIncPerSec = world-time units per real second
+        // (24000-unit day; live-observed 6 at the default 60 minute day).
+        // The clock's rate *is* this value, so the wire cannot disagree
+        // with the sim (RE server-lifecycle.md:168).
+        .time_of_day_inc_per_sec = @intCast(clk.time_of_day_inc_per_sec),
+        .storm_freq = self.storm_frequency,
+        .sandbox_preset = self.sandbox_preset,
+        .sandbox_code = self.sandbox_code,
+    };
+}
 
 pub const SpawnSurface = struct { x: i32, y: i32, z: i32 };
 
 pub fn spawnSurface(self: *Game, sx: i32, sz: i32) SpawnSurface {
-        const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
-        const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
-        // heightWorld = top solid; PDF/entity feet use that block Y; entity
-        // float y = h+1.
-        var feet_y: i32 = @max(@as(i32, @intCast(h_u16)), 1);
-        // Stock Chunk::CanPlayersSpawnAtPos IL_0023 requires the block below the
-        // feet to carry CanPlayersSpawnOn (default true; treeMaster and the
-        // vehicle masters declare false), so a forest or parked-vehicle column
-        // walks down to the ground instead of spawning the player on top of it.
-        var scan: usize = 0;
-        while (scan < max_spawn_ground_scan) : (scan += 1) {
-            if (feet_y <= 1) break;
-            const below = self.world.blockWorld(sx, feet_y - 1, sz) catch break;
-            if (below == 0) break; // nothing to stand on: keep the surface
-            if (self.blocks.canPlayersSpawnOn(below)) break;
-            feet_y -= 1;
-        }
-        // Live AssignIds resolved at init (A05); the module pin is the offline
-        // default until resolveTerrainIds runs, so modded dumps stay correct.
-        const dirt = self.world.terrain_ids.dirt;
-        // 3x3 pad of solid at surface so client mesh + BlockUnderFeet see ground.
-        var dz: i32 = -1;
-        while (dz <= 1) : (dz += 1) {
-            var dx: i32 = -1;
-            while (dx <= 1) : (dx += 1) {
-                const px = sx + dx;
-                const pz = sz + dz;
-                // Ensure surface cell solid.
-                const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
-                if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch |err| {
+    const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
+    const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
+    // heightWorld = top solid; PDF/entity feet use that block Y; entity
+    // float y = h+1.
+    var feet_y: i32 = @max(@as(i32, @intCast(h_u16)), 1);
+    // Stock Chunk::CanPlayersSpawnAtPos IL_0023 requires the block below the
+    // feet to carry CanPlayersSpawnOn (default true; treeMaster and the
+    // vehicle masters declare false), so a forest or parked-vehicle column
+    // walks down to the ground instead of spawning the player on top of it.
+    var scan: usize = 0;
+    while (scan < max_spawn_ground_scan) : (scan += 1) {
+        if (feet_y <= 1) break;
+        const below = self.world.blockWorld(sx, feet_y - 1, sz) catch break;
+        if (below == 0) break; // nothing to stand on: keep the surface
+        if (self.blocks.canPlayersSpawnOn(below)) break;
+        feet_y -= 1;
+    }
+    // Live AssignIds resolved at init (A05); the module pin is the offline
+    // default until resolveTerrainIds runs, so modded dumps stay correct.
+    const dirt = self.world.terrain_ids.dirt;
+    // 3x3 pad of solid at surface so client mesh + BlockUnderFeet see ground.
+    var dz: i32 = -1;
+    while (dz <= 1) : (dz += 1) {
+        var dx: i32 = -1;
+        while (dx <= 1) : (dx += 1) {
+            const px = sx + dx;
+            const pz = sz + dz;
+            // Ensure surface cell solid.
+            const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
+            if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch |err| {
+                std.debug.print(
+                    "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
+                    .{ px, feet_y, pz, @errorName(err) },
+                );
+            };
+            // One block below if empty (stairs / overhang).
+            if (feet_y > 0) {
+                const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
+                if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch |err| {
                     std.debug.print(
                         "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
-                        .{ px, feet_y, pz, @errorName(err) },
+                        .{ px, feet_y - 1, pz, @errorName(err) },
                     );
                 };
-                // One block below if empty (stairs / overhang).
-                if (feet_y > 0) {
-                    const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
-                    if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch |err| {
-                        std.debug.print(
-                            "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
-                            .{ px, feet_y - 1, pz, @errorName(err) },
-                        );
-                    };
-                }
             }
         }
-        return .{ .x = sx, .y = feet_y, .z = sz };
     }
+    return .{ .x = sx, .y = feet_y, .z = sz };
+}
 
 /// Stock GameServerInfo.ToString(true) body used as NetPackagePlayerLoginAnswer.data.
 pub fn buildLoginGsiText(self: *Game, buf: []u8) ![]const u8 {

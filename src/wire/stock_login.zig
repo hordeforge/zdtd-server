@@ -8,7 +8,6 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const platform_user = @import("platform_user.zig");
 
-
 /// Stock `NetPackagePlayerLogin::read` (asm.il 832140), field for field:
 /// playerName string | native PlatformUserIdentifierAbs (inclCustomData=true) |
 /// native auth token string | crossplatform PlatformUserIdentifierAbs
@@ -496,7 +495,6 @@ test "player login truncated at any boundary is rejected" {
     }
     _ = try parsePlayerLogin(full, &name_buf);
 }
-
 
 test "ally request round-trips both identities" {
     var body: [128]u8 = undefined;

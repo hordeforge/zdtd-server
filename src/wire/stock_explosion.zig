@@ -153,7 +153,6 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
     return out;
 }
 
-
 test "explosion initiate parse head" {
     var buf: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };

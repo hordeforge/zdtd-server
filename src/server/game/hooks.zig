@@ -789,8 +789,6 @@ test "storage pins are not a second authority after catalogs requested" {
     }
 }
 
-
-
 /// on_player_damage verdict for the ECS damage path (zombie melee / deferred
 /// accumulator): routes to the plugin host + wasm host like the C2S path, with
 /// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
@@ -878,7 +876,6 @@ pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u
     return game_plugin_compose.tradePrice(g, player, item, p);
 }
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
-
 
 /// One water-leveler fill: send the cell as a plain SetBlock to observers.
 /// Stock streams water deltas with NetPackageWaterSimChunkUpdate, but the

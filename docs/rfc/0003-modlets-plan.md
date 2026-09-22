@@ -3,12 +3,13 @@
 > **Purpose:** implementation plan for pure XML/assetbundle modlet support - discovery, patch ops, S2C sync, and fixtures.
 
 **Number:** RFC 0003
+**Status:** decided, partial and fail-closed: the implemented Phase 1-2
+pipeline lives in `src/assets/modlets.zig` / `src/assets/xml_patch.zig` /
+`src/server/game/config_files.zig`; `conditional` remains RE gap G5 and is
+rejected loudly, while localization is descoped per G8. Plan phases gate on
+acceptance checks; `make check` must stay green at every commit.
 **Source:** [PRD 0003](../prd/0003-modlets.md) (requirements R1-R12, wire
-contract §7, RE gaps G1-G8). **Status:** decided, partial and fail-closed:
-the implemented Phase 1-2 pipeline lives in `src/assets/modlets.zig` /
-`xml_patch.zig` / `game/config_files.zig`; `conditional` remains RE gap G5
-and is rejected loudly, while localization is descoped per G8. Plan phases
-gate on acceptance checks; `make check` must stay green at every commit.
+contract §7, RE gaps G1-G8).
 **Related:** [PRD 0003](../prd/0003-modlets.md) · [ASSETS.md](../ASSETS.md) · [AUTHORITY.md](../AUTHORITY.md) (join order) · [wire/PACKAGES.md](../wire/PACKAGES.md)
 
 ```mermaid

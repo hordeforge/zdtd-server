@@ -8,7 +8,6 @@ const std = @import("std");
 const binary = @import("binary.zig");
 const stock_entity = @import("stock_entity.zig");
 
-
 /// Stock NetPackageLockRequest body (after package id):
 /// locking:bool | channel:u16 | targetCount:i32 | targets… | contextType:string | context?
 pub const LockRequestHead = struct {

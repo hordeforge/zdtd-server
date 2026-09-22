@@ -227,7 +227,6 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
-
 pub fn writeI32Le(buf: []u8, pos: *usize, v: i32) error{Overflow}!void {
     if (pos.* + 4 > buf.len) return error.Overflow;
     std.mem.writeInt(i32, buf[pos.*..][0..4], v, .little);

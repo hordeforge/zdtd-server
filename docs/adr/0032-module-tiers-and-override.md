@@ -28,7 +28,7 @@ claims, resolved once at boot.
    disabled or blacklisted), `official` (shipped in-repo, auto-discovered),
    `user` (anything else). Tier is declared in the module's manifest and
    validated; a `mods/` manifest claiming `tier = "core"` is a load error.
-2. **Manifests.** Every loadable mod ships `mod.toml` (name, version, wasm,
+2. **Manifests.** Every loadable mod ships `manifest.toml` (name, version, wasm,
    optional tier, override, points, claim_mode, requires, description,
    enabled). Parsed at boot by the ADR 0021 comptime binder (`toml_bind`),
    so unknown keys fail loudly. Core components declare their override
@@ -37,7 +37,7 @@ claims, resolved once at boot.
    `component.toml`; a second declarative copy would drift from the compiled
    registry that routes the tick path (deliberate deviation from RFC 0005's
    "component.toml in-tree" wording).
-3. **Discovery.** Boot scans `mods/*/mod.toml` (`plugin/manifest.discover`,
+3. **Discovery.** Boot scans `mods/*/manifest.toml` (`plugin/manifest.discover`,
    sorted by dir name for determinism), resolves to a `ResolvedResult`
    (`plugin/resolver.zig`): disabled mods are skipped with an info log,
    blacklisted mods are refused and also veto any mod overriding/requiring
@@ -49,13 +49,13 @@ claims, resolved once at boot.
    hook with a core decision site: `loot.roll` (on_loot_roll),
    `quest.payout` (on_quest_complete), `damage.player_scale`
    (on_player_damage), `craft.request` (on_craft_request), `trade.price`
-   (on_trade_price). A mod claims points in `mod.toml` `points = "a,b"`.
+   (on_trade_price). A mod claims points in `manifest.toml` `points = "a,b"`.
    Claims are exclusive and checked at load: a duplicate claim is a boot
    error naming both contenders. A claimed point routes that verdict to the
    claimant only and skips the native default; an unclaimed point keeps
    today's first-non-zero fan-out. Routing is a branch on a load-fixed
    `claims[point] -> slot` table, so there is no new per-tick cost (rule 7).
-5. **Mod replaces mod.** `override = "<mod-name>"` in `mod.toml`: the target
+5. **Mod replaces mod.** `override = "<mod-name>"` in `manifest.toml`: the target
    is dropped from the load list, the replacer takes its slot, and cycles or
    a second replacer for the same target are load errors. `bot` and
    `mcp` are official mods (PRD 0005 tier model), not core, and are
@@ -78,7 +78,7 @@ claims, resolved once at boot.
 
 - Fresh boots auto-discover the in-repo official mods (`bot`,
   `mcp`); the demo gates/feeds load only when explicitly listed. A user
-  mod dropped under `mods/` with a `mod.toml` loads on next boot with zero
+  mod dropped under `mods/` with a `manifest.toml` loads on next boot with zero
   config.
 - Operators disable or blacklist any non-core mod by name; naming a core
   component is a config error (fail-closed).

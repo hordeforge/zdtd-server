@@ -20,7 +20,7 @@ core components and other mods, with conflicts failing loudly at load?
   string) into paths; `src/plugin/wasm.zig` `WasmHost.loadAll` instantiates
   each. No discovery, no tier, no order, no priority, no override.
 - Manifests: optional and decorative. Five mods under `mods/` carry a
-  `mod.toml` (`name`, `version`, `wasm`, `description`); the rest
+  `manifest.toml` (`name`, `version`, `wasm`, `description`); the rest
   (`bot`, `mcp`, gates, feeds) have none. Nothing parses them at
   runtime.
 - Official addons: `mods/fps_bot` (ADR 0026) and `mods/mcp` (ADR 0031)
@@ -68,20 +68,20 @@ where it lives; override is a first-class claim checked at load.
   compiled registry that routes the tick path (deviation recorded in
   [ADR 0032](../adr/0032-module-tiers-and-override.md) decision 2).
 - **Official mods and user mods**: Wasm guests in `mods/<name>/` with
-  `mod.toml`. Official = shipped in the repo's `mods/` tree; user = anything
+  `manifest.toml`. Official = shipped in the repo's `mods/` tree; user = anything
   else the operator points at. Tier is declared in the manifest and
   validated (a `mods/` dir claiming `tier = "core"` is a load error).
-- **Discovery**: boot scans `mods/*/mod.toml`. Explicit `[plugin] modules`
+- **Discovery**: boot scans `mods/*/manifest.toml`. Explicit `[plugin] modules`
   paths remain a valid additional load source (bootstrapping, tests).
 - **Disable/blacklist**: `[mods] disabled` / `[mods] blacklist` in
   zdtd.toml, matched against discovered mod names.
 - **Core override points**: each core decision site that is overridable is
   declared as a named point (`loot.roll`, `quest.payout`,
   `damage.player_scale`, …) backed by an existing verdict hook. A mod claims
-  points in `mod.toml`. Claimed → the claiming mod's verdict decides and the
+  points in `manifest.toml`. Claimed → the claiming mod's verdict decides and the
   native default is skipped; unclaimed → native default. Claims are
   exclusive; duplicates fail at load.
-- **Mod replaces mod**: `override = "<mod-name>"` in `mod.toml`. Target not
+- **Mod replaces mod**: `override = "<mod-name>"` in `manifest.toml`. Target not
   instantiated; replacer takes its slot. Cycles and conflicts fail loudly.
 - **Composition of unclaimed hooks**: unchanged (all subscribers, slot
   order).

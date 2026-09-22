@@ -36,8 +36,6 @@ const isSeated = tick.isSeated;
 const fillItemMods = tick.fillItemMods;
 // Shared consts owned by tick.zig:
 
-
-
 /// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
 /// table (`EntityBuffs::HasBuff` is case-insensitive). Living here keeps
 /// `assets/requirements.zig` free of a dependency on the buffs asset module,

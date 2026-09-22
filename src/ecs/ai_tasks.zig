@@ -2255,7 +2255,6 @@ test "system zombie territorial walks home when far" {
     try std.testing.expect(dx * dx + dz * dz <= terr3 * terr3);
 }
 
-
 test "move helper: a blocked grounded zombie jumps a 1-block wall" {
     // RE entity-ai.md 2030-2034: MoveHelper.StartJump triggers when both slide
     // axes are blocked and the body is grounded; the hop (heightDiff ~1.3)

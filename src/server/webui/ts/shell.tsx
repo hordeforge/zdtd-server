@@ -1100,7 +1100,7 @@ function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren 
         <div id="console-log" aria-label="Recent commands" role="region" tabindex={-1}>
             <pre class="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabindex={0}>
                 {lines.length === 0 ? (
-                    <span class="text-muted font-sans text-body2">No commands run yet. Enter a command above and choose Run.</span>
+                    <span class="text-term-faint font-sans text-body2">No commands run yet. Enter a command above and choose Run.</span>
                 ) : (
                     lines.join("\n")
                 )}

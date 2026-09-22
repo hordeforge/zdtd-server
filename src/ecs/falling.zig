@@ -11,7 +11,6 @@ const c = @import("components.zig");
 const inventory = @import("inventory.zig");
 const query = @import("query.zig");
 
-
 /// Stability-collapse groups (RE entity-ai.md EntityFallingBlock landing):
 /// the group falls under the stock gravity integrator and dies on ground
 /// contact - cells are never re-placed (the collapse already aired them).

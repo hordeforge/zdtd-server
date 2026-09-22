@@ -486,7 +486,6 @@ test "spawned-in-world body is reason, position and entity id in that order" {
     try std.testing.expectEqual(@as(i32, 106), p.entity_id);
 }
 
-
 test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -639,7 +638,6 @@ pub fn buildConfirmSpawnEntityBody(buf: []u8, created_entity_id: i64, key: *cons
     return w.written();
 }
 
-
 /// NetPackageRequestToSpawnPlayer (RE inventories/netpackage-bodies.md write
 /// IL=17, protocol.md §5): `chunkViewDim` i16 | `playerProfile`
 /// (PlayerProfile.Write) | `nearEntityId` i32.
@@ -757,4 +755,3 @@ test "a received profile drives the PDF player class and appearance" {
     try std.testing.expectEqual(@as(i32, stock_entity.class_player_male), std.mem.readInt(i32, dflt[7..11], .little));
     try std.testing.expect(std.mem.find(u8, dflt, "BaseMale") != null);
 }
-

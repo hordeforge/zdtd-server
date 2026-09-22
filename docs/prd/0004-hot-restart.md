@@ -50,7 +50,8 @@ server-owned state comes back from disk.
 ### In scope (MVP)
 
 - Full stop + start of the same binary, world dir, and config (the
-  `restart_pair.sh` / playtest `persist` suite shape).
+  sibling `7dtd-fastconnect/scripts/restart_pair.sh` / the playtest `persist`
+  cases in `7dtd-playtest`'s `Catalog.cs` shape).
 - Server-owned state: world, players, claims, clock, weather, workstations,
   cleared sleepers, trader stock, config, webui operator session.
 - Client rejoin: stock client (EAC off) and bots reconnect after restart.

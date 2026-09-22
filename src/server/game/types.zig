@@ -891,4 +891,3 @@ pub const max_block_raw_entries: usize = 256;
 /// false (a tree or vehicle column): a modded world cannot spin the join path
 /// in a loop.
 pub const max_spawn_ground_scan: usize = 32;
-

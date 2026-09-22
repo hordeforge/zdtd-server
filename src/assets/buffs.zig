@@ -1083,7 +1083,6 @@ pub fn tagsMatch(row_tags: []const u8, query: []const u8) bool {
     return false;
 }
 
-
 /// The level-1 (flat) variant, used by perk/attribute callers and tests.
 pub fn trackedDeltasFrom(passives: []const Passive, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
     return trackedDeltasAt(passives, .{ .level = 1 }, ctx, counts);
@@ -1167,7 +1166,6 @@ pub fn stageBuffName(stage: u8, thirsty: bool) ?[]const u8 {
         else => if (thirsty) "buffStatusThirsty03" else "buffStatusHungry03",
     };
 }
-
 
 /// Survival stage (1..3) of a conditional buff name, or null.
 pub fn stageOfBuffName(name: []const u8) ?u8 {

@@ -153,4 +153,3 @@ test "entity stat changed body size" {
     try std.testing.expectEqual(@as(f32, 100), f32At(body, 13)); // max
     try std.testing.expectEqual(@as(f32, 25), f32At(body, 17)); // maxModifier
 }
-

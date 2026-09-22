@@ -115,7 +115,7 @@ verb and the host drains them.
 
 ## M2 - Guest brain module (Q3/Doom 3) + admin commands
 
-- `mods/fps_bot/bot.c` → `fps_bot.wasm` (same clang→wasm32 build path
+- `mods/fps_bot/fps_bot.c` → `fps_bot.wasm` (same clang→wasm32 build path
   as `assets/fixtures/*.c`, no WASI, no libc deps).
 - Brain (ported from `../7dtd-fps-bots`/Q3/Doom 3, re-expressed):
   - **Target selection**: nearest hostile within vision range/angle (players,

@@ -1495,7 +1495,6 @@ const persist_entities = @import("persist_entities.zig");
 pub const saveEntities = persist_entities.saveEntities;
 pub const loadEntities = persist_entities.loadEntities;
 
-
 const persist_claims = @import("persist_claims.zig");
 pub const saveClaims = persist_claims.saveClaims;
 pub const loadClaims = persist_claims.loadClaims;
@@ -1503,7 +1502,6 @@ const persist_traders = @import("persist_traders.zig");
 pub const ztrScanLen = persist_traders.ztrScanLen;
 pub const saveTraders = persist_traders.saveTraders;
 pub const loadTraders = persist_traders.loadTraders;
-
 
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};

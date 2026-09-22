@@ -124,7 +124,6 @@ test "inventory transaction request body is the compact zdtd order" {
 }
 
 /// Stock-compatible player inventory body (NetPackagePlayerInventory.write fields).
-
 /// NetPackagePlayerInventory (RE protocol-packages.md 5.4, write IL=107):
 /// `toolbelt` present bool (+ ItemStack[] if set) | `bag` present bool
 /// (+ Bag.Write) | `equipment` present bool (+ Equipment: ItemValue array, one
@@ -132,7 +131,6 @@ test "inventory transaction request body is the compact zdtd order" {
 /// present bool (+ ItemStack). The body-inventory table shows the cosmetics
 /// list as a top-level field; the narrative places it inside the equipment
 /// block, which is where stock_inv.writeEquipment puts it.
-
 /// NetPackageIdMapping body: name string + i32 len + bytes, matching
 /// `NetPackageIdMapping::write` (IL=18: `Write(String)`, `Write(Int32)`,
 /// `Write(Byte[])`) and its read (IL=13: `ReadString`, `ReadInt32`,
@@ -172,7 +170,6 @@ pub fn buildNameIdMappingPayload(buf: []u8, entries: []const IdMappingEntry) ![]
 /// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
 /// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
 /// u8. Body written by stock_inv.writeHoldingItem.
-
 /// zdtd's own compact transaction request: op:u8 | a:u16 | b:u16 | qty:u16 |
 /// entity_id:i32. **Not the stock body.** Stock writes
 /// `InventoryTransaction.Write` (RE inventories/netpackage-bodies.md, Write

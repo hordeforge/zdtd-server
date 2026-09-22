@@ -233,7 +233,6 @@ pub const Triggered = struct {
 
 /// One `<requirement name="StatComparePercCurrentToMax" .../>` gate. Stock
 /// compares a **fraction of max**, not an absolute 0..100 value.
-
 pub fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfBuffStart")) return .start;
     if (std.mem.eql(u8, s, "onSelfBuffUpdate")) return .update;

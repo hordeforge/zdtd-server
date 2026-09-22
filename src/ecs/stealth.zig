@@ -17,7 +17,6 @@ const nearestPlayerSnap = @import("sensing.zig").nearestPlayerSnap;
 const stealthLightPreBlend = @import("sensing.zig").stealthLightPreBlend;
 const systemZombieAi = @import("ai_tasks.zig").systemZombieAi;
 
-
 /// Heat window stock gives every noise-driven heat event: `NotifyNoise` passes
 /// the literal 240 s to `AIDirector::NotifyActivity` (AIDirector.il.txt
 /// IL_00D9); the 4th argument decays in seconds (`AIDirectorChunkData::DecayEvents`

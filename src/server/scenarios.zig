@@ -12828,7 +12828,6 @@ test "scenario the alive-flags aim and crouch edges drive their buffs" {
     std.debug.print("PASS aim/crouch edges: hold-breath gated, crouch buff cycles\n", .{});
 }
 
-
 test "scenario the respawn funnel fires onSelfRespawn rows" {
     // Stock fires onSelfRespawn after the player respawns; the only stock
     // row is buffNearDeathProtection's self-remove. A stale protection buff

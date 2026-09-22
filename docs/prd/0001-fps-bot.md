@@ -85,7 +85,7 @@ plugin addon**. This gives operators bots that:
 
 ## 5. User stories
 
-- As an **operator**, I can add `mods/fps_bot/bot.wasm` to `[plugin] modules` and
+- As an **operator**, I can add `mods/fps_bot/fps_bot.wasm` to `[plugin] modules` and
   restart to see 6 bots alive immediately (default `bot count 6`).
 - As an **operator**, I can run `bot count 12`, `bot remove 3`, `bot remove
   all`, `bot skill 3` from the admin console and see the world reflect it.

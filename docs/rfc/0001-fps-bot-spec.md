@@ -412,11 +412,12 @@ which is honest: no bot addon, no bot commands.
   `Client.known_bots` tracking.
 - `src/plugin/wasm.zig` - add the `zdtd.sense` import to `defineImports`;
   add a `sense` host-fn dispatch.
-- `mods/fps_bot/bot.c` (+ `.wasm` output) - the guest brain (Q3/Doom 3
+- `mods/fps_bot/fps_bot.c` (+ `.wasm` output) - the guest brain (Q3/Doom 3
   model), unchanged: it only talks through `zdtd.sense` / `zdtd.queue`. Build
   via the same clang→wasm32 path as `assets/fixtures/*.c`.
-- `assets/fixtures/plugin_bot.c` / `.wasm` - a minimal bot host-surface
-  fixture used by unit/scenario tests (sense round-trip, command parse).
+- No separate bot fixture: the sense round-trip and command-parse tests load
+  the shipped `mods/fps_bot/fps_bot.wasm` directly (`src/plugin/tests.zig:1254`),
+  so the test and the operator run the same guest.
 - `docs/rfc/0001-fps-bot-spec.md` (RFC 0001), `docs/prd/0001-fps-bot.md` (PRD 0001),
   `docs/adr/0026-*.md`, `docs/IMPLEMENTATION_PLAN_BOTS.md` - this contract and its plan.
 
@@ -447,5 +448,5 @@ data, and the open alignment decisions, is
 (clanker `docs/research/INDEX.md` maps the full R-series). This spec describes
 the intended contract; R13 records where the guest and the reference actually
 diverge today. Any alignment change to the guest updates
-`mods/fps_bot/bot.c` + the `.wasm` rebuild, keeps `make check` green, and
+`mods/fps_bot/fps_bot.c` + the `.wasm` rebuild, keeps `make check` green, and
 updates this spec and R13 in step.

@@ -914,83 +914,83 @@ test "blockRawAt prefers resident chunk over a stale sparse mirror" {
 }
 
 pub fn biomeGroupName(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind, fallback: []const u8) []const u8 {
-        const self: *Game = @ptrCast(@alignCast(ctx.?));
-        const bm = self.world.biomes orelse return fallback;
-        const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return fallback;
-        const bname = self.world.biome_layers_table.nameById(biome_id) orelse return fallback;
-        var buf: [16]assets_spawning.Rule = undefined;
-        const n = self.spawning.rulesForBiome(bname, &buf);
-        var animal_rules: [8][]const u8 = undefined;
-        var animal_candidates: usize = 0;
-        var ri: usize = 0;
-        while (ri < n) : (ri += 1) {
-            const r = buf[ri];
-            // POI-tag gate (spawning.md §2): tagged rules only fire where the
-            // area's POI tags match; the stock random-start scan over up to
-            // min(5, count) groups is approximated by the deterministic
-            // first-matching-rule walk.
-            if (!self.ruleTagsAllow(&r, x, z)) continue;
-            switch (kind) {
-                .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
-                .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
-                .animal => {
-                    // Stock per biome has multiple animal rules: day Any
-                    // (WildGameForest), Night wildlife (WildGameForestNight),
-                    // and Night enemy (EnemyAnimalsForest: snake, boar, wolf,
-                    // bear). Rotate across the matching rules by the spawn
-                    // counter so predators actually appear at night instead of
-                    // always picking the first Night rule.
-                    if (r.kind != .animal) continue;
-                    const night = self.sim.director.clock.isNight();
-                    const matches_night = r.time == .night and night;
-                    const matches_day = (r.time == .any or r.time == .day) and !night;
-                    if (!matches_night and !matches_day) continue;
-                    if (animal_candidates < animal_rules.len) {
-                        animal_rules[animal_candidates] = r.entitygroup;
-                        animal_candidates += 1;
-                    }
-                },
-            }
+    const self: *Game = @ptrCast(@alignCast(ctx.?));
+    const bm = self.world.biomes orelse return fallback;
+    const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return fallback;
+    const bname = self.world.biome_layers_table.nameById(biome_id) orelse return fallback;
+    var buf: [16]assets_spawning.Rule = undefined;
+    const n = self.spawning.rulesForBiome(bname, &buf);
+    var animal_rules: [8][]const u8 = undefined;
+    var animal_candidates: usize = 0;
+    var ri: usize = 0;
+    while (ri < n) : (ri += 1) {
+        const r = buf[ri];
+        // POI-tag gate (spawning.md §2): tagged rules only fire where the
+        // area's POI tags match; the stock random-start scan over up to
+        // min(5, count) groups is approximated by the deterministic
+        // first-matching-rule walk.
+        if (!self.ruleTagsAllow(&r, x, z)) continue;
+        switch (kind) {
+            .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
+            .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
+            .animal => {
+                // Stock per biome has multiple animal rules: day Any
+                // (WildGameForest), Night wildlife (WildGameForestNight),
+                // and Night enemy (EnemyAnimalsForest: snake, boar, wolf,
+                // bear). Rotate across the matching rules by the spawn
+                // counter so predators actually appear at night instead of
+                // always picking the first Night rule.
+                if (r.kind != .animal) continue;
+                const night = self.sim.director.clock.isNight();
+                const matches_night = r.time == .night and night;
+                const matches_day = (r.time == .any or r.time == .day) and !night;
+                if (!matches_night and !matches_day) continue;
+                if (animal_candidates < animal_rules.len) {
+                    animal_rules[animal_candidates] = r.entitygroup;
+                    animal_candidates += 1;
+                }
+            },
         }
-        if (kind == .animal and animal_candidates > 0) {
-            // Rotate deterministically by the director spawn counter so the
-            // mix of passive and enemy wildlife varies per spawn.
-            const pick = self.sim.director.total_spawned % animal_candidates;
-            return animal_rules[pick];
-        }
-        return fallback;
     }
+    if (kind == .animal and animal_candidates > 0) {
+        // Rotate deterministically by the director spawn counter so the
+        // mix of passive and enemy wildlife varies per spawn.
+        const pick = self.sim.director.total_spawned % animal_candidates;
+        return animal_rules[pick];
+    }
+    return fallback;
+}
 pub fn biomeRuleBudget(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind) ecs.aidirector.RuleBudget {
-        const self: *Game = @ptrCast(@alignCast(ctx.?));
-        const bm = self.world.biomes orelse return .{};
-        const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return .{};
-        const bname = self.world.biome_layers_table.nameById(biome_id) orelse return .{};
-        var ri: usize = 0;
-        while (ri < self.spawning.rules.len) : (ri += 1) {
-            const r = &self.spawning.rules[ri];
-            if (!std.mem.eql(u8, r.biome, bname)) continue;
-            // POI-tag gate: the budget follows the same rule the group pick
-            // chose, so a tagged rule's cap applies only where it fires.
-            if (!self.ruleTagsAllow(r, x, z)) continue;
-            const match = switch (kind) {
-                .night => r.kind == .zombie and r.time == .night,
-                .day => r.kind == .zombie and (r.time == .any or r.time == .day),
-                // Animals rotate across candidates; they share the first
-                // animal rule's budget (a per-candidate cap would need
-                // per-group tracking, out of scope for the drip).
-                .animal => r.kind == .animal,
-            };
-            if (!match) continue;
-            return .{
-                .index = @intCast(ri),
-                .maxcount = r.maxcount,
-                // Default sandbox column (index 0); the Biome*Respawn sandbox
-                // options select the other columns when they are decoded.
-                .respawn_days = assets_spawning.respawnDays(r.*, 0),
-            };
-        }
-        return .{};
+    const self: *Game = @ptrCast(@alignCast(ctx.?));
+    const bm = self.world.biomes orelse return .{};
+    const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return .{};
+    const bname = self.world.biome_layers_table.nameById(biome_id) orelse return .{};
+    var ri: usize = 0;
+    while (ri < self.spawning.rules.len) : (ri += 1) {
+        const r = &self.spawning.rules[ri];
+        if (!std.mem.eql(u8, r.biome, bname)) continue;
+        // POI-tag gate: the budget follows the same rule the group pick
+        // chose, so a tagged rule's cap applies only where it fires.
+        if (!self.ruleTagsAllow(r, x, z)) continue;
+        const match = switch (kind) {
+            .night => r.kind == .zombie and r.time == .night,
+            .day => r.kind == .zombie and (r.time == .any or r.time == .day),
+            // Animals rotate across candidates; they share the first
+            // animal rule's budget (a per-candidate cap would need
+            // per-group tracking, out of scope for the drip).
+            .animal => r.kind == .animal,
+        };
+        if (!match) continue;
+        return .{
+            .index = @intCast(ri),
+            .maxcount = r.maxcount,
+            // Default sandbox column (index 0); the Biome*Respawn sandbox
+            // options select the other columns when they are decoded.
+            .respawn_days = assets_spawning.respawnDays(r.*, 0),
+        };
     }
+    return .{};
+}
 
 /// World Y for spawning mobs next to a player (surface band, not void/float).
 pub fn spawnYNearPlayer(self: *Game, tr_x: f32, tr_y: f32, tr_z: f32) f32 {

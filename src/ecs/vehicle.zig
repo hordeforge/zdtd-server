@@ -13,7 +13,6 @@ const query = @import("query.zig");
 /// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
 const dmg_scale: u32 = 100;
 
-
 /// Kind defaults when vehicles.xml velocityMax missing (A12: XML first, then this).
 /// Stock `velocityMax_turbo` first components (vehicles.xml: bicycle 6,
 /// minibike 7, motorcycle 9.8, 4x4 10, gyro 9); the loader reads the same
@@ -256,7 +255,9 @@ test "driver seat tracks clamped vehicle y+1" {
     try std.testing.expectApproxEqAbs(@as(f32, 65), w.transform[vs].y, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 66), w.transform[ps].y, 0.001);
 }
-fn testGround(_: ?*anyopaque, _: i32, _: i32) f32 { return 65; }
+fn testGround(_: ?*anyopaque, _: i32, _: i32) f32 {
+    return 65;
+}
 
 test "multi-seat: passenger rides the hull and cannot steer" {
     var w: World = .{};

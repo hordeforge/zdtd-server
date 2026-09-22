@@ -9,7 +9,7 @@
 
 ## Context
 
-`assets/progression.zig` parses the level curve and the attribute/perk
+`src/assets/progression.zig` parses the level curve and the attribute/perk
 **catalog** from `progression.xml`: names, max levels, costs. That is as far as
 it goes. Confirmed by grep across the whole tree: no per-player attribute
 level, no per-player perk level, no spent-skill-point balance, and no evaluator
@@ -72,7 +72,7 @@ all, and most perks are themselves gated on an attribute level.
 (`craftingArmor`, `craftingBlades`, ...), so a perk can gate on another perk's
 level, not only on an attribute's. The evaluator needs one name-to-level
 lookup spanning both tables, not two separately-typed lookups the caller has
-to know which to use. `assets/progression.zig` used to carry exactly that
+to know which to use. `src/assets/progression.zig` used to carry exactly that
 (`attrByName` / `perkByName`), removed as dead code before this ADR gave them
 a caller; T25 brings the shape back with one now that both tables produce
 levels to compare.

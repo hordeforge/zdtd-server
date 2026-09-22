@@ -75,7 +75,6 @@ pub const trade = quest_trade.trade;
 pub const traderRestock = quest_trade.traderRestock;
 pub const questObjectiveEvent = quest_trade.questObjectiveEvent;
 
-
 pub const ai_tasks = @import("ai_tasks.zig");
 const stealth = @import("stealth.zig");
 pub const systemZombieAi = ai_tasks.systemZombieAi;
@@ -158,7 +157,6 @@ pub const systemDespawnFar = despawn.systemDespawnFar;
 
 pub const buff_tick = @import("buff_tick.zig");
 pub const systemBuffs = buff_tick.systemBuffs;
-
 
 // T14 (WORK_PLAN): a configured Rules floor is a floor, never a replacement
 // for per-entity stock data (ADR 0021 decision 5). These three tests set a

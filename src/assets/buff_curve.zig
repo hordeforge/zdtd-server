@@ -213,4 +213,3 @@ pub fn parseAnchors(body: []const u8, tag: usize, out: *[max_curve_len]f32) u8 {
     }
     return 0;
 }
-

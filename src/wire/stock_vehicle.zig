@@ -74,7 +74,6 @@ pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32,
     return buf[0..13];
 }
 
-
 test "vehicle data sync header framing" {
     // senderId | vehicleId | syncFlags | dataLen | data
     var body: [16]u8 = .{ 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 4, 0, 9, 8, 7, 6 };

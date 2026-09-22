@@ -34,20 +34,25 @@ flowchart LR
 
 ```
 mods/mcp/
-  mcp.c        guest: JSON-RPC 2.0 + MCP session + tool registry
-  mcp.wasm     committed build artifact (clang, freestanding wasm32)
+  mcp.zig      guest: JSON-RPC 2.0 + MCP session + tool registry
+  main.zig     hook wrapper exporting the guest to the host
+  manifest.toml
+  mcp.wasm     committed build artifact (zig, freestanding wasm32)
 
 src/server/mcp_transport.zig   host: listener + sessions + frame rings + auth
                                (new; registered beside webui.zig, gated by [mcp])
 ```
 
-Guest build (mirrors `mods/fps_bot/`; the `.wasm` is committed). `-fno-builtin`
-keeps clang from lowering the guest's small loops into libc calls (strlen,
-memcmp) that freestanding wasm32 has no definitions for:
+Guest build: `scripts/build-plugins.sh` builds it with the same Zig recipe as
+the core plugins, and `scripts/lint-plugins.sh` (`make lint`) fails when the
+committed `.wasm` no longer matches a fresh rebuild:
 
 ```bash
-clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry -Wl,--export-all \
-  -o mods/mcp/mcp.wasm mods/mcp/mcp.c
+zig build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic --name mcp \
+  --dep plugin_common --dep plugin_root \
+  -Mroot=mods/mcp/main.zig \
+  --dep plugin_common -Mplugin_root=mods/mcp/mcp.zig \
+  -Mplugin_common=mods/plugin_common.zig
 ```
 
 Guest exports: `on_enable`, `on_shutdown`, `on_mcp_frame`, `_zdtd_requires`
@@ -109,9 +114,9 @@ toml section can follow later if operators ask):
 The allowlist is served to the guest as the `mcp.allowlist` query
 (newline-separated prefixes) and enforced in the guest before `zdtd.queue`.
 
-## 5. Guest design (`mods/mcp/mcp.c`)
+## 5. Guest design (`mods/mcp/mcp.zig`)
 
-Static memory only (no heap, no libc):
+Static memory only (no heap, no libc, freestanding wasm32):
 
 - `frame_buf[16 KiB]` (copied in by the host), `out_buf[8 KiB]` (copied out),
   `result_buf[8 KiB]` for tool results, small static strings for the
@@ -250,7 +255,7 @@ All named module consts, no magic numbers on the path.
 
 - `docs/PROVENANCE.md` file map: row for `src/server/mcp_transport.zig`
   (bucket Z: zdtd-owned; protocol from the public MCP spec, cited
-  `modelcontextprotocol.io` + ADR 0031; `mods/mcp/mcp.c` is a plugin
+  `modelcontextprotocol.io` + ADR 0031; `mods/mcp/mcp.zig` is a plugin
   module, not `src/`, and follows the same Z provenance claim).
 - `docs/INDEX.md`: rows for PRD 0002, RFC 0002, and
   `adr/0031-mcp-wasm-module.md` (already in the ADR table).

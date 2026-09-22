@@ -1049,7 +1049,6 @@ pub const quest_point_update_treasure: u8 = 2;
 pub const quest_point_update_blocks: u8 = 3;
 
 /// `NetPackageQuestTreasurePoint` body. The layout branches on the leading
-
 /// `ActionType` byte (read IL=54, NetPackageQuestTreasurePoint.il.txt:125):
 /// action 2 carries only `questCode` i32 + `position` Vector3i; every other
 /// action carries the full request/response form.

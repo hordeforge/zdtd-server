@@ -52,7 +52,6 @@ pub fn buildEntitySpawnResponse(buf: []u8, success: bool, item: ?stock_inv.Stock
 }
 
 /// Stock TraderData with primary inventory entries (ItemStack + markup i8 + addedByPlayer).
-
 /// Widest world coordinate a client may claim. Downstream sim code funnels
 /// positions through `@floor(v)`, which traps on NaN/inf/huge in
 /// safe builds, so non-finite coordinates are rejected at the wire boundary

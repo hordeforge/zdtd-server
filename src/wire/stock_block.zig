@@ -41,7 +41,6 @@ pub fn withBlockMeta(raw: u32, meta: u8) u32 {
     return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
 }
 
-
 /// NetPackageSetBlock, one change (RE write IL=37; field order in
 /// buildSetBlockBodyRaw). Null platform user; peers accept S2C without id check.
 /// Id-only: rotation and meta bits are zero, so this is safe for fresh placement

@@ -933,4 +933,3 @@ const loot_load = @import("loot_load.zig");
 pub const loadFromPath = loot_load.loadFromPath;
 pub const loadFromSlice = loot_load.loadFromSlice;
 pub const tryLoad = loot_load.tryLoad;
-

@@ -7,7 +7,6 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 
-
 /// NetPackageWorldTime (RE inventories/netpackage-bodies.md, write IL=8): a
 /// single `worldTime` u64, encoded as WorldClock.worldTimeBits (24000 per day,
 /// 1000 per hour).
@@ -193,4 +192,3 @@ test "world init info empty is two zero counts" {
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[0..4], .little));
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[4..8], .little));
 }
-
