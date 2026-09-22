@@ -122,6 +122,29 @@ block_id_mapping = true
 # largest client-written CraftingTimeLeft backlog (seconds) accepted.
 # workstation_crafts_per_tick = 64
 # workstation_craft_backlog = 60
+# Trader/vending open-and-echo reach gate (blocks): bounds both the trade and
+# the post-trade TraderData echo, so a peer cannot rewrite a distant trader.
+# trader_use_range = 32
+# Party shared-kill XP credit range (blocks). No stock serverconfig key
+# (GameStats[54] default 100).
+# party_shared_kill_range = 100
+# Sleeper wake/stage radius (m): the CalcGameStageAround radius zdtd uses to
+# stage sleeper-volume spawns. Stock uses the volume box + party stage.
+# sleeper_party_radius = 100
+# Restore the stock sleeper global spawn gate (a volume only restores while
+# EnemyCount < MaxSpawnedZombies * 2.1). Default false keeps the documented
+# zdtd divergence: sleepers spawn regardless of the global cap.
+# sleeper_cap_gate_enabled = false
+# World ticks a storm is pushed past a horde night (5000 = ~5 in-game hours).
+# storm_bm_push_ticks = 5000
+# Airdrop schedule: "interval" (every AirDropFrequency game-hours, the
+# pre-config behavior) or "days" (every airdrop_day_min..airdrop_day_max days
+# at airdrop_drop_hour). airdrop_loot_list is the loot.xml crate container.
+# airdrop_schedule = "interval"
+# airdrop_day_min = 3
+# airdrop_day_max = 3
+# airdrop_drop_hour = 12
+# airdrop_loot_list = "airDrop"
 
 # Operator metrics cadence (docs/APM.md). 0 disables the periodic dump.
 # [apm]

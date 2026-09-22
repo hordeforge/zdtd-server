@@ -202,6 +202,9 @@ lint: need-zig need-python3 lint-webui lint-html
 	# that drifted from source, research-sibling paths that no longer exist,
 	# and the word ceilings in docs/budgets.json.
 	python3 tools/check_docs.py
+	# Config-surface gate: every zdtd.toml key the binder parses is listed in
+	# the shipped zdtd.toml.example and in the docs/GAME_OPTIONS.md key table.
+	python3 tools/check_config_keys.py
 	bash scripts/lint-cycles.sh
 	bash scripts/lint-wire.sh
 	bash scripts/lint-plugins.sh
