@@ -317,7 +317,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc.zig` | R | C2S misc domain: chat, player data / disconnect, dropped packages, game events, quest entity spawns, console commands, damage, lock requests, the NetPackageEntityAnimationData relay (client-originated avatar anim params, stock ProcessPackage IL=64),  The C2S damage claim applies the non-player victim's class PhysicalDamageResist (victim-side state) to the claimed strength (2026-09-14).|
 | `src/server/c2s/misc_chat.zig` | R | C2S chat packages (NetPackageChat / NetPackageSimpleChat). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_relay.zig` | R | C2S verbatim + avatar-state relays (GameMessage, SoundAtPosition, ParticleEffect, EntityPhysics, EntityRagdoll, PlayerLaserSight). Split out of misc.zig verbatim |
-| `src/server/c2s/misc_drop.zig` | R | C2S validate-and-drop arms (stealth, stat-changed, game-event response). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_drop.zig` | R | C2S validate-and-drop arms (stealth, stat-changed, game-event response) plus the accepted-and-dropped group and keep-open refresh. Split out of misc.zig verbatim |
 | `src/server/c2s/misc_session.zig` | R | C2S session arms (PlayerData validate, PlayerDisconnect quit path). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_av.zig` | R | C2S audio + map arms (positional-audio relay, minimap drive). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_questequip.zig` | R | C2S quest/equipment arms (quest positions drop, equipment apply+relay). Split out of misc.zig verbatim |

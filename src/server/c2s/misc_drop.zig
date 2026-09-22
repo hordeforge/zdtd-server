@@ -70,3 +70,53 @@ pub fn handleDrop(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
     }
     return false;
 }
+
+/// Accepted-and-dropped packages (deliberate no-ops) plus the keep-open
+/// lock refresh. Same code, moved from misc.zig verbatim.
+pub fn handleDrops2(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
+    _ = peer;
+    _ = body;
+    // Accepted and dropped on purpose (phase-gated above, so this is a
+    // deliberate no-op, not an unhandled package). Each is a documented
+    // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
+    // one here.
+    // - NetPackagePlayerStats: stock relays the owning client's own stats blob
+    //   (EntityNetworkStats::ToEntity, RE progression.md 441560ff). Applying it
+    //   would let a client author its level/XP/kill totals, so the server keeps
+    //   its own ledger and sends that instead (AGENTS rule 17).
+    // - NetPackageDiscordIdMappings: Discord rich-presence id map, a client
+    //   social feature with no server-side sim effect.
+    if (std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+        return true;
+    }
+    // Second accepted-and-dropped group; see the note above and
+    // docs/DIVERGENCES.md.
+    // - NetPackageBossEvent: client-side boss HUD banner, no sim effect.
+    // - NetPackageEntityStatsBuff: stock applies the client's whole buff blob
+    //   (EntityBuffs.Read IL=76). The server owns the buff set, so accepting it
+    //   would let a client grant itself buffs (AGENTS rule 17). Known cost:
+    //   client-local consume buffs never sync server-side, so the
+    //   dysentery-dependent behaviours miss them - recorded in DIVERGENCES.md.
+    // - NetPackagePlayerInventoryForAI: feeds stock's AIDirector smell/threat
+    //   model from a client-reported bag (RE protocol-packages.md, Process
+    //   IL=23). zdtd's AI reads its own sim state; a client must not be able to
+    //   steer zombie targeting by declaring its inventory.
+    // - NetPackageLobbyRegisterClient: matchmaking-lobby registration, which a
+    //   self-hosted dedicated server does not participate in.
+    if (std.mem.eql(u8, name, "NetPackageInventoryKeepOpen")) {
+        // Stock NetPackageInventoryKeepOpen::ProcessPackage (IL=6) calls
+        // LockManager.ProcessKeepOpen(sender.entityId) (IL=31): a player holding
+        // a lock gets keepOpenTimes refreshed, and LockManager.Update (IL=128)
+        // reaps only a stamp older than 10s. The stock client sends this every
+        // 2.5s from its own LockManager.Update while a window is open (client
+        // branch IL_0182). Dropping it let the stale reaper expire a live
+        // window. The body is empty (read IL=1), so it refreshes a server-owned
+        // timer and carries no client state.
+        self.refreshLocksForPeer(c.slot);
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
+        return true;
+    }
+    return false;
+}
