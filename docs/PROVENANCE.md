@@ -317,6 +317,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/inv_reload.zig` | R | C2S inventory arms (item reload, player inventory snapshot). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_holding.zig` | R | C2S inventory arms (holding item, item drop, bag access). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_te.zig` | R | C2S tile-entity arms (drop-container refusal, TE edits). Split out of inv.zig verbatim |
+| `src/server/c2s/inv_txn.zig` | R | C2S inventory arms (transaction requests, data requests). Split out of inv.zig verbatim |
 | `src/server/c2s/misc.zig` | R | C2S misc domain: chat, player data / disconnect, dropped packages, game events, quest entity spawns, console commands, damage, lock requests, the NetPackageEntityAnimationData relay (client-originated avatar anim params, stock ProcessPackage IL=64),  The C2S damage claim applies the non-player victim's class PhysicalDamageResist (victim-side state) to the claimed strength (2026-09-14).|
 | `src/server/c2s/misc_chat.zig` | R | C2S chat packages (NetPackageChat / NetPackageSimpleChat). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_relay.zig` | R | C2S verbatim + avatar-state relays (GameMessage, SoundAtPosition, ParticleEffect, EntityPhysics, EntityRagdoll, PlayerLaserSight). Split out of misc.zig verbatim |
