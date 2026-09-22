@@ -49,10 +49,10 @@ pub fn rejectIfBeyondEditRange(
 /// The counter and the evidence event belong together: `ownership` is a
 /// `server_only` detector (evidence.decisionInputs), so a forged id is the
 /// guard's strongest class of signal, and AUTHORITY.md lists ownership among
-/// the inputs the ladder weighs. Before this existed, 36 of the 37
-/// `ownership_rejects` sites incremented the counter and told the guard
-/// nothing, so a peer could spoof entity ids across every relay without ever
-/// building a case against itself.
+/// the inputs the ladder weighs. Every C2S arm that compares a claimed entity
+/// id against the sender's goes through here; a site that only bumps
+/// `ownership_rejects` tells the guard nothing, so a peer could spoof entity
+/// ids across every relay without ever building a case against itself.
 pub fn rejectIfNotSender(
     self: *Game,
     c: *Client,

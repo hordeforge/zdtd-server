@@ -12,7 +12,6 @@ const relayBodyExcept = @import("misc_relay.zig").relayBodyExcept;
 
 /// True when `name` is a turret package and was handled.
 pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer;
     if (std.mem.eql(u8, name, "NetPackageEntityAnimationData")) {
         // Stock NetPackageEntityAnimationData (client-originated: the local
         // AvatarController broadcasts the avatar anim params; ProcessPackage
@@ -29,10 +28,7 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        if (anim.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, anim.entity_id, .none)) return true;
         // Trim to the parsed body: the parameter list is variable length, so a
         // raw relay would forward whatever a peer appended.
         relayBodyExcept(self, "NetPackageEntityAnimationData", body[0..anim.wire_len], anim.entity_id, "EntityAnimationData");

@@ -127,8 +127,7 @@ pub fn handleRelay(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
 }
 
 /// True when `name` is an avatar-state relay package and was handled.
-pub fn handleAvatar(self: *Game, c: *Client, _peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = _peer;
+pub fn handleAvatar(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
         // Stock NetPackageEntityPhysics (read IL=74, GetLength IL=2 = 58):
         // Flags u16, EntityId i32, then 13xf32 (pos 3, quat 4, velocity 3,
@@ -181,10 +180,7 @@ pub fn handleAvatar(self: *Game, c: *Client, _peer: *ln_peer.Peer, name: []const
         // Only speak for your own entity: without this a peer could paint a
         // dot on anyone. Stock leans on the sender's ClientInfo for the
         // exclusion; zdtd checks the claimed id directly.
-        if (ls.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, ls.entity_id, .none)) return true;
         // Same rate gate as the other cosmetic relays: the client sends on
         // aim changes, so an unthrottled loop would fan out for free.
         if (!self.takeBlockToken(c)) {

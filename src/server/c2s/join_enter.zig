@@ -113,10 +113,7 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        if (rep.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, rep.entity_id, .none)) return true;
         for (&self.clients) |*cl| {
             if (cl.slot == c.slot or !cl.joined) continue;
             const op = cl.peer orelse continue;

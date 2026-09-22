@@ -24,10 +24,7 @@ pub fn handleHolding(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
             return true;
         }
         const h = packages.stock_inv.readHoldingItem(body) catch return true;
-        if (h.entity_id != 0 and h.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (h.entity_id != 0 and self.rejectIfNotSender(c, peer.local_id, h.entity_id, .none)) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].inventory) return true;
         if (h.holding_index < ecs.components.inv_toolbelt) {

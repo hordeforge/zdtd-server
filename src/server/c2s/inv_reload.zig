@@ -70,10 +70,11 @@ pub fn handleReload(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         // reload would fan out to every connected peer for free. The body
         // describes the sender's own weapon, so a foreign id is a claim on
         // another player's animation, not a relay the server owes.
-        if (entity_id == 0 or entity_id != c.entity_id) {
+        if (entity_id == 0) {
             self.harness.counters.inc(.ownership_rejects);
             return true;
         }
+        if (self.rejectIfNotSender(c, peer.local_id, entity_id, .none)) return true;
         if (self.sim.slotOfNetId(entity_id) == null) return true;
         try self.broadcastExcept("NetPackageItemReload", body, c.slot);
         // Stock check-buff row (buffStatusCheck01 onReloadStart): while the

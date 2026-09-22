@@ -11,7 +11,6 @@ const packages = @import("../../wire/packages.zig");
 
 /// True when `name` is an FX package and was handled.
 pub fn handleFx(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer;
     if (std.mem.eql(u8, name, "NetPackageItemActionEffects")) {
         if (!self.takeInvToken(c)) {
             self.harness.counters.inc(.c2s_throttle);
@@ -28,10 +27,7 @@ pub fn handleFx(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        if (fx.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, fx.entity_id, .none)) return true;
         try self.broadcastExcept("NetPackageItemActionEffects", body[0..fx.wire_len], c.slot);
         return true;
     }

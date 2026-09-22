@@ -16,7 +16,6 @@ pub const wire_tool_max_op: u8 = 1;
 
 /// True when `name` is a wire package and was handled.
 pub fn handleWire(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer;
     if (std.mem.eql(u8, name, "NetPackageWireActions")) {
         // Same rate gate as SetBlock: unthrottled would let a spam loop fan
         // this broadcast out to every other peer for free (bandwidth DoS).
@@ -46,10 +45,7 @@ pub fn handleWire(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        if (tool.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, tool.entity_id, .none)) return true;
         if (tool.operation > wire_tool_max_op) return true;
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;

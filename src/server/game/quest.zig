@@ -19,7 +19,7 @@ const PlaceholderCtx = game_mod.Game.PlaceholderCtx;
 pub fn handleQuestEvent(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []const u8) !void {
     const head = packages.stock_quest.parseQuestEventHead(body) catch return;
     // Trust boundary: a peer may only raise quest events for its own entity.
-    if (head.entity_id != c.entity_id) return;
+    if (self.rejectIfNotSender(c, peer.local_id, head.entity_id, .none)) return;
     switch (head.event) {
         .try_rally_marker => {
             const lockout = systems.questCheckPoiLockout(&self.sim, c.entity_id, head.px, head.pz);

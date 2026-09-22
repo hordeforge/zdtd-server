@@ -4583,11 +4583,21 @@ test "scenario spawn confirm: forged echo dropped, own echo relayed to the other
     cap_b.clear();
 
     const rej_before = g.harness.counters.get(.ownership_rejects);
+    const ev_before = g.harness.counters.get(.evidence_events);
     var forged: [20]u8 = undefined;
     _ = try packages.buildSpawnedBody(&forged, @intFromEnum(packages.RespawnType.died), 256, 70, 256, cb.entity_id);
     try g.handlePackage(ca, peer_a, spawn_id, &forged);
     try std.testing.expectEqual(rej_before + 1, g.harness.counters.get(.ownership_rejects));
     try std.testing.expect(cap_b.findPkgId(spawn_id) == null);
+    // The counter alone is not the contract: a forged id is `ownership`
+    // evidence, so the guard ladder must see it (game/guard.rejectIfNotSender).
+    // Counting without recording left every relay spoofable with no case built
+    // against the peer.
+    try std.testing.expectEqual(ev_before + 1, g.harness.counters.get(.evidence_events));
+    const last = g.evidence.events[(g.evidence.head -% 1) % evidence_mod.max_ring];
+    try std.testing.expectEqual(evidence_mod.Detector.ownership, last.detector);
+    try std.testing.expectEqual(evidence_mod.Severity.strong, last.severity);
+    try std.testing.expectEqual(cb.entity_id, last.entity_id);
 
     var own: [20]u8 = undefined;
     _ = try packages.buildSpawnedBody(&own, @intFromEnum(packages.RespawnType.died), 256, 70, 256, ca.entity_id);

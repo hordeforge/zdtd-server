@@ -22,10 +22,7 @@ pub fn handleState(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.decode_rejects);
             return true;
         };
-        if (f.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, f.entity_id, .none)) return true;
         if (self.sim.slotOfNetId(f.entity_id)) |idx| {
             // Jump edge first: the stored word is overwritten below, so the
             // previous jump bit must be read before the verbatim store (stock
@@ -95,10 +92,7 @@ pub fn handleState(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.decode_rejects);
             return true;
         };
-        if (s.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, s.entity_id, .none)) return true;
         // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
         // entity-ai.md SetMovementState); lapses on a stale timer. The same
         // report carries the movement tag `EntityHasMovementTag` gates read
@@ -130,10 +124,7 @@ pub fn handleState(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.decode_rejects);
             return true;
         };
-        if (p.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, p.entity_id, .none)) return true;
         // Same speed envelope as PosAndRot: without it a client teleports
         // anywhere and noteAcceptedMove rebaselines the gate to that spot.
         const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);

@@ -32,10 +32,7 @@ pub fn handleProgress(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         var r = wire_binary.Reader{ .data = body };
         var skill_buf: [128]u8 = undefined;
         const req_entity = r.readI32() catch return true;
-        if (req_entity != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, req_entity, .none)) return true;
         const skill = r.readString(&skill_buf) catch return true;
         const level = r.readI32() catch return true;
         if (skill.len == 0 or level < 1 or level > 255) return true;

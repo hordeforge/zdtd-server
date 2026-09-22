@@ -40,10 +40,7 @@ pub fn handleParty(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.ownership_rejects);
             return true;
         };
-        if (claim.owner_entity != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, claim.owner_entity, .none)) return true;
         _ = self.repairClaimArea(req.x, req.z);
         // Stock answers the repair pass with Setup(blockPos, false) to the
         // requester (repair coroutine IL_0337), clearing its IsRepairing.
@@ -118,10 +115,7 @@ pub fn handleParty(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             // the sender is excluded. zdtd echoed the body back to the sender
             // and told the party nothing. Refuse a sender naming someone else
             // (anti-spoof) before any journal mutation, then fan out.
-            if (head.shared_by_entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return true;
-            }
+            if (self.rejectIfNotSender(c, peer.local_id, head.shared_by_entity_id, .none)) return true;
             // Prefer stock Quest.QuestCode; fall back to catalog def_id for old clients.
             if (head.quest_code != 0) {
                 if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |s| {
@@ -158,10 +152,7 @@ pub fn handleParty(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             // owner never heard about it. Gate on the sender naming itself as
             // the member (sharedWith) and deliver to the owner (sharedBy).
             const by = head.shared_by_entity_id;
-            if (head.shared_with_entity_id != c.entity_id) {
-                self.harness.counters.inc(.ownership_rejects);
-                return true;
-            }
+            if (self.rejectIfNotSender(c, peer.local_id, head.shared_with_entity_id, .none)) return true;
             if (self.parties.partyByMember(by) == null) return true;
             for (&self.clients) |*cl| {
                 if (!cl.joined or cl.entity_id != by) continue;
@@ -176,10 +167,7 @@ pub fn handleParty(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        if (q.sender_entity != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, q.sender_entity, .none)) return true;
         const p = self.parties.partyByMember(c.entity_id) orelse return true;
         for (p.members[0..p.n]) |m| {
             if (m == c.entity_id) continue;

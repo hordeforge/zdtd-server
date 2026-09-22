@@ -19,9 +19,9 @@ pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
         self.harness.counters.inc(.c2s_malformed);
         return;
     };
-    if (req.entity_id != c.entity_id) {
+    const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
+    if (self.rejectIfNotSender(c, peer_local, req.entity_id, .none)) {
         self.harness.counters.inc(.buff_rejects);
-        self.harness.counters.inc(.ownership_rejects);
         return;
     }
     const def_id = self.buffs.indexOfName(req.name) orelse {
@@ -421,6 +421,8 @@ pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
     const own = c.puid_primary.get() orelse return;
     if (!own.eql(source)) {
         self.harness.counters.inc(.ownership_rejects);
+        const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
+        self.noteEvidence(c, peer_local, c.entity_id, .ownership, .strong, .none, 1, 0);
         return;
     }
     const t = self.allies.processRequest(source, target, req.add_ally) catch {

@@ -11,7 +11,6 @@ const wire_binary = @import("../../wire/binary.zig");
 
 /// True when `name` is a spawn package and was handled.
 pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer;
     if (std.mem.eql(u8, name, "NetPackageQuestEntitySpawn")) {
         if (!self.takeBlockToken(c)) {
             self.harness.counters.inc(.c2s_throttle);
@@ -33,10 +32,7 @@ pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // The holder is the player whose quest summons. A packet naming another
         // player would spawn at the sender on someone else's quest, so require
         // the sender's own entity.
-        if (holder_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, holder_id, .none)) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
             self.harness.counters.inc(.c2s_rejects);

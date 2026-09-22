@@ -18,10 +18,7 @@ pub fn handlePosition(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
             self.harness.counters.inc(.decode_rejects);
             return true;
         };
-        if (p.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, p.entity_id, .none)) return true;
         const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
         if (!env.applied) return true;
         // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
@@ -53,10 +50,7 @@ pub fn handlePosition(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         // claimed collector is not the sender (NetPackageEntityCollect
         // ProcessPackage IL=51), so one client cannot collect a bag in another
         // player's name.
-        if (col.player_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, col.player_id, .none)) return true;
         // Transfer contents into server inv, then destroy. Wire order matches
         // stock: Collect (client OnCollect) then EntityRemove(Despawned).
         if (self.sim.slotOfNetId(bag)) |bs| {
@@ -120,10 +114,7 @@ pub fn handlePosition(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
             return true;
         }
         const eid = std.mem.readInt(i32, body[0..4], .little);
-        if (eid != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, eid, .none)) return true;
         // The Rotation base this package extends is variable width: byte 4 is
         // bUseQRotation, and it selects 3 x i16 euler (6 bytes) or a 4 x f32
         // quaternion (16 bytes) before dPos begins (RE protocol-packages.md
