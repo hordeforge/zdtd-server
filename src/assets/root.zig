@@ -28,6 +28,7 @@ pub const passive_effects = @import("passive_effects.zig");
 pub const entities = @import("entities.zig");
 pub const entity_tests = @import("entity_tests.zig");
 pub const recipes = @import("recipes.zig");
+pub const recipe_tests = @import("recipe_tests.zig");
 pub const loot = @import("loot.zig");
 pub const loot_load = @import("loot_load.zig");
 pub const loot_tests = @import("loot_tests.zig");
@@ -86,6 +87,7 @@ test {
     _ = entities;
     _ = entity_tests;
     _ = recipes;
+    _ = recipe_tests;
     _ = loot;
     _ = loot_load;
     _ = loot_tests;
