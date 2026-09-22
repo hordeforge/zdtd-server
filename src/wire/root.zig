@@ -66,6 +66,7 @@ pub const stock_ids = @import("stock_ids.zig");
 pub const stock_frame = @import("stock_frame.zig");
 pub const stock_vehicle = @import("stock_vehicle.zig");
 pub const stock_te = @import("stock_te.zig");
+pub const te_tests = @import("te_tests.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const stock_party = @import("stock_party.zig");
 pub const stock_xp = @import("stock_xp.zig");
@@ -131,6 +132,7 @@ test {
     _ = stock_frame;
     _ = stock_vehicle;
     _ = stock_te;
+    _ = te_tests;
     _ = stock_sign;
     _ = stock_party;
     _ = stock_xp;
