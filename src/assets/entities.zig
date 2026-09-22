@@ -467,8 +467,10 @@ fn parseBoolLoose(s: []const u8) bool {
 /// census): RangedAttackTarget on the five acid-spitter zombies (Rancher,
 /// Chuck, FatCop, Mutated, MutatedRadiated), Leap on zombieSpider (pounce)
 /// and animalMountainLion (AITask-1, legs=4). Both classes fall back to the
-/// remaining melee/approach tasks until the ranged attack has a server-side
-/// damage leg (ItemActionVomit fires a client GameObject projectile).
+/// remaining melee/approach tasks until the tasks land; the delivery contract
+/// is RE-closed (entity-ai.md 2026-09-22): stock's server applies the vomit
+/// projectile hit itself behind the isEntityRemote gate, and EAILeap drives
+/// the shared StartJump primitive.
 fn taskNameToId(name: []const u8) ?components.TaskId {
     if (std.mem.eql(u8, name, "BreakBlock")) return .break_block;
     if (std.mem.eql(u8, name, "DestroyArea")) return .destroy_area;
