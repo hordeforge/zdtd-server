@@ -240,6 +240,7 @@ Coverage targets, all enforced by the scan:
 | `src/assets/xml_util.zig` | A | Tiny helpers for scanning stock 7DTD XML configs (no full DOM) |
 | `src/assets/xml_patch_tests.zig` | A | XML patch tests (xpath, ops, conditionals, CSV, routing). Split out of xml_patch.zig verbatim |
 | `src/ecs/aidirector.zig` | R | Lightweight AIDirector as ECS resource (world clock, horde, blood moon) |
+| `src/ecs/aidirector_tests.zig` | R | AI director tests (clock, spawning, blood moon, hordes, heat). Split out of aidirector.zig verbatim |
 | `src/ecs/buff.zig` | R | Buff runtime rules: stacking, duration ticks, expiry. Pure over BuffSet, no World and no wire. Every rule mirrors stock EntityBuffs/BuffClass/BuffValu |
 | `src/ecs/command.zig` | Z | Fixed tick command buffer: systems/plugins enqueue, drain once per tick. Cap 64; drop when full (no heap, no grow). Soft warn once past ~80% |
 | `src/ecs/components.zig` | Z | All sim component types (plain data; no behavior). SoA columns live on World. `Sleeper.groan_sent` + the `SleeperWakeRequest.groan` flag back the SetSleeperActive stir (RE entity-ai.md) |
