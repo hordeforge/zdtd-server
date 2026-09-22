@@ -512,14 +512,14 @@ pub const Table = struct {
         const arena = try self.ensureArena(allocator);
         var it = std.mem.splitScalar(u8, raw, '\n');
         while (it.next()) |line_raw| {
-            var line = std.mem.trim(u8, line_raw, " \t\r");
+            const line = std.mem.trim(u8, line_raw, " \t\r");
             if (line.len == 0 or line[0] == '#') continue;
             // Accept "id\tname", "id name", "name=id"
             var id: u16 = 0;
             var name: []const u8 = "";
-            if (std.mem.findScalar(u8, line, '=')) |eq| {
-                name = std.mem.trim(u8, line[0..eq], " \t");
-                const id_s = std.mem.trim(u8, line[eq + 1 ..], " \t");
+            if (std.mem.cutScalar(u8, line, '=')) |parts| {
+                name = std.mem.trim(u8, parts[0], " \t");
+                const id_s = std.mem.trim(u8, parts[1], " \t");
                 id = std.fmt.parseInt(u16, id_s, 10) catch continue;
             } else {
                 var sp = std.mem.tokenizeAny(u8, line, " \t");

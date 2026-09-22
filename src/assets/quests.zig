@@ -97,9 +97,9 @@ pub fn parseQuestEvents(arena: std.mem.Allocator, body: []const u8, out: *[quest
                 spec.spawn_list = arena.dupe(u8, g) catch "";
             }
             if (xml.propertyValue(inner, "count")) |c| {
-                if (std.mem.findScalar(u8, c, '-')) |dash| {
-                    spec.spawn_min = xml.parseU8(c[0..dash]) orelse 1;
-                    spec.spawn_max = xml.parseU8(c[dash + 1 ..]) orelse spec.spawn_min;
+                if (std.mem.cutScalar(u8, c, '-')) |parts| {
+                    spec.spawn_min = xml.parseU8(parts[0]) orelse 1;
+                    spec.spawn_max = xml.parseU8(parts[1]) orelse spec.spawn_min;
                 } else {
                     spec.spawn_min = xml.parseU8(c) orelse 1;
                     spec.spawn_max = spec.spawn_min;
@@ -673,9 +673,9 @@ pub fn parseActions(arena: std.mem.Allocator, body: []const u8, out: *[quest.max
         // SpawnGSEnemy: `count="1-2"` (a single value means exactly that many).
         if (std.mem.eql(u8, typ, "SpawnGSEnemy")) {
             if (xml.propertyValue(inner, "count")) |c| {
-                if (std.mem.findScalar(u8, c, '-')) |dash| {
-                    spec.count_min = xml.parseU8(c[0..dash]) orelse 1;
-                    spec.count_max = xml.parseU8(c[dash + 1 ..]) orelse spec.count_min;
+                if (std.mem.cutScalar(u8, c, '-')) |parts| {
+                    spec.count_min = xml.parseU8(parts[0]) orelse 1;
+                    spec.count_max = xml.parseU8(parts[1]) orelse spec.count_min;
                 } else {
                     spec.count_min = xml.parseU8(c) orelse 1;
                     spec.count_max = spec.count_min;

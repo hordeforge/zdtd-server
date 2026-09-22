@@ -199,10 +199,10 @@ fn tryParsePredicateGroup(seg: *XSeg, inner_raw: []const u8) bool {
             pred.val = unquote(std.mem.trim(u8, args[comma + 1 ..], " \t"));
         } else if (clause[0] == '@') {
             const rest = clause[1..];
-            if (std.mem.findScalar(u8, rest, '=')) |eq| {
+            if (std.mem.cutScalar(u8, rest, '=')) |parts| {
                 pred.kind = .attr_eq;
-                pred.attr = std.mem.trim(u8, rest[0..eq], " \t");
-                pred.val = unquote(std.mem.trim(u8, rest[eq + 1 ..], " \t"));
+                pred.attr = std.mem.trim(u8, parts[0], " \t");
+                pred.val = unquote(std.mem.trim(u8, parts[1], " \t"));
             } else {
                 pred.kind = .attr_exists;
                 pred.attr = std.mem.trim(u8, rest, " \t");
@@ -686,8 +686,7 @@ fn removeAttributeFrom(allocator: std.mem.Allocator, cur: []const u8, open_at: u
 /// `ReadPatchXmlWithFixedModFolders`, G6). Absolute paths pass through.
 /// Caller frees the result.
 fn rewriteModFolder(allocator: std.mem.Allocator, path: []const u8, own_mod_path: ?[]const u8) ![]const u8 {
-    if (std.mem.startsWith(u8, path, "@modfolder:")) {
-        const rest = path["@modfolder:".len..];
+    if (std.mem.cutPrefix(u8, path, "@modfolder:")) |rest| {
         const mp = own_mod_path orelse return error.MissingModFolder;
         return std.fmt.allocPrint(allocator, "{s}{s}", .{ mp, rest });
     }

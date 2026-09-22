@@ -1495,9 +1495,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             var dmin: u32 = 0;
             var dmax: u32 = 0;
             if (xml.passiveEffectValue(body, "DegradationMax")) |v| {
-                if (std.mem.findScalar(u8, v, ',')) |comma| {
-                    dmin = xml.parseU32(v[0..comma]) orelse 0;
-                    dmax = xml.parseU32(v[comma + 1 ..]) orelse 0;
+                if (std.mem.cutScalar(u8, v, ',')) |parts| {
+                    dmin = xml.parseU32(parts[0]) orelse 0;
+                    dmax = xml.parseU32(parts[1]) orelse 0;
                 } else {
                     dmax = xml.parseU32(v) orelse 0;
                     dmin = dmax;

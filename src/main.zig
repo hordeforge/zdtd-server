@@ -206,8 +206,8 @@ fn flagServerPort(flag: []const u8, s: []const u8) u16 {
 
 /// Split `--name` / `--name=value` into (name, optional value).
 fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
-    if (std.mem.findScalar(u8, a, '=')) |eq| {
-        return .{ .name = a[0..eq], .value = a[eq + 1 ..] };
+    if (std.mem.cutScalar(u8, a, '=')) |parts| {
+        return .{ .name = parts[0], .value = parts[1] };
     }
     return .{ .name = a, .value = null };
 }

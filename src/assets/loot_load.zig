@@ -30,9 +30,9 @@ const max_containers = loot.max_containers;
 const max_entries = loot.max_entries;
 
 fn parseCountRange(s: []const u8) struct { min: u16, max: u16 } {
-    if (std.mem.findScalar(u8, s, ',')) |c| {
-        const a = xml.parseU16(std.mem.trim(u8, s[0..c], " \t")) orelse 1;
-        const b = xml.parseU16(std.mem.trim(u8, s[c + 1 ..], " \t")) orelse a;
+    if (std.mem.cutScalar(u8, s, ',')) |parts| {
+        const a = xml.parseU16(std.mem.trim(u8, parts[0], " \t")) orelse 1;
+        const b = xml.parseU16(std.mem.trim(u8, parts[1], " \t")) orelse a;
         return .{ .min = a, .max = b };
     }
     const v = xml.parseU16(std.mem.trim(u8, s, " \t")) orelse 1;
@@ -146,8 +146,8 @@ fn parseMinMax(s: []const u8) [2]f32 {
 /// `value="@$name"` / `value="@name"` names the entity's cvar; anything else is
 /// a literal. `@:` is a localization key, never an operand.
 fn cvarOperand(v: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, v, "@$")) return v[2..];
-    if (std.mem.startsWith(u8, v, "@")) return v[1..];
+    if (std.mem.cutPrefix(u8, v, "@$")) |name| return name;
+    if (std.mem.cutPrefix(u8, v, "@")) |name| return name;
     return "";
 }
 
@@ -389,9 +389,9 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             c.quality_template = try arena.dupe(u8, lqt);
         }
         if (xml.attr(clean, tag, "size")) |sz| {
-            if (std.mem.findScalar(u8, sz, ',')) |comma| {
-                c.size_x = @intCast(xml.parseU16(std.mem.trim(u8, sz[0..comma], " \t")) orelse 8);
-                c.size_y = @intCast(xml.parseU16(std.mem.trim(u8, sz[comma + 1 ..], " \t")) orelse 6);
+            if (std.mem.cutScalar(u8, sz, ',')) |parts| {
+                c.size_x = @intCast(xml.parseU16(std.mem.trim(u8, parts[0], " \t")) orelse 8);
+                c.size_y = @intCast(xml.parseU16(std.mem.trim(u8, parts[1], " \t")) orelse 6);
             }
         }
         // destroy_on_close: "true" (1) / "empty" (2) / absent (0). Values

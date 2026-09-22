@@ -502,9 +502,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
             root_quest_tier_mod = try arena.dupe(f32, qtm.items);
         }
         if (xml.attr(clean, tr, "quality_mod")) |qm| {
-            if (std.mem.findScalar(u8, qm, ',')) |comma| {
-                root_quality_min = std.fmt.parseFloat(f32, std.mem.trim(u8, qm[0..comma], " \t")) catch 1;
-                root_quality_max = std.fmt.parseFloat(f32, std.mem.trim(u8, qm[comma + 1 ..], " \t")) catch 1;
+            if (std.mem.cutScalar(u8, qm, ',')) |parts| {
+                root_quality_min = std.fmt.parseFloat(f32, std.mem.trim(u8, parts[0], " \t")) catch 1;
+                root_quality_max = std.fmt.parseFloat(f32, std.mem.trim(u8, parts[1], " \t")) catch 1;
             }
         }
     }

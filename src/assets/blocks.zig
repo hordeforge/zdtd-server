@@ -451,9 +451,9 @@ pub const CountRange = struct { min: u32, max: u32 };
 /// ParseMinMaxCount): "55" → 55..55, "3,6" → 3..6, "0,3" → 0..3. Malformed
 /// or absent values fall back to the IL default 1..1.
 fn parseMinMaxCount(v: []const u8) CountRange {
-    if (std.mem.findScalar(u8, v, ',')) |comma| {
-        const a = std.fmt.parseInt(u32, std.mem.trim(u8, v[0..comma], " \t"), 10) catch 1;
-        const b = std.fmt.parseInt(u32, std.mem.trim(u8, v[comma + 1 ..], " \t"), 10) catch a;
+    if (std.mem.cutScalar(u8, v, ',')) |parts| {
+        const a = std.fmt.parseInt(u32, std.mem.trim(u8, parts[0], " \t"), 10) catch 1;
+        const b = std.fmt.parseInt(u32, std.mem.trim(u8, parts[1], " \t"), 10) catch a;
         return .{ .min = @min(a, b), .max = @max(a, b) };
     }
     const n = std.fmt.parseInt(u32, std.mem.trim(u8, v, " \t"), 10) catch 1;
@@ -772,9 +772,9 @@ pub fn loadFromPath(
                 // value that fails to parse leaves no radius effect rather
                 // than applying a buff at radius 0.
                 if (xml.attr(clean, pi, "value")) |v| {
-                    if (std.mem.findScalar(u8, v, ',')) |comma| {
-                        const nm = std.mem.trim(u8, v[0..comma], " ");
-                        const rs = std.mem.trim(u8, v[comma + 1 ..], " ");
+                    if (std.mem.cutScalar(u8, v, ',')) |parts| {
+                        const nm = std.mem.trim(u8, parts[0], " ");
+                        const rs = std.mem.trim(u8, parts[1], " ");
                         if (nm.len > 0) {
                             if (std.fmt.parseFloat(f32, rs) catch null) |r| {
                                 if (r > 0) {

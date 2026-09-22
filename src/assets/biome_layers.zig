@@ -396,9 +396,9 @@ fn ticksFromHours(hours: f32) i32 {
 
 /// `lo,hi` pair, or a single value used for both components (Unity Vector2 parse).
 fn parsePair(s: []const u8, lo: *f32, hi: *f32) void {
-    if (std.mem.findScalar(u8, s, ',')) |c| {
-        lo.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[0..c], " \t")), lo.*);
-        hi.* = saneFinite(xml.parseF32(std.mem.trim(u8, s[c + 1 ..], " \t")), hi.*);
+    if (std.mem.cutScalar(u8, s, ',')) |parts| {
+        lo.* = saneFinite(xml.parseF32(std.mem.trim(u8, parts[0], " \t")), lo.*);
+        hi.* = saneFinite(xml.parseF32(std.mem.trim(u8, parts[1], " \t")), hi.*);
         return;
     }
     const v = saneFinite(xml.parseF32(std.mem.trim(u8, s, " \t")), lo.*);

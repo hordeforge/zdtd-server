@@ -1543,9 +1543,9 @@ pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
         if (row.len == 0) continue;
         var name = row;
         var count: u16 = 1;
-        if (std.mem.findScalar(u8, row, ':')) |colon| {
-            name = std.mem.trim(u8, row[0..colon], " \t");
-            const ctext = std.mem.trim(u8, row[colon + 1 ..], " \t");
+        if (std.mem.cutScalar(u8, row, ':')) |parts| {
+            name = std.mem.trim(u8, parts[0], " \t");
+            const ctext = std.mem.trim(u8, parts[1], " \t");
             count = std.fmt.parseInt(u16, ctext, 10) catch {
                 std.debug.print("zdtd: spawn_starter_kit: bad count '{s}' for '{s}'; row skipped\n", .{ ctext, name });
                 continue;

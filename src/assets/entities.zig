@@ -564,17 +564,19 @@ fn resolvedTargetPlayerSense(
     return resolvedAiTargetEntry(TargetPlayerSense, parseTargetPlayerEntry, classes, name);
 }
 
+/// Split an AI task entry into its task name and the trimmed argument tail.
+/// The tail is empty when the entry carries no arguments.
+fn splitTaskEntry(entry: []const u8) struct { []const u8, []const u8 } {
+    const parts = std.mem.cutScalar(u8, entry, ' ') orelse return .{ entry, "" };
+    return .{ parts[0], std.mem.trim(u8, parts[1], " \t") };
+}
+
 /// Parse one `SetNearestEntityAsTarget class=...` entry for its EntityPlayer
 /// triple. Grammar (targetClasses parse IL): comma-separated
 /// `type,hear,see` triples stepped by 3; the player triple's hear 0 reads 50
 /// stock-side. Null unless the entry names the player type.
 fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
-    var name = entry;
-    var data: []const u8 = "";
-    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
-        name = entry[0..sp];
-        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
-    }
+    const name, const data = splitTaskEntry(entry);
     if (!std.mem.eql(u8, name, "SetNearestEntityAsTarget")) return null;
     const marker = "class=";
     const ci = std.mem.find(u8, data, marker) orelse return null;
@@ -604,12 +606,7 @@ fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
 /// that carries a `class=` filter; a bare entry keeps the legacy
 /// always-retarget path, which the resolver reports as 0 bits.
 fn parseHurtTargetClasses(entry: []const u8) ?u8 {
-    var name = entry;
-    var data: []const u8 = "";
-    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
-        name = entry[0..sp];
-        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
-    }
+    const name, const data = splitTaskEntry(entry);
     if (!std.mem.eql(u8, name, "SetAsTargetIfHurt")) return null;
     const marker = "class=";
     const ci = std.mem.find(u8, data, marker) orelse return null;
@@ -636,12 +633,7 @@ fn parseHurtTargetClasses(entry: []const u8) ?u8 {
 /// `data=` returns bit 0 alone (stock parses zero conditions, so
 /// CanExecute never fires and nothing is blocked).
 fn parseBlockIfAlert(entry: []const u8) ?u8 {
-    var name = entry;
-    var data: []const u8 = "";
-    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
-        name = entry[0..sp];
-        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
-    }
+    const name, const data = splitTaskEntry(entry);
     if (!std.mem.eql(u8, name, "BlockIf")) return null;
     const marker = "condition=";
     const ci = std.mem.find(u8, data, marker) orelse return 1;
