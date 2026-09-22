@@ -13,6 +13,7 @@ pub const packages = @import("packages.zig");
 pub const platform_user = @import("platform_user.zig");
 pub const stock_inv = @import("stock_inv.zig");
 pub const stock_chunk = @import("stock_chunk.zig");
+pub const chunk_tests = @import("chunk_tests.zig");
 pub const stock_deco = @import("stock_deco.zig");
 pub const stock_nameid = @import("stock_nameid.zig");
 pub const stock_entity = @import("stock_entity.zig");
@@ -72,6 +73,7 @@ test {
     _ = platform_user;
     _ = stock_inv;
     _ = stock_chunk;
+    _ = chunk_tests;
     _ = stock_deco;
     _ = stock_nameid;
     _ = stock_entity;
