@@ -63,6 +63,29 @@ the tick pacer quote follows `lifecycle.zig:109`. Evidence: full
 previously-failing test re-verified green individually (fan-out 14/14,
 stale-peer reap 14/14, GAME_OPTIONS 3/3); `check_docs` ok (1688 links,
 3805 citations, 303 quoted blocks) and `check_config_keys` ok (72 keys).
+**Zombie strike anim params on the wire 2026-09-22**: a landed zombie melee
+hit sets an edge that `replicate` drains into one stock
+`NetPackageEntityAnimationData` (entityId, count 3: `Attack` int 0,
+`AttackBlend` 0.5, `AttackTrigger` true), so a stock client's local avatar
+controller plays the swing instead of the zombie hitting with no visible
+animation. The param hashes come from `animatorStringHash`, the reflected
+CRC-32 behind `Animator.StringToHash`: the managed internalcall was traced
+into the installed `UnityPlayer.so`, the registered icall target captured
+under gdb, the BSS table dumped against the standard CRC-32 table, and a
+live engine evaluation of `"Attack"` returned `0x406c280d`, exactly
+`zlib.crc32("Attack")` (chain and flush IL in 7dtd-engine-research
+docs/entities/entity-ai.md 2026-09-22). The edge bypasses the pos-heartbeat
+and motion-period replicate gates (stock flushes changed params every
+FixedUpdate), survives until an observer is in range, and counts a build or
+frame failure on `encode_errors`; delivery is the reliable window,
+window-droppable like AliveFlags. Base variant 0 and a fixed midpoint blend
+replace stock's limb-derived and random picks (cosmetic client choices; a
+dedi zombie carries no per-limb body damage), zombie avatars only (the
+animal controller's attack params are not RE'd). Gated by
+`animatorStringHash matches the live-pinned CRC-32 constants`,
+`entity animation data builds the typed strike list`, and the extended
+`scenario zombie melee reaches the client as EntityStatChanged` (zombie
+entity id, count 3, pinned Attack hash, edge consumed; 11/11).
 **Loadgen Navezgane mixed-mode smoke 2026-09-12
 (round 19, post damage/loot changes)**: on the current commit (passive-43 EDR +
 `AffectedByArmor` source gate + loot `EntryGate`) the real map loaded (loot

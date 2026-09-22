@@ -3036,9 +3036,19 @@ gamestage, no wandering hordes, and no screamers.
   `asm.il:199650` (SendStatChangePacket), `asm.il:200440`
 
 - **Animation / ragdoll / look-at replication for AI** `PARTIAL (waived)`
-  Server drives AI position/state; animation/ragdoll/look-at FX are client-predicted.
-  Stock FX parity is out of scope (AGENTS: wire is contract, no fake FX - §2a).
-  *Anchors:* `src/server/game.zig`, `src/ecs/ai_tasks.zig:1190-1230`
+  Server drives AI position/state; the landed-strike attack params now ship:
+  a zombie hit sets an edge that replicate drains into one stock
+  `NetPackageEntityAnimationData` (Attack int / AttackBlend float /
+  AttackTrigger, hashes from the RE-pinned CRC-32 `animatorStringHash`,
+  entity-ai.md 2026-09-22), so a stock client's avatar controller plays the
+  swing; gated by the melee-replication scenario (zombie entity id, count 3,
+  pinned Attack hash, edge consumed). zdtd picks stock's base variant and a
+  fixed blend midpoint instead of the limb-derived random picks (cosmetic
+  client choices; a dedi zombie carries no per-limb body damage); the other
+  animator params (locomotion), look-at and server-initiated ragdoll FX stay
+  client-predicted, out of scope (AGENTS: wire is contract, no fake FX - §2a).
+  *Anchors:* `src/server/game/replicate.zig` (strike flush), `src/wire/stock_anim.zig`
+  (builder + hashes), `src/ecs/ai_tasks.zig` (strike edge)
 
 - **Spawn placement validity** `WORKS`
   Spawn Y is now ground-snapped through the world ground hook for every
