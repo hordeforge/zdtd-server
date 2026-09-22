@@ -489,6 +489,7 @@ Coverage targets, all enforced by the scan:
 | `src/wire/stock_deco.zig` | R | Stock NetPackageDecoUpdate + DecoObject wire (derived V3.0.1, live on V3.1.0 b14). Client fixed-size worlds only show grass/trees from server deco pac |
 | `src/wire/chunk_tests.zig` | R | Chunk wire tests (encode, density, stability). Split out of stock_chunk.zig verbatim |
 | `src/wire/stock_entity.zig` | R | Stock EntityCreationData + NetPackageEntitySpawn (networkWrite=true). |
+| `src/wire/entity_tests.zig` | R | Entity wire tests (spawn, stats, anim). Split out of stock_entity.zig verbatim |
 | `src/wire/stock_inv.zig` | R | Stock inventory wire (ItemValue/ItemStack/Bag/Equipment/NetPackagePlayerInventory). The `ItemValue` stat block (flag bit 2, `u8` count, `type u8 | slotA i16 | slotB i16`; `ItemValue::Write` IL=323) parses into the slot and is written back verbatim, so an echo keeps a client-created item's passive deltas (2026-09-14). Derived on V3.0.1, carried to V3.1.0 b14; version-specific fields. Equipment body parse helpers feed `server/inv_apply.zig` (Equipment.Read IL=93, pinned in netpackage-bodies.md 2026-08-26) for the C2S equip-sync |
 | `src/wire/stock_nameid.zig` | R | Stock `NameIdMapping` blob (the `data` payload of NetPackageIdMapping). |
 | `src/wire/stock_party.zig` | R | NetPackagePartyActions (ToServer) + NetPackagePartyData (ToClient) bodies (RE ../7dtd-engine-research/docs/social/parties-factions.md §3) |

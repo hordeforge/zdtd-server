@@ -17,6 +17,7 @@ pub const chunk_tests = @import("chunk_tests.zig");
 pub const stock_deco = @import("stock_deco.zig");
 pub const stock_nameid = @import("stock_nameid.zig");
 pub const stock_entity = @import("stock_entity.zig");
+pub const entity_tests = @import("entity_tests.zig");
 pub const stock_quest = @import("stock_quest.zig");
 pub const stock_buff = @import("stock_buff.zig");
 pub const stock_damage = @import("stock_damage.zig");
@@ -77,6 +78,7 @@ test {
     _ = stock_deco;
     _ = stock_nameid;
     _ = stock_entity;
+    _ = entity_tests;
     _ = stock_quest;
     _ = stock_buff;
     _ = stock_damage;
