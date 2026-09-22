@@ -85,6 +85,7 @@ pub const game_lifecycle = @import("game/lifecycle.zig");
 pub const game_tests = @import("game/tests.zig");
 pub const game_tests_players = @import("game/tests_players.zig");
 pub const game_tests_claims = @import("game/tests_claims.zig");
+pub const game_tests_offline = @import("game/tests_offline.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
 pub const c2s_inv_reload = @import("c2s/inv_reload.zig");
@@ -212,6 +213,7 @@ test {
     _ = game_tests;
     _ = game_tests_players;
     _ = game_tests_claims;
+    _ = game_tests_offline;
     _ = c2s_inv;
     _ = c2s_inv_reload;
     _ = c2s_inv_holding;
