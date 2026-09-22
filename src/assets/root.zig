@@ -27,6 +27,7 @@ pub const entities = @import("entities.zig");
 pub const recipes = @import("recipes.zig");
 pub const loot = @import("loot.zig");
 pub const loot_load = @import("loot_load.zig");
+pub const loot_tests = @import("loot_tests.zig");
 pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
 pub const maxdamage = @import("maxdamage.zig");
@@ -80,6 +81,7 @@ test {
     _ = recipes;
     _ = loot;
     _ = loot_load;
+    _ = loot_tests;
     _ = entitygroups;
     _ = gamestages;
     _ = maxdamage;
