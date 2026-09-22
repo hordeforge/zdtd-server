@@ -22,6 +22,7 @@
 pub const entity = @import("entity.zig");
 pub const components = @import("components.zig");
 pub const world = @import("world.zig");
+pub const world_tests = @import("world_tests.zig");
 pub const BotSnap = world.BotSnap;
 pub const systems = @import("systems.zig");
 pub const vehicle = @import("vehicle.zig");
@@ -68,6 +69,7 @@ test {
     _ = entity;
     _ = components;
     _ = world;
+    _ = world_tests;
     _ = systems;
     _ = vehicle;
     _ = turrets;

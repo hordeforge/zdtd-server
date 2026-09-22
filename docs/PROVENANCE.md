@@ -274,6 +274,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/quest_trade.zig` | R | Quest + trader systems (journal phase graph, wallet, loot pickup, buy/sell/restock). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/vehicle.zig` | R | Vehicle sim (kind speeds, drive control, seat attach/detach). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/world.zig` | R | ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers |
+| `src/ecs/world_tests.zig` | R | ECS world tests (spawn, damage, loot, ticks, handles, corpses). Split out of world.zig verbatim |
 | `src/fuzz.zig` | Z | Coverage-guided fuzz targets for remote wire parsing boundaries and other untrusted-input surfaces (admin lines, map XML, COG headers, |
 | `src/litenet/packet.zig` | R | LiteNetLib wire packet property helpers. Property ordinals match the **game** Managed LiteNetLib (7DTD V3.1.0 b14), |
 | `src/litenet/peer.zig` | R | Per-endpoint reliable-ordered channel (LiteNetLib-compatible subset). Matches game Managed LiteNetLib PacketProperty ordinals and ack sizing | fragment per-part loop pumps to the outer send deadline (no outer stream restart for live peers) per-peer negotiated MTU from MtuCheck probes caps S2C sizes (low-MTU joins)

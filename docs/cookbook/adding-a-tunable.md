@@ -123,7 +123,7 @@ If the field moved out of a code constant, add a row to the `Moved` table in
 
 A `Rules` value is a floor, never a replacement for stock data (ADR 0021
 decision 5). The pattern at the read site checks the per-entity value first and
-falls back to the rule (`src/ecs/ai_tasks.zig:893`):
+falls back to the rule (`src/ecs/ai_tasks.zig:875`):
 
 ```zig
         const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
