@@ -198,7 +198,7 @@ src/assets/xml_patch.zig:1307-1317).
 
 `applyModDirs` tries `<mod>/Config/<configName>` first, `.xml` appended when the name
 carries no extension, then every other XML in that mod's `Config/` in filename order
-(src/assets/xml_patch.zig:1543-1593). `applyOverrideDirs` applies all override dirs in
+(src/assets/xml_patch.zig:1498-1551). `applyOverrideDirs` applies all override dirs in
 dir order then filename order, and skips a file that fails rather than losing the
 whole catalog (src/assets/xml_patch.zig:1472-1499, src/assets/xml_patch.zig:1504-1536).
 

@@ -51,6 +51,7 @@ pub const worldglobal = @import("worldglobal.zig");
 pub const storage_pairs = @import("storage_pairs.zig");
 pub const paths = @import("paths.zig");
 pub const xml_patch = @import("xml_patch.zig");
+pub const xml_patch_tests = @import("xml_patch_tests.zig");
 pub const modlets = @import("modlets.zig");
 pub const blocks_nim = @import("blocks_nim.zig");
 pub const sandbox = @import("sandbox.zig");
@@ -102,6 +103,7 @@ test {
     _ = storage_pairs;
     _ = paths;
     _ = xml_patch;
+    _ = xml_patch_tests;
     _ = modlets;
     _ = blocks_nim;
     _ = sandbox;
