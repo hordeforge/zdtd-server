@@ -64,6 +64,30 @@ test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {
     try std.testing.expect(m.find(100) == null);
 }
 
+test "a plugin's bot remove <id> only reaches its own bots" {
+    // `bot remove all` is source-scoped so one component cannot destroy hosts
+    // another created; the single-id form carries the same rule, or plugin 2
+    // could despawn plugin 1's bot and the removal would be neither attributed
+    // to it nor undone when plugin 1 is withdrawn (ADR 0030).
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 100, .hp = 100, .alive = true, .src = 1 };
+    m.bots[1] = .{ .net_id = 101, .hp = 100, .alive = true, .src = 2 };
+    m.n = 2;
+
+    m.removeFrom(100, 2); // plugin 2 aiming at plugin 1's bot: refused
+    try std.testing.expectEqual(@as(usize, 2), m.n);
+    try std.testing.expect(m.find(100) != null);
+
+    m.removeFrom(101, 2); // its own bot: removed
+    try std.testing.expectEqual(@as(usize, 1), m.n);
+    try std.testing.expect(m.find(101) == null);
+
+    // The console (src 0) keeps `remove`'s full reach over every bot.
+    m.removeFrom(100, 0);
+    try std.testing.expectEqual(@as(usize, 0), m.n);
+    try std.testing.expect(m.find(100) == null);
+}
+
 test "BotManager move integration steps toward dest without overshooting" {
     var m: BotManager = .{};
     m.bots[0] = .{ .net_id = 100, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };

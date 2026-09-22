@@ -229,7 +229,7 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
     // at a time; the cells it yields keep the old x-then-z-then-y visit order.
     var y: i32 = 0;
     while (y < live.y_dim) : (y += 1) {
-        const plane = blocks[@intCast(y * 256)..][0..cells_per_plane];
+        const plane = blocks[@as(usize, @intCast(y)) * cells_per_plane ..][0..cells_per_plane];
         var i: usize = 0;
         while (world_store.nextNonAir(plane, i)) |k| {
             i = k + 1;
@@ -300,7 +300,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     var y: i32 = 0;
     while (y < ch.y_dim) : (y += 1) {
         cells += cells_per_plane;
-        const plane = blocks[@intCast(y * 256)..][0..cells_per_plane];
+        const plane = blocks[@as(usize, @intCast(y)) * cells_per_plane ..][0..cells_per_plane];
         var i: usize = 0;
         while (world_store.nextNonAir(plane, i)) |k| {
             i = k + 1;

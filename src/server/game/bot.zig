@@ -451,9 +451,24 @@ pub const BotManager = struct {
         return written;
     }
 
-    /// Despawn one bot by net id (no-op for unknown ids).
+    /// Despawn one bot by net id (no-op for unknown ids). Unscoped: the
+    /// operator console reaches every bot, whoever spawned it.
     pub fn remove(self: *BotManager, net_id: i32) void {
         const s = self.find(net_id) orelse return;
+        self.bots[s] = .{};
+        self.n -|= 1;
+    }
+
+    /// `bot remove <id>` issued by a plugin: the single-target twin of
+    /// `removeAll`, and it carries the same attribution rule. A plugin may
+    /// despawn only the bots it spawned, or one component could destroy hosts
+    /// another created and the removal would be neither attributed to it nor
+    /// revertible when it is withdrawn (paper: temporal composability, ADR
+    /// 0030). Native src 0 is the console and keeps `remove`'s full reach.
+    pub fn removeFrom(self: *BotManager, net_id: i32, src: i16) void {
+        if (src <= 0) return self.remove(net_id);
+        const s = self.find(net_id) orelse return;
+        if (self.bots[s].src != src) return;
         self.bots[s] = .{};
         self.n -|= 1;
     }
@@ -621,7 +636,7 @@ pub const BotManager = struct {
                 self.removeAll(src);
             } else {
                 if (it.next() != null) return true;
-                self.remove(std.fmt.parseInt(i32, arg, 10) catch return true);
+                self.removeFrom(std.fmt.parseInt(i32, arg, 10) catch return true, src);
             }
             return true;
         }

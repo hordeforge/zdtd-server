@@ -11,8 +11,9 @@ const xml = @import("../assets/xml_util.zig");
 const paths = @import("../assets/paths.zig");
 const stock_paths = @import("../util/stock_paths.zig");
 
-/// Offline biomemap id for pine_forest (stock V3.1 AssignIds pin). Used when
-/// biomes.xml is not loaded, never when the stock file resolved the id.
+/// Offline biomemap id for pine_forest (stock `biomes.xml` row
+/// `<biomemap id="03" name="pine_forest"/>`). Used when biomes.xml is not
+/// loaded, never when the stock file resolved the id.
 pub const offline_default_biome_id: u8 = 3;
 
 /// Color keys compared per vector in `ColorTable.lookup` (stock biomes.xml
@@ -76,7 +77,9 @@ pub const ColorTable = struct {
     }
 };
 
-/// Fallback when biomes.xml is missing (offline tests). Matches stock V3.1 keys.
+/// Fallback when biomes.xml is missing (offline tests). Keys and ids are the
+/// stock `biomemapcolor` / `<biomemap>` pairs (verified against the operator
+/// install's `Data/Config/biomes.xml`, 2026-09-22).
 pub fn colorToId(r: u8, g: u8, b: u8) u8 {
     return fallback_colors.lookup(r, g, b);
 }
@@ -100,8 +103,8 @@ pub fn biomeIdForName(table: ?*const ColorTable, name: []const u8) u8 {
 }
 
 /// Offline biomemap id for the synthetic height-band biome choice (no
-/// biomes.xml loaded): stock V3.1 AssignIds pins (snow 1, desert 5, else
-/// pine_forest). Callers prefer the loaded `<biomemap>` name table first.
+/// biomes.xml loaded): the stock `<biomemap>` rows (snow 01, desert 05, else
+/// pine_forest 03). Callers prefer the loaded `<biomemap>` name table first.
 pub fn offlineBandId(name: []const u8) u8 {
     if (std.mem.eql(u8, name, "snow")) return 1;
     if (std.mem.eql(u8, name, "desert")) return 5;
