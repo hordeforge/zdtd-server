@@ -49,7 +49,7 @@
   //     repeated: eslint/no-await-in-loop, no-continue, no-ternary, id-length,
   //     max-statements, new-cap, prefer-object-spread, oxc/no-optional-
   //     chaining, no-rest-spread-properties, no-map-spread.
-  //   * oxlint 1.79.0 does not implement import/no-reexport,
+  //   * oxlint 1.85.0 does not implement import/no-reexport,
   //     import/no-extraneous-dependencies, import/no-unresolved (baseline
   //     entries; the import plugin is loaded for the rest of imports-hygiene).
   //   * Framework presets (strict-drizzle/-web/-effect/-zustand/-bun) do not
@@ -61,11 +61,20 @@
   // lint-webui.sh from a cached install; see the provenance note above. The
   // dmmulroy/anti-slop plugin is vendored source at a pinned SHA (same cache),
   // and @oxlint/plugins is its plugin-API dependency, installed in the same
-  // npm invocation.
+  // npm invocation. @shadcn/lint is the Tailwind design-system plugin
+  // (no-restyle is off: there is no component library here, only page markup;
+  // the token/appearance rules guard the utility port).
   "jsPlugins": [
     "@rikalabs/oxlint-standards/plugin",
-    { "name": "anti-slop", "specifier": "./anti-slop-src/index.js" }
+    { "name": "anti-slop", "specifier": "./anti-slop-src/index.js" },
+    "@shadcn/lint"
   ],
+  "settings": {
+    "shadcn": {
+      "note": "zdtd webui: theme tokens come from src/server/webui/webui.css (@theme).",
+      "componentImports": ["^preact(/|$)"]
+    }
+  },
   // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
   // the rules below reference (same list as the baseline's strict-core preset);
   // import + promise are the two that would otherwise not be loaded.
@@ -263,6 +272,14 @@
     "@rikalabs/no-debug-residue-filenames": "error",
     "@rikalabs/no-hardcoded-secrets": "error",
     "@rikalabs/no-sql-string-concat": "error",
+    // ---- @shadcn/lint (Tailwind design system; theme in webui.css) ----
+    // no-restyle stays off: no component library, only page markup.
+    "shadcn/no-restyle": "off",
+    "shadcn/no-raw-colors": "error",
+    "shadcn/no-arbitrary-values": ["error", { "allow": ["layout"] }],
+    "shadcn/no-inline-styles": ["error", { "allow": ["transform"] }],
+    "shadcn/no-unknown-classes": "error",
+    "shadcn/require-static-classes": "error",
     // ---- off, with reason ----
     // Narrow exception instead of the rule off: the lockout page's only
     // double-underscore name is the server-injected global, so allow that one

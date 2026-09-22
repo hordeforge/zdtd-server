@@ -64,7 +64,7 @@ pub const collide_arrows: CollideMask = 32;
 pub const collide_default: CollideMask = 0xff;
 
 /// The three stock drop events (`EnumDropEvent`: Destroy=0, Fall=1,
-/// Harvest=2, il/full-v3.1.0/_global/EnumDropEvent.il.txt).
+/// Harvest=2, il/full-v3.2.0/_global/EnumDropEvent.il.txt).
 pub const DropEvent = enum { destroy, fall, harvest };
 
 /// One `<drop event="Harvest" .../>` row from a block's body. Roll

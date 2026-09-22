@@ -110,7 +110,9 @@ function cssVar(name: string): string {
 }
 
 // The palette is re-read rather than frozen: forced-colors swaps the CSS
-// variables, and the canvas is not recoloured by the browser.
+// variables, and the canvas is not recoloured by the browser. Reads the
+// --color-* theme names; the legacy --term-* aliases in webui.css exist only
+// for the transition.
 let CHART_LINE_COLOR = "#6b7280";
 let CHART_GHOST_COLOR = "#6b7280";
 let CHART_GRID_COLOR = "#6b7280";
@@ -119,17 +121,17 @@ let CHART_BUDGET_COLOR = "#6b7280";
 let SECTION_FILL_COLORS: ReadonlyArray<string> = [];
 
 function refreshChartPalette(): void {
-    CHART_LINE_COLOR = cssVar("--term-ok");
-    CHART_GHOST_COLOR = cssVar("--term-faint");
-    CHART_GRID_COLOR = cssVar("--term-line");
-    CHART_LABEL_COLOR = cssVar("--term-faint");
-    CHART_BUDGET_COLOR = cssVar("--term-key");
+    CHART_LINE_COLOR = cssVar("--color-term-ok");
+    CHART_GHOST_COLOR = cssVar("--color-term-faint");
+    CHART_GRID_COLOR = cssVar("--color-term-line");
+    CHART_LABEL_COLOR = cssVar("--color-term-faint");
+    CHART_BUDGET_COLOR = cssVar("--color-term-key");
     SECTION_FILL_COLORS = [
-        cssVar("--term-line"),
-        cssVar("--term-band1"),
-        cssVar("--term-band2"),
-        cssVar("--term-faint"),
-        cssVar("--term-text"),
+        cssVar("--color-term-line"),
+        cssVar("--color-term-band1"),
+        cssVar("--color-term-band2"),
+        cssVar("--color-term-faint"),
+        cssVar("--color-term-text"),
     ];
 }
 

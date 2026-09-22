@@ -5138,7 +5138,7 @@ a finer server encoding.
   still reads `land_claims`, so a player past the wire cap keeps every claim;
   only the client overlay tail is dropped.
   *Anchors:* `src/server/c2s/blocks.zig:claimCovering`, `src/wire/stock_inv.zig:846-885`,
-  `../7dtd-engine-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
+  `../7dtd-engine-research/il/realearth-surfaces-v3.2.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
 
 - **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `WORKS` (2026-08-25):
   Count, DeadZone and ExpiryTime are enforced at registration / day roll

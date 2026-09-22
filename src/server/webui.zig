@@ -35,12 +35,15 @@ pub const max_name: usize = 32;
 pub const max_cmd_line: usize = 256;
 pub const max_cmd_out: usize = 4096;
 // Shell page (bundled Preact app + CSS inlined) is the largest rendered body.
-// The bundle (ADR 0040) put the committed page at about 68 KiB, under 4 KiB
-// below the old 72 KiB cap; 80 KiB keeps room for bundle growth. Poll
-// path only, but not free: serveHttp's `body_buf` and the std.http.Server out
-// buffer (`max_shell_html + 4096`) are both stack frames on the tick thread,
+// The Tailwind build (utilities + @theme inlined) put the committed page at
+// about 111 KiB; 128 KiB keeps room for utility growth. Poll path only, but
+// not free: serveHttp's `body_buf` and the std.http.Server out buffer
+// (`max_shell_html + 4096`) are both stack frames on the tick thread,
 // so this const is stack cost as well as a cap.
-pub const max_shell_html: usize = 80 * 1024;
+pub const max_shell_html: usize = 128 * 1024;
+// Sign-in pages (Tailwind build inlined) are the next largest bodies after the
+// shell; login.html and login_lockout.html each render under this cap.
+pub const max_login_html: usize = 24 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -215,8 +218,8 @@ pub const Server = struct {
     /// Game allocator for mutating admin routes (modlet state file) and the
     /// session-scoped shell gzip cache (see `shell_gz`).
     allocator: std.mem.Allocator = std.heap.page_allocator,
-    /// Last gzip of GET `/` for the current session token. The shell is ~73 KiB
-    /// plain / ~23 KiB gzip and is served on every dashboard load; recompressing
+    /// Last gzip of GET `/` for the current session token. The shell is ~111 KiB
+    /// plain / ~30 KiB gzip and is served on every dashboard load; recompressing
     /// it per request burns tick-thread CPU for bytes that only change when the
     /// session token does. Freed on logout, re-login, and deinit.
     shell_gz: ?[]u8 = null,
@@ -503,7 +506,7 @@ pub const Server = struct {
         // The out buffer must hold the largest response body (the rendered
         // shell dashboard, up to max_shell_html) plus header headroom; 49 KiB
         // was too small and the dashboard 500'd with WriteFailed for any page
-        // over it (shell.html alone is 63 KiB).
+        // over it (shell.html alone is 111 KiB with the Tailwind build inline).
         var out_buf: [max_shell_html + 4096]u8 = undefined;
         var out_w: std.Io.Writer = .fixed(&out_buf);
         var http_srv = http.Server.init(&in_r, &out_w);
@@ -590,7 +593,7 @@ pub const Server = struct {
                 }
                 // Show lockout on the form page so operators know why Sign in is refused.
                 if (self.loginLocked()) {
-                    var lockout_buf: [8192]u8 = undefined;
+                    var lockout_buf: [max_login_html]u8 = undefined;
                     var retry_buf: [8]u8 = undefined;
                     const remaining_s = self.lockoutRemainingS();
                     const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
@@ -598,7 +601,7 @@ pub const Server = struct {
                         .{ .name = "Retry-After", .value = retry_hdr },
                     });
                 } else {
-                    var login_buf: [8192]u8 = undefined;
+                    var login_buf: [max_login_html]u8 = undefined;
                     try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderLogin(&login_buf, false), &.{});
                 }
                 return;
@@ -609,7 +612,7 @@ pub const Server = struct {
                     return;
                 }
                 if (self.loginLocked()) {
-                    var lockout_buf: [8192]u8 = undefined;
+                    var lockout_buf: [max_login_html]u8 = undefined;
                     var retry_buf: [8]u8 = undefined;
                     const remaining_s = self.lockoutRemainingS();
                     const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
@@ -620,12 +623,12 @@ pub const Server = struct {
                 }
                 // Missing/empty token is a client error (400). Wrong secret is 401.
                 const tok = formField(body, "token") orelse {
-                    var login_buf: [8192]u8 = undefined;
+                    var login_buf: [max_login_html]u8 = undefined;
                     try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                     return;
                 };
                 if (tok.len == 0) {
-                    var login_buf: [8192]u8 = undefined;
+                    var login_buf: [max_login_html]u8 = undefined;
                     try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                     return;
                 }
@@ -646,7 +649,7 @@ pub const Server = struct {
                 self.noteLoginFailure();
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} webui login rejected (bad token)\n", .{clock.wallStamp(&ts)});
-                var login_buf: [8192]u8 = undefined;
+                var login_buf: [max_login_html]u8 = undefined;
                 try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                 return;
             }
@@ -678,7 +681,7 @@ pub const Server = struct {
                     .{ .name = "WWW-Authenticate", .value = "Bearer realm=\"zdtd-webui\"" },
                 });
             } else {
-                var login_buf: [8192]u8 = undefined;
+                var login_buf: [max_login_html]u8 = undefined;
                 try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, false), &.{});
             }
             return;
@@ -1660,6 +1663,10 @@ comptime {
     // header/capture headroom the response buffers add on top of max_shell_html.
     if (shell_html.len + 4096 > max_shell_html)
         @compileError("shell.html no longer fits max_shell_html; raise the const and its stack-cost comment");
+    if (login_html.len + 1024 > max_login_html)
+        @compileError("login.html no longer fits max_login_html; raise the const");
+    if (login_lockout_html.len + 1024 > max_login_html)
+        @compileError("login_lockout.html no longer fits max_login_html; raise the const");
 }
 
 /// Sign-in form; `bad_token` swaps the lead for the failure banner and flips
@@ -1767,7 +1774,7 @@ test "renderTemplate tolerates a substitution the template does not use" {
 }
 
 test "renderLoginLockout substitutes the real remaining seconds" {
-    var buf: [8192]u8 = undefined;
+    var buf: [max_login_html]u8 = undefined;
     const out = try renderLoginLockout(&buf, 7);
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
     // Visible countdown is not a live region; #retry-live announces milestones.
@@ -3110,7 +3117,7 @@ test "renderShell serves the app mount point and the JSON poll" {
     try std.testing.expect(html.len < max_shell_html);
 }
 test "renderLogin substitutes banner and input state" {
-    var buf: [8192]u8 = undefined;
+    var buf: [max_login_html]u8 = undefined;
     const ok = try renderLogin(&buf, false);
     try std.testing.expect(std.mem.find(u8, ok, "<label for=\"login-token\">Shared secret</label>") != null);
     try std.testing.expect(std.mem.find(u8, ok, "name=\"token\"") != null);

@@ -101,7 +101,7 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
     return true;
 }
 
-/// Stock `PlayerStealth.TickServer` (IL=432, full-v3.1.0 dump): the
+/// Stock `PlayerStealth.TickServer` (IL=432, full-v3.2.0 dump): the
 /// `lightAttackPercent` fed to `CanSleeperAttackDetect`'s `FastLerp(3, 15,
 /// t)` crouch range. The IL check is on the **selfLight** out param of
 /// GetStealthLightLevel (the held-item light, IL_010B: `selfLight < 0.1` →

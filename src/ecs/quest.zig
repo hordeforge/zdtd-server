@@ -18,7 +18,7 @@ pub const QuestKind = enum(u8) {
     block_activate,
 };
 
-/// Stock quest tag names (QuestEventManager statics, il/full-v3.1.0/_global/
+/// Stock quest tag names (QuestEventManager statics, il/full-v3.2.0/_global/
 /// QuestEventManager.il.txt IL_0024-IL_0088): manual, trader, clear, treasure,
 /// fetch, crafting, restore_power, infested, bandit; plus `hidden_cache`, which
 /// ObjectiveFetchFromContainer adds for its hidden-cache fetch mode. The bit
@@ -57,7 +57,7 @@ pub fn tagsMask(list: []const u8) u32 {
     return mask;
 }
 
-/// Stock BaseObjective.SetupQuestTag map (il/full-v3.1.0/_global/Objective*.il.txt):
+/// Stock BaseObjective.SetupQuestTag map (il/full-v3.2.0/_global/Objective*.il.txt):
 /// which objective `type=` adds which tag to Quest.QuestTags. Unknown types add
 /// nothing (BaseObjective.SetupQuestTag is an empty IL=1 method).
 pub fn objectiveTag(obj_type: []const u8) u32 {
@@ -88,7 +88,7 @@ pub const biome_filter_same: u8 = 3;
 /// selection (static position or base SetupPosition).
 pub const PoiSelectKind = enum(u8) { none = 0, random, closest };
 
-/// Stock Prefab.GetQuestTag = questTags.Test_AllSet (il/full-v3.1.0/_global/
+/// Stock Prefab.GetQuestTag = questTags.Test_AllSet (il/full-v3.2.0/_global/
 /// Prefab.il.txt IL=5): the prefab must carry **every** tag the quest carries.
 /// An empty quest tag set matches everything (vacuous AllSet).
 pub fn prefabMatches(prefab_mask: u32, quest_mask: u32) bool {

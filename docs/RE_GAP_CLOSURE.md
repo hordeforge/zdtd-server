@@ -32,7 +32,7 @@ Paths below are relative to this repo: `../7dtd-engine-research/docs/<file>`.
 ## 2. NetPackage bodies (channels + wire)
 
 The full per-package census (channel/compress/direction/before-auth) is
-`protocol-packages.md` §1; regenerate with `../7dtd-engine-research/tools/bin/NetProtocolCensus`.
+`protocol-packages.md` §1; regenerate with `../7dtd-engine-research/tools/bin/NetProtocolCensus.exe`.
 Key facts zdtd should honor:
 
 - **Channel 1 band** (bulk, several compressed): `NetPackageChunk`, `ChunkRemove`,

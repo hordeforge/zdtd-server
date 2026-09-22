@@ -901,7 +901,7 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
 }
 
 /// NetPackageWorldSpawnPoints body: SpawnPointList (RE
-/// ../7dtd-engine-research/il/full-v3.1.0/_global/SpawnPointList.il.txt write IL=25
+/// ../7dtd-engine-research/il/full-v3.2.0/_global/SpawnPointList.il.txt write IL=25
 /// + SpawnPoint/SpawnPosition). Sent on death so the client's respawn screen
 /// lists the available spawn points. Layout: version u8 (2) + count i32 +
 /// per point: SpawnPosition (version u16 0 + position xyz f32 + heading f32)

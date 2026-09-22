@@ -1,5 +1,5 @@
 //! NetPackageEntityAddExpClient body (ToClient XP grant; RE
-//! ../7dtd-engine-research/il/netpackages-v3.1.0/NetPackageEntityAddExpClient_il.txt).
+//! ../7dtd-engine-research/il/netpackages-v3.2.0/NetPackageEntityAddExpClient_il.txt).
 //!
 //! `write` order after the package name: entityId i32, xp i32, xpType i16,
 //! includeItem bool, then ItemValue only when includeItem. ProcessPackage
@@ -44,7 +44,7 @@ test "add exp client body is the 11-byte stock shape" {
 }
 
 /// NetPackagePlayerStats body: entityId i32 + EntityNetworkStats snapshot
-/// (RE ../7dtd-engine-research/il/full-v3.1.0/_global/EntityAlive_EntityNetworkStats.il.txt
+/// (RE ../7dtd-engine-research/il/full-v3.2.0/_global/EntityAlive_EntityNetworkStats.il.txt
 /// write IL=104; read order in 7dtd-engine-research/docs/gameplay/progression.md).
 ///
 /// The snapshot carries the whole progression picture to peers (party panel
@@ -201,7 +201,7 @@ test "player stats body is the stock EntityNetworkStats shape" {
 
 /// NetPackageEntityAddScoreClient body: entityId i32, zombieKills i16,
 /// playerKills i16, otherTeamNumber i16, conditions i32 (RE
-/// ../7dtd-engine-research/il/netpackages-v3.1.0/NetPackageEntityAddScoreClient_il.txt
+/// ../7dtd-engine-research/il/netpackages-v3.2.0/NetPackageEntityAddScoreClient_il.txt
 /// write IL=27; the struct fields are Int32 narrowed to i16 on the wire).
 /// Stock sends it on every kill so the client's character sheet shows the
 /// running zombie/player kill counters.

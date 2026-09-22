@@ -1,0 +1,7 @@
+/* Tailwind v4 entry for shell: theme + only the utilities this page uses.
+   Generated splice input for scripts/build-webui-ts.sh; not authored. */
+@import "tailwindcss" source(none);
+@import "./webui.css";
+@source "./shell.html";
+@source "./shell.tsx";
+@source "./chart.ts";

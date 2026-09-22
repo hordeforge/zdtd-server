@@ -9,7 +9,10 @@ Checks, in this order:
 3. Quoted blocks: every ```zig block in the checked trees appears in the source
    file named by the `file.zig:LINE` citation above it, in order, so a quoted
    declaration cannot drift from the code it claims to quote.
-4. Budgets: docs/budgets.json ceilings are respected, and every page under the
+4. Research paths: every `../7dtd-engine-research/...` path resolves in the
+   sibling checkout, so a provenance cite cannot outlive the file it names.
+   Skipped when that sibling is absent.
+5. Budgets: docs/budgets.json ceilings are respected, and every page under the
    covered trees has a row (a new page without a budget is a config error, the
    same way a new src file without a provenance row is).
 
@@ -50,8 +53,14 @@ CITATION_EXCLUDED_TREES = ("archive",)
 CITATION_EXCLUDED_FILES = ("provenance.html",)
 
 # A path that resolves to one of these is a citation of an external artifact we
-# do not have in this checkout, so only its shape is informational.
+# do not have in this checkout, so only its shape is informational. The one
+# exception is the research sibling, checked separately by check_research_paths
+# when it is present: its `file:LINE` offsets move with a dump regeneration, but
+# the paths themselves are provenance cites and must resolve.
 EXTERNAL_PREFIXES = ("..", "/")
+
+RESEARCH_ROOT = ROOT.parent / "7dtd-engine-research"
+RESEARCH_PATH_RE = re.compile(r"\.\./7dtd-engine-research/[A-Za-z0-9_./-]+")
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 CITATION_RE = re.compile(
@@ -119,6 +128,24 @@ def check_links(text: str, path: Path, failures: list[str]) -> int:
         resolved = (path.parent / target).resolve()
         if resolved.is_relative_to(ROOT) and not resolved.exists():
             failures.append(f"{rel(path)}: dead link {target}")
+    return total
+
+
+def check_research_paths(text: str, path: Path, failures: list[str]) -> int:
+    """Every `../7dtd-engine-research/...` path in a page must exist.
+
+    Skipped (reported as 0 checks) when the sibling checkout is absent, so a
+    worktree without it still gates the rest. Sentence punctuation is trimmed
+    off the tail; a real path never ends in one of those.
+    """
+    if not RESEARCH_ROOT.is_dir():
+        return 0
+    total = 0
+    for match in RESEARCH_PATH_RE.finditer(text):
+        cited = match.group(0).rstrip(".,;:)")
+        total += 1
+        if not (ROOT / cited).exists():
+            failures.append(f"{rel(path)}: research path {cited} does not exist")
     return total
 
 
@@ -390,7 +417,7 @@ def main() -> int:
             only = argv[index + 1]
 
     failures: list[str] = []
-    links = citations = blocks = budgets = 0
+    links = citations = blocks = budgets = research = 0
 
     for path in markdown_files():
         if only is not None and only not in rel(path):
@@ -400,6 +427,7 @@ def main() -> int:
         if is_citation_checked(path):
             citations += check_citations(text, path, failures)
             blocks += check_blocks(text, path, failures)
+            research += check_research_paths(text, path, failures)
     budgets = 0 if only else check_budgets(failures)
     if only is None:
         check_registries(failures)
@@ -415,7 +443,8 @@ def main() -> int:
             )
         print(
             f"check_docs: {len(failures)} failure(s) "
-            f"({links} links, {citations} citations, {blocks} quoted blocks, {budgets} budgets)",
+            f"({links} links, {citations} citations, {blocks} quoted blocks, "
+            f"{budgets} budgets, {research} research paths)",
             file=sys.stderr,
         )
         return 1
@@ -423,7 +452,8 @@ def main() -> int:
     if not quiet:
         print(
             f"check_docs: ok ({links} links, {citations} citations, "
-            f"{blocks} quoted blocks, {budgets} budgets)"
+            f"{blocks} quoted blocks, {budgets} budgets, "
+            f"{research} research paths)"
         )
     return 0
 

@@ -189,7 +189,7 @@ function flashChanges(region: HTMLElement): void {
     if (prefersReducedMotion()) {
         return;
     }
-    const nodes = region.querySelectorAll<HTMLElement>(".stat, tbody tr");
+    const nodes = region.querySelectorAll<HTMLElement>("[data-flash], tbody tr");
     const prev = prevSignatures.get(region);
     const next = new Map<string, string>();
     const changed: Array<HTMLElement> = [];
@@ -204,13 +204,13 @@ function flashChanges(region: HTMLElement): void {
     // Clear, then flush layout once, then re-add: one forced reflow restarts
     // every animation at once instead of one reflow per changed node.
     for (const node of changed) {
-        node.classList.remove("flash");
+        node.classList.remove("flash-once");
     }
     if (changed.length > 0) {
         void region.offsetWidth;
         for (const node of changed) {
-            node.classList.add("flash");
-            globalThis.setTimeout(() => node.classList.remove("flash"), FLASH_MS);
+            node.classList.add("flash-once");
+            globalThis.setTimeout(() => node.classList.remove("flash-once"), FLASH_MS);
         }
     }
     prevSignatures.set(region, next);
@@ -294,20 +294,20 @@ async function postModlet(csrf: string, name: string, action: string): Promise<M
 
 function toneFor(count: number, severe: boolean): string {
     if (count === 0) {
-        return "num";
+        return "font-mono text-num tabular-nums";
     }
-    return severe ? "num err" : "num warn-text";
+    return severe ? "font-mono text-num tabular-nums text-err" : "font-mono text-num tabular-nums text-warn";
 }
 
-function StatGrid({ heading, stats, flush }: { heading?: string; stats: Array<Stat>; flush?: boolean }): ComponentChildren {
+function StatGrid({ heading, stats }: { heading?: string; stats: Array<Stat> }): ComponentChildren {
     return (
         <Fragment>
-            {heading === undefined ? null : <h3 class={flush === true ? "flush" : undefined}>{heading}</h3>}
-            <ul class="grid">
+            {heading === undefined ? null : <h3 class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold text-ink">{heading}</h3>}
+            <ul class="list-none m-0 grid border-t border-line bg-transparent p-0">
                 {stats.map((stat) => (
-                    <li class="stat" key={stat.label}>
-                        <b class={stat.tone ?? "num"}>{stat.body}</b>
-                        <span>{stat.label}</span>
+                    <li class="min-w-0 border-l border-b border-line bg-transparent px-4 py-3 first:border-l-0" data-flash key={stat.label}>
+                        <b class={stat.tone ?? "font-mono text-num tabular-nums"}>{stat.body}</b>
+                        <span class="text-muted font-sans text-hud tracking-label leading-stat uppercase font-semibold">{stat.label}</span>
                     </li>
                 ))}
             </ul>
@@ -316,7 +316,16 @@ function StatGrid({ heading, stats, flush }: { heading?: string; stats: Array<St
 }
 
 function Pill({ tone, children }: { tone: string; children: ComponentChildren }): ComponentChildren {
-    return <span class={`pill ${tone}`}>{children}</span>;
+    if (tone === "ok") {
+        return <span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-sans text-body2 font-semibold tracking-pill whitespace-nowrap border-ok-border bg-acc-soft text-acc-ink">{children}</span>;
+    }
+    if (tone === "bad") {
+        return <span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-sans text-body2 font-semibold tracking-pill whitespace-nowrap border-err-border bg-err-soft text-err">{children}</span>;
+    }
+    if (tone === "warn") {
+        return <span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-sans text-body2 font-semibold tracking-pill whitespace-nowrap border-warn-border bg-warn-soft text-warn">{children}</span>;
+    }
+    return <span class="inline-flex items-center gap-1 rounded-full border border-line2 px-2.5 py-1 font-sans text-body2 font-semibold tracking-pill text-muted bg-paper2 whitespace-nowrap">{children}</span>;
 }
 
 function pad2(part: number): string {
@@ -332,7 +341,7 @@ function worldTimeText(tick: TickState): string {
 function worldName(tick: TickState): ComponentChildren {
     const name = tick.world_name ?? "";
     if (name === "") {
-        return <span class="meta">(unnamed)</span>;
+        return <span class="text-muted font-sans text-body2">(unnamed)</span>;
     }
     return name;
 }
@@ -377,7 +386,7 @@ function entityCells(tick: TickState): Array<Stat> {
 
 function serverCells(tick: TickState): Array<Stat> {
     return [
-        { label: "world", body: worldName(tick), tone: "" },
+        { label: "world", body: worldName(tick), tone: "font-mono text-num tabular-nums" },
         { label: "info port", body: String(tick.info_port) },
         { label: "game port", body: String(tick.info_port + 2) },
         { label: "webui port", body: String(tick.webui_port) },
@@ -385,9 +394,9 @@ function serverCells(tick: TickState): Array<Stat> {
         { label: "max streamed chunks", body: String(tick.max_streamed_chunks) },
         { label: "interest range (m)", body: String(Math.round(tick.interest_range)) },
         { label: "edit range (m)", body: String(Math.round(tick.max_edit_range)) },
-        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "" : "num warn-text" },
-        { label: "password", body: tick.password_set ? "set" : "not set", tone: "" },
-        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "" },
+        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "font-mono text-num tabular-nums" : "font-mono text-num tabular-nums text-warn" },
+        { label: "password", body: tick.password_set ? "set" : "not set", tone: "font-mono text-num tabular-nums" },
+        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "font-mono text-num tabular-nums" },
     ];
 }
 
@@ -409,8 +418,8 @@ function latencyCells(tick: TickState): Array<Stat> {
     const budgetNs = TICK_BUDGET_MS * NS_PER_MS;
     return [
         { label: "tick mean", body: `${msText(tick.tick_mean_ns)} ms` },
-        { label: "tick p50 / p99", body: `${msText(tick.tick_p50_ns)} / ${msText(tick.tick_p99_ns)} ms`, tone: tick.tick_p99_ns > budgetNs ? "num warn-text" : "num" },
-        { label: "tick max", body: `${msText(tick.tick_max_ns)} ms`, tone: tick.tick_max_ns > budgetNs ? "num warn-text" : "num" },
+        { label: "tick p50 / p99", body: `${msText(tick.tick_p50_ns)} / ${msText(tick.tick_p99_ns)} ms`, tone: tick.tick_p99_ns > budgetNs ? "font-mono text-num tabular-nums text-warn" : "font-mono text-num tabular-nums" },
+        { label: "tick max", body: `${msText(tick.tick_max_ns)} ms`, tone: tick.tick_max_ns > budgetNs ? "font-mono text-num tabular-nums text-warn" : "font-mono text-num tabular-nums" },
         { label: "net mean / p99", body: `${usText(tick.net_mean_ns)} / ${usText(tick.net_p99_ns)} µs` },
         { label: "sim mean / p99", body: `${usText(tick.sim_mean_ns)} / ${usText(tick.sim_p99_ns)} µs` },
         { label: "repl mean / p99", body: `${usText(tick.repl_mean_ns)} / ${usText(tick.repl_p99_ns)} µs` },
@@ -469,7 +478,7 @@ function guardCells(tick: TickState): Array<Stat> {
 
 function settingsCells(tick: TickState): Array<Stat> {
     return [
-        { label: "world", body: worldName(tick), tone: "" },
+        { label: "world", body: worldName(tick), tone: "font-mono text-num tabular-nums" },
         { label: "max players", body: String(tick.max_players) },
         { label: "info port", body: String(tick.info_port) },
         { label: "game port", body: String(tick.info_port + 2) },
@@ -480,9 +489,9 @@ function settingsCells(tick: TickState): Array<Stat> {
         { label: "interest range (m)", body: String(Math.round(tick.interest_range)) },
         { label: "edit range (m)", body: String(Math.round(tick.max_edit_range)) },
         { label: "max spawned zombies", body: String(tick.max_spawned_zombies) },
-        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "" : "num warn-text" },
-        { label: "password", body: tick.password_set ? "set" : "not set", tone: "" },
-        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "" },
+        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "font-mono text-num tabular-nums" : "font-mono text-num tabular-nums text-warn" },
+        { label: "password", body: tick.password_set ? "set" : "not set", tone: "font-mono text-num tabular-nums" },
+        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "font-mono text-num tabular-nums" },
     ];
 }
 
@@ -493,32 +502,36 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
     const over = isOverBudget(apm);
     const blood = apm.bm;
     const fill = Math.round(Math.min(1, p99Ms / TICK_BUDGET_MS) * PERCENT_MAX);
+    const glanceValue = "block font-sans text-glance font-bold leading-tight2 tracking-tight2 text-ink tabular-nums break-words";
+    const glanceLabel = "text-muted font-sans text-hud tracking-eyebrow uppercase font-semibold";
+    const cell = "min-w-0 border-l border-line px-4 py-3.5 first:border-l-0 max-md:[&:nth-child(3)]:border-l-0";
     return (
-        <div class="glance-band" role="region" aria-label="Server health at a glance">
-            <div class="glance-cell">
-                <b class="num" id="glance-tick">{String(apm.tick)}</b>
-                <span>server tick</span>
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] overflow-hidden rounded-card border border-line bg-panel shadow-card max-md:grid-cols-2" role="region" aria-label="Server health at a glance">
+            <div class={cell}>
+                <b class={glanceValue} id="glance-tick">{String(apm.tick)}</b>
+                <span class={glanceLabel}>server tick</span>
             </div>
-            <div class="glance-cell">
-                <b class="num" id="glance-players">{`${apm.entered}/${apm.joined}`}</b>
-                <span>players in world</span>
+            <div class={cell}>
+                <b class={glanceValue} id="glance-players">{`${apm.entered}/${apm.joined}`}</b>
+                <span class={glanceLabel}>players in world</span>
             </div>
-            <div class="glance-cell">
-                <b class="num" id="glance-p99">{`${p99Ms.toFixed(1)} ms`}</b>
-                <span>tick p99 / 50 ms budget</span>
+            <div class={cell}>
+                <b class={glanceValue} id="glance-p99">{`${p99Ms.toFixed(1)} ms`}</b>
+                <span class={glanceLabel}>tick p99 / 50 ms budget</span>
                 <div
-                    class={over ? "meter hot" : "meter"}
+                    class="mt-1.5 h-2.5 overflow-hidden rounded-full border border-line bg-paper2"
                     role="img"
                     id="glance-meter"
                     aria-label={`${p99Ms.toFixed(1)} milliseconds tick p99, ${over ? "over" : "within"} the 50 millisecond budget`}
                 >
-                    <i id="glance-meter-fill" style={{ transform: `scaleX(${fill / PERCENT_MAX})` }}></i>
+                    {/* oxlint-disable-next-line shadcn/no-inline-styles -- dynamic: per-poll meter fill has no static class form; the allowed transform prop carries the value */}
+                    <i id="glance-meter-fill" class={over ? "block h-full w-full origin-left rounded-full bg-err" : "block h-full w-full origin-left rounded-full bg-acc"} style={{ transform: `scaleX(${fill / PERCENT_MAX})` }}></i>
                 </div>
             </div>
-            <div class="glance-cell">
-                <b id="glance-state">{blood ? "ACTIVE" : "idle"}</b>
-                <span id="glance-state-label">blood moon</span>
-                <span class={`pill ${blood ? "bad" : "ok"} glance-pill`} id="glance-pill">{blood ? "blood moon" : "live"}</span>
+            <div class={cell}>
+                <b id="glance-state" class={glanceValue}>{blood ? "ACTIVE" : "idle"}</b>
+                <span id="glance-state-label" class={glanceLabel}>blood moon</span>
+                <span class="mt-1 inline-flex" id="glance-pill"><Pill tone={blood ? "bad" : "ok"}>{blood ? "blood moon" : "live"}</Pill></span>
             </div>
         </div>
     );
@@ -540,14 +553,14 @@ function onHistoryChange(event: Event): void {
 
 function ChartToolbar({ historyRef }: { historyRef: RefObject<HTMLSelectElement> }): ComponentChildren {
     return (
-        <span class="chart-tools-right">
-            <label class="refresh-ctrl" for="chart-history">history</label>
-            <select id="chart-history" aria-label="History window" ref={historyRef} onChange={onHistoryChange}>
+        <span class="inline-flex flex-wrap items-center gap-2.5 max-md:w-full max-md:justify-start">
+            <label class="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-sans text-body2 font-medium text-muted select-none" for="chart-history">history</label>
+            <select id="chart-history" class="min-h-[44px] rounded-ctl border border-term-faint bg-term2 px-2 py-1 font-mono text-body2 text-term-text" aria-label="History window" ref={historyRef} onChange={onHistoryChange}>
                 {CHART_HISTORY_OPTIONS.map((option) => (
                     <option value={String(option.value)} key={option.value}>{option.label}</option>
                 ))}
             </select>
-            <label class="refresh-ctrl" for="chart-compress">
+            <label class="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-sans text-body2 font-medium text-muted select-none" for="chart-compress">
                 <input type="checkbox" id="chart-compress" checked onChange={onCompressChange} /> Compress history
             </label>
         </span>
@@ -556,9 +569,10 @@ function ChartToolbar({ historyRef }: { historyRef: RefObject<HTMLSelectElement>
 
 function ChartCanvas({ canvasRef }: { canvasRef: RefObject<HTMLCanvasElement> }): ComponentChildren {
     return (
-        <div class="deck-body">
+        <div class="px-1 py-3">
             <canvas
                 id="apm-canvas"
+                class="block h-44 w-full cursor-crosshair touch-pan-y rounded-md border-0 bg-term"
                 ref={canvasRef}
                 width={600}
                 height={150}
@@ -576,11 +590,11 @@ function ChartCanvas({ canvasRef }: { canvasRef: RefObject<HTMLCanvasElement> })
 function ChartReadout({ liveRef, tableRef }: { liveRef: RefObject<HTMLParagraphElement>; tableRef: RefObject<HTMLTableSectionElement> }): ComponentChildren {
     return (
         <Fragment>
-            <p id="apm-chart-live" class="sr-only" role="status" ref={liveRef}>collecting samples…</p>
-            <p id="apm-chart-keys" class="sr-only">
+            <p id="apm-chart-live" class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]" role="status" ref={liveRef}>collecting samples…</p>
+            <p id="apm-chart-keys" class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">
                 Focus and use left and right arrows to inspect past samples, Escape for live. Drag across the chart to inspect.
             </p>
-            <table id="apm-chart-data" class="sr-only">
+            <table id="apm-chart-data" class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">
                 <caption>Newest tick section means, milliseconds</caption>
                 <thead>
                     <tr>
@@ -630,10 +644,10 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
     }, [stale]);
 
     return (
-        <div class="deck" id="apm-chart-wrap">
-            <div class="deck-head">
-                <span class="job">tick · live</span>
-                <span class="meta" id="apm-chart-caption" ref={captionRef}>collecting samples…</span>
+        <div class="rounded-card shadow-card border p-4 max-md:p-2.5 chart-surface" id="apm-chart-wrap">
+            <div class="flex flex-wrap items-center gap-2.5 px-1 pb-2">
+                <span class="font-mono text-body2 font-semibold tracking-eyebrow text-term-faint uppercase">tick · live</span>
+                <span class="ml-auto font-mono text-hud tracking-caption text-term-faint tabular-nums" id="apm-chart-caption" ref={captionRef}>collecting samples…</span>
                 <ChartToolbar historyRef={historyRef} />
             </div>
             <ChartCanvas canvasRef={canvasRef} />
@@ -645,11 +659,11 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
 function StatusPanel({ state, visible, stale }: { state: StateJson; visible: boolean; stale: boolean }): ComponentChildren {
     const { tick } = state;
     return (
-        <section id="status-section" role="tabpanel" tabindex={0} aria-labelledby="tab-status" hidden={!visible}>
-            <h2 id="status-heading">Tick tape</h2>
-            <p class="deck-sub">Live latency on the terminal. Numbers beside every signal; exact values in Performance.</p>
+        <section id="status-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-status" hidden={!visible}>
+            <h2 id="status-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Tick tape</h2>
+            <p class="m-0 px-5 pb-2.5 text-muted text-body2 max-md:break-words">Live latency on the terminal. Numbers beside every signal; exact values in Performance.</p>
             <ChartDeck apm={state.apm} visible={visible} stale={stale} />
-            <h3>Job file</h3>
+            <h3 class="m-0 px-5 pt-4 pb-1 font-sans text-ui font-semibold text-ink">Job file</h3>
             <div id="status">
                 <StatGrid stats={statusCells(tick)} />
                 <StatGrid heading="Entities" stats={entityCells(tick)} />
@@ -662,10 +676,10 @@ function StatusPanel({ state, visible, stale }: { state: StateJson; visible: boo
 
 function ApmPanel({ tick, visible }: { tick: TickState; visible: boolean }): ComponentChildren {
     return (
-        <section id="apm-section" role="tabpanel" tabindex={0} aria-labelledby="tab-apm" hidden={!visible}>
-            <h2 id="apm-heading">Performance and counters</h2>
+        <section id="apm-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-apm" hidden={!visible}>
+            <h2 id="apm-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Performance and counters</h2>
             <div id="apm">
-                <StatGrid heading="Latency (tick budget 50 ms)" stats={latencyCells(tick)} flush />
+                <StatGrid heading="Latency (tick budget 50 ms)" stats={latencyCells(tick)} />
                 <StatGrid heading="Traffic" stats={trafficCells(tick)} />
                 <StatGrid heading="Errors and rejections" stats={errorCells(tick)} />
                 <StatGrid heading="Guard policy" stats={guardCells(tick)} />
@@ -696,35 +710,35 @@ function playerStateTone(player: PlayerEntry): string {
 
 function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visible: boolean }): ComponentChildren {
     return (
-        <section id="players-section" role="tabpanel" tabindex={0} aria-labelledby="tab-players" hidden={!visible}>
-            <h2 id="players-heading">Players</h2>
-            <div id="players" role="region" aria-label="Connected players table" tabindex={0}>
-                <table class="stack">
-                    <caption class="sr-only">Connected players</caption>
+        <section id="players-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-players" hidden={!visible}>
+            <h2 id="players-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Players</h2>
+            <div id="players" class="overflow-auto" role="region" aria-label="Connected players table" tabindex={0}>
+                <table class="w-full border-collapse text-panel">
+                    <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Connected players</caption>
                     <thead>
                         <tr>
-                            <th scope="col">Slot</th>
-                            <th scope="col">Name</th>
-                            <th scope="col">Entity ID</th>
-                            <th scope="col">Position</th>
-                            <th scope="col">State</th>
+                            <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Slot</th>
+                            <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Name</th>
+                            <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Entity ID</th>
+                            <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Position</th>
+                            <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">State</th>
                         </tr>
                     </thead>
                     <tbody>
                         {players.length === 0 ? (
                             <tr>
-                                <td colspan={5} class="empty-note">
+                                <td colspan={5} class="px-3.5 py-3 text-muted">
                                     No players are connected. They appear here when clients join.
                                 </td>
                             </tr>
                         ) : (
                             players.map((player) => (
                                 <tr key={player.slot}>
-                                    <td class="num" data-label="Slot">{String(player.slot)}</td>
-                                    <th scope="row" data-label="Name">{player.name}</th>
-                                    <td class="num" data-label="Entity ID">{String(player.entity_id)}</td>
-                                    <td class="num" data-label="Position">{`${Math.round(player.x)},${Math.round(player.y)},${Math.round(player.z)}`}</td>
-                                    <td data-label="State">
+                                    <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="Slot">{String(player.slot)}</td>
+                                    <th scope="row" data-label="Name" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">{player.name}</th>
+                                    <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="Entity ID">{String(player.entity_id)}</td>
+                                    <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="Position">{`${Math.round(player.x)},${Math.round(player.y)},${Math.round(player.z)}`}</td>
+                                    <td data-label="State" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">
                                         <Pill tone={playerStateTone(player)}>{playerStateLabel(player)}</Pill>
                                     </td>
                                 </tr>
@@ -739,13 +753,13 @@ function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visib
 
 function SettingsPanel({ tick, visible }: { tick: TickState; visible: boolean }): ComponentChildren {
     return (
-        <section id="settings-section" role="tabpanel" tabindex={0} aria-labelledby="tab-settings" hidden={!visible}>
-            <h2 id="settings-heading">Settings</h2>
-            <p class="deck-sub">
-                Read-only snapshot of the running server. Change these in <code>zdtd.toml</code> or the process flags, then restart.
+        <section id="settings-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-settings" hidden={!visible}>
+            <h2 id="settings-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Settings</h2>
+            <p class="m-0 px-5 pb-2.5 text-muted text-body2 max-md:break-words">
+                Read-only snapshot of the running server. Change these in <code class="rounded-md border border-line bg-paper2 px-1.5 py-0.5 font-mono text-muted">zdtd.toml</code> or the process flags, then restart.
             </p>
             <div id="settings" aria-live="polite" aria-atomic="true">
-                <StatGrid heading="Server" stats={settingsCells(tick)} flush />
+                <StatGrid heading="Server" stats={settingsCells(tick)} />
             </div>
         </section>
     );
@@ -753,28 +767,28 @@ function SettingsPanel({ tick, visible }: { tick: TickState; visible: boolean })
 
 function ModuleTable({ modules }: { modules: Array<ModuleEntry> }): ComponentChildren {
     return (
-        <table class="stack">
-            <caption class="sr-only">Loaded modules</caption>
+        <table class="w-full border-collapse text-panel">
+            <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Loaded modules</caption>
             <thead>
                 <tr>
-                    <th scope="col">#</th>
-                    <th scope="col">Module</th>
-                    <th scope="col">State</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">#</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Module</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">State</th>
                 </tr>
             </thead>
             <tbody>
                 {modules.length === 0 ? (
                     <tr>
-                        <td colspan={3} class="empty-note">
+                        <td colspan={3} class="px-3.5 py-3 text-muted">
                             No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.
                         </td>
                     </tr>
                 ) : (
                     modules.map((module, index) => (
                         <tr key={module.name}>
-                            <td class="num" data-label="#">{String(index + 1)}</td>
-                            <th scope="row" data-label="Module">{module.name}</th>
-                            <td data-label="State">
+                            <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="#">{String(index + 1)}</td>
+                            <th scope="row" data-label="Module" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">{module.name}</th>
+                            <td data-label="State" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">
                                 <Pill tone={module.disabled ? "bad" : "ok"}>{module.disabled ? "disabled" : "enabled"}</Pill>
                             </td>
                         </tr>
@@ -798,30 +812,30 @@ function ModletTable({
     onAction: (name: string, action: string) => void;
 }): ComponentChildren {
     return (
-        <table class="stack">
-            <caption class="sr-only">Game modlets</caption>
+        <table class="w-full border-collapse text-panel">
+            <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Game modlets</caption>
             <thead>
                 <tr>
-                    <th scope="col">#</th>
-                    <th scope="col">Modlet</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">State</th>
-                    <th scope="col">Action</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">#</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Modlet</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Version</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">State</th>
+                    <th scope="col" class="bg-paper2 px-3.5 py-3 text-left font-sans text-hud font-semibold tracking-eyebrow text-muted uppercase whitespace-nowrap">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {modlets.map((modlet, index) => (
                     <tr key={modlet.name}>
-                        <td class="num" data-label="#">{String(index + 1)}</td>
-                        <th scope="row" data-label="Modlet">
+                        <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="#">{String(index + 1)}</td>
+                        <th scope="row" data-label="Modlet" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">
                             {modlet.name}
-                            {modlet.has_code ? <span class="meta"> (code mod: XML only)</span> : null}
+                            {modlet.has_code ? <span class="text-muted font-sans text-body2"> (code mod: XML only)</span> : null}
                         </th>
-                        <td class="num" data-label="Version">{modlet.version}</td>
-                        <td data-label="State">
+                        <td class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink font-mono text-num tabular-nums" data-label="Version">{modlet.version}</td>
+                        <td data-label="State" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">
                             <Pill tone={modlet.disabled ? "bad" : "ok"}>{modlet.disabled ? "disabled" : "enabled"}</Pill>
                         </td>
-                        <td data-label="Action">
+                        <td data-label="Action" class="border-b border-line px-3.5 py-3 text-left align-middle font-sans text-ink">
                             <form
                                 method="post"
                                 action={MODLET_URL}
@@ -833,9 +847,9 @@ function ModletTable({
                                 <input type="hidden" name="csrf" value={csrf} />
                                 <input type="hidden" name="name" value={modlet.name} />
                                 <input type="hidden" name="action" value={modlet.disabled ? "enable" : "disable"} />
-                                <button type="submit" class="mod-btn" disabled={pending === modlet.name} aria-busy={pending === modlet.name}>
+                                <button type="submit" class="min-h-[44px] min-w-[4.5rem] cursor-pointer whitespace-nowrap rounded-ctl border border-edge bg-panel px-3.5 py-2 font-sans text-body2 font-semibold text-ink hover:bg-paper2 disabled:opacity-45 disabled:cursor-wait" disabled={pending === modlet.name} aria-busy={pending === modlet.name}>
                                     {modlet.disabled ? "Enable" : "Disable"}
-                                    <span class="sr-only"> {modlet.name}</span>
+                                    <span class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]"> {modlet.name}</span>
                                 </button>
                             </form>
                         </td>
@@ -860,12 +874,12 @@ function ModletFeedback({ failure, success }: { failure: string | null; success:
     return (
         <Fragment>
             {failure === null ? null : (
-                <p class="err modlet-err" role="alert">
+                <p class="mx-5 mb-3 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-panel leading-card text-err-ink" role="alert">
                     {failure}
                 </p>
             )}
             {success === null ? null : (
-                <p class="ok modlet-ok" role="status">
+                <p class="mx-5 mb-3 rounded-card border border-ok-border bg-acc-soft px-4 py-3.5 font-sans text-panel leading-card text-acc-ink" role="status">
                     {success}
                 </p>
             )}
@@ -907,17 +921,17 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
     };
 
     return (
-        <section id="modules-section" role="tabpanel" tabindex={0} aria-labelledby="tab-modules" hidden={!visible}>
-            <h2 id="modules-heading">Modules</h2>
-            <div id="modules" role="region" aria-label="Loaded module list" tabindex={0}>
+        <section id="modules-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-modules" hidden={!visible}>
+            <h2 id="modules-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Modules</h2>
+            <div id="modules" class="overflow-auto" role="region" aria-label="Loaded module list" tabindex={0}>
                 <ModuleTable modules={state.modules} />
-                <h3>Game modlets</h3>
-                <p class="deck-sub">
+                <h3 class="m-0 px-5 pt-4 pb-1 font-sans text-ui font-semibold text-ink">Game modlets</h3>
+                <p class="m-0 px-5 pb-2.5 text-muted text-body2 max-md:break-words">
                     Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).
                 </p>
                 <ModletFeedback failure={failure} success={success} />
                 {modlets.length === 0 ? (
-                    <p class="deck-sub">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>
+                    <p class="m-0 px-5 pb-2.5 text-muted text-body2 max-md:break-words">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>
                 ) : (
                     <ModletTable
                         modlets={modlets}
@@ -977,6 +991,31 @@ function validatedLine(input: HTMLInputElement, raw: string): LineDecision {
 }
 
 
+// The input hint names real commands (help, status, settime day), not filler.
+// The input hint names real commands (help, status, settime day), not filler.
+const CMD_INPUT_CLASS = "min-h-[44px] w-full min-w-40 flex-1 rounded-ctl border-2 border-edge bg-panel px-3 py-2.5 font-mono text-ink hover:border-muted2 focus:border-acc focus:outline-2 focus:outline-acc max-md:basis-full max-md:min-w-0";
+
+function QuickRow({ pending, onRun }: { pending: boolean; onRun: (line: string) => void }): ComponentChildren {
+    return (
+        <div class="flex flex-wrap gap-2 px-5 py-3 border-t border-line bg-transparent" id="quick-commands" role="group" aria-label="Quick commands">
+            {QUICK_COMMANDS.map((quick) => (
+                <button
+                    type="button"
+                    class="min-h-[44px] cursor-pointer whitespace-nowrap rounded-full border border-edge bg-panel px-3.5 py-1.5 font-mono text-body2 font-medium text-muted hover:bg-paper2 hover:text-ink disabled:opacity-45 disabled:cursor-wait"
+                    key={quick.line}
+                    data-cmd={quick.line}
+                    disabled={pending}
+                    onClick={() => {
+                        onRun(quick.line);
+                    }}
+                >
+                    {quick.label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 function CommandForm({
     csrf,
     pending,
@@ -992,7 +1031,7 @@ function CommandForm({
         <Fragment>
             <form
                 id="cmd-form"
-                class="cmd-row"
+                class="cmd-hint flex items-center gap-2 bg-panel px-5 py-3.5 border-b border-line max-md:flex-wrap max-md:p-3"
                 method="post"
                 action={CMD_URL}
                 onSubmit={(event) => {
@@ -1001,12 +1040,13 @@ function CommandForm({
                 }}
             >
                 <input type="hidden" name="csrf" value={csrf} />
-                <label for="cmd-line" class="sr-only">Admin command</label>
+                <label for="cmd-line" class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Admin command</label>
                 <input
                     type="text"
                     name="line"
                     id="cmd-line"
                     ref={inputRef}
+                    class={CMD_INPUT_CLASS}
                     placeholder="help · status · settime day"
                     aria-describedby="cmd-help-inline"
                     autocomplete="off"
@@ -1016,38 +1056,23 @@ function CommandForm({
                     readOnly={pending}
                     aria-busy={pending}
                 />
-                <button type="submit" disabled={pending}>{pending ? "Running…" : "Run"}</button>
+                <button type="submit" class="min-h-[44px] min-w-[4.5rem] cursor-pointer rounded-ctl border border-acc-ink bg-acc px-5 font-sans text-ui font-semibold text-white hover:bg-acc-ink disabled:opacity-45 disabled:cursor-wait" disabled={pending}>{pending ? "Running…" : "Run"}</button>
             </form>
-            <div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
-                {QUICK_COMMANDS.map((quick) => (
-                    <button
-                        type="button"
-                        class="quick-cmd"
-                        key={quick.line}
-                        data-cmd={quick.line}
-                        disabled={pending}
-                        onClick={() => {
-                            onRun(quick.line);
-                        }}
-                    >
-                        {quick.label}
-                    </button>
-                ))}
-            </div>
+            <QuickRow pending={pending} onRun={onRun} />
         </Fragment>
     );
 }
 
 function CommandOutput({ pending, outcome }: { pending: boolean; outcome: CommandOutcome | null }): ComponentChildren {
     if (pending) {
-        return <pre class="meta">Running command…</pre>;
+        return <pre class="text-muted font-sans text-body2">Running command…</pre>;
     }
     if (outcome === null) {
         return null;
     }
     return (
-        <pre class={outcome.failed ? "cmd-out err" : "cmd-out"} tabindex={0} data-command-error={outcome.failed ? "true" : undefined}>
-            <span class="in">&gt; {outcome.line}</span>
+        <pre class={outcome.failed ? "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-bad max-h-60 whitespace-pre-wrap break-words" : "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words"} tabindex={0} data-command-error={outcome.failed ? "true" : undefined}>
+            <span class="text-term-faint">&gt; {outcome.line}</span>
             {"\n"}
             {outcome.text}
         </pre>
@@ -1063,7 +1088,7 @@ function CommandResult({ pending, outcome }: { pending: boolean; outcome: Comman
             <div id="cmd-out" aria-live="polite" aria-atomic="true" role="status" aria-busy={pending}>
                 <CommandOutput pending={pending} outcome={outcome} />
             </div>
-            <p class="sr-only" role="alert">
+            <p class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]" role="alert">
                 {outcome !== null && outcome.failed ? `${outcome.line}: ${outcome.text}` : ""}
             </p>
         </Fragment>
@@ -1073,9 +1098,9 @@ function CommandResult({ pending, outcome }: { pending: boolean; outcome: Comman
 function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren {
     return (
         <div id="console-log" aria-label="Recent commands" role="region" tabindex={-1}>
-            <pre class="cmd-log" tabindex={0}>
+            <pre class="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabindex={0}>
                 {lines.length === 0 ? (
-                    <span class="meta">No commands run yet. Enter a command above and choose Run.</span>
+                    <span class="text-muted font-sans text-body2">No commands run yet. Enter a command above and choose Run.</span>
                 ) : (
                     lines.join("\n")
                 )}
@@ -1123,15 +1148,15 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
     };
 
     return (
-        <section id="console-section" role="tabpanel" tabindex={0} aria-labelledby="tab-console" hidden={!visible}>
-            <h2 id="console-heading">Console</h2>
-            <p class="deck-sub">Same commands as the admin telnet console. Destructive verbs ask first.</p>
-            <div class="deck">
-                <div class="deck-head">
-                    <span class="job">admin · stdout</span>
-                    <span class="meta" id="cmd-help-inline">history keeps the last 24 lines</span>
+        <section id="console-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-console" hidden={!visible}>
+            <h2 id="console-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Console</h2>
+            <p class="m-0 px-5 pb-2.5 text-muted text-body2 max-md:break-words">Same commands as the admin telnet console. Destructive verbs ask first.</p>
+            <div class="overflow-hidden rounded-card border border-line bg-panel shadow-card">
+                <div class="flex flex-wrap items-center gap-2.5 bg-paper2 px-5 py-2.5 border-b border-line">
+                    <span class="font-mono text-body2 font-semibold tracking-eyebrow text-ink uppercase">admin · stdout</span>
+                    <span class="ml-auto text-muted font-sans text-body2" id="cmd-help-inline">history keeps the last 24 lines</span>
                 </div>
-                <div class="deck-body">
+                <div class="px-5 py-4 max-md:p-3">
                     <CommandForm
                         csrf={csrf}
                         pending={pending}
@@ -1385,10 +1410,14 @@ function App(): ComponentChildren {
 
     // One derived connection state for the header: the lamp and the word must
     // never describe the last good reading while the poll is failing.
+    // Toggles Tailwind background utilities directly (no legacy bad/idle classes).
     useEffect(() => {
         const over = state !== null && isOverBudget(state.apm);
-        glanceLampEl.classList.toggle("bad", failed || over);
-        glanceLampEl.classList.toggle("idle", state === null && !failed);
+        const bad = failed || over;
+        const idle = state === null && !failed;
+        glanceLampEl.classList.toggle("bg-err", bad);
+        glanceLampEl.classList.toggle("bg-ok", !bad && !idle);
+        glanceLampEl.classList.toggle("bg-muted2", idle);
         glanceWordEl.textContent = glanceWord(failed, state, over);
     }, [state, failed]);
 
@@ -1413,7 +1442,7 @@ function App(): ComponentChildren {
     }, [runRefresh]);
 
     const banner = failed ? (
-        <p class="err banner-err" role="alert">
+        <p class="m-0 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-panel leading-card text-err-ink" role="alert">
             Live data is unavailable. Check the connection; retrying automatically.
         </p>
     ) : null;
@@ -1421,9 +1450,9 @@ function App(): ComponentChildren {
     if (state !== null) {
         body = <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />;
     } else if (failed) {
-        body = <p class="meta" role="status">Waiting for the server…</p>;
+        body = <p class="text-muted font-sans text-body2" role="status">Waiting for the server…</p>;
     } else {
-        body = <p class="meta" role="status" aria-live="polite">Loading dashboard…</p>;
+        body = <p class="text-muted font-sans text-body2" role="status" aria-live="polite">Loading dashboard…</p>;
     }
     return (
         <Fragment>

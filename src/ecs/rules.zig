@@ -377,8 +377,8 @@ pub const Ai = struct {
 /// `party_teleport_dist` teleport back; waves spawn ~`party_spawn_dist` out;
 /// the per-party alive ceiling is `party_enemy_max`.
 /// GameDifficulty 0..5 -> damage multipliers (RE `ItemActionAttack.
-/// difficultyModifier`, il/full-v3.1.0/_global/ItemActionAttack.il.txt:2722;
-/// call site IL_0A4A inside ItemActionAttack.Hit). The PvE scalers apply only
+/// difficultyModifier`, il/full-v3.2.0/_global/ItemActionAttack.il.txt:2672;
+/// call site IL_0A58 inside ItemActionAttack.Hit). The PvE scalers apply only
 /// in mixed client/server matchups: a server (AI) attacker hitting a client
 /// entity scales its strength by `IncomingDamageModifier`, a client hitting a
 /// server entity by `EntityIncomingDamageModifier`; PvP and AI-vs-AI are

@@ -48,14 +48,14 @@ python3 ../7dtd-engine-research/tools/parity/parity_diff.py parity_old.json pari
 
 ## Fetch old versions to validate (steamcmd)
 
-`../7dtd-engine-research/tools/parity/fetch_version.sh <branch|manifestid> [label]` downloads a
+`../7dtd-engine-research/tools/steam/fetch_version.sh <branch|manifestid> [label]` downloads a
 specific dedicated-server build (app 294420, depot 294422) via steamcmd
 (installed under scratch, never the host) and writes its parity snapshot:
 
 ```bash
-../7dtd-engine-research/tools/parity/fetch_version.sh public        stable
-../7dtd-engine-research/tools/parity/fetch_version.sh latest_experimental exp
-../7dtd-engine-research/tools/parity/fetch_version.sh 1234567890123 v3.0   # pinned depot manifest
+../7dtd-engine-research/tools/steam/fetch_version.sh public        stable
+../7dtd-engine-research/tools/steam/fetch_version.sh latest_experimental exp
+../7dtd-engine-research/tools/steam/fetch_version.sh 1234567890123 v3.0   # pinned depot manifest
 # then diff:
 python3 ../7dtd-engine-research/tools/parity/parity_diff.py parity_v3.0.json parity_stable.json
 ```

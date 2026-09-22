@@ -58,7 +58,7 @@ Stock body: `chunkKey:i64` = `WorldChunkCache.MakeChunkKey(cx, cz)`
 
 Provenance of that formula: **empirical, not IL-cited.** `MakeChunkKey` is
 called from the dumped methods (for example
-`il/dedi-complete-v3.1.0/ChunkProviderGenerateWorld_RequestChunk_Int32_Int32_il.txt`
+`il/dedi-complete-v3.2.0/ChunkProviderGenerateWorld_RequestChunk_Int32_Int32_il.txt`
 `IL_0026`) but its own body is in no retained dump, and no dump contains the
 `0xFFFFFF` mask. The shift/mask above is what a stock client accepts: the same
 key rides `NetPackageChunk`, `ChunkRemove` and `NetPackageDecoResetWorldChunk`,

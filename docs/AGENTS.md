@@ -61,7 +61,7 @@ STATUS.md.
 
 | Gate | Checks | Runs in |
 |---|---|---|
-| `tools/check_docs.py` | dead relative links, `file:LINE` out of range, quoted `zig` block drift, registry rows, the subsystem page contract, word budgets | `make lint` |
+| `tools/check_docs.py` | dead relative links, `file:LINE` out of range, quoted `zig` block drift, missing `../7dtd-engine-research/` paths, registry rows, the subsystem page contract, word budgets | `make lint` |
 | `tools/gen_docs_catalogs.py --check` | `docs/catalogs/` is fresh from source | `make check` |
 | `tools/provenance_scan.py` | every `src/` file has a PROVENANCE row | `make check` |
 | `scripts/gen_provenance.py` | `docs/provenance.html` is fresh | `make check` |

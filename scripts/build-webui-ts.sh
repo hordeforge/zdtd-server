@@ -4,14 +4,13 @@
 # markers. Run this after editing a .ts/.tsx source and commit the regenerated
 # pages; `make lint` fails when the committed pages are stale.
 #
-# The dashboard is a Preact app (ADR 0040): shell.tsx is JSX and imports
-# `preact`, so the sources are bundled rather than emitted file-by-file.
-# scripts/webui-ts-project.sh stages the pinned toolchain and dependency in a
-# cache project (no package.json/node_modules in the tree); this script then
-# runs `bun build --format=iife` per page entry. The bundle is what ships
-# inline, so the Zig build stays pure and offline and nothing is read from disk
-# at runtime (AGENTS rule 12).
-# Override locally: PREACT_VERSION=10.29.8 bash scripts/build-webui-ts.sh
+# Styling is Tailwind v4: markup in the .html/.tsx carries utilities, the
+# theme (design tokens) lives in src/server/webui/webui.css (@theme), and this
+# script builds that entry with the cached @tailwindcss/cli (staged by
+# scripts/webui-ts-project.sh; no package.json/node_modules in the tree) and
+# splices the output into the pages between the zdtd-css markers. The Zig
+# build stays pure and offline: pages ship the compiled CSS inline.
+# Override locally: PREACT_VERSION=10.29.8 TAILWIND_VERSION=4.3.3 bash scripts/build-webui-ts.sh
 #
 # Usage: scripts/build-webui-ts.sh [--dest DIR]   (default: src/server/webui)
 #
@@ -31,6 +30,15 @@ project="$(webui_ts_prepare)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+
+# Tailwind: compile one CSS bundle per page entry. Each webui-<page>.css
+# declares its own @source set, so a page ships only the utilities it uses
+# (the login pages stay small instead of carrying the dashboard's chart and
+# table utilities). Theme (@theme in webui.css) rides along in each output.
+for page in shell login lockout; do
+  ( cd "$project" && bunx --bun @tailwindcss/cli \
+    -i "$project/webui-$page.css" -o "$tmp/webui-$page.css" --minify )
+done
 
 # Bundle one IIFE per page entry. `--define process.env.NODE_ENV` selects
 # preact's production branches; --minify keeps the embedded page small (the
@@ -53,6 +61,11 @@ import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 shared_css_path = pathlib.Path(sys.argv[3])
+PAGE_CSS = {
+    "shell.html": "webui-shell.css",
+    "login.html": "webui-login.css",
+    "login_lockout.html": "webui-lockout.css",
+}
 
 # Compiled bundle per marker name.
 MARKER_JS = {
@@ -64,9 +77,10 @@ MARKER_JS = {
 MARK = re.compile(r"/\* zdtd-ts:([A-Za-z0-9_-]+) \*/.*?/\* /zdtd-ts:\1 \*/", re.DOTALL)
 CSS_MARK = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/.*?/\* /zdtd-css:\1 \*/", re.DOTALL)
 
-# The shared style sheet is the one home for the design tokens and the sign-in
-# chrome. Regions are spliced by name, so a page carries only what it uses and
-# the committed page stays self-contained.
+# The Tailwind build is the whole page stylesheet now: every zdtd-css region
+# marker is replaced by the compiled output. shared.css remains the legacy
+# token/chrome source kept for provenance; it is read for the region-name
+# check but no longer spliced.
 css_regions = {}
 for match in CSS_MARK.finditer(shared_css_path.read_text(encoding="utf-8")):
     css_regions[match.group(1)] = match.group(0)
@@ -83,15 +97,19 @@ for html_path in sorted(html_dir.glob("*.html")):
         body = (js_dir / js).read_text(encoding="utf-8").rstrip("\n")
         return f"/* zdtd-ts:{name} */\n{body}\n/* /zdtd-ts:{name} */"
 
+    page_css_file = PAGE_CSS.get(html_path.name)
+    if page_css_file is None:
+        raise SystemExit(f"build-webui-ts: no Tailwind bundle for {html_path.name}")
+    page_css = (js_dir / page_css_file).read_text(encoding="utf-8").rstrip("\n")
+
     def splice_css(m):
         name = m.group(1)
-        region = css_regions.get(name)
-        if region is None:
+        if name not in css_regions:
             raise SystemExit(
                 f"build-webui-ts: no '{name}' region in {shared_css_path.name} "
                 f"for the marker in {html_path.name}"
             )
-        return region
+        return f"/* zdtd-css:{name} */\n{page_css}\n/* /zdtd-css:{name} */"
 
     out, n = MARK.subn(splice, text)
     if n == 0:

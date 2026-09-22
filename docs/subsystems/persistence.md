@@ -27,10 +27,10 @@ Every format here is zdtd-owned: the magics are `ZPV<version>`, `ZEN2` (legacy `
 
 ## Files on disk
 
-Paths are built by `fmt.bufPrint` into a caller stack buffer per store, keyed on `self.world.world_dir`; chunks are named by position. `World.chunkPath` (`src/world/store.zig:1329`):
+Paths are built by `fmt.bufPrint` into a caller stack buffer per store, keyed on `self.world.world_dir`; chunks are named by position. `World.chunkPath` (`src/world/store.zig:1382`):
 
 ```zig
-    fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
+    pub fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
         return try std.fmt.bufPrint(buf, "{s}/c_{d}_{d}.zch", .{ self.world_dir, pos.x, pos.z });
     }
 ```

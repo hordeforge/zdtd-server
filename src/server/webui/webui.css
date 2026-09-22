@@ -1,0 +1,175 @@
+/* Webui Tailwind v4 theme: tokens + @utility extras shared by every page entry.
+   Each page entry (webui-<page>.css) imports tailwindcss, this theme, and
+   declares its own @source set so the built CSS per page carries only the
+   utilities that page uses. Markup styling lives in Tailwind utilities in
+   the .html/.tsx; @utility rules below exist only for what utilities cannot
+   express: the terminal chart canvas theme, the flash keyframe, placeholder
+   and sign-in chrome, and forced-colors fallbacks. */
+
+@theme {
+  --color-paper: #f7f5f0;
+  --color-paper2: #efece4;
+  --color-panel: #fffdf8;
+  --color-well: #fffdf8;
+  --color-line: #e2ddd0;
+  --color-line2: #cfc8b6;
+  --color-edge: #5f686f;
+  --color-ink: #1a1d21;
+  --color-muted: #4d545c;
+  --color-muted2: #5f686f;
+  --color-acc: #0f5c37;
+  --color-acc-ink: #0c4a2d;
+  --color-acc-soft: #dcefe1;
+  --color-acc-ghost: rgba(15, 92, 55, 0.06);
+  --color-ok: #0f5c37;
+  --color-warn: #6b4a00;
+  --color-warn-soft: #f2dbaa;
+  --color-err: #8a2318;
+  --color-err-ink: #3d0d07;
+  --color-err-border: #d59f96;
+  --color-err-field: rgba(138, 35, 24, 0.45);
+  --color-err-soft: #f5c9c2;
+  --color-term: #101418;
+  --color-term2: #1a2129;
+  --color-term-line: #2a333d;
+  --color-term-band1: #22303c;
+  --color-term-band2: #2c3f4e;
+  --color-term-text: #d8e2dc;
+  --color-term-faint: #7f8b94;
+  --color-term-key: #ffd8a0;
+  --color-term-ok: #5fd894;
+  --color-term-bad: #ff7364;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius-card: 10px;
+  --radius-ctl: 9px;
+
+  --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.06), 0 8px 24px -12px rgba(26, 29, 33, 0.18);
+
+  /* Non-standard spacing step used by the port (px-4_5): the default scale
+     jumps from 4 to 5. */
+  --spacing-4_5: 1.125rem;
+
+  /* Prose sizes carried over from the hand-written CSS (exact px the design
+     was tuned at). Declared so no-arbitrary-values passes without rounding
+     the design to the nearest default step. */
+  --text-hud: 0.72rem;
+  --text-body2: 0.8rem;
+  --text-num: 0.88rem;
+  --text-ui: 0.9rem;
+  --text-panel: 0.95rem;
+  --text-h3: 1.05rem;
+  --text-glance: 1.7rem;
+  --text-brand: 1.75rem;
+
+  /* Tracking/leading steps carried over from the hand-written CSS. */
+  --tracking-eyebrow: 0.06em;
+  --tracking-pill: 0.02em;
+  --tracking-label: 0.05em;
+  --tracking-caption: 0.04em;
+  --tracking-tight1: -0.01em;
+  --tracking-tight2: -0.02em;
+  --leading-stat: 1.4;
+  --leading-tight2: 1.2;
+  --leading-term: 1.7;
+  --leading-card: 1.5;
+  --leading-prose: 1.6;
+
+  /* Pill borders that were hex in the hand-written CSS. */
+  --color-ok-border: #9cc6aa;
+  --color-warn-border: #cbab72;
+}
+
+/* Legacy token aliases: the --bg/--fg aliases keep the Zig error fragments
+   and any unported markup working during the transition. */
+:root {
+  --bg: var(--color-paper);
+  --bg2: var(--color-paper2);
+  --panel: var(--color-panel);
+  --well: var(--color-well);
+  --line: var(--color-line);
+  --line2: var(--color-line2);
+  --edge: var(--color-edge);
+  --fg: var(--color-ink);
+  --muted: var(--color-muted);
+  --muted2: var(--color-muted2);
+  --acc: var(--color-acc);
+  --acc-ink: var(--color-acc-ink);
+  --acc-soft: var(--color-acc-soft);
+  --acc-ghost: var(--color-acc-ghost);
+  --ok: var(--color-ok);
+  --warn: var(--color-warn);
+  --warn-soft: var(--color-warn-soft);
+  --err: var(--color-err);
+  --err-ink: var(--color-err-ink);
+  --err-border: var(--color-err-border);
+  --err-field: var(--color-err-field);
+  --err-soft: var(--color-err-soft);
+  --term: var(--color-term);
+  --term2: var(--color-term2);
+  --term-line: var(--color-term-line);
+  --term-band1: var(--color-term-band1);
+  --term-band2: var(--color-term-band2);
+  --term-text: var(--color-term-text);
+  --term-faint: var(--color-term-faint);
+  --term-key: var(--color-term-key);
+  --term-ok: var(--color-term-ok);
+  --term-bad: var(--color-term-bad);
+  --sans: var(--font-sans);
+  --mono: var(--font-mono);
+  --r: var(--radius-card);
+  --r-ctl: var(--radius-ctl);
+  --shadow: var(--shadow-card);
+}
+
+/* Chart canvas theme: read by chart.ts via getComputedStyle, not paintable
+   with utilities (canvas pixels, not DOM). */
+@utility chart-surface {
+  background: var(--color-term);
+  border-color: var(--color-term-line);
+  color: var(--color-term-text);
+}
+
+/* Poll-change flash: a keyframe utilities cannot declare. */
+@keyframes zdtd-flash {
+  0% {
+    background: var(--color-acc-ghost);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@utility flash-once {
+  animation: zdtd-flash 1.1s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-once {
+    animation: none;
+  }
+}
+
+/* Command input hint color: the ::placeholder pseudo-element cannot be
+   styled from a utility in the TSX without tripping the placeholder-content
+   lint rule, so it lives here as a plain-CSS utility. */
+@utility cmd-hint {
+  & input::placeholder {
+    color: var(--color-muted2);
+  }
+}
+
+/* Sign-in chrome that stays element-scoped (no per-page utility churn): the
+   login pages are server-rendered with no TSX component layer. */
+@utility signin-shell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  width: min(26rem, 100%);
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 1.5rem 1.5rem 1.25rem;
+}

@@ -280,7 +280,7 @@ The tick chart and the console log: Terminal ground, Terminal Rule hairline, mon
 - **Do** use mono + tabular figures for anything that came off the wire, and sans for the sentence around it.
 - **Do** keep 44px minimum targets and a 2px visible focus ring on everything focusable, including the chart canvas.
 - **Do** honour `prefers-reduced-motion` (flash, meter, and toggle motion all stop) and `forced-colors` (tokens remap, canvas palette re-reads).
-- **Do** keep the tokens and sign-in chrome in `src/server/webui/shared.css`; `scripts/build-webui-ts.sh` splices the regions into the pages and `scripts/lint-webui.sh` fails when a page drifts from it or a token goes unused.
+- **Do** keep the theme tokens in `src/server/webui/webui.css` (`@theme`); `scripts/build-webui-ts.sh` compiles them with Tailwind and splices the output into the pages, and `scripts/lint-webui.sh` fails when a page drifts from it. `shared.css` is the legacy source kept for provenance.
 
 ### Don't:
 - **Don't** add a second accent colour, a gradient, a glow, or a coloured shadow.

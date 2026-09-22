@@ -6,3 +6,11 @@
 # read by its inline JS (src/server/webui/shell.html); stock HTML has no such
 # attributes.
 .*Attribute .hx-(get|trigger|swap). not allowed on element.*
+# Tailwind v4 emits CSS the vnu CSS parser does not know yet (checked with
+# vnu-jar 26.9.16): @property registrations for the --tw-* animation vars,
+# the margin-trim reset in its preflight @supports block, and two modern
+# color/supports expressions it reports as bare parse errors. All three are
+# stock compiler output from src/server/webui/webui.css, not hand-written CSS.
+.*Unrecognized at-rule.*@property.*
+.*margin-trim.*doesn.t exist.*
+.*CSS: Parse Error\..*

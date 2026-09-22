@@ -17,8 +17,9 @@
 # OXLINT_TSGOLINT_VERSION. The repo deliberately does not track
 # package.json/node_modules (.gitignore: "opencode tooling only"), so the
 # versions live here as the single source of truth.
-# Override locally: TSC_VERSION=5.9.3 OXLINT_VERSION=1.79.0 \
-#   OXLINT_TSGOLINT_VERSION=7.0.2001 ANTI_SLOP_SHA=... ANTI_SLOP_SHA256=... \
+# Override locally: TSC_VERSION=5.9.3 OXLINT_VERSION=1.85.0 \
+#   OXLINT_TSGOLINT_VERSION=7.0.2001 OXLINT_STANDARDS_VERSION=0.8.1 \
+#   SHADCN_LINT_VERSION=0.1.5 ANTI_SLOP_SHA=... ANTI_SLOP_SHA256=... \
 #   bash scripts/lint-webui.sh
 #
 # Requires: bun (bunx), python3, sha256sum (already a make check requirement).
@@ -30,10 +31,11 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   echo "zdtd: lint-webui: missing required tool: sha256sum (GNU coreutils)" >&2
   exit 127
 fi
-oxlint_version="${OXLINT_VERSION:-1.79.0}"
+oxlint_version="${OXLINT_VERSION:-1.85.0}"
 oxlint_standards_version="${OXLINT_STANDARDS_VERSION:-0.8.1}"
 oxlint_tsgolint_version="${OXLINT_TSGOLINT_VERSION:-7.0.2001}"
-oxlint_plugins_version="${OXLINT_PLUGINS_VERSION:-1.79.0}"
+oxlint_plugins_version="${OXLINT_PLUGINS_VERSION:-1.85.0}"
+shadcn_lint_version="${SHADCN_LINT_VERSION:-0.1.5}"
 anti_slop_sha="${ANTI_SLOP_SHA:-6d538555cb151d4121ed51a27db81890eacf8ae9}"
 # Content hash of the GitHub archive for ANTI_SLOP_SHA (commit pin alone is not
 # enough: GitHub can regenerate archive bytes for the same commit). Override
@@ -111,17 +113,19 @@ bun_add() {
   ( cd "$cache_dir" && bun add --silent \
       "@rikalabs/oxlint-standards@$oxlint_standards_version" \
       "oxlint-tsgolint@$oxlint_tsgolint_version" \
-      "@oxlint/plugins@$oxlint_plugins_version" ) >/dev/null 2>&1
+      "@oxlint/plugins@$oxlint_plugins_version" \
+      "@shadcn/lint@$shadcn_lint_version" ) >/dev/null 2>&1
 }
 if ! bun_add; then
   sleep 2
   if ! bun_add; then
     if [ -d "$cache_dir/node_modules/@rikalabs/oxlint-standards" ] &&
       [ -d "$cache_dir/node_modules/oxlint-tsgolint" ] &&
-      [ -d "$cache_dir/node_modules/@oxlint/plugins" ]; then
+      [ -d "$cache_dir/node_modules/@oxlint/plugins" ] &&
+      [ -d "$cache_dir/node_modules/@shadcn/lint" ]; then
       echo "zdtd: lint-webui: registry unreachable; using the pinned cache in $cache_dir" >&2
     else
-      echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_plugins_version into $cache_dir (offline?)" >&2
+      echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_plugins_version + @shadcn/lint@$shadcn_lint_version into $cache_dir (offline?)" >&2
       exit 1
     fi
   fi
@@ -134,43 +138,33 @@ cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 ( cd "$webui_ts_project" && PATH="$cache_dir/node_modules/.bin:$PATH" \
     bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc.jsonc" --deny-warnings ./*.ts ./*.tsx )
 
-# 3. Design tokens: shared.css is the one home, spliced into the pages by the
-#    build. Every page must carry the tokens marker, the sign-in pages the
-#    sign-in marker, and no token may be declared that no page uses. A page that
-#    hand-edits its tokens instead of the shared file fails the freshness gate.
+# 3. Design tokens: webui.css @theme is the one home, built by the Tailwind
+#    CLI and spliced into the pages by the build. Every page must carry its
+#    region marker. shared.css is the legacy source kept for provenance;
+#    a page that hand-edits its CSS instead of the theme fails the freshness
+#    gate.
 python3 - "$root" <<'PY'
 import pathlib
 import re
 import sys
 
 pages_dir = pathlib.Path(sys.argv[1]) / "src/server/webui"
-region_re = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/(.*?)/\* /zdtd-css:\1 \*/", re.S)
-shared = (pages_dir / "shared.css").read_text(encoding="utf-8")
-regions = {m.group(1): m.group(2) for m in region_re.finditer(shared)}
-if "tokens" not in regions or "signin" not in regions:
-    raise SystemExit("zdtd: lint-webui: shared.css must define the tokens and signin regions")
+theme = (pages_dir / "webui.css").read_text(encoding="utf-8")
+theme_block = re.search(r"@theme \{(.*?)\}", theme, re.S)
+if theme_block is None:
+    raise SystemExit("zdtd: lint-webui: webui.css must define an @theme block")
 required = {
     "shell.html": ("tokens",),
     "login.html": ("tokens", "signin"),
     "login_lockout.html": ("tokens", "signin"),
 }
-body = ""
 for page, wanted in required.items():
     text = (pages_dir / page).read_text(encoding="utf-8")
     for name in wanted:
         if not re.search(rf"/\* zdtd-css:{name} \*/.*?/\* /zdtd-css:{name} \*/", text, re.S):
             raise SystemExit(f"zdtd: lint-webui: {page} is missing the {name} region marker")
-    # Count usage everywhere except the token declarations themselves: the
-    # sign-in region is where --err-ink/--err-field are consumed.
-    body += re.sub(r"/\* zdtd-css:tokens \*/.*?/\* /zdtd-css:tokens \*/", "", text, flags=re.S)
-tokens = re.findall(r"(--[a-z0-9-]+):", regions["tokens"])
-dead = [token for token in tokens if body.count(token) == 0]
-if dead:
-    raise SystemExit(
-        "zdtd: lint-webui: token(s) declared in shared.css but used by no page: "
-        f"{', '.join(dead)}"
-    )
-print(f"zdtd: lint-webui: {len(tokens)} shared design tokens, all used")
+tokens = re.findall(r"(--color-[a-z0-9-]+|--font-[a-z0-9-]+|--radius-[a-z0-9-]+|--shadow-[a-z0-9-]+|--spacing-[a-z0-9_]+|--text-[a-z0-9-]+|--tracking-[a-z0-9-]+|--leading-[a-z0-9-]+):", theme_block.group(1))
+print(f"zdtd: lint-webui: {len(tokens)} theme tokens declared")
 PY
 
 # 4. Freshness: regenerate into a temp copy of the pages and diff.

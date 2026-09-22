@@ -142,7 +142,7 @@ pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i3
 }
 
 /// Stock DynamicPrefabDecorator quest-POI selection
-/// (il/full-v3.1.0/_global/DynamicPrefabDecorator.il.txt; RE: 7dtd-engine-research
+/// (il/full-v3.2.0/_global/DynamicPrefabDecorator.il.txt; RE: 7dtd-engine-research
 /// docs/quests-challenges.md "Quest POI selection"). `.random` mirrors
 /// GetRandomPOINearWorldPos / GetRandomPOINearTrader; `.closest` mirrors
 /// GetClosestPOIToWorldPos. No heap: fixed stack pools + a per-call XorShift
@@ -625,7 +625,7 @@ pub fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
     return total;
 }
 
-/// QuestActionSpawnGSEnemy (il/full-v3.1.0/_global/QuestActionSpawnGSEnemy):
+/// QuestActionSpawnGSEnemy (il/full-v3.2.0/_global/QuestActionSpawnGSEnemy):
 /// spawn `count_min..count_max` gamestage-scaled enemies around the player  -
 /// stock SpawnQuestEntity places them at player.position + random unit
 /// direction × (12 + RandomFloat*12) metres, resolving the entity via
