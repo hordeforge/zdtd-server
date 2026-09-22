@@ -102,9 +102,12 @@ pub const HostCtx = struct {
     data: ?*anyopaque = null,
     /// Set by the loader for the duration of a discovered-mod load: a mod's
     /// manifest is a claim about its capabilities, so `_zdtd_requires` presence
-    /// is fail-closed for it. False on the raw load path (in-repo test
-    /// fixtures, legacy `[plugin] modules`), where `--export-all` fixtures
-    /// would otherwise be refused for exporting hooks they never meant to claim.
+    /// is fail-closed for it. `loadResolved` sets it for every planned module,
+    /// legacy `[plugin] modules` entries included: an operator-listed path is
+    /// as much a capability claim as a discovered manifest. False on the raw
+    /// `loadAll`/`loadInto` path (in-repo test fixtures), where `--export-all`
+    /// fixtures would otherwise be refused for exporting hooks they never meant
+    /// to claim.
     require_declaration: bool = false,
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,
@@ -173,8 +176,12 @@ pub const Plugin = struct {
     config_bytes: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
-    /// Set on the host (not the slot) for the duration of a discovered-mod
-    /// load: probeRequires runs inside Plugin.load, before the slot exists.
+    /// The declaration rule this slot was loaded under, recorded by `loadInto`
+    /// from `HostCtx.require_declaration` (the probe itself runs inside
+    /// `Plugin.load`, before the slot exists, so the live flag lives on the
+    /// host). `reload` replays it so HMR holds the same rule as boot: a module
+    /// swapped on disk to drop `_zdtd_requires` must not load here and then be
+    /// refused on the next restart.
     require_declaration: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
     /// Declarative dependency check (paper: reactive coeffects): `_zdtd_requires`
@@ -321,12 +328,12 @@ pub const Plugin = struct {
     /// Coeffect fail-closed: a typo'd hook never silently never-fires.
     fn probeRequires(self: *Plugin, require_declaration: bool, ctx: *HostCtx) void {
         if (self.instance.exportFuncSig("_zdtd_requires") == null) {
-            // A discovered mod must declare its contract; the raw load path
+            // A planned module must declare its contract; the raw load path
             // does not, because its callers are the in-repo test harness (the
             // C fixtures export every symbol via --export-all, so "exports a
-            // hook" is not evidence of intent there) and the legacy
-            // `[plugin] modules` list. `require_declaration` is set by
-            // loadResolved for discovered manifests only.
+            // hook" is not evidence of intent there). `require_declaration` is
+            // set by loadResolved for every planned module and by reload for a
+            // manifest-backed slot.
             //
             // The hole this closes: nothing validated the hook names a mod
             // believes it registered, so a typo was a silent never-fire. A mod
@@ -1014,7 +1021,10 @@ pub const WasmHost = struct {
         for (plan.modules) |rm| {
             if (self.n >= max_wasm_plugins) {
                 std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
-                return;
+                // `break`, not `return`: the claim install below is the only
+                // thing that binds points to loaded slots, so returning from
+                // here left every module that DID load with no claims at all.
+                break;
             }
             // Path = <manifest dir>/<wasm> for discovered mods; synthetic
             // explicit modules carry the full path as wasm with dir "".
@@ -1041,10 +1051,15 @@ pub const WasmHost = struct {
             };
             self.slots[self.n].tier = rm.tier;
             self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
-            // This slot came from a `manifest.toml`, so `reload` re-reads that
-            // declaration (paper 5.2.1) instead of treating the module as a
-            // legacy path with no points to reconcile.
-            self.slots[self.n].manifest_loaded = true;
+            // Only a discovered mod directory has a `manifest.toml` for
+            // `reload` to re-read (paper 5.2.1). A legacy `[plugin] modules`
+            // entry reaches here as a synthetic manifest with dir "", and the
+            // boot path never read a manifest for it: marking it
+            // manifest-backed would make a reload adopt point claims, a deny
+            // list and a config from a `manifest.toml` that happens to sit
+            // beside the .wasm, and drop the config.toml bytes loaded below
+            // whenever no manifest sits there at all.
+            self.slots[self.n].manifest_loaded = rm.manifest.dir.len > 0;
             self.slots[self.n].module_deny = moduleDenyMask(rm.manifest.deny);
             self.slots[self.n].refreshDenied();
             if (rm.manifest.config.len > 0) {
@@ -1168,6 +1183,7 @@ pub const WasmHost = struct {
         ctx.rt_slot[idx] = @ptrCast(rt);
         ctx.plugin_slot[idx] = @ptrCast(&self.slots[idx]);
         self.slots[idx] = p2;
+        self.slots[idx].require_declaration = ctx.require_declaration;
         self.withdrawn[idx] = false;
     }
 
@@ -1210,6 +1226,8 @@ pub const WasmHost = struct {
         const module_deny = self.slots[idx].module_deny;
         const op_deny = self.slots[idx].op_deny;
         const op_allow = self.slots[idx].op_allow;
+        // Read before deinit: the slot is `undefined` afterwards.
+        const require_decl = self.slots[idx].require_declaration;
         _ = self.slots[idx].callHook(.on_shutdown);
         // Withdraw after on_shutdown and before deinit: shutdown may queue
         // (or spawn bots) that a pre-reload withdraw would miss, and those
@@ -1222,12 +1240,13 @@ pub const WasmHost = struct {
             ctx.rt_slot[idx] = null;
             ctx.plugin_slot[idx] = null;
         }
-        // A manifest-backed module declares its capabilities, so HMR holds the
-        // same fail-closed rule as boot: a module swapped on disk to drop
-        // `_zdtd_requires` must not load here and then be refused on restart
-        // (review F8; the boot path sets the same flag in loadResolved).
+        // HMR holds the same fail-closed rule the slot booted under, whatever
+        // that was: a module swapped on disk to drop `_zdtd_requires` must not
+        // load here and then be refused on restart (review F8). `manifest_loaded`
+        // is the wrong proxy for it, since a legacy `[plugin] modules` entry
+        // also loads through loadResolved with the rule on.
         const prev_require = if (self.ctx) |ctx| ctx.require_declaration else false;
-        if (manifest_loaded) {
+        if (require_decl) {
             if (self.ctx) |ctx| ctx.require_declaration = true;
         }
         defer {

@@ -62,6 +62,7 @@
   --text-panel: 0.95rem;
   --text-h3: 1.05rem;
   --text-glance: 1.7rem;
+  --text-stat: 1.25rem;
   --text-brand: 1.75rem;
 
   /* Tracking/leading steps carried over from the hand-written CSS. */
@@ -158,6 +159,122 @@
 @utility cmd-hint {
   & input::placeholder {
     color: var(--color-muted2);
+  }
+}
+
+
+/* Base page defaults utilities cannot carry: visible focus ring on everything
+   focusable (44px targets alone are not enough), stable scrollbar gutter, and
+   the body ground. Plain CSS in the theme entry; the shadcn JS rules do not
+   lint stylesheets. */
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+  body {
+    margin: 0;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--color-acc);
+    outline-offset: 2px;
+  }
+  a, button, input, [tabindex] {
+    scroll-margin-top: 6.5rem;
+  }
+}
+
+/* Forced-colors fallback: remap the theme; the canvas palette re-reads via
+   getComputedStyle in chart.ts. */
+@media (forced-colors: active) {
+  :root {
+    --color-paper: Canvas;
+    --color-panel: Canvas;
+    --color-well: Canvas;
+    --color-paper2: Canvas;
+    --color-ink: CanvasText;
+    --color-muted: CanvasText;
+    --color-muted2: CanvasText;
+    --color-line: CanvasText;
+    --color-line2: CanvasText;
+    --color-edge: CanvasText;
+    --color-acc: LinkText;
+    --color-acc-ink: LinkText;
+    --color-term: Canvas;
+    --color-term2: Canvas;
+    --color-term-line: CanvasText;
+    --color-term-text: CanvasText;
+    --color-term-faint: CanvasText;
+    --color-term-key: CanvasText;
+    --color-term-ok: LinkText;
+    --color-term-bad: Mark;
+    --color-term-band1: Canvas;
+    --color-term-band2: Canvas;
+  }
+}
+
+
+/* Server-rendered fragment compat: Zig error/console/login-banner fragments
+   (webui.zig) carry these legacy classes outside the TSX layer. Plain CSS so
+   the non-JS and plain-HTML fallbacks keep their styling. */
+@layer components {
+  .lead {
+    color: var(--color-muted);
+    font-size: 1rem;
+    margin: 0 0 1rem;
+    line-height: 1.6;
+  }
+  .err {
+    margin: 0 0 0.85rem;
+    padding: 0.9rem 1rem;
+    border-radius: var(--radius-card);
+    background: var(--color-err-soft);
+    border: 1px solid var(--color-err-border);
+    color: var(--color-err-ink);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  .ok {
+    color: var(--color-ok);
+  }
+  pre.cmd-out,
+  pre.cmd-log {
+    margin: 0 1.25rem 1.1rem;
+    background: var(--color-term);
+    color: var(--color-term-text);
+    border: 1px solid var(--color-term-line);
+    border-radius: var(--radius-card);
+    padding: 0.9rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    line-height: 1.7;
+    overflow: auto;
+    max-height: 15rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  pre .in,
+  pre .meta {
+    color: var(--color-term-faint);
+  }
+  pre.err,
+  pre .err {
+    color: var(--color-term-bad);
+  }
+  pre.ok,
+  pre .ok {
+    color: var(--color-term-ok);
+  }
+  span.meta {
+    color: var(--color-muted);
+    font-size: 0.8rem;
   }
 }
 

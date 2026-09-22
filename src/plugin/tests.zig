@@ -1982,3 +1982,53 @@ test "parachute.wasm announce text survives on_enable's stack frame" {
     }
     try std.testing.expect(saw_shipped);
 }
+
+test "a legacy [plugin] modules slot is not manifest-backed" {
+    // Composability review: loadResolved marked every plan entry
+    // manifest_loaded, including the synthetic manifests the resolver
+    // fabricates for `[plugin] modules` paths (dir ""). Those never had a
+    // manifest.toml read for them, so a reload re-read whatever
+    // `manifest.toml` happened to sit beside the .wasm (adopting point claims
+    // and a deny list the boot path never applied), and when none sat there
+    // the config.toml bytes loaded at boot were dropped instead of preserved.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    // A .wasm with a config.toml beside it and NO manifest.toml: the shape an
+    // operator gets from `modules = ["<path>.wasm"]`.
+    const wasm_path = try std.fs.path.join(a, &.{ dir, "legacy.wasm" });
+    defer a.free(wasm_path);
+    const cfg_path = try std.fs.path.join(a, &.{ dir, "config.toml" });
+    defer a.free(cfg_path);
+    try io_fs.writeFile(wasm_path, &declaring_test_wasm);
+    try io_fs.writeFile(cfg_path, "greeting = \"hi\"\n");
+
+    var modules = [_]resolver.ResolvedModule{
+        .{ .manifest = .{ .name = wasm_path, .dir = "", .wasm = wasm_path }, .tier = .user, .slot = 0 },
+    };
+    var plan: resolver.ResolvedResult = .{ .modules = &modules, .point_claims = .{}, .name_to_slot = .{}, .synthetic = &.{} };
+    defer plan.point_claims.deinit(a);
+    defer plan.name_to_slot.deinit(a);
+
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadResolved(a, &plan, &ctx, .{});
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    try std.testing.expect(!host.slots[0].manifest_loaded);
+    try std.testing.expectEqualStrings("greeting = \"hi\"\n", host.slots[0].config_bytes);
+
+    // HMR keeps the boot-time config instead of failing closed to none on a
+    // manifest.toml that was never part of this module's load.
+    try std.testing.expect(host.reload(0, host.slots[0].name));
+    try std.testing.expectEqualStrings("greeting = \"hi\"\n", host.slots[0].config_bytes);
+}

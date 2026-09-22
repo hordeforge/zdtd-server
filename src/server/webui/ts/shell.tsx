@@ -303,11 +303,11 @@ function StatGrid({ heading, stats }: { heading?: string; stats: Array<Stat> }):
     return (
         <Fragment>
             {heading === undefined ? null : <h3 class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold text-ink">{heading}</h3>}
-            <ul class="list-none m-0 grid border-t border-line bg-transparent p-0">
+            <ul class="list-none m-0 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] border-t border-line bg-transparent p-0">
                 {stats.map((stat) => (
                     <li class="min-w-0 border-l border-b border-line bg-transparent px-4 py-3 first:border-l-0" data-flash key={stat.label}>
-                        <b class={stat.tone ?? "font-mono text-num tabular-nums"}>{stat.body}</b>
-                        <span class="text-muted font-sans text-hud tracking-label leading-stat uppercase font-semibold">{stat.label}</span>
+                        <b class={stat.tone === undefined ? "block font-sans text-stat font-bold leading-tight2 tracking-tight1 text-ink tabular-nums break-words" : `block ${stat.tone}`} data-flash-value>{stat.body}</b>
+                        <span class="block text-muted font-sans text-hud tracking-label leading-stat uppercase font-semibold">{stat.label}</span>
                     </li>
                 ))}
             </ul>
@@ -531,7 +531,7 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
             <div class={cell}>
                 <b id="glance-state" class={glanceValue}>{blood ? "ACTIVE" : "idle"}</b>
                 <span id="glance-state-label" class={glanceLabel}>blood moon</span>
-                <span class="mt-1 inline-flex" id="glance-pill"><Pill tone={blood ? "bad" : "ok"}>{blood ? "blood moon" : "live"}</Pill></span>
+                <span class="mt-1 flex" id="glance-pill"><Pill tone={blood ? "bad" : "ok"}>{blood ? "blood moon" : "live"}</Pill></span>
             </div>
         </div>
     );
@@ -713,7 +713,7 @@ function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visib
         <section id="players-section" class="overflow-hidden rounded-card border border-line bg-panel shadow-card" role="tabpanel" tabindex={0} aria-labelledby="tab-players" hidden={!visible}>
             <h2 id="players-heading" class="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold tracking-tight1 text-ink">Players</h2>
             <div id="players" class="overflow-auto" role="region" aria-label="Connected players table" tabindex={0}>
-                <table class="w-full border-collapse text-panel">
+                <table class="w-full border-collapse text-body2">
                     <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Connected players</caption>
                     <thead>
                         <tr>
@@ -767,7 +767,7 @@ function SettingsPanel({ tick, visible }: { tick: TickState; visible: boolean })
 
 function ModuleTable({ modules }: { modules: Array<ModuleEntry> }): ComponentChildren {
     return (
-        <table class="w-full border-collapse text-panel">
+        <table class="w-full border-collapse text-body2">
             <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Loaded modules</caption>
             <thead>
                 <tr>
@@ -812,7 +812,7 @@ function ModletTable({
     onAction: (name: string, action: string) => void;
 }): ComponentChildren {
     return (
-        <table class="w-full border-collapse text-panel">
+        <table class="w-full border-collapse text-body2">
             <caption class="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Game modlets</caption>
             <thead>
                 <tr>
@@ -874,12 +874,12 @@ function ModletFeedback({ failure, success }: { failure: string | null; success:
     return (
         <Fragment>
             {failure === null ? null : (
-                <p class="mx-5 mb-3 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-panel leading-card text-err-ink" role="alert">
+                <p class="mx-5 mb-3 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-body2 leading-card text-err-ink" role="alert">
                     {failure}
                 </p>
             )}
             {success === null ? null : (
-                <p class="mx-5 mb-3 rounded-card border border-ok-border bg-acc-soft px-4 py-3.5 font-sans text-panel leading-card text-acc-ink" role="status">
+                <p class="mx-5 mb-3 rounded-card border border-ok-border bg-acc-soft px-4 py-3.5 font-sans text-body2 leading-card text-acc-ink" role="status">
                     {success}
                 </p>
             )}
@@ -1442,7 +1442,7 @@ function App(): ComponentChildren {
     }, [runRefresh]);
 
     const banner = failed ? (
-        <p class="m-0 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-panel leading-card text-err-ink" role="alert">
+        <p class="m-0 rounded-card border border-err-border bg-err-soft px-4 py-3.5 font-sans text-body2 leading-card text-err-ink" role="alert">
             Live data is unavailable. Check the connection; retrying automatically.
         </p>
     ) : null;

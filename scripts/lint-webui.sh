@@ -155,8 +155,8 @@ if theme_block is None:
     raise SystemExit("zdtd: lint-webui: webui.css must define an @theme block")
 required = {
     "shell.html": ("tokens",),
-    "login.html": ("tokens", "signin"),
-    "login_lockout.html": ("tokens", "signin"),
+    "login.html": ("tokens",),
+    "login_lockout.html": ("tokens",),
 }
 for page, wanted in required.items():
     text = (pages_dir / page).read_text(encoding="utf-8")

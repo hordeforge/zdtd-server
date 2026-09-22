@@ -43,7 +43,7 @@ pub const max_cmd_out: usize = 4096;
 pub const max_shell_html: usize = 128 * 1024;
 // Sign-in pages (Tailwind build inlined) are the next largest bodies after the
 // shell; login.html and login_lockout.html each render under this cap.
-pub const max_login_html: usize = 24 * 1024;
+pub const max_login_html: usize = 28 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -3097,7 +3097,7 @@ test "renderShell serves the app mount point and the JSON poll" {
     // The retired partials must not survive in the committed page.
     try std.testing.expect(std.mem.find(u8, html, "hx-get=\"/partials/") == null);
     // Document chrome that must not regress with a page edit.
-    try std.testing.expect(std.mem.find(u8, html, "class=\"skip-link\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "href=\"#main-content\"") != null); // skip link (Tailwind utilities now)
     try std.testing.expect(std.mem.find(u8, html, "href=\"#main-content\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"auto-refresh\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-now\"") != null);
@@ -3107,19 +3107,20 @@ test "renderShell serves the app mount point and the JSON poll" {
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"glance-lamp\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"glance-word\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, ":focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "focus-visible") != null); // base-layer focus ring in webui.css
     // No-JS fallback: the static controls that need the app hide (head
     // noscript). Sections are rendered by the Preact app, so there is no
     // `section[hidden]` to unhide without JS.
-    try std.testing.expect(std.mem.find(u8, html, ".refresh-ctrl,#refresh-now,.glance-band{display:none}") != null);
-    try std.testing.expect(std.mem.find(u8, html, "class=\"flush\"") == null); // partial-only
-    try std.testing.expect(std.mem.find(u8, html, "class=\"mod-btn\"") == null); // partial-only
+    try std.testing.expect(std.mem.find(u8, html, "#refresh-now,#app{display:none}") != null); // no-JS hides app-dependent controls
+    try std.testing.expect(std.mem.find(u8, html, "class=\"stat\"") == null); // legacy hooks are Tailwind utilities now
+    try std.testing.expect(std.mem.find(u8, html, "class=\"glance-cell\"") == null); // legacy hooks are Tailwind utilities now
     try std.testing.expect(html.len < max_shell_html);
 }
 test "renderLogin substitutes banner and input state" {
     var buf: [max_login_html]u8 = undefined;
     const ok = try renderLogin(&buf, false);
-    try std.testing.expect(std.mem.find(u8, ok, "<label for=\"login-token\">Shared secret</label>") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "<label for=\"login-token\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "Shared secret</label>") != null);
     try std.testing.expect(std.mem.find(u8, ok, "name=\"token\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "type=\"password\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "maxlength=\"128\"") != null);
@@ -3140,7 +3141,7 @@ test "renderLogin substitutes banner and input state" {
     try std.testing.expect(std.mem.find(u8, bad, "aria-invalid") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
     try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
-    try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "CanvasText") != null); // forced-colors theme remap in webui.css
     try std.testing.expect(std.mem.find(u8, bad, "forced-color-adjust:none") == null);
     try std.testing.expect(std.mem.find(u8, bad, "__ZDTD_") == null);
     const locked = loginLockoutHtml();

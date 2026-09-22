@@ -330,7 +330,12 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
     defer a.free(cfg_path);
     if (io_fs.fileExists(cfg_path)) {
         const cfg = try io_fs.readFileAll(a, cfg_path);
-        if (cfg.len <= max_config_bytes) m.config = cfg;
+        if (cfg.len <= max_config_bytes) {
+            m.config = cfg;
+        } else {
+            // Oversized fails closed to no config; the bytes still need freeing.
+            a.free(cfg);
+        }
     }
     return m;
 }
