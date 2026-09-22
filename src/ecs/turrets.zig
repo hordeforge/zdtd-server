@@ -154,6 +154,11 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         const would_kill = w.health[i].hp - applied <= 0;
         if (would_kill and (out.killed_n >= out.killed_ids.len or out.loot_n >= out.loot_bag_ids.len)) break;
         w.health[i].hp -= applied;
+        // Stock's Stat setter raises Stat.Changed and the entity tick turns
+        // that into a stat-change package (asm.il:199393). Without the dirty
+        // bit the replicate pass had no way to know a turret had shot this
+        // zombie, so viewers saw it at full health until it died.
+        w.markDirty(i, .{ .hp = true });
         if (w.health[i].hp <= 0) {
             const x = if (w.mask[i].transform) w.transform[i].x else 0;
             const y = if (w.mask[i].transform) w.transform[i].y else 0;
@@ -162,25 +167,10 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             // Same drop_prob roll as player kills (class_id LootDropProb);
             // read before the corpse marking, which keeps the slot.
             const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
-            // Corpse dwell like player kills: the body stays at hp 0 for
-            // TimeStayAfterDeath; the tick sweep destroys it later. Fallback
-            // is the stock EntityAlive default 5 s (RE entity-ai.md); the XML
-            // values 30/300 flow via class_id.time_stay when declared. Horde
-            // kills gib 3x faster: stock cuts `timeStayAfterDeath /= 3` on
-            // horde spawns (`AIDirectorBloodMoonParty.SpawnZombie`), so the
-            // night's corpses clear instead of piling up.
-            var dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
-                w.class_id[i].time_stay
-            else
-                5.0;
-            if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) dwell /= 3.0;
-            w.health[i].hp = 0;
-            w.health[i].corpse_seconds = dwell;
-            if (w.mask[i].zombie_ai) {
-                w.zombie_ai[i].state = .idle;
-                w.zombie_ai[i].target_id = -1;
-                w.zombie_ai[i].alert = false;
-            }
+            // Same corpse funnel as every other kill path (World.markCorpse):
+            // the body stays at hp 0 for TimeStayAfterDeath and the tick sweep
+            // destroys it, pairing the removal with its EntityRemove.
+            w.markCorpse(i);
             out.kills += 1;
             if (zid > 0 and out.killed_n < out.killed_ids.len) {
                 out.killed_ids[out.killed_n] = zid;

@@ -14,6 +14,7 @@ const misc_av = @import("misc_av.zig");
 const misc_questequip = @import("misc_questequip.zig");
 const misc_progress = @import("misc_progress.zig");
 const misc_gameevent = @import("misc_gameevent.zig");
+const misc_spawn = @import("misc_spawn.zig");
 const misc_drop = @import("misc_drop.zig");
 const protocol = @import("../../protocol.zig");
 const replicate_te = @import("../game/replicate_te.zig");
@@ -61,6 +62,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try misc_questequip.handleQuestEquip(self, c, peer, name, body)) return true;
     if (try misc_progress.handleProgress(self, c, peer, name, body)) return true;
     if (try misc_gameevent.handleGameEvent(self, c, peer, name, body)) return true;
+    if (try misc_spawn.handleSpawn(self, c, peer, name, body)) return true;
     // Accepted and dropped on purpose (phase-gated above, so this is a
     // deliberate no-op, not an unhandled package). Each is a documented
     // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
@@ -101,49 +103,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageQuestEntitySpawn")) {
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        // Stock body (RE protocol-packages.md 6.17; read IL at
-        // il/netpackages-v3.2.0/NetPackageQuestEntitySpawn_il.txt IL_0002-001F):
-        // entityType i32 | gamestageGroup string | entityIDQuestHolder i32.
-        // The third field is the quest holder's entity id, not a count. It was
-        // read as one, so a single packet summoned that many zombies with the
-        // client choosing the number. Stock ProcessPackage (IL=37) calls
-        // SpawnQuestEntity exactly once, so there is no per-request cap to
-        // apply: the count is not client-chosen at all.
-        var r: wire_binary.Reader = .{ .data = body };
-        _ = r.readI32() catch return true; // entityType (-1 = resolve from group)
-        var gname: [64]u8 = undefined;
-        _ = r.readString(&gname) catch return true; // gamestageGroup
-        const holder_id = r.readI32() catch return true;
-        // The holder is the player whose quest summons. A packet naming another
-        // player would spawn at the sender on someone else's quest, so require
-        // the sender's own entity.
-        if (holder_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
-        const ps = self.sim.playerByPeer(c.slot) orelse return true;
-        if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
-            self.harness.counters.inc(.c2s_rejects);
-            return true;
-        }
-        const t = self.sim.transform[ps];
-        const zdef = self.entities.defaultZombie();
-        const zclass = self.entityClassOf(zdef);
-        // A35: spawn the full resolved class so the quest summon carries stats.
-        _ = self.sim.spawnZombieDef(t.x + 6, t.y, t.z, zdef.max_hp, zclass);
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageRequestToSpawnEntity")) {
-        // The generic ECD request does not prove item ownership or a legal
-        // spawn class. Typed drop/throw paths must validate and consume the
-        // corresponding server-side inventory first.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageConsoleCmdServer")) {

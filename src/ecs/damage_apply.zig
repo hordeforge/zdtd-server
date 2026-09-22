@@ -7,6 +7,7 @@ const std = @import("std");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
+const NetId = @import("world.zig").NetId;
 const c = @import("components.zig");
 const systemZombieAi = @import("ai_tasks.zig").systemZombieAi;
 const inventory = @import("inventory.zig");
@@ -147,12 +148,11 @@ pub fn applyDeferredDamage(w: *World, dmg_fp: []const u32, dmg_attacker: []const
                     continue;
                 }
             }
-            // Dead players keep their entity (stock death → respawn flow).
-            if (w.kind[i] == .player) {
-                w.health[i].hp = 0;
-            } else {
-                w.destroy(i);
-            }
+            // Same death funnels as World.applyDamage and systemTurrets:
+            // players keep their entity and take IsBloodMoonDead, everything
+            // else becomes a corpse the sweep destroys with an EntityRemove.
+            // Destroying here skipped both and left the client a ghost.
+            if (w.kind[i] == .player) w.markPlayerDead(i) else w.markCorpse(i);
         }
     }
     return applied;
@@ -231,6 +231,44 @@ test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expect(!w.dirty[ps].hp);
 }
+test "the deferred kill funnels match World.applyDamage: blood-moon flag and corpse" {
+    // Regression: the deferred path wrote hp = 0 for players (no
+    // IsBloodMoonDead, so the horde kept chasing the body) and called
+    // destroy() for everything else (no corpse dwell, and the removal went
+    // out without the EntityRemove sweepCorpses pairs with it). Both now go
+    // through World.markPlayerDead / World.markCorpse like every other kill.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const z = w.spawnZombie(4, 70, 0, 10).?;
+    const ps = w.slotOfNetId(p).?;
+    const zs = w.slotOfNetId(z).?;
+    // Blood-moon night: day 7, freq 7, after dusk (mirrors world_tests).
+    w.director.clock.day = 7;
+    w.director.clock.hours = 22.0;
+    w.director.clock.dawn = 6;
+    w.director.clock.dusk = 18;
+    w.director.clock.bloodmoon_frequency = 7;
+    w.health[ps].hp = 1;
+    w.health[zs].hp = 1;
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    dmg_fp[ps] = 100_000;
+    dmg_fp[zs] = 100_000;
+    try std.testing.expectEqual(@as(u32, 2), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
+    try std.testing.expect(w.player[ps].is_blood_moon_dead);
+    try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
+    // The zombie is a corpse, not gone: still alive[] with a dwell armed, so
+    // the sweep is what destroys it and reports the id to remove.
+    try std.testing.expect(w.alive[zs]);
+    try std.testing.expectEqual(@as(f32, 0), w.health[zs].hp);
+    try std.testing.expect(w.health[zs].corpse_seconds > 0);
+    var out: [4]NetId = undefined;
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000.0, out[0..], null));
+    try std.testing.expectEqual(z, out[0]);
+    try std.testing.expect(!w.alive[zs]);
+}
+
 test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred choke" {
     // RE `ItemActionAttack.difficultyModifier` (combat-damage.md): a server
     // (AI) attacker vs a client entity scales by IncomingDamageModifier,

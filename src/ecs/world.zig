@@ -58,6 +58,16 @@ const sleeper_wake_near_max_default: f32 = 5.0;
 const sleeper_wake_far_min_default: f32 = 340.0;
 const sleeper_wake_far_max_default: f32 = 480.0;
 
+/// Stock EntityAlive `timeStayAfterDeath` default (RE entity-ai.md): the
+/// corpse dwell used when the class declares no TimeStayAfterDeath. The XML
+/// values (30 zombies, 300 animals) arrive through `class_id.time_stay`.
+const corpse_dwell_default_seconds: f32 = 5.0;
+
+/// Horde kills gib faster: `AIDirectorBloodMoonParty.SpawnZombie` cuts the
+/// spawned zombie's `timeStayAfterDeath /= 3` so the night's corpses clear
+/// instead of piling up.
+const corpse_dwell_horde_divisor: f32 = 3.0;
+
 /// RE entity-ai.md 3318-3320 (CopyPropertiesFromEntityClass): the
 /// MoveSpeedRand per-entity roll on the day chase speed. When the class has a
 /// roll range and a day aggro value < 1, add the roll, clamp min 0.1 and cap
@@ -1802,28 +1812,9 @@ pub const World = struct {
                 const loot_name = if (self.mask[s].class_id) self.class_id[s].loot_list else "";
                 const drop_prob = if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0;
                 const nid = self.network_id[s].id;
-                // Corpse dwell (EntityAlive::OnDeathUpdate, TimeStayAfterDeath):
-                // keep the body in world at hp 0 so the client's ragdoll is not
-                // yanked mid-animation; the tick sweep destroys it later. A
-                // second hit must not re-fire kill side effects (hp <= 0 guard
-                // above already returns).
-                self.health[s].hp = 0; // clamp: the wire stat shows 0, not the overkill
-                // Stock EntityAlive timeStayAfterDeath default = 5 s (RE
-                // entity-ai.md; the XML values 30/300 flow via class_id.time_stay
-                // when the class declares the property). 5 s fallback, not 300/30.
-                // Horde kills gib 3x faster (SpawnZombie cuts the dwell /= 3).
-                var dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
-                    self.class_id[s].time_stay
-                else
-                    5.0;
-                if (self.mask[s].zombie_ai and self.zombie_ai[s].is_horde) dwell /= 3.0;
-                self.health[s].corpse_seconds = dwell;
-                // The corpse does not act: stop its AI and any chase.
-                if (self.mask[s].zombie_ai) {
-                    self.zombie_ai[s].state = .idle;
-                    self.zombie_ai[s].target_id = -1;
-                    self.zombie_ai[s].alert = false;
-                }
+                // A second hit must not re-fire kill side effects (the
+                // hp <= 0 guard above already returns).
+                self.markCorpse(s);
                 if (!self.rollLootDrop(nid, drop_prob)) {
                     // zPackReg is a 4% bag: most kills drop nothing, like stock.
                     return .{
@@ -1843,18 +1834,8 @@ pub const World = struct {
                     .applied = applied,
                 };
             }
-            // Players stay in the world dead (stock death → respawn flow keeps
-            // the entity; destroy() here silently desyncs the client and breaks
-            // every later net-id lookup: give/kill/tele all "miss").
             if (self.kind[s] == .player) {
-                self.health[s].hp = 0;
-                // EntityPlayer death sets IsBloodMoonDead = BloodMoonActive
-                // (asm.il 412541-412547); the horde then ignores this player.
-                if (self.mask[s].player) {
-                    self.player[s].is_blood_moon_dead = self.director.clock.isBloodMoonNight();
-                }
-                self.reviveSlot(s); // no-op here (slot was never removed), but
-                // keeps every alive[] = true in the repo on one path.
+                self.markPlayerDead(s);
                 return .{ .killed = true, .applied = applied };
             }
             self.destroy(s);
@@ -1934,6 +1915,51 @@ pub const World = struct {
             self.destroy(s);
         }
         return n;
+    }
+
+    /// Seconds this body lingers as a corpse before `sweepCorpses` destroys
+    /// it, from the class TimeStayAfterDeath with the stock default and the
+    /// horde divisor applied (see the two consts at the top of this file).
+    pub fn corpseDwell(self: *const World, s: Slot) f32 {
+        var dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
+            self.class_id[s].time_stay
+        else
+            corpse_dwell_default_seconds;
+        if (self.mask[s].zombie_ai and self.zombie_ai[s].is_horde) dwell /= corpse_dwell_horde_divisor;
+        return dwell;
+    }
+
+    /// Turn a lethally hit non-player into a corpse: clamp hp to 0 (the wire
+    /// stat shows 0, not the overkill), arm the dwell `sweepCorpses` destroys
+    /// on, and stop the body acting (EntityAlive::OnDeathUpdate). The single
+    /// funnel for non-player deaths: `destroy` here instead would drop the
+    /// client's ragdoll mid-animation and skip the paired EntityRemove the
+    /// sweep reports, leaving a permanent ghost.
+    pub fn markCorpse(self: *World, s: Slot) void {
+        self.health[s].hp = 0;
+        self.markDirty(s, .{ .hp = true });
+        self.health[s].corpse_seconds = self.corpseDwell(s);
+        if (self.mask[s].zombie_ai) {
+            self.zombie_ai[s].state = .idle;
+            self.zombie_ai[s].target_id = -1;
+            self.zombie_ai[s].alert = false;
+        }
+    }
+
+    /// Player death. Stock keeps the entity (the death → respawn flow needs
+    /// it; `destroy` here silently desyncs the client and breaks every later
+    /// net-id lookup, so give/kill/tele all "miss"): clamp hp to 0 and set
+    /// IsBloodMoonDead = BloodMoonActive (asm.il 412541-412547) so the horde
+    /// ignores this player. The single funnel for player deaths.
+    pub fn markPlayerDead(self: *World, s: Slot) void {
+        self.health[s].hp = 0;
+        self.markDirty(s, .{ .hp = true });
+        if (self.mask[s].player) {
+            self.player[s].is_blood_moon_dead = self.director.clock.isBloodMoonNight();
+        }
+        // No-op here (the slot was never removed), but keeps every
+        // alive[] = true in the repo on the one sanctioned path.
+        self.reviveSlot(s);
     }
 
     /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.

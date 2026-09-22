@@ -163,6 +163,21 @@ slot order and costs O(live) or O(changed). `mask.zombie_ai` is set at spawn for
 zombie and animal and is not cleared while alive, so the merged kind groups
 are the live AI set.
 
+### Death funnels (`world.zig`)
+
+All three kill paths (`World.applyDamage`, `systemTurrets`,
+`applyDeferredDamage`) end in the same two `World` methods, so the side
+effects cannot drift apart:
+
+| Method | Applies |
+|---|---|
+| `markCorpse` | hp 0 + `markDirty(.hp)`, `corpse_seconds = corpseDwell(slot)`, AI stopped. `sweepCorpses` destroys the body later and reports the id for EntityRemove. |
+| `markPlayerDead` | hp 0 + `markDirty(.hp)`, `is_blood_moon_dead = clock.isBloodMoonNight()`, `reviveSlot`. The entity stays: destroying it desyncs the client and breaks later net-id lookups. |
+
+`corpseDwell` is the class `TimeStayAfterDeath` (`class_id.time_stay`), else
+the stock default, over the horde divisor for a blood-moon spawn. Loot roll,
+kill XP, death bag and sequence stay with the calling path.
+
 ### Tick command buffer (`command.zig`)
 
 Queued-op shapes, illustrative:
