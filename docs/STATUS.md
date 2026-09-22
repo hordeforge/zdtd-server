@@ -22,6 +22,47 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**EAILeap pounce shipped 2026-09-22**: `zombieSpider` (pipe `AITask`, first
+entry) and `animalMountainLion` (`AITask-1 legs=4`) now pounce.
+`taskNameToId` maps `Leap`, `JumpMaxDistance` rides
+`EntityDef` -> `EntityClass` -> `ClassId` and rolls per spawn (Wyhash over
+position + class hash, the `rollChaseDay` shape; stock rolls the vec per
+entity at CopyPropertiesFromEntityClass, entity-ai.md 3363), and the task
+runs behind the stock `EAILeap.CanExecute` legs: the parsed-list bit (so the
+shared native table never gains a pounce stock zombieTemplateMale never had),
+the `[leap_min_dist, jump_max]` distance window, the `leapV.y` bound
+`[-5, 0.5 + 0.5 * jump_max]`, and the corridor physics ray from feet + 1.5
+for `dist - 0.5` (`EAILeap.il.txt` in
+`7dtd-engine-research`, walls are walked around, never vaulted). The aim
+phase turns to `leapYaw` inside the `leap_abort_s` budget, then a closed-form
+arc lands on the aimed cell and arms `jump_delay_s`; the flight tunables are
+`[sim]` Rules fields (`leap_*`, documented in GAME_OPTIONS). The `jumping`
+flag and `vy` delta stream ride the existing AliveFlags/EntityVelocity path,
+so a stock client renders the pounce with no new package. Only
+`RangedAttackTarget` (the five acid spitters) stays unmapped; its delivery
+contract is RE-closed (7dtd-engine-research entity-ai.md 2026-09-22) and
+needs server projectile flight. Gated by `system zombie leaps at a target
+inside its JumpMaxDistance window`, `leap refuses a walled corridor and an
+out-of-window leapV.y`, `Leap maps to a native task and JumpMaxDistance
+parses`, and `GAME_OPTIONS.md documents every Rules field`.
+**One wedged peer no longer aborts another player's join 2026-09-22**:
+`broadcastExcept`'s `hard_fail` reports a full window on a peer the caller
+cannot act on, so `broadcast()` now swallows it at the API boundary (the
+enter-bundle critical lane still aborts on the joiner's own full window) and
+`sendJoinBundle`'s announce-to-others loop skips a wedged peer, leaving its
+`known_entities` unset so the replicate pass re-sends once the window drains;
+before this, one wedged client made every subsequent join fail at the
+PersistentPlayerState row or the EntitySpawn announce. The fan-out test pins
+it (`a broadcast fan-out shares one retry window across wedged peers`, 14/14).
+Two more greens from the same sweep: the stale-peer reap scenario now checks
+the drop contract it was written against (`clients[slot] = .{}` reads back
+the type default `-1`; the old `expectEqual(0, ...)` demanded a value the
+teardown never produced, so it was red from the commit that wrote it), and
+the tick pacer quote follows `lifecycle.zig:109`. Evidence: full
+`zig build test` run exit 0 at 21:10 (zero FAIL lines) with every
+previously-failing test re-verified green individually (fan-out 14/14,
+stale-peer reap 14/14, GAME_OPTIONS 3/3); `check_docs` ok (1688 links,
+3805 citations, 303 quoted blocks) and `check_config_keys` ok (72 keys).
 **Loadgen Navezgane mixed-mode smoke 2026-09-12
 (round 19, post damage/loot changes)**: on the current commit (passive-43 EDR +
 `AffectedByArmor` source gate + loot `EntryGate`) the real map loaded (loot
