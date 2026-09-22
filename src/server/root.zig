@@ -115,6 +115,7 @@ pub const c2s_misc_turret = @import("c2s/misc_turret.zig");
 pub const c2s_join = @import("c2s/join.zig");
 pub const c2s_join_login = @import("c2s/join_login.zig");
 pub const c2s_join_enter = @import("c2s/join_enter.zig");
+pub const c2s_join_worldinfo = @import("c2s/join_worldinfo.zig");
 pub const c2s_dispatch = @import("c2s/dispatch.zig");
 
 pub const Game = game.Game;
@@ -230,5 +231,6 @@ test {
     _ = c2s_join;
     _ = c2s_join_login;
     _ = c2s_join_enter;
+    _ = c2s_join_worldinfo;
     _ = c2s_dispatch;
 }

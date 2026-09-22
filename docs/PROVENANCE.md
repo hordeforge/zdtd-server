@@ -322,6 +322,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/inv_reload.zig` | R | C2S inventory arms (item reload, player inventory snapshot). Split out of inv.zig verbatim |
 | `src/server/c2s/join_login.zig` | R | C2S join arm (PlayerLogin validate, spawn, join bundle). Split out of join.zig verbatim |
 | `src/server/c2s/join_enter.zig` | R | C2S join arms (enter game, auth, world folder, spawned-in-world). Split out of join.zig verbatim |
+| `src/server/c2s/join_worldinfo.zig` | R | C2S join arms (sign data, POI metadata, world-init info, client arrive). Split out of join.zig verbatim |
 | `src/server/c2s/inv_holding.zig` | R | C2S inventory arms (holding item, item drop, bag access). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_te.zig` | R | C2S tile-entity arms (drop-container refusal, TE edits). Split out of inv.zig verbatim |
 | `src/server/c2s/inv_txn.zig` | R | C2S inventory arms (transaction requests, data requests). Split out of inv.zig verbatim |
