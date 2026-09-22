@@ -83,12 +83,11 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game/lifecycle.zig:108`):
+The only real-time pacer is `Game.run` (`src/server/game/lifecycle.zig:109`):
 
 ```zig
 pub fn run(self: *Game) !void {
     const tick_ns: u64 = @import("../../protocol.zig").tick_ns;
-    const clock = @import("../../util/clock.zig");
     var next_t = clock.monoNs() + tick_ns;
     while (self.running) {
         try self.step();

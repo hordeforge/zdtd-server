@@ -184,7 +184,12 @@ test "scenario the stale-peer reap tears the session down like a disconnect" {
     g.reapStalePeers();
 
     try std.testing.expect(g.clients[a_slot].peer == null);
-    try std.testing.expectEqual(@as(i32, 0), g.clients[a_slot].entity_id);
+    // The drop path's contract is a full record reset: session_drop.zig ends
+    // at `clients[slot] = .{}`, so the slot reads back the type's no-entity
+    // default (-1, game/types.zig), which is what "cleared" means here. The
+    // old `expectEqual(0, ...)` demanded a value the documented teardown
+    // never produces (red since the scenario landed, 2026-09-22 c68363f8).
+    try std.testing.expectEqual((game_mod.Client{}).entity_id, g.clients[a_slot].entity_id);
     // The ghost is gone from the sim and from B's known set.
     try std.testing.expect(!g.sim.alive_bits.isSet(a_sim));
     try std.testing.expect(!g.clients[b.slot].known_entities.isSet(a_sim));
