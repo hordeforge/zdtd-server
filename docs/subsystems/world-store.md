@@ -81,7 +81,7 @@ Channel order after the heights is blocks (u32 per cell), textures (u64), densit
 
 ## Dirty tracking and the flush path
 
-`dirty` is set by every mutating setter: `setBlockRaw` (`setBlockTexDens` routes through it), `setDmg` and `clearDmg`, `setTopSoilBroken`, and `setHeight` (`src/world/store.zig:243,251,310,348,450`). `setBlockDecoRaw` deliberately does not set it (`src/world/store.zig:465-475`): decoration mirror writes are derived state, so a clean session writes no files (see the persistence test at `src/world/store.zig:1794-1826`).
+`dirty` is set by every mutating setter: `setBlockRaw` (`setBlockTexDens` routes through it), `setDmg` and `clearDmg`, `setTopSoilBroken`, and `setHeight` (`src/world/store.zig:243,251,310,348,450`). `setBlockDecoRaw` deliberately does not set it (`src/world/store.zig:465-475`): decoration mirror writes are derived state, so a clean session writes no files (see the persistence test at `src/world/store_tests.zig:119-151`).
 
 `saveAll` collects the dirty keys, sorts them so write order is independent of HashMap history (deterministic fault injection), and walks them in slices of 512 (`src/world/store.zig:1632-1672`). `saveChunkSlice` writes serially below `parallel.min_parallel_items` and otherwise fans out with `parallel.forRanges`, clearing `dirty` per chunk as it succeeds and returning `error.SaveFailed` if any worker did (`src/world/store.zig:1674-1708`). `saveChunk` skips a clean chunk in a procedural world, since it regenerates deterministically from the seed; baked worlds persist clean chunks because disk reload beats DTM plus prefab regen (`src/world/store.zig:1460-1468`).
 

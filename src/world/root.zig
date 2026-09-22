@@ -6,6 +6,7 @@
 //! Prefab `.blocks.nim` lives in `assets/blocks_nim.zig` (import assets, not here).
 
 pub const store = @import("store.zig");
+pub const store_tests = @import("store_tests.zig");
 pub const chunk_flush = @import("chunk_flush.zig");
 pub const terrain_snapshot = @import("terrain_snapshot.zig");
 pub const containers = @import("containers.zig");
@@ -31,6 +32,7 @@ pub const subbiome_noise = @import("subbiome_noise.zig");
 
 test {
     _ = store;
+    _ = store_tests;
     _ = chunk_flush;
     _ = terrain_snapshot;
     _ = containers;

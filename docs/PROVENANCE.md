@@ -459,6 +459,7 @@ Coverage targets, all enforced by the scan:
 | `src/world/stability.zig` | R | Stock block stability plane and falling-block trigger (RE: `../7dtd-engine-research/docs/world/stability.md`, dumps 2026-08-06) |
 | `src/world/sky.zig` | R | Stock SkyManager day/night model (RE `../7dtd-engine-research/docs/entities/entity-ai.md` SkyManager pin 2026-08-26): TimeOfDay, UpdateSunMoonAngles sun target, CalcDayPercent curve, GetLightLevel ambient term. Slice 1 of the clone-side world-light model; the moon term SHIPS 2026-08-27 (moonAmbientScale in step.zig), block light / moving lights / shade stay recorded later slices |
 | `src/world/store.zig` | R | Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch). v3 magic ZCH3: heights + optional u32 rawData + optional texture/density |
+| `src/world/store_tests.zig` | R | World store tests (worldgen, persistence, water, SIMD, prefabs). Split out of store.zig verbatim |
 | `src/world/subbiome_noise.zig` | R | Stock subbiome noise for deco placement (GAP_ANALYSIS 18): a clean-room port of `PerlinNoise` + `WorldBiomeProviderFromImage::GetSubBiomeIdxAt`, so |
 | `src/world/terrain_snapshot.zig` | R | Read-mostly terrain footing snapshot for the A* inner loop. |
 | `src/world/tts.zig` | R | Stock prefab `.tts` block paint (Prefab.readBlockData, V3.x file version 19). |
