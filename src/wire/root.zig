@@ -20,6 +20,7 @@ pub const stock_nameid = @import("stock_nameid.zig");
 pub const stock_entity = @import("stock_entity.zig");
 pub const entity_tests = @import("entity_tests.zig");
 pub const stock_quest = @import("stock_quest.zig");
+pub const quest_tests = @import("quest_tests.zig");
 pub const stock_buff = @import("stock_buff.zig");
 pub const stock_damage = @import("stock_damage.zig");
 pub const stock_map = @import("stock_map.zig");
@@ -83,6 +84,7 @@ test {
     _ = stock_entity;
     _ = entity_tests;
     _ = stock_quest;
+    _ = quest_tests;
     _ = stock_buff;
     _ = stock_damage;
     _ = stock_map;
