@@ -10,27 +10,13 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const c2s_text = @import("../c2s_text.zig");
-const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const clock = @import("../../util/clock.zig");
 const admin_cmds = @import("../admin_cmds.zig");
 const version_mod = @import("../../version.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
+const game_player = @import("../game/player.zig");
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
-
-/// Spawn a player entity or record a join failure. A full entity table used to
-/// return null with no counter and no log, so `join_ok`/`join_fail` stayed flat
-/// while the peer hung mid-login with no operator signal.
-fn spawnPlayerOrFail(self: *Game, c: *Client, x: f32, y: f32, z: f32, where: []const u8) ?i32 {
-    if (self.sim.spawnPlayer(x, y, z, @intCast(c.slot))) |eid| return eid;
-    self.harness.counters.inc(.join_fail);
-    var ts: [19]u8 = undefined;
-    std.debug.print(
-        "zdtd: {s} player spawn failed ({s}) slot={d} name_len={d}\n",
-        .{ clock.wallStamp(&ts), where, c.slot, c.name_len },
-    );
-    return null;
-}
 
 /// True when `name` is a login package and was handled.
 pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -236,7 +222,7 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // cannot leave the client believing it joined with no server entity.
         const surf0 = self.spawnSurface(sp.x, sp.z);
         const was_joined = c.joined;
-        const eid = spawnPlayerOrFail(
+        const eid = game_player.spawnOrFail(
             self,
             c,
             @floatFromInt(surf0.x),

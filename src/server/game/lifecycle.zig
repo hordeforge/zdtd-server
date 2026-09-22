@@ -8,6 +8,7 @@ const apm = @import("../../apm/root.zig");
 const util_sim = @import("../../util/sim.zig");
 const plugin_compose = @import("plugin_compose.zig");
 const clock = @import("../../util/clock.zig");
+const log = @import("../../util/log.zig");
 
 pub fn deinit(self: *Game) void {
     const leave_sim = self.info_port == 0;
@@ -124,14 +125,7 @@ pub fn run(self: *Game) !void {
             // Hard gate keep running.
             if (self.guard.load_shed) self.shed_until_tick = self.tick_n + self.guard.shed_hold_ticks;
             const overruns = self.harness.counters.get(.tick_overruns);
-            if (overruns == 1 or overruns % 100 == 0) {
-                const late_us = (now -% next_t) / 1000;
-                var ts: [19]u8 = undefined;
-                std.debug.print(
-                    "zdtd: {s} tick overrun n={d} late_us={d} (budget={d}us)\n",
-                    .{ clock.wallStamp(&ts), overruns, late_us, tick_ns / 1000 },
-                );
-            }
+            log.warnEvery(overruns, "tick overrun n={d} late_us={d} (budget={d}us)\n", .{ overruns, (now -% next_t) / 1000, tick_ns / 1000 });
         }
         next_t += tick_ns;
         if (next_t < clock.monoNs()) next_t = clock.monoNs() + tick_ns;

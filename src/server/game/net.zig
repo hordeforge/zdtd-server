@@ -25,6 +25,7 @@ const util_sim = @import("../../util/sim.zig");
 const persist = @import("../persist.zig");
 const ecs = @import("../../ecs/root.zig");
 const delivery_policy = @import("delivery_policy.zig");
+const log = @import("../../util/log.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -60,10 +61,7 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
         const n = self.harness.counters.get(.encode_errors);
-        if (n == 1 or n % 100 == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} encode failed pkg={s} body_len={d} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), pkg_name, body.len, peer.local_id, n, @errorName(err) });
-        }
+        log.warnEvery(n, "encode failed pkg={s} body_len={d} local_id={d} n={d}: {s}\n", .{ pkg_name, body.len, peer.local_id, n, @errorName(err) });
         return err;
     };
     if (isUnreliablePackage(pkg_name)) {
@@ -89,10 +87,7 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);
             const drops = self.harness.counters.get(.reliable_window_drops);
-            if (drops == 1 or drops % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} reliable window drop pkg={s} droppable={} n={d}\n", .{ clock.wallStamp(&ts), pkg_name, droppable, drops });
-            }
+            log.warnEvery(drops, "reliable window drop pkg={s} droppable={} n={d}\n", .{ pkg_name, droppable, drops });
             if (!droppable) return error.WindowFull;
         },
         else => return err,
@@ -170,20 +165,14 @@ pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8)
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
-            if (n == 1 or n % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} drop framed stream (reliable window full) n={d} local_id={d}\n", .{ clock.wallStamp(&ts), n, peer.local_id });
-            }
+            log.warnEvery(n, "drop framed stream (reliable window full) n={d} local_id={d}\n", .{ n, peer.local_id });
         },
         else => {
             // sendReliablePumped already counted this in net_send_errors; log
             // the error name like the other send paths or a socket fault on the
             // stream is only visible as an unexplained counter.
             const n = self.harness.counters.get(.net_send_errors);
-            if (n == 1 or n % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} framed stream send failed local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, n, @errorName(err) });
-            }
+            log.warnEvery(n, "framed stream send failed local_id={d} n={d}: {s}\n", .{ peer.local_id, n, @errorName(err) });
         },
     };
 }
@@ -223,10 +212,7 @@ pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs
         // would otherwise be one blocking stderr write per entity per peer.
         self.sendGame(p, name, body) catch |err| {
             const n = self.harness.counters.get(.net_send_errors) + self.harness.counters.get(.reliable_window_drops);
-            if (n == 1 or n % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} broadcastKnown send failed pkg={s} slot={d} local_id={d}: {s}\n", .{ clock.wallStamp(&ts), name, slot, p.local_id, @errorName(err) });
-            }
+            log.warnEvery(n, "broadcastKnown send failed pkg={s} slot={d} local_id={d}: {s}\n", .{ name, slot, p.local_id, @errorName(err) });
         };
     }
 }
@@ -248,10 +234,7 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
     const framed = packages.framed(&self.send_buf, name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
         const n = self.harness.counters.get(.encode_errors);
-        if (n == 1 or n % 100 == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} encode failed pkg={s} body_len={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, body.len, n, @errorName(err) });
-        }
+        log.warnEvery(n, "encode failed pkg={s} body_len={d} n={d}: {s}\n", .{ name, body.len, n, @errorName(err) });
         return err;
     };
     const droppable = isDroppablePackage(name);
@@ -277,10 +260,7 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
             error.WindowFull => {
                 self.harness.counters.inc(.reliable_window_drops);
                 const d = self.harness.counters.get(.reliable_window_drops);
-                if (d == 1 or d % 100 == 0) {
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcastNear droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
-                }
+                log.warnEvery(d, "reliable window drop pkg={s} broadcastNear droppable={} local_id={d} n={d}\n", .{ name, droppable, p.local_id, d });
                 if (!droppable) hard_err = error.WindowFull;
             },
             else => {
@@ -288,10 +268,7 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
                 // (same convention as sendFramedDroppable / broadcastKnown);
                 // counting again here made one socket fault read as two.
                 const n2 = self.harness.counters.get(.net_send_errors);
-                if (n2 == 1 or n2 % 100 == 0) {
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
-                }
+                log.warnEvery(n2, "broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
                 hard_err = err;
             },
         };
@@ -303,10 +280,7 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
     const framed = packages.framed(&self.send_buf, name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
         const n = self.harness.counters.get(.encode_errors);
-        if (n == 1 or n % 100 == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} encode failed pkg={s} body_len={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, body.len, n, @errorName(err) });
-        }
+        log.warnEvery(n, "encode failed pkg={s} body_len={d} n={d}: {s}\n", .{ name, body.len, n, @errorName(err) });
         return err;
     };
     const droppable = isDroppablePackage(name);
@@ -335,20 +309,14 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
                 error.WindowFull => {
                     self.harness.counters.inc(.reliable_window_drops);
                     const d = self.harness.counters.get(.reliable_window_drops);
-                    if (d == 1 or d % 100 == 0) {
-                        var ts: [19]u8 = undefined;
-                        std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcast droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
-                    }
+                    log.warnEvery(d, "reliable window drop pkg={s} broadcast droppable={} local_id={d} n={d}\n", .{ name, droppable, p.local_id, d });
                     if (!droppable) hard_err = error.WindowFull;
                 },
                 else => {
                     // Already counted inside sendReliablePumped; see the
                     // broadcastNear arm.
                     const n2 = self.harness.counters.get(.net_send_errors);
-                    if (n2 == 1 or n2 % 100 == 0) {
-                        var ts: [19]u8 = undefined;
-                        std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
-                    }
+                    log.warnEvery(n2, "broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ name, p.local_id, n2, @errorName(err) });
                     hard_err = err;
                 },
             };
@@ -373,13 +341,7 @@ pub fn pollNetAfterSend(self: *Game) void {
 /// burying the first (diagnostic) line. The counter stays exact.
 pub fn logPayloadErr(self: *Game, local_id: i32, err: anyerror) void {
     const n = self.harness.counters.get(.net_payload_errors);
-    if (n == 1 or n % 100 == 0) {
-        var ts: [19]u8 = undefined;
-        std.debug.print(
-            "zdtd: {s} payload failed local_id={d} error={s} n={d}\n",
-            .{ clock.wallStamp(&ts), local_id, @errorName(err), n },
-        );
-    }
+    log.warnEvery(n, "payload failed local_id={d} error={s} n={d}\n", .{ local_id, @errorName(err), n });
 }
 
 pub fn pollNetOnce(self: *Game) void {
@@ -395,10 +357,7 @@ pub fn pollNetOnce(self: *Game) void {
         // with no way to tell a socket fault from a decode fault.
         self.harness.counters.inc(.net_poll_errors);
         const n = self.harness.counters.get(.net_poll_errors);
-        if (n == 1 or n % 100 == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} net poll error (drain): {s} n={d}\n", .{ clock.wallStamp(&ts), @errorName(err), n });
-        }
+        log.warnEvery(n, "net poll error (drain): {s} n={d}\n", .{ @errorName(err), n });
         return;
     };
     switch (ev) {

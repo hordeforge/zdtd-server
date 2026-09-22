@@ -11,6 +11,7 @@ const ally_mod = @import("../ally.zig");
 const systems = @import("../../ecs/systems.zig");
 const plugin_compose = @import("plugin_compose.zig");
 const admin_cmds = @import("../admin_cmds.zig");
+const log = @import("../../util/log.zig");
 
 pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
     var name_buf: [packages.stock_buff.max_buff_name]u8 = undefined;
@@ -27,9 +28,7 @@ pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
     const def_id = self.buffs.indexOfName(req.name) orelse {
         self.harness.counters.inc(.buff_rejects);
         const n = self.harness.counters.get(.buff_rejects);
-        if (n == 1 or n % 100 == 0) {
-            std.debug.print("zdtd: buff name not in catalog slot={d} n={d}\n", .{ c.slot, n });
-        }
+        log.warnEvery(n, "buff name not in catalog slot={d} n={d}\n", .{ c.slot, n });
         return;
     };
     const ps = self.sim.playerByPeer(c.slot) orelse return;

@@ -9,19 +9,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
-
-/// Spawn a player entity or record a join failure. Copy of the join.zig
-/// helper; the enter arm respawns independently of the login arm.
-fn spawnPlayerOrFail(self: *Game, c: *Client, x: f32, y: f32, z: f32, where: []const u8) ?i32 {
-    if (self.sim.spawnPlayer(x, y, z, @intCast(c.slot))) |eid| return eid;
-    self.harness.counters.inc(.join_fail);
-    var ts: [19]u8 = undefined;
-    std.debug.print(
-        "zdtd: {s} player spawn failed ({s}) slot={d} name_len={d}\n",
-        .{ clock.wallStamp(&ts), where, c.slot, c.name_len },
-    );
-    return null;
-}
+const game_player = @import("../game/player.zig");
 
 /// True when `name` is an enter-game package and was handled.
 pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -35,7 +23,7 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         defer peer.releaseCriticalBudget(owns_bundle_budget);
         if (c.entity_id <= 0) {
             const surf_e = self.spawnSurface(sp.x, sp.z);
-            c.entity_id = spawnPlayerOrFail(
+            c.entity_id = game_player.spawnOrFail(
                 self,
                 c,
                 @floatFromInt(surf_e.x),

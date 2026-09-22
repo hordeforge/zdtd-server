@@ -57,6 +57,26 @@ pub fn err(comptime fmt: []const u8, args: anytype) void {
     emit("ERROR", fmt, args);
 }
 
+/// Repeat cap for a runtime failure that can fire on every packet or tick:
+/// the 1st occurrence and every `warn_throttle_every`-th after it. One flood
+/// still names itself once, immediately, without filling the operator log.
+pub const warn_throttle_every: u64 = 100;
+
+/// Whether occurrence `n` (1-based running count, normally an apm counter
+/// read) is one of the ones `warn_throttle_every` lets through. Use directly
+/// only when the line needs local setup (a hex dump, a sanitized name);
+/// otherwise call `warnEvery`.
+pub fn throttled(n: u64) bool {
+    return n == 1 or n % warn_throttle_every == 0;
+}
+
+/// `warn` for occurrence `n`, gated by `throttled`. Callers pass the count
+/// they also print as `n={d}` so the line says how many were suppressed.
+pub fn warnEvery(n: u64, comptime fmt: []const u8, args: anytype) void {
+    if (!throttled(n)) return;
+    warn(fmt, args);
+}
+
 fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void {
     var ts: [19]u8 = undefined;
     const stamp = clock.wallStamp(&ts);

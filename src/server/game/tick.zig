@@ -17,7 +17,6 @@ const sandbox = @import("../../assets/sandbox.zig");
 const hooks = @import("hooks.zig");
 const clock = @import("../../util/clock.zig");
 const inventory = @import("../../ecs/inventory.zig");
-const game_types = @import("types.zig");
 const assets_items = @import("../../assets/items.zig");
 
 const buff_events = @import("buff_events.zig");
@@ -31,6 +30,7 @@ pub const armor_query_tags = buff_events.armor_query_tags;
 pub const applyTriggeredBuffsAoe = buff_events.applyTriggeredBuffsAoe;
 pub const applyTriggeredBuffs = buff_events.applyTriggeredBuffs;
 const tick_equip = @import("tick_equip.zig");
+const log = @import("../../util/log.zig");
 // Names owned by tick_equip.zig that the survival VM below still uses.
 pub const syncStageBuffs = tick_equip.syncStageBuffs;
 pub const syncEquipMarkers = tick_equip.syncEquipMarkers;
@@ -975,20 +975,14 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                         self.sendSurvivalStats(peer, c.entity_id, h.hp, h.max_hp, h.food, h.food_max, h.water, h.water_max) catch |err| {
                             self.harness.counters.inc(.net_send_errors);
                             const n = self.harness.counters.get(.net_send_errors);
-                            if (n == 1 or n % 100 == 0) {
-                                var ts: [19]u8 = undefined;
-                                std.debug.print("zdtd: {s} send survival stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
-                            }
+                            log.warnEvery(n, "send survival stats failed local_id={d} entity={d} n={d}: {s}\n", .{ peer.local_id, c.entity_id, n, @errorName(err) });
                         };
                     }
                     if (stamina_changed) {
                         self.sendStaminaStats(peer, c.entity_id, h.stamina, h.stamina_max) catch |err| {
                             self.harness.counters.inc(.net_send_errors);
                             const n = self.harness.counters.get(.net_send_errors);
-                            if (n == 1 or n % 100 == 0) {
-                                var ts: [19]u8 = undefined;
-                                std.debug.print("zdtd: {s} send stamina stats failed local_id={d} entity={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), peer.local_id, c.entity_id, n, @errorName(err) });
-                            }
+                            log.warnEvery(n, "send stamina stats failed local_id={d} entity={d} n={d}: {s}\n", .{ peer.local_id, c.entity_id, n, @errorName(err) });
                         };
                     }
                 }

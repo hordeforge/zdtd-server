@@ -31,6 +31,7 @@ const clock = @import("../../util/clock.zig");
 /// the stream budget / W2b async gen) is tracked in that GAP.
 const join_ack_yield_ns: u64 = 500_000;
 const game_join = @import("join.zig");
+const log = @import("../../util/log.zig");
 
 const max_streamed_chunks_cap = game_mod.max_streamed_chunks_cap;
 
@@ -358,10 +359,7 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                     // sites instead of one blocking stderr write per chunk.
                     self.harness.counters.inc(.stream_errors);
                     const n = self.harness.counters.get(.stream_errors);
-                    if (n == 1 or n % 100 == 0) {
-                        var ts: [19]u8 = undefined;
-                        std.debug.print("zdtd: {s} stream deco failed at {d},{d} n={d}: {s}\n", .{ clock.wallStamp(&ts), cx, cz, n, @errorName(err) });
-                    }
+                    log.warnEvery(n, "stream deco failed at {d},{d} n={d}: {s}\n", .{ cx, cz, n, @errorName(err) });
                 };
             }
         }

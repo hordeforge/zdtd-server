@@ -15,6 +15,7 @@ const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const replicate_te = @import("../game/replicate_te.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
+const log = @import("../../util/log.zig");
 
 /// Bound on the `PassThroughDamage` downgrade-chain walk. Stock recurses the
 /// whole damage handler with no cap; a modded chain cannot spin the tick here.
@@ -57,9 +58,7 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 @floatFromInt(b.z),
             )) {
                 const rejects = self.harness.counters.get(.bounds_rejects);
-                if (rejects == 1 or rejects % 100 == 0) {
-                    std.debug.print("zdtd: SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z });
-                }
+                log.warnEvery(rejects, "SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z });
                 continue;
             }
             if (self.claimCovering(b.x, b.z)) |claim| {

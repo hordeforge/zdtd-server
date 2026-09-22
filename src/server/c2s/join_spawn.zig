@@ -11,22 +11,10 @@ const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const clock = @import("../../util/clock.zig");
+const game_player = @import("../game/player.zig");
 
 /// Upper bound on C2S RequestToSpawnPlayer.chunkViewDim (viewDist 8 mesh core).
 pub const max_spawn_chunk_view_dim: i32 = 8;
-
-/// Spawn a player entity or record a join failure. Copy of the join.zig
-/// helper; the spawn arm runs independently of the login arm.
-fn spawnPlayerOrFail(self: *Game, c: *Client, x: f32, y: f32, z: f32, where: []const u8) ?i32 {
-    if (self.sim.spawnPlayer(x, y, z, @intCast(c.slot))) |eid| return eid;
-    self.harness.counters.inc(.join_fail);
-    var ts: [19]u8 = undefined;
-    std.debug.print(
-        "zdtd: {s} player spawn failed ({s}) slot={d} name_len={d}\n",
-        .{ clock.wallStamp(&ts), where, c.slot, c.name_len },
-    );
-    return null;
-}
 
 /// True when `name` is a spawn-player package and was handled.
 pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -52,7 +40,7 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
         } else |_| {}
         const surf = self.spawnSurface(sp.x, sp.z);
         if (c.entity_id <= 0) {
-            c.entity_id = spawnPlayerOrFail(
+            c.entity_id = game_player.spawnOrFail(
                 self,
                 c,
                 @floatFromInt(surf.x),
@@ -168,7 +156,7 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
                 std.debug.print("zdtd: respawn heal entity={d} slot={d}\n", .{ c.entity_id, c.slot });
             }
         } else {
-            c.entity_id = spawnPlayerOrFail(
+            c.entity_id = game_player.spawnOrFail(
                 self,
                 c,
                 @floatFromInt(surf.x),

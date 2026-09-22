@@ -10,12 +10,25 @@ const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
 const gbot = @import("bot.zig");
 const ln_peer = @import("../../litenet/peer.zig");
+const log = @import("../../util/log.zig");
 
 /// Display name for a bot spawn body; bots always carry a bounded name, so this
 /// is non-empty for live bots (fallback backstop only).
 fn botName(b: *const gbot.Bot) []const u8 {
     if (b.name_len == 0) return gbot.default_bot_name;
     return b.name[0..b.name_len];
+}
+
+/// True when any zombie still holds an undrained strike-anim edge. Stock
+/// flushes changed anim params every FixedUpdate (entity-ai.md 2026-09-22),
+/// so the motion-period early return must not hold a landed strike's params
+/// for a whole period: the off tick walks the (bounded, SoA) zombie group
+/// instead of scanning all slots.
+fn pendingStrikeAnim(self: *const Game) bool {
+    for (self.sim.kind_groups.slice(.zombie)) |z| {
+        if (self.sim.mask[z].zombie_ai and self.sim.zombie_ai[z].strike_anim) return true;
+    }
+    return false;
 }
 
 pub fn replicate(self: *Game) !void {
@@ -36,12 +49,7 @@ pub fn replicate(self: *Game) !void {
             self.drainSpawnArea(cl, &drain_budget) catch |err| {
                 self.harness.counters.inc(.stream_errors);
                 const n = self.harness.counters.get(.stream_errors);
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: spawn-area drain failed slot={d} entity={d} n={d}: {s}\n",
-                        .{ cl.slot, cl.entity_id, n, @errorName(err) },
-                    );
-                }
+                log.warnEvery(n, "spawn-area drain failed slot={d} entity={d} n={d}: {s}\n", .{ cl.slot, cl.entity_id, n, @errorName(err) });
             };
         }
     }
@@ -51,17 +59,12 @@ pub fn replicate(self: *Game) !void {
             self.streamChunksForClient(cl) catch |err| {
                 self.harness.counters.inc(.stream_errors);
                 const n = self.harness.counters.get(.stream_errors);
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: chunk stream failed slot={d} entity={d} n={d}: {s}\n",
-                        .{ cl.slot, cl.entity_id, n, @errorName(err) },
-                    );
-                }
+                log.warnEvery(n, "chunk stream failed slot={d} entity={d} n={d}: {s}\n", .{ cl.slot, cl.entity_id, n, @errorName(err) });
             };
         }
     }
     self.replicatePlayerHealth();
-    if (self.tick_n % self.motion_replicate_period_ticks != 0) {
+    if (self.tick_n % self.motion_replicate_period_ticks != 0 and !pendingStrikeAnim(self)) {
         self.clearDeadKnownEntities();
         return;
     }
@@ -75,6 +78,7 @@ pub fn replicate(self: *Game) !void {
     var flags_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var vel_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     var turret_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
+    var anim_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
 
     var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
@@ -219,7 +223,13 @@ pub fn replicate(self: *Game) !void {
         }
 
         const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
-        if (!interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
+        // An attack is an event, not a pose: stock flushes changed anim params
+        // every FixedUpdate (entity-ai.md 2026-09-22), so a pending strike
+        // skips the pos-heartbeat wait instead of delaying the swing up to
+        // pos_heartbeat_period_ticks. With no in-range viewer the viewers==0
+        // branch below leaves the edge set for the tick one appears.
+        const anim_pending = self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].strike_anim;
+        if (!anim_pending and !interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
 
         const viewers = if (self.sim.mask[i].player)
             in_range & ~game_mod.bitOfPeerSlot(self.sim.player[i].peer_slot)
@@ -249,6 +259,7 @@ pub fn replicate(self: *Game) !void {
         var flags_framed: ?[]const u8 = null;
         var vel_framed: ?[]const u8 = null;
         var turret_framed: ?[]const u8 = null;
+        var anim_framed: ?[]const u8 = null;
         if (self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal)) {
             var fwd: f32 = 0.2;
             var state: u8 = 1;
@@ -276,6 +287,31 @@ pub fn replicate(self: *Game) !void {
                     self.harness.counters.inc(.packages_encoded);
                 } else |_| {}
             } else |_| {}
+            // Stock's StartAnimationAttack param flush (entity-ai.md
+            // 2026-09-22): the landed strike sets this edge, and the client's
+            // local AvatarZombieController plays the swing from the same
+            // Attack/AttackBlend/AttackTrigger params stock's server sends.
+            // zdtd picks stock's base variant (int 0) and a fixed blend
+            // midpoint instead of the limb-derived random picks: both are
+            // cosmetic client choices, and a dedi zombie carries no per-limb
+            // body damage. No stock delivery override, so it rides the
+            // reliable window; droppable like AliveFlags so a repeated strike
+            // supersedes an undelivered one.
+            if (self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].strike_anim) {
+                self.sim.zombie_ai[i].strike_anim = false;
+                const params = [_]packages.AnimParam{
+                    .{ .hash = packages.attack_param_hash, .kind = packages.anim_param_int, .int = 0 },
+                    .{ .hash = packages.attack_blend_hash, .kind = packages.anim_param_float, .float = 0.5 },
+                    .{ .hash = packages.attack_trigger_hash, .kind = packages.anim_param_trigger, .boolean = true },
+                };
+                var abuf: [64]u8 = undefined;
+                if (packages.buildEntityAnimationDataBody(&abuf, nid, &params)) |ab| {
+                    if (packages.framed(&anim_frame_buf, "NetPackageEntityAnimationData", ab)) |af| {
+                        anim_framed = af;
+                        self.harness.counters.inc(.packages_encoded);
+                    } else |_| {}
+                } else |_| {}
+            }
             // Vertical motion (RE NetEntityDistributionEntry velocity updates):
             // a falling/jumping zombie streams its vy so the client renders the
             // fall instead of gliding; delta-gated per slot. The gen gate
@@ -323,7 +359,8 @@ pub fn replicate(self: *Game) !void {
             @as(u64, @intFromBool(speeds_framed != null)) +
             @as(u64, @intFromBool(flags_framed != null)) +
             @as(u64, @intFromBool(vel_framed != null)) +
-            @as(u64, @intFromBool(turret_framed != null));
+            @as(u64, @intFromBool(turret_framed != null)) +
+            @as(u64, @intFromBool(anim_framed != null));
         var m = viewers;
         while (m != 0) : (m &= m - 1) {
             const ci = @ctz(m);

@@ -9,6 +9,7 @@ const packages = @import("../../wire/packages.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const clock = @import("../../util/clock.zig");
 const delivery_policy = @import("delivery_policy.zig");
+const log = @import("../../util/log.zig");
 
 pub fn trySendCompressed(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8) bool {
     return sendCompressed(self, peer, pkg_name, body, game_mod.window_retry_budget_ns, false) catch false;
@@ -43,10 +44,7 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
-            if (n == 1 or n % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} reliable window drop pkg={s} (framed) droppable={} n={d}\n", .{ clock.wallStamp(&ts), pkg_name, droppable, n });
-            }
+            log.warnEvery(n, "reliable window drop pkg={s} (framed) droppable={} n={d}\n", .{ pkg_name, droppable, n });
             // Same droppable rule as sendGameBudget: a droppable package
             // (NetPackageChunk/SignDataResponse ride this compressed path)
             // must not turn WindowFull into a hard error, or a single full

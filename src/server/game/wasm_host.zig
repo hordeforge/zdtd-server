@@ -214,10 +214,10 @@ fn pluginVerbDenied(g: *Game, src: i16, cmd: []const u8) bool {
     if (denied & mask == 0) return false;
     g.harness.counters.inc(.plugin_verbs_denied);
     const n = g.harness.counters.get(.plugin_verbs_denied);
-    if (n == 1 or n % 100 == 0) {
+    if (util_log.throttled(n)) {
         var vb: [32]u8 = undefined;
         const vn = c2s_text.sanitizePlayerName(&vb, cmd[0..verb_end]);
-        std.debug.print("zdtd wasm: plugin {d} queued denied verb '{s}' (n={d})\n", .{ src, vb[0..vn], n });
+        util_log.warn("wasm: plugin {d} queued denied verb '{s}' (n={d})\n", .{ src, vb[0..vn], n });
     }
     return true;
 }

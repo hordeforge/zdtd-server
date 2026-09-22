@@ -9,6 +9,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const packages = @import("../../wire/packages.zig");
 const constantTimeEql = @import("../../util/secret.zig").constantTimeEql;
+const log = @import("../../util/log.zig");
 
 pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     const c = self.clientFor(peer) orelse {
@@ -82,9 +83,7 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
             // one blocking stderr write per packet on the tick thread.
             self.harness.counters.inc(.join_fail);
             const fails = self.harness.counters.get(.join_fail);
-            if (fails == 1 or fails % 100 == 0) {
-                std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d} n={d}\n", .{ peer.local_id, payload.len, fails });
-            }
+            log.warnEvery(fails, "challenge mismatch local_id={d} payload_len={d} n={d}\n", .{ peer.local_id, payload.len, fails });
         } else if (payload.len > 0 and payload.len <= c.preauth_buf.len) {
             @memcpy(c.preauth_buf[0..payload.len], payload);
             c.preauth_len = payload.len;
@@ -115,7 +114,7 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
         // one blocking stderr write per packet would stall the tick thread.
         self.harness.counters.inc(.c2s_malformed);
         const malformed = self.harness.counters.get(.c2s_malformed);
-        if (malformed == 1 or malformed % 100 == 0) {
+        if (log.throttled(malformed)) {
             var hex: [24]u8 = undefined;
             const show = @min(stable.len, 8);
             var hi: usize = 0;
@@ -126,9 +125,9 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
             }
             if (stable.len >= 9) {
                 const psz = std.mem.readInt(i32, stable[1..5], .little);
-                std.debug.print("zdtd: unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{ stable.len, hex[0..hi], stable[0], psz, stable[5], stable[6], std.mem.readInt(u16, stable[7..9], .little) });
+                log.warn("unparsed game payload len={d} head={s} ch={d} psz={d} comp={d} enc={d} cnt={d}\n", .{ stable.len, hex[0..hi], stable[0], psz, stable[5], stable[6], std.mem.readInt(u16, stable[7..9], .little) });
             } else {
-                std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
+                log.warn("unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
             }
         }
         // An unparseable payload stops here. A retry that prepends a zero

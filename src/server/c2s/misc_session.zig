@@ -8,6 +8,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
+const log = @import("../../util/log.zig");
 const reverseItemType = game_mod.Game.reverseItemType;
 const logPersistErr = game_mod.logPersistErr;
 
@@ -29,12 +30,7 @@ pub fn handleSession(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     if (h.entity_id != c.entity_id) {
                         self.harness.counters.inc(.ownership_rejects);
                         const n = self.harness.counters.get(.ownership_rejects);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: PlayerData ownership reject n={d} claimed={d} expected={d} local_id={d}\n",
-                                .{ n, h.entity_id, c.entity_id, peer.local_id },
-                            );
-                        }
+                        log.warnEvery(n, "PlayerData ownership reject n={d} claimed={d} expected={d} local_id={d}\n", .{ n, h.entity_id, c.entity_id, peer.local_id });
                     }
                 } else |_| {
                     // Fall back to ECD head only. Parse-skip is rare; log once per 100
@@ -45,12 +41,7 @@ pub fn handleSession(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {
                         self.harness.counters.inc(.decode_rejects);
                         const n = self.harness.counters.get(.decode_rejects);
-                        if (n == 1 or n % 100 == 0) {
-                            std.debug.print(
-                                "zdtd: PlayerData parse skip n={d} body_len={d} local_id={d}\n",
-                                .{ n, body.len, peer.local_id },
-                            );
-                        }
+                        log.warnEvery(n, "PlayerData parse skip n={d} body_len={d} local_id={d}\n", .{ n, body.len, peer.local_id });
                     }
                 }
             }

@@ -7375,12 +7375,26 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     g.sim.rules.progression.water_depletion_per_hour = 0;
     g.sim.rules.progression.well_fed_regen_per_hour = 0;
     g.sim.rules.progression.starvation_damage_per_hour = 0;
-    _ = g.sim.spawnZombie(p.x + 1, p.y, p.z, 40).?;
+    const znid = g.sim.spawnZombie(p.x + 1, p.y, p.z, 40).?;
 
     cap.clear();
     var t: u32 = 0;
     while (t < 60 and g.sim.health[ps].hp >= 100) : (t += 1) try g.step();
     try std.testing.expect(g.sim.health[ps].hp < 100);
+
+    // Stock AvatarZombieController::StartAnimationAttack fires on the landed
+    // strike and updateNetworkAnimData flushes it as
+    // NetPackageEntityAnimationData (entity-ai.md 2026-09-22): the client's
+    // local avatar plays the swing from this param list. The zombie's network
+    // id rides the NetPackageEntityTargeted base; count 3 = Attack int,
+    // AttackBlend float, AttackTrigger, hashes pinned by animatorStringHash.
+    const anim_id = packages.idOf("NetPackageEntityAnimationData").?;
+    const ab = cap.findPkgId(anim_id) orelse return error.NoAttackAnimPackage;
+    try std.testing.expectEqual(znid, std.mem.readInt(i32, ab[0..4], .little));
+    const ad = try packages.parseAnimationData(ab);
+    try std.testing.expectEqual(@as(i32, 3), ad.param_count);
+    try std.testing.expectEqual(packages.attack_param_hash, std.mem.readInt(i32, ab[8..12], .little));
+    try std.testing.expectEqual(@as(u8, packages.anim_param_int), ab[12]);
 
     // Stock NetPackageEntityStatChanged::write (asm.il:201967, GetLength 21 at
     // :202120): entityId i32 (NetPackageEntityTargeted) | instigatorId i32 |

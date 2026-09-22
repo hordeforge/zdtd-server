@@ -15,13 +15,23 @@ const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const requirements = @import("../../assets/requirements.zig");
-const assets_progression = @import("../../assets/progression.zig");
-const assets_items = @import("../../assets/items.zig");
 const hooks = @import("hooks.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
+const log = @import("../../util/log.zig");
 
 const max_clients = game_mod.max_clients;
+
+/// Spawn `c`'s player entity, or count and name the failure. Every join arm
+/// (login, enter, spawn) needs the same outcome when the entity table is full:
+/// a `join_fail` tick and one operator line, never a silent null that leaves
+/// the peer hung mid-login with flat counters. `where` names the calling arm.
+pub fn spawnOrFail(self: *Game, c: *Client, x: f32, y: f32, z: f32, where: []const u8) ?i32 {
+    if (self.sim.spawnPlayer(x, y, z, @intCast(c.slot))) |eid| return eid;
+    self.harness.counters.inc(.join_fail);
+    log.warn("player spawn failed ({s}) slot={d} name_len={d}\n", .{ where, c.slot, c.name_len });
+    return null;
+}
 
 /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
 /// serverconfig key, so it rides the `[sim] party_shared_kill_range` surface).

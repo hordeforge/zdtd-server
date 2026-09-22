@@ -7,6 +7,7 @@ const Client = game_mod.Client;
 const evidence_mod = @import("../evidence.zig");
 const guard_policy = @import("../guard_policy.zig");
 const packages = @import("../../wire/packages.zig");
+const log = @import("../../util/log.zig");
 
 /// True when (px,py,pz) is within `max_edit_range` of (bx,by,bz). Single
 /// reach predicate shared by reject-and-count and silent gate callers.
@@ -131,9 +132,7 @@ pub fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) boo
     if (!denied) return false;
     self.harness.counters.inc(.quarantine_rejects);
     const n = self.harness.counters.get(.quarantine_rejects);
-    if (n == 1 or n % 100 == 0) {
-        std.debug.print("zdtd: quarantine deny n={d} slot={d} surface={s}\n", .{ n, c.slot, @tagName(surf) });
-    }
+    log.warnEvery(n, "quarantine deny n={d} slot={d} surface={s}\n", .{ n, c.slot, @tagName(surf) });
     return true;
 }
 

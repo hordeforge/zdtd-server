@@ -9,6 +9,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const protocol = @import("../../protocol.zig");
 const movement = @import("../movement.zig");
 const packages = @import("../../wire/packages.zig");
+const log = @import("../../util/log.zig");
 
 pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
     // Server-derived vertical velocity (ADR 0037): delta over the server dt
@@ -102,9 +103,7 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     }
     self.harness.counters.inc(.movement_rejects);
     const n = self.harness.counters.get(.movement_rejects);
-    if (n == 1 or n % 100 == 0) {
-        std.debug.print("zdtd: movement envelope reject n={d} local_id={d} entity={d}\n", .{ n, peer.local_id, entity_id });
-    }
+    log.warnEvery(n, "movement envelope reject n={d} local_id={d} entity={d}\n", .{ n, peer.local_id, entity_id });
     if (packages.buildPosAndRotBody(self.body_buf[0..64], entity_id, clamp.x, vclamp.y, clamp.z, 0, 0, 0, true)) |sb| {
         self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};
     } else |_| {}

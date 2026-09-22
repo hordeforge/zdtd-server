@@ -27,6 +27,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const io_fs = @import("../util/io_fs.zig");
 const parallel = @import("../util/parallel.zig");
+const log = @import("../util/log.zig");
 
 /// Queue depth. A full queue falls back to a synchronous write, never drops.
 pub const max_pending: usize = 512;
@@ -214,12 +215,7 @@ pub const Flusher = struct {
                 // first (most useful) one under thousands of duplicates. The
                 // `errors` counter stays exact for apm.
                 const n = self.errors.fetchAdd(1, .monotonic) + 1;
-                if (n == 1 or n % 100 == 0) {
-                    std.debug.print(
-                        "zdtd: async chunk write '{s}' failed: {s} n={d}\n",
-                        .{ e.path, @errorName(err), n },
-                    );
-                }
+                log.warnEvery(n, "async chunk write '{s}' failed: {s} n={d}\n", .{ e.path, @errorName(err), n });
             };
             a.free(e.path);
             a.free(e.payload);

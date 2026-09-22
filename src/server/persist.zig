@@ -19,24 +19,22 @@ const util_sim = @import("../util/sim.zig");
 const utf8_util = @import("../util/utf8.zig");
 const game_types = @import("game/types.zig");
 const platform_user = @import("../wire/platform_user.zig");
+const log = @import("../util/log.zig");
 const max_land_claims = game_mod.max_land_claims;
 
 pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
     self.harness.counters.inc(.persistence_errors);
     const n = self.harness.counters.get(.persistence_errors);
-    if (n == 1 or n % 100 == 0) {
-        var ts: [19]u8 = undefined;
+    if (log.throttled(n)) {
         // Under sim this is where injected write/read faults surface (async
         // chunk flush is force-disabled under DST); name the replay key so a
         // failing seeded run is reproducible from its own failure line
         // (same pattern as the net poll error path in game/step.zig).
-        const with_seed = util_sim.isEnabled();
         var seed_buf: [32]u8 = undefined;
-        const seed_s = if (with_seed) util_sim.formatSeed(&seed_buf) else "";
-        if (with_seed) {
-            std.debug.print("zdtd: {s} {s} failed: {s} n={d} ({s})\n", .{ clock.wallStamp(&ts), what, @errorName(err), n, seed_s });
+        if (util_sim.isEnabled()) {
+            log.warn("{s} failed: {s} n={d} ({s})\n", .{ what, @errorName(err), n, util_sim.formatSeed(&seed_buf) });
         } else {
-            std.debug.print("zdtd: {s} {s} failed: {s} n={d}\n", .{ clock.wallStamp(&ts), what, @errorName(err), n });
+            log.warn("{s} failed: {s} n={d}\n", .{ what, @errorName(err), n });
         }
     }
 }

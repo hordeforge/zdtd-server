@@ -15,6 +15,7 @@ const c2s_inv = @import("inv.zig");
 const c2s_blocks = @import("blocks.zig");
 const c2s_quest = @import("quest.zig");
 const c2s_misc = @import("misc.zig");
+const log = @import("../../util/log.zig");
 
 pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body: []const u8) !void {
     if (id >= packages.default_mappings.len) {
@@ -22,13 +23,7 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
         // error panel) instead of only a rate-limited stderr line.
         self.harness.counters.inc(.c2s_malformed);
         const n = self.harness.counters.get(.c2s_malformed);
-        if (n == 1 or n % 100 == 0) {
-            var ts: [19]u8 = undefined;
-            std.debug.print(
-                "zdtd: {s} unmapped package local_id={d} package_id={d} body_len={d} n={d}\n",
-                .{ clock.wallStamp(&ts), peer.local_id, id, body.len, n },
-            );
-        }
+        log.warnEvery(n, "unmapped package local_id={d} package_id={d} body_len={d} n={d}\n", .{ peer.local_id, id, body.len, n });
         return;
     }
     const name = packages.default_mappings[id];
@@ -38,10 +33,7 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
             self.harness.counters.inc(.phase_rejects);
             self.noteEvidence(c, peer.local_id, c.entity_id, .phase, .hard, .none, 1, 0);
             const n = self.harness.counters.get(.phase_rejects);
-            if (n == 1 or n % 100 == 0) {
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} phase reject n={d} pkg={s} joined={} entered={} local_id={d}\n", .{ clock.wallStamp(&ts), n, name, c.joined, c.entered, peer.local_id });
-            }
+            log.warnEvery(n, "phase reject n={d} pkg={s} joined={} entered={} local_id={d}\n", .{ n, name, c.joined, c.entered, peer.local_id });
             return;
         }
     }
@@ -53,8 +45,5 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
     if (try c2s_misc.handle(self, c, peer, name, body)) return;
     self.harness.counters.inc(.c2s_unhandled);
     const un = self.harness.counters.get(.c2s_unhandled);
-    if (un == 1 or un % 100 == 0) {
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} unhandled C2S pkg={s} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, peer.local_id, un });
-    }
+    log.warnEvery(un, "unhandled C2S pkg={s} local_id={d} n={d}\n", .{ name, peer.local_id, un });
 }

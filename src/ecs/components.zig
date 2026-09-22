@@ -281,6 +281,12 @@ pub const ZombieAi = struct {
     /// Winning task from the last selection pass (EAITaskList executing set).
     active_task: TaskId = .none,
     attack_cd: f32 = 0,
+    /// The last landed strike fired stock's StartAnimationAttack params
+    /// (AvatarZombieController, entity-ai.md 2026-09-22): replicate drains
+    /// this edge into one NetPackageEntityAnimationData and clears it, so a
+    /// strike with no observers still consumes the edge instead of leaking
+    /// into a later viewer's session.
+    strike_anim: bool = false,
     wander_tx: f32 = 0,
     wander_tz: f32 = 0,
     /// Director/AI Investigate-style spot (EAIApproachSpot). Cleared on arrive.

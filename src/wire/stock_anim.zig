@@ -66,6 +66,95 @@ pub fn parseAnimationData(body: []const u8) binary.ReadError!AnimationData {
     return out;
 }
 
+/// `Animator.StringToHash` (UnityEngine.AnimationModule internalcall): the
+/// reflected CRC-32 of the parameter name - seed 0xFFFFFFFF, per byte
+/// `h = (h >> 1 >> 7) ^ (0xEDB88320 & -(h & 1))`-style table step, return
+/// `~h`. RE chain (entity-ai.md 2026-09-22): managed internalcall in
+/// `UnityEngine.AnimationModule.dll`, native leaf at
+/// `UnityPlayer.so +0xc26c90` seeded with -1 and complemented by its caller,
+/// runtime table at `+0x1dedaf0` compared row-for-row against the standard
+/// table, and a live stock-dedi capture returning
+/// `StringToHash("Attack") = 0x406c280d`, exactly `zlib.crc32("Attack")`.
+/// `AnimParamData.hash` carries these values; a wrong hash is a silent
+/// client no-op, so this is an RE-pinned constant class (AGENTS rule 15:
+/// Unity hashes from stock names).
+pub fn animatorStringHash(comptime name: []const u8) i32 {
+    var crc: u32 = 0xffff_ffff;
+    for (name) |b| {
+        crc ^= b;
+        var k: u32 = 0;
+        while (k < 8) : (k += 1) {
+            crc = if (crc & 1 == 1) (crc >> 1) ^ 0xedb8_8320 else crc >> 1;
+        }
+    }
+    return @bitCast(~crc);
+}
+
+/// The AvatarController.StaticInit constants an AI strike flush writes
+/// (`AvatarZombieController::StartAnimationAttack`: `_setInt(Attack, variant)`,
+/// `_setFloat(AttackBlend, ...)`, `_setTrigger(AttackTrigger)`).
+pub const attack_param_hash: i32 = animatorStringHash("Attack");
+pub const attack_blend_hash: i32 = animatorStringHash("AttackBlend");
+pub const attack_trigger_hash: i32 = animatorStringHash("AttackTrigger");
+
+/// One `AnimParamData` entry for the write side: the type selects which
+/// value field is serialized, mirroring `parseAnimationData`.
+pub const AnimParam = struct {
+    hash: i32,
+    kind: u8,
+    int: i32 = 0,
+    float: f32 = 0,
+    boolean: bool = false,
+};
+
+/// Write side of the layout read by `parseAnimationData` (stock
+/// `NetPackageEntityAnimationData::write` over the `NetPackageEntityTargeted`
+/// base): `entityId` i32, count i32, then `hash` i32 + type u8 + typed value.
+pub fn buildEntityAnimationDataBody(buf: []u8, entity_id: i32, params: []const AnimParam) error{Overflow}![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeI32(@intCast(params.len));
+    for (params) |p| {
+        try w.writeI32(p.hash);
+        try w.writeByte(p.kind);
+        switch (p.kind) {
+            anim_param_bool, anim_param_trigger => try w.writeBool(p.boolean),
+            anim_param_float, anim_param_data_float => try w.writeF32(p.float),
+            anim_param_int => try w.writeI32(p.int),
+            // Stock read throws on an unknown type; the builder only emits
+            // the known kinds, so an unknown one is a local coding error.
+            else => unreachable,
+        }
+    }
+    return w.written();
+}
+
+test "animatorStringHash matches the live-pinned CRC-32 constants" {
+    // Live stock-dedi capture (entity-ai.md 2026-09-22):
+    // StringToHash("Attack") = 0x406c280d = zlib.crc32("Attack").
+    try std.testing.expectEqual(@as(i32, @bitCast(@as(u32, 0x406c_280d))), attack_param_hash);
+    try std.testing.expectEqual(@as(i32, @bitCast(@as(u32, 0x46fe_600d))), attack_blend_hash);
+    try std.testing.expectEqual(@as(i32, @bitCast(@as(u32, 0x9828_122b))), attack_trigger_hash);
+}
+
+test "entity animation data builds the typed strike list" {
+    var buf: [64]u8 = undefined;
+    const params = [_]AnimParam{
+        .{ .hash = attack_param_hash, .kind = anim_param_int, .int = 0 },
+        .{ .hash = attack_blend_hash, .kind = anim_param_float, .float = 0.5 },
+        .{ .hash = attack_trigger_hash, .kind = anim_param_trigger, .boolean = true },
+    };
+    const body = try buildEntityAnimationDataBody(&buf, 107, &params);
+    // Two i32 header words plus 4+1+4 (int), 4+1+4 (float), 4+1+1 (trigger).
+    try std.testing.expectEqual(@as(usize, 32), body.len);
+    const back = try parseAnimationData(body);
+    try std.testing.expectEqual(@as(i32, 107), back.entity_id);
+    try std.testing.expectEqual(@as(i32, 3), back.param_count);
+    try std.testing.expectEqual(body.len, back.wire_len);
+    try std.testing.expectEqual(attack_param_hash, std.mem.readInt(i32, body[8..12], .little));
+    try std.testing.expectEqual(@as(u8, anim_param_int), body[12]);
+}
+
 test "animation data parses the typed parameter list" {
     var buf: [64]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };

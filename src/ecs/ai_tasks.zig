@@ -987,6 +987,12 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
+            // Stock AvatarZombieController::StartAnimationAttack fires on the
+            // landed strike; replicate flushes it as NetPackageEntityAnimationData
+            // (entity-ai.md 2026-09-22). Zombie avatars only: the animal
+            // controller's attack params are not RE'd, so a biting wolf keeps
+            // its current client-local animation.
+            if (ctx.w.kind[s] == .zombie) ai.strike_anim = true;
             ctx.w.flags[s].bits |= c.flag_approaching_enemy;
             // Combat noise (stock NotifyNoise): the landed hit alerts zombies
             // and wakes sleepers within radius (group-AI PARTIAL).
