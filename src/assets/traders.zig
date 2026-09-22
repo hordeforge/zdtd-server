@@ -174,9 +174,16 @@ pub const TraderTable = struct {
         return null;
     }
 
-    pub fn traderInfo(self: *const TraderTable, id: u16) ?TraderInfo {
+    /// Row for a TraderID. Takes the i32 the data carries (blocks.xml
+    /// `TraderID`, the vending save record) so an out-of-range value fails
+    /// closed here instead of trapping in a narrowing cast at the call site.
+    /// 0 is "not declared" (blocks.zig floors an absent TraderID to 0), so it
+    /// resolves to no row even if traders.xml declares an id 0 block.
+    pub fn traderInfo(self: *const TraderTable, id: i32) ?TraderInfo {
+        if (id <= 0 or id > std.math.maxInt(u16)) return null;
+        const want: u16 = @intCast(id);
         for (self.trader_infos) |ti| {
-            if (ti.id == id) return ti;
+            if (ti.id == want) return ti;
         }
         return null;
     }

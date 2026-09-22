@@ -196,6 +196,21 @@ test "unique_only group picks distinct refs" {
     try std.testing.expect(seen[0] and seen[1] and seen[2]);
 }
 
+test "traderInfo fails closed on unset and out-of-range TraderIDs" {
+    const infos = [_]TraderInfo{ .{ .id = 5, .rentable = true }, .{ .id = 0 } };
+    const t: TraderTable = .{ .trader_infos = &infos };
+    try std.testing.expect(t.traderInfo(5) != null);
+    try std.testing.expect(t.traderInfo(6) == null);
+    // blocks.xml floors an absent TraderID to 0, so 0 means "not declared"
+    // even when a row claims that id.
+    try std.testing.expect(t.traderInfo(0) == null);
+    // A negative or past-u16 TraderID (patched blocks.xml, hand-edited vending
+    // save) must miss the table, not trap in a narrowing cast at the caller.
+    try std.testing.expect(t.traderInfo(-1) == null);
+    try std.testing.expect(t.traderInfo(std.math.maxInt(u16) + 1) == null);
+    try std.testing.expect(t.traderInfo(std.math.maxInt(i32)) == null);
+}
+
 test "trader_info scan survives adjacent blocks with no whitespace" {
     const xml_text =
         \\<traders>

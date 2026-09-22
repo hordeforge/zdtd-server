@@ -216,7 +216,7 @@ pub fn handleTrade(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);
             return true;
         }
-        const info = self.traders.traderInfo(@intCast(vm.trader_id)) orelse return true;
+        const info = self.traders.traderInfo(vm.trader_id) orelse return true;
         if (!info.rentable) return true;
         if (vm.rental_end_day > 0 and !vm.owner.matches(acc.user)) return true; // other owner (CanRent 1)
         const coins = self.coinItemId();

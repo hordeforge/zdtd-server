@@ -332,11 +332,9 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     // (owner-stocked vending: traders.xml id 3 player_owned, id 5 rentable);
     // only an unresolved row takes the traderAlways fallback.
     var resolved_row = false;
-    if (v.trader_id > 0 and v.trader_id <= 65535) {
-        if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
-            resolved_row = true;
-            if (ti.refs.len > 0) refs = ti.refs;
-        }
+    if (tt.traderInfo(v.trader_id)) |ti| {
+        resolved_row = true;
+        if (ti.refs.len > 0) refs = ti.refs;
     }
     if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
     if (refs.len == 0) return;
