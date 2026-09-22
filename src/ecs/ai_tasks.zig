@@ -136,18 +136,61 @@ fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
 /// stock 2.8 m floor and the class's rolled `jumpMaxDistance`, with the body
 /// grounded and off jump cooldown. A class whose `jump_max` never clears the
 /// floor (the 1.9-2.1 cctor default, i.e. no `JumpMaxDistance` row) can never
-/// pass, so only zombieSpider / animalMountainLion pounce.
+/// pass, so only zombieSpider / animalMountainLion pounce. Stock then takes
+/// two more legs: the leapV.y window [-5, 0.5 + 0.5*jumpMaxDistance]
+/// (refuses deep falls and high climbs) and the physics ray from feet + 1.5
+/// along the corridor for leapDist - 0.5 (IL_0134-017B), so a wall between
+/// zombie and player is walked around, never vaulted. The parsed-list gate
+/// keeps zdtd's shared native table (a class with no XML AITask list) from
+/// gaining a pounce stock zombieTemplateMale never had.
 fn leapCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np: TargetSnap, sense_d2: f32) bool {
     // Already airborne: the flight owns the entity until it lands, so the
     // selection pass must keep re-electing the task (stock's jump state does
     // the same by holding the mutex).
     if (ai.leaping) return true;
+    if (w.class_id[s].ai_tasks == 0) return false;
     const max_d = w.class_id[s].jump_max;
     const min_d = w.rules.ai.leap_min_dist;
     if (max_d < min_d) return false;
     if (ai.jumping or ai.jump_cd > 0) return false;
     if (!(np.id >= 0 and np.d2 < sense_d2)) return false;
-    return np.d2 >= min_d * min_d and np.d2 <= max_d * max_d;
+    if (!(np.d2 >= min_d * min_d and np.d2 <= max_d * max_d)) return false;
+    const t = &w.transform[s];
+    const tgt = w.transform[np.slot];
+    const dy = tgt.y - t.y;
+    if (dy < leap_dy_min or dy > 0.5 + 0.5 * max_d) return false;
+    const dx = np.px - t.x;
+    const dz = np.pz - t.z;
+    const dist = @sqrt(dx * dx + dz * dz);
+    if (dist < 0.001) return false;
+    const scale = (dist - 0.5) / dist;
+    return leapRayClear(w, t.x, t.y + 1.5, t.z, t.x + dx * scale, t.y + 1.5 + dy * scale, t.z + dz * scale);
+}
+
+/// Stock EAILeap.CanExecute's lower leapV.y bound (IL_00BF): a path end more
+/// than 5 m below the body refuses the pounce.
+const leap_dy_min: f32 = -5;
+
+/// The physics ray from EAILeap.CanExecute (IL_0134-017B): origin feet + 1.5
+/// along the leap vector for leapDist - 0.5, any solid cell refuses. Solid
+/// probe with solid_fn, not the sight oracle: stock raycasts the physics
+/// layers, so a transparent block still refuses. Unset solid_fn (headless /
+/// flat tests) counts as clear.
+fn leapRayClear(w: *const World, ox: f32, oy: f32, oz: f32, tx: f32, ty: f32, tz: f32) bool {
+    const solid_fn = w.solid_fn orelse return true;
+    const ctx = w.solid_ctx;
+    const dx = tx - ox;
+    const dy = ty - oy;
+    const dz = tz - oz;
+    const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist < 0.001) return true;
+    const step: f32 = 0.5;
+    var i: f32 = step;
+    while (i < dist) : (i += step) {
+        const f = i / dist;
+        if (solid_fn(ctx, @floor(ox + dx * f), @floor(oy + dy * f), @floor(oz + dz * f))) return false;
+    }
+    return true;
 }
 
 /// EAILeap::Continue: the aim budget or the flight, not the start condition.
@@ -2586,10 +2629,12 @@ test "system zombie leaps at a target inside its JumpMaxDistance window" {
         try std.testing.expect(w.zombie_ai[zs].active_task != .leap);
     }
 
-    // A zombieSpider-shaped JumpMaxDistance opens the window.
+    // A zombieSpider-shaped JumpMaxDistance opens the window, and the class
+    // must carry the parsed-list Leap bit (stock tasks come from XML only).
     w.transform[zs].x = 0;
     w.transform[zs].z = 0;
     w.class_id[zs].jump_max = 6.0;
+    w.class_id[zs].ai_tasks = c.ai_task_list_set | c.aiTaskBit(.leap);
     var saw_flight = false;
     t = 0;
     while (t < 3.0) : (t += 0.05) {
@@ -2604,4 +2649,68 @@ test "system zombie leaps at a target inside its JumpMaxDistance window" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), w.transform[zs].z, 0.35);
     // The landing arms the jump cooldown so it cannot pounce again at once.
     try std.testing.expect(w.zombie_ai[zs].jump_cd > 0);
+}
+
+/// Sight predicate that never blocks: the leap-refusal test needs vision
+/// across the wall so only the physics ray (solid_fn) can refuse, exactly
+/// the stock split between CanSee and EAILeap's physics ray.
+fn leapTestSightOpen(_: ?*anyopaque, _: i32, _: i32, _: i32) bool {
+    return false;
+}
+
+/// One-cell-thick wall across the pounce corridor at x == 2 (y 71 band,
+/// where the feet + 1.5 ray travels; z wide enough to block a detour aim).
+fn leapTestWallSolid(_: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    return x == 2 and y == 71 and z >= -4 and z <= 4;
+}
+
+test "leap refuses a walled corridor and an out-of-window leapV.y" {
+    // Stock EAILeap.CanExecute takes two legs the distance window alone does
+    // not cover: the physics ray from feet + 1.5 along the corridor (a wall
+    // between zombie and player is walked around, never vaulted) and the
+    // leapV.y window [-5, 0.5 + 0.5*jumpMaxDistance] (a deep fall or a high
+    // climb is refused).
+    var w: World = .{};
+    defer w.deinit();
+    // Vision crosses the wall; only solid_fn blocks, so a refusal pins the
+    // leap ray itself rather than the sight gate.
+    w.sight_fn = leapTestSightOpen;
+    w.sight_ctx = null;
+    w.solid_fn = leapTestWallSolid;
+    w.solid_ctx = null;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+    w.class_id[zs].jump_max = 6.0;
+    w.class_id[zs].ai_tasks = c.ai_task_list_set | c.aiTaskBit(.leap);
+    var t: f32 = 0;
+    while (t < 1.5) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(w.zombie_ai[zs].active_task != .leap);
+        try std.testing.expect(!w.zombie_ai[zs].leaping);
+    }
+
+    // Same distance window, open air: only the leapV.y legs can refuse. The
+    // player sits 6 m below (-6 < -5) and then 6 m above (> 0.5 + 0.5*8),
+    // while jump_max 8 keeps the 3D sense distance (4^2 + 6^2 = 52) inside
+    // the window, so the y bound is the deciding gate both ways.
+    var w2: World = .{};
+    defer w2.deinit();
+    const z2 = w2.spawnZombie(0, 70, 0, 40).?;
+    const s2 = w2.slotOfNetId(z2).?;
+    const pid = w2.spawnPlayer(4, 64, 0, 0).?;
+    const ps = w2.slotOfNetId(pid).?;
+    w2.class_id[s2].jump_max = 8.0;
+    w2.class_id[s2].ai_tasks = c.ai_task_list_set | c.aiTaskBit(.leap);
+    for ([_]f32{ 64.0, 76.0 }) |py| {
+        w2.transform[ps].y = py;
+        w2.transform[s2].x = 0;
+        w2.transform[s2].z = 0;
+        var t2: f32 = 0;
+        while (t2 < 0.8) : (t2 += 0.05) {
+            _ = systemZombieAi(&w2, 0.05);
+            try std.testing.expect(w2.zombie_ai[s2].active_task != .leap);
+            try std.testing.expect(!w2.zombie_ai[s2].leaping);
+        }
+    }
 }

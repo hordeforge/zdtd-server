@@ -31,10 +31,6 @@ Each fact has exactly one home. Everywhere else, link to it.
 | [archive/](archive/) | frozen snapshots, never current authority | anything current |
 | [INDEX.md](INDEX.md) | the doc map and the conflict rule | duplicated content |
 
-Placement: a bug to a postmortem; rationale to an ADR; a procedure to the
-cookbook; a type to `subsystems/`; behavior to ARCHITECTURE.md; status to
-STATUS.md.
-
 ## Writing rules
 
 - Document current state. History lives in git, an ADR, or a postmortem.
@@ -58,7 +54,7 @@ STATUS.md.
 
 | Gate | Checks | Runs in |
 |---|---|---|
-| `tools/check_docs.py` | dead relative links, `file:LINE` out of range, quoted `zig` block drift, missing `../7dtd-engine-research/` paths, registry rows, the subsystem page contract, word budgets | `make lint` |
+| `tools/check_docs.py` | dead relative links (docs/ plus the root rule pages), `file:LINE` out of range, quoted `zig` block drift, missing `../7dtd-engine-research/` paths, registry rows, the subsystem page contract, word budgets | `make lint` |
 | `tools/gen_docs_catalogs.py --check` | `docs/catalogs/` is fresh from source | `make check` |
 | `tools/provenance_scan.py` | every `src/` file has a PROVENANCE row | `make check` |
 | `scripts/gen_provenance.py` | `docs/provenance.html` is fresh | `make check` |
@@ -68,6 +64,7 @@ STATUS.md.
 | `scripts/lint-plugins.sh` | committed plugin `.wasm` matches a fresh rebuild | `make lint` |
 | `scripts/lint-cycles.sh` | import cycles outside the `src/server/` delegation | `make lint` |
 | `scripts/lint-wire.sh` | wire heuristics (ripgrep; ast-grep has no Zig grammar) | `make lint` |
+| `tools/check_config_keys.py` | every bound `zdtd.toml` key is listed in `zdtd.toml.example` and [GAME_OPTIONS.md](GAME_OPTIONS.md) | `make lint` |
 | `tools/check_xml_audit.py` | [XML_DATA_AUDIT.md](XML_DATA_AUDIT.md) covers every stock `Data/Config/*.xml`; no stock-name literal outside the loaders | `make check` |
 | `python3 -m unittest discover -s tools` | the gate scripts' own unit tests | `make check` |
 

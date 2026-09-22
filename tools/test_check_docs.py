@@ -1,4 +1,4 @@
-"""Unit tests for the check_docs research-path gate."""
+"""Unit tests for the check_docs research-path and page-scope gates."""
 
 from pathlib import Path
 import sys
@@ -54,6 +54,36 @@ class ResearchPathTest(unittest.TestCase):
             )
         self.assertEqual(0, checked)
         self.assertEqual([], failures)
+
+
+class ScopeTest(unittest.TestCase):
+    """The root rule pages are link-checked alongside docs/."""
+
+    def test_root_pages_are_in_scope(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        (root / "docs").mkdir()
+        (root / "docs" / "page.md").write_text("", encoding="utf-8")
+        for name in check_docs.ROOT_PAGES:
+            (root / name).write_text("", encoding="utf-8")
+        with mock.patch.object(check_docs, "ROOT", root), mock.patch.object(
+            check_docs, "DOCS", root / "docs"
+        ):
+            names = {p.name for p in check_docs.markdown_files()}
+        self.assertEqual(set(check_docs.ROOT_PAGES) | {"page.md"}, names)
+
+    def test_root_page_dead_link_fails(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        page = root / "AGENTS.md"
+        page.write_text("see [gone](docs/gone.md)", encoding="utf-8")
+        failures: list[str] = []
+        with mock.patch.object(check_docs, "ROOT", root):
+            check_docs.check_links(page.read_text(encoding="utf-8"), page, failures)
+        self.assertEqual(1, len(failures))
+        self.assertIn("dead link docs/gone.md", failures[0])
 
 
 if __name__ == "__main__":

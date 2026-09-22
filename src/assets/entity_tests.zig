@@ -506,3 +506,41 @@ test "dismember tuning resolves through Extends in an offline file" {
     try std.testing.expectEqual(@as(f32, 0), bare.leg_cripple_scale);
     try std.testing.expectEqual(@as(f32, 0), bare.leg_crawler_threshold);
 }
+
+test "Leap maps to a native task and JumpMaxDistance parses" {
+    // EAILeap needs both halves from entityclasses.xml: the task name in the
+    // AITask list (so the class gains the leap bit) and the JumpMaxDistance
+    // range bound that opens its distance window (stock zombieSpider "7, 9";
+    // a class without the prop keeps the EntityClass cctor default 1.9/2.1,
+    // under EAILeap's 2.8 m floor).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_leap.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="pouncer">
+        \\    <property name="JumpMaxDistance" value="7, 9"/>
+        \\    <property name="AITask" value="Leap| BreakBlock| ApproachAndAttackTarget"/>
+        \\  </entity_class>
+        \\  <entity_class name="plainWalker">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const pouncer = t.byName("pouncer").?;
+    try std.testing.expectEqual(@as(f32, 7), pouncer.jump_max_min);
+    try std.testing.expectEqual(@as(f32, 9), pouncer.jump_max_max);
+    try std.testing.expect(pouncer.ai_tasks & components.ai_task_list_set != 0);
+    try std.testing.expect(components.aiTaskAllowed(pouncer.ai_tasks, .leap));
+    try std.testing.expect(components.aiTaskAllowed(pouncer.ai_tasks, .break_block));
+    try std.testing.expect(!components.aiTaskAllowed(pouncer.ai_tasks, .territorial));
+    const plain = t.byName("plainWalker").?;
+    try std.testing.expectEqual(@as(f32, 1.9), plain.jump_max_min);
+    try std.testing.expectEqual(@as(f32, 2.1), plain.jump_max_max);
+    try std.testing.expectEqual(@as(u16, 0), plain.ai_tasks);
+}

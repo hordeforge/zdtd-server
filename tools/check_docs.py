@@ -17,7 +17,9 @@ Checks, in this order:
    same way a new src file without a provenance row is).
 
 Scope: links and the citation/block checks cover all of docs/**/*.md except
-docs/archive/ and the generated docs/provenance.html. Budgets, tree-registry
+docs/archive/ and the generated docs/provenance.html. Link checking also covers
+the root rule and front pages in ROOT_PAGES, whose relative links are the ones
+an agent follows first and were previously gated by nothing. Budgets, tree-registry
 rows and the subsystem page contract are narrower (CHECKED_TREES plus the
 single-file entries in CHECKED_FILES), because a budget is opt-in per page
 while a stale citation is a defect anywhere. See CITATION_EXCLUDED_TREES.
@@ -52,6 +54,11 @@ CHECKED_FILES = ("AGENTS.md", "glossary.md", "testing.md")
 CITATION_EXCLUDED_TREES = ("archive",)
 CITATION_EXCLUDED_FILES = ("provenance.html",)
 
+# Root pages whose relative links are checked alongside docs/. They carry the
+# standing orders and the entry path into the tree, so a dead link there costs
+# an agent a pass. Citations, quoted blocks and budgets stay docs/-only.
+ROOT_PAGES = ("AGENTS.md", "CONTRIBUTING.md", "README.md")
+
 # A path that resolves to one of these is a citation of an external artifact we
 # do not have in this checkout, so only its shape is informational. The one
 # exception is the research sibling, checked separately by check_research_paths
@@ -85,7 +92,9 @@ def rel(path: Path) -> str:
 
 
 def markdown_files() -> list[Path]:
-    return sorted(p for p in DOCS.rglob("*.md") if p.is_file())
+    pages = [p for p in DOCS.rglob("*.md") if p.is_file()]
+    pages += [ROOT / name for name in ROOT_PAGES if (ROOT / name).is_file()]
+    return sorted(pages)
 
 
 def is_checked(path: Path) -> bool:

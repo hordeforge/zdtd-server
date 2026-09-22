@@ -94,7 +94,9 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 zig build              # Debug → zig-out/bin/zdtd
 zig build test         # unit + scenario tests (must stay green)
 zig build run
+make lint              # fmt, shellcheck, ruff, architecture, docs, config keys, webui
 make check             # version/toolchain pin + lint + build + test + fuzz
+make plugins           # rebuild the committed plugin .wasm from source (rule 31)
 make release           # ReleaseSafe + strip (operator binary)
 make clean             # zig-out + .zig-cache + .zdtd_cfg_cache
 ```
@@ -144,9 +146,12 @@ src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
 src/ecs/rules.zig      sim rule params, overlaid by preset packs (ADR 0021)
 src/server/webui/      webui markup, @embedFile'd (never Zig string literal); linted by scripts/lint-webui.sh (JS) + lint-html.sh (HTML/CSS)
+plugins/               first-party core plugin Zig sources + committed .wasm (rule 31)
+mods/                  addon guests (Zig, C) and config-only mods; shared plugin_common.zig
 assets/fixtures/       offline XML and .wasm fixtures for tests
 presets/               preset packs (`--preset <name>`; `--mode` is a deprecated alias)
 scripts/               release, lint and smoke gates called by Makefile
+tools/                 Python doc/provenance/config gates called by Makefile
 docs/                  STATUS, gaps, plan, APM, wire/map notes; numbered PRD/RFC/ADR series in docs/{prd,rfc,adr}
 worlds/                local save overlays (ZCH3 `.zch`, player data)
 ```

@@ -101,7 +101,7 @@ and TCP setup use Zig 0.16 `std.Io.net`; non-blocking TCP I/O and clocks use
 thin POSIX calls contained in `src/util/` (see
 [`docs/STD_ABSTRACTIONS.md`](docs/STD_ABSTRACTIONS.md)). Canonical validation
 and release builds use the exact compiler in `.zigversion`; `make check`
-enforces that pin. For `make check`, also provide Python 3.10+, `rg` (ripgrep),
+enforces that pin. For `make check`, also provide Python 3.11+ (ruff.toml `target-version`), `rg` (ripgrep),
 ShellCheck, Bun (`bun` and `bunx`; pin in [`.bun-version`](.bun-version), same
 file CI installs via `scripts/bun-pin.sh`), Node.js (oxlint's plugin host),
 Java (CI uses JRE 21), curl, tar/gzip, and standard GNU shell utilities.

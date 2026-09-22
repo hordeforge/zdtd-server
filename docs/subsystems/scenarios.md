@@ -23,7 +23,7 @@ Those directories are named `worlds/zdtd_sc_*`, and `worlds/` is gitignored. Sce
 
 ## The in-process harness
 
-`src/server/game/harness.zig` is the seam injection layer. Its header states the scope and the limit: in-process test and scenario helpers for joined clients, packet injection and direct world setup, and production networking does not use these shortcuts (`src/server/game/harness.zig:1-2`). `Game` re-exports the whole surface so a scenario holds one type, for example `attachJoinedClient` and `injectFramed` (`src/server/game.zig:3180-3191`). Replication is not a harness shortcut: a scenario calls the production `g.replicate()` directly.
+`src/server/game/harness.zig` is the seam injection layer. Its header states the scope and the limit: in-process test and scenario helpers for joined clients, packet injection and direct world setup, and production networking does not use these shortcuts (`src/server/game/harness.zig:1-2`). `Game` re-exports the whole surface so a scenario holds one type, for example `attachJoinedClient` and `injectFramed` (`src/server/game.zig:3038-3047`). Replication is not a harness shortcut: a scenario calls the production `g.replicate()` directly.
 
 The joined-client entry point (`src/server/game/harness.zig:32-34`):
 

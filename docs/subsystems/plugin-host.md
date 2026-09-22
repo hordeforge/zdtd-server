@@ -12,21 +12,22 @@ Two unrelated things share the package. The shipping plugin format is a `.wasm` 
 
 Boot order. `main` discovers manifests under `mods/` and `plugins/` (`src/main.zig:766`, `src/main.zig:769`), resolves them into a load plan (`src/main.zig:808`), and stores it on `InitOptions.plugin_plan` (`src/main.zig:820`). World init then loads through the plan, falling back to the legacy `[plugin] modules` list when no plan exists (`src/server/game/init_world.zig:363`), applies the operator queued-verb policy over every loaded slot (`src/server/game/init_world.zig:372`), and calls `on_enable` on each module (`src/server/game/init_world.zig:377`). Shutdown runs the reverse order before the stores are freed (`src/server/game/lifecycle.zig:31`).
 
-The `Game` holds two fields. `wasm_plugins: plugin_mod.wasm.WasmHost = .{}` (`src/server/game.zig:411`) is the slot table, and `wasm_ctx: plugin_mod.wasm.HostCtx = undefined` (`src/server/game.zig:422`) is the callback context built with the Game-side functions (`src/server/game.zig:921`):
+The `Game` holds two fields. `wasm_plugins: plugin_mod.wasm.WasmHost = .{}` (`src/server/game.zig:220`) is the slot table, and `wasm_ctx: plugin_mod.wasm.HostCtx = undefined` (`src/server/game.zig:231`) is the callback context built with the `game/wasm_host.zig` functions (`src/server/game.zig:742`):
 
 ```zig
             .wasm_ctx = .{
                 .data = self,
-                .log_fn = &wasmLog,
-                .tick_fn = &wasmTick,
-                .queue_fn = &wasmQueue,
-                .withdraw_fn = &wasmWithdraw,
-                .sense_fn = &wasmSense,
-                .query_fn = &wasmQuery,
+                .log_fn = &game_wasm_host.wasmLog,
+                .tick_fn = &game_wasm_host.wasmTick,
+                .queue_fn = &game_wasm_host.wasmQueue,
+                .withdraw_fn = &game_wasm_host.wasmWithdraw,
+                .shift_srcs_fn = &game_wasm_host.wasmShiftSrcs,
+                .sense_fn = &game_wasm_host.wasmSense,
+                .query_fn = &game_wasm_host.wasmQuery,
             },
 ```
 
-(`src/server/game.zig:921`.) Three `World` callbacks close the loop back into the host: `kill_verdict_fn` (`src/server/game/init_assets.zig:687`), `pre_drain_fn` (`src/server/game/init_assets.zig:710`), and `op_src_withdrawn_fn` (`src/server/game/init_assets.zig:716`). Their signatures sit on `World` at `src/ecs/world.zig:547`, `src/ecs/world.zig:576`, and `src/ecs/world.zig:584`.
+(`src/server/game.zig:742`.) Three `World` callbacks close the loop back into the host: `kill_verdict_fn` (`src/server/game/init_assets.zig:687`), `pre_drain_fn` (`src/server/game/init_assets.zig:710`), and `op_src_withdrawn_fn` (`src/server/game/init_assets.zig:716`). Their signatures sit on `World` at `src/ecs/world.zig:547`, `src/ecs/world.zig:576`, and `src/ecs/world.zig:584`.
 
 ## The Hook table
 
