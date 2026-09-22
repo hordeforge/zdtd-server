@@ -96,8 +96,8 @@ pub const Buffer = struct {
     /// withdrawal cannot unmake them, so the count is handed to the owner to
     /// report instead of being forgotten (the honest residue of paper 3.1's
     /// unchecked witness). Indexed by the 1-based plugin src; sized by
-    /// `max_commands`, which is far above the plugin slot cap (8 today), and a
-    /// src outside it is ignored rather than aliased.
+    /// `max_commands`, which is above `plugin.wasm.max_wasm_plugins` (the src
+    /// ceiling), and a src outside it is ignored rather than aliased.
     irrevocable_applied: [max_commands]u32 = .{0} ** max_commands,
     /// Lifetime drop counter (not cleared on drain).
     dropped: u32 = 0,

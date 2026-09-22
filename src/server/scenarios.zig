@@ -13320,6 +13320,57 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
     try std.testing.expectEqual(@as(u8, 2), out[64 + 4]);
 }
 
+test "scenario bot move/look/shoot only drive the issuing plugin's own bots" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Plugin src 1 spawns a bot; plugin src 2 must not be able to steer it,
+    // or the effects land on src 1 and neither module's withdrawal reverts
+    // them (paper 3.1 attribution, ADR 0030).
+    try std.testing.expect(g.bots.handleCommand(g, "bot spawn 4 4", 1));
+    const owned = g.bots.bots[0].net_id;
+    try std.testing.expectEqual(@as(i16, 1), g.bots.bots[0].src);
+
+    var line: [64]u8 = undefined;
+    const move = try std.fmt.bufPrint(&line, "bot move {d} 20 70 20 4", .{owned});
+    try std.testing.expect(g.bots.handleCommand(g, move, 2));
+    try std.testing.expect(!g.bots.bots[0].move_active);
+    // The owner's own move is applied.
+    try std.testing.expect(g.bots.handleCommand(g, move, 1));
+    try std.testing.expect(g.bots.bots[0].move_active);
+
+    var line2: [64]u8 = undefined;
+    const look = try std.fmt.bufPrint(&line2, "bot look {d} 1.5", .{owned});
+    try std.testing.expect(g.bots.handleCommand(g, look, 2));
+    try std.testing.expectEqual(@as(f32, 0), g.bots.bots[0].yaw);
+    try std.testing.expect(g.bots.handleCommand(g, look, 1));
+    try std.testing.expectEqual(@as(f32, 1.5), g.bots.bots[0].yaw);
+
+    // A foreign `bot shoot` never fires, so the victim takes no damage and no
+    // damage event is recorded for the guest.
+    try std.testing.expect(g.bots.handleCommand(g, "bot spawn 6 4", 1));
+    const victim = g.bots.bots[1].net_id;
+    const hp_before = g.bots.bots[1].hp;
+    var line3: [64]u8 = undefined;
+    const shoot = try std.fmt.bufPrint(&line3, "bot shoot {d} {d}", .{ owned, victim });
+    try std.testing.expect(g.bots.handleCommand(g, shoot, 2));
+    try std.testing.expectEqual(hp_before, g.bots.bots[1].hp);
+    try std.testing.expectEqual(@as(usize, 0), g.bots.ev_n);
+
+    // Native src 0 (console/tests) keeps its full reach.
+    try std.testing.expect(g.bots.handleCommand(g, look, 0));
+}
+
 test "scenario applyCountFloor tops up across repeated calls" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

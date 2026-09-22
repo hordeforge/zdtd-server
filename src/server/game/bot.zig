@@ -269,6 +269,18 @@ pub const BotManager = struct {
         return id;
     }
 
+    /// May `src` drive the live bot `net_id`? A plugin steers only the bots it
+    /// spawned: the same attribution rule `removeFrom` / `removeAll` apply, for
+    /// the same reason (paper 3.1 / ADR 0030). One component driving hosts
+    /// another created puts the resulting effects on the owner, so the issuer's
+    /// withdrawal cannot reach them and the owner's withdrawal reverts a bot it
+    /// never moved. Native src 0 is the console and keeps its full reach.
+    fn mayDrive(self: *BotManager, net_id: i32, src: i16) bool {
+        if (src <= 0) return true;
+        const s = self.find(net_id) orelse return false;
+        return self.bots[s].src == src;
+    }
+
     /// Slot of a live bot by net id, or null. O(max_bots) - 16 slots, fine.
     pub fn find(self: *BotManager, net_id: i32) ?usize {
         if (net_id < 0) return null;
@@ -603,14 +615,18 @@ pub const BotManager = struct {
             // the position arithmetic (both trap the tick-path casts).
             if (!game_mod.coordInRange(fx) or !game_mod.coordInRange(fy) or !game_mod.coordInRange(fz)) return true;
             if (!std.math.isFinite(fs) or fs < 0) return true;
-            self.move(std.fmt.parseInt(i32, id, 10) catch return true, fx, fy, fz, fs);
+            const nid = std.fmt.parseInt(i32, id, 10) catch return true;
+            if (!self.mayDrive(nid, src)) return true;
+            self.move(nid, fx, fy, fz, fs);
             return true;
         }
         if (std.mem.eql(u8, sub, "look")) {
             const id = it.next() orelse return true;
             const yaw = it.next() orelse return true;
             if (it.next() != null) return true;
-            self.look(std.fmt.parseInt(i32, id, 10) catch return true, std.fmt.parseFloat(f32, yaw) catch return true);
+            const nid = std.fmt.parseInt(i32, id, 10) catch return true;
+            if (!self.mayDrive(nid, src)) return true;
+            self.look(nid, std.fmt.parseFloat(f32, yaw) catch return true);
             return true;
         }
         if (std.mem.eql(u8, sub, "shoot")) {
@@ -626,7 +642,9 @@ pub const BotManager = struct {
                 }
                 if (it.next() != null) return true;
             }
-            self.shoot(g, std.fmt.parseInt(i32, id, 10) catch return true, std.fmt.parseInt(i32, target, 10) catch return true, head);
+            const shooter = std.fmt.parseInt(i32, id, 10) catch return true;
+            if (!self.mayDrive(shooter, src)) return true;
+            self.shoot(g, shooter, std.fmt.parseInt(i32, target, 10) catch return true, head);
             return true;
         }
         if (std.mem.eql(u8, sub, "remove")) {
