@@ -142,7 +142,7 @@ the vehicles.xml hook or the `[rules.vehicle] fuel_cap` floor, gives a bicycle n
 `seat_count` into `1..max_seats` (`src/ecs/world.zig:1720-1746`). It is called by the demo world
 seed, the admin console and the persistence load path
 (`src/server/game/init_world.zig:289-298`, `src/server/admin_console.zig:1700-1712`,
-`src/server/persist.zig:1810`). The asset side keeps the physicals honest: `loadFromPath` reads
+`src/server/persist_entities.zig:305`). The asset side keeps the physicals honest: `loadFromPath` reads
 `velocityMax_turbo` (falling back to `velocityMax`), `motorTorque_turbo` and the `fuelTank`
 capacity, resolves max HP from the placeable item's `DegradationMax`, and counts only contiguous
 unmodded seat blocks (`src/assets/vehicles.zig:15-37`, `src/assets/vehicles.zig:74-84`,
@@ -160,11 +160,11 @@ multi-entity blob breaks the client reader (`src/server/game/vehicle.zig:121-125
 
 Persistence stores each vehicle as a 32-byte record: kind, position, yaw, fuel, `seat_count` and
 `max_speed`, followed by an optional basket record when the basket holds items
-(`src/server/persist.zig:1619-1639`). Load range-checks the raw kind byte before `@enumFromInt`,
+(`src/server/persist_entities.zig:112-131`). Load range-checks the raw kind byte before `@enumFromInt`,
 because an out-of-range byte would panic on a corrupt `entities.zen`, then restores fuel and yaw on
-the respawned hull (`src/server/persist.zig:1796-1815`). Basket records apply to the vehicle written
+the respawned hull (`src/server/persist_entities.zig:286-311`). Basket records apply to the vehicle written
 just before them, and every claimed slot is consumed even when no vehicle is available, so the
-record stream stays aligned (`src/server/persist.zig:1852-1863`). Seat occupancy does not persist:
+record stream stays aligned (`src/server/persist_entities.zig:271-284`). Seat occupancy does not persist:
 riders re-mount after a restart.
 
 ## See also
