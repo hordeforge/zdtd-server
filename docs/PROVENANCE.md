@@ -397,6 +397,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/map.zig` | R | In-game minimap: MapChunks window send + per-chunk 256 RGB555 colors (CalcChunkColors -> Block.GetMapColor -> atlas color -> ToColor5; water = BlockLiquidv2.Color) and the 6 s PersistentPlayerPositions player-marker broadcast. RE: `../7dtd-engine-research/docs/world/texture-atlas.md`, `protocol-packages.md §3.3` + PersistentPlayerPositions |
 | `src/server/game/tick.zig` | R | Tick orchestration - extracted from game.zig; helpers take *Game. Bodies are verbatim copies from src/server/game.zig (stock asm.il comments kept) |
 | `src/server/game/buff_events.zig` | R | Buff-event drivers (PlayerCtx gate assembly, triggered-row apply, AddBuff gate, fire* hit/kill/fall/jump/aim/crouch/respawn/reload/died/leave-game events). Split out of tick.zig, forwarded through game.zig |
+| `src/server/game/tick_equip.zig` | R | Tick equip sync (stage buffs, equip markers, mod rows). Split out of tick.zig verbatim |
 | `src/server/game/trader.zig` | R | Trader helpers extracted verbatim from game.zig  The traderAlways fallback applies only when no `<trader_info>` row resolved; a resolved row with no `<trader_items>` stays empty (2026-09-13).|
 | `src/server/game/trader_wire.zig` | R | Trader wire helpers extracted from game.zig. stockEntries + sendTraderSnapshot + handleTrade + applyTraderDataCopyFrom |
 | `src/server/game/types.zig` | R | Game-owned types extracted from game.zig: InitOptions, defaults, LandClaim, Client. Canonical definitions live here; game.zig re-exports them so exist |
