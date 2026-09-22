@@ -6610,17 +6610,27 @@ test "scenario join enter bundle arrives in full on the capture peer" {
         "NetPackageWorldTime",
         "NetPackageGameStats",
     };
+    // `names` is in stock send order (protocol.md step 10-13). Arrival alone
+    // is not the contract: the client's worldInfoCo applies spawn points only
+    // after chunkClusterLoaded, so a bundle that arrives complete but
+    // reordered still wedges it on the loading screen. Assert both.
     var checked: usize = 0;
+    var last_slot: usize = 0;
     for (names) |nm| {
         const id = packages.idOf(nm) orelse continue;
-        if (cap.findPkgId(id) == null) {
+        const at = cap.indexOfPkgId(id) orelse {
             std.debug.print("FAIL enter bundle: {s} (id {d}) not found in {d} capture slots\n", .{ nm, id, cap.n });
             return error.MissingBundlePackage;
+        };
+        if (at < last_slot) {
+            std.debug.print("FAIL enter bundle order: {s} at slot {d}, behind the previous package at {d}\n", .{ nm, at, last_slot });
+            return error.BundleOutOfOrder;
         }
+        last_slot = at;
         checked += 1;
     }
     try std.testing.expectEqual(@as(usize, names.len), checked);
-    std.debug.print("PASS enter bundle: {d}/{d} critical packages arrived on capture\n", .{ checked, names.len });
+    std.debug.print("PASS enter bundle: {d}/{d} critical packages arrived in order on capture\n", .{ checked, names.len });
 }
 
 test "scenario plugin withdrawal despawns applied spawns" {

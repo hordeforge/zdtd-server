@@ -73,6 +73,23 @@ pub const Capture = struct {
         self.n = 0;
     }
 
+    /// Capture-slot index of the first message carrying `pkg_id`, for tests
+    /// that assert a send ORDER rather than mere arrival (the stock client
+    /// wedges on an enter bundle whose packages arrive out of sequence).
+    pub fn indexOfPkgId(self: *const Capture, pkg_id: u16) ?usize {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const msg = self.slots[i].data[0..self.slots[i].len];
+            var pkgs: [8]frame.Package = undefined;
+            const pn = frame.parseChannelPayload(msg, &pkgs);
+            var j: usize = 0;
+            while (j < pn) : (j += 1) {
+                if (pkgs[j].id == pkg_id) return i;
+            }
+        }
+        return null;
+    }
+
     pub fn findPkgId(self: *const Capture, pkg_id: u16) ?[]const u8 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
@@ -302,11 +319,13 @@ pub const Peer = struct {
     /// makes that property moot - see DIVERGENCES 1. Introducing a queue means
     /// reinstating those eight as bypasses.
     pub fn sendReliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
+        if (user.len > max_payload) return error.Overflow;
         if (self.capture) |cap| {
             // Record full user message for scenarios, then exercise real send path.
+            // After the size check: a capture that holds a message the send
+            // path rejected reads as delivered evidence it never was.
             cap.push(user);
         }
-        if (user.len > max_payload) return error.Overflow;
 
         // Single datagram when it fits the negotiated MTU (matches stock
         // non-fragment path). The cap follows the peer's MtuCheck so a low-MTU

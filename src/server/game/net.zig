@@ -259,7 +259,9 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
     // or a chunk broadcast silently gets the single-window droppable cap.
     const max_attempts = delivery_policy.maxAttemptsFor(name, droppable);
     const fanout_deadline = clock.monoNs() + game_mod.window_retry_budget_ns;
-    var hard_fail = false;
+    // The real error, not a stand-in: returning error.WindowFull for a socket
+    // fault told the caller to back off on window pressure that was not there.
+    var hard_err: ?anyerror = null;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
@@ -279,20 +281,22 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
                     var ts: [19]u8 = undefined;
                     std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcastNear droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
                 }
-                if (!droppable) hard_fail = true;
+                if (!droppable) hard_err = error.WindowFull;
             },
             else => {
-                self.harness.counters.inc(.net_send_errors);
+                // sendReliablePumped already counted this in net_send_errors
+                // (same convention as sendFramedDroppable / broadcastKnown);
+                // counting again here made one socket fault read as two.
                 const n2 = self.harness.counters.get(.net_send_errors);
                 if (n2 == 1 or n2 % 100 == 0) {
                     var ts: [19]u8 = undefined;
                     std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
                 }
-                hard_fail = true;
+                hard_err = err;
             },
         };
     }
-    if (hard_fail) return error.WindowFull;
+    if (hard_err) |e| return e;
 }
 
 pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
@@ -310,15 +314,17 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
     // or a chunk broadcast silently gets the single-window droppable cap.
     const max_attempts = delivery_policy.maxAttemptsFor(name, droppable);
     const fanout_deadline = clock.monoNs() + game_mod.window_retry_budget_ns;
-    var hard_fail = false;
+    // The real error, not a stand-in: returning error.WindowFull for a socket
+    // fault told the caller to back off on window pressure that was not there.
+    var hard_err: ?anyerror = null;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
         if (except_slot) |ex| if (c.slot == ex) continue;
         if (isUnreliablePackage(name) and framed.len <= p.singleUserLimit()) {
-            p.sendUnreliable(&self.net.sock, framed) catch {
+            p.sendUnreliable(&self.net.sock, framed) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                hard_fail = true;
+                hard_err = err;
                 continue;
             };
             self.harness.counters.add(.net_packets_out, 1);
@@ -333,21 +339,22 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
                         var ts: [19]u8 = undefined;
                         std.debug.print("zdtd: {s} reliable window drop pkg={s} broadcast droppable={} local_id={d} n={d}\n", .{ clock.wallStamp(&ts), name, droppable, p.local_id, d });
                     }
-                    if (!droppable) hard_fail = true;
+                    if (!droppable) hard_err = error.WindowFull;
                 },
                 else => {
-                    self.harness.counters.inc(.net_send_errors);
+                    // Already counted inside sendReliablePumped; see the
+                    // broadcastNear arm.
                     const n2 = self.harness.counters.get(.net_send_errors);
                     if (n2 == 1 or n2 % 100 == 0) {
                         var ts: [19]u8 = undefined;
                         std.debug.print("zdtd: {s} broadcast send failed pkg={s} local_id={d} n={d}: {s}\n", .{ clock.wallStamp(&ts), name, p.local_id, n2, @errorName(err) });
                     }
-                    hard_fail = true;
+                    hard_err = err;
                 },
             };
         }
     }
-    if (hard_fail) return error.WindowFull;
+    if (hard_err) |e| return e;
 }
 
 /// Process pending UDP events (acks free window; data delivered to onData).
