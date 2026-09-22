@@ -158,6 +158,45 @@ test "scenario a wrong challenge echo does not authenticate the peer" {
     try std.testing.expect(peer.authenticated);
 }
 
+test "scenario the stale-peer reap tears the session down like a disconnect" {
+    // reapStalePeers used to hand-roll `clients[slot] = .{}`, which left the
+    // sim player entity alive and told nobody: every other client kept
+    // rendering a frozen ghost until it reconnected. The one drop path
+    // (dropClientSlot) owns persist, EntityRemove fan-out and sim destroy.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try game_mod.Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const a = try g.attachJoinedClient(&cap_a);
+    const b = try g.attachJoinedClient(&cap_b);
+    const a_slot = a.slot;
+    const a_entity = a.entity_id;
+    const a_sim = g.sim.playerByPeer(a_slot) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.alive_bits.isSet(a_sim));
+
+    // Hard disconnect: the transport marks the peer dead, the sweep reaps it.
+    a.peer.?.alive = false;
+    cap_b.clear();
+    g.reapStalePeers();
+
+    try std.testing.expect(g.clients[a_slot].peer == null);
+    try std.testing.expectEqual(@as(i32, 0), g.clients[a_slot].entity_id);
+    // The ghost is gone from the sim and from B's known set.
+    try std.testing.expect(!g.sim.alive_bits.isSet(a_sim));
+    try std.testing.expect(!g.clients[b.slot].known_entities.isSet(a_sim));
+    // And B was told, so its world does not keep the frozen player.
+    const remove_id = packages.idOf("NetPackageEntityRemove") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap_b.findPkgIdEntity(remove_id, a_entity) != null);
+}
+
 test "scenario a peer that never echoes is reaped past the auth age" {
     // Stock MaxDurationInAuthState (10 s): the auth sweep reaps by challenge
     // age, not RX silence. A peer that keeps the socket warm with junk but
@@ -194,9 +233,11 @@ test "scenario a peer that never echoes is reaped past the auth age" {
     // Offline Game already armed the virtual clock; pin absolute time so the
     // auth-age math is exact without tearing sim mode down mid-test.
     clock.setVirtualNs(1_000_000_000);
-    c.challenge_ns = 0; // issued at virtual t=0
-    peer.last_recv_ns = clock.monoNs(); // RX warm right now
+    c.challenge_ns = clock.monoNs(); // challenge issued now
     clock.advanceNs((game_mod.default_auth_state_ms *| 1_000_000) + 1);
+    // RX warm *after* the advance, or the idle arm reaps first and the auth
+    // arm this test is named for never runs.
+    peer.last_recv_ns = clock.monoNs();
     g.reapStalePeers();
     try std.testing.expectEqual(reaped_before + 1, g.harness.counters.get(.stale_peers_reaped));
     try std.testing.expect(!peer.alive);

@@ -310,8 +310,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // One deadline covers the whole must-deliver enter bundle. Clear it at
         // the request boundary so later critical exchanges (sign data,
         // PlayerId) receive their own bounded budget.
-        peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
-        defer peer.critical_budget_deadline_ns = 0;
+        const owns_bundle_budget = peer.armCriticalBudget(game_mod.critical_retry_budget_ns);
+        defer peer.releaseCriticalBudget(owns_bundle_budget);
         if (c.entity_id <= 0) {
             const surf_e = self.spawnSurface(sp.x, sp.z);
             c.entity_id = spawnPlayerOrFail(
@@ -487,8 +487,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // RequestToEnterGame path): without it every sendGameCritical in
             // the bundle re-arms its own budget and a peer that stops ACKing
             // costs the tick one full budget per critical package.
-            peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
-            defer peer.critical_budget_deadline_ns = 0;
+            const owns_bundle_budget = peer.armCriticalBudget(game_mod.critical_retry_budget_ns);
+            defer peer.releaseCriticalBudget(owns_bundle_budget);
             try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
             std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
         } else {
@@ -678,8 +678,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Death-respawn already sent Spawned+stats; still re-send join bundle so the
         // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
         // One deadline for the bundle, as in the RequestToEnterGame path.
-        peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
-        defer peer.critical_budget_deadline_ns = 0;
+        const owns_bundle_budget = peer.armCriticalBudget(game_mod.critical_retry_budget_ns);
+        defer peer.releaseCriticalBudget(owns_bundle_budget);
         try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
         return true;
     }

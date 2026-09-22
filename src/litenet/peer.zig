@@ -226,6 +226,29 @@ pub const Peer = struct {
     /// Payloads dropped because the mailbox was full. Must stay 0 in practice.
     extra_drops: u32 = 0,
 
+    /// Arm the shared join-critical retry deadline unless an enclosing bundle
+    /// already owns one. Returns whether this caller owns it; pair with
+    /// `releaseCriticalBudget` in a `defer` so a nested standalone critical
+    /// send cannot disarm the bundle's deadline early.
+    pub fn armCriticalBudget(self: *Peer, budget_ns: u64) bool {
+        if (self.critical_budget_deadline_ns != 0) return false;
+        self.critical_budget_deadline_ns = clock.monoNs() + budget_ns;
+        return true;
+    }
+
+    pub fn releaseCriticalBudget(self: *Peer, owned: bool) void {
+        if (owned) self.critical_budget_deadline_ns = 0;
+    }
+
+    /// Slice of the shared critical deadline still available, capped at
+    /// `budget_ns`. 0 once the bundle's deadline has passed, so the send fails
+    /// fast instead of spending a fresh budget per package.
+    pub fn criticalBudgetRemaining(self: *const Peer, budget_ns: u64) u64 {
+        const now = clock.monoNs();
+        if (now >= self.critical_budget_deadline_ns) return 0;
+        return @min(budget_ns, self.critical_budget_deadline_ns - now);
+    }
+
     pub fn setAddr(self: *Peer, addr: *const udp.IpAddress) void {
         self.addr = addr.*;
         self.addr_key = udp.hashIp(addr);

@@ -44,11 +44,8 @@ pub fn sendGameCritical(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, 
 }
 
 pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, body: []const u8, budget_ns: u64, critical: bool) anyerror!void {
-    const owns_critical_budget = critical and peer.critical_budget_deadline_ns == 0;
-    if (owns_critical_budget) peer.critical_budget_deadline_ns = clock.monoNs() + budget_ns;
-    defer if (owns_critical_budget) {
-        peer.critical_budget_deadline_ns = 0;
-    };
+    const owns_critical_budget = critical and peer.armCriticalBudget(budget_ns);
+    defer peer.releaseCriticalBudget(owns_critical_budget);
     // Stock get_Compress()=true for exactly these eight (asm.il 808641-808647
     // and friends): Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
     // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
@@ -86,20 +83,8 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // join bundle. In particular, periodic WorldTime is droppable while the
     // enter-bundle WorldTime has no client retry.
     const droppable = !critical and isDroppablePackage(pkg_name);
-    const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
-        4000
-    else if (droppable)
-        64
-    else
-        960;
-    var retry_budget = budget_ns;
-    if (critical) {
-        const now = clock.monoNs();
-        retry_budget = if (now >= peer.critical_budget_deadline_ns)
-            0
-        else
-            @min(budget_ns, peer.critical_budget_deadline_ns - now);
-    }
+    const max_attempts = delivery_policy.maxAttemptsFor(pkg_name, droppable);
+    const retry_budget = if (critical) peer.criticalBudgetRemaining(budget_ns) else budget_ns;
     sendReliablePumped(self, peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);

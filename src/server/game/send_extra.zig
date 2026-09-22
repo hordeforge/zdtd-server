@@ -33,27 +33,12 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
     // One retry shape: the shared sendReliablePumped pump owns the
     // budget/deadline/sleep/resend rules. Only the join-critical deadline
     // arm differs and is shared across the whole enter bundle.
-    const owns_critical_budget = critical and peer.critical_budget_deadline_ns == 0;
-    if (owns_critical_budget) peer.critical_budget_deadline_ns = clock.monoNs() + budget_ns;
-    defer if (owns_critical_budget) {
-        peer.critical_budget_deadline_ns = 0;
-    };
-    var retry_budget = budget_ns;
-    if (critical) {
-        const now = clock.monoNs();
-        retry_budget = if (now >= peer.critical_budget_deadline_ns)
-            0
-        else
-            @min(budget_ns, peer.critical_budget_deadline_ns - now);
-    }
-    // Same attempt ladder as sendGameBudget (Chunk 4000 / droppable 64 / else 960).
+    const owns_critical_budget = critical and peer.armCriticalBudget(budget_ns);
+    defer peer.releaseCriticalBudget(owns_critical_budget);
+    const retry_budget = if (critical) peer.criticalBudgetRemaining(budget_ns) else budget_ns;
+    // Same attempt ladder as sendGameBudget: one table in delivery_policy.
     const droppable = !critical and delivery_policy.isDroppablePackage(pkg_name);
-    const max_attempts: u32 = if (std.mem.eql(u8, pkg_name, "NetPackageChunk"))
-        4000
-    else if (droppable)
-        64
-    else
-        960;
+    const max_attempts = delivery_policy.maxAttemptsFor(pkg_name, droppable);
     self.sendReliablePumped(peer, pkg_name, framed, retry_budget, max_attempts, false) catch |err| switch (err) {
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);

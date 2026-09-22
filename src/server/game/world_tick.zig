@@ -14,8 +14,8 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const clock = @import("../../util/clock.zig");
+const ln_peer = @import("../../litenet/peer.zig");
 const game_types = @import("types.zig");
-const persist = @import("../persist.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const admin_xml = @import("../admin_xml.zig");
 
@@ -252,6 +252,16 @@ pub fn reapStaleLocks(self: *Game) void {
     }
 }
 
+/// Free a reaped peer's transport state before the session teardown runs:
+/// the pending reliable window would otherwise keep retransmitting to an
+/// address nobody is listening on until the slot is reused.
+fn releaseReapedPeer(p: *ln_peer.Peer) void {
+    p.alive = false;
+    p.authenticated = false;
+    for (&p.pending) |*slot| slot.used = false;
+    p.local_window_start = p.local_seq;
+}
+
 pub fn reapStalePeers(self: *Game) void {
     const now = clock.monoNs();
     const stale_ns: u64 = self.peer_stale_ms *| 1_000_000;
@@ -267,14 +277,12 @@ pub fn reapStalePeers(self: *Game) void {
                 "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
                 .{ p.local_id, c.slot, c.entity_id },
             );
-            // A hard disconnect (no NetPackagePlayerDisconnect) must not lose
-            // the player's data until the next autosave: persist before the
-            // slot is cleared (GAP "Save on disconnect / kick"). Pre-join
-            // peers have no entity and nothing to save.
-            if (c.entity_id > 0) self.savePlayers() catch |e| persist.logPersistErr(self, "save players on reap", e);
-            self.clearLocksForPeer(c.slot);
-            c.* = .{};
-            self.refreshInfoPlayers();
+            // One drop path owns the teardown (persist, party removal, claims,
+            // EntityRemove fan-out, sim destroy) - see clientFor, which hit the
+            // same bug. The hand-rolled `c.* = .{}` here left the sim player
+            // entity alive as a ghost every other client kept rendering,
+            // because nothing broadcast NetPackageEntityRemove.
+            self.dropClientSlot(c.slot, "reap-dead");
             continue;
         }
         if (p.last_recv_ns == 0) continue;
@@ -289,13 +297,8 @@ pub fn reapStalePeers(self: *Game) void {
                 "zdtd: peer reaped in-auth local_id={d} slot={d} age_ms={d}\n",
                 .{ p.local_id, c.slot, (now -% c.challenge_ns) / 1_000_000 },
             );
-            p.alive = false;
-            p.authenticated = false;
-            for (&p.pending) |*slot| slot.used = false;
-            p.local_window_start = p.local_seq;
-            self.clearLocksForPeer(c.slot);
-            c.* = .{};
-            self.refreshInfoPlayers();
+            releaseReapedPeer(p);
+            self.dropClientSlot(c.slot, "reap-auth");
             continue;
         }
         if (now -% p.last_recv_ns > stale_ns) {
@@ -304,14 +307,8 @@ pub fn reapStalePeers(self: *Game) void {
                 "zdtd: peer reaped stale local_id={d} slot={d} entity={d} idle_ms={d}\n",
                 .{ p.local_id, c.slot, c.entity_id, (now -% p.last_recv_ns) / 1_000_000 },
             );
-            p.alive = false;
-            p.authenticated = false;
-            for (&p.pending) |*slot| slot.used = false;
-            p.local_window_start = p.local_seq;
-            if (c.entity_id > 0) self.savePlayers() catch |e| persist.logPersistErr(self, "save players on reap", e);
-            self.clearLocksForPeer(c.slot);
-            c.* = .{};
-            self.refreshInfoPlayers();
+            releaseReapedPeer(p);
+            self.dropClientSlot(c.slot, "reap-stale");
         }
     }
 }

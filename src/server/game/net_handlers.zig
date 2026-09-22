@@ -30,7 +30,10 @@ pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     }
     var ch: [17]u8 = undefined;
     wire_frame.buildChallenge(&ch, c.challenge);
-    peer.sendReliable(&self.net.sock, &ch) catch |err| {
+    // Through the shared pump like every other reliable send: the window is
+    // empty on a fresh peer, but this is the only path that would otherwise
+    // miss net_packets_out / net_bytes_out and run with no send deadline.
+    self.sendReliablePumped(peer, "challenge", &ch, game_mod.window_retry_budget_ns, 64, false) catch |err| {
         self.harness.counters.inc(.net_send_errors);
         self.harness.counters.inc(.join_fail);
         std.debug.print("zdtd: challenge send failed local_id={d} error={s}\n", .{ peer.local_id, @errorName(err) });
