@@ -72,6 +72,12 @@ const zombie_tasks = [_]Task{
     // Ahead of Approach the way AITask-1 sits ahead of it in a passive-animal
     // class; its kind gate keeps it out of the zombie list.
     .{ .id = .runaway, .priority = 1, .mutex = 0b01, .execute_delay = 0.5, .continuous = true },
+    // EAILeap (EAILeap.il.txt): MutexBits=3, first in the zombieSpider /
+    // animalMountainLion AITask lists, so it sits ahead of approach_attack and
+    // shares its exclusive movement mutex. continuous stays false for the same
+    // reason approach_attack's does: a continuous priority-1 task lets the
+    // wander fallback steal the walk through isBestTask's continuous yield.
+    .{ .id = .leap, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
     // EAIApproachDistraction (asm.il:423700): MutexBits=3, no Init override so
     // executeDelay/continuous are the EAIBase defaults (0.5 / true). Priority 1
@@ -124,6 +130,31 @@ fn approachCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2:
 /// EAIApproachSpot::CanExecute (asm.il:424093): director/AI set a spot to walk to.
 fn approachSpotCanExecute(ai: *const c.ZombieAi) bool {
     return ai.has_spot;
+}
+
+/// EAILeap::CanExecute (EAILeap.il.txt): a sensed target sitting between the
+/// stock 2.8 m floor and the class's rolled `jumpMaxDistance`, with the body
+/// grounded and off jump cooldown. A class whose `jump_max` never clears the
+/// floor (the 1.9-2.1 cctor default, i.e. no `JumpMaxDistance` row) can never
+/// pass, so only zombieSpider / animalMountainLion pounce.
+fn leapCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np: TargetSnap, sense_d2: f32) bool {
+    // Already airborne: the flight owns the entity until it lands, so the
+    // selection pass must keep re-electing the task (stock's jump state does
+    // the same by holding the mutex).
+    if (ai.leaping) return true;
+    const max_d = w.class_id[s].jump_max;
+    const min_d = w.rules.ai.leap_min_dist;
+    if (max_d < min_d) return false;
+    if (ai.jumping or ai.jump_cd > 0) return false;
+    if (!(np.id >= 0 and np.d2 < sense_d2)) return false;
+    return np.d2 >= min_d * min_d and np.d2 <= max_d * max_d;
+}
+
+/// EAILeap::Continue: the aim budget or the flight, not the start condition.
+/// Once launched the arc must run to the landing even though the target has by
+/// then moved out of the launch window.
+fn leapContinue(ai: *const c.ZombieAi) bool {
+    return ai.leaping or ai.leap_time > 0;
 }
 
 /// EAIApproachDistraction::CanExecute (asm.il:423700): a dropped EntityItem
@@ -453,6 +484,7 @@ const AiCtx = struct {
                 .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
                 .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
                 .runaway => runawayUpdate(ctx.w, ctx.pos, s, ai, cspd, ctx.dt),
+                .leap => leapUpdate(ctx.w, s, ai, np, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
@@ -474,7 +506,9 @@ const AiCtx = struct {
 
             // Vertical settle once per tick (gravity + ground snap), so the
             // body falls and lands even when its task never moves horizontally.
-            applyGravity(ctx.w, s, ctx.dt);
+            // A launched leap owns y for the whole arc (advanceLeap is the
+            // integrator); the snap resumes on the landing tick.
+            if (!ai.leaping) applyGravity(ctx.w, s, ctx.dt);
         }
     }
 };
@@ -516,6 +550,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
         .approach_attack => w.class_id[s].ai_attack and approachCanExecute(w, ai, np.id, np.d2, sense_d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2, sense_d2),
         .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2, sense_d2),
+        .leap => leapCanExecute(w, s, ai, np, sense_d2),
         .approach_spot => approachSpotCanExecute(ai),
         .look => lookCanExecute(ai),
         .wander => wanderCanExecute(w, ai, np.id, np.d2, sense_d2),
@@ -531,6 +566,7 @@ fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np
     return switch (id) {
         .wander => wanderContinue(w, s, ai, np.id, np.d2, senseDistSq(w, s)),
         .look => lookContinue(ai),
+        .leap => leapContinue(ai),
         // EAIApproachDistraction overrides Continue to read `distraction`
         // (Start moved pending there), not the pending slot.
         .approach_distraction => approachDistractionContinue(w, s, ai),
@@ -550,6 +586,13 @@ fn resetTask(w: *const World, id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void
             // EAIWander::Reset (asm.il:438383): lookTime = RandomRange(0.5, 5).
             ai.look_time = ai_rules.wander_look_min_s + rngFrac(ai, rng_seed) * (ai_rules.wander_look_max_s - ai_rules.wander_look_min_s);
             ai.wander_time = 0;
+        },
+        // EAILeap::Reset: drop the aim budget and any arc state. A task cut
+        // short mid-flight lands via the normal gravity path next tick.
+        .leap => {
+            ai.leaping = false;
+            ai.leap_time = 0;
+            ai.leap_t = 0;
         },
         // EAIApproachSpot::Reset (asm.il:424395): lookTime = 5 + rand*3.
         .approach_spot => ai.look_time = ai_rules.spot_look_base_s + rngFrac(ai, rng_seed) * ai_rules.spot_look_rand_s,
@@ -819,6 +862,12 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
             ai.clearPath();
             ai.path_blocked = false;
         },
+        // EAILeap::Start: latch the abortTime aim budget. Start re-runs on every
+        // re-eval that keeps the task, so neither the budget nor an in-flight
+        // arc may be restarted here.
+        .leap => {
+            if (!ai.leaping and ai.leap_time <= 0) ai.leap_time = w.rules.ai.leap_abort_s;
+        },
         // EAIApproachDistraction::Start (asm.il:423700): SetAttackTarget(null),
         // IsEating=false, distraction = pendingDistraction, pendingDistraction
         // = null, then updatePath(). zdtd re-runs Start on every decision
@@ -998,6 +1047,90 @@ fn chaseAlongPath(w: *World, s: Slot, ai: *c.ZombieAi, gx: f32, gz: f32, speed: 
     } else {
         stepToward(w, s, gx, gz, speed, dt);
     }
+}
+
+/// Shortest signed difference between two yaws, degrees, in (-180, 180].
+fn yawDelta(from: f32, to: f32) f32 {
+    var d = @mod(to - from + 180.0, 360.0) - 180.0;
+    if (d <= -180.0) d += 360.0;
+    return d;
+}
+
+/// Advance one frame of the launched arc. Closed form on (leap_ox, leap_oy,
+/// leap_oz): horizontal is linear along `leap_yaw` over `leap_dist`, vertical
+/// is the straight launch-to-landing line plus a `leap_arc_height` parabola, so
+/// the body lands exactly on the aimed cell. Clears `leaping` at t == dur and
+/// hands the entity back to the normal ground snap.
+fn advanceLeap(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
+    ai.leap_t += dt;
+    const u = @min(ai.leap_t / ai.leap_dur, 1.0);
+    const rad = ai.leap_yaw * (std.math.pi / 180.0);
+    const t = &w.transform[s];
+    t.x = ai.leap_ox + @sin(rad) * ai.leap_dist * u;
+    t.z = ai.leap_oz + @cos(rad) * ai.leap_dist * u;
+    const arc = w.rules.ai.leap_arc_height * 4.0 * u * (1.0 - u);
+    const prev_y = t.y;
+    t.y = ai.leap_oy + ai.leap_dy * u + arc;
+    ai.vy = (t.y - prev_y) / dt;
+    if (u >= 1.0) {
+        ai.leaping = false;
+        ai.leap_t = 0;
+        ai.vy = 0;
+        ai.jump_cd = w.rules.ai.jump_delay_s;
+    }
+}
+
+/// EAILeap::Update: turn toward the target within the abort budget, then launch
+/// the arc; once airborne, fly it. Aborting (budget spent, target lost) leaves
+/// the entity grounded and idle so the next re-eval picks another task.
+fn leapUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) void {
+    if (ai.leaping) {
+        ai.state = .chase;
+        ai.alert = true;
+        advanceLeap(w, s, ai, dt);
+        return;
+    }
+    if (np.id < 0) {
+        ai.leap_time = 0;
+        ai.state = .idle;
+        return;
+    }
+    ai.state = .chase;
+    ai.alert = true;
+    ai.target_id = np.id;
+    // moveHelper is stopped for the whole aim phase: stock turns in place.
+    ai.has_path = false;
+    ai.clearPath();
+    ai.path_blocked = false;
+
+    const t = &w.transform[s];
+    const dx = np.px - t.x;
+    const dz = np.pz - t.z;
+    const want_yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+    const delta = yawDelta(t.yaw, want_yaw);
+    const step = w.rules.ai.leap_turn_deg_s * dt;
+    t.yaw += std.math.clamp(delta, -step, step);
+
+    ai.leap_time -= dt;
+    if (@abs(delta) > w.rules.ai.leap_aim_tol_deg) {
+        if (ai.leap_time <= 0) ai.state = .idle; // abortTime spent; give up
+        return;
+    }
+
+    const dist = @sqrt(dx * dx + dz * dz);
+    const max_d = w.class_id[s].jump_max;
+    ai.leap_yaw = want_yaw;
+    ai.leap_ox = t.x;
+    ai.leap_oy = t.y;
+    ai.leap_oz = t.z;
+    ai.leap_dist = @min(dist, max_d);
+    ai.leap_dy = w.transform[np.slot].y - t.y;
+    ai.leap_dur = @max(ai.leap_dist / w.rules.ai.leap_speed, dt);
+    ai.leap_t = 0;
+    // Zeroed at launch so Continue fails once the arc ends and the task is not
+    // re-elected straight into a second pounce.
+    ai.leap_time = 0;
+    ai.leaping = true;
 }
 
 /// EAIApproachSpot::Update: path/step toward director spot; clear has_spot on arrive.
@@ -2434,4 +2567,41 @@ test "demolition: primes at the health threshold, countdowns, then requests the 
     w2.health[s2].hp = 1;
     for (0..3) |_| _ = systemZombieAi(&w2, 0.05);
     try std.testing.expect(!w2.zombie_ai[s2].primed);
+}
+
+test "system zombie leaps at a target inside its JumpMaxDistance window" {
+    // EAILeap: only a class whose rolled jump_max clears the 2.8 m floor
+    // pounces, and the arc lands on the aimed cell.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    _ = w.spawnPlayer(4, 70, 0, 0);
+
+    // Stock cctor default (1.9, 2.1) is under the floor: no leap.
+    try std.testing.expect(w.class_id[zs].jump_max < w.rules.ai.leap_min_dist);
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(w.zombie_ai[zs].active_task != .leap);
+    }
+
+    // A zombieSpider-shaped JumpMaxDistance opens the window.
+    w.transform[zs].x = 0;
+    w.transform[zs].z = 0;
+    w.class_id[zs].jump_max = 6.0;
+    var saw_flight = false;
+    t = 0;
+    while (t < 3.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].leaping) saw_flight = true;
+        if (saw_flight and !w.zombie_ai[zs].leaping) break;
+    }
+    try std.testing.expect(saw_flight);
+    try std.testing.expect(!w.zombie_ai[zs].leaping);
+    // Landed on the aimed cell, not short and not past it.
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), w.transform[zs].x, 0.35);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), w.transform[zs].z, 0.35);
+    // The landing arms the jump cooldown so it cannot pounce again at once.
+    try std.testing.expect(w.zombie_ai[zs].jump_cd > 0);
 }

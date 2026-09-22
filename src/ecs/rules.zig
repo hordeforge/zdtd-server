@@ -250,6 +250,25 @@ pub const Ai = struct {
     /// Min seconds between jumps (stock EntityAlive jumpDelay default 1 x20
     /// ticks = 1 s - entity-ai.md 3228). Prevents bunny-hop on a sealed wall.
     jump_delay_s: f32 = 1.0,
+    /// EAILeap lower range bound, blocks: a class whose rolled
+    /// `ClassId.jump_max` sits under this never pounces, and a target nearer
+    /// than this is walked to instead (stock EAILeap CanExecute floor,
+    /// entity-ai.md 3363). Policy floor.
+    leap_min_dist: f32 = 2.8,
+    /// EAILeap.Start abortTime, seconds: the aim budget. The task turns toward
+    /// the target for at most this long; on expiry it gives up instead of
+    /// launching.
+    leap_abort_s: f32 = 5.0,
+    /// Aim tolerance, degrees: the leap launches once the body's yaw is within
+    /// this of the target bearing.
+    leap_aim_tol_deg: f32 = 12.0,
+    /// Yaw turn rate while aiming, degrees/s.
+    leap_turn_deg_s: f32 = 360.0,
+    /// Horizontal flight speed, blocks/s: sets the arc duration from the
+    /// launch distance (`leap_dur = leap_dist / leap_speed`).
+    leap_speed: f32 = 7.0,
+    /// Extra apex height above the straight launch-to-landing line, blocks.
+    leap_arc_height: f32 = 0.9,
     /// Vertical acceleration, blocks/s². RE: `World::Gravity` cctor default
     /// **0.08** blocks/tick (World.il.txt:96) integrated as
     /// `motion.y = (motion.y - Gravity) * 0.98` per physics tick (the 0.98 is
@@ -872,6 +891,12 @@ pub const AiOverlay = struct {
     step_height: ?f32 = null,
     jump_height: ?f32 = null,
     jump_delay_s: ?f32 = null,
+    leap_min_dist: ?f32 = null,
+    leap_abort_s: ?f32 = null,
+    leap_aim_tol_deg: ?f32 = null,
+    leap_turn_deg_s: ?f32 = null,
+    leap_speed: ?f32 = null,
+    leap_arc_height: ?f32 = null,
     gravity: ?f32 = null,
     fall_max_vy: ?f32 = null,
     swim_gravity_per: ?f32 = null,
