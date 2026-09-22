@@ -188,8 +188,17 @@ pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8)
     };
 }
 
+/// Fan-out one package to every joined peer. Best effort by contract:
+/// `broadcastExcept`'s hard_fail is *another* peer's full window, which the
+/// caller cannot act on, so propagating it let one wedged client abort the
+/// next player's join bundle, a chat, or a bag collect (the fan-out test
+/// joined its second client into the first one's wedged window and died at
+/// join.zig's PersistentPlayerState send). The lane where a window error IS
+/// actionable stays per-peer: sendGameCritical / sendFramedReliable abort
+/// the joiner's own bundle when its window is the full one (see the
+/// enter-bundle scenario). Direct broadcastExcept callers keep the error.
 pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
-    try broadcastExcept(self, name, body, null);
+    broadcastExcept(self, name, body, null) catch {};
 }
 
 /// Send an entity-scoped package only to peers that already know `slot`.

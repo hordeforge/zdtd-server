@@ -26,6 +26,7 @@ const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
 const assets_items = @import("../../assets/items.zig");
+const io_fs = @import("../../util/io_fs.zig");
 
 const stock_sign = packages.stock_sign;
 
@@ -898,9 +899,14 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
             self.sim.transform[js].z,
             oradius,
         )) continue;
-        try self.sendGame(opeer, "NetPackageEntitySpawn", jbody);
+        // An existing peer's full window must not abort the joiner's bundle:
+        // skip the announce and leave its known_entities unset, so the
+        // replicate pass re-sends the spawn once that window drains (the same
+        // best-effort contract as broadcast(), which already swallowed the
+        // PersistentPlayerState row for this peer).
+        self.sendGame(opeer, "NetPackageEntitySpawn", jbody) catch continue;
         cl.known_entities.set(js);
-        try sendPlayerStatsTo(self, opeer, c, jnid);
+        sendPlayerStatsTo(self, opeer, c, jnid) catch {};
     }
 }
 
@@ -1041,7 +1047,6 @@ test "quest nav class names exist in stock nav_objects.xml" {
     // leave the marker unresolved on the client (the names are wire
     // identifiers from stock names, like block/item names; the file's sprite
     // settings are client-side rendering config the server never reads).
-    const io_fs = @import("../../util/io_fs.zig");
     const path = stock_paths.configFile("nav_objects.xml");
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     const buf = io_fs.readFileAll(std.testing.allocator, path) catch return error.SkipZigTest;
