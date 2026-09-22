@@ -93,6 +93,7 @@ pub const c2s_misc_questequip = @import("c2s/misc_questequip.zig");
 pub const c2s_misc_progress = @import("c2s/misc_progress.zig");
 pub const c2s_misc_gameevent = @import("c2s/misc_gameevent.zig");
 pub const c2s_misc_spawn = @import("c2s/misc_spawn.zig");
+pub const c2s_misc_admin = @import("c2s/misc_admin.zig");
 pub const c2s_join = @import("c2s/join.zig");
 pub const c2s_dispatch = @import("c2s/dispatch.zig");
 
@@ -187,6 +188,7 @@ test {
     _ = c2s_misc_progress;
     _ = c2s_misc_gameevent;
     _ = c2s_misc_spawn;
+    _ = c2s_misc_admin;
     _ = c2s_join;
     _ = c2s_dispatch;
 }

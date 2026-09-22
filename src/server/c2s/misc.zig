@@ -15,6 +15,7 @@ const misc_questequip = @import("misc_questequip.zig");
 const misc_progress = @import("misc_progress.zig");
 const misc_gameevent = @import("misc_gameevent.zig");
 const misc_spawn = @import("misc_spawn.zig");
+const misc_admin = @import("misc_admin.zig");
 const misc_drop = @import("misc_drop.zig");
 const protocol = @import("../../protocol.zig");
 const replicate_te = @import("../game/replicate_te.zig");
@@ -63,6 +64,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (try misc_progress.handleProgress(self, c, peer, name, body)) return true;
     if (try misc_gameevent.handleGameEvent(self, c, peer, name, body)) return true;
     if (try misc_spawn.handleSpawn(self, c, peer, name, body)) return true;
+    if (try misc_admin.handleAdmin(self, c, peer, name, body)) return true;
     // Accepted and dropped on purpose (phase-gated above, so this is a
     // deliberate no-op, not an unhandled package). Each is a documented
     // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
@@ -103,18 +105,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageConsoleCmdServer")) {
-        self.handleConsoleCmd(peer, c, body) catch |err| {
-            std.debug.print(
-                "zdtd: console cmd failed slot={d}: {s}\n",
-                .{ c.slot, @errorName(err) },
-            );
-        };
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageEditorAddVolumeFromClient")) {
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageDamageEntity")) {
