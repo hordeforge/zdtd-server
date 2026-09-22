@@ -36,9 +36,9 @@ pub const Phase = enum(u8) {
 };
 ```
 
-`joined` is set when PlayerLogin is accepted (src/server/c2s/join_spawn.zig:195) and again on the
-two recovery paths, the `RequestToEnterGame` spawn fallback (src/server/c2s/join_spawn.zig:125)
-and the `RequestToSpawnPlayer` handler (src/server/c2s/join_spawn.zig:70). `entered` is set once
+`joined` is set when PlayerLogin is accepted (src/server/c2s/join_login.zig:250) and again on the
+two recovery paths, the `RequestToEnterGame` spawn fallback (src/server/c2s/join_enter.zig:37)
+and the `RequestToSpawnPlayer` handler (src/server/c2s/join_spawn.zig:171). `entered` is set once
 per slot, at the top of `sendJoinBundle` and before any bundle body is written
 (game.zig:2783). There is no Phase value for the challenge step: a peer that has
 not echoed the challenge never reaches the gate, because `onData` returns before
@@ -109,41 +109,42 @@ counted on `c2s_malformed` and rate-limited-logged before the gate
    sends `NetPackagePackageIds`, and replays a payload that raced the echo out of
    `preauth_buf` (net_handlers.zig:49-75).
 2. `NetPackagePlayerLogin`, gated before any effect: version equality against
-   `version.stock_wire_comp` (src/server/c2s/join_spawn.zig:61-80; also `join_fail` + drop), the
-   `PlayerSlotsAuthorizer` tier math (src/server/c2s/join_spawn.zig:92-118), plugin and Wasm
-   denies (src/server/c2s/join_spawn.zig:137-148), the identity ban (src/server/c2s/join_spawn.zig:161-169), and
-   the whitelist when configured (src/server/c2s/join_spawn.zig:178-193). On accept the sim player
-   is reserved first (`spawnPlayerOrFail`, src/server/c2s/join_spawn.zig:97-108) so a full entity
+   `version.stock_wire_comp` (src/server/c2s/join_login.zig:59-78; also `join_fail` + drop), the
+   `PlayerSlotsAuthorizer` tier math (src/server/c2s/join_login.zig:91-120), plugin and Wasm
+   denies (src/server/c2s/join_login.zig:136-148), the identity ban (src/server/c2s/join_login.zig:149-196), and
+   the whitelist when configured (src/server/c2s/join_login.zig:204-220). On accept the sim player
+   is reserved first (`game_player.spawnOrFail`, src/server/c2s/join_login.zig:225-235) so a full entity
    table cannot send `PlayerLoginAnswer` with no entity; then
-   `PlayerLoginAnswer` with the full GSI text (src/server/c2s/join_spawn.zig:109-110), an empty
-   `AuthConfirmation` the client echoes (src/server/c2s/join_spawn.zig:117), claim and turret
-   re-mapping by login name (src/server/c2s/join_spawn.zig:120-121), and `tryRestorePlayer`
-   (src/server/c2s/join_spawn.zig:128). A re-login while joined takes the early arm: answer plus
-   `PlayerSpawnedInWorld`, no second enter (src/server/c2s/join_login.zig:43-60).
+   `PlayerLoginAnswer` with the full GSI text (src/server/c2s/join_login.zig:237-238), an empty
+   `AuthConfirmation` the client echoes (src/server/c2s/join_login.zig:245), claim and turret
+   re-mapping by login name (src/server/c2s/join_login.zig:248-249), and `tryRestorePlayer`
+   (src/server/c2s/join_login.zig:256). A re-login while joined takes the early arm: answer plus
+   `PlayerSpawnedInWorld`, no second enter (src/server/c2s/join_login.zig:29-42).
 3. `NetPackageRequestToEnterGame` arms one critical deadline for the whole
-   bundle (src/server/c2s/join_spawn.zig:153) and sends, in order: blocks id mapping,
+   bundle (src/server/c2s/join_enter.zig:22) and sends, in order: blocks id mapping,
    localization, the 42 config rows, `WorldInfo`, `ChunkClusterInfo`,
    `WorldSpawnPoints`, `WorldAreas`, `WorldTime`, `GameStats`, then the join deco
-   burst (src/server/c2s/join_spawn.zig:174-198). `WorldInfo` goes out here and never in the spawn
+   burst (src/server/c2s/join_enter.zig:43-67). `WorldInfo` goes out here and never in the spawn
    bundle, because a second one restarts the client's `createWorld` mid-session
-   (src/server/c2s/join_spawn.zig:180-181).
+   (src/server/c2s/join_enter.zig:49-50).
 4. `SignDataRequest` answers with batched `SignDataResponse`, the final batch a
    critical send because the client blocks worldInfo continuation on
    `isLastBatch` (game/join.zig:233-270); `POIMetadataRequest` answers with the
-   compressed 3.2.0 metadata blob (src/server/c2s/join_spawn.zig:160-187); `WorldFolder` answers
-   with one empty last part (src/server/c2s/join_spawn.zig:106-115).
+   compressed 3.2.0 metadata blob (src/server/c2s/join_worldinfo.zig:27-61); `WorldFolder` answers
+   with one empty last part (src/server/c2s/join_enter.zig:76-86).
 5. `WorldInitInfoRequest` answers with an empty `WorldInitInfo` and sets
-   `world_ready`, when the chunk streamer may start (src/server/c2s/join_worldinfo.zig:35-49).
+   `world_ready`, when the chunk streamer may start (src/server/c2s/join_worldinfo.zig:64-79).
    `DynamicClientArrive` is the fallback: with an entity it sends the join
-   bundle, without one `WorldInitInfo` plus the spawn area (src/server/c2s/join_worldinfo.zig:54-90).
-6. `RequestToSpawnPlayer` parses `chunkViewDim` (clamped to 8, c2s/join.zig:30)
-   and the client's profile (src/server/c2s/join_worldinfo.zig:107), spawns or revives the sim player
-   (src/server/c2s/join_spawn.zig:34-182), streams the spawn area before the bundle
-   (src/server/c2s/join_spawn.zig:193-196), then calls `sendJoinBundle` (src/server/c2s/join_spawn.zig:202).
+   bundle, without one `WorldInitInfo` plus the spawn area (src/server/c2s/join_worldinfo.zig:83-120).
+6. `RequestToSpawnPlayer` parses `chunkViewDim` (clamped to `max_spawn_chunk_view_dim` 8,
+   src/server/c2s/join_spawn.zig:23-28) and the client's profile (src/server/c2s/join_spawn.zig:37-40),
+   spawns or revives the sim player (src/server/c2s/join_spawn.zig:41-170), streams the spawn area
+   before the bundle (src/server/c2s/join_spawn.zig:181-184), then calls `sendJoinBundle`
+   (src/server/c2s/join_spawn.zig:190).
 
 Two stock paths are deliberately unanswered: `DynamicClientArrive` after enter,
-where stock reconciles a dynamic mesh, is a no-op (src/server/c2s/join_worldinfo.zig:56-58), and
-drones have no zdtd surface in the spawn-confirm relay (src/server/c2s/join_spawn.zig:125).
+where stock reconciles a dynamic mesh, is a no-op (src/server/c2s/join_worldinfo.zig:84-88), and
+drones have no zdtd surface in the spawn-confirm relay (src/server/c2s/join_enter.zig:99).
 `sendTraderSnapshot` is an empty stub with the reason inline (game/join.zig:273-280).
 The handler answers ten names while the header enumerates seven (c2s/join.zig:1-7).
 
@@ -165,7 +166,7 @@ end with `WorldTime`, `GameStats`, blood-moon music when eligible, and `Weather`
 only on a re-bundle (game.zig:3024-3039).
 
 Must-deliver sends use `sendGameCritical` under a per-peer deadline armed by the
-caller (src/server/c2s/join_spawn.zig:109, src/server/c2s/join_spawn.zig:175, src/server/c2s/join_spawn.zig:78) with a 1 s budget,
+caller (src/server/c2s/join_enter.zig:22, src/server/c2s/join_worldinfo.zig:96, src/server/c2s/join_spawn.zig:188) with a 1 s budget,
 bounding the worst case stall of the single tick thread rather than one join
 (types.zig:167-176). The synchronous spawn area is capped to the collision-mesh
 core, outer rings draining at `chunk_adds_per_stream_tick` per tick
@@ -246,9 +247,9 @@ the ghost-player bug the inline reset used to leave behind (net.zig:449-453).
 What survives a restart is the player record, not the session. `savePlayers`
 writes `players.zsv` (ZPV17, merge-write so offline records are carried over:
 persist.zig:1, persist.zig:573) and `tryRestorePlayer` reads it back into the
-`Client` at login (src/server/persist.zig:594, called at src/server/c2s/join_spawn.zig:201 and
-src/server/c2s/join_spawn.zig:126). Claims and turret ownership are keyed by login name and
-re-mapped to the new entity id (src/server/c2s/join_spawn.zig:193-194), and vending rentals are
+`Client` at login (src/server/persist.zig:594, called at src/server/c2s/join_login.zig:256 and
+src/server/c2s/join_enter.zig:38). Claims and turret ownership are keyed by login name and
+re-mapped to the new entity id (src/server/c2s/join_login.zig:248-249), and vending rentals are
 matched by platform id when `PersistentPlayerState` is built
 (game.zig:2911-2921). Shutdown flushes players first, then the world, then the
 remaining stores in reverse construction order (lifecycle.zig:9-44,

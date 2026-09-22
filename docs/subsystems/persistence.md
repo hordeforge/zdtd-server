@@ -6,7 +6,7 @@ Sources: [`src/server/persist.zig`](../../src/server/persist.zig), [`src/server/
 
 ## What survives a restart and what does not
 
-Durable state is one flat overlay directory, `world_dir` (`src/world/store.zig:538`): chunk files, `players.zsv`, `entities.zen` (vehicles, turrets, power wires and nodes, death bags), `claims.zlc`, `containers.zct`, `workstations.zws`, `vending.zvn`, `allies.zal`, `sleepers_cleared.zsc` and `sleepers_triggered.zst`, `traders.zst`, `blockmeta.zbm`, `weather.zwt` and `clock.zcl`. `saveAllStores` is the canonical ladder over all of them, documented so an operator-triggered save covers what the autosave tick covers (`src/server/persist.zig:52`):
+Durable state is one flat overlay directory, `world_dir` (`src/world/store.zig:538`): chunk files, `players.zsv`, `entities.zen` (vehicles, turrets, power wires and nodes, death bags), `claims.zlc`, `containers.zct`, `workstations.zws`, `vending.zvn`, `allies.zal`, `sleepers_cleared.zsc` and `sleepers_triggered.zst`, `traders.zst`, `blockmeta.zbm`, `weather.zwt` and `clock.zcl`. `saveAllStores` is the canonical ladder over all of them, documented so an operator-triggered save covers what the autosave tick covers (`src/server/persist.zig:50`):
 
 ```zig
 pub fn saveAllStores(self: *Game) bool {
@@ -129,7 +129,7 @@ The topsoil tail is appended last and is optional on read, so a pre-topsoil file
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
 ```
 
-The version this build writes and the stride each generation used are one pair of functions, so a reader for an old file and the writer cannot disagree (`src/server/persist.zig:132`, `src/server/persist.zig:134`):
+The version this build writes and the stride each generation used are one pair of functions, so a reader for an old file and the writer cannot disagree (`src/server/persist.zig:129`, `src/server/persist.zig:131`):
 
 ```zig
 pub fn zpvSlotStride(version: u8) usize {
@@ -172,7 +172,7 @@ pub const ZpvIdentity = struct {
 };
 ```
 
-`savePlayers` is a merge write, not a rewrite: it reads the existing file, carries every record whose player is not currently live and re-encodes the ones whose layout predates the current version, so offline players and legacy shapes survive an autosave (`src/server/persist.zig:573`). One live record is written per joined client with a sim player slot; the vehicle-style truncation the store uses elsewhere is not acceptable here, so a `comptime` block proves a 4096-byte record can hold name, position, wallet, inventory count and every inventory slot at the current stride (`src/server/persist_players.zig:280`). A carried record is dropped only when this save rewrites that client's state fresh, and the rewrite predicate matches the write predicate exactly so a connected-but-not-spawned player cannot lose its record (`src/server/persist.zig:615`). Restore happens at login: `tryRestorePlayer` is called once the client has a sim entity (`src/server/c2s/join_spawn.zig:201`), and again on the enter-game path when the entity was created there (`src/server/c2s/join_spawn.zig:126`). The same file backs `wipePlayerRecordsByName`, which reports how many records it removed (`src/server/persist.zig:583`).
+`savePlayers` is a merge write, not a rewrite: it reads the existing file, carries every record whose player is not currently live and re-encodes the ones whose layout predates the current version, so offline players and legacy shapes survive an autosave (`src/server/persist_players.zig:64`). One live record is written per joined client with a sim player slot; the vehicle-style truncation the store uses elsewhere is not acceptable here, so the record buffer is sized at `comptime` from its sections (head, inventory at the current `zpvSlotStride`, journal, progression, buffs, bedroll), and a slot that would still not fit fails the save with `PlayerRecordTooLarge` instead of writing a short record (`src/server/persist_players.zig:327-335`, `src/server/persist_players.zig:361-364`). A carried record is dropped only when this save rewrites that client's state fresh, and the rewrite predicate matches the write predicate exactly so a connected-but-not-spawned player cannot lose its record (`src/server/persist_players.zig:105-120`). Restore happens at login: `tryRestorePlayer` is called once the client has a sim entity (`src/server/c2s/join_login.zig:256`), and again on the enter-game path when the entity was created there (`src/server/c2s/join_enter.zig:38`). The same file backs `wipePlayerRecordsByName`, which reports how many records it removed (`src/server/persist.zig:583`).
 
 ## Save triggers
 

@@ -30,7 +30,7 @@ The `Game` fields the loop itself owns (`src/server/game.zig:252`):
     running: bool = true,
 ```
 
-`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game/lifecycle.zig:112`, `src/server/game/lifecycle.zig:139`).
+`tick_n` is the single tick counter used by every cadence gate in the step and by plugins (`src/server/game/step.zig:42`). `running` is the loop condition; an admin shutdown clears it and `run` returns, then saves (`src/server/game/lifecycle.zig:113`, `src/server/game/lifecycle.zig:133`).
 
 Cadence gates are `InitOptions`/`Game` fields sampled as tick counts, not seconds. The compile-time defaults (`src/server/game/types.zig:87`):
 
@@ -83,7 +83,7 @@ const max_webui_polls_per_tick: u32 = 4;
 
 ## Timing, overrun and catch-up policy
 
-The only real-time pacer is `Game.run` (`src/server/game/lifecycle.zig:109`):
+The only real-time pacer is `Game.run` (`src/server/game/lifecycle.zig:110`):
 
 ```zig
 pub fn run(self: *Game) !void {
@@ -115,7 +115,7 @@ pub fn run(self: *Game) !void {
 
 The policy this encodes: sleep to the absolute deadline; on overrun count the tick and rate-limit the log to the first and every hundredth; then re-anchor. Because the re-anchor sets `next_t = now + tick_ns` when the deadline is already in the past, missed ticks are dropped rather than replayed - there is no catch-up burst, and a process that stalls for a second resumes at the current time instead of running twenty ticks back to back. One loop iteration counts at most one overrun regardless of how many tick periods it lost.
 
-The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game/lifecycle.zig:125`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
+The overrun branch also arms the load-shed valve: `shed_until_tick = tick_n + guard.shed_hold_ticks` (`src/server/game/lifecycle.zig:126`). `loadShedding` is a single comparison against that field (`src/server/game/guard.zig:149`), so the valve costs nothing when unarmed. Defaults are `load_shed: bool = true` and `shed_hold_ticks: u64 = 40` (`src/server/guard_policy.zig:66`, `src/server/guard_policy.zig:78`), which is 2 s at 20 TPS. Only the real-time `run` path arms it: `--ticks` and `--once` call `step` directly with no pacing and no overrun accounting, and the counter is documented as "Main loop fell behind the 50 ms tick budget (run path only)." (`src/apm/metrics.zig:28`).
 
 Time comes from one leaf module so the loop can be made deterministic without touching callers. `clock.monoNs` reads `CLOCK_MONOTONIC` in production but returns the virtual counter when one is active (`src/util/clock.zig:48`), `sleepNs` advances that counter and returns immediately instead of sleeping (`src/util/clock.zig:97`), and `enableVirtual` switches the process over (`src/util/clock.zig:25`). The offline path enables the seeded virtual clock at init (`src/server/game/init_world.zig:109`) and the local `util/sim` layer advances it one tick per completed step (`src/server/game/step.zig:38`), so a `--ticks N` run is reproducible from its seed and does not depend on host speed. `wallNs`/`wallSeconds` exist for values that cross the process boundary, such as report timestamps and ban expiry, and also follow the virtual clock (`src/util/clock.zig:62`, `src/util/clock.zig:73`).
 
@@ -155,7 +155,7 @@ and continues with `save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_sc
 | `survival` | `tickSurvival`, `src/server/game/tick.zig:833` |
 | `replicate` | `replicate`, `src/server/game/replicate.zig:21` |
 | `save_io` / `save_encode` | save block, `src/server/game/step.zig:524`, `src/server/game/step.zig:527` |
-| `save_flush_wait` | shutdown flush, `src/server/game/lifecycle.zig:14` |
+| `save_flush_wait` | shutdown flush, `src/server/game/lifecycle.zig:18` |
 
 The remaining sections are opened deeper in the paths the tick reaches: `chunk_stream` and `join_drain` in the chunk stream (`src/server/game/chunk_stream.zig:261`, `src/server/game/chunk_stream.zig:221`), `chunk_gen` and `te_scan` in chunk materialization (`src/server/game/chunk_fill.zig:45`, `src/server/game/chunk_fill.zig:273`), `sleeper_scan` in the sleeper-volume pass (`src/server/game/sleeper.zig:65`), and `join` in the join handler reached from the net drain (`src/server/c2s/join.zig:39`). A `Scope` is zero-sized unless `-Dtracy=true`, so instrumentation is not a per-tick allocation (`src/apm/profiler.zig:102`).
 
@@ -167,7 +167,7 @@ Accuracy caveat: a green `zdtd` APM dump, or a green zdtd encode/decode round tr
 
 Persistence splits between the periodic tick save and process teardown. The tick save writes the list in phase 9 every `save_interval_ticks`; failures are logged and counted, not fatal, so a disk problem degrades the process instead of killing the loop (`src/server/game/step.zig:529`).
 
-`Game.deinit` is the ordered teardown that mirrors construction in reverse (`src/server/game/lifecycle.zig:9`). It saves players first, then the world, then waits for the background chunk writer before saving the side stores (`src/server/game/lifecycle.zig:11`, `src/server/game/lifecycle.zig:12`, `src/server/game/lifecycle.zig:16`). The flush wait is instrumented so a slow shutdown disk shows up as `save_flush_wait` rather than as unexplained exit latency (`src/server/game/lifecycle.zig:14`). Plugins and Wasm modules are shut down before the stores are freed (`src/server/game/lifecycle.zig:30`), and the virtual clock is disabled on the way out when this process enabled it (`src/server/game/lifecycle.zig:10`, `src/server/game/lifecycle.zig:43`).
+`Game.deinit` is the ordered teardown that mirrors construction in reverse (`src/server/game/lifecycle.zig:13`). It saves players first, then the world, then waits for the background chunk writer before saving the side stores (`src/server/game/lifecycle.zig:15`, `src/server/game/lifecycle.zig:16`, `src/server/game/lifecycle.zig:20`). The flush wait is instrumented so a slow shutdown disk shows up as `save_flush_wait` rather than as unexplained exit latency (`src/server/game/lifecycle.zig:18`). Plugins and Wasm modules are shut down before the stores are freed (`src/server/game/lifecycle.zig:39`), and the virtual clock is disabled on the way out when this process enabled it (`src/server/game/lifecycle.zig:14`, `src/server/game/lifecycle.zig:48`).
 
 `main` distinguishes its two exits clearly. The `run` path is reached only when `max_ticks == 0` (`src/main.zig:1141`); it saves and returns, and only then does the process print the line naming the final tick count, which is how an operator tells a graceful stop from a killed process (`src/main.zig:1147`). The bounded path saves through `g.world.saveAll()`, dumps APM and exits without ever having opened the run loop (`src/main.zig:1157`).
 

@@ -10,14 +10,7 @@ const buildSoundAtPosition = @import("stock_chat.zig").buildSoundAtPosition;
 const max_audio_clip_len: usize = @import("stock_chat.zig").max_audio_clip_len;
 const parseSoundAtPosition = @import("stock_chat.zig").parseSoundAtPosition;
 
-/// Stock `NetPackageEntityRagdoll` (write IL=59): entityId i32, flags u8,
-/// then conditionally (flags&1) duration f32, bodyPart i16, forceVec 3xf32,
-/// forceWorldPos 3xf32, hipPos 3xf32, (flags&2) mode u8, (flags&4) state u8.
-/// The sender is the entity's owner (EntityBuffs / EModelBase.DoRagdoll
-/// force the local ragdoll); the server applies it and re-broadcasts via
-/// NetEntityDistribution.SendPacketToTrackedPlayersAndTrackedEntity, so a
-/// verbatim relay to the other clients matches the intent (the owner already
-/// ragdolled locally).
+/// `AnimParamData.type` tags, from the stock enum
 /// `AnimParamData/ValueTypes` (AnimParamData_ValueTypes.il.txt:3). The value
 /// width follows the type: Bool and Trigger read a bool, Float and DataFloat a
 /// f32, Int an i32 (`CreateFromBinary` switch, AnimParamData.il.txt:62).
@@ -193,6 +186,14 @@ test "animation data parses the typed parameter list" {
     try std.testing.expectError(error.EndOfStream, parseAnimationData(bw.written()));
 }
 
+/// Stock `NetPackageEntityRagdoll` (write IL=59): entityId i32, flags u8,
+/// then conditionally (flags&1) duration f32, bodyPart i16, forceVec 3xf32,
+/// forceWorldPos 3xf32, hipPos 3xf32, (flags&2) mode u8, (flags&4) state u8.
+/// The sender is the entity's owner (EntityBuffs / EModelBase.DoRagdoll
+/// force the local ragdoll); the server applies it and re-broadcasts via
+/// NetEntityDistribution.SendPacketToTrackedPlayersAndTrackedEntity, so a
+/// verbatim relay to the other clients matches the intent (the owner already
+/// ragdolled locally).
 pub const RagdollInvoke = struct {
     entity_id: i32,
     flags: u8,
