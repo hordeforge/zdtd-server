@@ -873,7 +873,9 @@ pub const World = struct {
     /// per block-allocated chunk → cap ≈ 1 GiB worst case.
     pub const max_resident_chunks: usize = 4096;
 
-    fn evictOneChunk(self: *World, keep_key: u64) !void {
+    /// Evict the coldest resident chunk other than `keep_key`. Internal to the
+    /// resident cap; `pub` for `store_tests.zig`.
+    pub fn evictOneChunk(self: *World, keep_key: u64) !void {
         // Coldest resident by `last_touch`, min key breaking ties (never the
         // HashMap walk order: that would pick different victims for the same
         // resident set, breaking DST replay under cap pressure). Keying on the
@@ -1375,7 +1377,9 @@ pub const World = struct {
         return c.standableY(t.lx, t.lz, from_y, max_step_up, max_drop);
     }
 
-    fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
+    /// `.zch` path for one chunk, written into the caller's `buf`. `pub` for
+    /// `store_tests.zig`.
+    pub fn chunkPath(self: *World, pos: ChunkPos, buf: []u8) ![]const u8 {
         return try std.fmt.bufPrint(buf, "{s}/c_{d}_{d}.zch", .{ self.world_dir, pos.x, pos.z });
     }
 
