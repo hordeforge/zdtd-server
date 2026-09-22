@@ -344,6 +344,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
 | `src/server/c2s_text.zig` | R | C2S text trust boundary: player names, chat bodies, player console verbs. Pure helpers (no Game / net types). Extracted from game.zig for navigability |
 | `src/server/c2s/quest_party.zig` | R | C2S quest arms (land-claim repair, shared quests, party actions). Split out of quest.zig verbatim |
+| `src/server/c2s/quest_waypoint.zig` | R | C2S quest arms (goto/treasure points, allies, waypoints, kill awards). Split out of quest.zig verbatim |
 | `src/server/config.zig` | Z | Minimal serverconfig.xml subset (port, max players, world name, password) |
 | `src/server/evidence.zig` | Z | P4 observe evidence: fixed ring of detector events (no secrets, no IP, no packets). Admin `evidence dump [path]` flushes the ring as JSONL via |
 | `src/server/inv_apply.zig` | R | Apply parsed wire inventory / TE bodies into ECS Inventory and world Container stores. Parse stays in `wire/stock_*.zig`; this owns the sim writes formerly in `applyBagPackage` / `applyEquipmentBody` / `applyParsedToContainer` |

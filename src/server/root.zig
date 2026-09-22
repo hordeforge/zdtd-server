@@ -93,6 +93,7 @@ pub const c2s_blocks_fx = @import("c2s/blocks_fx.zig");
 pub const c2s_move = @import("c2s/move.zig");
 pub const c2s_quest = @import("c2s/quest.zig");
 pub const c2s_quest_party = @import("c2s/quest_party.zig");
+pub const c2s_quest_waypoint = @import("c2s/quest_waypoint.zig");
 pub const c2s_misc = @import("c2s/misc.zig");
 pub const c2s_misc_chat = @import("c2s/misc_chat.zig");
 pub const c2s_misc_relay = @import("c2s/misc_relay.zig");
@@ -203,6 +204,7 @@ test {
     _ = c2s_move;
     _ = c2s_quest;
     _ = c2s_quest_party;
+    _ = c2s_quest_waypoint;
     _ = c2s_misc;
     _ = c2s_misc_chat;
     _ = c2s_misc_relay;
