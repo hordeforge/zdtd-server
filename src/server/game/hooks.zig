@@ -15,7 +15,6 @@ const assets_traders = @import("../../assets/traders.zig");
 const assignids = @import("../../assets/assignids_comptime.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const plugin_compose = @import("plugin_compose.zig");
-const game_plugin_compose = @import("plugin_compose.zig");
 const game_tick = @import("tick.zig");
 const game_wasm_host = @import("wasm_host.zig");
 const packages = @import("../../wire/packages.zig");
@@ -794,7 +793,7 @@ test "storage pins are not a second authority after catalogs requested" {
 /// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
 pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    return game_plugin_compose.playerDamage(g, -1, victim, @trunc(amount));
+    return plugin_compose.playerDamage(g, -1, victim, @trunc(amount));
 }
 
 /// Foreign-gated victim resist for the ECS damage path (zombie melee /
@@ -839,7 +838,7 @@ pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) 
 /// radiation, starvation, attacker -1) and explosion damage (attacker = the
 /// blaster), so a module shapes ALL damage directed at players.
 pub fn playerDamageVerdictAmount(g: *Game, attacker: i32, victim: i32, amount: f32) f32 {
-    const v = game_plugin_compose.playerDamage(g, attacker, victim, @trunc(amount));
+    const v = plugin_compose.playerDamage(g, attacker, victim, @trunc(amount));
     if (v < 0) return 0;
     if (v > 0) return amount * @as(f32, @floatFromInt(v)) / 100.0;
     return amount;
@@ -873,7 +872,7 @@ pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u
     // are u16, but a future caller or modded data must not trap the tick on
     // a >i32max price. Same shape as the perk-spend cost clamp in misc.zig.
     const p: i32 = @intCast(@min(unit_price, std.math.maxInt(i32)));
-    return game_plugin_compose.tradePrice(g, player, item, p);
+    return plugin_compose.tradePrice(g, player, item, p);
 }
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 

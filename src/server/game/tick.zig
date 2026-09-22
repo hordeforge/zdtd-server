@@ -8,8 +8,6 @@ const apm = @import("../../apm/root.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
-const packages = @import("../../wire/packages.zig");
-const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_unity_hash = @import("../../assets/unity_hash.zig");
@@ -18,15 +16,9 @@ const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
 const hooks = @import("hooks.zig");
 const clock = @import("../../util/clock.zig");
-const rng_util = @import("../../util/rng.zig");
-const persist = @import("../persist.zig");
-const admin_xml = @import("../admin_xml.zig");
-const game_social = @import("social.zig");
-const io_fs = @import("../../util/io_fs.zig");
 const inventory = @import("../../ecs/inventory.zig");
 const game_types = @import("types.zig");
 const assets_items = @import("../../assets/items.zig");
-const protocol = @import("../../protocol.zig");
 
 const buff_events = @import("buff_events.zig");
 // Names owned by buff_events.zig that the survival VM below still uses.
@@ -1285,7 +1277,6 @@ fn fireSeenModRows(
     }
 }
 
-const world_tick = @import("world_tick.zig");
 
 test "per-slot look cache resets when the slot is recycled" {
     const gpa = std.testing.allocator;

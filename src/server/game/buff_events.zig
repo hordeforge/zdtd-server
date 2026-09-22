@@ -18,11 +18,9 @@ const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
-const hooks = @import("hooks.zig");
 const rng_util = @import("../../util/rng.zig");
 const game_social = @import("social.zig");
 const inventory = @import("../../ecs/inventory.zig");
-const game_types = @import("types.zig");
 const tick = @import("tick.zig");
 // VM helpers owned by tick.zig (also used by the survival fold):
 const activeBuffIds = tick.activeBuffIds;

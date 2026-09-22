@@ -9,7 +9,6 @@ const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("xml_util.zig");
 const quest = @import("../ecs/quest.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_list_entries: usize = 64;
 

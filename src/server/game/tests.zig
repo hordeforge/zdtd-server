@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const Game = @import("../game.zig").Game;
-const game_mod = @import("../game.zig");
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const wire_binary = @import("../../wire/binary.zig");
@@ -630,7 +629,7 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     // bed(1) + skills(5) + backpacks(1, an empty marker list) + the v14
     // counters(12) (the fixture has no inventory slots, so the ZPV12 slot
     // widening changes nothing).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1), game_mod.zpvRecordLen(data, 8, @import("../persist.zig").persist_version));
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1), game.zpvRecordLen(data, 8, @import("../persist.zig").persist_version));
 }
 
 test "players zpv10 inventory slots widen to the ZPV12 stride" {
@@ -693,7 +692,7 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
     // No prog tail on this fixture, so the ZPV13 marker list (which lives
     // inside the prog block) adds nothing to the length.
     const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(persist.persist_version) + 1 + 1;
-    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, persist.persist_version));
+    try std.testing.expectEqual(want, game.zpvRecordLen(data, 8, persist.persist_version));
     // The slot's leading fields survived the widening at their own offsets.
     const slot_at = 8 + 1 + name.len + 16 + 1;
     try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, data[slot_at..][0..2], .little));

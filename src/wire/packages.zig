@@ -6,10 +6,6 @@
 //! the written slice (`![]u8`); no builder allocates. Callers size `buf` from
 //! the named `*_size` / `max_*` constants and handle error.Overflow.
 
-const std = @import("std");
-const binary = @import("binary.zig");
-const frame = @import("frame.zig");
-const components = @import("../ecs/components.zig");
 pub const platform_user = @import("platform_user.zig");
 pub const stock_inv = @import("stock_inv.zig");
 pub const stock_chunk = @import("stock_chunk.zig");

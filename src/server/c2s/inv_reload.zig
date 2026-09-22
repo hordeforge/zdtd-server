@@ -10,12 +10,9 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
-const inv_apply = @import("../inv_apply.zig");
 const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
-const assets_progression = @import("../../assets/progression.zig");
-const game_craft = @import("../game/craft.zig");
 
 /// curve[quality]) and tag gates (the mod's installable_tags intersects the
 /// item's Tags, blocked_tags disjoint). Fail closed: unknown item, unknown

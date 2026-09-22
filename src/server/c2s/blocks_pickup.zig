@@ -11,8 +11,6 @@ const packages = @import("../../wire/packages.zig");
 const platform_user = packages.platform_user;
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
-const invsys = @import("../../ecs/inventory.zig");
-const game_world = @import("../game/world.zig");
 
 /// True when `name` is a pickup/texture package and was handled.
 pub fn handlePickup(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {

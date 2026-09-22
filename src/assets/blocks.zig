@@ -10,8 +10,6 @@ const assignids = @import("assignids_comptime.zig");
 /// Test-only: the stock AssignIds dump, to pin that a stock install never
 /// enters the leftover-id path. Production passes the resolver in as a
 /// callback, so the dependency stays one-way.
-const maxdamage_dep = @import("maxdamage.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed block defs, a zdtd bound rather than a stock rule:
 /// stock assigns ids dynamically and the wire id space is 16 bits

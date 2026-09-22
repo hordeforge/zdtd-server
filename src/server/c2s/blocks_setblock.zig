@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const chunk_fill = @import("../game/chunk_fill.zig");
-const game_world = @import("../game/world.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -14,8 +13,6 @@ const platform_user = packages.platform_user;
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
-const protocol = @import("../../protocol.zig");
-const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../game/replicate_te.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 

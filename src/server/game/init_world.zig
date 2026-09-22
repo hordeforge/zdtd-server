@@ -5,7 +5,6 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const version = @import("../../version.zig");
-const world_store = @import("../../world/store.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const ecs = @import("../../ecs/root.zig");
 const util_sim = @import("../../util/sim.zig");

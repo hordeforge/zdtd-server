@@ -20,7 +20,6 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 /// Stock world ticks per in-game day (asm.il get_gameStage IL_0012, 0x5dc0).
 pub const ticks_per_day: u64 = 24000;

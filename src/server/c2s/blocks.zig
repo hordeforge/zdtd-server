@@ -1,22 +1,13 @@
 //! Block editing: SetBlock, BlockTrigger, Explosions.
 //! Extracted from the old c2s/inv.zig tail (643-991) verbatim.
 
-const std = @import("std");
-const chunk_fill = @import("../game/chunk_fill.zig");
-const game_world = @import("../game/world.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const platform_user = packages.platform_user;
-const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
-const invsys = @import("../../ecs/inventory.zig");
-const protocol = @import("../../protocol.zig");
-const systems = @import("../../ecs/systems.zig");
-const replicate_te = @import("../game/replicate_te.zig");
-const plugin_compose = @import("../game/plugin_compose.zig");
 const blocks_trigger = @import("blocks_trigger.zig");
 const blocks_pickup = @import("blocks_pickup.zig");
 const blocks_setblock = @import("blocks_setblock.zig");

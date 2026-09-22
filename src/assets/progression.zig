@@ -7,12 +7,9 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
-const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
-const cvars = @import("cvars.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 // zdtd storage bounds, not stock rules; stock has no limit on either. Measured
 // against V3.2.0 `Data/Config` (2026-09-04): progression.xml defines 8

@@ -6,7 +6,6 @@
 //! precedent. `handle` returns true when the package name belongs to this
 //! domain; handlePackage falls through to the join-SM arms otherwise.
 
-const std = @import("std");
 const misc_chat = @import("misc_chat.zig");
 const misc_relay = @import("misc_relay.zig");
 const misc_session = @import("misc_session.zig");
@@ -22,21 +21,13 @@ const misc_vehicle = @import("misc_vehicle.zig");
 const misc_wire = @import("misc_wire.zig");
 const misc_turret = @import("misc_turret.zig");
 const misc_drop = @import("misc_drop.zig");
-const protocol = @import("../../protocol.zig");
 const replicate_te = @import("../game/replicate_te.zig");
-const vending_mod = @import("../../world/vending.zig");
-const clock = @import("../../util/clock.zig");
-const invsys = @import("../../ecs/inventory.zig");
-const inv_apply = @import("../inv_apply.zig");
-const components = @import("../../ecs/components.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
-const wire_binary = @import("../../wire/binary.zig");
 const ecs = @import("../../ecs/root.zig");
-const systems = @import("../../ecs/systems.zig");
 const c2s_text = @import("../c2s_text.zig");
 const packLockPos = game_mod.Game.packLockPos;
 const firstLockTargetPos = game_mod.Game.firstLockTargetPos;
@@ -44,7 +35,6 @@ const logPersistErr = game_mod.logPersistErr;
 const reverseItemType = game_mod.Game.reverseItemType;
 const max_chat_msg_len = c2s_text.max_chat_msg_len;
 const chatMsgOk = c2s_text.chatMsgOk;
-const plugin_compose = @import("../game/plugin_compose.zig");
 
 /// Honored-`fatal` kill amount vs NPC kinds. Lives in misc_damage.zig;
 /// this alias keeps the name resolving for any out-of-tree caller.

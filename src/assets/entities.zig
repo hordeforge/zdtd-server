@@ -3,10 +3,8 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
-const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 

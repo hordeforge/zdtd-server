@@ -4,9 +4,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
-const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 pub const max_npcs: usize = 64;
 

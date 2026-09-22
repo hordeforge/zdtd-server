@@ -12,7 +12,6 @@ const game_mod = @import("game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const io_fs = @import("../util/io_fs.zig");
-const wire_binary = @import("../wire/binary.zig");
 const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
 const assets_progression = @import("../assets/progression.zig");

@@ -6,18 +6,12 @@
 //! precedent. `handle` returns true when the package name belongs to this
 //! domain; handlePackage falls through to the remaining arms otherwise.
 
-const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
-const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
-const systems = @import("../../ecs/systems.zig");
-const rng_util = @import("../../util/rng.zig");
-const c2s_text = @import("../c2s_text.zig");
 const replicate_te = @import("../game/replicate_te.zig");
-const vending_mod = @import("../../world/vending.zig");
 const quest_party = @import("quest_party.zig");
 const quest_waypoint = @import("quest_waypoint.zig");
 const quest_buff = @import("quest_buff.zig");

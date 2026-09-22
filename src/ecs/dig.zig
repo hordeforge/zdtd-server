@@ -4,7 +4,6 @@
 //! re-exported so existing `systems.*` call sites keep working.
 
 const World = @import("world.zig").World;
-const Slot = @import("world.zig").Slot;
 const query = @import("query.zig");
 
 /// MoveHelper dig cadence (RE entity-ai.md DigUpdate IL=261): each digging AI

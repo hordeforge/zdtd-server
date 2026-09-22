@@ -3,12 +3,9 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
-const io_fs = @import("../util/io_fs.zig");
-const components = @import("../ecs/components.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
 const util_log = @import("../util/log.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed recipes, a zdtd bound rather than a stock rule: stock
 /// has no limit. Measured against V3.2.0 `Data/Config` (2026-09-04): stock

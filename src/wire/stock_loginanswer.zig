@@ -4,7 +4,6 @@
 //! verbatim); import via `packages.stock_loginanswer` like the other
 //! stock_* leaves.
 
-const std = @import("std");
 const binary = @import("binary.zig");
 
 /// NetPackagePlayerLoginAnswer (RE inventories/netpackage-bodies.md, write

@@ -21,7 +21,6 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const sandbox = @import("sandbox.zig");
 const cvars = @import("cvars.zig");
-const rng_util = @import("../util/rng.zig");
 
 /// One `<requirement name="..."/>` gate. The name may carry a leading `!`,
 /// which is stock's negation spelling (RequirementBase::invert).

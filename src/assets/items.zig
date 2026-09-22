@@ -5,10 +5,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
-const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
-const stock_paths = @import("../util/stock_paths.zig");
-const game_random = @import("../util/game_random.zig");
 
 /// Storage cap on parsed item defs, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock items.xml defines

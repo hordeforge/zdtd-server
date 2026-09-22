@@ -21,7 +21,6 @@ const max_lp_blocks_on_wire = game_mod.max_lp_blocks_on_wire;
 const world_store = @import("../../world/store.zig");
 const max_spawn_ground_scan = game_mod.max_spawn_ground_scan;
 const game_stability = @import("stability.zig");
-const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");

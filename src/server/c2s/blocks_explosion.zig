@@ -8,12 +8,10 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
-const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
 const systems = @import("../../ecs/systems.zig");
-const plugin_compose = @import("../game/plugin_compose.zig");
 const game_world = @import("../game/world.zig");
 const chunk_fill = @import("../game/chunk_fill.zig");
 

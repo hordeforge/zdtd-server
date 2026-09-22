@@ -9,7 +9,6 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
-const rng_util = @import("../../util/rng.zig");
 const systems = @import("../../ecs/systems.zig");
 
 /// True when `name` is a waypoint/ally/kill package and was handled.

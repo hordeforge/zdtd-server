@@ -7,7 +7,6 @@
 //! Chunk.CalcChunkColors -> Block.GetMapColor (MapColor property, else the
 //! mesh atlas color, else gray), with water cells taking BlockLiquidv2.Color.
 
-const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;

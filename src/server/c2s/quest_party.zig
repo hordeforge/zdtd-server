@@ -10,8 +10,6 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
-const c2s_text = @import("../c2s_text.zig");
-const replicate_te = @import("../game/replicate_te.zig");
 
 /// Fallback quest-giver marker Y when the trader NPC is not yet in the sim
 /// (the marker snaps to the real transform once the entity loads). A

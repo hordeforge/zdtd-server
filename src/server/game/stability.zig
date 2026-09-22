@@ -1,6 +1,5 @@
 //! Stability helpers extracted verbatim from game.zig.
 
-const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");

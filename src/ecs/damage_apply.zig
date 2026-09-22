@@ -8,7 +8,6 @@ const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
 const NetId = @import("world.zig").NetId;
-const c = @import("components.zig");
 const systemZombieAi = @import("ai_tasks.zig").systemZombieAi;
 const inventory = @import("inventory.zig");
 

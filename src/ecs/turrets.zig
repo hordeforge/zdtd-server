@@ -7,7 +7,6 @@ const std = @import("std");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
-const c = @import("components.zig");
 const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
 const builtin = @import("builtin");

@@ -15,7 +15,6 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const clock = @import("../../util/clock.zig");
 const ln_peer = @import("../../litenet/peer.zig");
-const game_types = @import("types.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const admin_xml = @import("../admin_xml.zig");
 

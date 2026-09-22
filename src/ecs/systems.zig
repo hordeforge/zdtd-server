@@ -1,22 +1,11 @@
 //! ECS systems: pure functions over World SoA columns + resources.
 //! Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots.
 
-const std = @import("std");
-const builtin = @import("builtin");
-const protocol = @import("../protocol.zig");
 const World = @import("world.zig").World;
-const Slot = @import("world.zig").Slot;
-const EntityClass = @import("world.zig").EntityClass;
-const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
-const poi_lock = @import("poi_lock.zig");
-const buff = @import("buff.zig");
-const path_mod = @import("path.zig");
 const query = @import("query.zig");
-const inventory = @import("inventory.zig");
 const parallel = @import("../util/parallel.zig");
-const rng_util = @import("../util/rng.zig");
 
 /// Fixed-point damage unit (1.0 hp = 100). zdtd-owned structural scale.
 const dmg_scale: u32 = 100;

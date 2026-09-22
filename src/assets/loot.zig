@@ -5,8 +5,6 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const requirements = @import("requirements.zig");
 const sandbox = @import("sandbox.zig");
-const io_fs = @import("../util/io_fs.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 // zdtd storage bounds, not stock rules; stock caps neither. Measured against
 // V3.2.0 `Data/Config` (2026-09-04): loot.xml defines 1015 lootgroups (50% of

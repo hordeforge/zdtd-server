@@ -5,7 +5,6 @@
 //! import via `packages.stock_vehicle` like the other stock_* leaves.
 
 const std = @import("std");
-const binary = @import("binary.zig");
 
 /// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
 /// senderId i32 | vehicleId i32 | syncFlags u16 | dataLen u16 | data[dataLen].

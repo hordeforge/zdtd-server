@@ -5,7 +5,6 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
-const ecs = @import("../../ecs/world.zig");
 const persist = @import("../persist.zig");
 const plugin_compose = @import("plugin_compose.zig");
 

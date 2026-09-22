@@ -3,13 +3,10 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
-const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const requirements = @import("requirements.zig");
 const cvars = @import("cvars.zig");
-const sandbox = @import("sandbox.zig");
 const components = @import("../ecs/components.zig");
-const stock_paths = @import("../util/stock_paths.zig");
 
 /// Storage cap on parsed buff defs, a zdtd bound rather than a stock rule.
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock buffs.xml defines

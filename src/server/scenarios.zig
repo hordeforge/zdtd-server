@@ -18,7 +18,6 @@ const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
 const world_store = @import("../world/store.zig");
-const world_tts = @import("../world/tts.zig");
 const nav = @import("../world/nav.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
@@ -29,7 +28,6 @@ const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
-const blocks_mod = @import("../assets/blocks.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
 const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
@@ -42,7 +40,6 @@ const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/noise.zig");
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_gameevents = @import("../assets/gameevents.zig");
-const assets_cvars = @import("../assets/cvars.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const c2s_misc = @import("c2s/misc.zig");
 const platform_user = packages.platform_user;
@@ -52,7 +49,6 @@ const powerblocks_mod = @import("../ecs/powerblocks.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const game_types = @import("game/types.zig");
 const persist = @import("persist.zig");
-const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
 const clock = @import("../util/clock.zig");
 const containers_mod = @import("../world/containers.zig");
@@ -2566,7 +2562,7 @@ test "scenario zombie opens a door on its path instead of chewing" {
     const path = ".zdtd_test_blocks_door.xml";
     try io_fs.writeFile(path, src);
     defer io_fs.deleteFile(path);
-    const ft = try blocks_mod.loadFromPath(gpa, path, DoorId.id, null);
+    const ft = try assets_blocks.loadFromPath(gpa, path, DoorId.id, null);
     g.blocks.deinit();
     g.blocks = ft;
 
@@ -11454,7 +11450,7 @@ test "scenario a burning workstation grants its ActiveRadiusEffects buff to near
     // workstation persistence tests already use) carrying a radius effect.
     // buffIsOnFire is a real entry in the builtin buff catalog (no game-dir
     // in this scenario), so indexOfName resolves without a custom buff table.
-    const test_defs = [_]blocks_mod.BlockDef{.{
+    const test_defs = [_]assets_blocks.BlockDef{.{
         .id = 106,
         .name = "campfire",
         .radius_effect_buff = "buffIsOnFire",

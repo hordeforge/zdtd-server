@@ -8,7 +8,6 @@
 const std = @import("std");
 const binary = @import("binary.zig");
 const stock_inv = @import("stock_inv.zig");
-const stock_entity = @import("stock_entity.zig");
 const components = @import("../ecs/components.zig");
 const framed = @import("stock_frame.zig").framed;
 

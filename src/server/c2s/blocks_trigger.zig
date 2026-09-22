@@ -8,8 +8,6 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
-const ecs = @import("../../ecs/root.zig");
-const replicate_te = @import("../game/replicate_te.zig");
 
 /// True when `name` is a trigger/water package and was handled.
 pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {

@@ -6,7 +6,6 @@
 //! precedent. `handle` returns true when the package name belongs to this
 //! domain; handlePackage falls through to the remaining arms otherwise.
 
-const std = @import("std");
 const inv_reload = @import("inv_reload.zig");
 const inv_holding = @import("inv_holding.zig");
 const inv_te = @import("inv_te.zig");
@@ -17,21 +16,12 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
-const systems = @import("../../ecs/systems.zig");
-const invsys = @import("../../ecs/inventory.zig");
-const inv_apply = @import("../inv_apply.zig");
 const replicate_te = @import("../game/replicate_te.zig");
-const vending_mod = @import("../../world/vending.zig");
-const clock = @import("../../util/clock.zig");
 const stock_te = packages.stock_te;
-const containers_mod = @import("../../world/containers.zig");
-const game_locks = @import("../game/locks.zig");
 const stabilityAfterSetBlock = game_mod.stabilityAfterSetBlock;
 const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
-const assets_progression = @import("../../assets/progression.zig");
-const game_craft = @import("../game/craft.zig");
 
 /// Server-authoritative mod attachment scrub. Lives in inv_reload.zig;
 /// this alias keeps the name resolving for existing callers.
