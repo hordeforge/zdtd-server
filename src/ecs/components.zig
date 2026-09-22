@@ -1480,11 +1480,10 @@ pub const Mask = packed struct(u32) {
     loot_bag: bool = false,
     sleeper: bool = false,
     bot: bool = false,
-    dirty: bool = false,
     buffs: bool = false,
     cvars: bool = false,
     falling: bool = false,
-    _pad: u10 = 0,
+    _pad: u11 = 0,
 };
 
 test "putInSlot rejects overflowing stack counts" {

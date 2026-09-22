@@ -21,7 +21,7 @@ pub fn replicatePlayerHealth(self: *Game) void {
     var dirty_it = dirty_now.iterator(.{});
     while (dirty_it.next()) |idx| {
         const i: ecs.Slot = @intCast(idx);
-        if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
+        if (!self.sim.alive[i] or !self.sim.dirty[i].hp) continue;
         self.sim.dirty[i].hp = false;
         self.sim.syncDirtyBit(i);
         const is_player = self.sim.mask[i].player;

@@ -1174,7 +1174,6 @@ pub const World = struct {
             .network_id = true,
             .kind = true,
             .flags = true,
-            .dirty = true,
             .class_id = true,
         };
         self.transform[s] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
@@ -2027,7 +2026,6 @@ pub const World = struct {
     /// re-visit the slot.
     pub fn markDirty(self: *World, slot: Slot, bits: c.Dirty) void {
         if (slot >= max_entities or !self.alive[slot]) return;
-        self.mask[slot].dirty = true;
         if (bits.pos) self.dirty[slot].pos = true;
         if (bits.rot) self.dirty[slot].rot = true;
         if (bits.flags) self.dirty[slot].flags = true;

@@ -222,7 +222,7 @@ pub fn replicate(self: *Game) !void {
             }
         }
 
-        const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
+        const d = self.sim.dirty[i];
         // An attack is an event, not a pose: stock flushes changed anim params
         // every FixedUpdate (entity-ai.md 2026-09-22), so a pending strike
         // skips the pos-heartbeat wait instead of delaying the swing up to
