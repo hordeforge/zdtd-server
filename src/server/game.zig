@@ -198,24 +198,8 @@ pub const Client = game_types.Client;
 
 const game_wasm_host = @import("game/wasm_host.zig");
 const game_plugin_compose = @import("game/plugin_compose.zig");
-pub const killVerdict = game_wasm_host.killVerdict;
-pub const withdrawDisabled = game_wasm_host.withdrawDisabled;
-/// World.op_src_withdrawn_fn: is the plugin that queued this op withdrawn?
-pub const opSrcWithdrawn = game_wasm_host.opSrcWithdrawn;
-const wasmLog = game_wasm_host.wasmLog;
-const wasmTick = game_wasm_host.wasmTick;
-const wasmQueue = game_wasm_host.wasmQueue;
-const wasmWithdraw = game_wasm_host.wasmWithdraw;
-const wasmShiftSrcs = game_wasm_host.wasmShiftSrcs;
-const wasmSense = game_wasm_host.wasmSense;
-const wasmQuery = game_wasm_host.wasmQuery;
 
-pub const playerDamageVerdict = game_hooks.playerDamageVerdict;
-pub const foreignResistHook = game_hooks.foreignResistHook;
-pub const attackedSelfHook = game_hooks.attackedSelfHook;
 pub const playerDamageVerdictAmount = game_hooks.playerDamageVerdictAmount;
-pub const announceChat = game_hooks.announceChat;
-pub const tradePriceVerdict = game_hooks.tradePriceVerdict;
 
 pub const stabilityAfterSetBlock = game_stability.stabilityAfterSetBlock;
 
@@ -757,13 +741,13 @@ pub const Game = struct {
             .plugins = .{},
             .wasm_ctx = .{
                 .data = self,
-                .log_fn = &wasmLog,
-                .tick_fn = &wasmTick,
-                .queue_fn = &wasmQueue,
-                .withdraw_fn = &wasmWithdraw,
-                .shift_srcs_fn = &wasmShiftSrcs,
-                .sense_fn = &wasmSense,
-                .query_fn = &wasmQuery,
+                .log_fn = &game_wasm_host.wasmLog,
+                .tick_fn = &game_wasm_host.wasmTick,
+                .queue_fn = &game_wasm_host.wasmQueue,
+                .withdraw_fn = &game_wasm_host.wasmWithdraw,
+                .shift_srcs_fn = &game_wasm_host.wasmShiftSrcs,
+                .sense_fn = &game_wasm_host.wasmSense,
+                .query_fn = &game_wasm_host.wasmQuery,
             },
         };
         // Apply serverconfig gameplay options to the sim director/clock.
@@ -834,13 +818,13 @@ pub const Game = struct {
         try self.sim.ensureNetMap(allocator);
         // Back the ECS vehicle-physics ground hook with the real block store.
         self.sim.ground_ctx = self;
-        self.sim.ground_fn = &heightAtWorld;
+        self.sim.ground_fn = &game_hooks.heightAtWorld;
         // AI path move probe: destination footing, or blocked.
         self.sim.step_ctx = self;
-        self.sim.step_fn = &pathStepAt;
+        self.sim.step_fn = &game_hooks.pathStepAt;
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
-        self.sim.solid_fn = &blockSolidAt;
+        self.sim.solid_fn = &game_hooks.blockSolidAt;
         self.sim.sight_ctx = self;
         self.sim.sight_fn = &game_hooks.blockSightBlockedAt;
         self.world.movement_solid_ctx = self;
@@ -852,43 +836,43 @@ pub const Game = struct {
         self.sim.fall_land_fn = &game_chunk_fill.fallBlocksLanded;
         // Water probe for the AI swim physics (stock inWaterPercent).
         self.sim.water_ctx = self;
-        self.sim.water_fn = &blockIsWaterAt;
+        self.sim.water_fn = &game_hooks.blockIsWaterAt;
         // Door-id oracle for the solid probe: an open door is passable.
         self.world.door_id_ctx = self;
-        self.world.door_id_fn = &blockIsDoor;
+        self.world.door_id_fn = &game_hooks.blockIsDoor;
         // Water leveler fills: broadcast each filled cell. The chunk dirty
         // flag is persistence-only, so without this a pour is saved but never
         // sent and a joined client keeps seeing the dry basin.
         self.world.water_fill_ctx = self;
-        self.world.water_fill_fn = &broadcastWaterFill;
+        self.world.water_fill_fn = &game_hooks.broadcastWaterFill;
         // AI sense smell probe: effective radius (stock cSmellRadiusMin / Bleed,
         // the latter bound to buffInjuryBleeding via the buff catalog).
         self.sim.smell_ctx = self;
-        self.sim.smell_fn = &smellRadiusFor;
+        self.sim.smell_fn = &game_hooks.smellRadiusFor;
         // Zombie AI bot targets (ADR 0026): bots are not ECS entities, so the
         // AI reaches them through these Game-side hooks (snap + melee damage).
         self.sim.bot_snap_ctx = self;
-        self.sim.bot_snap_fn = &botSnapAt;
+        self.sim.bot_snap_fn = &game_hooks.botSnapAt;
         self.sim.bot_damage_ctx = self;
-        self.sim.bot_damage_fn = &botDamageAt;
+        self.sim.bot_damage_fn = &game_hooks.botDamageAt;
         self.sim.place_ctx = self;
-        self.sim.place_fn = &placeBlockId;
+        self.sim.place_fn = &game_hooks.placeBlockId;
         self.sim.item_id_ctx = self;
-        self.sim.item_id_fn = &itemIdByName;
+        self.sim.item_id_fn = &game_hooks.itemIdByName;
         self.sim.fuel_value_ctx = self;
-        self.sim.fuel_value_fn = &itemFuelValue;
+        self.sim.fuel_value_fn = &game_hooks.itemFuelValue;
         self.sim.vehicle_tank_ctx = self;
-        self.sim.vehicle_tank_fn = &vehicleTankCapacity;
+        self.sim.vehicle_tank_fn = &game_hooks.vehicleTankCapacity;
         self.sim.turret_watts_ctx = self;
-        self.sim.turret_watts_fn = &turretWatts;
+        self.sim.turret_watts_fn = &game_hooks.turretWatts;
         self.sim.turret_stats_ctx = self;
-        self.sim.turret_stats_fn = &turretStats;
+        self.sim.turret_stats_fn = &game_hooks.turretStats;
         self.sim.stack_ctx = self;
-        self.sim.stack_fn = &itemStackFor;
+        self.sim.stack_fn = &game_hooks.itemStackFor;
         self.sim.held_light_ctx = self;
         self.sim.held_light_fn = &game_hooks.heldItemLight;
         self.sim.is_armor_ctx = self;
-        self.sim.is_armor_fn = &itemIsArmor;
+        self.sim.is_armor_fn = &game_craft.itemIsArmor;
         self.sim.armor_pdr_ctx = self;
         self.sim.armor_pdr_fn = &game_craft.armorPdr;
         self.sim.armor_pdr_foreign_ctx = self;
@@ -903,34 +887,34 @@ pub const Game = struct {
         self.sim.barter_sell_fn = &game_player.barterSellScale;
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
-        self.sim.poi_fn = &poiRectAtWorld;
+        self.sim.poi_fn = &game_hooks.poiRectAtWorld;
         self.sim.poi_tier_ctx = self;
-        self.sim.poi_tier_fn = &poiTierAtWorld;
+        self.sim.poi_tier_fn = &game_hooks.poiTierAtWorld;
         self.sim.nearest_poi_ctx = self;
-        self.sim.nearest_poi_fn = &nearestPoiAtWorld;
+        self.sim.nearest_poi_fn = &game_hooks.nearestPoiAtWorld;
         // Stock quest-POI selection (tags/tier/biome/distance + lockouts).
         self.sim.quest_poi_ctx = self;
-        self.sim.quest_poi_fn = &questPoiSelectAt;
+        self.sim.quest_poi_fn = &game_hooks.questPoiSelectAt;
         // Quest POI lockout exempts party members (stock CheckForPOILockouts).
         self.sim.party_same_ctx = self;
-        self.sim.party_same_fn = &partySame;
+        self.sim.party_same_fn = &game_hooks.partySame;
         // ... and reports bedroll/land-claim home lockouts.
         self.sim.home_ctx = self;
-        self.sim.home_fn = &homeLockout;
+        self.sim.home_fn = &game_hooks.homeLockout;
         // ClearSleepers completion suppresses the POI's sleeper volumes
         // (persistent across restart).
         self.sim.quest_clear_ctx = self;
-        self.sim.quest_clear_fn = &questClearSleepers;
+        self.sim.quest_clear_fn = &game_hooks.questClearSleepers;
         self.sim.quest_sleeper_count_ctx = self;
-        self.sim.quest_sleeper_count_fn = &questSleeperCount;
+        self.sim.quest_sleeper_count_fn = &game_hooks.questSleeperCount;
         // QuestActionSpawnGSEnemy spawns gamestage-scaled enemies on phase
         // entry (stock SpawnQuestEntity placement).
         self.sim.quest_spawn_ctx = self;
-        self.sim.quest_spawn_fn = &questSpawnGsEnemy;
+        self.sim.quest_spawn_fn = &game_hooks.questSpawnGsEnemy;
         // Sell any item, not just stocked ones (stock lets you sell anything):
         // unit price = EconomicValue x EconomicSellScale x SellMarkdown.
         self.sim.sell_price_ctx = self;
-        self.sim.sell_price_fn = &traderSellPrice;
+        self.sim.sell_price_fn = &game_hooks.traderSellPrice;
         // Root quality_mod lerp bounds for the non-stocked sell path
         // (stock GetSellPrice, asm.il 1830625-1830948).
         self.sim.trader_quality_min_mod = self.traders.quality_min_mod;
@@ -938,7 +922,7 @@ pub const Game = struct {
         // ItemValue.PercentUsesLeft for the sell price (worn items sell for
         // less; RE ItemValue IL=17). Same ctx as the sell hook.
         self.sim.percent_uses_left_ctx = self;
-        self.sim.percent_uses_left_fn = &percentUsesLeft;
+        self.sim.percent_uses_left_fn = &game_hooks.percentUsesLeft;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -1092,125 +1076,8 @@ pub const Game = struct {
         return game_movement_helpers.applyMovementEnvelope(self, c, peer, entity_id, x, y, z);
     }
 
-    fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
-        return game_hooks.heightAtWorld(ctx, wx, wz);
-    }
-
-    fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
-        return game_hooks.blockSolidAt(ctx, x, y, z);
-    }
-
-    fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
-        return game_hooks.blockIsWaterAt(ctx, x, y, z);
-    }
-
-    fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
-        return game_hooks.blockIsDoor(ctx, id);
-    }
-
-    /// One water-leveler fill: send the cell as a plain SetBlock to observers.
-    /// Stock streams water deltas with NetPackageWaterSimChunkUpdate, but the
-    /// client's Chunk::SetBlockRaw turns an isWater BlockValue into air plus
-    /// SetWater(Full), so a SetBlock renders the same result without modelling
-    /// the native water sim. Best-effort: the store is authoritative and a
-    /// dropped packet only delays the paint until the chunk is re-streamed.
-    fn broadcastWaterFill(ctx: ?*anyopaque, x: i32, y: i32, z: i32, id: u16) void {
-        return game_hooks.broadcastWaterFill(ctx, x, y, z, id);
-    }
-
-    fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {
-        return game_hooks.smellRadiusFor(ctx, slot);
-    }
-
     pub fn spawnPoiTraders(self: *Game) void {
         return game_hooks.spawnPoiTraders(self);
-    }
-
-    fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        return game_hooks.poiRectAtWorld(ctx, x, z);
-    }
-
-    fn poiTierAtWorld(ctx: ?*anyopaque, x: f32, z: f32) u8 {
-        return game_hooks.poiTierAtWorld(ctx, x, z);
-    }
-
-    fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {
-        return game_hooks.partySame(ctx, a, b);
-    }
-
-    fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
-        return game_hooks.homeLockout(ctx, entity_id, px, pz);
-    }
-
-    fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
-        return game_hooks.questClearSleepers(ctx, rect);
-    }
-
-    fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
-        return game_hooks.questSleeperCount(ctx, rect);
-    }
-
-    fn questSpawnGsEnemy(ctx: ?*anyopaque, rect: ecs.components.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
-        return game_hooks.questSpawnGsEnemy(ctx, rect, list, min, max, px, pz);
-    }
-
-    fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
-        return game_hooks.traderSellPrice(ctx, item_id, trader_slot);
-    }
-
-    fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f32) f32 {
-        return game_hooks.percentUsesLeft(ctx, item_id, quality, use_times);
-    }
-
-    fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
-        return game_hooks.nearestPoiAtWorld(ctx, x, z);
-    }
-
-    fn questPoiSelectAt(ctx: ?*anyopaque, p: ecs.quest.QuestPoiParams) ?ecs.quest.PoiSelect {
-        return game_hooks.questPoiSelectAt(ctx, p);
-    }
-
-    pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i32) ?i32 {
-        return game_hooks.pathStepAt(ctx, 0, 0, from_y, tx, tz);
-    }
-
-    /// Zombie AI bot snap (ADR 0026): exact bot by net id, or nearest within
-    /// `range_sq` of (zx, zz). See game/hooks.zig for the BotManager scan.
-    pub fn botSnapAt(ctx: ?*anyopaque, zx: f32, zz: f32, range_sq: f32, exact: i32) ecs.BotSnap {
-        return game_hooks.botSnapAt(ctx, zx, zz, range_sq, exact);
-    }
-
-    /// Zombie melee on a host-side bot (ADR 0026); attributed via BotManager.
-    pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool {
-        return game_hooks.botDamageAt(ctx, bot_net, attacker_net, amount);
-    }
-
-    fn itemIdByName(ctx: ?*anyopaque, name: []const u8) u16 {
-        return game_hooks.itemIdByName(ctx, name);
-    }
-
-    fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
-        return game_hooks.placeBlockId(ctx, item_id);
-    }
-
-    fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
-        return game_hooks.itemFuelValue(ctx, item_id);
-    }
-
-    fn vehicleTankCapacity(ctx: ?*anyopaque, kind: ecs.components.VehicleKind) f32 {
-        return game_hooks.vehicleTankCapacity(ctx, kind);
-    }
-
-    fn turretWatts(ctx: ?*anyopaque) f32 {
-        return game_hooks.turretWatts(ctx);
-    }
-
-    fn turretStats(ctx: ?*anyopaque) ?ecs.components.TurretBlockStats {
-        return game_hooks.turretStats(ctx);
-    }
-
-    fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
-        return game_hooks.itemStackFor(ctx, item_id);
     }
 
     /// Fail closed on oversize C2S stacks: clamp count to items table max_stack.
@@ -1223,13 +1090,10 @@ pub const Game = struct {
     pub fn clampStackSlots(self: *Game, slots: []ecs.components.InvSlot) void {
         for (slots) |*s| {
             if (s.count == 0 or s.item_id == 0) continue;
-            const max = itemStackFor(self, s.item_id);
+            const max = game_hooks.itemStackFor(self, s.item_id);
             if (max > 0) s.count = @min(s.count, max);
         }
     }
-
-    /// ECS armor hook: stock/builtin name starts with "armor" (game/craft.zig).
-    pub const itemIsArmor = game_craft.itemIsArmor;
 
     /// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
     pub fn tryRefuelGenerator(self: *Game, c: *const Client, x: i32, y: i32, z: i32, amount: f32) bool {

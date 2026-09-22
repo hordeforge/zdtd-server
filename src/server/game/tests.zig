@@ -88,8 +88,8 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
     // Baseline: snapshot off, the locked hook answers.
     g.terrain_snapshot_on = false;
     const open_y: i32 = @as(i32, ch.heightAt(5, 5)) + 1;
-    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
-    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
+    try std.testing.expectEqual(@as(?i32, null), game_hooks.pathStepAt(g, 1, 3, from_y, 2, 3));
+    try std.testing.expectEqual(@as(?i32, open_y), game_hooks.pathStepAt(g, 4, 5, open_y, 5, 5));
 
     const px = [_]f32{0};
     const pz = [_]f32{0};
@@ -97,17 +97,17 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
     g.terrain_snapshot_on = true;
     // The wall column is out of the step band: the snapshot misses and the
     // locked hook still reports it blocked.
-    try std.testing.expectEqual(@as(?i32, null), Game.pathStepAt(g, 1, 3, from_y, 2, 3));
+    try std.testing.expectEqual(@as(?i32, null), game_hooks.pathStepAt(g, 1, 3, from_y, 2, 3));
     try std.testing.expect(g.terrain_snap.misses.load(.monotonic) > 0);
     // Open terrain is answered lock-free.
     const before_misses = g.terrain_snap.misses.load(.monotonic);
-    try std.testing.expectEqual(@as(?i32, open_y), Game.pathStepAt(g, 4, 5, open_y, 5, 5));
+    try std.testing.expectEqual(@as(?i32, open_y), game_hooks.pathStepAt(g, 4, 5, open_y, 5, 5));
     try std.testing.expectEqual(before_misses, g.terrain_snap.misses.load(.monotonic));
 
     // Outside the window: falls through to the locked hook, which still
     // generates the chunk on demand exactly as before.
     const before = g.world.chunks.count();
-    _ = Game.pathStepAt(g, 4000, 4000, from_y, 4001, 4000);
+    _ = game_hooks.pathStepAt(g, 4000, 4000, from_y, 4001, 4000);
     try std.testing.expectEqual(before + 1, g.world.chunks.count());
 }
 

@@ -5,6 +5,7 @@
 const std = @import("std");
 const game_mod = @import("../game.zig");
 const game_hooks = @import("hooks.zig");
+const game_wasm_host = @import("wasm_host.zig");
 const Game = game_mod.Game;
 const biomes_mod = @import("../../world/biomes.zig");
 const util_sim = @import("../../util/sim.zig");
@@ -685,40 +686,40 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // Wasm host (on_player_death for players, on_entity_killed for the
         // rest). Unset hook = no plugins = today's behaviour.
         self.sim.kill_verdict_ctx = self;
-        self.sim.kill_verdict_fn = &game_mod.killVerdict;
+        self.sim.kill_verdict_fn = &game_wasm_host.killVerdict;
         // on_player_damage verdict for the ECS damage path (zombie melee /
         // deferred accumulator): routes to the plugin + wasm host with the
         // attacker unknown. Unset hook = no plugins = today's behaviour.
         self.sim.player_damage_verdict_ctx = self;
-        self.sim.player_damage_verdict_fn = &game_mod.playerDamageVerdict;
+        self.sim.player_damage_verdict_fn = &game_hooks.playerDamageVerdict;
         // Foreign-gated victim resist for the ECS damage path (Spectral
         // Grace): the accumulator's attacker slot resolves the `other`
         // filter. Unset hook = no foreign rows.
         self.sim.foreign_resist_ctx = self;
-        self.sim.foreign_resist_fn = &game_mod.foreignResistHook;
+        self.sim.foreign_resist_fn = &game_hooks.foreignResistHook;
         // Victim-side hit trigger for the ECS damage path: the accumulator's
         // attacker slot fires the victim's `onOtherAttackedSelf` rows.
         self.sim.attacked_self_ctx = self;
-        self.sim.attacked_self_fn = &game_mod.attackedSelfHook;
+        self.sim.attacked_self_fn = &game_hooks.attackedSelfHook;
         // `zdtd.queue say` announcements: routed to the stock chat broadcast
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;
-        self.sim.say_fn = &game_mod.announceChat;
+        self.sim.say_fn = &game_hooks.announceChat;
         // Plugin withdrawal immediately before drainCommands (ADR 0030): a
         // module that disabled during net poll or sim must not have its
         // queued ops applied this tick.
         self.sim.pre_drain_ctx = self;
-        self.sim.pre_drain_fn = &game_mod.withdrawDisabled;
+        self.sim.pre_drain_fn = &game_wasm_host.withdrawDisabled;
         // ...and again per op during the drain: a module can disable itself
         // *while* an op is being applied (a `damage` op reaching an
         // `on_entity_killed` verdict that traps), and its remaining ops are
         // already in the snapshot the drain is walking.
         self.sim.op_src_withdrawn_ctx = self;
-        self.sim.op_src_withdrawn_fn = &game_mod.opSrcWithdrawn;
+        self.sim.op_src_withdrawn_fn = &game_wasm_host.opSrcWithdrawn;
         // Pre-trade price verdict (on_trade_price): routes the sim buy price
         // to the plugin + wasm host. Unset hook = no plugins.
         self.sim.trade_price_verdict_ctx = self;
-        self.sim.trade_price_verdict_fn = &game_mod.tradePriceVerdict;
+        self.sim.trade_price_verdict_fn = &game_hooks.tradePriceVerdict;
         // Quest-accept gate (AGENTS rule 29): on_quest_accept verdict on every
         // acceptance (plugins gate which quests a player may take).
         self.sim.quest_accept_ctx = self;
