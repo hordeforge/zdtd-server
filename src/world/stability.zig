@@ -168,7 +168,42 @@ fn resetScalar(w: *store.World, c: *store.Chunk, fctx: ?*anyopaque, facts: Facts
 
 /// Stock StabilityInitializer::DistributeStability: spread from every block
 /// whose byte is > 1. `w` is needed for cross-chunk neighbour reads.
+///
+/// The seed scan goes row by row (a (y,z) row is 16 contiguous bytes in the
+/// `x + z*16 + y*256` plane) and drops a whole row with one 16-wide compare
+/// when no cell in it carries more than 1. Air and non-support blocks are both
+/// at or below 1, so most of a chunk never reaches the per-cell work.
+///
+/// Row-major seeding reaches the same plane as the column-major scalar walk:
+/// the spread is a monotone max-relaxation that recurses out of every cell it
+/// raises, so a seed raised by an earlier spread has already propagated its own
+/// value and never needs revisiting. `distributeScalar` is the golden.
 pub fn distribute(w: *store.World, c: *store.Chunk, fctx: ?*anyopaque, facts: FactsFn) void {
+    // No plane: every read is 0, so there is nothing above 1 to seed from.
+    const plane = c.stability orelse return;
+    // Same cells the scalar walk reaches: it stopped at the world profile, and
+    // `stabilityAt` reads 0 past the chunk's own plane.
+    const y_lim: usize = @min(@as(usize, c.y_dim), @as(usize, @intCast(@max(w.yDim(), 0))));
+    const rows = @min(plane.len / row_lanes, y_lim * 16);
+    const V = @Vector(row_lanes, u8);
+    const one: V = @splat(1);
+    var row: usize = 0;
+    while (row < rows) : (row += 1) {
+        const base = row * row_lanes;
+        const vals: V = plane[base..][0..row_lanes].*;
+        if (!@reduce(.Or, vals > one)) continue;
+        const y: i32 = @intCast(row / 16);
+        const z: i32 = @intCast(row % 16);
+        for (0..row_lanes) |lane| {
+            // Re-read per lane: a seed earlier in this row can raise a later one.
+            const s = plane[base + lane];
+            if (s > 1) spreadHorizontal(w, c, @intCast(lane), y, z, s, fctx, facts);
+        }
+    }
+}
+
+/// Scalar reference for `distribute`, held to it by the golden test.
+fn distributeScalar(w: *store.World, c: *store.Chunk, fctx: ?*anyopaque, facts: FactsFn) void {
     var x: i32 = 0;
     while (x < 16) : (x += 1) {
         var z: i32 = 0;
@@ -738,4 +773,54 @@ test "stability reset: row kernel matches the scalar reference" {
     try testing.expect(std.mem.findScalar(u8, plane, stability_full) != null);
     try testing.expect(std.mem.findScalar(u8, plane, 1) != null);
     try testing.expect(std.mem.findScalar(u8, plane, 0) != null);
+}
+
+test "stability distribute: row scan matches the scalar reference" {
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
+    defer {
+        w.deinit();
+        gpa.destroy(w);
+    }
+    const t = store.World.worldToChunk(0, 0);
+    const c = w.chunks.get((store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }).hash()).?;
+
+    var prng = std.Random.DefaultPrng.init(0x57ab_d157);
+    const rnd = prng.random();
+    const blocks = c.blocks.?;
+    for (blocks, 0..) |*b, i| {
+        if (i % 97 < 60) {
+            b.* = 0;
+            continue;
+        }
+        b.* = rnd.intRangeAtMost(u32, 1, 3) | (@as(u32, rnd.int(u16)) << 16);
+    }
+
+    const plane = try c.ensureStability(gpa);
+    resetRows(plane, blocks, plane.len / row_lanes, null, testFacts);
+    // Punch holes so the spread has somewhere to flow: a saturated plane makes
+    // every seed a no-op and would prove nothing about seed order.
+    for (plane) |*s| {
+        if (rnd.intRangeAtMost(u8, 0, 3) == 0) s.* = 0;
+    }
+    const seeded = try gpa.dupe(u8, plane);
+    defer gpa.free(seeded);
+
+    distribute(w, c, null, testFacts);
+    const expect = try gpa.dupe(u8, plane);
+    defer gpa.free(expect);
+    // The fixture must actually propagate, or the comparison is vacuous.
+    try testing.expect(!std.mem.eql(u8, seeded, expect));
+
+    @memcpy(plane, seeded);
+    distributeScalar(w, c, null, testFacts);
+    try testing.expectEqualSlices(u8, expect, plane);
 }
