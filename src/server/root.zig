@@ -37,6 +37,7 @@ pub const game_buff_events = @import("game/buff_events.zig");
 pub const game_world = @import("game/world.zig");
 pub const game_map = @import("game/map.zig");
 pub const game_player = @import("game/player.zig");
+pub const game_player_tests = @import("game/player_tests.zig");
 pub const game_join = @import("game/join.zig");
 pub const game_types = @import("game/types.zig");
 pub const game_quest = @import("game/quest.zig");
@@ -158,6 +159,7 @@ test {
     _ = game_world;
     _ = game_map;
     _ = game_player;
+    _ = game_player_tests;
     _ = game_join;
     _ = game_types;
     _ = game_quest;
