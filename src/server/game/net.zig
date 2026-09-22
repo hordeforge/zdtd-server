@@ -426,11 +426,8 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
     for (&self.clients) |*c| {
         if (c.peer == peer) return c;
     }
-    var occupied: u16 = 0;
-    for (&self.clients) |*c| {
-        if (c.peer != null) occupied += 1;
-    }
-    if (occupied >= self.clients.len) return null;
+    // Full table needs no pre-count: the free-slot scan below already returns
+    // null when every slot is taken, and this runs per inbound packet.
     for (&self.clients, 0..) |*c, i| {
         if (c.peer == null) {
             c.* = .{ .peer = peer, .slot = i };
