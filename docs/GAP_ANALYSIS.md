@@ -2742,22 +2742,24 @@ gamestage, no wandering hordes, and no screamers.
   `asm.il:437713`, `asm.il:437874`
 
 - **EAI task coverage** `WORKS` `(2026-08-22 re-audit)`
-  9 task classes implemented (BreakBlock, DestroyArea, RunawayWhenHurt,
+  10 task classes implemented (BreakBlock, DestroyArea, RunawayWhenHurt,
   **RunawayFromEntity**, ApproachAndAttackTarget, **ApproachDistraction**,
-  Territorial, ApproachSpot, Look, Wander - the two bolded landed since this
+  Territorial, ApproachSpot, Look, Wander, and **Leap** (the EAILeap
+  pounce, landed 2026-09-22) - the bolded ones landed since this
   row was written: the distraction task chases a dropped decoy/item
-  (`approachDistractionCanExecute` + the decoy scenario) and the fear task
+  (`approachDistractionCanExecute` + the decoy scenario), the fear task
   flees a wolf/zombie/player (`runawayCanExecute` + the flee tests), so a
-  thrown distraction is chased and a timid animal flees a wolf. Leap
-  (zombieSpider pounce + animalMountainLion AITask-1 legs=4) and
+  thrown distraction is chased and a timid animal flees a wolf; the pounce
+  aims and flies only inside the stock window, `leapV.y` bound and corridor
+  physics ray, and only for a class whose parsed AITask list carries the bit.
   RangedAttackTarget (the five acid spitters: zombieRancher, zombieChuck,
   zombieFatCop, zombieMutated, zombieMutatedRadiated - measured 2026-09-22
   against the installed entityclasses.xml, see
-  `../7dtd-engine-research/docs/entities/entity-ai.md` census) stay unmapped:
-  no native task, so they are omitted
+  `../7dtd-engine-research/docs/entities/entity-ai.md` census) stays unmapped:
+  no native task, so it is omitted
   rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
   and PathTest have **zero AITask uses** in the stock file.
-  *Anchors:* `src/ecs/ai_tasks.zig:62` zombie_tasks,
+  *Anchors:* `src/ecs/ai_tasks.zig` zombie_tasks,
   `$game/Data/Config/entityclasses.xml` lines 562-571, `asm.il` EAI* class list
 
 - **Per-class AITask/AITarget lists from entityclasses.xml** `WORKS` `(2026-09-07)`
@@ -2768,9 +2770,9 @@ gamestage, no wandering hordes, and no screamers.
   with no list keeps the shared `zombie_tasks` table. `entityClassOf` used to
   drop `ai_attack`, so XML timid animals could hunt; that field (and the new
   mask) now copy onto every spawn path.
-  Residual: Leap (zombieSpider + mountain lion AITask-1) and RangedAttackTarget
-  (rancher/cop/chuck/mutated/mutatedRadiated, the acid spitters)
-  have no native task yet, so those names stay unmapped rather than faked.
+  Residual: RangedAttackTarget (rancher/cop/chuck/mutated/mutatedRadiated,
+  the acid spitters) has no native task yet, so that name stays unmapped
+  rather than faked (Leap shipped 2026-09-22).
   AITarget rows (SetAsTargetIfHurt / SetNearestEntityAsTarget) are still the
   native sense/revenge path. Moving the brain into a Wasm plugin (AGENTS rule
   29) stays an ADR: the AI pass is parallel over slots and the host is

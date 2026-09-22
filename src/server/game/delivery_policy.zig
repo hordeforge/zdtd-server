@@ -43,6 +43,14 @@ pub fn isCompressedPackage(pkg_name: []const u8) bool {
 }
 
 pub fn isDroppablePackage(pkg_name: []const u8) bool {
+    // A stock-unreliable package has no retransmit on the wire at all, so it is
+    // droppable by construction. It only reaches this classifier at all when
+    // the framed message exceeds the peer's negotiated MTU and net.zig falls
+    // through to the reliable window: without this arm an oversized
+    // EntityStatsBuff (a full 1024 B buff blob against a 1024 B MtuCheck) got
+    // the must-deliver attempt ladder and a hard error.WindowFull, which aborts
+    // sendBuffSync mid-join instead of skipping one replaceable update.
+    if (isUnreliablePackage(pkg_name)) return true;
     // Latest-wins / replaceable under WindowFull. EntityStatChanged stays
     // ReliableOrdered (stock get_ReliableDelivery=true) but a newer value
     // supersedes a stalled one, so hard-failing the send only stalls combat
@@ -50,8 +58,6 @@ pub fn isDroppablePackage(pkg_name: []const u8) bool {
     const names = [_][]const u8{
         "NetPackageChunk",
         "NetPackageDecoResetWorldChunk",
-        "NetPackageEntityPosAndRot",
-        "NetPackageEntitySpeeds",
         "NetPackageEntityStatChanged",
         "NetPackageVehiclePositions",
         "NetPackageWorldTime",
@@ -89,6 +95,26 @@ const must_deliver_max_attempts: u32 = 960;
 pub fn maxAttemptsFor(pkg_name: []const u8, droppable: bool) u32 {
     if (std.mem.eql(u8, pkg_name, "NetPackageChunk")) return chunk_max_attempts;
     return if (droppable) droppable_max_attempts else must_deliver_max_attempts;
+}
+
+test "every unreliable package is droppable on the MTU fallthrough" {
+    // net.zig only reaches the reliable window for an unreliable package when
+    // the frame is larger than the peer's negotiated MTU. Classifying one of
+    // them as must-deliver there burns the 960-attempt ladder on the tick and
+    // returns error.WindowFull to a caller (sendBuffSync) that aborts a join
+    // bundle over a replaceable update.
+    const unreliable = [_][]const u8{
+        "NetPackageEntityPosAndRot",
+        "NetPackageEntityRelPosAndRot",
+        "NetPackageEntityRotation",
+        "NetPackageEntitySpeeds",
+        "NetPackageEntityStatsBuff",
+    };
+    for (unreliable) |n| {
+        try std.testing.expect(isUnreliablePackage(n));
+        try std.testing.expect(isDroppablePackage(n));
+        try std.testing.expectEqual(droppable_max_attempts, maxAttemptsFor(n, isDroppablePackage(n)));
+    }
 }
 
 test "the attempt ladder is one table for both send entry points" {

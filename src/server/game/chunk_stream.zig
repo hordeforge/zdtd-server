@@ -352,7 +352,16 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 // join window only. Tracked per deco chunk; harmless overlap
                 // with the join burst (client HashSet + mirror both dedupe).
                 game_join.sendDecoForStreamedChunk(self, c, peer, cx, cz) catch |err| {
-                    std.debug.print("zdtd: stream deco failed at {d},{d}: {s}\n", .{ cx, cz, @errorName(err) });
+                    // Tick path, once per newly-streamed chunk per client: a
+                    // full reliable window fails every deco send in the pass,
+                    // so count it and throttle the line like the other send
+                    // sites instead of one blocking stderr write per chunk.
+                    self.harness.counters.inc(.stream_errors);
+                    const n = self.harness.counters.get(.stream_errors);
+                    if (n == 1 or n % 100 == 0) {
+                        var ts: [19]u8 = undefined;
+                        std.debug.print("zdtd: {s} stream deco failed at {d},{d} n={d}: {s}\n", .{ clock.wallStamp(&ts), cx, cz, n, @errorName(err) });
+                    }
                 };
             }
         }

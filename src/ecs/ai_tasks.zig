@@ -44,12 +44,13 @@ const rng_util = @import("../util/rng.zig");
 // coarse ZombieAi.state enum so downstream replication (game.zig EntitySpeeds/
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
-// Nine real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
-// ApproachDistraction, Territorial, ApproachSpot, Look, Wander. The two remaining
-// stock entries with native consumers are unmapped (measured 2026-09-22): RangedAttackTarget
-// on the five acid-spitter zombies and Leap on zombieSpider/animalMountainLion
-// (../7dtd-engine-research/docs/entities/entity-ai.md carries the census and the
-// now-closed delivery contract); Dodge is client-animator only and unreferenced by stock XML.
+// Ten real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
+// ApproachDistraction, Territorial, ApproachSpot, Look, Wander, Leap (the EAILeap
+// pounce, 2026-09-22: zombieSpider/animalMountainLion, XML-list gated). The one
+// remaining stock entry with native consumers and no task is RangedAttackTarget
+// on the five acid-spitter zombies (measured 2026-09-22;
+// ../7dtd-engine-research/docs/entities/entity-ai.md carries the census and the
+// closed delivery contract); Dodge is client-animator only and unreferenced by stock XML.
 // BreakBlock/DestroyArea use mutex 0 so isBestTask allows them while Approach
 // executes when path_blocked; movement tasks still share bit 0. Collapsing
 // executingTasks to one TaskId stays exact for this set.

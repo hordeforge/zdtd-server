@@ -28,6 +28,7 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
+const clock = @import("../../util/clock.zig");
 
 const te_types = packages.te_types;
 
@@ -191,7 +192,16 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
     const after_out = self.harness.counters.get(.net_packets_out);
     const delivered = after_out != before_out;
     if (!delivered) {
-        std.debug.print("zdtd: FAILED NetPackageChunk cx={d} cz={d} body={d}\n", .{ cx, cz, body.len });
+        // sendGame already counted the soft drop in reliable_window_drops;
+        // throttle the line off that counter like every other send site. This
+        // runs on the tick once per refused chunk per peer, so an unthrottled
+        // print turns a full reliable window into a blocking stderr write per
+        // stream pass per client.
+        const n = self.harness.counters.get(.reliable_window_drops);
+        if (n == 1 or n % 100 == 0) {
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} NetPackageChunk not sent cx={d} cz={d} body={d} n={d}\n", .{ clock.wallStamp(&ts), cx, cz, body.len, n });
+        }
         return false;
     }
     // Storage TEs in this column (placed chests, loot containers).
