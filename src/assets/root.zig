@@ -51,6 +51,7 @@ pub const require_eval = @import("require_eval.zig");
 pub const require_parse = @import("require_parse.zig");
 pub const cvars = @import("cvars.zig");
 pub const progression = @import("progression.zig");
+pub const progression_tests = @import("progression_tests.zig");
 pub const vehicles = @import("vehicles.zig");
 pub const worldglobal = @import("worldglobal.zig");
 pub const storage_pairs = @import("storage_pairs.zig");
@@ -108,6 +109,7 @@ test {
     _ = require_parse;
     _ = cvars;
     _ = progression;
+    _ = progression_tests;
     _ = vehicles;
     _ = worldglobal;
     _ = storage_pairs;
