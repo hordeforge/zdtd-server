@@ -26,6 +26,7 @@ pub const passive_effects = @import("passive_effects.zig");
 pub const entities = @import("entities.zig");
 pub const recipes = @import("recipes.zig");
 pub const loot = @import("loot.zig");
+pub const loot_load = @import("loot_load.zig");
 pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
 pub const maxdamage = @import("maxdamage.zig");
@@ -78,6 +79,7 @@ test {
     _ = entities;
     _ = recipes;
     _ = loot;
+    _ = loot_load;
     _ = entitygroups;
     _ = gamestages;
     _ = maxdamage;
