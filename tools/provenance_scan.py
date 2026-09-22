@@ -10,7 +10,9 @@ Checks docs/PROVENANCE.md against the src/ tree:
 
 2. CONSTANT LEDGER: every constants-ledger row carries an anchor
    (path:line or path symbol) that exists in src/, a value, a bucket, and a
-   non-empty source. Rows whose anchor file does not exist fail.
+   non-empty source. Rows whose anchor file does not exist fail, and so do
+   rows naming a symbol that is no longer in the anchored file: a constant
+   that moves or is renamed leaves a citation pointing at nothing.
 
 Usage: python3 tools/provenance_scan.py
 Exit 0 when file coverage is 100% and every ledger row is well-formed.
@@ -27,8 +29,12 @@ LEDGER = os.path.join(ROOT, "docs", "PROVENANCE.md")
 
 BUCKETS = {"A", "R", "Z"}
 FILE_ROW = re.compile(r"^\|\s*`([^`]+\.zig)`\s*\|\s*([ARZ])\s*\|\s*(.+?)\s*\|")
+# The anchor cell is prose with backticks in it ("`ecs/rules.zig` `Power.x`",
+# "`ecs/world.zig` sleeper wake roll defaults (`a`, `b`)"), so it must not stop
+# at the first backtick: an anchor-shaped pattern silently dropped 55 of the
+# 125 rows from every ledger check.
 CONST_ROW = re.compile(
-    r"^\|\s*`?([^`|]+)`?\s*\|\s*([^|]+?)\s*\|\s*([ARZ])\s*\|\s*(.+?)\s*\|"
+    r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([ARZ])\s*\|\s*(.+?)\s*\|"
 )
 
 
@@ -195,6 +201,52 @@ def research_citation_errors(root, research_docs):
     return errors
 
 
+ANCHOR_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Anchor symbols the ledger names as prose rather than as a src identifier
+# (config table keys, RE method names), so they are not searched for in src.
+ANCHOR_SYMBOL_EXEMPT = {"Diverges", "TickServer", "IL", "RE"}
+
+
+def resolve_anchor_path(path):
+    """Ledger anchors are written src-relative with the leading directory
+    often dropped (`game/craft.zig` for `src/server/game/craft.zig`), so try
+    the literal path, then src/<path>, then a unique suffix match under src/."""
+    for cand in (path, os.path.join("src", path)):
+        if os.path.isfile(os.path.join(ROOT, cand)):
+            return cand
+    tail = os.sep + path.replace("/", os.sep)
+    hits = [f for f in src_files() if f.endswith(tail)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def anchor_errors(anchor):
+    """Anchor file must resolve and every identifier the anchor backticks must
+    still appear in it. A constant that moves file or gets renamed otherwise
+    leaves its citation pointing at code that is no longer there."""
+    tokens = re.findall(r"`([^`]+)`", anchor)
+    path, symbols = None, []
+    for token in tokens:
+        for word in token.split():
+            base = word.split(":")[0]
+            if base.endswith(".zig"):
+                if path is None:
+                    path = base
+            elif ANCHOR_IDENT.match(word.split(".")[-1]) and word not in ANCHOR_SYMBOL_EXEMPT:
+                symbols.append(word.split(".")[-1])
+    if path is None:
+        return []
+    rel = resolve_anchor_path(path)
+    if rel is None:
+        return [f"{anchor}: anchor file {path} missing"]
+    with open(os.path.join(ROOT, rel), encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    return [
+        f"{anchor}: {sym} not found in {rel}"
+        for sym in symbols
+        if not re.search(r"\b" + re.escape(sym) + r"\b", text)
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -319,7 +371,8 @@ def main():
     cov = 100.0 * covered / len(files) if files else 100.0
     print(f"file coverage: {covered}/{len(files)} = {cov:.1f}%")
 
-    # Constants ledger well-formedness: anchor file must exist, bucket valid, source non-empty.
+    # Constants ledger well-formedness: anchor file must resolve, every symbol
+    # the anchor names must still be in that file, bucket valid, source non-empty.
     bad_const = []
     for anchor, _value, bucket, source in const_rows:
         if bucket not in BUCKETS:
@@ -328,10 +381,7 @@ def main():
         if not source:
             bad_const.append(f"{anchor}: empty source")
             continue
-        afile = anchor.split(":")[0].split(" ")[0]
-        rel = afile if afile.startswith("src/") else None
-        if rel and not os.path.isfile(os.path.join(ROOT, rel)):
-            bad_const.append(f"{anchor}: anchor file {afile} missing")
+        bad_const += anchor_errors(anchor)
     if bad_const:
         failures.append(f"constant ledger issues ({len(bad_const)}): " + "; ".join(bad_const[:8]))
 

@@ -116,7 +116,7 @@ The topsoil tail is appended last and is optional on read, so a pre-topsoil file
 
 ## Player records
 
-`players.zsv` is a header plus a record per player; the header count is patched in last from the records actually appended, because a count predicted up front drifts when a joined client has no ECS player slot (`src/server/persist.zig:629`). The written magic byte is `'H'`, that is ZPV17, and older files stay readable (`src/server/persist.zig:632`). The record layout, as documented next to `playersPath` (`src/server/persist.zig:576`):
+`players.zsv` is a header plus a record per player; the header count is patched in last from the records actually appended, because a count predicted up front drifts when a joined client has no ECS player slot (`src/server/persist_players.zig:89`). The written magic byte is `'H'`, that is ZPV17, and older files stay readable (`src/server/persist_players.zig:92`). The record layout, as documented next to `savePlayers` (`src/server/persist_players.zig:40-50`):
 
 ```zig
 /// Record layout (v5+): magic ZPVN | n:u32 | records…
@@ -150,10 +150,10 @@ pub const RecordSpan = struct {
 };
 ```
 
-Since ZPV15 a record can be keyed to an account instead of a login name, because a name key let any client load another player's save by typing their name (`src/server/persist.zig:101`). An identity-bearing row belongs to that account and nothing else (`src/server/persist.zig:419`):
+Since ZPV15 a record can be keyed to an account instead of a login name, because a name key let any client load another player's save by typing their name (`src/server/persist.zig:101`). An identity-bearing row belongs to that account and nothing else (`src/server/persist.zig:449`):
 
 ```zig
-const ZpvIdentity = struct {
+pub const ZpvIdentity = struct {
     present: bool = false,
     primary: platform_user.Stored = .{},
     native: platform_user.Stored = .{},
@@ -163,7 +163,7 @@ const ZpvIdentity = struct {
     /// once the row has an identity, and an absent or different identity never
     /// inherits it (fail closed). A legacy row with no identity is still
     /// matched by name so an existing world upgrades in place on the next save.
-    fn matchesClient(self: ZpvIdentity, cl: *const Client, name_matches: bool) bool {
+    pub fn matchesClient(self: ZpvIdentity, cl: *const Client, name_matches: bool) bool {
         if (!self.present) return name_matches;
         const theirs = self.primary.get() orelse return false;
         const mine = cl.puid_primary.get() orelse return false;

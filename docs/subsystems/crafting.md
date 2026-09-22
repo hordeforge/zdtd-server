@@ -117,7 +117,7 @@ so the same seed and inputs produce the same stacks. Entry probability can be ov
 `loot_prob_template` band covering the loot stage, and quality resolves from a quality template by
 the same stage window (`src/assets/loot.zig:466-478`, `src/assets/loot.zig:480-494`). Rolled stack
 counts are scaled by the `LootAbundance` percentage (`src/assets/loot.zig:463-464`). One rolled
-stack carries (`src/assets/loot.zig:366-381`):
+stack carries (`src/assets/loot.zig:365-380`):
 
 ```zig
 pub const Stack = struct {

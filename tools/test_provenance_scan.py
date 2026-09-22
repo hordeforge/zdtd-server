@@ -93,5 +93,61 @@ class ResearchCitationsTest(unittest.TestCase):
         self.assertEqual(self.scan(), [])
 
 
+class AnchorErrorsTest(unittest.TestCase):
+    """The constants ledger cites code by anchor; a moved or renamed constant
+    must fail the gate instead of leaving a citation pointing at nothing."""
+
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        root = Path(self.scratch.name)
+        (root / "src" / "server" / "c2s").mkdir(parents=True)
+        (root / "src" / "server" / "c2s" / "inv_te.zig").write_text(
+            "const sign_echo_range: f32 = 192;\n", encoding="utf-8"
+        )
+        (root / "src" / "server" / "c2s" / "inv.zig").write_text("\n", encoding="utf-8")
+        patch = mock.patch.object(provenance_scan, "ROOT", str(root))
+        patch.start()
+        self.addCleanup(patch.stop)
+        files = mock.patch.object(
+            provenance_scan, "src_files",
+            lambda: ["src/server/c2s/inv_te.zig", "src/server/c2s/inv.zig"],
+        )
+        files.start()
+        self.addCleanup(files.stop)
+
+    def test_symbol_at_its_anchor_passes(self):
+        self.assertEqual(
+            provenance_scan.anchor_errors("`server/c2s/inv_te.zig` `sign_echo_range`"), []
+        )
+
+    def test_symbol_moved_out_of_the_anchored_file_fails(self):
+        errors = provenance_scan.anchor_errors("`server/c2s/inv.zig` `sign_echo_range`")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("sign_echo_range not found in src/server/c2s/inv.zig", errors[0])
+
+    def test_short_anchor_path_resolves_by_unique_suffix(self):
+        self.assertEqual(
+            provenance_scan.anchor_errors("`c2s/inv_te.zig` `sign_echo_range`"), []
+        )
+
+    def test_anchor_file_that_does_not_exist_fails(self):
+        errors = provenance_scan.anchor_errors("`server/c2s/gone.zig` `sign_echo_range`")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("anchor file server/c2s/gone.zig missing", errors[0])
+
+
+class ConstRowTest(unittest.TestCase):
+    def test_anchor_cell_with_several_backticked_spans_parses(self):
+        row = (
+            "| `ecs/rules.zig` `Power.trigger_pulse_s` (mirrored to `ecs/electric.zig` "
+            "`trigger_pulse_s` at init) | 0.5 | R | Trigger pulse width |"
+        )
+        match = provenance_scan.CONST_ROW.match(row)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(2).strip(), "0.5")
+        self.assertEqual(match.group(3), "R")
+
+
 if __name__ == "__main__":
     unittest.main()

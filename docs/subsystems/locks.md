@@ -103,7 +103,7 @@ The claim sizes and lifetimes are server options, not rule fields: the protected
 
 ## C2S paths and client release
 
-Two lock vocabularies arrive from clients and are not the same table. The quest lockout is decided inside the quest event handler, which answers the rally-marker request with a reason rather than applying a lockout as a block, and it also serves the explicit `lock_poi` and `unlock_poi` events that take and release the POI for the sending entity (`src/server/game/quest.zig:22`, `:51`). The container channel lock is `NetPackageLockRequest`, handled with the interaction packages and validated before any channel is written (`src/server/c2s/misc.zig:72`):
+Two lock vocabularies arrive from clients and are not the same table. The quest lockout is decided inside the quest event handler, which answers the rally-marker request with a reason rather than applying a lockout as a block, and it also serves the explicit `lock_poi` and `unlock_poi` events that take and release the POI for the sending entity (`src/server/game/quest.zig:22`, `:51`). The container channel lock is `NetPackageLockRequest`, handled with the interaction packages and validated before any channel is written (`src/server/c2s/misc_lock.zig:63-67`):
 
 ```zig
     if (std.mem.eql(u8, name, "NetPackageLockRequest")) {
@@ -113,11 +113,11 @@ Two lock vocabularies arrive from clients and are not the same table. The quest 
             if (req.locking and self.quarantineDenies(c, .container)) return true;
 ```
 
-A channel lock is a lease, so the path refuses by default. The server clamps the requested channel into its table and reaps a stale holder whose keep-open stamp aged out (`src/server/c2s/misc.zig:77`, `:1060`). It refuses a peer that already holds any channel, force-unlocking what that peer holds and granting nothing, which is stock's gate 1 (`src/server/c2s/misc_damage.zig:23`). A null or over-long target list is denied explicitly so the client's pending request resolves instead of hanging, a dead or closed trader is refused before any channel is written, and a target locked elsewhere or a channel held by another peer is refused as `locked` (`src/server/c2s/misc_damage.zig:37`, `:1131`, `:1139`). An unlock is accepted only from the holder or when the channel is free, and it runs the tile-entity close consequences (`src/server/c2s/misc_damage.zig:28`). A keep-open refresh carries no state and only restamps the timer (`src/server/game/locks.zig:100`).
+A channel lock is a lease, so the path refuses by default. The server clamps the requested channel into its table and reaps a stale holder whose keep-open stamp aged out (`src/server/c2s/misc_lock.zig:68`, `:70-73`). It refuses a peer that already holds any channel, force-unlocking what that peer holds and granting nothing, which is stock's gate 1 (`src/server/c2s/misc_lock.zig:79-86`). A null or over-long target list is denied explicitly so the client's pending request resolves instead of hanging, a dead or closed trader is refused before any channel is written, and a target locked elsewhere or a channel held by another peer is refused as `locked` (`src/server/c2s/misc_lock.zig:88-96`, `:130-137`, `:141-157`). An unlock is accepted only from the holder or when the channel is free, and it runs the tile-entity close consequences (`src/server/c2s/misc_lock.zig:223-237`). A keep-open refresh carries no state and only restamps the timer (`src/server/game/locks.zig:100`).
 
 Release exists so a departing player cannot pin a channel. Clearing server state alone would leave other clients showing the container as locked, so the disconnect path force-unlocks every channel the peer held and tells the remaining clients (`src/server/game/locks.zig:124`, `src/server/game/session_drop.zig:34`). That body uses `locking = false`, routing the client to its unlock-response branch (`src/wire/stock_lock.zig:143`).
 
-A denial is always a reply. The plain denial is a `NetPackageLockResponse` with `locking` echoed, `success` false and a reason string, and the handler supplies `locked`, `closed`, `null target` and `too many targets` for the four refusal classes (`src/server/c2s/misc_damage.zig:39`, `src/wire/stock_lock.zig:114`):
+A denial is always a reply. The plain denial is a `NetPackageLockResponse` with `locking` echoed, `success` false and a reason string, and the handler supplies `locked`, `closed`, `null target` and `too many targets` for the four refusal classes (`src/server/c2s/misc_lock.zig:94`, `src/wire/stock_lock.zig:114-116`):
 
 ```zig
 pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {
@@ -125,7 +125,7 @@ pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u
 }
 ```
 
-An unlock the requester may not perform answers with `success = false` and an empty error message, the stock shape for nothing locked (`src/wire/stock_lock.zig:226`). A malformed request body is logged and dropped whole, so a truncated span cannot leave a half-written channel (`src/server/c2s/misc_lock.zig:240-242`). The parser bound is wider than the handler rule: it walks up to 64 targets because the deny echoes the request's list, while the handler refuses above the stock ceiling of five (`src/wire/stock_lock.zig:75`, `:69`).
+An unlock the requester may not perform answers with `success = false` and an empty error message, the stock shape for nothing locked (`src/wire/stock_lock.zig:225`). A malformed request body is logged and dropped whole, so a truncated span cannot leave a half-written channel (`src/server/c2s/misc_lock.zig:240-243`). The parser bound is wider than the handler rule: it walks up to 64 targets because the deny echoes the request's list, while the handler refuses above the stock ceiling of five (`src/wire/stock_lock.zig:74`, `:68`).
 
 ## Persistence
 

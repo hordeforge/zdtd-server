@@ -95,7 +95,7 @@ Use `std.testing.allocator` or a `DebugAllocator` so a leak fails the run.
 
 One `Capture` per participating peer is the outbound assertion surface
 (`src/litenet/peer.zig:47-48`). The joined-client entry point
-(`src/server/game/harness.zig:32-34`):
+(`src/server/game/harness.zig:31-33`):
 
 ```zig
 pub fn attachJoinedClient(self: *Game, capture: ?*@import("../../litenet/peer.zig").Capture) !*Client {

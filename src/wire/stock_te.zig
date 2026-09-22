@@ -1144,8 +1144,12 @@ pub fn buildPoweredTriggerTeBody(
     return w.written();
 }
 
-/// Encode a C2S powered-trigger body (StreamModeWrite.ToServer = 1). Tests and the
-/// fuzz corpus need the client half of the exchange; the server never sends it.
+/// NetPackageTileEntity carrying a powered trigger, C2S direction
+/// (TileEntity/StreamModeWrite.ToServer = 1). RE: TileEntityPowered write
+/// (asm.il:1322032 for the read side); the field order is the one
+/// `parsePoweredTriggerTeBody` reads, so the two stay a round trip.
+/// Tests and the fuzz corpus need the client half of the exchange; the
+/// server never sends it.
 pub fn buildPoweredTriggerTeBodyToServer(
     buf: []u8,
     world_x: i32,

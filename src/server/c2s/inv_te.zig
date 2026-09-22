@@ -20,6 +20,12 @@ const reverseItemType = game_mod.Game.reverseItemType;
 const systems = @import("../../ecs/systems.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const game_craft = @import("../game/craft.zig");
+// NetPackageTileEntity::ProcessPackage rebroadcasts the applied composite
+// TE with SendPackage(..., pos = te.ToWorldCenterPos(), range = 192,
+// exclude = false) (NetPackageTileEntity.il.txt IL_00B4). Stock includes
+// the sender: that echo is what clears its lockHandleWaitingFor, so this
+// stays the RE literal rather than the configurable interest_range the
+// container and workstation TE paths use.
 const sign_echo_range: f32 = 192;
 
 /// True when `name` is a tile-entity package and was handled.

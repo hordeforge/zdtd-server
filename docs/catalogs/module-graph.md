@@ -15,28 +15,28 @@ Only imports of another package directory are counted; single-file imports
 |---|---|---|
 | `apm` | `util` | 2 |
 | `assets` | `ecs` | 14 |
-| `assets` | `util` | 111 |
+| `assets` | `util` | 101 |
 | `ecs` | `assets` | 1 |
-| `ecs` | `util` | 10 |
+| `ecs` | `util` | 9 |
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
 | `plugin` | `util` | 5 |
 | `server` | `apm` | 10 |
-| `server` | `assets` | 152 |
-| `server` | `ecs` | 118 |
-| `server` | `litenet` | 38 |
-| `server` | `plugin` | 10 |
-| `server` | `server/game` | 14 |
-| `server` | `util` | 101 |
-| `server` | `wire` | 89 |
-| `server` | `world` | 81 |
-| `wire` | `assets` | 8 |
-| `wire` | `ecs` | 4 |
+| `server` | `assets` | 185 |
+| `server` | `ecs` | 153 |
+| `server` | `litenet` | 76 |
+| `server` | `plugin` | 16 |
+| `server` | `server/game` | 30 |
+| `server` | `util` | 118 |
+| `server` | `wire` | 137 |
+| `server` | `world` | 90 |
+| `wire` | `assets` | 10 |
+| `wire` | `ecs` | 5 |
 | `wire` | `util` | 3 |
-| `wire` | `world` | 2 |
+| `wire` | `world` | 4 |
 | `world` | `assets` | 23 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 29 |
+| `world` | `util` | 28 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)
