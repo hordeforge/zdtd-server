@@ -140,6 +140,18 @@ pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, frame
     return error.WindowFull;
 }
 
+/// Slice of a fan-out's shared retry window still available, 0 once it has
+/// passed. A broadcast gives the whole fan-out one `window_retry_budget_ns`,
+/// the way the enter bundle shares `critical_budget_deadline_ns`: budgeting
+/// per peer instead costs `peers * 16 ms` on the tick thread, so eight wedged
+/// clients turn one broadcast into 128 ms and blow the 50 ms tick (AGENTS
+/// rule 20). Peers reached after the window still get one send attempt; only
+/// the WindowFull retry is cut short.
+fn fanoutBudgetRemaining(deadline_ns: u64) u64 {
+    const now = clock.monoNs();
+    return if (now >= deadline_ns) 0 else deadline_ns - now;
+}
+
 pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
     if (framed.len > peer.singleUserLimit()) {
         sendFramedDroppable(self, peer, framed);
@@ -153,7 +165,8 @@ pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8
 }
 
 pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-    sendReliablePumped(self, peer, "framed-stream", framed, game_mod.window_retry_budget_ns, 64, true) catch |err| switch (err) {
+    const max_attempts = delivery_policy.maxAttemptsFor("framed-stream", true);
+    sendReliablePumped(self, peer, "framed-stream", framed, game_mod.window_retry_budget_ns, max_attempts, true) catch |err| switch (err) {
         error.WindowFull => {
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
@@ -194,9 +207,17 @@ pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs
         const p = c.peer orelse continue;
         if (!c.joined) continue;
         if (!c.known_entities.isSet(slot)) continue;
+        // sendGame already counted this (reliable_window_drops on WindowFull,
+        // net_send_errors otherwise), so only the log belongs here - and it is
+        // throttled like every other send site: this runs on the tick thread
+        // once per removed entity, so a horde despawn against a full window
+        // would otherwise be one blocking stderr write per entity per peer.
         self.sendGame(p, name, body) catch |err| {
-            self.harness.counters.inc(.net_send_errors);
-            std.debug.print("zdtd: send {s} failed: {s}\n", .{ name, @errorName(err) });
+            const n = self.harness.counters.get(.net_send_errors) + self.harness.counters.get(.reliable_window_drops);
+            if (n == 1 or n % 100 == 0) {
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} broadcastKnown send failed pkg={s} slot={d} local_id={d}: {s}\n", .{ clock.wallStamp(&ts), name, slot, p.local_id, @errorName(err) });
+            }
         };
     }
 }
@@ -225,7 +246,10 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
         return err;
     };
     const droppable = isDroppablePackage(name);
-    const max_attempts: u32 = if (droppable) 64 else 960;
+    // Same attempt ladder as the unicast path: one table in delivery_policy,
+    // or a chunk broadcast silently gets the single-window droppable cap.
+    const max_attempts = delivery_policy.maxAttemptsFor(name, droppable);
+    const fanout_deadline = clock.monoNs() + game_mod.window_retry_budget_ns;
     var hard_fail = false;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
@@ -238,7 +262,7 @@ fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, w
             const dz = self.sim.transform[ps].z - wz;
             if (dx * dx + dz * dz > range_blocks * range_blocks) continue;
         }
-        sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, max_attempts, true) catch |err| switch (err) {
+        sendReliablePumped(self, p, name, framed, fanoutBudgetRemaining(fanout_deadline), max_attempts, true) catch |err| switch (err) {
             error.WindowFull => {
                 self.harness.counters.inc(.reliable_window_drops);
                 const d = self.harness.counters.get(.reliable_window_drops);
@@ -273,7 +297,10 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
         return err;
     };
     const droppable = isDroppablePackage(name);
-    const max_attempts: u32 = if (droppable) 64 else 960;
+    // Same attempt ladder as the unicast path: one table in delivery_policy,
+    // or a chunk broadcast silently gets the single-window droppable cap.
+    const max_attempts = delivery_policy.maxAttemptsFor(name, droppable);
+    const fanout_deadline = clock.monoNs() + game_mod.window_retry_budget_ns;
     var hard_fail = false;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
@@ -289,7 +316,7 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
             self.harness.counters.add(.net_bytes_out, framed.len);
             self.harness.counters.inc(.packages_broadcast);
         } else {
-            sendReliablePumped(self, p, name, framed, game_mod.window_retry_budget_ns, max_attempts, true) catch |err| switch (err) {
+            sendReliablePumped(self, p, name, framed, fanoutBudgetRemaining(fanout_deadline), max_attempts, true) catch |err| switch (err) {
                 error.WindowFull => {
                     self.harness.counters.inc(.reliable_window_drops);
                     const d = self.harness.counters.get(.reliable_window_drops);
@@ -625,4 +652,35 @@ test "chunk removal retries without forgetting the client chunk" {
     var expected_buf: [16]u8 = undefined;
     const expected = try packages.buildChunkRemoveBody(&expected_buf, 1000, 1000);
     try std.testing.expectEqualSlices(u8, expected, body);
+}
+
+test "a broadcast fan-out shares one retry window across wedged peers" {
+    // Per-peer budgeting cost `peers * window_retry_budget_ns` on the tick
+    // thread: three wedged clients turned one broadcast into ~48 ms, past the
+    // 50 ms tick on its own. The shared deadline bounds the whole fan-out to
+    // one window regardless of peer count (AGENTS rule 20).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // One Capture reused for all three joins (it is ~2 MB, and each peer
+    // detaches from it right after attaching).
+    var cap: ln_peer.Capture = .{};
+    for (0..3) |_| {
+        const c = try g.attachJoinedClient(&cap);
+        const peer = c.peer.?;
+        peer.capture = null;
+        for (0..ln_packet.window_size) |_| try peer.sendReliable(&g.net.sock, "pending");
+    }
+
+    const started = clock.monoNs();
+    try broadcastExcept(g, "NetPackageWorldTime", &.{ 1, 2, 3, 4, 5, 6, 7, 8 }, null);
+    const elapsed = clock.monoNs() - started;
+    // Generous: one window is ~16 ms, the old per-peer shape was >= 48 ms.
+    try std.testing.expect(elapsed < 2 * game_mod.window_retry_budget_ns);
 }

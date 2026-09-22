@@ -302,7 +302,13 @@ serialize-once frame scratch (`src/server/game/types.zig:181`);
 is bounded by the 512-slot table times 64 clients. The reliable pump retry
 budget is `window_retry_budget_ns = 16_000_000`
 (`src/server/game/types.zig:166`), and a droppable package turns `WindowFull`
-into a silent drop (`src/server/game/net.zig:66`).
+into a silent drop (`src/server/game/net.zig:66`). A broadcast shares one such
+window across its whole fan-out (`fanoutBudgetRemaining` in
+`src/server/game/net.zig`), so N wedged peers cost 16 ms total rather than
+N x 16 ms; peers reached after the window still get one send attempt, only the
+retry is cut short. Attempt caps for every reliable send come from
+`delivery_policy.maxAttemptsFor` (4000 chunk / 64 droppable / 960
+must-deliver).
 
 ## See also
 - [tick.md](tick.md) - the 20 TPS step this pass is called from.

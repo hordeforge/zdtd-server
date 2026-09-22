@@ -23,7 +23,7 @@ Those directories are named `worlds/zdtd_sc_*`, and `worlds/` is gitignored. Sce
 
 ## The in-process harness
 
-`src/server/game/harness.zig` is the seam injection layer. Its header states the scope and the limit: in-process test and scenario helpers for joined clients, packet injection, replication and direct world setup, and production networking does not use these shortcuts (`src/server/game/harness.zig:1-3`). `Game` re-exports the whole surface so a scenario holds one type, for example `attachJoinedClient`, `injectFramed` and `replicateNow` (`src/server/game.zig:3181-3193`).
+`src/server/game/harness.zig` is the seam injection layer. Its header states the scope and the limit: in-process test and scenario helpers for joined clients, packet injection and direct world setup, and production networking does not use these shortcuts (`src/server/game/harness.zig:1-2`). `Game` re-exports the whole surface so a scenario holds one type, for example `attachJoinedClient` and `injectFramed` (`src/server/game.zig:3180-3191`). Replication is not a harness shortcut: a scenario calls the production `g.replicate()` directly.
 
 The joined-client entry point (`src/server/game/harness.zig:32-34`):
 
@@ -41,10 +41,6 @@ Two helpers carry the rest of a scenario (`src/server/game/harness.zig:89-96`):
 pub fn injectFramed(self: *Game, c: *Client, framed: []const u8) !void {
     const peer = c.peer orelse return error.NoPeer;
     try self.onData(peer, framed);
-}
-
-pub fn replicateNow(self: *Game) !void {
-    try self.replicate();
 }
 ```
 
@@ -147,7 +143,7 @@ One claim category does land here: APM counter shapes are pinned by scenario ass
 1. Decide what the test must observe. If it needs the chunk, deco or streaming path, give it a directory and wipe it with `freshScenarioDir` (`src/server/scenarios.zig:77`); otherwise use `std.testing.tmpDir` and pass the path in.
 2. Create the server offline with port 0 so the virtual clock and serial ranges are already on (`src/server/game/init_world.zig:109-111`), and use `std.testing.allocator` or a `DebugAllocator` so a leak fails the run.
 3. Attach one `Capture` per participating peer with `attachJoinedClient` (`src/server/game/harness.zig:32`) and assert the returned client is joined.
-4. Drive the behaviour through production handlers: build the body with the `packages` builder, frame it with `packages.framed`, and inject it with `injectFramed`; advance the sim with `g.step()`; push interest with `replicateNow` (`src/server/scenarios.zig:259-269`). Do not re-implement a parser or call a sim system directly when a client package exists that reaches it.
+4. Drive the behaviour through production handlers: build the body with the `packages` builder, frame it with `packages.framed`, and inject it with `injectFramed`; advance the sim with `g.step()`; push interest with `g.replicate()` (`src/server/scenarios.zig:259-269`). Do not re-implement a parser or call a sim system directly when a client package exists that reaches it.
 5. Assert on the observable state, not survival. Parse the captured body back with the matching `packages.parse*` helper, and assert on the sim column (`g.sim.health[slot].hp`, `g.world.blockWorld`) or the counter (`g.harness.counters.get(.ownership_rejects)`) as well. A gate that lets a packet through while mutating the wrong thing passes a survival-only test (`src/server/scenarios.zig:587-597`).
 6. Keep the scenario in `src/server/scenarios.zig` rather than starting a new harness, name it with the `scenario ` prefix, and leave no state behind: the directory it used is either a self-cleaning `tmpDir` or one it wipes on the next run.
 

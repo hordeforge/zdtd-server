@@ -39,219 +39,134 @@ pub const PluginHost = struct {
         self.view.tick = tick_n;
     }
 
-    /// Call on_tick for enabled plugins. Null hooks skip (branch only).
-    pub fn onTick(self: *PluginHost) void {
+    /// Call `hook` on every enabled plugin in registration order. Pure
+    /// observer: a null hook is skipped, nothing is returned.
+    fn notifyAll(self: *PluginHost, comptime hook: []const u8, args: anytype) void {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             if (!self.enabled[i]) continue;
-            if (self.slots[i].on_tick) |f| f(&self.view);
+            if (@field(self.slots[i], hook)) |f| @call(.auto, f, .{&self.view} ++ args);
         }
+    }
+
+    /// Event-hook verdicts (T15): first non-zero return across enabled
+    /// plugins wins. 0 keeps today's behaviour; a null hook is skipped.
+    fn firstVerdict(self: *PluginHost, comptime hook: []const u8, args: anytype) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (@field(self.slots[i], hook)) |f| {
+                const v = @call(.auto, f, .{&self.view} ++ args);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
+    /// Rewrite hooks: the first enabled plugin returning a slice wins; null
+    /// means "not handled" and the scan continues. The slice is written into
+    /// the caller's `out` buffer, which is the last element of `args`.
+    fn firstRewrite(self: *PluginHost, comptime hook: []const u8, args: anytype) ?[]const u8 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (@field(self.slots[i], hook)) |f| {
+                if (@call(.auto, f, .{&self.view} ++ args)) |written| return written;
+            }
+        }
+        return null;
+    }
+
+    /// Call on_tick for enabled plugins. Null hooks skip (branch only).
+    pub fn onTick(self: *PluginHost) void {
+        self.notifyAll("on_tick", .{});
     }
 
     pub fn playerJoin(self: *PluginHost, peer_slot: u16, entity_id: i32) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_player_join) |f| f(&self.view, peer_slot, entity_id);
-        }
+        self.notifyAll("on_player_join", .{ peer_slot, entity_id });
     }
 
     pub fn playerLeave(self: *PluginHost, peer_slot: u16, entity_id: i32) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_player_leave) |f| f(&self.view, peer_slot, entity_id);
-        }
+        self.notifyAll("on_player_leave", .{ peer_slot, entity_id });
     }
 
     /// Player stat observer (ADR 0034): fired when the survival pass changed
     /// a tracked stat or an XP award landed. Pure observer, void.
     pub fn statChanged(self: *PluginHost, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_stat_changed) |f| f(&self.view, player, hp, food, water, stamina, level, xp);
-        }
+        self.notifyAll("on_stat_changed", .{ player, hp, food, water, stamina, level, xp });
     }
 
     /// Buff observer: fired for every buff applied or dropped, whatever caused
     /// it. Pure observer, void: the buff is already applied and relayed.
     pub fn buff(self: *PluginHost, entity: i32, name: []const u8, adding: bool) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_buff) |f| f(&self.view, entity, name, adding);
-        }
+        self.notifyAll("on_buff", .{ entity, name, adding });
     }
 
     /// Evidence observer (T21): the guard's evidence event, read-only. The
     /// host already applied the T20 severity ceiling; the guest return is
     /// discarded (never a gate).
     pub fn evidence(self: *PluginHost, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_evidence) |f| f(&self.view, tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
-        }
+        self.notifyAll("on_evidence", .{ tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits });
     }
 
     pub fn traderEvent(self: *PluginHost, player: i32, trader_entity: i32, kind: i32) void {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_trader_event) |f| f(&self.view, player, trader_entity, kind);
-        }
+        self.notifyAll("on_trader_event", .{ player, trader_entity, kind });
     }
 
     /// Event-hook verdicts (T15): first non-zero return across enabled
     /// plugins. 0 keeps today's behaviour; a null hook is skipped.
     pub fn playerDeath(self: *PluginHost, victim: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_player_death) |f| {
-                const v = f(&self.view, victim);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_player_death", .{victim});
     }
 
     pub fn entityKilled(self: *PluginHost, killed: i32, killer: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_entity_killed) |f| {
-                const v = f(&self.view, killed, killer);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_entity_killed", .{ killed, killer });
     }
 
     pub fn playerDamage(self: *PluginHost, attacker: i32, victim: i32, amount: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_player_damage) |f| {
-                const v = f(&self.view, attacker, victim, amount);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_player_damage", .{ attacker, victim, amount });
     }
 
     /// Pre-purchase perk verdict (on_perk_spend, ADR 0033): <0 deny, 0 keep,
     /// >0 scales the skill-point cost by percent.
     pub fn perkSpend(self: *PluginHost, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_perk_spend) |f| {
-                const v = f(&self.view, player, skill, level, cost);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_perk_spend", .{ player, skill, level, cost });
     }
 
     /// Pre-fire GameEvent verdict (on_game_event, ADR 0035): <0 deny, 0 keep,
     /// >0 keep (first non-keep wins).
     pub fn gameEvent(self: *PluginHost, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_game_event) |f| {
-                const v = f(&self.view, player, event, target, var_count);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_game_event", .{ player, event, target, var_count });
     }
 
     /// Pre-trade price verdict (on_trade_price): <0 deny, 0 keep, >0 percent.
     pub fn tradePrice(self: *PluginHost, player: i32, item: i32, unit_price: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_trade_price) |f| {
-                const v = f(&self.view, player, item, unit_price);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_trade_price", .{ player, item, unit_price });
     }
 
     pub fn questAccept(self: *PluginHost, player: i32, def_id: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_quest_accept) |f| {
-                const v = f(&self.view, player, def_id);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_quest_accept", .{ player, def_id });
     }
 
     pub fn craftRequest(self: *PluginHost, player: i32, recipe_name: []const u8, times: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_craft_request) |f| {
-                const v = f(&self.view, player, recipe_name, times);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_craft_request", .{ player, recipe_name, times });
     }
 
     pub fn lootRoll(self: *PluginHost, list_name: []const u8, rolled: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_loot_roll) |f| {
-                const v = f(&self.view, list_name, rolled);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_loot_roll", .{ list_name, rolled });
     }
 
     pub fn blockDamage(self: *PluginHost, x: i32, y: i32, z: i32, dmg: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_block_damage) |f| {
-                const v = f(&self.view, x, y, z, dmg);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_block_damage", .{ x, y, z, dmg });
     }
 
     pub fn questComplete(self: *PluginHost, player: i32, quest_def: i32) i32 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_quest_complete) |f| {
-                const v = f(&self.view, player, quest_def);
-                if (v != 0) return v;
-            }
-        }
-        return 0;
+        return self.firstVerdict("on_quest_complete", .{ player, quest_def });
     }
 
     /// Join gate: first plugin that denies wins.
     pub fn playerLoginDeny(self: *PluginHost, peer_slot: u16, name: []const u8, out: []u8) ?[]const u8 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_player_login) |f| {
-                if (f(&self.view, peer_slot, name, out)) |reason| return reason;
-            }
-        }
-        return null;
+        return self.firstRewrite("on_player_login", .{ peer_slot, name, out });
     }
 
     /// Chat hook: first plugin that rewrites or suppresses wins. The handler
@@ -259,28 +174,14 @@ pub const PluginHost = struct {
     /// the original, "" means suppress. Validate after - a bad rewrite is
     /// treated as suppress.
     pub fn chatFilter(self: *PluginHost, sender: i32, msg: []const u8, out: []u8) ?[]const u8 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_chat) |f| {
-                if (f(&self.view, sender, msg, out)) |filtered| return filtered;
-            }
-        }
-        return null;
+        return self.firstRewrite("on_chat", .{ sender, msg, out });
     }
 
     /// Admin command hook: first plugin that handles the verb wins. The
     /// handler writes its reply into `out` and returns the written slice; a
     /// null return means not handled.
     pub fn adminCommand(self: *PluginHost, cmd: []const u8, out: []u8) ?[]const u8 {
-        var i: usize = 0;
-        while (i < self.n) : (i += 1) {
-            if (!self.enabled[i]) continue;
-            if (self.slots[i].on_admin_command) |f| {
-                if (f(&self.view, cmd, out)) |reply| return reply;
-            }
-        }
-        return null;
+        return self.firstRewrite("on_admin_command", .{ cmd, out });
     }
 
     pub fn shutdown(self: *PluginHost) void {

@@ -95,18 +95,11 @@ pub const item_value_enc_relative_type: u8 = 1;
 /// ItemValue.Write/ReadData v>=8 encoding-flags bit 1: Stats array follows.
 pub const item_value_enc_has_stats: u8 = 2;
 
-/// Map relative item index (0..) to absolute type with ItemsStartHere offset.
-pub fn itemTypeFromIndex(item_index: u16) i32 {
-    if (item_index == 0) return 0;
-    return items_start_here + @as(i32, item_index);
-}
-
-/// Encode zdtd builtin item_id as a stock-style absolute type (item flag path).
-/// Icons only match when the client ItemClass list assigns the same relative index;
-/// structure is always client-parseable.
-pub fn typeFromBuiltinId(item_id: u16) i32 {
-    return itemTypeFromIndex(item_id);
-}
+/// Encode a builtin item id as a stock absolute type (ItemsStartHere offset).
+/// Icons only match when the client ItemClass list assigns the same relative
+/// index; structure is always client-parseable. Single source: the catalog
+/// owns the mapping, wire re-exports it (same rule as `items_start_here`).
+pub const typeFromBuiltinId = @import("../assets/item_parse.zig").typeFromBuiltinId;
 
 pub fn writeEmptyItemValue(w: *binary.Writer) !void {
     try w.writeByte(0);

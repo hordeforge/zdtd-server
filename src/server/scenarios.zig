@@ -308,7 +308,7 @@ test "scenario two-peer motion: B receives A PosAndRot" {
     // Clear captures then replicate; B must see A's entity pos (A must not).
     cap_a.clear();
     cap_b.clear();
-    try g.replicateNow();
+    try g.replicate();
 
     const pos_id = packages.idOf("NetPackageEntityPosAndRot").?;
     const b_body = cap_b.findPkgIdEntity(pos_id, ca.entity_id);
@@ -347,7 +347,7 @@ test "scenario animal movement state replicates (EntitySpeeds)" {
     const adef = g.entities.defaultAnimal();
     const an = g.sim.spawnAnimalDef(g.sim.transform[ps].x + 8, g.sim.transform[ps].y, g.sim.transform[ps].z, g.entityClassOf(adef)).?;
     cap.clear();
-    try g.replicateNow();
+    try g.replicate();
     const speeds_id = packages.idOf("NetPackageEntitySpeeds").?;
     const sb = cap.findPkgIdEntity(speeds_id, an) orelse return error.TestUnexpectedResult;
     const parsed = try packages.parseEntitySpeedsBody(sb);
@@ -501,7 +501,7 @@ test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
 
     cap_a.clear();
     cap_b.clear();
-    try g.replicateNow();
+    try g.replicate();
 
     // B must see A's new position on the next replicate (dirty relay), not
     // only on the 5-tick heartbeat; A must not echo its own motion.
@@ -570,7 +570,7 @@ test "scenario item drop commits with EntitySpawnResponse" {
     const wood_id = g.items.ecsIdByName("resourceWood");
     try std.testing.expect(wood_id != 0);
     _ = invsys.give(&g.sim, ca.slot, wood_id, 10);
-    const stack = packages.stock_inv.StockSlot{ .type_id = packages.stock_inv.itemTypeFromIndex(7), .count = 1 };
+    const stack = packages.stock_inv.StockSlot{ .type_id = packages.stock_inv.typeFromBuiltinId(7), .count = 1 };
     var db: [128]u8 = undefined;
     var dw: @import("../wire/binary.zig").Writer = .{ .buf = &db };
     try packages.stock_inv.writeItemStack(&dw, stack);
@@ -6983,7 +6983,7 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     // active (last) slot with a Recipe blob, and an empty craft-complete list.
     var recipe: [128]u8 = undefined;
     var rw: @import("../wire/binary.zig").Writer = .{ .buf = &recipe };
-    const out_type = stock_inv.itemTypeFromIndex(7); // resourceWood
+    const out_type = stock_inv.typeFromBuiltinId(7); // resourceWood
     try rw.writeU16(1);
     try rw.writeI32(out_type);
     try rw.writeI32(2);
@@ -7264,7 +7264,7 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     const gone_s = g.sim.slotOfNetId(gone_id).?;
 
     cap.clear();
-    try g.replicateNow();
+    try g.replicate();
     try std.testing.expect(ca.known_entities.isSet(near_s));
     try std.testing.expect(ca.known_entities.isSet(gone_s));
 
@@ -7274,7 +7274,7 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     g.sim.transform[gone_s].z = pz + 4000;
 
     cap.clear();
-    try g.replicateNow();
+    try g.replicate();
     try std.testing.expect(g.sim.slotOfNetId(gone_id) != null);
 
     const rm_id = packages.idOf("NetPackageEntityRemove").?;
@@ -7293,7 +7293,7 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     // And the removal is one-shot: no per-tick remove/spawn flip-flop.
     const sp_id = packages.idOf("NetPackageEntitySpawn").?;
     cap.clear();
-    try g.replicateNow();
+    try g.replicate();
     try std.testing.expect(cap.findPkgIdEntity(rm_id, gone_id) == null);
     try std.testing.expect(cap.findPkgIdEntity(sp_id, gone_id) == null);
 
@@ -7866,12 +7866,12 @@ test "scenario replicate serialize-once: a second viewer costs fan-out, not enco
     // Heartbeat motion pass (tick % 2 == 0 for motion, % 5 == 0 for heartbeat).
     g.tick_n = 10;
     // Settle: the first pass hands out EntitySpawn, later passes only move things.
-    try g.replicateNow();
-    try g.replicateNow();
+    try g.replicate();
+    try g.replicate();
 
     const enc0 = g.harness.counters.get(.packages_encoded);
     const fan0 = g.harness.counters.get(.replicate_fanouts);
-    try g.replicateNow();
+    try g.replicate();
     const enc_one = g.harness.counters.get(.packages_encoded) - enc0;
     const fan_one = g.harness.counters.get(.replicate_fanouts) - fan0;
     try std.testing.expect(enc_one > 0);
@@ -7881,14 +7881,14 @@ test "scenario replicate serialize-once: a second viewer costs fan-out, not enco
     var cap_b: ln_peer.Capture = .{};
     const cb = try g.attachJoinedClient(&cap_b);
     try std.testing.expect(cb.entity_id != ca.entity_id);
-    try g.replicateNow();
-    try g.replicateNow();
+    try g.replicate();
+    try g.replicate();
 
     cap_a.clear();
     cap_b.clear();
     const enc1 = g.harness.counters.get(.packages_encoded);
     const fan1 = g.harness.counters.get(.replicate_fanouts);
-    try g.replicateNow();
+    try g.replicate();
     const enc_two = g.harness.counters.get(.packages_encoded) - enc1;
     const fan_two = g.harness.counters.get(.replicate_fanouts) - fan1;
 
@@ -7938,16 +7938,16 @@ test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" 
     // Heartbeat pass first: it both clears the spawn dirty bits and shows the
     // candidate count when everything is in play.
     g.tick_n = 10;
-    try g.replicateNow();
+    try g.replicate();
     const hb0 = g.harness.counters.get(.replicate_candidates);
-    try g.replicateNow();
+    try g.replicate();
     const cand_heartbeat = g.harness.counters.get(.replicate_candidates) - hb0;
     try std.testing.expect(cand_heartbeat >= bags);
 
     // Off-heartbeat motion pass with nothing dirty: the bags are not candidates.
     g.tick_n = 12;
     const off0 = g.harness.counters.get(.replicate_candidates);
-    try g.replicateNow();
+    try g.replicate();
     const cand_off = g.harness.counters.get(.replicate_candidates) - off0;
     try std.testing.expect(cand_off + bags <= cand_heartbeat);
 
@@ -7956,7 +7956,7 @@ test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" 
     cap.clear();
     g.sim.setPos(bag_ids[3], px + 2, py, pz + 3, 0);
     const dirty0 = g.harness.counters.get(.replicate_candidates);
-    try g.replicateNow();
+    try g.replicate();
     try std.testing.expectEqual(cand_off + 1, g.harness.counters.get(.replicate_candidates) - dirty0);
 
     const pos_id = packages.idOf("NetPackageEntityPosAndRot").?;

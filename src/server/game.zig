@@ -3190,20 +3190,16 @@ pub const Game = struct {
         return @import("game/harness.zig").injectFramed(self, c, framed);
     }
 
-    pub fn replicateNow(self: *Game) !void {
-        return @import("game/harness.zig").replicateNow(self);
-    }
-
     pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
-        return @import("game/harness.zig").handlePartyActions(self, c, body);
+        return game_social.handlePartyActions(self, c, body);
     }
 
     pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
-        return @import("game/harness.zig").acceptQuestFor(self, c, def_id);
+        return game_social.acceptQuestFor(self, c, def_id);
     }
 
     pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
-        return @import("game/harness.zig").handleAllyRequest(self, c, body);
+        return game_social.handleAllyRequest(self, c, body);
     }
 
     pub fn sendAllySnapshot(self: *Game, peer: *ln_peer.Peer) !void {

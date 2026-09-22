@@ -70,20 +70,26 @@ pub fn isDroppablePackage(pkg_name: []const u8) bool {
     return false;
 }
 
-/// Reliable-window attempt cap for one send. The chunk stream is the only
-/// caller allowed a long ladder (a 40 KB chunk fragments against the 64-slot
-/// window, so one pass needs far more attempts than a single datagram);
-/// droppable packages give up early because a newer value supersedes them.
-/// Shared by net.zig and send_extra.zig so the two retry entry points cannot
-/// drift apart.
+// zdtd send-retry policy, not stock wire: how many reliable-window passes one
+// S2C send may occupy before net.zig gives up on it. Scaled off the 64-slot
+// LiteNet reliable window (litenet/packet.zig window_size).
+//
+// A 40 KB chunk fragments well past one window, so the chunk stream needs a
+// ladder orders of magnitude longer than a single datagram.
+const chunk_max_attempts: u32 = 4000;
+// One window's worth: a droppable package is superseded by the next value, so
+// retrying past the current window only delays fresher state.
+const droppable_max_attempts: u32 = 64;
+// Fifteen windows: enough for a must-deliver package to survive a burst of
+// loss without pinning a slot for the length of a chunk transfer.
+const must_deliver_max_attempts: u32 = 960;
+
+/// Reliable-window attempt cap for one send. Shared by net.zig and
+/// send_extra.zig so the two retry entry points cannot drift apart.
 pub fn maxAttemptsFor(pkg_name: []const u8, droppable: bool) u32 {
     if (std.mem.eql(u8, pkg_name, "NetPackageChunk")) return chunk_max_attempts;
     return if (droppable) droppable_max_attempts else must_deliver_max_attempts;
 }
-
-const chunk_max_attempts: u32 = 4000;
-const droppable_max_attempts: u32 = 64;
-const must_deliver_max_attempts: u32 = 960;
 
 test "the attempt ladder is one table for both send entry points" {
     try std.testing.expectEqual(chunk_max_attempts, maxAttemptsFor("NetPackageChunk", true));

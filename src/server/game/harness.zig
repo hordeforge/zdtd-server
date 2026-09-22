@@ -1,6 +1,5 @@
 //! In-process test and scenario helpers for joined clients, packet injection,
-//! replication, and direct world setup. Production networking does not use
-//! these shortcuts.
+//! and direct world setup. Production networking does not use these shortcuts.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -89,20 +88,4 @@ pub fn attachJoinedClientAs(self: *Game, capture: ?*@import("../../litenet/peer.
 pub fn injectFramed(self: *Game, c: *Client, framed: []const u8) !void {
     const peer = c.peer orelse return error.NoPeer;
     try self.onData(peer, framed);
-}
-
-pub fn replicateNow(self: *Game) !void {
-    try self.replicate();
-}
-
-pub fn handlePartyActions(self: *Game, c: *Client, body: []const u8) !void {
-    return @import("social.zig").handlePartyActions(self, c, body);
-}
-
-pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
-    return @import("social.zig").acceptQuestFor(self, c, def_id);
-}
-
-pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
-    return @import("social.zig").handleAllyRequest(self, c, body);
 }
