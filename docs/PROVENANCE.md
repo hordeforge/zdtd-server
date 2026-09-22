@@ -396,6 +396,7 @@ Coverage targets, all enforced by the scan:
 | `src/server/game/tests.zig` | R | Game integration tests: peerIpKey, player persist, claims, evidence, etc. Bodies are verbatim copies from src/server/game.zig (kept as integration tes |
 | `src/server/game/map.zig` | R | In-game minimap: MapChunks window send + per-chunk 256 RGB555 colors (CalcChunkColors -> Block.GetMapColor -> atlas color -> ToColor5; water = BlockLiquidv2.Color) and the 6 s PersistentPlayerPositions player-marker broadcast. RE: `../7dtd-engine-research/docs/world/texture-atlas.md`, `protocol-packages.md §3.3` + PersistentPlayerPositions |
 | `src/server/game/tests_players.zig` | R | Game integration tests (peer keys, player persistence ZPV). Split out of tests.zig verbatim |
+| `src/server/game/tests_claims.zig` | R | Game integration tests (land claims, block durability). Split out of tests.zig verbatim |
 | `src/server/game/tick.zig` | R | Tick orchestration - extracted from game.zig; helpers take *Game. Bodies are verbatim copies from src/server/game.zig (stock asm.il comments kept) |
 | `src/server/game/buff_events.zig` | R | Buff-event drivers (PlayerCtx gate assembly, triggered-row apply, AddBuff gate, fire* hit/kill/fall/jump/aim/crouch/respawn/reload/died/leave-game events). Split out of tick.zig, forwarded through game.zig |
 | `src/server/game/tick_equip.zig` | R | Tick equip sync (stage buffs, equip markers, mod rows). Split out of tick.zig verbatim |
