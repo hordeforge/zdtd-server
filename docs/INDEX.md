@@ -149,11 +149,11 @@ Where each kind of fact lives, and the gates that keep the pages honest.
 
 The prompts under `prompts/` are named `*-review.md` so the review-loop tool
 discovers them as project prompts. Findings from a run are snapshots, not a
-live inventory; the former `reviews/` directory was removed, and surviving
-snapshots live under [archive/](archive/) (e.g.
+live inventory. New snapshots go under [archive/](archive/) (e.g.
 [HARDCODE_AUDIT_2026-08-08.md](archive/HARDCODE_AUDIT_2026-08-08.md),
-[PLAYTEST_V310_20260803.md](archive/PLAYTEST_V310_20260803.md)). When a
-review contradicts [STATUS.md](STATUS.md), STATUS wins.
+[PLAYTEST_V310_20260803.md](archive/PLAYTEST_V310_20260803.md)); one earlier
+page still sits in `reviews/` and is linked below. When a review contradicts
+[STATUS.md](STATUS.md), STATUS wins.
 
 | Prompt | Findings |
 |---|---|

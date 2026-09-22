@@ -47,7 +47,7 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     awardXpTagged(self, slot, base, "");
 }
 
-/// Like `awardXp`, with the GetValue query tag set (stock XPTypes FastTags —
+/// Like `awardXp`, with the GetValue query tag set (stock XPTypes FastTags,
 /// harvest passes `"Harvesting"` so miner/motherlode rows can match).
 pub fn awardXpTagged(self: *Game, slot: usize, base: u64, tags: []const u8) void {
     const scaled = playerExpGainScale(self, slot, tags, base);
@@ -497,7 +497,7 @@ pub fn healthGainLossMult(self: *const Game, peer_slot: usize, comptime passive_
 
 /// Fold `GlobalGameStageModifier` / `GlobalLootStageModifier` onto base 1.0
 /// (stock EntityPlayer getters). Same perk/buff/held/equip layers as
-/// `playerExpGainScale`. Biome*StageModifier stays at 1 — biomes.xml terms
+/// `playerExpGainScale`. Biome*StageModifier stays at 1, biomes.xml terms
 /// already cover that path via `biomeStageMods`.
 fn stageGlobalModifier(self: *const Game, peer_slot: usize, passive_name: []const u8) f32 {
     const ps = self.sim.playerByPeer(peer_slot) orelse return 1.0;
@@ -507,7 +507,7 @@ fn stageGlobalModifier(self: *const Game, peer_slot: usize, passive_name: []cons
     const broken = holdingItemBrokenForPeer(self, ps);
     if (peer_slot < self.clients.len) {
         const c = &self.clients[peer_slot];
-        // ponytail: no cvars on *const Game; value_cvar Global* rows rare — add *Game overload if needed.
+        // ponytail: no cvars on *const Game; value_cvar Global* rows rare, add *Game overload if needed.
         const ctx: requirements.Ctx = .{
             .levels = c.skill_levels[0..c.skill_level_n],
             .player_level = c.level,
@@ -1100,7 +1100,7 @@ pub fn lootQtyScale(self: *Game, peer_slot: usize, ps: ecs.Slot, item_name: []co
     return @intCast(@min(@as(u32, @trunc(v)), std.math.maxInt(u16)));
 }
 
-/// Fold PlayerExpGain (87) onto an XP award — same layers as
+/// Fold PlayerExpGain (87) onto an XP award, same layers as
 /// `lootProbScale` (purchased perks/attrs, active buffs, held + equipped
 /// items), with `held_tags` filled so `HoldingItemHasTags` rows (miner69r)
 /// can pass. Kill XP folds with tags="Kill" (`AddKillXP` passes useBonus:
@@ -1162,7 +1162,7 @@ fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64
 }
 
 /// Worn armor groups and their lowest worn quality, into `out`. Local copy of
-/// tick.zig's helper — that one is file-private. Answers
+/// tick.zig's helper, that one is file-private. Answers
 /// `ArmorGroupLowestQuality`/`ArmorGroupCount` rows (rogue/scavenger set
 /// bonuses) in the loot folds below.
 fn armorGroupsForPeer(self: *const Game, ps: ecs.Slot, out: []requirements.ArmorGroup) []const requirements.ArmorGroup {
@@ -1198,7 +1198,7 @@ fn armorGroupsForPeer(self: *const Game, ps: ecs.Slot, out: []requirements.Armor
 }
 
 /// Held-item tags for requirement rows (`HoldingItemHasTags`). Local copy of
-/// tick.zig's helper — that one is file-private.
+/// tick.zig's helper, that one is file-private.
 fn heldItemTagsForPeer(self: *const Game, ps: ecs.Slot) []const u8 {
     if (!self.sim.mask[ps].inventory) return "";
     const inv = &self.sim.inventory[ps];

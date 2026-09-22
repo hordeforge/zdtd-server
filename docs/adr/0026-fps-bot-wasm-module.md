@@ -1,6 +1,6 @@
 # ADR 0026: FPS bots as a Wasm module: a host sense/act boundary, not a core bot brain
 
-- **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities  -
+- **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities:
   decisions 1 and 3 below are superseded by the host-side `BotManager` in
   `src/server/game/bot.zig`; the sense/command boundary, decisions 2 and 4,
   stand unchanged)

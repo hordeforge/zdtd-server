@@ -570,8 +570,9 @@ pub const Geometry = struct {
     /// RealEarth-style worlds set ~100.
     sea_level: f32 = 64,
     /// surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling).
-    /// 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a
-    /// taller wire profile (ADR geometry/wire-profiles) for headroom.
+    /// 1.0 = identity; < 1 compresses mountains into the column; > 1 clamps at
+    /// the ceiling, since zdtd emits only the stock 256-tall dialect
+    /// (ADR 0036 amendment 2026-09-20).
     height_scale: f32 = 1.0,
     /// Vertical shift applied after scaling (lift/lower the whole world).
     height_offset: f32 = 0.0,

@@ -446,7 +446,7 @@ Tracks Wire RE and World store should start day one; ECS inventory waits on pack
 | PackageIds list | Full 194 names vs subset | Subset + grow; missing names only when handling |
 | Currency | Coins vs duke item | Move to real item id in M9/M13 |
 | Thread pool | std.Thread.Pool vs custom | Custom fixed pool (Zig 0.16 API churn) |
-| Client target version | Pin **V3.1.0 b14** | Yes; documented in STATUS and RELEASES |
+| Client target version | Pin **V3.2.0 b10** | Yes; documented in STATUS and RELEASES |
 
 ---
 

@@ -11,7 +11,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 | Wire | [`../7dtd-engine-research/docs/network/protocol.md`](../7dtd-engine-research/docs/network/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
 | Gaps / tasks | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/WORK_PLAN.md`](docs/WORK_PLAN.md) |
-| Phases | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (M7+) |
+| Phases | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (M7-M16) |
 | Backlog | [`TODO.md`](TODO.md) |
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
@@ -50,7 +50,7 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 
 1. **Zig only** for server code. Wire facts from `../7dtd-engine-research/docs` + loadgen goldens.
 2. **No game DLL or bulk IL** in this repo.
-3. **Milestones** follow ZIG_CLONE then `IMPLEMENTATION_PLAN` (M7+); ranked next work is `WORK_PLAN`. Don't skip join/terrain/inv fidelity for AI/scale.
+3. **Milestones** follow ZIG_CLONE (M0-M6) then `IMPLEMENTATION_PLAN` (M7-M16); ranked next work is `WORK_PLAN`. Don't skip join/terrain/inv fidelity for AI/scale.
 4. **Package IDs dynamic.** Resolve via negotiated name→id map. Never treat numeric id as stable across versions (fixtures may pin maps for tests).
 5. **Validate with loadgen + stock client + zdtd apm.** Never require 7dtd-server-apm.
 6. **Instrument hot paths** (net, sim, interest, chunk stream) with `apm` as they land.
@@ -94,12 +94,15 @@ Keep quality gates intact: fix failing code, not assertions, thresholds, allowli
 zig build              # Debug → zig-out/bin/zdtd
 zig build test         # unit + scenario tests (must stay green)
 zig build run
-make lint              # fmt, shellcheck, ruff, architecture, docs, config keys, webui
-make check             # version/toolchain pin + lint + build + test + fuzz
+make lint              # fmt, shellcheck, ruff, architecture, cycles, wire, plugins, docs, config keys, webui, html
+make check             # release-check + lint + tools tests + provenance/catalogs/xml gates + build + test + fuzz
 make plugins           # rebuild the committed plugin .wasm from source (rule 31)
 make release           # ReleaseSafe + strip (operator binary)
 make clean             # zig-out + .zig-cache + .zdtd_cfg_cache
+make help              # full target list
 ```
+
+Gate list (what each proves, which target runs it): [`docs/AGENTS.md`](docs/AGENTS.md).
 
 ```bash
 # Flat default world
@@ -131,6 +134,8 @@ Join/spawn/chunk/inv changes: loadgen smoke **and** stock client (EAC off) when 
 ```text
 src/main.zig           CLI, DebugAllocator, construct Game, run loop
 src/protocol.zig       wire constants (challenge, tick rate; package ids in wire/)
+src/version.zig        product SemVer + the supported stock wire pin and its announce forms
+src/fuzz.zig           root of the `zig build fuzz` step
 src/server/game.zig    join SM; delegating façade - most paths in game/*, c2s/*
 src/server/game/*      per-domain Game helpers (e.g. net, tick, world, player, join, chunk_stream, trader) - each takes *Game
 src/server/c2s/*       C2S handlers by domain (join, move, blocks, inv, quest, misc); each exposes handle(*Game,*Client,*Peer,name,body) anyerror!bool, routed by dispatch.zig
@@ -145,7 +150,7 @@ src/plugin/*           Wasm plugin host, hook table, budgets (ADR 0020)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
 src/ecs/rules.zig      sim rule params, overlaid by preset packs (ADR 0021)
-src/server/webui/      webui markup, @embedFile'd (never Zig string literal); linted by scripts/lint-webui.sh (JS) + lint-html.sh (HTML/CSS)
+src/server/webui/      webui markup + Preact TS under ts/; pages are @embedFile'd (rule 12)
 plugins/               first-party core plugin Zig sources + committed .wasm (rule 31)
 mods/                  addon guests (Zig, C) and config-only mods; shared plugin_common.zig
 assets/fixtures/       offline XML and .wasm fixtures for tests
@@ -169,7 +174,7 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 - Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`, `litenet`, `wire`, `assets`, `ecs`, `world`, `plugin`, `server`) and `wire/packages.zig` for stock bodies. Leaf files stay importable. Avoid cycles; world must not import wire (TE domain types in world, wire re-exports).
 - `src/server/c2s/` and `src/server/game/` are subfolders of `server`; every file there is aggregated via `src/server/root.zig` (lint recurses one level, so new helpers must be added there or tests silently drop).
 - `pub` only for intended API. Helpers file-private by default.
-- Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make check`) fails on forbidden `@import`. Fix imports to respect the boundary; change the gate only for an explicitly requested architecture contract change, with rationale and regression coverage.
+- Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make lint`) fails on forbidden `@import`. Fix imports to respect the boundary; change the gate only for an explicitly requested architecture contract change, with rationale and regression coverage.
 
 ## Docs: PRD / RFC / ADR series
 

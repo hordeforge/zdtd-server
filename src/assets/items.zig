@@ -220,8 +220,8 @@ pub const ItemDef = struct {
     /// not place in stock).
     place_block_name: []const u8 = "",
     /// items.xml declares an Action1 (`<property class="Action1">`), the
-    /// secondary action. `IsSecondaryAttack` (IL=65) resolves to this — melee
-    /// weapons' heavy attack — not the current swing type.
+    /// secondary action. `IsSecondaryAttack` (IL=65) resolves to this, melee
+    /// weapons' heavy attack, not the current swing type.
     has_secondary: bool = false,
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,

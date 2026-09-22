@@ -147,7 +147,7 @@ pub const TriggeredAction = enum(u8) {
     modify_stats,
     add_buff,
     remove_buff,
-    /// `MinEventActionAddOrRemoveBuff`: the row gates decide — pass adds,
+    /// `MinEventActionAddOrRemoveBuff`: the row gates decide, pass adds,
     /// fail removes (weather/hazard toggles on `onSelfBuffUpdate`).
     add_or_remove_buff,
     /// `MinEventActionModifyCVar`: write one custom variable.

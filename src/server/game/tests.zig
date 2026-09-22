@@ -3801,7 +3801,7 @@ test "delayed kill stamina lands after 1s" {
 test "power-attack kill refunds stamina via IsSecondaryAttack" {
     // perkBatterUpComplete's club power-kill group gates on the book at 1 +
     // `ItemHasTags club` + `IsSecondaryAttack`: the held club declares Action1
-    // (the heavy attack), which IL=65 resolves to `Actions[1] != null` — a
+    // (the heavy attack), which IL=65 resolves to `Actions[1] != null`, a
     // weapon shape, not the swing type. Without the supplier the group
     // refused and a club kill scored no refund.
     const game_dir = stock_paths.dedicated_server;
@@ -4198,7 +4198,7 @@ test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
     g.fireItemUseBuffs(ps, beer.id);
     try std.testing.expect(g.sim.buffs[ps].find(beer_id) == null);
     try std.testing.expect(g.sim.buffs[ps].find(ext_id) != null);
-    // Second client, not on fire: the gates flip — beer grants, extinguish
+    // Second client, not on fire: the gates flip, beer grants, extinguish
     // refuses.
     var cap2: ln_peer.Capture = .{};
     const cl2 = try g.attachJoinedClient(&cap2);

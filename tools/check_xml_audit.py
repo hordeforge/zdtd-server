@@ -90,7 +90,7 @@ ALLOWLIST = {
     "dartTrap", "bladeTrap",
     # Forge smelt-completion sound gate (craft.zig onStationCraftDone):
     # the block name is a data-bound selection key resolved through the    # loaded blocks table (stock TileEntityForge plays the ding; other
-    # workstations are silent — RE tile-entities-power.md).
+    # workstations are silent, RE tile-entities-power.md).
     "forge",
     # Spectral Grace recharge buff (game.zig foreignResistHook +
     # c2s/misc.zig damage path): resolved through the loaded buff catalog

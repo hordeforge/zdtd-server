@@ -63,7 +63,7 @@ Each fact has exactly one home. Everywhere else, link to it.
 | `scripts/lint-html.sh` | webui HTML/CSS (vnu) | `make lint` |
 | `scripts/lint-plugins.sh` | committed plugin `.wasm` matches a fresh rebuild | `make lint` |
 | `scripts/lint-cycles.sh` | import cycles outside the `src/server/` delegation | `make lint` |
-| `scripts/lint-wire.sh` | wire heuristics (ripgrep; ast-grep has no Zig grammar) | `make lint` |
+| `scripts/lint-wire.sh` | wire, AI-attribution and em-dash heuristics (ripgrep) | `make lint` |
 | `tools/check_config_keys.py` | every bound `zdtd.toml` key is listed in `zdtd.toml.example` and [GAME_OPTIONS.md](GAME_OPTIONS.md) | `make lint` |
 | `tools/check_xml_audit.py` | [XML_DATA_AUDIT.md](XML_DATA_AUDIT.md) covers every stock `Data/Config/*.xml`; no stock-name literal outside the loaders | `make check` |
 | `python3 -m unittest discover -s tools` | the gate scripts' own unit tests | `make check` |

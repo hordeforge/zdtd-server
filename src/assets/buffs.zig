@@ -974,7 +974,7 @@ pub fn lootProbFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx
 
 /// Fold the `PlayerExpGain` rows (passive 87) onto a base XP award.
 /// Same GetValue op / tag / req filtering as `lootProbFold`, but `perc_add`/
-/// `perc_subtract` use stock's fraction form (`1 +/- v`) — PlayerExpGain rows
+/// `perc_subtract` use stock's fraction form (`1 +/- v`), PlayerExpGain rows
 /// ship as fractions (Harvesting `-.1..-.4`, Kill `.05`, medical `1`/`2`/`5`),
 /// not the LootProb percent scale.
 pub fn playerExpGainFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx, base: f32, counts: *requirements.Counts) f32 {

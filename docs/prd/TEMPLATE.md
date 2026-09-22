@@ -1,7 +1,7 @@
 # <Addon> - Product Requirements (PRD)
 
 **Number:** PRD NNNN
-**Status:** draft | in review | shipped
+**Status:** draft | in review | partial | shipped
 
 ## 1. Background and problem
 

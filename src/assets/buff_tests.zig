@@ -1167,7 +1167,7 @@ test "explicit level= curve pairs evaluate piecewise-linearly" {
 
 test "AddOrRemoveBuff toggles on its gates" {
     // Stock `MinEventActionAddOrRemoveBuff` (Execute IL=11): the row gates
-    // decide — pass adds, fail removes. Weather/hazard toggles ride
+    // decide, pass adds, fail removes. Weather/hazard toggles ride
     // `onSelfBuffUpdate` with a CVar threshold gate.
     const rows = [_]Triggered{
         .{ .trigger = .update, .action = .add_or_remove_buff, .buff = "buffHot", .reqs = &.{} },

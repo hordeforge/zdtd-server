@@ -19,7 +19,7 @@ Status is one of: **draft**, **in review**, **decided**, **withdrawn**,
 |---|---|---|
 | [0001](0001-fps-bot-spec.md) | FPS Bot technical specification | decided (shipped; implements PRD 0001) |
 | [0002](0002-mcp-server-design.md) | MCP server addon design | decided (implements PRD 0002) |
-| [0003](0003-modlets-plan.md) | Modlet compatibility implementation plan | decided (shipped, localization phase descoped; implements PRD 0003) |
+| [0003](0003-modlets-plan.md) | Modlet compatibility implementation plan | decided, partial and fail-closed (`conditional` op rejected as RE gap G5, localization descoped; implements PRD 0003) |
 | [0005](0005-mod-tiers-and-override.md) | Module tiers and mod override: manifest model, discovery, override claims | decided (implements PRD 0005; ADR 0032) |
 | [0006](0006-honk-doors.md) | Vehicle horn opens trader doors: door TE + honk signal design | draft (answers PRD 0006) |
 | [0007](0007-deco-suppression.md) | Decoration suppression: chunk-keyed footprint gate | decided (shipped 2026-09-12; answers PRD 0007) |

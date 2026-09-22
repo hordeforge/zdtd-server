@@ -1067,7 +1067,7 @@ pub fn heldWeaponIsRanged(self: *const Game, ps: ecs.Slot) bool {
 /// The eaten item's `onSelfPrimaryActionEnd` rows: consumable grants (beer /
 /// coffee / drug buffs, goldenrod dysentery cure, medical heal) land on the
 /// eater after a successful consume. The food/water/HP ModifyCVar pool rows
-/// are skipped — the eat path applies EatProps directly, so firing the pool
+/// are skipped, the eat path applies EatProps directly, so firing the pool
 /// writes here would double-restore. AddBuff/RemoveBuff/CallGameEvent apply.
 pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
     const peer_slot = self.sim.player[ps].peer_slot;
@@ -1088,7 +1088,7 @@ pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
     // it) and the food/water/HP pools (`$foodAmountAdd`, foodHealthAmount,
     // medicalRegHealthAmount) that buffProcessConsumables drains over time.
     // The eat path owns the pool effect through instant EatProps, so evaluate
-    // against a scratch copy and merge only the non-pool writes back — the
+    // against a scratch copy and merge only the non-pool writes back, the
     // duration cvars land and the pools stay absent, so a beer wears off and
     // food does not double-restore.
     var scratch = c.cvars;

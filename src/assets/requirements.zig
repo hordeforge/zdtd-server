@@ -99,34 +99,34 @@ pub const Kind = enum(u8) {
     /// target=other reads the damage path's other_distance. Null refuses.
     target_range,
     /// `IsLocalPlayer` IL=23: target is EntityPlayerLocal. Dedicated server
-    /// never hosts EntityPlayerLocal — always false when Ctx is filled.
+    /// never hosts EntityPlayerLocal, always false when Ctx is filled.
     /// Null Ctx refuses.
     is_local_player,
     /// `IsFPV` IL=34: EntityPlayerLocal.bFirstPersonView. Dedicated server
-    /// never hosts EntityPlayerLocal — always false when Ctx is filled
+    /// never hosts EntityPlayerLocal, always false when Ctx is filled
     /// (IL returns invert when target is not local). Null Ctx refuses.
     is_fpv,
     /// `IsSheltered` IL=24: EntityPlayerLocal.shelterPercent > 0. Dedicated
-    /// server never hosts EntityPlayerLocal — always false when Ctx is filled
+    /// server never hosts EntityPlayerLocal, always false when Ctx is filled
     /// (IL returns false when target is not local). Null Ctx refuses.
     is_sheltered,
     /// `IsSDCS` IL=27: target.emodel is EModelSDCS. Dedicated server never
-    /// hosts Unity EModel* — always false when Ctx is filled. Null Ctx refuses.
+    /// hosts Unity EModel*, always false when Ctx is filled. Null Ctx refuses.
     is_sdcs,
     /// `IsAlly` IL=36: EntityPlayer && IsFriendOfLocalPlayer() && not
-    /// EntityPlayerLocal. Dedicated server never hosts a local player — always
+    /// EntityPlayerLocal. Dedicated server never hosts a local player, always
     /// false when Ctx is filled. Null Ctx refuses.
     is_ally,
     /// `IsOnLadder` IL=19: despite the name, tests `target.IsInElevator()`.
-    /// No elevator flag tracked in sim — always false when Ctx is filled.
+    /// No elevator flag tracked in sim, always false when Ctx is filled.
     /// Null Ctx refuses.
     is_on_ladder,
     /// `HasAttachedPrefab` IL=53: finds `tempPrefab_` + prefabName under
-    /// Self.RootTransform (Unity). Dedicated server never hosts transforms —
+    /// Self.RootTransform (Unity). Dedicated server never hosts transforms,
     /// always false when Ctx is filled. Null Ctx refuses.
     has_attached_prefab,
     /// `HasParticle` IL=23: `params.Self.HasParticle(particleName)`. Dedicated
-    /// server never hosts Unity particle FX — always false when Ctx is filled.
+    /// server never hosts Unity particle FX, always false when Ctx is filled.
     /// Null Ctx refuses.
     has_particle,
     /// `IsLookingAtBlock` IL=8: after RequirementBase::IsValid, stock always
@@ -138,7 +138,7 @@ pub const Kind = enum(u8) {
     /// Ctx is filled. Null Ctx refuses.
     is_looking_at_entity,
     /// `IsIndoors` IL=25: `target.Stats.AmountEnclosed > 0`. Enclosure is not
-    /// tracked yet — AmountEnclosed stays 0 → always false when Ctx is filled.
+    /// tracked yet, AmountEnclosed stays 0 → always false when Ctx is filled.
     /// Null Ctx refuses. (# ponytail: enclosure model later if indoors passives matter)
     is_indoors,
     is_attached_to_entity,

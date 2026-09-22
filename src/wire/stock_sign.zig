@@ -12,7 +12,7 @@ pub const SignEntry = signs.SignEntry;
 /// Cap for the `data` blob of one response batch. Stock cuts at
 /// `cSignSyncBatchBytes` = 1 MiB; zdtd cuts at 48 KiB because batches build
 /// into the 512 KiB `body_buf` and the client reassembles by `isLastBatch`
-/// either way — more batches, same drawings.
+/// either way, more batches, same drawings.
 pub const max_batch_payload: usize = 48 * 1024;
 
 /// Encode SignData with its layer stack (research gameplay/signs.md §2:

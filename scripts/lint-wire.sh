@@ -48,6 +48,21 @@ else
   ok
 fi
 
+note "em dashes in sources (AGENTS.md rule 7)"
+# docs/archive/ is frozen (never current authority), so it is not rewritten.
+dash_hits="$(
+  rg_hits -n --glob '!research_inv/**' --glob '!.opencode/node_modules/**' --glob '!.zig-cache/**' --glob '!zig-out/**' \
+    --glob '!docs/archive/**' --glob '!scripts/lint-wire.sh' \
+    -e $'—' \
+    src docs AGENTS.md CHANGELOG.md CONTRIBUTING.md Makefile README.md TODO.md scripts tools
+)"
+if [[ -n "$dash_hits" ]]; then
+  printf '%s\n' "$dash_hits"
+  hit "replace em dashes with a comma, colon, period or parentheses (AGENTS.md rule 7)"
+else
+  ok
+fi
+
 note "numeric package id as framePackage 3rd arg (prefer name map / variable)"
 # Bare decimal package id in production framing. Allow the frame.zig unit test (99).
 frame_hits="$(
