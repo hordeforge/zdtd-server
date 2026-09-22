@@ -34,6 +34,7 @@ pub const loot_load = @import("loot_load.zig");
 pub const loot_tests = @import("loot_tests.zig");
 pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
+pub const gamestage_tests = @import("gamestage_tests.zig");
 pub const maxdamage = @import("maxdamage.zig");
 pub const noise = @import("noise.zig");
 pub const traders = @import("traders.zig");
@@ -94,6 +95,7 @@ test {
     _ = loot_tests;
     _ = entitygroups;
     _ = gamestages;
+    _ = gamestage_tests;
     _ = maxdamage;
     _ = noise;
     _ = traders;
