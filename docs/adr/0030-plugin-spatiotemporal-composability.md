@@ -59,7 +59,7 @@ safe runtime components:
    queued during shutdown cannot outlive the disposed instance.
 3. **Declarative dependencies.** Modules export `_zdtd_requires` returning a
    comma-separated capability list (hook names + `host_verbs`: `log`/`tick`/
-   `queue`/`sense`/`query`/`json_*`). Unknown or un-exported capabilities
+   `queue`/`sense`/`query`/`config`/`json_*`). Unknown or un-exported capabilities
    reject the module at load with a loud error (fail-closed); the vocabulary
    stays in sync with `Hook.names` and the host import table.
    Amended 2026-09-12 (claim liveness; review `docs/reviews/PLUGIN_COMPOSABILITY.md`
