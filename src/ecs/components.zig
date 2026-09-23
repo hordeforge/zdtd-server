@@ -115,6 +115,24 @@ pub const ClassId = struct {
     /// reaches EAILeap's 2.8 m lower bound). Set by applyEntityClassStats /
     /// the kind-default spawn.
     jump_max: f32 = 2.0,
+    /// EAIRangedAttackTarget SetData params resolved per spawn (stock
+    /// ctor/Init defaults; source: assets/entities.zig EntityDef, which
+    /// parses the class AITask entry).
+    ranged_cooldown_s: f32 = 3,
+    ranged_duration_s: f32 = 20,
+    ranged_release_delay_s: f32 = 0.5,
+    ranged_min_dist: f32 = 4,
+    ranged_max_dist: f32 = 25,
+    ranged_unreachable_dist: f32 = 0,
+    ranged_start_anim: i32 = -1,
+    /// The held item's Vomit action + its ammo's Projectile flight, resolved
+    /// at class build (Game.spitConfigFor over items.xml). -1 / 0 = no vomit
+    /// config: EAIRangedAttackTarget refuses to fire for this class.
+    vomit_anim_type: i32 = -1,
+    projectile_speed: f32 = 0,
+    projectile_fly_time: f32 = 0,
+    projectile_radius: f32 = 0,
+    projectile_damage: f32 = 0,
     attack_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
     /// class; 0 = class_table[id] then no resist. Applied only at the
@@ -240,6 +258,13 @@ pub const TaskId = enum(u8) {
     /// the existing task bits keep their values; selection order comes from
     /// the zombie_tasks table, not from this enum.
     leap,
+    /// EAIRangedAttackTarget (full-v3.2.0 EAIRangedAttackTarget.il.txt;
+    /// MutexBits 0b1011): the acid spit. Listed before ApproachAndAttackTarget
+    /// in every spitter class (BreakBlock|ApproachDistraction|
+    /// RangedAttackTarget|ApproachAndAttackTarget|...). Appended last so the
+    /// existing task bits keep their values; selection order comes from the
+    /// zombie_tasks table, not from this enum.
+    ranged_attack_target,
 };
 
 /// entityclasses.xml parsed a task list (pipe `AITask` or numbered `AITask-N`).
@@ -270,6 +295,24 @@ pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
 /// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay); the
 /// knockback impulse (rules.combat.knockback_speed / knockback_seconds) also
 /// lives on the rules surface.
+/// One in-flight vomit projectile. Stock's shot is a client GameObject with a
+/// ProjectileMoveScript, never a replicated entity (entity-ai.md 2026-09-22
+/// delivery contract), so zdtd keeps it as per-shooter sim state that
+/// advanceSpit steps outside any AI task.
+pub const SpitFlight = struct {
+    active: bool = false,
+    t: f32 = 0,
+    age: f32 = 0,
+    straight_s: f32 = 0,
+    ox: f32 = 0,
+    oy: f32 = 0,
+    oz: f32 = 0,
+    dx: f32 = 0,
+    dy: f32 = 0,
+    dz: f32 = 0,
+    target_net: i32 = -1,
+};
+
 pub const ZombieAi = struct {
     state: AiState = .idle,
     target_id: i32 = -1,
@@ -281,12 +324,33 @@ pub const ZombieAi = struct {
     /// Winning task from the last selection pass (EAITaskList executing set).
     active_task: TaskId = .none,
     attack_cd: f32 = 0,
-    /// The last landed strike fired stock's StartAnimationAttack params
-    /// (AvatarZombieController, entity-ai.md 2026-09-22): replicate drains
-    /// this edge into one NetPackageEntityAnimationData and clears it, so a
-    /// strike with no observers still consumes the edge instead of leaking
-    /// into a later viewer's session.
-    strike_anim: bool = false,
+    /// The landed strike (or a vomit telegraph/burst) wants one stock
+    /// NetPackageEntityAnimationData flush: the Attack int value, or -1 for
+    /// none. Melee sends 0 (StartAnimationAttack, blend+trigger), the ranged
+    /// task sends 3000 + X (AvatarZombieController.StartAction >= 3000,
+    /// int+trigger only; entity-ai.md 2026-09-22). Replicate drains it.
+    pending_anim_action: i32 = -1,
+    /// EAIRangedAttackTarget task state: when the next shot may be attempted
+    /// (stock re-arms `cooldown` in Reset as base + 0..0.5x base jitter, so
+    /// the ready gate carries that roll), when the aim phase began, the tick
+    /// the shot leaves at (aim half + releaseDelay + the vomit warning
+    /// window, or just the warning window when the class has no task-level
+    /// telegraph anim), and the release/fire milestones.
+    ranged_ready_tick: u64 = 0,
+    ranged_start_tick: u64 = 0,
+    ranged_fire_tick: u64 = 0,
+    /// Live sequence latch: the selection pass re-runs Start on every re-eval,
+    /// so Start must not re-arm elapsed/telegraph/fire mid-sequence; Reset
+    /// clears it (leap gets the same idempotence from its accumulator
+    /// condition).
+    ranged_running: bool = false,
+    ranged_released: bool = false,
+    ranged_fired: bool = false,
+    /// One vomit projectile in flight (the SpitFlight doc): straight from the
+    /// mouth toward the target chest at ammo speed for FlyTime, then gravity;
+    /// one per shooter (ammo BurstRoundCount/MagazineSize 1, cooldown 3 s >
+    /// flight 2 s).
+    spit: SpitFlight = .{},
     wander_tx: f32 = 0,
     wander_tz: f32 = 0,
     /// Director/AI Investigate-style spot (EAIApproachSpot). Cleared on arrive.

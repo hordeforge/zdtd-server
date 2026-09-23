@@ -44,13 +44,13 @@ const rng_util = @import("../util/rng.zig");
 // coarse ZombieAi.state enum so downstream replication (game.zig EntitySpeeds/
 // AliveFlags, block-damage, despawn) keeps working unchanged.
 //
-// Ten real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
+// Eleven real tasks: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
 // ApproachDistraction, Territorial, ApproachSpot, Look, Wander, Leap (the EAILeap
-// pounce, 2026-09-22: zombieSpider/animalMountainLion, XML-list gated). The one
-// remaining stock entry with native consumers and no task is RangedAttackTarget
-// on the five acid-spitter zombies (measured 2026-09-22;
-// ../7dtd-engine-research/docs/entities/entity-ai.md carries the census and the
-// closed delivery contract); Dodge is client-animator only and unreferenced by stock XML.
+// pounce, 2026-09-22: zombieSpider/animalMountainLion), and RangedAttackTarget
+// (the acid spit, 2026-09-22: the five spitter classes, vomit config from
+// items.xml). Every task name stock assigns to a class now maps; the census
+// lives in ../7dtd-engine-research/docs/entities/entity-ai.md. Dodge is
+// client-animator only and unreferenced by stock XML.
 // BreakBlock/DestroyArea use mutex 0 so isBestTask allows them while Approach
 // executes when path_blocked; movement tasks still share bit 0. Collapsing
 // executingTasks to one TaskId stays exact for this set.
@@ -79,6 +79,15 @@ const zombie_tasks = [_]Task{
     // reason approach_attack's does: a continuous priority-1 task lets the
     // wander fallback steal the walk through isBestTask's continuous yield.
     .{ .id = .leap, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
+    // EAIRangedAttackTarget (full-v3.2.0 EAIRangedAttackTarget.il.txt Init:
+    // MutexBits 0b1011, cooldown 3 s / attackDuration 20 s defaults that the
+    // class AITask entry overrides; EAIBase executeDelay 0.5, IsContinuous
+    // default true, unread at priority 1). Before ApproachAndAttackTarget the
+    // way every spitter class lists it (BreakBlock|ApproachDistraction|
+    // RangedAttackTarget|ApproachAndAttackTarget|...), so the scan reaches the
+    // spit first when the target sits in the range window; the 0b1011 mutex
+    // shares only with the block-chew tasks, exactly like stock's bits.
+    .{ .id = .ranged_attack_target, .priority = 1, .mutex = 0b1011, .execute_delay = 0.5, .continuous = true },
     .{ .id = .approach_attack, .priority = 1, .mutex = 0b11, .execute_delay = 0.1, .continuous = false },
     // EAIApproachDistraction (asm.il:423700): MutexBits=3, no Init override so
     // executeDelay/continuous are the EAIBase defaults (0.5 / true). Priority 1
@@ -492,7 +501,7 @@ const AiCtx = struct {
                     ai.decision_cd = t.execute_delay * ctx.w.rules.ai.execute_delay_scale;
                     // EAIBase::Reset fires on this exact path (asm.il:437713,
                     // IL_006F): a finished Wander / ApproachSpot seeds lookTime.
-                    resetTask(ctx.w, ai.active_task, ai, ctx.w.network_id[s].id);
+                    resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
                     ai.active_task = .none;
                 }
             }
@@ -516,7 +525,7 @@ const AiCtx = struct {
                 // Preemption: stock removes the loser from executingTasks via the
                 // same Reset path, so a Wander cut short by Approach still seeds
                 // the look-around that plays once the chase ends.
-                if (chosen != ai.active_task) resetTask(ctx.w, ai.active_task, ai, ctx.w.network_id[s].id);
+                if (chosen != ai.active_task) resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
                 ai.active_task = chosen;
                 ai.decision_cd = (taskById(chosen) orelse zombie_tasks[0]).execute_delay * ctx.w.rules.ai.execute_delay_scale;
                 startTask(chosen, ctx.w, s, ai);
@@ -529,6 +538,7 @@ const AiCtx = struct {
                 .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
                 .runaway => runawayUpdate(ctx.w, ctx.pos, s, ai, cspd, ctx.dt),
                 .leap => leapUpdate(ctx.w, s, ai, np, ctx.dt),
+                .ranged_attack_target => rangedUpdate(ctx.w, s, ai, np, ctx.dt),
                 .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
                 .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
                 .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
@@ -583,6 +593,138 @@ pub fn senseDistSq(w: *const World, s: Slot) f32 {
     return w.rules.ai.sense_dist_sq;
 }
 
+/// The vomit telegraph window: ItemActionVomit.ReadFrom sets
+/// `warningDelay = 1.2` before parsing (ldc.r4 1.2 at IL_0019) and none of
+/// the five stock spitter items override it with WarningDelay, so the server
+/// waits one fixed window before the burst (stock randomizes the warning
+/// count inside it; zdtd fires after the single window - recorded).
+const vomit_warning_s: f32 = 1.2;
+
+/// EAIRangedAttackTarget::CanExecute (IL=69-107): not dancing (AI never
+/// dances in zdtd); a live sensed target (`np` refresh carries the CanSee
+/// stealth/sense result stock tests here); not already leaping, jumping or
+/// spitting; InRange = 3D distance inside the class AITask window
+/// [minRange, maxRange] (ctor defaults 4..25; the unreachableRange arm needs
+/// moveHelper unreachable flags zdtd does not model, so it stays out -
+/// recorded). Stock's cooldown drain (IL=02A mutates cooldown inside
+/// CanExecute) becomes the absolute ready-tick gate so the gate stays
+/// read-only like the others, and the missing-limb leg has no per-limb body
+/// damage to read (open, recorded). Fail closed without a vomit config: the
+/// task must not aim at a shot it cannot fire.
+fn rangedAttackCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np: TargetSnap, sense_d2: f32) bool {
+    if (w.class_id[s].ai_tasks == 0) return false;
+    if (w.class_id[s].vomit_anim_type < 0) return false;
+    if (w.sim_tick < ai.ranged_ready_tick) return false;
+    if (ai.leaping or ai.jumping or ai.spit.active or ai.vy != 0) return false;
+    if (!(np.id >= 0 and np.d2 < sense_d2)) return false;
+    const ct = &w.class_id[s];
+    const min2 = ct.ranged_min_dist * ct.ranged_min_dist;
+    const max2 = ct.ranged_max_dist * ct.ranged_max_dist;
+    return np.d2 >= min2 and np.d2 <= max2;
+}
+
+/// EAIRangedAttackTarget::Continue (IL=205): a living target (stock keeps its
+/// cached entityTarget without re-checking the range, so a target that steps
+/// out of the window mid-aim is still shot at; zdtd requires it to stay
+/// sensed, a recorded conservative difference), elapsed < attackDuration, no
+/// stun/electrocute (n/a), limbs (n/a) and no pain spike (no pain accumulator
+/// in zdtd - recorded). Update sets elapsed to +inf once the vomit action
+/// goes idle (IL=012F), i.e. right after the single shot: `ranged_fired` is
+/// that condition.
+fn rangedContinue(w: *const World, s: Slot, ai: *const c.ZombieAi, np: TargetSnap, sense_d2: f32) bool {
+    if (ai.ranged_fired) return false;
+    const elapsed = @as(f32, @floatFromInt(w.sim_tick -% ai.ranged_start_tick)) / 20.0;
+    if (elapsed >= w.class_id[s].ranged_duration_s) return false;
+    if (!((np.id >= 0 and np.d2 < sense_d2) or (ai.alert and ai.target_id >= 0 and targetLive(w, ai.target_id)))) return false;
+    return true;
+}
+
+/// Spawn the vomit projectile (ItemActionVomit.ItemActionEffects ->
+/// instantiateProjectile + ProjectileMoveScript.Fire, entity-ai.md delivery
+/// contract step 2: mouth origin, aimed at the target chest by
+/// GetActionEffectsValues when it is in front, IL=99). Stock's shot is a
+/// client GameObject, never a replicated entity, so this is server-only sim
+/// state; every client spawns its own visual from the replicated anim action.
+fn fireVomit(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, ct: *const c.ClassId) void {
+    const t = &w.transform[s];
+    const tgt = w.transform[np.slot];
+    const ox = t.x;
+    const oy = t.y + 1.5;
+    const oz = t.z;
+    const dx = tgt.x - ox;
+    const dy = (tgt.y + 1.0) - oy;
+    const dz = tgt.z - oz;
+    const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist < 0.001) return;
+    ai.spit = .{
+        .active = true,
+        .t = 0,
+        .age = 0,
+        .straight_s = ct.projectile_fly_time,
+        .ox = ox,
+        .oy = oy,
+        .oz = oz,
+        .dx = dx / dist,
+        .dy = dy / dist,
+        .dz = dz / dist,
+        .target_net = w.network_id[np.slot].id,
+    };
+}
+
+/// One frame of the vomit projectile (stock ProjectileMoveScript.FixedUpdate,
+/// RE items.md section 4): straight at ammo speed for FlyTime seconds, gravity
+/// after (stock vomit FlyTime is positive, so the ballistic Fire branch is
+/// unused), retiring on the target body, a solid cell, or the ground. A hit
+/// feeds the same deferred accumulator the melee choke uses, so the victim
+/// folds (armor/GDR) and the attacker's held-item rows (infection counter,
+/// abrasion) run through applyDeferredDamage exactly like a landed punch.
+/// Stock also applies the ammo's DamageBlock (120) to a block and has a 4 s
+/// LifeTime; zdtd cancels on the first solid cell instead (recorded: no acid
+/// block damage, no lingering pool) and gravity terminates a miss.
+fn advanceSpit(w: *World, s: Slot, dt: f32, dmg_fp: []u32, dmg_attacker: []u16, hits: *std.atomic.Value(u32)) void {
+    if (!w.mask[s].zombie_ai) return;
+    const ai = &w.zombie_ai[s];
+    if (!ai.spit.active) return;
+    const sp = &ai.spit;
+    sp.t += dt;
+    sp.age += dt;
+    const ct = &w.class_id[s];
+    const speed = ct.projectile_speed;
+    const straight = @min(sp.t, sp.straight_s);
+    const px = sp.ox + sp.dx * speed * straight;
+    const pz = sp.oz + sp.dz * speed * straight;
+    var py = sp.oy + sp.dy * speed * straight;
+    if (sp.t > sp.straight_s) {
+        const g = sp.t - sp.straight_s;
+        py += (sp.dy * speed) * g + 0.5 * w.rules.ai.gravity * g * g;
+    }
+    // Target-body hit: the shot was aimed at the chest, so entering the
+    // cylinder around the (live) target lands it; a strafed target misses and
+    // the shot keeps flying until gravity grounds it. Approximates stock's
+    // capsule ray with radius + 0.4 horizontal and feet..head vertically.
+    if (w.slotOfNetId(sp.target_net)) |ts| {
+        if (w.alive[ts] and w.mask[ts].transform and w.mask[ts].health) {
+            const tg = &w.transform[ts];
+            const hx = px - tg.x;
+            const hz = pz - tg.z;
+            const rad = ct.projectile_radius + 0.4;
+            if (hx * hx + hz * hz <= rad * rad and py >= tg.y and py <= tg.y + 1.9) {
+                const add: u32 = @trunc(ct.projectile_damage * @as(f32, @floatFromInt(dmg_scale)));
+                _ = @atomicRmw(u32, &dmg_fp[ts], .Add, add, .monotonic);
+                @atomicStore(u16, &dmg_attacker[ts], s, .monotonic);
+                _ = hits.fetchAdd(1, .monotonic);
+                sp.active = false;
+                return;
+            }
+        }
+    }
+    if (w.solid_fn) |solid| {
+        if (solid(w.solid_ctx, @floor(px), @floor(py), @floor(pz))) {
+            sp.active = false;
+        }
+    }
+}
+
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: TargetSnap) bool {
     if (!c.aiTaskAllowed(w.class_id[s].ai_tasks, id)) return false;
@@ -595,6 +737,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2, sense_d2),
         .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2, sense_d2),
         .leap => leapCanExecute(w, s, ai, np, sense_d2),
+        .ranged_attack_target => rangedAttackCanExecute(w, s, ai, np, sense_d2),
         .approach_spot => approachSpotCanExecute(ai),
         .look => lookCanExecute(ai),
         .wander => wanderCanExecute(w, ai, np.id, np.d2, sense_d2),
@@ -611,6 +754,7 @@ fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np
         .wander => wanderContinue(w, s, ai, np.id, np.d2, senseDistSq(w, s)),
         .look => lookContinue(ai),
         .leap => leapContinue(ai),
+        .ranged_attack_target => rangedContinue(w, s, ai, np, senseDistSq(w, s)),
         // EAIApproachDistraction overrides Continue to read `distraction`
         // (Start moved pending there), not the pending slot.
         .approach_distraction => approachDistractionContinue(w, s, ai),
@@ -623,7 +767,7 @@ fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np
 /// four sites in the whole assembly write EAIManager::lookTime; two of them are
 /// the Reset hooks below, and they are what produce the wander/look-around
 /// cycle. Every other task inherits the empty EAIBase::Reset.
-fn resetTask(w: *const World, id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void {
+fn resetTask(w: *const World, s: Slot, id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void {
     const ai_rules = w.rules.ai;
     switch (id) {
         .wander => {
@@ -637,6 +781,17 @@ fn resetTask(w: *const World, id: c.TaskId, ai: *c.ZombieAi, rng_seed: i32) void
             ai.leaping = false;
             ai.leap_time = 0;
             ai.leap_t = 0;
+        },
+        // EAIRangedAttackTarget::Reset (IL=41): stock re-arms
+        // cooldown = base + 0..0.5 x base jitter on every stop (shot done or
+        // aborted); zdtd stores the absolute ready tick so the CanExecute
+        // gate stays read-only, and clears the sequence milestones.
+        .ranged_attack_target => {
+            const cd = w.class_id[s].ranged_cooldown_s;
+            ai.ranged_ready_tick = w.sim_tick + @as(u64, @intFromFloat(cd * 20.0 * (1.0 + 0.5 * rngFrac(ai, rng_seed))));
+            ai.ranged_running = false;
+            ai.ranged_released = false;
+            ai.ranged_fired = false;
         },
         // EAIApproachSpot::Reset (asm.il:424395): lookTime = 5 + rand*3.
         .approach_spot => ai.look_time = ai_rules.spot_look_base_s + rngFrac(ai, rng_seed) * ai_rules.spot_look_rand_s,
@@ -912,6 +1067,34 @@ fn startTask(id: c.TaskId, w: *World, s: Slot, ai: *c.ZombieAi) void {
         .leap => {
             if (!ai.leaping and ai.leap_time <= 0) ai.leap_time = w.rules.ai.leap_abort_s;
         },
+        // EAIRangedAttackTarget::Start (IL=46): elapsed resets and, when the
+        // class carries a task-level telegraph (startAnimType >= 0, chuck),
+        // the first anim action goes out immediately (3000 + startAnimType).
+        // The shot leaves at aim-half + releaseDelay + the vomit warning
+        // window for those classes; a class without the task anim (cop,
+        // rancher, mutated: startAnimType -1) runs the vomit's own warning
+        // window from tick 0, because Update calls UseHoldingItem
+        // unconditionally (IL=0109).
+        //
+        // The selection pass re-runs Start on every re-eval (startTask's
+        // contract, how wander keeps drifting), so the sequence latches:
+        // re-Start on a live sequence would reset elapsed forever and the
+        // shot could never leave (leap's accumulator condition gives it the
+        // same idempotence).
+        .ranged_attack_target => {
+            if (ai.ranged_running) return;
+            ai.ranged_running = true;
+            ai.ranged_start_tick = w.sim_tick;
+            ai.ranged_released = false;
+            ai.ranged_fired = false;
+            const rct = &w.class_id[s];
+            const delay_s: f32 = if (rct.ranged_start_anim >= 0)
+                0.5 * rct.ranged_duration_s + rct.ranged_release_delay_s + vomit_warning_s
+            else
+                vomit_warning_s;
+            ai.ranged_fire_tick = w.sim_tick + @as(u64, @intFromFloat(delay_s * 20.0));
+            if (rct.ranged_start_anim >= 0) ai.pending_anim_action = 3000 + rct.ranged_start_anim;
+        },
         // EAIApproachDistraction::Start (asm.il:423700): SetAttackTarget(null),
         // IsEating=false, distraction = pendingDistraction, pendingDistraction
         // = null, then updatePath(). zdtd re-runs Start on every decision
@@ -991,8 +1174,9 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
             // landed strike; replicate flushes it as NetPackageEntityAnimationData
             // (entity-ai.md 2026-09-22). Zombie avatars only: the animal
             // controller's attack params are not RE'd, so a biting wolf keeps
-            // its current client-local animation.
-            if (ctx.w.kind[s] == .zombie) ai.strike_anim = true;
+            // its current client-local animation. 0 = the melee variant
+            // (StartAnimationAttack writes Attack int + blend + trigger).
+            if (ctx.w.kind[s] == .zombie) ai.pending_anim_action = 0;
             ctx.w.flags[s].bits |= c.flag_approaching_enemy;
             // Combat noise (stock NotifyNoise): the landed hit alerts zombies
             // and wakes sleepers within radius (group-AI PARTIAL).
@@ -1183,6 +1367,41 @@ fn leapUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) void
     ai.leaping = true;
 }
 
+/// EAIRangedAttackTarget::Update (IL=107-013A) as a task-local sequence:
+/// chase-stance + SeekYawToPos(target, 30) through the first half of
+/// attackDuration, the release anim once past it (state 0/1 wait on the
+/// server avatar's action phase, which zdtd does not run - approximated by
+/// the aim half), then the shot at the computed fire tick (releaseDelay +
+/// ItemActionVomit's 1.2 s warning window on top, or just the warning for a
+/// class without a task anim). Firing emits the burst anim action and spawns
+/// the projectile; `ranged_fired` ends the sequence the way stock's
+/// `elapsedTime = +inf` does when the vomit action goes idle (IL=012F).
+fn rangedUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) void {
+    if (np.id < 0) return; // Continue fails next pass and the task stops
+    const ct = &w.class_id[s];
+    const t = &w.transform[s];
+    ai.state = .chase;
+    ai.alert = true;
+    ai.target_id = np.id;
+    const elapsed = @as(f32, @floatFromInt(w.sim_tick -% ai.ranged_start_tick)) / 20.0;
+    if (elapsed < 0.5 * ct.ranged_duration_s) {
+        const want_yaw = std.math.atan2(np.px - t.x, np.pz - t.z) * (180.0 / std.math.pi);
+        // SeekYawToPos(..., 30): 30 degrees per AI tick = 600/s.
+        t.yaw = seekYawStep(t.yaw, want_yaw, 600, 60, 60, dt);
+    }
+    if (ct.ranged_start_anim >= 0 and !ai.ranged_released and elapsed >= 0.5 * ct.ranged_duration_s) {
+        ai.ranged_released = true;
+        // ContinueAnimAction(startAnimType + 1 + 3000), Update IL=00A4.
+        ai.pending_anim_action = 3000 + ct.ranged_start_anim + 1;
+    }
+    if (ai.ranged_fired or w.sim_tick < ai.ranged_fire_tick) return;
+    // The burst anim (StartAnimAction(3000 + X), ItemActionVomit IL=00D6)
+    // then the shot; replicate drains the edge on this or the next tick.
+    ai.pending_anim_action = 3000 + ct.vomit_anim_type;
+    fireVomit(w, s, ai, np, ct);
+    ai.ranged_fired = true;
+}
+
 /// EAIApproachSpot::Update: path/step toward director spot; clear has_spot on arrive.
 fn approachSpotUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) void {
     if (!ai.has_spot) {
@@ -1367,6 +1586,11 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     var dmg_attacker: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
+    // The vomit projectile is per-shooter sim state (stock's is a client
+    // GameObject, never a replicated entity): step it serially before the
+    // parallel AI phase so an impact lands in the same deferred accumulator
+    // the melee choke fills and applyDeferredDamage folds both once.
+    for (ai_slots[0..ai_n]) |sl| advanceSpit(w, sl, dt, dmg_fp[0..], dmg_attacker[0..], &hits_a);
     // Positions as of the phase start. Workers write only their own slots, so
     // any cross-slot position read has to come from this copy.
     const pos_snap: [max_entities]c.Transform = w.transform;
@@ -2719,5 +2943,103 @@ test "leap refuses a walled corridor and an out-of-window leapV.y" {
             try std.testing.expect(w2.zombie_ai[s2].active_task != .leap);
             try std.testing.expect(!w2.zombie_ai[s2].leaping);
         }
+    }
+}
+
+/// Fill a spawn's ClassId with the spitter list bit and a resolved vomit
+/// config, the way entityClassOf + spitConfigFor do for the real classes.
+fn seedSpitter(w: *World, zs: Slot) void {
+    w.class_id[zs].ai_tasks = c.ai_task_list_set | c.aiTaskBit(.ranged_attack_target);
+    w.class_id[zs].vomit_anim_type = 0;
+    w.class_id[zs].projectile_speed = 18;
+    w.class_id[zs].projectile_fly_time = 2;
+    w.class_id[zs].projectile_radius = 0.24;
+    w.class_id[zs].projectile_damage = 10;
+    w.class_id[zs].ranged_min_dist = 4;
+    w.class_id[zs].ranged_max_dist = 25;
+    w.class_id[zs].ranged_duration_s = 4.0; // covers half + release + warning (3.7 s)
+    w.class_id[zs].ranged_start_anim = 0; // exercise the task telegraph path
+}
+
+test "system zombie spits at a target in its range window and the shot lands" {
+    // EAIRangedAttackTarget sequence: aim half -> release anim (3000 + 1 for
+    // startAnimType 0) -> releaseDelay + the 1.2 s vomit warning -> burst anim
+    // (3000 + item AnimType 0) + the projectile, which flies 18 m/s to the
+    // chest and lands its damage through the same deferred accumulator the
+    // melee choke uses.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const pid = w.spawnPlayer(5, 70, 0, 0).?;
+    const ps = w.slotOfNetId(pid).?;
+    seedSpitter(&w, zs);
+    w.transform[zs].yaw = 90; // face +x: no wasted seek time
+
+    // Phase 1: the release anim goes out past the aim half, before the shot.
+    var t: f32 = 0;
+    while (t < 5 and !w.zombie_ai[zs].ranged_released) : (t += 0.05) {
+        w.beginTick(); // the sequence advances on sim_tick, one tick per step
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[zs].ranged_released);
+    try std.testing.expectEqual(@as(i32, 3001), w.zombie_ai[zs].pending_anim_action);
+
+    // Phase 2: fire at aim half + releaseDelay (0.5) + vomit warning (1.2).
+    while (t < 10 and !w.zombie_ai[zs].spit.active) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[zs].spit.active);
+    try std.testing.expectEqual(@as(i32, 3000), w.zombie_ai[zs].pending_anim_action);
+    const hp_before = w.health[ps].hp;
+
+    // Phase 3: the flight steps serially inside systemZombieAi; 5 m at 18 m/s
+    // is under a third of a second, and the impact folds through
+    // applyDeferredDamage in the same call.
+    while (t < 12 and w.zombie_ai[zs].spit.active) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(!w.zombie_ai[zs].spit.active);
+    try std.testing.expect(w.health[ps].hp < hp_before);
+
+    // Phase 4: the reset re-armed stock's cooldown (base 3 s + 0..0.5 jitter),
+    // so no second telegraph leaves inside that window.
+    var t2: f32 = 0;
+    while (t2 < 2.0) : (t2 += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(!w.zombie_ai[zs].ranged_released);
+        try std.testing.expect(!w.zombie_ai[zs].spit.active);
+    }
+}
+
+test "ranged attack refuses without a vomit config and outside the range window" {
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const pid = w.spawnPlayer(2, 70, 0, 0).?; // sensed, but under minRange 4
+    const ps = w.slotOfNetId(pid).?;
+    seedSpitter(&w, zs);
+    var t: f32 = 0;
+    while (t < 2.0) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(!w.zombie_ai[zs].ranged_released);
+        try std.testing.expect(!w.zombie_ai[zs].spit.active);
+    }
+    // In the window now (the melee-stopped zombie sits ~1.6 m out, so 8 m is
+    // comfortably inside [4, 25] at t0), but the class resolves no vomit
+    // action: fail closed instead of aiming at a shot it cannot fire.
+    w.class_id[zs].vomit_anim_type = -1;
+    w.transform[ps].x = 8;
+    t = 0;
+    while (t < 2.0) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+        try std.testing.expect(!w.zombie_ai[zs].ranged_released);
+        try std.testing.expect(!w.zombie_ai[zs].spit.active);
     }
 }

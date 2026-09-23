@@ -392,6 +392,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
 }
 
 pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.EntityClass {
+    const spit = self.spitConfigFor(d.hand_item);
     return .{
         .name = d.name,
         .max_hp = d.max_hp,
@@ -407,6 +408,18 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .move_speed_rand_max = d.move_speed_rand_max,
         .jump_max_min = d.jump_max_min,
         .jump_max_max = d.jump_max_max,
+        .ranged_cooldown_s = d.ranged_cooldown_s,
+        .ranged_duration_s = d.ranged_duration_s,
+        .ranged_release_delay_s = d.ranged_release_delay_s,
+        .ranged_min_dist = d.ranged_min_dist,
+        .ranged_max_dist = d.ranged_max_dist,
+        .ranged_unreachable_dist = d.ranged_unreachable_dist,
+        .ranged_start_anim = d.ranged_start_anim,
+        .vomit_anim_type = if (spit) |sc| sc.anim_type else -1,
+        .projectile_speed = if (spit) |sc| sc.speed else 0,
+        .projectile_fly_time = if (spit) |sc| sc.fly_time else 0,
+        .projectile_radius = if (spit) |sc| sc.radius else 0,
+        .projectile_damage = if (spit) |sc| sc.damage else 0,
         .attack_damage = self.handItemDamage(d.hand_item),
         .time_stay = d.time_stay,
         .sight_range = d.sight_range,

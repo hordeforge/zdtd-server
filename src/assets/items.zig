@@ -117,6 +117,24 @@ pub const ItemDef = struct {
     /// feral 24; 0 = none/unset → the `[rules.progression] block_bite_damage`
     /// floor).
     damage_block: f32 = 0,
+    /// items.xml ActionN `Class="Vomit"` (EAIRangedAttackTarget's item
+    /// action, the cop-style spit; ItemActionVomit.ReadFrom): the AnimType
+    /// the avatar plays as `StartAnimAction(3000 + X)` (absent in stock XML
+    /// = 0, the zeroed field default) and the `Magazine_items` ammo whose
+    /// Projectile action flies. -1 / empty = the item has no vomit action.
+    /// Children inherit both through Extends (meleeHandZombieCopFeral never
+    /// redeclares the action but still spits).
+    vomit_anim_type: i32 = -1,
+    vomit_ammo: []const u8 = "",
+    /// The ammo's ActionN `Class="Projectile"` flight config
+    /// (ItemActionProjectile.ReadFrom, RE items.md section 4): straight-line
+    /// speed, the seconds before gravity engages, the hit radius, and the
+    /// impact DamageEntity. 0 = the row carries no projectile action (the
+    /// vomit resolver fails closed without speed and damage).
+    projectile_speed: f32 = 0,
+    projectile_fly_time: f32 = 0,
+    projectile_radius: f32 = 0,
+    projectile_damage: f32 = 0,
     /// items.xml LightValue (held-item light: torch .35, flashlight02 .55,
     /// weapon lights .45). Feeds the PlayerStealth selfLight term (Inventory.
     /// GetLightLevel IL=76: an AlwaysActive held item's LightValue, clamped
@@ -736,6 +754,7 @@ const writeDotNetString = item_parse.writeDotNetString;
 /// Action0/1 Class property equals `want` (ItemActionEat → Class="Eat").
 const item_parse = @import("item_parse.zig");
 const itemActionClassIs = item_parse.itemActionClassIs;
+const itemActionProps = item_parse.itemActionProps;
 const firstCvarAdd = item_parse.firstCvarAdd;
 const firstProgressionAdd = item_parse.firstProgressionAdd;
 const collectProgressionSetMax = item_parse.collectProgressionSetMax;
@@ -831,6 +850,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_sellable_declared.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
     defer stock_is_eat.deinit(allocator);
+    var stock_vomit_anim: std.ArrayList(i32) = .empty;
+    defer stock_vomit_anim.deinit(allocator);
+    var stock_vomit_ammo: std.ArrayList([]const u8) = .empty;
+    defer stock_vomit_ammo.deinit(allocator);
+    var stock_proj_speed: std.ArrayList(f32) = .empty;
+    defer stock_proj_speed.deinit(allocator);
+    var stock_proj_fly: std.ArrayList(f32) = .empty;
+    defer stock_proj_fly.deinit(allocator);
+    var stock_proj_radius: std.ArrayList(f32) = .empty;
+    defer stock_proj_radius.deinit(allocator);
+    var stock_proj_dmg: std.ArrayList(f32) = .empty;
+    defer stock_proj_dmg.deinit(allocator);
     var stock_food_amt: std.ArrayList(f32) = .empty;
     defer stock_food_amt.deinit(allocator);
     var stock_food_hp: std.ArrayList(f32) = .empty;
@@ -1238,6 +1269,35 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             const prog_set_max = try collectProgressionSetMax(arena, body);
             if (prog_set_max.len > 0) is_eat = true;
             try stock_is_eat.append(allocator, is_eat);
+            // EAIRangedAttackTarget's item action (Class=Vomit) and its ammo's
+            // flight (Class=Projectile): AnimType feeds the client avatar
+            // (StartAnimAction 3000 + X), the ammo resolves the projectile
+            // config, and speed/window/radius/damage fly the shot server-side
+            // (ItemActionVomit / ItemActionProjectile ReadFrom, RE items.md
+            // section 4). Absent AnimType is the stock zeroed-field default 0.
+            var vomit_anim: i32 = -1;
+            var vomit_ammo: []const u8 = "";
+            if (itemActionProps(body, "Vomit")) |vb| {
+                vomit_anim = 0;
+                if (xml.propertyValue(vb, "AnimType")) |v| vomit_anim = xml.parseI32Prefix(v) orelse 0;
+                if (xml.propertyValue(vb, "Magazine_items")) |v| vomit_ammo = try arena.dupe(u8, v);
+            }
+            var proj_speed: f32 = 0;
+            var proj_fly: f32 = 0;
+            var proj_radius: f32 = 0;
+            var proj_dmg: f32 = 0;
+            if (itemActionProps(body, "Projectile")) |pb| {
+                if (xml.propertyValue(pb, "Velocity")) |v| proj_speed = xml.parseF32(v) orelse 0;
+                if (xml.propertyValue(pb, "FlyTime")) |v| proj_fly = xml.parseF32(v) orelse 0;
+                if (xml.propertyValue(pb, "CollisionRadius")) |v| proj_radius = xml.parseF32(v) orelse 0;
+                if (xml.propertyValue(pb, "DamageEntity")) |v| proj_dmg = xml.parseF32(v) orelse 0;
+            }
+            try stock_vomit_anim.append(allocator, vomit_anim);
+            try stock_vomit_ammo.append(allocator, vomit_ammo);
+            try stock_proj_speed.append(allocator, proj_speed);
+            try stock_proj_fly.append(allocator, proj_fly);
+            try stock_proj_radius.append(allocator, proj_radius);
+            try stock_proj_dmg.append(allocator, proj_dmg);
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
@@ -1521,6 +1581,41 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             next_stock += 1;
         }
         i = ii + 6;
+    }
+
+    // Resolve the vomit action through the Extends chain: stock children
+    // (meleeHandZombieCopFeral, meleeHandZombieRancherFeral, ...) inherit the
+    // parent's Class=Vomit action without redeclaring it, so a feral cop
+    // still spits (measured against V3.2.0 items.xml). The projectile fields
+    // stay with the ammo row: the vomit resolver reads them off the ammo
+    // itself, looked up by the inherited Magazine_items name.
+    {
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .empty;
+        defer ext_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
+        }
+        var own_vomit: std.StringHashMapUnmanaged(struct { i32, []const u8 }) = .empty;
+        defer own_vomit.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_vomit_anim.items[idx] >= 0)
+                try own_vomit.put(allocator, n, .{ stock_vomit_anim.items[idx], stock_vomit_ammo.items[idx] });
+        }
+        for (stock_names.items, 0..) |_, idx| {
+            if (stock_vomit_anim.items[idx] >= 0) continue;
+            var cur = ext_names.items[idx];
+            var hops: u8 = 0;
+            while (cur.len > 0 and hops < 24) : (hops += 1) {
+                // `cur` IS the parent (the child's own Extends target): check
+                // it before walking further up the chain.
+                if (own_vomit.get(cur)) |pv| {
+                    stock_vomit_anim.items[idx] = pv[0];
+                    stock_vomit_ammo.items[idx] = pv[1];
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
     }
 
     // Resolve Stacknumber, EconomicValue and EconomicBundleSize through the
@@ -1966,6 +2061,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.no_scrapping = stock_no_scrapping.items[idx];
                 def.sellable_to_trader = stock_sellable.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
+                def.vomit_anim_type = stock_vomit_anim.items[idx];
+                def.vomit_ammo = stock_vomit_ammo.items[idx];
+                def.projectile_speed = stock_proj_speed.items[idx];
+                def.projectile_fly_time = stock_proj_fly.items[idx];
+                def.projectile_radius = stock_proj_radius.items[idx];
+                def.projectile_damage = stock_proj_dmg.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
                 def.food_health = stock_food_hp.items[idx];
                 def.water_amount = stock_water_amt.items[idx];
@@ -2025,6 +2126,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .sellable_to_trader = stock_sellable.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
+            .vomit_anim_type = stock_vomit_anim.items[idx],
+            .vomit_ammo = stock_vomit_ammo.items[idx],
+            .projectile_speed = stock_proj_speed.items[idx],
+            .projectile_fly_time = stock_proj_fly.items[idx],
+            .projectile_radius = stock_proj_radius.items[idx],
+            .projectile_damage = stock_proj_dmg.items[idx],
             .food_amount = stock_food_amt.items[idx],
             .food_health = stock_food_hp.items[idx],
             .water_amount = stock_water_amt.items[idx],

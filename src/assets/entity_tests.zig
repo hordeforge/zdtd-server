@@ -544,3 +544,55 @@ test "Leap maps to a native task and JumpMaxDistance parses" {
     try std.testing.expectEqual(@as(f32, 2.1), plain.jump_max_max);
     try std.testing.expectEqual(@as(u16, 0), plain.ai_tasks);
 }
+
+test "RangedAttackTarget SetData params parse with stock ctor defaults" {
+    // The spitter classes carry their window/cooldown/anim as attributes on
+    // the AITask list entry (EAIRangedAttackTarget.SetData IL=64); a class
+    // without the entry keeps the stock ctor defaults (startAnimType -1,
+    // releaseDelay 0.5, minRange 4, maxRange 25, cooldown 3, attackDuration
+    // 20 - EAIRangedAttackTarget::.ctor / Init).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_ranged.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="spitterCop">
+        \\    <property name="HandItem" value="meleeHandZombieCop"/>
+        \\    <property name="AITask" value="BreakBlock| ApproachDistraction| RangedAttackTarget itemType=1;cooldown=6;duration=5;minRange=4;maxRange=27;startAnimType=2| ApproachAndAttackTarget"/>
+        \\  </entity_class>
+        \\  <entity_class name="spitterDefault">
+        \\    <property name="AITask" value="BreakBlock| RangedAttackTarget| ApproachAndAttackTarget"/>
+        \\  </entity_class>
+        \\  <entity_class name="plainWalker">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const sp = t.byName("spitterCop").?;
+    try std.testing.expectEqual(@as(f32, 6), sp.ranged_cooldown_s);
+    try std.testing.expectEqual(@as(f32, 5), sp.ranged_duration_s);
+    try std.testing.expectEqual(@as(f32, 4), sp.ranged_min_dist);
+    try std.testing.expectEqual(@as(f32, 27), sp.ranged_max_dist);
+    try std.testing.expectEqual(@as(i32, 2), sp.ranged_start_anim);
+    try std.testing.expectEqual(@as(f32, 0.5), sp.ranged_release_delay_s);
+    try std.testing.expect(sp.ai_tasks & components.ai_task_list_set != 0);
+    try std.testing.expect(components.aiTaskAllowed(sp.ai_tasks, .ranged_attack_target));
+    const dflt = t.byName("spitterDefault").?;
+    try std.testing.expectEqual(@as(f32, 3), dflt.ranged_cooldown_s);
+    try std.testing.expectEqual(@as(f32, 20), dflt.ranged_duration_s);
+    try std.testing.expectEqual(@as(f32, 25), dflt.ranged_max_dist);
+    try std.testing.expectEqual(@as(i32, -1), dflt.ranged_start_anim);
+    const plain = t.byName("plainWalker").?;
+    try std.testing.expectEqual(@as(u16, 0), plain.ai_tasks);
+    // A mask without the list bit is the native table (aiTaskAllowed allows
+    // every name); what refuses the task for such a class is the
+    // `ai_tasks == 0` gate in rangedAttackCanExecute, so here the plain class
+    // just keeps the stock ctor window.
+    try std.testing.expectEqual(@as(f32, 4), plain.ranged_min_dist);
+    try std.testing.expectEqual(@as(f32, 25), plain.ranged_max_dist);
+}

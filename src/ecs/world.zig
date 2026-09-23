@@ -114,6 +114,18 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.move_speed_rand_min = def.move_speed_rand_min;
     cid.move_speed_rand_max = def.move_speed_rand_max;
     cid.jump_max = rollJumpMax(def, x, z);
+    cid.ranged_cooldown_s = def.ranged_cooldown_s;
+    cid.ranged_duration_s = def.ranged_duration_s;
+    cid.ranged_release_delay_s = def.ranged_release_delay_s;
+    cid.ranged_min_dist = def.ranged_min_dist;
+    cid.ranged_max_dist = def.ranged_max_dist;
+    cid.ranged_unreachable_dist = def.ranged_unreachable_dist;
+    cid.ranged_start_anim = def.ranged_start_anim;
+    cid.vomit_anim_type = def.vomit_anim_type;
+    cid.projectile_speed = def.projectile_speed;
+    cid.projectile_fly_time = def.projectile_fly_time;
+    cid.projectile_radius = def.projectile_radius;
+    cid.projectile_damage = def.projectile_damage;
     cid.attack_damage = def.attack_damage;
     cid.phys_resist = def.phys_resist;
     cid.block_chew = def.block_chew;
@@ -184,6 +196,26 @@ pub const EntityClass = struct {
     /// EAILeap's 2.8 m floor, so an unparsed class never pounces.
     jump_max_min: f32 = 1.9,
     jump_max_max: f32 = 2.1,
+    /// EAIRangedAttackTarget SetData params (stock ctor/Init defaults; see
+    /// assets/entities.zig EntityDef for the source and the recorded
+    /// unreachable-range residual).
+    ranged_cooldown_s: f32 = 3,
+    ranged_duration_s: f32 = 20,
+    ranged_release_delay_s: f32 = 0.5,
+    ranged_min_dist: f32 = 4,
+    ranged_max_dist: f32 = 25,
+    ranged_unreachable_dist: f32 = 0,
+    ranged_start_anim: i32 = -1,
+    /// The held item's Class=Vomit action resolved against items.xml at class
+    /// build (Game.spitConfigFor): the avatar AnimType the client plays as
+    /// 3000 + X, and the ammo's Projectile flight (speed m/s, seconds before
+    /// gravity engages, hit radius, impact DamageEntity). -1 / 0 = the class
+    /// holds no vomit item, so EAIRangedAttackTarget refuses to fire.
+    vomit_anim_type: i32 = -1,
+    projectile_speed: f32 = 0,
+    projectile_fly_time: f32 = 0,
+    projectile_radius: f32 = 0,
+    projectile_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
     /// class's own rows (Extends-resolved). Applied only where the server
     /// computes the damage (turrets, the deferred accumulator), never to a
@@ -1271,6 +1303,18 @@ pub const World = struct {
                 .jump_max = rollJumpMax(ct, x, z),
                 .ai_attack = ct.ai_attack,
                 .ai_tasks = ct.ai_tasks,
+                .ranged_cooldown_s = ct.ranged_cooldown_s,
+                .ranged_duration_s = ct.ranged_duration_s,
+                .ranged_release_delay_s = ct.ranged_release_delay_s,
+                .ranged_min_dist = ct.ranged_min_dist,
+                .ranged_max_dist = ct.ranged_max_dist,
+                .ranged_unreachable_dist = ct.ranged_unreachable_dist,
+                .ranged_start_anim = ct.ranged_start_anim,
+                .vomit_anim_type = ct.vomit_anim_type,
+                .projectile_speed = ct.projectile_speed,
+                .projectile_fly_time = ct.projectile_fly_time,
+                .projectile_radius = ct.projectile_radius,
+                .projectile_damage = ct.projectile_damage,
             };
         }
         return id;

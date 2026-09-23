@@ -606,6 +606,36 @@ pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
     return 0;
 }
 
+/// The resolved cop-style spit for a held item: the item's Vomit action
+/// (avatar AnimType for `StartAnimAction(3000 + X)`) plus its ammo's
+/// Projectile flight, looked up through items.xml at class build. Null when
+/// the hand has no Vomit action or the ammo row is missing speed/damage, so
+/// EAIRangedAttackTarget refuses to fire instead of shooting a zero-config
+/// projectile (fail closed, AGENTS rule 15/24).
+pub const SpitConfig = struct {
+    anim_type: i32,
+    speed: f32,
+    fly_time: f32,
+    radius: f32,
+    damage: f32,
+};
+
+pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?SpitConfig {
+    if (hand_item.len == 0) return null;
+    const hand = self.items.byName(hand_item) orelse return null;
+    if (hand.vomit_anim_type < 0) return null;
+    if (hand.vomit_ammo.len == 0) return null;
+    const ammo = self.items.byName(hand.vomit_ammo) orelse return null;
+    if (ammo.projectile_speed <= 0 or ammo.projectile_damage <= 0) return null;
+    return .{
+        .anim_type = hand.vomit_anim_type,
+        .speed = ammo.projectile_speed,
+        .fly_time = ammo.projectile_fly_time,
+        .radius = ammo.projectile_radius,
+        .damage = ammo.projectile_damage,
+    };
+}
+
 /// Hand-item DamageBlock (items.xml) for the per-class block chew; 0 when
 /// the hand item has none (the caller falls back to the Rules floor).
 /// Stock: meleeHandZombie01 8, meleeHandZombieFeral 24.

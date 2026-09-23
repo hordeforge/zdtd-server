@@ -388,6 +388,33 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .move_speed_rand_max = zdef.move_speed_rand_max,
             .jump_max_min = zdef.jump_max_min,
             .jump_max_max = zdef.jump_max_max,
+            .ranged_cooldown_s = zdef.ranged_cooldown_s,
+            .ranged_duration_s = zdef.ranged_duration_s,
+            .ranged_release_delay_s = zdef.ranged_release_delay_s,
+            .ranged_min_dist = zdef.ranged_min_dist,
+            .ranged_max_dist = zdef.ranged_max_dist,
+            .ranged_unreachable_dist = zdef.ranged_unreachable_dist,
+            .ranged_start_anim = zdef.ranged_start_anim,
+            .vomit_anim_type = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk -1;
+                break :blk sc.anim_type;
+            },
+            .projectile_speed = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
+                break :blk sc.speed;
+            },
+            .projectile_fly_time = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
+                break :blk sc.fly_time;
+            },
+            .projectile_radius = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
+                break :blk sc.radius;
+            },
+            .projectile_damage = blk: {
+                const sc = self.spitConfigFor(zdef.hand_item) orelse break :blk 0;
+                break :blk sc.damage;
+            },
             .phys_resist = zdef.phys_resist,
             .attack_damage = self.handItemDamage(zdef.hand_item),
             .block_chew = self.handItemBlockChew(zdef.hand_item),
@@ -428,6 +455,18 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .move_speed_rand_max = adef.move_speed_rand_max,
             .jump_max_min = adef.jump_max_min,
             .jump_max_max = adef.jump_max_max,
+            .ranged_cooldown_s = adef.ranged_cooldown_s,
+            .ranged_duration_s = adef.ranged_duration_s,
+            .ranged_release_delay_s = adef.ranged_release_delay_s,
+            .ranged_min_dist = adef.ranged_min_dist,
+            .ranged_max_dist = adef.ranged_max_dist,
+            .ranged_unreachable_dist = adef.ranged_unreachable_dist,
+            .ranged_start_anim = adef.ranged_start_anim,
+            .vomit_anim_type = if (self.spitConfigFor(adef.hand_item)) |sc| sc.anim_type else -1,
+            .projectile_speed = if (self.spitConfigFor(adef.hand_item)) |sc| sc.speed else 0,
+            .projectile_fly_time = if (self.spitConfigFor(adef.hand_item)) |sc| sc.fly_time else 0,
+            .projectile_radius = if (self.spitConfigFor(adef.hand_item)) |sc| sc.radius else 0,
+            .projectile_damage = if (self.spitConfigFor(adef.hand_item)) |sc| sc.damage else 0,
             .attack_damage = self.handItemDamage(adef.hand_item),
             .time_stay = adef.time_stay,
             .sight_range = adef.sight_range,
@@ -503,6 +542,18 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .move_speed_rand_max = def.move_speed_rand_max,
                 .jump_max_min = def.jump_max_min,
                 .jump_max_max = def.jump_max_max,
+                .ranged_cooldown_s = def.ranged_cooldown_s,
+                .ranged_duration_s = def.ranged_duration_s,
+                .ranged_release_delay_s = def.ranged_release_delay_s,
+                .ranged_min_dist = def.ranged_min_dist,
+                .ranged_max_dist = def.ranged_max_dist,
+                .ranged_unreachable_dist = def.ranged_unreachable_dist,
+                .ranged_start_anim = def.ranged_start_anim,
+                .vomit_anim_type = if (self.spitConfigFor(def.hand_item)) |sc| sc.anim_type else -1,
+                .projectile_speed = if (self.spitConfigFor(def.hand_item)) |sc| sc.speed else 0,
+                .projectile_fly_time = if (self.spitConfigFor(def.hand_item)) |sc| sc.fly_time else 0,
+                .projectile_radius = if (self.spitConfigFor(def.hand_item)) |sc| sc.radius else 0,
+                .projectile_damage = if (self.spitConfigFor(def.hand_item)) |sc| sc.damage else 0,
                 .attack_damage = self.handItemDamage(def.hand_item),
                 .block_chew = self.handItemBlockChew(def.hand_item),
                 .melee_range = self.handItemRange(def.hand_item),

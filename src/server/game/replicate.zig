@@ -24,9 +24,9 @@ fn botName(b: *const gbot.Bot) []const u8 {
 /// so the motion-period early return must not hold a landed strike's params
 /// for a whole period: the off tick walks the (bounded, SoA) zombie group
 /// instead of scanning all slots.
-fn pendingStrikeAnim(self: *const Game) bool {
+fn pendingAnimFlush(self: *const Game) bool {
     for (self.sim.kind_groups.slice(.zombie)) |z| {
-        if (self.sim.mask[z].zombie_ai and self.sim.zombie_ai[z].strike_anim) return true;
+        if (self.sim.mask[z].zombie_ai and self.sim.zombie_ai[z].pending_anim_action >= 0) return true;
     }
     return false;
 }
@@ -64,7 +64,7 @@ pub fn replicate(self: *Game) !void {
         }
     }
     self.replicatePlayerHealth();
-    if (self.tick_n % self.motion_replicate_period_ticks != 0 and !pendingStrikeAnim(self)) {
+    if (self.tick_n % self.motion_replicate_period_ticks != 0 and !pendingAnimFlush(self)) {
         self.clearDeadKnownEntities();
         return;
     }
@@ -228,7 +228,7 @@ pub fn replicate(self: *Game) !void {
         // skips the pos-heartbeat wait instead of delaying the swing up to
         // pos_heartbeat_period_ticks. With no in-range viewer the viewers==0
         // branch below leaves the edge set for the tick one appears.
-        const anim_pending = self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].strike_anim;
+        const anim_pending = self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].pending_anim_action >= 0;
         if (!anim_pending and !interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
 
         const viewers = if (self.sim.mask[i].player)
@@ -287,25 +287,34 @@ pub fn replicate(self: *Game) !void {
                     self.harness.counters.inc(.packages_encoded);
                 } else |_| {}
             } else |_| {}
-            // Stock's StartAnimationAttack param flush (entity-ai.md
-            // 2026-09-22): the landed strike sets this edge, and the client's
-            // local AvatarZombieController plays the swing from the same
-            // Attack/AttackBlend/AttackTrigger params stock's server sends.
+            // Stock's param flush (entity-ai.md 2026-09-22): the landed
+            // strike (Attack int 0 + blend + trigger, StartAnimationAttack)
+            // and the vomit sequence (3000 + X int + trigger only,
+            // AvatarZombieController.StartAction IL=22) set this edge, and the
+            // client's local avatar plays the swing/spit from the same
+            // Attack/AttackBlend/AttackTrigger params stock's server sends,
+            // which is also what spawns the client's local visual projectile.
             // zdtd picks stock's base variant (int 0) and a fixed blend
             // midpoint instead of the limb-derived random picks: both are
             // cosmetic client choices, and a dedi zombie carries no per-limb
             // body damage. No stock delivery override, so it rides the
-            // reliable window; droppable like AliveFlags so a repeated strike
+            // reliable window; droppable like AliveFlags so a repeated event
             // supersedes an undelivered one.
-            if (self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].strike_anim) {
-                self.sim.zombie_ai[i].strike_anim = false;
-                const params = [_]packages.AnimParam{
-                    .{ .hash = packages.attack_param_hash, .kind = packages.anim_param_int, .int = 0 },
-                    .{ .hash = packages.attack_blend_hash, .kind = packages.anim_param_float, .float = 0.5 },
-                    .{ .hash = packages.attack_trigger_hash, .kind = packages.anim_param_trigger, .boolean = true },
-                };
+            if (self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].pending_anim_action >= 0) {
+                const action = self.sim.zombie_ai[i].pending_anim_action;
+                self.sim.zombie_ai[i].pending_anim_action = -1;
+                var params: [3]packages.AnimParam = undefined;
+                var param_n: usize = 0;
+                params[param_n] = .{ .hash = packages.attack_param_hash, .kind = packages.anim_param_int, .int = action };
+                param_n += 1;
+                if (action < 3000) {
+                    params[param_n] = .{ .hash = packages.attack_blend_hash, .kind = packages.anim_param_float, .float = 0.5 };
+                    param_n += 1;
+                }
+                params[param_n] = .{ .hash = packages.attack_trigger_hash, .kind = packages.anim_param_trigger, .boolean = true };
+                param_n += 1;
                 var abuf: [64]u8 = undefined;
-                if (packages.buildEntityAnimationDataBody(&abuf, nid, &params)) |ab| {
+                if (packages.buildEntityAnimationDataBody(&abuf, nid, params[0..param_n])) |ab| {
                     if (packages.framed(&anim_frame_buf, "NetPackageEntityAnimationData", ab)) |af| {
                         anim_framed = af;
                         self.harness.counters.inc(.packages_encoded);

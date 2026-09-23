@@ -13,7 +13,17 @@ const loadFromPath = @import("items.zig").loadFromPath;
 const paths = @import("paths.zig");
 
 pub fn itemActionClassIs(body: []const u8, want: []const u8) bool {
-    // Prefer nested <property class="Action0"> ... Class=Eat
+    return itemActionProps(body, want) != null;
+}
+
+/// The `<property class="ActionN">` block whose nested `Class` is `want`, as a
+/// slice of `body` for reading that block's own properties (Vomit:
+/// `AnimType` / `Magazine_items`; Projectile: `Velocity` / `FlyTime` /
+/// `CollisionRadius` / `DamageEntity`, ItemActionVomit/ItemActionProjectile
+/// ReadFrom, RE items.md section 4). Same 500-byte window the class probe
+/// scans: stock's vomit and projectile action blocks fit (measured against
+/// V3.2.0 items.xml; ammoProjectileZombieVomit's Action1 is under 470 bytes).
+pub fn itemActionProps(body: []const u8, want: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < body.len) {
         const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
@@ -30,11 +40,11 @@ pub fn itemActionClassIs(body: []const u8, want: []const u8) bool {
         // Search Class value within next 400 bytes of this Action block.
         const window = if (rest.len > 500) rest[0..500] else rest;
         if (xml.propertyValue(window, "Class")) |cls| {
-            if (std.mem.eql(u8, cls, want)) return true;
+            if (std.mem.eql(u8, cls, want)) return window;
         }
         i = pi + 9;
     }
-    return false;
+    return null;
 }
 
 /// First effect_group ModifyCVar add for cvar name (e.g. $foodAmountAdd).

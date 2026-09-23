@@ -1020,3 +1020,61 @@ test "the gamestage stat roll follows stock's draw order" {
     const n7 = rollGsStats(&staged, 0, 0, &r7, &out7);
     try std.testing.expectEqual(@as(usize, 0), n7);
 }
+
+test "the vomit action parses, inherits through Extends, and carries its ammo projectile" {
+    // stock meleeHandZombieCop holds Class=Vomit in Action1 (AnimType absent
+    // = the zeroed-field default 0) with a Magazine_items ammo, the feral
+    // children inherit the action without redeclaring it, and the ammo's
+    // Projectile row carries the flight config EAIRangedAttackTarget fires
+    // (velocity 18, FlyTime 2, radius .24, DamageEntity 10 - measured on
+    // ammoProjectileZombieVomit, V3.2.0 items.xml).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_vomit.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="vomitHand">
+        \\    <property class="Action1">
+        \\      <property name="Class" value="Vomit"/>
+        \\      <property name="Magazine_items" value="vomitAmmo"/>
+        \\    </property>
+        \\  </item>
+        \\  <item name="vomitHandChild">
+        \\    <property name="Extends" value="vomitHand"/>
+        \\    <property name="Stacknumber" value="1"/>
+        \\  </item>
+        \\  <item name="vomitAmmo">
+        \\    <property class="Action1">
+        \\      <property name="Class" value="Projectile"/>
+        \\      <property name="Velocity" value="18"/>
+        \\      <property name="FlyTime" value="2"/>
+        \\      <property name="CollisionRadius" value=".24"/>
+        \\      <property name="DamageEntity" value="10"/>
+        \\    </property>
+        \\  </item>
+        \\  <item name="plainHand">
+        \\    <property name="Stacknumber" value="1"/>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const hand = t.byName("vomitHand").?;
+    try std.testing.expectEqual(@as(i32, 0), hand.vomit_anim_type); // AnimType absent = 0
+    try std.testing.expect(std.mem.eql(u8, "vomitAmmo", hand.vomit_ammo));
+    const child = t.byName("vomitHandChild").?;
+    try std.testing.expectEqual(@as(i32, 0), child.vomit_anim_type);
+    try std.testing.expect(std.mem.eql(u8, "vomitAmmo", child.vomit_ammo));
+    const ammo = t.byName("vomitAmmo").?;
+    try std.testing.expectEqual(@as(f32, 18), ammo.projectile_speed);
+    try std.testing.expectEqual(@as(f32, 2), ammo.projectile_fly_time);
+    try std.testing.expectEqual(@as(f32, 0.24), ammo.projectile_radius);
+    try std.testing.expectEqual(@as(f32, 10), ammo.projectile_damage);
+    try std.testing.expectEqual(@as(i32, -1), ammo.vomit_anim_type);
+    const plain = t.byName("plainHand").?;
+    try std.testing.expectEqual(@as(i32, -1), plain.vomit_anim_type);
+    try std.testing.expectEqual(@as(usize, 0), plain.vomit_ammo.len);
+}

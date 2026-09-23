@@ -60,6 +60,20 @@ pub const EntityDef = struct {
     /// Inherited AITask list as TaskId bits. 0 = no XML list (native table).
     /// Bit 15 (`ai_task_list_set`) means a list was parsed.
     ai_tasks: u16 = 0,
+    /// EAIRangedAttackTarget SetData params from the class AITask entry
+    /// (stock ctor/Init defaults when the class omits them): the between-shot
+    /// cooldown, the aim+telegraph sequence length, the release delay after
+    /// the telegraph anim, the in-range window plus its unreachable extension
+    /// (not modelled: zdtd has no moveHelper unreachable flags, so the window
+    /// stays [min, max]), and the telegraph AnimType the task plays through
+    /// `StartAnimAction(3000 + start_anim + 1)`.
+    ranged_cooldown_s: f32 = 3,
+    ranged_duration_s: f32 = 20,
+    ranged_release_delay_s: f32 = 0.5,
+    ranged_min_dist: f32 = 4,
+    ranged_max_dist: f32 = 25,
+    ranged_unreachable_dist: f32 = 0,
+    ranged_start_anim: i32 = -1,
     /// entityclasses MoveSpeedAggro max = night chase speed (m/s scale); the
     /// stock XML comment on the prop ("min/max (like day or night)") pins the
     /// split, matching GetMoveSpeedAggro dark → aggroMax (passive 134). 0 =
@@ -482,6 +496,7 @@ fn taskNameToId(name: []const u8) ?components.TaskId {
     if (std.mem.eql(u8, name, "ApproachDistraction")) return .approach_distraction;
     if (std.mem.eql(u8, name, "ApproachSpot")) return .approach_spot;
     if (std.mem.eql(u8, name, "Leap")) return .leap;
+    if (std.mem.eql(u8, name, "RangedAttackTarget")) return .ranged_attack_target;
     if (std.mem.eql(u8, name, "RunawayWhenHurt")) return .runaway;
     if (std.mem.eql(u8, name, "RunawayFromEntity")) return .runaway;
     if (std.mem.eql(u8, name, "Look")) return .look;
@@ -678,9 +693,63 @@ fn resolvedHurtTargetClasses(
 ) u8 {
     return resolvedAiTargetEntry(u8, parseHurtTargetClasses, classes, name) orelse 0;
 }
+/// EAIRangedAttackTarget SetData params read from the winning class AITask
+/// entry (`RangedAttackTarget itemType=1;cooldown=...`, entityclasses.xml;
+/// defaults are the stock ctor/Init values: startAnimType -1, releaseDelay
+/// 0.5, minRange 4, maxRange 25, cooldown 3, attackDuration 20).
+pub const RangedParams = struct {
+    cooldown_s: f32 = 3,
+    duration_s: f32 = 20,
+    release_delay_s: f32 = 0.5,
+    min_dist: f32 = 4,
+    max_dist: f32 = 25,
+    unreachable_dist: f32 = 0,
+    start_anim: i32 = -1,
+};
+
+/// Parse the `k=v;k=v` tail of a `RangedAttackTarget` list entry into the
+/// stock defaults above. `sndStart`/`sndRelease` are client audio with no
+/// server emit channel yet (recorded residual); everything else numeric is
+/// taken verbatim.
+fn parseRangedTaskParams(entry: []const u8, rp: *RangedParams) void {
+    // The list entry keeps its pipe separator's padding (" RangedAttackTarget
+    // itemType=1;cooldown=6"), so trim first: taking the first space of the
+    // raw entry finds the separator's own leading space and leaves the token
+    // glued to the first attribute.
+    const trimmed = std.mem.trim(u8, entry, " \t\r\n");
+    const sp = std.mem.findScalar(u8, trimmed, ' ') orelse return;
+    var rest = std.mem.trim(u8, trimmed[sp + 1 ..], " \t\r\n");
+    while (rest.len > 0) {
+        const semi = std.mem.findScalar(u8, rest, ';') orelse rest.len;
+        const kv = std.mem.trim(u8, rest[0..semi], " \t\r\n");
+        if (std.mem.findScalar(u8, kv, '=')) |eq| {
+            const k = std.mem.trim(u8, kv[0..eq], " \t");
+            const v = std.mem.trim(u8, kv[eq + 1 ..], " \t");
+            if (std.mem.eql(u8, k, "cooldown")) {
+                if (xml.parseF32(v)) |f| rp.cooldown_s = f;
+            } else if (std.mem.eql(u8, k, "duration")) {
+                if (xml.parseF32(v)) |f| rp.duration_s = f;
+            } else if (std.mem.eql(u8, k, "releaseDelay")) {
+                if (xml.parseF32(v)) |f| rp.release_delay_s = f;
+            } else if (std.mem.eql(u8, k, "minRange")) {
+                if (xml.parseF32(v)) |f| rp.min_dist = f;
+            } else if (std.mem.eql(u8, k, "maxRange")) {
+                if (xml.parseF32(v)) |f| rp.max_dist = f;
+            } else if (std.mem.eql(u8, k, "unreachableRange")) {
+                if (xml.parseF32(v)) |f| rp.unreachable_dist = f;
+            } else if (std.mem.eql(u8, k, "startAnimType")) {
+                if (xml.parseI32Prefix(v)) |n| rp.start_anim = n;
+            }
+        }
+        if (semi >= rest.len) break;
+        rest = rest[semi + 1 ..];
+    }
+}
+
 fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
+    ranged: ?*RangedParams,
 ) u16 {
     var mask: u16 = 0;
     var saw_list = false;
@@ -702,7 +771,16 @@ fn resolvedAiTasks(
                 var rest = val;
                 while (rest.len > 0) {
                     const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
-                    orTaskName(&pipe, rest[0..cut]);
+                    const entry = rest[0..cut];
+                    orTaskName(&pipe, entry);
+                    if (ranged) |rp| {
+                        // Pipe entries keep their padding (" RangedAttackTarget
+                        // ..."): trim before splitting off the task name, or the
+                        // separator's own leading space makes the token empty.
+                        const trimmed_entry = std.mem.trim(u8, entry, " \t\r\n");
+                        const tok = if (std.mem.findScalar(u8, trimmed_entry, ' ')) |sp2| std.mem.trim(u8, trimmed_entry[0..sp2], " \t") else trimmed_entry;
+                        if (std.mem.eql(u8, tok, "RangedAttackTarget")) parseRangedTaskParams(trimmed_entry, rp);
+                    }
                     if (cut >= rest.len) break;
                     rest = rest[cut + 1 ..];
                 }
@@ -734,7 +812,7 @@ fn resolvedAiAttacks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
 ) bool {
-    const tasks = resolvedAiTasks(classes, name);
+    const tasks = resolvedAiTasks(classes, name, null);
     if (tasks & components.ai_task_list_set == 0) return true;
     return components.aiTaskAllowed(tasks, .approach_attack);
 }
@@ -951,7 +1029,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
-        const ai_tasks = resolvedAiTasks(&classes, name);
+        var ranged_params: RangedParams = .{};
+        const ai_tasks = resolvedAiTasks(&classes, name, &ranged_params);
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
@@ -1212,6 +1291,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .is_enemy = is_enemy,
             .ai_attack = ai_attack,
             .ai_tasks = ai_tasks,
+            .ranged_cooldown_s = ranged_params.cooldown_s,
+            .ranged_duration_s = ranged_params.duration_s,
+            .ranged_release_delay_s = ranged_params.release_delay_s,
+            .ranged_min_dist = ranged_params.min_dist,
+            .ranged_max_dist = ranged_params.max_dist,
+            .ranged_unreachable_dist = ranged_params.unreachable_dist,
+            .ranged_start_anim = ranged_params.start_anim,
             .target_player_hear = if (target_sense) |s| s.hear else 0,
             .target_player_see = if (target_sense) |s| s.see else 0,
             .hurt_target_classes = hurt_classes,

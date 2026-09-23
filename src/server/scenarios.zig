@@ -7395,7 +7395,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     // id rides the NetPackageEntityTargeted base; count 3 = Attack int,
     // AttackBlend float, AttackTrigger, hashes pinned by animatorStringHash.
     const zslot = g.sim.slotOfNetId(znid).?;
-    try std.testing.expect(!g.sim.zombie_ai[zslot].strike_anim); // drain consumed the edge
+    try std.testing.expect(g.sim.zombie_ai[zslot].pending_anim_action < 0); // drain consumed the edge
     const anim_id = packages.idOf("NetPackageEntityAnimationData").?;
     const ab = cap.findPkgId(anim_id) orelse return error.NoAttackAnimPackage;
     try std.testing.expectEqual(znid, std.mem.readInt(i32, ab[0..4], .little));

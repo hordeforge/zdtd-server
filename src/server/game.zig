@@ -2687,6 +2687,10 @@ pub const Game = struct {
         return game_craft.handItemDamage(self, hand_item);
     }
 
+    pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?game_craft.SpitConfig {
+        return game_craft.spitConfigFor(self, hand_item);
+    }
+
     pub fn handItemBlockChew(self: *Game, hand_item: []const u8) f32 {
         return game_craft.handItemBlockChew(self, hand_item);
     }
