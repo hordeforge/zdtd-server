@@ -278,6 +278,19 @@ pub const Manifest = struct {
             if (std.mem.find(u8, pr, "..") != null) ok = false;
             if (!ok) return "invalid 'preset' path (must be a relative path inside the mod dir, no '..')";
         }
+        if (self.wasm) |wm| {
+            // Same rule as preset and icon: a relative path inside the mod dir
+            // only. Without it `wasm = "../../evil.wasm"` escapes the folder
+            // the validator keeps every other path in, so a manifest could load
+            // an arbitrary on-disk module (another mod's file behind a disabled
+            // name, an outside build artifact) under its own tier, claims and
+            // policy identity. The executed artifact needs the containment its
+            // cosmetic siblings already have.
+            var ok = wm.len > 0 and wm.len <= 128;
+            if (wm.len > 0 and (wm[0] == '/' or wm[0] == '\\')) ok = false;
+            if (std.mem.find(u8, wm, "..") != null) ok = false;
+            if (!ok) return "invalid 'wasm' path (must be a relative path inside the mod dir, no '..')";
+        }
         if (self.tier) |t| {
             if (!std.mem.eql(u8, t, "official") and !std.mem.eql(u8, t, "user")) {
                 return "tier must be 'official' or 'user' (core components are native and registered host-side)";

@@ -536,6 +536,23 @@ test "manifest icon is an optional relative path" {
     try std.testing.expect(m.validate() == null);
 }
 
+test "manifest wasm is a relative path inside the mod dir" {
+    // The executed artifact gets the same containment the validator already
+    // enforces for preset and icon: no absolute path, no parent traversal, so
+    // a manifest cannot load a module outside its own folder under its own
+    // tier/claims/policy identity.
+    var m = mk("contained", "x.wasm", "user", null, null);
+    try std.testing.expect(m.validate() == null);
+    m.wasm = "sub/x.wasm"; // nested but still inside the dir
+    try std.testing.expect(m.validate() == null);
+    m.wasm = "../evil.wasm";
+    try std.testing.expect(m.validate() != null);
+    m.wasm = "/abs/evil.wasm";
+    try std.testing.expect(m.validate() != null);
+    m.wasm = "sub/../../evil.wasm";
+    try std.testing.expect(m.validate() != null);
+}
+
 test "resolve activates a preset from an enabled config-only mod" {
     // Config-only mods (preset = "preset.toml", no wasm) ship enabled=false so
     // a fresh boot stays stock; `[mods] enabled` forces them on and activates
