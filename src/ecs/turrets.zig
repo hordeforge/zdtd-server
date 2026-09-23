@@ -163,6 +163,22 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             const y = if (w.mask[i].transform) w.transform[i].y else 0;
             const z = if (w.mask[i].transform) w.transform[i].z else 0;
             const zid: i32 = if (w.mask[i].network_id) w.network_id[i].id else -1;
+            // Kill verdict (T15): the same death-cancel contract as
+            // World.damageFrom and applyDeferredDamage - a <0 verdict leaves
+            // the victim alive at 1 hp and the kill bookkeeping below never
+            // runs. This third death choke used to skip both the deny and the
+            // on_entity_killed notification, so a peaceful/immortal gate was
+            // bypassed by turret fire and kill observers stayed silent on trap
+            // kills. Attacker id reads -1 like the deferred choke (the owner
+            // pairing rides the report below, not the verdict parameter). Trap
+            // XP carries no verdict SCALE (step.zig, stock V3.2.0 4.3); only
+            // the deny applies here.
+            if (w.kill_verdict_fn) |vf| {
+                if (vf(w.kill_verdict_ctx, w.kind[i], zid, -1) < 0) {
+                    w.health[i].hp = 1;
+                    continue;
+                }
+            }
             // Same drop_prob roll as player kills (class_id LootDropProb);
             // read before the corpse marking, which keeps the slot.
             const drop_prob = if (w.mask[i].class_id) w.class_id[i].drop_prob else 1.0;
@@ -208,4 +224,59 @@ test "concurrent turret owner follows deterministic slot order" {
     }
     for (&threads) |*thread| thread.join();
     try std.testing.expectEqual(@as(i16, threads.len - 1), turretOwner(value));
+}
+
+test "turret kills honour the kill verdict (T15)" {
+    // The turret fold is the third death choke; without the verdict call a
+    // peaceful/immortal gate was bypassed by turret fire and on_entity_killed
+    // observers (killfeed) stayed silent on trap kills. Deny first, then keep:
+    // the same call carries both the cancellation and the notification, like
+    // damageFrom and applyDeferredDamage.
+    const Kind = @import("world.zig").Kind;
+    const Cap = struct {
+        var calls: i32 = 0;
+        var verdict: i32 = 0;
+        fn killVerdict(_: ?*anyopaque, kind: Kind, victim: i32, killer: i32) i32 {
+            _ = kind;
+            _ = victim;
+            _ = killer;
+            calls += 1;
+            return verdict;
+        }
+    };
+    Cap.calls = 0;
+    Cap.verdict = -1;
+    var w: World = .{};
+    defer w.deinit();
+    const tid = w.spawnTurret(0, 70, 0).?;
+    const ts = w.slotOfNetId(tid).?;
+    // The bare world has no generator, so the consumer node resolves
+    // unpowered; flip it directly (systemTurrets does not re-resolve).
+    if (w.power.indexOfId(w.turret[ts].power_node)) |ni| w.power.nodes[ni].powered = true;
+    w.turret[ts].fire_cd = 0;
+    const zid = w.spawnZombie(4, 70, 0, 5).?;
+    const zs = w.slotOfNetId(zid).?;
+    w.kill_verdict_fn = &Cap.killVerdict;
+    w.kill_verdict_ctx = null;
+
+    const r1 = systemTurrets(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, 1), Cap.calls);
+    try std.testing.expectEqual(@as(f32, 1), w.health[zs].hp); // survives at 1
+    try std.testing.expectEqual(@as(u32, 0), r1.kills);
+    try std.testing.expectEqual(@as(u8, 0), r1.killed_n);
+    try std.testing.expect(w.alive[zs]);
+
+    // A keep verdict lets the same choke record the kill on the next burst.
+    Cap.verdict = 0;
+    var last: TurretTick = .{};
+    var t: f32 = 0;
+    while (t < 5 and w.alive[zs]) : (t += 0.05) {
+        w.turret[ts].fire_cd = 0; // skip the 0.4 s cadence between assertions
+        last = systemTurrets(&w, 0.05);
+    }
+    try std.testing.expect(w.health[zs].hp <= 0);
+    try std.testing.expectEqual(@as(u32, 1), last.kills);
+    try std.testing.expectEqual(@as(u8, 1), last.killed_n);
+    try std.testing.expect(zid == last.killed_ids[0]);
+    try std.testing.expect(Cap.calls >= 2);
 }
