@@ -44,21 +44,22 @@ const Blob = struct {
     data: []u8 = &.{},
 };
 
-var cache: [s2c_names.len]Blob = [_]Blob{.{}} ** s2c_names.len;
-var cache_built = false;
+/// The cached blobs live on the Game, not in module scope: the rows are
+/// built from that Game's game_dir/config_dir inputs, so a process-global
+/// latch would let a second Game in the same process silently reuse (or skip
+/// rebuilding) another instance's data (paper: shared mutable state belongs
+/// to the context that owns the inputs). Game teardown frees it.
+pub const Cache = struct {
+    rows: [s2c_names.len]Blob = [_]Blob{.{}} ** s2c_names.len,
+    built: bool = false,
+};
 
-pub fn deinitCache(allocator: std.mem.Allocator) void {
-    for (&cache) |*b| {
-        if (b.data.len > 0) allocator.free(b.data);
+pub fn deinitCache(self: *Game) void {
+    for (&self.config_cache.rows) |*b| {
+        if (b.data.len > 0) self.allocator.free(b.data);
         b.data = &.{};
     }
-    cache_built = false;
-}
-
-/// Test/assert helper: true after a successful `buildCache`, false after
-/// `deinitCache` (including the create-failure errdefer).
-pub fn cacheBuiltForTest() bool {
-    return cache_built;
+    self.config_cache.built = false;
 }
 
 /// Raw-Deflate `src` into an owned buffer. A result that does not fit the
@@ -82,8 +83,8 @@ fn deflateBlob(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 /// (`paths.readConfigXml`, PRD R7). Init/load-time only; alloc allowed.
 /// Mod-patch failures are already fatal inside readConfigXml (PRD R6); a
 /// missing base file is a skip (row sends -1), like stock's null cache.
-pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !void {
-    if (cache_built) return;
+pub fn buildCache(self: *Game, allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !void {
+    if (self.config_cache.built) return;
     var name_buf: [128]u8 = undefined;
     for (s2c_names, 0..) |name, idx| {
         if (std.mem.eql(u8, name, "archetypes")) continue; // LoadClientFile: name-only
@@ -92,7 +93,7 @@ pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_di
             std.debug.print("zdtd: config cache {s} failed: {s}\n", .{ name, @errorName(err) });
             // Drop any rows already stored so a retry starts clean and the
             // process-global blobs cannot accumulate across failed builds.
-            deinitCache(allocator);
+            deinitCache(self);
             return err;
         } orelse continue;
         defer allocator.free(patched);
@@ -101,14 +102,14 @@ pub fn buildCache(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_di
                 "zdtd: config cache deflate {s} failed: {s} ({d} raw bytes)\n",
                 .{ name, @errorName(err), patched.len },
             );
-            deinitCache(allocator);
+            deinitCache(self);
             return err;
         };
-        cache[idx] = .{ .data = blob };
+        self.config_cache.rows[idx] = .{ .data = blob };
     }
-    cache_built = true;
+    self.config_cache.built = true;
     var blobs: usize = 0;
-    for (&cache) |*b| {
+    for (&self.config_cache.rows) |*b| {
         if (b.data.len > 0) blobs += 1;
     }
     std.debug.print("zdtd: config s2c cache rows={d}/{d}\n", .{ blobs, s2c_names.len });
@@ -154,7 +155,7 @@ pub fn sendLocalization(self: *Game, peer: *ln_peer.Peer) !void {
 /// One Deflate-framed package per row, like `sendBlockIdMapping`.
 pub fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
     for (s2c_names, 0..) |name, idx| {
-        const blob = cache[idx].data;
+        const blob = self.config_cache.rows[idx].data;
         // All 42 names are < 128 chars, so the 7-bit length is one byte.
         comptime {
             var longest: usize = 0;

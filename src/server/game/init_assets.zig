@@ -148,7 +148,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     }
     // Patched-config S2C cache (PRD R8): deflate the same merged bytes the
     // catalogs use, once, for join-phase NetPackageConfigFile sends.
-    try @import("config_files.zig").buildCache(allocator, opts.game_dir, opts.config_dir);
+    try @import("config_files.zig").buildCache(self, allocator, opts.game_dir, opts.config_dir);
     // Traders before quests: wallet credit sums reward Item rows matching
     // traders.xml root `currency_item` (stock casinoCoin).
     if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {

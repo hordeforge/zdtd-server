@@ -107,7 +107,7 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
         self.drain_suppressed -%= 1;
     };
     var pkgs: [16]wire_frame.Package = undefined;
-    const n = wire_frame.parseChannelPayload(stable, &pkgs);
+    const n = wire_frame.parseChannelPayload(&self.frame_state, stable, &pkgs);
     if (n == 0 and stable.len > 0) {
         // Same hostile-input sampling as logPayloadErr (game/net.zig): an
         // unparseable payload is cheap to spray from any connected peer, and

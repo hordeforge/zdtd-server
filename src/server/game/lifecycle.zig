@@ -52,7 +52,7 @@ pub fn deinit(self: *Game) void {
 /// serveradmin_path). Shared by `deinit` and the create-failure path so a
 /// mid-create return cannot leave them for the next Game in the process.
 pub fn deinitProcessGlobals(self: *Game) void {
-    @import("config_files.zig").deinitCache(self.allocator);
+    @import("config_files.zig").deinitCache(self);
     @import("../../assets/paths.zig").deinitModDirs(self.allocator);
     @import("../../assets/modlets.zig").deinit(self.allocator);
     if (self.serveradmin_path) |p| {

@@ -53,6 +53,10 @@ pub const Capture = struct {
     /// Slot count covers join floods (stream r≤8 → 100+ chunks) + multi-step sim.
     /// Full stock chunks may exceed per-slot size; tests assert via counters too.
     slots: [256]struct { len: u16 = 0, data: [8192]u8 = undefined } = undefined,
+    /// This capture's parse scratch: a body returned by findPkgId aliases its
+    /// storage until this same capture's next parse (the contract the shared
+    /// module scratch used to imply, now owned by the instance).
+    parse_state: frame.ParseState = .{},
     n: usize = 0,
 
     pub fn push(self: *Capture, user: []const u8) void {
@@ -76,12 +80,12 @@ pub const Capture = struct {
     /// Capture-slot index of the first message carrying `pkg_id`, for tests
     /// that assert a send ORDER rather than mere arrival (the stock client
     /// wedges on an enter bundle whose packages arrive out of sequence).
-    pub fn indexOfPkgId(self: *const Capture, pkg_id: u16) ?usize {
+    pub fn indexOfPkgId(self: *Capture, pkg_id: u16) ?usize {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
             var pkgs: [8]frame.Package = undefined;
-            const pn = frame.parseChannelPayload(msg, &pkgs);
+            const pn = frame.parseChannelPayload(&self.parse_state, msg, &pkgs);
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id == pkg_id) return i;
@@ -90,12 +94,12 @@ pub const Capture = struct {
         return null;
     }
 
-    pub fn findPkgId(self: *const Capture, pkg_id: u16) ?[]const u8 {
+    pub fn findPkgId(self: *Capture, pkg_id: u16) ?[]const u8 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
             var pkgs: [8]frame.Package = undefined;
-            const pn = frame.parseChannelPayload(msg, &pkgs);
+            const pn = frame.parseChannelPayload(&self.parse_state, msg, &pkgs);
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id == pkg_id) return pkgs[j].body;
@@ -105,12 +109,12 @@ pub const Capture = struct {
     }
 
     /// Find PosAndRot/etc body whose first i32 is entity_id (common package layout).
-    pub fn findPkgIdEntity(self: *const Capture, pkg_id: u16, entity_id: i32) ?[]const u8 {
+    pub fn findPkgIdEntity(self: *Capture, pkg_id: u16, entity_id: i32) ?[]const u8 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
             var pkgs: [8]frame.Package = undefined;
-            const pn = frame.parseChannelPayload(msg, &pkgs);
+            const pn = frame.parseChannelPayload(&self.parse_state, msg, &pkgs);
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id != pkg_id) continue;
@@ -123,12 +127,12 @@ pub const Capture = struct {
     }
 
     /// Find EntitySpawn-style body with matching class hash at body[5..9] (after id+ver).
-    pub fn findPkgIdClass(self: *const Capture, pkg_id: u16, class_hash: i32) ?[]const u8 {
+    pub fn findPkgIdClass(self: *Capture, pkg_id: u16, class_hash: i32) ?[]const u8 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const msg = self.slots[i].data[0..self.slots[i].len];
             var pkgs: [8]frame.Package = undefined;
-            const pn = frame.parseChannelPayload(msg, &pkgs);
+            const pn = frame.parseChannelPayload(&self.parse_state, msg, &pkgs);
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id != pkg_id) continue;

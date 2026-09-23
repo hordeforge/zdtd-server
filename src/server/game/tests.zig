@@ -742,7 +742,7 @@ test "compressible packages send deflated frames the parser can read back" {
         var pkgs: [8]wire_frame.Package = undefined;
         var found = false;
         for (cap.slots[0..cap.n]) |s| {
-            const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+            const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
             for (pkgs[0..pn]) |p| {
                 if (p.id == pkg_id and std.mem.eql(u8, p.body, &payload)) found = true;
             }
@@ -1282,7 +1282,7 @@ test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" 
     var pkgs: [8]wire_frame.Package = undefined;
     var found = false;
     for (cap.slots[0..cap.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) {
                 // Flat world → infinite cluster: (0,0)/(0,0), bInfinite=true,
@@ -1344,13 +1344,13 @@ test "waypoint invites relay to allies (Friends) and all (Everyone)" {
     var b_got = false;
     var c_got = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) b_got = true;
         }
     }
     for (cap_c.slots[0..cap_c.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) c_got = true;
         }
@@ -1366,7 +1366,7 @@ test "waypoint invites relay to allies (Friends) and all (Everyone)" {
     try g.injectFramed(ca, framed2);
     c_got = false;
     for (cap_c.slots[0..cap_c.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) c_got = true;
         }
@@ -1407,13 +1407,13 @@ test "game message relays verbatim to all clients including sender" {
     var a_got = false;
     var b_got = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id and std.mem.eql(u8, p.body, &body)) a_got = true;
         }
     }
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id and std.mem.eql(u8, p.body, &body)) b_got = true;
         }
@@ -1458,13 +1458,13 @@ test "sound at position relays to all clients except the owning player" {
     var a_got = false;
     var b_got = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) a_got = true;
         }
     }
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pkg_id) b_got = true;
         }
@@ -1827,13 +1827,13 @@ test "particle effects relay to all clients except the causing owner; stealth is
     var a_got = false;
     var b_got = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pe_id) a_got = true;
         }
     }
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == pe_id) b_got = true;
         }
@@ -1998,13 +1998,13 @@ test "entity ragdoll relays to other clients, not the owner" {
     var a_got = false;
     var b_got = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == rg_id) a_got = true;
         }
     }
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == rg_id) b_got = true;
         }
@@ -2093,7 +2093,7 @@ test "in-game console runs admin verbs for admins, denies players" {
     var pkgs: [8]wire_frame.Package = undefined;
     var got_reply = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == cc_id) got_reply = true;
         }
@@ -2109,7 +2109,7 @@ test "in-game console runs admin verbs for admins, denies players" {
     try g.injectFramed(cb, framed2);
     var denied = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == cc_id and std.mem.find(u8, p.body, "permission denied") != null) denied = true;
         }
@@ -2154,7 +2154,7 @@ test "quest objective events mirror to party members" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w.written()));
     var b_got = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == ou_id) b_got = true;
         }
@@ -2174,7 +2174,7 @@ test "quest objective events mirror to party members" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w2.written()));
     var leaked = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == ou_id) leaked = true;
         }
@@ -4680,7 +4680,7 @@ test "kill trigger grants Dentist silver on tagged zombie kill" {
     while (i < capture.n) : (i += 1) {
         const msg = capture.slots[i].data[0..capture.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == ev_id) found_event = true;
@@ -5173,7 +5173,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     const ar_id = packages.idOf("NetPackageAddRemoveBuff").?;
     for (capture.slots[0..capture.n]) |sl| {
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(sl.data[0..sl.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != ar_id) continue;
             var nb: [128]u8 = undefined;
@@ -5752,7 +5752,7 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     var saw_progression = false;
     for (capture.slots[0..capture.n]) |sl| {
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(sl.data[0..sl.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != ar_id) continue;
             var nb: [128]u8 = undefined;
@@ -5967,13 +5967,13 @@ test "the laser sight relays to other players but not back to the sender" {
     var a_got = false;
     var b_body: ?[]const u8 = null;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == ls_id) a_got = true;
         }
     }
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == ls_id) b_body = p.body;
         }
@@ -6001,7 +6001,7 @@ test "the laser sight relays to other players but not back to the sender" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackagePlayerLaserSight", sw.written()));
     try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.ownership_rejects));
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             try std.testing.expect(p.id != ls_id);
         }
@@ -6029,7 +6029,7 @@ test "a fresh login sends the empty AuthConfirmation for the client to echo" {
     var pkgs: [8]wire_frame.Package = undefined;
     var saw = false;
     for (cap.slots[0..cap.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != ac_id) continue;
             // Empty body: read IL=1 touches nothing past the base header.
@@ -6074,7 +6074,7 @@ test "an owner receives their parked vehicles as a waypoint list" {
     var pkgs: [8]wire_frame.Package = undefined;
     var saw = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != wl_id) continue;
             // listType i16 Vehicle=0, count i32, then (id i32, 3xf32).
@@ -6097,7 +6097,7 @@ test "an owner receives their parked vehicles as a waypoint list" {
     try std.testing.expect(saw);
     // The other client gets nothing from this send.
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             try std.testing.expect(p.id != wl_id);
         }

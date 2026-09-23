@@ -127,7 +127,8 @@ fn fuzzChannelEnvelope(_: void, smith: *std.testing.Smith) !void {
     const len: usize = smith.slice(&storage);
     const input = storage[0..len];
     var decoded: [32]frame.Package = undefined;
-    const count = frame.parseChannelPayload(input, &decoded);
+    var fuzz_state: frame.ParseState = .{};
+    const count = frame.parseChannelPayload(&fuzz_state, input, &decoded);
     try std.testing.expect(count <= decoded.len);
     for (decoded[0..count]) |pkg| {
         try std.testing.expect(pkg.body.len <= 512 * 1024);

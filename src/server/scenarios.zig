@@ -1039,7 +1039,7 @@ test "scenario sign: a client's sign text is applied and echoed to everyone" {
     var si: usize = 0;
     while (si < cap_a.n) : (si += 1) {
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(cap_a.slots[si].data[0..cap_a.slots[si].len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(cap_a.slots[si].data[0..cap_a.slots[si].len], &pkgs);
         for (pkgs[0..pn]) |pk| {
             if (pk.id != te_id) continue;
             if (pk.body.len != body.len or pk.body[0] != 255) continue;
@@ -1558,7 +1558,7 @@ test "scenario replicate sends EntityVelocity for a falling zombie" {
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -1602,7 +1602,7 @@ test "scenario replicate sends TurretSync on target change" {
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -1687,7 +1687,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -1712,7 +1712,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -1741,7 +1741,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     while (i < cap_b.n and !found) : (i += 1) {
         const msg = cap_b.slots[i].data[0..cap_b.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id != did) continue;
@@ -1782,7 +1782,7 @@ test "scenario ClientInfo broadcasts the player list every 5 s" {
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -1829,7 +1829,7 @@ test "scenario map: PersistentPlayerPositions broadcasts every 6 s" {
     while (i < cap_a.n and !found) : (i += 1) {
         const msg = cap_a.slots[i].data[0..cap_a.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -2329,7 +2329,7 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     while (si < cap2.n) : (si += 1) {
         const msg = cap2.slots[si].data[0..cap2.slots[si].len];
         var pkgs: [8]@import("../wire/frame.zig").Package = undefined;
-        const pn = @import("../wire/frame.zig").parseChannelPayload(msg, &pkgs);
+        const pn = @import("../wire/frame.zig").parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id != ab_id) continue;
@@ -2865,7 +2865,7 @@ test "scenario deco streams beyond the join window as chunks stream" {
     while (si < cap.n and !found) : (si += 1) {
         const msg = cap.slots[si].data[0..cap.slots[si].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did) {
@@ -5567,7 +5567,7 @@ test "scenario a locked tile entity stays locked on a different channel" {
         while (i < cap_b.n and !found_unlock) : (i += 1) {
             const msg = cap_b.slots[i].data[0..cap_b.slots[i].len];
             var pkgs: [8]wire_frame.Package = undefined;
-            const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+            const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
             var j: usize = 0;
             while (j < pn) : (j += 1) {
                 if (pkgs[j].id != lock_id) continue;
@@ -6526,7 +6526,7 @@ test "scenario teleport Y-clamp suppresses the raw claim on peers" {
     while (i < cap_obs.n and !found) : (i += 1) {
         const msg = cap_obs.slots[i].data[0..cap_obs.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id == did and pkgs[j].body.len >= 4 and
@@ -7332,7 +7332,7 @@ fn findStatBody(cap: *const ln_peer.Capture, stat_id: u16, entity_id: i32, kind:
     while (i < cap.n) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn) : (j += 1) {
             if (pkgs[j].id != stat_id) continue;
@@ -8119,7 +8119,7 @@ fn collectAttaches(
     while (i < cap.n and n < types.len) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(msg, &pkgs);
         var j: usize = 0;
         while (j < pn and n < types.len) : (j += 1) {
             if (pkgs[j].id != attach_id) continue;
@@ -13075,7 +13075,7 @@ test "scenario walking away does not reset the decorations we sent" {
     var saw_reset = false;
     for (cap.slots[0..cap.n]) |s| {
         var pkgs: [16]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == remove_id) saw_remove = true;
             if (p.id == reset_id) saw_reset = true;
@@ -13763,7 +13763,7 @@ test "scenario stock InventoryTransaction applies and acks" {
     var got_ack = false;
     for (cap.slots[0..cap.n]) |s| {
         var pkgs: [8]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id == ack_id and p.body.len >= 5 and p.body[0] == 1) got_ack = true;
         }
@@ -13802,7 +13802,7 @@ test "scenario stock InventoryTransaction applies and acks" {
     // here would tell the client a rejected transaction went through.
     for (cap.slots[0..cap.n]) |s| {
         var pkgs2: [8]wire_frame.Package = undefined;
-        const pn2 = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs2);
+        const pn2 = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs2);
         for (pkgs2[0..pn2]) |p| {
             try std.testing.expect(p.id != ack_id);
         }
@@ -14457,7 +14457,7 @@ test "scenario light tile entities ride the chunk stream" {
         fn call(cp: *ln_peer.Capture, id: u16, x: i32, y: i32, z: i32) bool {
             for (cp.slots[0..cp.n]) |sl| {
                 var pkgs: [16]wire_frame.Package = undefined;
-                const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+                const pn = wire_frame.parseChannelPayloadForTest(sl.data[0..sl.len], &pkgs);
                 for (pkgs[0..pn]) |pk| {
                     if (pk.id != id or pk.body.len < 13) continue;
                     var r: binary.Reader = .{ .data = pk.body };
@@ -14555,7 +14555,7 @@ test "scenario a vending allow-list with a hole ships no empty identity" {
     var found_count: ?i32 = null;
     for (cap.slots[0..cap.n]) |sl| {
         var pkgs: [16]wire_frame.Package = undefined;
-        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(sl.data[0..sl.len], &pkgs);
         for (pkgs[0..pn]) |pk| {
             if (pk.id != te_id or pk.body.len < 21) continue;
             var r: binary.Reader = .{ .data = pk.body };
@@ -15403,7 +15403,7 @@ test "scenario a kill notifies the killer's client so kill challenges advance" {
     // everyone, and a bystander crediting the kill would be wrong.
     var pkgs: [8]wire_frame.Package = undefined;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             try std.testing.expect(p.id != award_id);
         }
@@ -15501,7 +15501,7 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     // The repaired cell must arrive as a SetBlock with damage 0.
     var saw_fix = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != setblock_id) continue;
             const first = packages.parseSetBlockBody(p.body) catch continue;
@@ -15514,7 +15514,7 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     // begin-repair rebroadcast the old code fanned out.
     var saw_done = false;
     for (cap_a.slots[0..cap_a.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != repair_id or p.body.len < 25) continue;
             if (p.body[p.body.len - 1] == 0) saw_done = true;
@@ -15522,7 +15522,7 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     }
     try std.testing.expect(saw_done);
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             try std.testing.expect(p.id != repair_id);
         }
@@ -15570,7 +15570,7 @@ test "scenario a landed hit fans the applied damage to the victim's trackers" {
     var pkgs: [8]wire_frame.Package = undefined;
     var saw = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != dmg_id) continue;
             const head = packages.parseDamageHead(p.body) catch continue;
@@ -15637,7 +15637,7 @@ test "scenario a leg hit past the crawler threshold crawlers the zombie" {
     var pkgs: [8]wire_frame.Package = undefined;
     var saw = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != dmg_id or p.body.len < 8) continue;
             const head = packages.parseDamageHead(p.body) catch continue;
@@ -15721,7 +15721,7 @@ test "scenario a perked attacker's dismember bonus reaches the S2C damage body" 
     var pkgs: [8]wire_frame.Package = undefined;
     var saw = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
-        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
         for (pkgs[0..pn]) |p| {
             if (p.id != dmg_id or p.body.len < 8) continue;
             const head = packages.parseDamageHead(p.body) catch continue;
@@ -15825,7 +15825,7 @@ test "scenario player death sends the deficit sequence action under XPOnly" {
         fn collect(self: *@This(), cp: *const ln_peer.Capture, pkg_id: u16) void {
             var pkgs: [8]wire_frame.Package = undefined;
             for (cp.slots[0..cp.n]) |s| {
-                const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+                const pn = wire_frame.parseChannelPayloadForTest(s.data[0..s.len], &pkgs);
                 for (pkgs[0..pn]) |p| {
                     if (p.id != pkg_id or p.body.len < 2) continue;
                     var rr = binary.Reader{ .data = p.body };

@@ -74,10 +74,10 @@ test "offline init failure restores deterministic sim globals" {
         .{ .webui_port = 1 },
     ));
     try std.testing.expect(!util_sim.isEnabled());
-    // createWithOptions errdefer must clear the process-global config S2C
-    // cache: buildCache runs before webui.listen, and a stuck cache_built
-    // would skip rebuild on the next Game.create in this process.
-    try std.testing.expect(!@import("config_files.zig").cacheBuiltForTest());
+    // The config S2C cache is Game-owned (config_cache), so a failed create
+    // cannot leave a process-global latch behind: there is no process state
+    // left to stick. The next create builds its own rows (see the built flag
+    // asserted by the successful-create tests).
 }
 
 test "offline successful step advances exactly one virtual tick" {
@@ -87,6 +87,8 @@ test "offline successful step advances exactly one virtual tick" {
         g.deinit();
         std.testing.allocator.destroy(g);
     }
+    // The join-phase config blobs belong to this Game instance.
+    try std.testing.expect(g.config_cache.built);
 
     const before = clock.monoNs();
     try g.step();

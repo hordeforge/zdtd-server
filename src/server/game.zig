@@ -276,6 +276,14 @@ pub const Game = struct {
     /// this (or the original when oversized) for the whole handlePackage loop;
     /// mid-handler ACK drains must not overwrite the live body storage.
     payload_hold: [65536]u8 = undefined,
+    /// Join-phase NetPackageConfigFile blobs for THIS Game's game_dir /
+    /// config_dir (was a module-scope cache: a second Game in one process
+    /// reused or skipped a rebuild of another instance's rows).
+    config_cache: game_config_files.Cache = .{},
+    /// C2S channel-envelope parse scratch: dispatch bodies alias its storage
+    /// for the whole handlePackage loop, owned by this Game (the module-scope
+    /// scratch this replaced let another parse session clobber them).
+    frame_state: wire_frame.ParseState = .{},
     /// Guards pumpAcks reentrancy while draining ACKs mid-send / mid-onData.
     /// When true, pollNetOnce only drainControl (no nested onData).
     pumping: bool = false,

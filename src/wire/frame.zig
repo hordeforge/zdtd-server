@@ -17,13 +17,24 @@ const inflate_cap: usize = 512 * 1024;
 /// packet. Stock package streams compress nowhere near this ratio.
 const max_inflate_ratio: usize = 64;
 
-/// Holds last inflated package stream so Package.body slices remain valid
-/// until the next parseChannelPayload call. Nested parseChannelPayload that
-/// needs inflate fails closed (see parse_depth) so bodies of the outer parse
-/// are not clobbered. Game.onData also holds `pumping` to avoid nested parse.
-var inflate_storage: [inflate_cap]u8 = undefined;
-/// In-flight parseChannelPayload nesting depth (single-threaded game loop).
-var parse_depth: u8 = 0;
+/// Per-context parse state: the inflate scratch plus its nesting depth, so
+/// Package.body slices from one owner's parse stay valid until that SAME
+/// owner's next parse, and two parse sessions can never clobber each other
+/// through process scope (paper: shared mutable state belongs to a context).
+/// Owners: the Game dispatch (Game.frame_state), the fuzz entry (a local)
+/// and the peer test Capture (one per capture instance). Nested parse
+/// through one context still fails closed (depth), and Game.onData still
+/// holds its `pumping` guard outside this layer.
+pub const ParseState = struct {
+    storage: [inflate_cap]u8 = undefined,
+    depth: u8 = 0,
+};
+
+/// Module-scope scratch backing parseChannelPayloadForTest. Test builds only:
+/// the production entry point requires a caller-owned ParseState, and the
+/// test-only entry compile-errors outside a test build, so this ambient
+/// scratch cannot serve a production parse.
+var for_test_state: ParseState = .{};
 
 pub const Package = struct {
     id: u16,
@@ -42,12 +53,13 @@ pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
     @memcpy(out.*[1..17], &guid);
 }
 
-/// Inflate stock C2S compressed payload. Header-sniff picks the container so
-/// the common case decompresses in one pass; the others stay as fallback.
-fn inflatePayload(src: []const u8) ?[]const u8 {
-    // Nested parse (parse_depth > 1) would overwrite inflate_storage while an
-    // outer Package.body still aliases it. Fail closed; same as corrupt deflate.
-    if (parse_depth > 1) return null;
+/// Inflate stock C2S compressed payload into `st.storage`. Header-sniff picks
+/// the container so the common case decompresses in one pass; the others stay
+/// as fallback.
+fn inflatePayload(st: *ParseState, src: []const u8) ?[]const u8 {
+    // Nested parse (depth > 1) would overwrite st.storage while an outer
+    // Package.body still aliases it. Fail closed; same as corrupt deflate.
+    if (st.depth > 1) return null;
 
     const first: flate.Container = if (src.len >= 2 and src[0] == 0x1f and src[1] == 0x8b)
         .gzip
@@ -67,11 +79,11 @@ fn inflatePayload(src: []const u8) ?[]const u8 {
     const cap = @min(inflate_cap, src.len *| max_inflate_ratio);
     for (containers) |container| {
         var in: std.Io.Reader = .fixed(src);
-        var out: std.Io.Writer = .fixed(inflate_storage[0..cap]);
+        var out: std.Io.Writer = .fixed(st.storage[0..cap]);
         var dec: flate.Decompress = .init(&in, container, &.{});
         const n = dec.reader.streamRemaining(&out) catch continue;
         if (n == 0) continue;
-        return inflate_storage[0..n];
+        return st.storage[0..n];
     }
     return null;
 }
@@ -100,11 +112,13 @@ fn parsePackageStream(payload: []const u8, count: u16, out: []Package) usize {
 /// compressed u8 | encrypted u8 | count u16, then the packages themselves.
 /// Supports stock uncompressed and deflate-compressed (Noemax) envelopes.
 /// Encrypted payloads are still rejected.
-/// Not reentrant for compressed envelopes: nested calls that need inflate
-/// return 0 so outer Package.body slices into inflate_storage stay valid.
-pub fn parseChannelPayload(data: []const u8, out: []Package) usize {
-    parse_depth +%= 1;
-    defer parse_depth -%= 1;
+/// Not reentrant through one state: nested calls that need inflate return 0
+/// so outer Package.body slices into `st.storage` stay valid. `st` is the
+/// owner's context; the returned bodies alias its storage for that owner's
+/// whole dispatch.
+pub fn parseChannelPayload(st: *ParseState, data: []const u8, out: []Package) usize {
+    st.depth +%= 1;
+    defer st.depth -%= 1;
 
     if (data.len < 9) return 0;
     var o: usize = 1; // skip channel
@@ -124,11 +138,21 @@ pub fn parseChannelPayload(data: []const u8, out: []Package) usize {
 
     const raw = data[o .. o + ps];
     const stream: []const u8 = if (compressed != 0) blk: {
-        const inflated = inflatePayload(raw) orelse return 0;
+        const inflated = inflatePayload(st, raw) orelse return 0;
         break :blk inflated;
     } else raw;
 
     return parsePackageStream(stream, count, out);
+}
+
+/// Test-only entry over a module-scope scratch: a test reads bodies right
+/// after one call and never shares state with another session, so this keeps
+/// test call sites one-liners. Calling it outside a test build is a compile
+/// error; every production owner passes its own ParseState.
+pub fn parseChannelPayloadForTest(data: []const u8, out: []Package) usize {
+    if (!@import("builtin").is_test)
+        @compileError("frame.parseChannelPayloadForTest is test-only; pass a *frame.ParseState");
+    return parseChannelPayload(&for_test_state, data, out);
 }
 
 /// Bytes before the (possibly compressed) package stream: channel + payload
@@ -248,7 +272,7 @@ test "frame roundtrip pos body size" {
     var frame_buf: [128]u8 = undefined;
     const framed = try framePackage(&frame_buf, 0, 99, bw.written());
     var pkgs: [4]Package = undefined;
-    const n = parseChannelPayload(framed, &pkgs);
+    const n = parseChannelPayloadForTest(framed, &pkgs);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(@as(u16, 99), pkgs[0].id);
     try std.testing.expectEqual(@as(usize, 30), pkgs[0].body.len);
@@ -308,7 +332,7 @@ test "DeflateFramer roundtrips through the inbound parser" {
     const empty = try fr.finish();
     try std.testing.expectEqual(@as(u8, 1), empty[5]);
     try std.testing.expectEqual(@as(i32, @intCast(empty.len - envelope_len)), std.mem.readInt(i32, empty[1..5], .little));
-    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(empty, &pkgs));
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayloadForTest(empty, &pkgs));
     try std.testing.expectEqual(@as(u16, 77), pkgs[0].id);
     try std.testing.expectEqual(@as(usize, 0), pkgs[0].body.len);
 
@@ -316,7 +340,7 @@ test "DeflateFramer roundtrips through the inbound parser" {
     try fr.begin(&out, &window, 0, 5, 1);
     try fr.writer().writeByte(0xab);
     const one = try fr.finish();
-    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(one, &pkgs));
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayloadForTest(one, &pkgs));
     try std.testing.expectEqualSlices(u8, &.{0xab}, pkgs[0].body);
 }
 
@@ -339,7 +363,7 @@ test "DeflateFramer keeps a body far larger than the frame buffer" {
     try std.testing.expect(framed.len * max_inflate_ratio > body_len);
 
     var pkgs: [2]Package = undefined;
-    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(framed, &pkgs));
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayloadForTest(framed, &pkgs));
     try std.testing.expectEqual(@as(u16, 123), pkgs[0].id);
     try std.testing.expectEqual(body_len, pkgs[0].body.len);
     i = 0;
@@ -375,7 +399,7 @@ test "deflate back-references stay inside the stock 32 KiB history" {
     const framed = try fr.finish();
 
     var pkgs: [2]Package = undefined;
-    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(framed, &pkgs));
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayloadForTest(framed, &pkgs));
     try std.testing.expectEqual(body_len, pkgs[0].body.len);
     i = 0;
     while (i < body_len) : (i += 1) {
@@ -444,7 +468,7 @@ test "compressed zlib package stream parses" {
     const framed = env[0 .. 9 + compressed.len];
 
     var pkgs: [4]Package = undefined;
-    const n = parseChannelPayload(framed, &pkgs);
+    const n = parseChannelPayloadForTest(framed, &pkgs);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(@as(u16, 42), pkgs[0].id);
     try std.testing.expectEqualStrings("hello", pkgs[0].body);
@@ -458,16 +482,57 @@ test "channel parser rejects malformed envelope and package lengths" {
     std.mem.writeInt(u16, envelope[7..9], 1, .little);
 
     std.mem.writeInt(i32, envelope[1..5], -1, .little);
-    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..9], &pkgs));
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayloadForTest(envelope[0..9], &pkgs));
 
     std.mem.writeInt(i32, envelope[1..5], 6, .little);
-    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..14], &pkgs));
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayloadForTest(envelope[0..14], &pkgs));
 
     std.mem.writeInt(i32, envelope[1..5], 6, .little);
     std.mem.writeInt(i32, envelope[9..13], 1, .little);
-    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..15], &pkgs));
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayloadForTest(envelope[0..15], &pkgs));
 
     envelope[6] = 1;
     std.mem.writeInt(i32, envelope[9..13], 2, .little);
-    try std.testing.expectEqual(@as(usize, 0), parseChannelPayload(envelope[0..15], &pkgs));
+    try std.testing.expectEqual(@as(usize, 0), parseChannelPayloadForTest(envelope[0..15], &pkgs));
+}
+
+test "two parse states keep their inflated bodies independent" {
+    // The module-scope scratch this replaced let one session's parse clobber
+    // another session's live Package.body slices: validity was global
+    // discipline ("valid until the next parse") instead of a property of the
+    // owning context. Interleave two owners and both bodies must survive.
+    var sa: ParseState = .{};
+    var sb: ParseState = .{};
+
+    const body_a_len: usize = 700;
+    var out_a: [8192]u8 = undefined;
+    var win_a: [DeflateFramer.window_len]u8 = undefined;
+    var fra: DeflateFramer = undefined;
+    try fra.begin(&out_a, &win_a, 0, 77, body_a_len);
+    var i: usize = 0;
+    while (i < body_a_len) : (i += 1) try fra.writer().writeByte(bodyByte(i));
+    const msg_a = try fra.finish();
+
+    const body_b_len: usize = 512;
+    var out_b: [8192]u8 = undefined;
+    var win_b: [DeflateFramer.window_len]u8 = undefined;
+    var frb: DeflateFramer = undefined;
+    try frb.begin(&out_b, &win_b, 0, 88, body_b_len);
+    i = 0;
+    while (i < body_b_len) : (i += 1) try frb.writer().writeByte(@truncate(i *% 7 +% 3));
+    const msg_b = try frb.finish();
+
+    var pk_a: [2]Package = undefined;
+    var pk_b: [2]Package = undefined;
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(&sa, msg_a, &pk_a));
+    // B's parse lands after A's body is still live; under the shared scratch
+    // it would overwrite A's inflated bytes.
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(&sb, msg_b, &pk_b));
+    try std.testing.expectEqual(@as(usize, body_a_len), pk_a[0].body.len);
+    i = 0;
+    while (i < body_a_len) : (i += 1) try std.testing.expectEqual(bodyByte(i), pk_a[0].body[i]);
+    try std.testing.expectEqual(@as(usize, body_b_len), pk_b[0].body.len);
+    i = 0;
+    while (i < body_b_len) : (i += 1)
+        try std.testing.expectEqual(@as(u8, @truncate(i *% 7 +% 3)), pk_b[0].body[i]);
 }
