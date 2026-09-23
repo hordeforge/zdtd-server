@@ -357,7 +357,7 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
 /// No heap on the tick path.
 pub const sense_header_len: usize = 24;
 
-pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
+pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, src: i16, out: []u8) usize {
     const g = gameFromPtr(ctx.data orelse return 0);
     if (out.len < sense_header_len) return 0;
     // Reserve room for the event trailer up front so a full record set still
@@ -449,7 +449,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     var ev_n: usize = 0;
     const ev_base2 = ev_base + info_n * bot_mod.sense_event_len;
     if (ev_base2 + bot_mod.sense_event_len <= out.len) {
-        ev_n = g.bots.drainSenseEvents(out, ev_base2, bot_mod.max_sense_events);
+        ev_n = g.bots.drainSenseEvents(out, ev_base2, bot_mod.max_sense_events, src);
     }
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
     return sense_header_len + n * rec_len + (info_n + ev_n) * bot_mod.sense_event_len;

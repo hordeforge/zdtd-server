@@ -297,7 +297,7 @@ test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
                 queued_n += 1;
             }
         }
-        fn senseFn(_: *HostCtx, out_buf: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out_buf: []u8) usize {
             if (out_buf.len < 24) return 0;
             std.mem.writeInt(u32, out_buf[0..4], 0x3453425a, .little); // 'ZBS3'
             std.mem.writeInt(u32, out_buf[4..8], 0, .little);
@@ -619,7 +619,7 @@ test "shipped core plugins declare the host contract version" {
             return 1;
         }
         fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
-        fn senseFn(_: *HostCtx, out: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out: []u8) usize {
             _ = out;
             return 0;
         }
@@ -1247,7 +1247,7 @@ test "host_verbs is the _zdtd_requires vocabulary for host imports" {
 }
 
 const TestSense = struct {
-    fn sense(_: *HostCtx, _: []u8) usize {
+    fn sense(_: *HostCtx, _: i16, _: []u8) usize {
         return 0;
     }
     fn query(_: *HostCtx, _: []const u8, _: []u8) usize {
@@ -1389,7 +1389,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             return 0;
         }
 
-        fn senseFn(_: *HostCtx, out: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out: []u8) usize {
             // header: magic 'ZBS4' (24 bytes: magic, count, tick, self,
             // world_time, blood_moon), records at base 24.
             std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
@@ -1704,7 +1704,7 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             std.mem.writeInt(i32, r[32..36], -1, .little); // target
             r[36] = 0; // wearing
         }
-        fn senseFn(_: *HostCtx, out: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out: []u8) usize {
             if (!sense_enabled) return 0;
             // header: magic 'ZBS4' (24 bytes), 2 records, tick 42, self -1
             std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
@@ -1918,7 +1918,7 @@ test "parachute.wasm deploys glide on a falling worn player and clears on landin
             std.mem.writeInt(u32, r[28..32], @bitCast(vy), .little); // f32 bit pattern
             r[36] = 1; // wearing_glider
         }
-        fn senseFn(_: *HostCtx, out: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out: []u8) usize {
             if (out.len < 24 + 40) return 0;
             std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
             std.mem.writeInt(u32, out[4..8], 1, .little); // count
@@ -1994,7 +1994,7 @@ test "parachute.wasm announce text survives on_enable's stack frame" {
             queued_len[queued_n] = n;
             queued_n += 1;
         }
-        fn senseFn(_: *HostCtx, out: []u8) usize {
+        fn senseFn(_: *HostCtx, _: i16, out: []u8) usize {
             if (out.len < 24 + 40) return 0;
             std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
             std.mem.writeInt(u32, out[4..8], 1, .little); // count

@@ -116,6 +116,12 @@ pub const SenseEvent = struct {
     attacker: i32 = -1,
     victim: i32 = -1,
     amount: f32 = 0,
+    /// Owning plugin src of the victim bot (host-side only; the wire record
+    /// stays the packed 16 bytes). A damage feed is an effect of the fiber
+    /// whose bot took the hit, so only that fiber's sense drain receives it
+    /// (paper: an effect must not be delivered into another component's
+    /// context); src 0 (native) reads everything, like the other src-0 rules.
+    owner: i16 = 0,
 };
 
 /// One host-side bot. Pure data - the guest brain never touches this struct
@@ -382,7 +388,7 @@ pub const BotManager = struct {
     pub fn damageFrom(self: *BotManager, target: i32, dmg: f32, attacker: i32) bool {
         const ts = self.find(target) orelse return false;
         if (self.ev_n < max_sense_events) {
-            self.events[self.ev_n] = .{ .attacker = attacker, .victim = target, .amount = dmg };
+            self.events[self.ev_n] = .{ .attacker = attacker, .victim = target, .amount = dmg, .owner = self.bots[ts].src };
             self.ev_n += 1;
         }
         self.bots[ts].last_attacker = attacker;
@@ -419,14 +425,26 @@ pub const BotManager = struct {
         }
     }
 
-    /// Copy pending damage events into the sense snapshot trailer starting at
-    /// byte `base` (immediately after the entity records) and clear the buffer.
-    /// Returns the number of events written (<= `cap`). No heap; stops early
-    /// when `out` cannot fit the next event.
-    pub fn drainSenseEvents(self: *BotManager, out: []u8, base: usize, cap: usize) usize {
+    /// Copy this src's pending damage events into the sense snapshot trailer
+    /// starting at byte `base` (immediately after the entity records) and
+    /// remove the drained events; events owned by other plugin srcs stay in
+    /// the ring for their owner's own sense pass (the old drain-and-clear
+    /// handed the first sensing plugin every module's retaliation feed).
+    /// `for_src == 0` (native) drains everything, like the other src-0 rules.
+    /// Returns the number of events written (<= `cap`); matches past the cap
+    /// are dropped as before. No heap; stops early when `out` cannot fit.
+    pub fn drainSenseEvents(self: *BotManager, out: []u8, base: usize, cap: usize, for_src: i16) usize {
         var written: usize = 0;
+        var kept: usize = 0;
         for (self.events[0..self.ev_n]) |ev| {
-            if (written >= cap) break;
+            if (for_src != 0 and ev.owner != for_src) {
+                // kept <= ev_n <= max by construction: only non-matching
+                // events are re-stored, so the compaction never overflows.
+                self.events[kept] = ev;
+                kept += 1;
+                continue;
+            }
+            if (written >= cap) continue;
             const rec = base + written * sense_event_len;
             if (rec + sense_event_len > out.len) break;
             const r = out[rec .. rec + sense_event_len];
@@ -437,7 +455,7 @@ pub const BotManager = struct {
             std.mem.writeInt(u32, r[12..16], @bitCast(ev.amount), .little);
             written += 1;
         }
-        self.ev_n = 0;
+        self.ev_n = kept;
         return written;
     }
 
@@ -502,6 +520,18 @@ pub const BotManager = struct {
     /// population floor when this src set it. Native src 0 is never withdrawn.
     pub fn dropFrom(self: *BotManager, src: i16) void {
         if (src == 0) return;
+        // Withdraw the consumer's pending sense feed with its bots (paper
+        // 3.1: a disabled module's pending effects do not outlive it).
+        {
+            var i: usize = 0;
+            var kept: usize = 0;
+            while (i < self.ev_n) : (i += 1) {
+                if (self.events[i].owner == src) continue;
+                self.events[kept] = self.events[i];
+                kept += 1;
+            }
+            self.ev_n = kept;
+        }
         for (&self.bots) |*b| {
             if (!b.alive or b.src != src) continue;
             b.* = .{};
@@ -523,6 +553,9 @@ pub const BotManager = struct {
             if (b.src > dropped) b.src -= 1;
         }
         if (self.floor_src > dropped) self.floor_src -= 1;
+        for (self.events[0..self.ev_n]) |*ev| {
+            if (ev.owner > dropped) ev.owner -= 1;
+        }
     }
 
     /// Live bots attributed to `src` (src 0 = the native console's own bots).

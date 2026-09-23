@@ -594,7 +594,7 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
             std.mem.writeInt(i32, r[32..36], -1, .little); // target
             r[36] = 0; // wearing
         }
-        fn senseFn(_: *plugin_mod.HostCtx, out: []u8) usize {
+        fn senseFn(_: *plugin_mod.HostCtx, _: i16, out: []u8) usize {
             // header: magic 'ZBS4' (24 bytes), 1 record (player 2000), tick 42, self -1
             std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
             std.mem.writeInt(u32, out[4..8], 1, .little);

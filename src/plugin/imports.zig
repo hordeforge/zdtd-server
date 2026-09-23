@@ -31,17 +31,10 @@ pub fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             // Attribute the command to its plugin via the caller's runtime
             // (paper: revertible effects - the owner withdraws a disabled
             // plugin's pending effects by src).
-            var src: i16 = 0;
-            const rt: *anyopaque = @ptrCast(caller.rt);
-            for (hc.rt_slot, 0..) |r, i| {
-                if (r == rt) {
-                    src = @intCast(i + 1);
-                    break;
-                }
-            }
             // Fail closed: an unattributed queue would run as native (src 0)
             // and could not be withdrawn. Drop it rather than leak the effect.
-            if (src == 0) return 1;
+            const slot = @import("wasm.zig").slotForCaller(hc, @ptrCast(caller.rt)) orelse return 1;
+            const src: i16 = @intCast(slot + 1);
             hc.queue_fn(hc, src, cmd);
             return 0;
         }
@@ -52,7 +45,14 @@ pub fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             if (ptr < 0 or len < 0) return 0;
             const sf = hc.sense_fn orelse return 0;
             var scratch: [host_sense_max:0]u8 = undefined;
-            const written = sf(hc, &scratch);
+            // 1-based slot of the sensing plugin (0 = unattributable -> the
+            // native view): the host routes the bot-damage event feed to the
+            // fiber whose bot took the hit.
+            const src: i16 = if (@import("wasm.zig").slotForCaller(hc, @ptrCast(caller.rt))) |sl|
+                @intCast(sl + 1)
+            else
+                0;
+            const written = sf(hc, src, &scratch);
             const guest_len: usize = @intCast(len);
             const copy = @min(guest_len, @min(written, host_sense_max));
             const dst = mem.sliceAt(@intCast(ptr), @intCast(copy)) catch return 0;

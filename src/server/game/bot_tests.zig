@@ -216,7 +216,7 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     m.ev_n = 2;
 
     var out: [128]u8 = [_]u8{0xAA} ** 128;
-    const written = m.drainSenseEvents(&out, 16, max_sense_events);
+    const written = m.drainSenseEvents(&out, 16, max_sense_events, 0);
     try std.testing.expectEqual(@as(usize, 2), written);
 
     const e0 = out[16..32];
@@ -231,7 +231,7 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     try std.testing.expectEqual(@as(i32, 11), std.mem.readInt(i32, e1[8..12], .little));
 
     // The buffer is cleared: a second drain writes nothing.
-    try std.testing.expectEqual(@as(usize, 0), m.drainSenseEvents(&out, 16, max_sense_events));
+    try std.testing.expectEqual(@as(usize, 0), m.drainSenseEvents(&out, 16, max_sense_events, 0));
 
     // Cap: at most `cap` events are written and the tail is untouched. Fill
     // the buffer through damageFrom (which itself caps at max_sense_events).
@@ -245,7 +245,7 @@ test "BotManager drainSenseEvents writes the 16-byte trailer layout and clears" 
     try std.testing.expect(m.damageFrom(10, 1, 99));
     try std.testing.expectEqual(@as(usize, max_sense_events), m.ev_n);
     var out2: [512]u8 = [_]u8{0xBB} ** 512;
-    const capped = m.drainSenseEvents(&out2, 16, max_sense_events);
+    const capped = m.drainSenseEvents(&out2, 16, max_sense_events, 0);
     try std.testing.expectEqual(@as(usize, max_sense_events), capped);
     try std.testing.expectEqual(@as(u8, 0xBB), out2[16 + max_sense_events * sense_event_len]);
 }
@@ -399,4 +399,44 @@ test "shiftSrcsAfter remaps remaining bot srcs after a slot drop" {
     try std.testing.expectEqual(@as(i16, 1), m.bots[0].src);
     try std.testing.expectEqual(@as(i16, 2), m.bots[1].src);
     try std.testing.expectEqual(@as(i16, 2), m.floor_src);
+}
+
+test "bot damage events route only to the owning src's sense drain" {
+    // Paper: an effect stays in its component's context. The first sensing
+    // plugin used to drain the whole ring, so another module's retaliation
+    // feed starved; the ring now keys on the victim bot's owner and each
+    // src (0 = native reads all) drains its own share.
+    var m: BotManager = .{};
+    // hp above the test hits: a 0-hp bot dies on the first push pair and the
+    // later finds fail (events still pushed, bots gone).
+    m.bots[0] = .{ .net_id = 10, .alive = true, .src = 1, .hp = 100 };
+    m.bots[1] = .{ .net_id = 11, .alive = true, .src = 2, .hp = 100 };
+    m.n = 2;
+    try std.testing.expect(m.damageFrom(10, 7, 999)); // hits src 1's bot
+    try std.testing.expect(m.damageFrom(11, 3, 888)); // hits src 2's bot
+    try std.testing.expectEqual(@as(usize, 2), m.ev_n);
+
+    var out: [256]u8 = undefined;
+    // src 2 senses first: only its own event (victim 11) comes out, and
+    // src 1's event (victim 10) stays in the ring for its owner.
+    try std.testing.expectEqual(@as(usize, 1), m.drainSenseEvents(&out, 0, max_sense_events, 2));
+    try std.testing.expectEqual(@as(i32, 11), std.mem.readInt(i32, out[8..12], .little));
+    try std.testing.expectEqual(@as(usize, 1), m.ev_n);
+    // src 1 gets its own feed afterwards.
+    try std.testing.expectEqual(@as(usize, 1), m.drainSenseEvents(&out, 0, max_sense_events, 1));
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, out[8..12], .little));
+    try std.testing.expectEqual(@as(usize, 0), m.ev_n);
+
+    // A withdrawn consumer takes its pending feed with it.
+    _ = m.damageFrom(10, 7, 999);
+    _ = m.damageFrom(11, 3, 888);
+    m.dropFrom(1);
+    try std.testing.expectEqual(@as(usize, 1), m.ev_n);
+    try std.testing.expectEqual(@as(usize, 1), m.drainSenseEvents(&out, 0, max_sense_events, 2));
+
+    // Compaction follows a failed-reload shift like the bot srcs.
+    _ = m.damageFrom(11, 3, 888);
+    m.shiftSrcsAfter(1);
+    try std.testing.expectEqual(@as(usize, 1), m.drainSenseEvents(&out, 0, max_sense_events, 1));
+    try std.testing.expectEqual(@as(usize, 0), m.ev_n);
 }

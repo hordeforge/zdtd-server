@@ -128,7 +128,11 @@ pub const HostCtx = struct {
     /// Build a read-only world snapshot into `out`, returning bytes written.
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
-    sense_fn: ?*const fn (ctx: *HostCtx, out: []u8) usize = null,
+    /// `src` is the 1-based slot of the plugin issuing the sense (0 = not
+    /// attributable / native): the bot-damage event feed is routed to the
+    /// owning fiber's drain only (paper: effects stay in their component's
+    /// context), while the world snapshot itself stays shared.
+    sense_fn: ?*const fn (ctx: *HostCtx, src: i16, out: []u8) usize = null,
     /// Reverse-direction point query (RFC 0001 §3): the guest writes a text
     /// request (e.g. `cover x z tx tz`) and the host writes a text response,
     /// returning bytes written (0 = no answer / unknown query). Null when the
@@ -1779,16 +1783,23 @@ pub const WasmHost = struct {
     }
 };
 
-/// Map a calling instance's runtime pointer to its loaded Plugin (per-plugin
-/// state for the json capability). Mirrors the queue import's attribution loop.
-pub fn pluginForCaller(hc: *HostCtx, rt: *anyopaque) ?*Plugin {
+/// 0-based slot of the calling instance's runtime pointer, or null when the
+/// caller is not attributable. The single rt_slot scan: the queue import
+/// derives its 1-based src from this, the sense import routes its event feed
+/// the same way, and the json capability reaches per-plugin state through it.
+pub fn slotForCaller(hc: *HostCtx, rt: *anyopaque) ?usize {
     for (hc.rt_slot, 0..) |r, i| {
-        if (r == rt) {
-            const p: *Plugin = @ptrCast(@alignCast(hc.plugin_slot[i] orelse return null));
-            return p;
-        }
+        if (r == rt) return i;
     }
     return null;
+}
+
+/// Map a calling instance's runtime pointer to its loaded Plugin (per-plugin
+/// state for the json capability).
+pub fn pluginForCaller(hc: *HostCtx, rt: *anyopaque) ?*Plugin {
+    const i = slotForCaller(hc, rt) orelse return null;
+    const p: *Plugin = @ptrCast(@alignCast(hc.plugin_slot[i] orelse return null));
+    return p;
 }
 
 /// Host import table, all under the "zdtd" module namespace. The import field
