@@ -240,9 +240,77 @@ Re-traced 2026-09-12 against the current tree (read-only, no gates run).
   caller's runtime is not in `rt_slot`, so an unattributable op is dropped
   rather than run as native (`wasm.zig:1641-1643`).
 
+## Round: 2026-09-23 (/cordis-review loop rounds 1-9)
+
+The loop review re-traced every open finding against the live tree, fixed the
+gaps its checklist surfaced, and gated the previously open ones (ids continue
+the series).
+
+Verified fixed and now gated (listed as open in the 2026-09-12 round):
+
+- **F7**: `slot_of_plan` translates plan slot to loaded slot at claim install
+  (`src/plugin/wasm.zig:1143`, `:1171`), gated by `point claims bind to the
+  loaded slot, not the plan index`.
+- **F8**: `Plugin.require_declaration` records the boot rule per slot and
+  `reload` replays it (`src/plugin/wasm.zig:191`, the reload restore), gated by
+  `plugin reload replays the boot declaration rule (review F8)`.
+- **F9**: `reconcileClaims` reads the on-disk declaration first and changes
+  state only on success (`src/plugin/wasm.zig:1392`), gated by
+  `reconcileClaims keeps claims and module deny when the manifest is invalid
+  (review F9)`. That gate also surfaced a real leak: `bindManifest` never
+  released the strings `toml_bind` had already duped when the bind or the
+  validate failed, so one invalid `manifest.toml` leaked at boot and on every
+  reload attempt. Fixed with an `errdefer free` and a partial-safe
+  `Manifest.free`.
+- **F10**: `bot spawn` / `bot remove` honor the `spawn` / `despawn` bits
+  (`src/server/game/wasm_host.zig:203`), gated by the queued-verb policy
+  test's `bot spawn` block.
+- **F11**: reload re-reads `config.toml` through `rereadConfig`
+  (`src/plugin/wasm.zig:1302`), gated by `plugin reload re-reads config.toml
+  for a manifest-backed module`.
+
+New findings fixed in the loop rounds (ids continue F11):
+
+- **F12 (P1)**: `WasmHost.enable` re-fired `on_enable` additively on every
+  call; a per-instance `activated` latch gates it and a reload arms its
+  replacement once (test `enable activates each instance once and a reload
+  reactivates its replacement`).
+- **F13 (P1)**: the strict path now rejects a `zdtd.sense` / `zdtd.query`
+  import its declaration omits, read from the module import section: the
+  optional-callback never-fire shape (test `an undeclared host verb import
+  fails the declared contract on the strict path`).
+- **F14 (P1)**: the join-phase config S2C cache was process-global and keyed
+  by nothing, so a second Game could reuse or skip a rebuild of another
+  instance's rows; it is `config_files.Cache` on Game now (asserted by the
+  successful-create tests).
+- **F15 (P1)**: the channel-envelope inflate scratch was module scope with
+  "valid until the next parse" held by discipline; `frame.ParseState` is per
+  owner (Game dispatch, fuzz entry, each test Capture), with a test-only entry
+  that compile-errors outside tests (test `two parse states keep their inflated
+  bodies independent`).
+- **F16 (P1)**: the turret fold was the third death choke and the only one
+  without `World.kill_verdict_fn`, so turret fire bypassed every plugin death
+  deny and never fired `on_entity_killed` (test `turret kills honour the kill
+  verdict (T15)`).
+- **F17 (P1)**: the bot-damage sense feed was an unattributed shared ring the
+  first sensing plugin drained whole; events carry the victim bot's owner src,
+  drains are per src, withdrawal purges, compaction remaps (test `bot damage
+  events route only to the owning src's sense drain`).
+- **F18 (P1)**: `--mcp-allowlist` (default none) was enforced only inside the
+  guest; `wasmQueue` now gates any `on_mcp_frame` exporter's queue with the
+  same prefix list (test `the mcp allowlist gates an external-entry module at
+  the queue boundary`).
+- **F19 (P1)**: `Manifest.validate` contained `preset` and `icon` to the mod
+  dir but not `wasm`, so a manifest could execute a file outside its folder
+  under its own tier/claims/policy identity (test `manifest wasm is a
+  relative path inside the mod dir`).
+- **F20 (P2)**: the linker verb list and `host_verbs` were two unlinked
+  hand-written lists; `imports.defined_verb_names` is pinned to `host_verbs`
+  by set equality (test `the linker defines exactly the verbs the requires
+  vocabulary accepts`).
+
 ## Follow-ups
 
-Open: F5 (provider ordering, moot until plugins provide keys), F7 (P1, boot
-claim slot mapping), F8/F9 (P2, reload fail-closed), F10/F11 (P3, deny
-granularity and config re-read). F1, F2, F3, F4 and F6 are fixed and gated by
-the scenarios and unit tests named above.
+Open: F5 (provider ordering, moot until plugins provide keys). F1-F4, F6-F20
+are fixed; the gates named above hold each. Full `zig build test` green
+2026-09-23.

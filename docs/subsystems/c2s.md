@@ -10,7 +10,7 @@ UDP payloads reach the handlers only through the tick thread's net poll: `pollNe
 
 ```zig
     var pkgs: [16]wire_frame.Package = undefined;
-    const n = wire_frame.parseChannelPayload(stable, &pkgs);
+    const n = wire_frame.parseChannelPayload(&self.frame_state, stable, &pkgs);
 ```
 
 A payload that fails to parse at all is counted `c2s_malformed` and dropped; an earlier retry that prepended a channel byte was removed because it widened the trust boundary on unauthenticated input (src/server/game/net_handlers.zig:131). Payloads that arrive before the challenge echo are buffered into `Client.preauth_buf` and replayed after authentication (src/server/game/net_handlers.zig:71, 85). Tests and loadgen enter the same path through `harness.attachJoinedClientAs` / `harness.injectFramed`, which call `onData` directly rather than opening a socket (src/server/game/harness.zig:36, 89).
