@@ -330,12 +330,19 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
     defer a.free(bytes);
 
     var m: Manifest = .{};
+    // `dir` first, so every fallible step below runs with the one field
+    // free() unconditionally releases already a real allocation.
+    m.dir = try a.dupe(u8, dir_path);
+    // toml_bind dupes strings into `a` while parsing, so a partial bind or a
+    // failed validate must release them here: the caller owns `m` only on
+    // success (the review-F9 corrupt-manifest path leaked name/points before
+    // this errdefer; the new F9 gate fails the test on the leak).
+    errdefer free(a, &m);
     try toml_bind.bind(Manifest, &m, bytes, a);
     if (m.validate()) |msg| {
         std.debug.print("zdtd: mods: invalid manifest.toml at '{s}': {s}\n", .{ dir_path, msg });
         return error.InvalidManifest;
     }
-    m.dir = try a.dupe(u8, dir_path);
     // Optional self-contained config: raw text passed to the guest verbatim.
     // A missing or oversized file is not a load error (config is optional;
     // fail closed to no config, never a truncated blob).
@@ -353,10 +360,12 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
     return m;
 }
 
-/// Free all duped strings in a Manifest (not the struct itself).
+/// Free all duped strings in a Manifest (not the struct itself). Partial
+/// state is safe: a bind aborted before `name` was parsed leaves it null, and
+/// an empty `dir` never came from the allocator.
 pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
-    a.free(m.dir);
-    a.free(m.name.?);
+    if (m.dir.len > 0) a.free(m.dir);
+    if (m.name) |n| a.free(n);
     if (m.config.len > 0) a.free(m.config);
     if (m.version) |v| a.free(v);
     if (m.wasm) |w| a.free(w);

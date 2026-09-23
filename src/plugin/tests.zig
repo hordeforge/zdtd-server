@@ -750,6 +750,18 @@ test "plugin reload keeps the module's config bytes" {
     try std.testing.expectEqualStrings(cfg_text, host.slots[0].config_bytes);
 }
 
+/// Minimal undeclared module (exports `on_tick`, no `_zdtd_requires`): the
+/// shape the strict presence rule refuses and the raw fixture path accepts.
+/// Shared by the presence test and the F8 reload-replay test.
+const undeclared_test_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+    0x03, 0x02, 0x01, 0x00, // function: one of type 0
+    0x07, 0x0b, 0x01, 0x07, 'o', 'n', '_', 't', 'i', 'c', 'k', // export "on_tick"
+    0x00, 0x00,
+    0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: empty body
+};
+
 /// Minimal declaring module for the manifest-backed reload tests: exports
 /// on_tick plus a valid `_zdtd_requires` ("log"), which the reviewed F8 rule
 /// requires of a module loaded from a manifest.
@@ -829,14 +841,7 @@ test "a discovered mod must declare _zdtd_requires" {
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     // Hand-built module exporting only `on_tick` and declaring nothing: type
     // ()->(), one function of that type, the export, an empty body.
-    const undeclared = [_]u8{
-        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
-        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
-        0x03, 0x02, 0x01, 0x00, // function: one of type 0
-        0x07, 0x0b, 0x01, 0x07, 'o', 'n', '_', 't', 'i', 'c', 'k', // export "on_tick"
-        0x00, 0x00,
-        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: empty body
-    };
+    const undeclared = undeclared_test_wasm;
     // Same bytes on the raw path (no manifest claim) load: the rule is about a
     // discovered mod's declaration, not about the module shape.
     var p = try Plugin.load(std.testing.allocator, "undeclared.wasm", &undeclared, &ctx, .{});
@@ -2172,4 +2177,142 @@ test "enable activates each instance once and a reload reactivates its replaceme
     try std.testing.expectEqual(@as(usize, 2), Cap.enabled_n);
     host.enable();
     try std.testing.expectEqual(@as(usize, 2), Cap.enabled_n);
+}
+
+test "plugin reload replays the boot declaration rule (review F8)" {
+    // A manifest-backed slot booted through the strict path must not reload a
+    // replacement that dropped `_zdtd_requires`: HMR holds the same fail-closed
+    // rule as the restart it stands in for. The slot records which rule it
+    // booted under, `reload` replays it, and the refused replacement leaves the
+    // active range. The raw fixture path (in-repo C modules, `--export-all`)
+    // keeps its permissive rule, proven by the same swap loading there.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    const a = std.testing.allocator;
+
+    // Strict boot (the discovered-mod rule), then the swap to undeclared.
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+        const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
+        defer a.free(wasm_path);
+        const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });
+        defer a.free(man_path);
+        try io_fs.writeFile(wasm_path, &declaring_test_wasm);
+        try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+        var host: WasmHost = .{};
+        host.allocator = a;
+        host.ctx = &ctx;
+        host.budget = .{};
+        defer host.shutdown();
+        ctx.require_declaration = true;
+        try host.loadInto(0, wasm_path);
+        host.n = 1;
+        host.slots[0].manifest_loaded = true;
+        host.slots[0].display = try a.dupe(u8, "m");
+        // The boot rule the slot ran under is recorded for the reload...
+        try std.testing.expect(host.slots[0].require_declaration);
+        // ...and boot restores the host flag, like loadResolved's save/restore.
+        ctx.require_declaration = false;
+
+        try io_fs.writeFile(wasm_path, &undeclared_test_wasm);
+        try std.testing.expect(!host.reload(0, wasm_path));
+        // The refused replacement leaves the active range (same as a restart
+        // that would refuse it: the composition keeps only loadable modules).
+        try std.testing.expectEqual(@as(usize, 0), host.n);
+    }
+
+    // The same swap on a raw-path slot (in-repo fixture rule) loads: the flag
+    // is what the replay honors, not a global switch.
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+        const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
+        defer a.free(wasm_path);
+        const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });
+        defer a.free(man_path);
+        try io_fs.writeFile(wasm_path, &declaring_test_wasm);
+        try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+        var host: WasmHost = .{};
+        host.allocator = a;
+        host.ctx = &ctx;
+        host.budget = .{};
+        defer host.shutdown();
+        try host.loadInto(0, wasm_path); // ctx flag still false: raw rule
+        host.n = 1;
+        host.slots[0].manifest_loaded = true;
+        host.slots[0].display = try a.dupe(u8, "m");
+        try std.testing.expect(!host.slots[0].require_declaration);
+
+        try io_fs.writeFile(wasm_path, &undeclared_test_wasm);
+        try std.testing.expect(host.reload(0, wasm_path));
+        try std.testing.expectEqual(@as(usize, 1), host.n);
+    }
+}
+
+test "reconcileClaims keeps claims and module deny when the manifest is invalid (review F9)" {
+    // The on-disk declaration is read first and state changes only on
+    // success: an unreadable or invalid manifest must not release an
+    // installed point claim or lift the module's queued-verb deny (the boot
+    // path would refuse that manifest outright; the reload keeps the
+    // declaration it booted with until a restart re-reads it).
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
+    defer a.free(wasm_path);
+    const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });
+    defer a.free(man_path);
+
+    // The claimant exports on_loot_roll and declares its spec, so a strict
+    // boot accepts it (discovered-mod rule).
+    const trap = try io_fs.readFileAll(a, "assets/fixtures/plugin_claim_trap.wasm");
+    defer a.free(trap);
+    try io_fs.writeFile(wasm_path, trap);
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\npoints = \"loot.roll\"\ndeny = \"say\"\n");
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    ctx.require_declaration = true;
+    try host.loadInto(0, wasm_path);
+    ctx.require_declaration = false;
+    host.n = 1;
+    host.slots[0].manifest_loaded = true;
+    host.slots[0].display = try a.dupe(u8, "m");
+
+    const loot = @intFromEnum(manifest.OverridePoint.loot_roll);
+    host.reconcileClaims(0, wasm_path);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
+
+    // Corrupt the manifest: bind now fails, and the failure must leave both
+    // the claim and the deny exactly as they were.
+    try io_fs.writeFile(man_path, "name = \"m\"\npoints = [ broken\n");
+    host.reconcileClaims(0, wasm_path);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
 }
