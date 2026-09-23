@@ -10,6 +10,17 @@ const pluginForCaller = @import("wasm.zig").pluginForCaller;
 const host_sense_max = @import("wasm.zig").host_sense_max;
 const query_resp_max = @import("wasm.zig").query_resp_max;
 
+/// The verbs `defineImports` actually puts on the linker. Pinned against
+/// `wasm.host_verbs` (the `_zdtd_requires` validation vocabulary) by a tests
+/// suite set-equality check: two hand-written lists (per-import types here,
+/// validation names there), one set, so a drift fails CI loudly instead of
+/// surfacing as a module rejected with "unknown capability" or a missing
+/// import at instantiate.
+pub const defined_verb_names = [_][]const u8{
+    "log",    "tick",       "queue",    "sense",    "query",
+    "config", "json_parse", "json_str", "json_raw", "json_obj",
+};
+
 pub fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
     const H = struct {
         fn log(caller: *zwasm.Caller, level: i32, ptr: i32, len: i32) anyerror!void {

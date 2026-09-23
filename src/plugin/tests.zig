@@ -15,6 +15,7 @@ const max_wasm_plugins = wasm.max_wasm_plugins;
 const no_claim = wasm.no_claim;
 const host_verbs = wasm.host_verbs;
 const manifest = @import("manifest.zig");
+const imports_mod = @import("imports.zig");
 const api = @import("api.zig");
 const resolver = @import("resolver.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -1244,6 +1245,24 @@ test "host_verbs is the _zdtd_requires vocabulary for host imports" {
     ctx.query_fn = &TestSense.query;
     try std.testing.expect(Plugin.isHostVerb("sense", &ctx));
     try std.testing.expect(Plugin.isHostVerb("query", &ctx));
+}
+
+test "the linker defines exactly the verbs the requires vocabulary accepts" {
+    // The two lists are hand-written on purpose (per-import types in
+    // imports.zig, validation names in wasm.zig): pin them as sets so an
+    // import added to the linker without a declare name, or a declare name
+    // without an import, goes red here instead of surfacing as a module
+    // rejected with "unknown capability" or a missing import at instantiate
+    // (composability review: requires vocabulary matches the host verbs).
+    const defined = imports_mod.defined_verb_names;
+    try std.testing.expectEqual(host_verbs.len, defined.len);
+    inline for (host_verbs) |v| {
+        var found = false;
+        inline for (defined) |d| {
+            if (std.mem.eql(u8, v, d)) found = true;
+        }
+        try std.testing.expect(found);
+    }
 }
 
 const TestSense = struct {
