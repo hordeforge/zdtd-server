@@ -2743,24 +2743,25 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/ai_tasks.zig:41-100`,
   `asm.il:437713`, `asm.il:437874`
 
-- **EAI task coverage** `WORKS` `(2026-08-22 re-audit)`
-  10 task classes implemented (BreakBlock, DestroyArea, RunawayWhenHurt,
+- **EAI task coverage** `WORKS` `(2026-09-22 re-audit)`
+  11 task classes implemented (BreakBlock, DestroyArea, RunawayWhenHurt,
   **RunawayFromEntity**, ApproachAndAttackTarget, **ApproachDistraction**,
-  Territorial, ApproachSpot, Look, Wander, and **Leap** (the EAILeap
-  pounce, landed 2026-09-22) - the bolded ones landed since this
-  row was written: the distraction task chases a dropped decoy/item
-  (`approachDistractionCanExecute` + the decoy scenario), the fear task
-  flees a wolf/zombie/player (`runawayCanExecute` + the flee tests), so a
-  thrown distraction is chased and a timid animal flees a wolf; the pounce
-  aims and flies only inside the stock window, `leapV.y` bound and corridor
-  physics ray, and only for a class whose parsed AITask list carries the bit.
-  RangedAttackTarget (the five acid spitters: zombieRancher, zombieChuck,
-  zombieFatCop, zombieMutated, zombieMutatedRadiated - measured 2026-09-22
-  against the installed entityclasses.xml, see
-  `../7dtd-engine-research/docs/entities/entity-ai.md` census) stays unmapped:
-  no native task, so it is omitted
-  rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
-  and PathTest have **zero AITask uses** in the stock file.
+  Territorial, ApproachSpot, Look, Wander, **Leap** (the EAILeap pounce) and
+  **RangedAttackTarget** (the acid spit: zombieRancher, zombieChuck,
+  zombieFatCop, zombieMutated and zombieMutatedRadiated now aim, telegraph
+  with `StartAnimAction(3000 + X)` and fire a server-simulated vomit
+  projectile from the items.xml Vomit/Projectile config) - the bolded ones
+  landed since this row was written: the distraction task chases a dropped
+  decoy/item (`approachDistractionCanExecute` + the decoy scenario), the
+  fear task flees a wolf/zombie/player (`runawayCanExecute` + the flee
+  tests), the pounce aims and flies only inside the stock window, `leapV.y`
+  bound and corridor physics ray, and the spit's window/cooldown/anim come
+  from the class AITask SetData entry and the held item's action config.
+  Every task name stock assigns to a class now has a native task: zero
+  referenced-but-unimplemented entries remain (see the
+  `../7dtd-engine-research/docs/entities/entity-ai.md` census). Dodge,
+  MeleeAttackTarget, ItemTask, the three Drone tasks and PathTest have
+  **zero AITask uses** in the stock file.
   *Anchors:* `src/ecs/ai_tasks.zig` zombie_tasks,
   `$game/Data/Config/entityclasses.xml` lines 562-571, `asm.il` EAI* class list
 
@@ -2771,10 +2772,11 @@ gamestage, no wandering hordes, and no screamers.
   (animals) resolve through the Extends chain into `ai_tasks` bits; a class
   with no list keeps the shared `zombie_tasks` table. `entityClassOf` used to
   drop `ai_attack`, so XML timid animals could hunt; that field (and the new
-  mask) now copy onto every spawn path.
-  Residual: RangedAttackTarget (rancher/cop/chuck/mutated/mutatedRadiated,
-  the acid spitters) has no native task yet, so that name stays unmapped
-  rather than faked (Leap shipped 2026-09-22).
+  mask) now copy onto every spawn path. A `RangedAttackTarget` entry also
+  yields its SetData params (cooldown, duration, releaseDelay, minRange,
+  maxRange, unreachableRange, startAnimType) onto the class.
+  Residual: every task name referenced by a stock class list now maps
+  (Leap and RangedAttackTarget shipped 2026-09-22).
   AITarget rows (SetAsTargetIfHurt / SetNearestEntityAsTarget) are still the
   native sense/revenge path. Moving the brain into a Wasm plugin (AGENTS rule
   29) stays an ADR: the AI pass is parallel over slots and the host is

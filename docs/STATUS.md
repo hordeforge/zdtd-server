@@ -63,6 +63,49 @@ the tick pacer quote follows `lifecycle.zig:109`. Evidence: full
 previously-failing test re-verified green individually (fan-out 14/14,
 stale-peer reap 14/14, GAME_OPTIONS 3/3); `check_docs` ok (1688 links,
 3805 citations, 303 quoted blocks) and `check_config_keys` ok (72 keys).
+**EAI RangedAttackTarget acid spit on the wire 2026-09-22**: the five stock
+acid-spitter classes (zombieRancher, zombieChuck, zombieFatCop,
+zombieMutated, zombieMutatedRadiated) now run `EAIRangedAttackTarget`
+natively, closing the last referenced-but-unimplemented EAI task. The class
+AITask entry yields its SetData params (`cooldown`, `duration`,
+`releaseDelay`, `minRange`, `maxRange`, `unreachableRange`, `startAnimType`)
+with the stock ctor defaults pinned from the IL (4/25/0.5/3/20/-1), and the
+held item's items.xml `Class=Vomit` action resolves with its ammo's
+`Class=Projectile` config (velocity, FlyTime, CollisionRadius,
+DamageEntity) through the Extends pass, so the feral children inherit the
+spit from their parent hand. The sequence follows the stock Update shape
+specialised for a server with no animator: aim half of `duration` with
+`SeekYawToPos(..., 30)`, the telegraph
+`StartAnimAction(3000 + startAnimType + 1)` (classes with
+`startAnimType >= 0` also get the immediate `3000 + startAnimType` at
+Start), then `releaseDelay` plus the ItemActionVomit 1.2 s warning window,
+then the burst `StartAnimAction(3000 + item AnimType)` - both emitted
+through the same `NetPackageEntityAnimationData` edge the melee strike uses
+(int + trigger for the 3000 range, blend kept for the melee variant) - and
+the shot itself. The projectile is per-shooter sim state, never a replicated
+entity (stock's is a client GameObject): a straight line from the mouth to
+the target chest at ammo speed for FlyTime seconds, then gravity, retiring
+on the body cylinder, a solid cell or the ground. An impact feeds the same
+deferred accumulator the melee choke uses, so armor folds run through
+`applyDeferredDamage` and the attacker's held-item rows (infection counter,
+abrasion) fire exactly like a landed punch. Cooldown re-arms at Reset as
+base + 0..0.5x jitter, stored as an absolute ready tick so the selection
+gate stays read-only, and Start is latched so the selection pass's re-run
+of the Start hook cannot reset the sequence mid-flight. Recorded
+deviations: the warning window is the single 1.2 s stock default instead of
+the randomized warning count, `sndStart`/`sndRelease`/`BroadcastPlay`
+sounds stay silent (zdtd has no server-side AI sound channel yet), the
+`unreachableRange` arm needs moveHelper flags zdtd does not model (window
+stays [min, max]), a target must keep being sensed for Continue (stock
+keeps its cached alive entityTarget), and the ammo's block impact
+(DamageBlock 120, acid pool, 4 s LifeTime) is not applied - gravity and
+the solid test retire the shot. Gated by four tests: the SetData parse
+test, the vomit/Extends/Projectile parse test, `system zombie spits at a
+target in its range window and the shot lands` (telegraph 3001, burst
+3000, hp drop, cooldown window) and `ranged attack refuses without a vomit
+config and outside the range window` (all 14/14); the melee anim scenario
+(11/11) and `animatorStringHash` pin (14/14) stayed green across the
+`strike_anim` -> `pending_anim_action` generalisation.
 **Zombie strike anim params on the wire 2026-09-22**: a landed zombie melee
 hit sets an edge that `replicate` drains into one stock
 `NetPackageEntityAnimationData` (entityId, count 3: `Attack` int 0,
