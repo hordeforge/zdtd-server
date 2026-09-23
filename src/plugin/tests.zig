@@ -2112,3 +2112,45 @@ test "a legacy [plugin] modules slot is not manifest-backed" {
     try std.testing.expect(host.reload(0, host.slots[0].name));
     try std.testing.expectEqualStrings("greeting = \"hi\"\n", host.slots[0].config_bytes);
 }
+
+test "enable activates each instance once and a reload reactivates its replacement" {
+    // Paper inverse/double: `on_enable` is an initializer, so re-running it
+    // is additive (each run queues/logs again). The activation latch makes
+    // enable() idempotent per instance, and a reload's fresh instance gets
+    // exactly one activation beside its on_enable. plugin_hello's on_enable
+    // logs "hello enabled" (the shutdown log and tick logs are filtered out).
+    const Cap = struct {
+        var enabled_n: usize = 0;
+        fn logFn(_: *HostCtx, _: u8, msg: []const u8) void {
+            if (std.mem.eql(u8, msg, "hello enabled")) enabled_n += 1;
+        }
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    Cap.enabled_n = 0;
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+    };
+    var host: WasmHost = .{};
+    const path = "assets/fixtures/plugin_hello.wasm";
+    host.loadAll(std.testing.allocator, &[_][]const u8{path}, &ctx, .{ .fuel = 1_000_000 });
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), Cap.enabled_n);
+    // Second enable: the latch skips the already-activated instance.
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), Cap.enabled_n);
+
+    // Reload disposes the old instance and activates its replacement once.
+    try std.testing.expect(host.reload(0, path));
+    try std.testing.expect(host.slots[0].activated);
+    try std.testing.expectEqual(@as(usize, 2), Cap.enabled_n);
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 2), Cap.enabled_n);
+}

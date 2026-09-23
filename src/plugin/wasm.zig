@@ -182,6 +182,12 @@ pub const Plugin = struct {
     config_bytes: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
+    /// Activation latch (paper: a fiber activates once per instantiation):
+    /// `enable` runs `on_enable` only for instances not yet activated, so a
+    /// repeated call cannot re-run an initializer additively (double-queue).
+    /// A reload builds a fresh Plugin (false) and sets it next to the
+    /// replacement's `on_enable`.
+    activated: bool = false,
     /// The declaration rule this slot was loaded under, recorded by `loadInto`
     /// from `HostCtx.require_declaration` (the probe itself runs inside
     /// `Plugin.load`, before the slot exists, so the live flag lives on the
@@ -328,6 +334,16 @@ pub const Plugin = struct {
         return false;
     }
 
+    /// Is `want` one of the capabilities the declaration lists? Comma-split
+    /// with the same trim the validation loop uses.
+    fn declaredHas(spec: []const u8, want: []const u8) bool {
+        var it = std.mem.splitScalar(u8, spec, ',');
+        while (it.next()) |raw| {
+            if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r\n"), want)) return true;
+        }
+        return false;
+    }
+
     /// Declarative capability check (`_zdtd_requires` -> "name,name,..." in
     /// guest memory). Every name must be a hook the module exports or a host
     /// verb it imports; anything else fails the load with the offending name.
@@ -394,6 +410,33 @@ pub const Plugin = struct {
             if (!found) {
                 self.requiresFailed2("unknown capability '", cap, "'");
                 return;
+            }
+        }
+        if (require_declaration) {
+            // The import side of the declaration contract, narrowed to the
+            // conditional verbs (paper: inject): a `zdtd.sense` / `zdtd.query`
+            // import whose declaration omits it reads zero forever against an
+            // owner that never wired the callback, with no claim to inspect -
+            // the never-fire shape the name set exists to prevent. The other
+            // host verbs are bound unconditionally by the host import table,
+            // so every call they make already flows through the context's
+            // provided surface and the name set adds no tracking the linker
+            // table lacks (an under-declared always-linked verb is a
+            // documentation inaccuracy, recorded as a skip). Fixtures stay
+            // permissive on the raw load path either way.
+            var imps = self.module.imports(self.allocator) catch {
+                self.requiresFailed("cannot introspect the import section");
+                return;
+            };
+            defer imps.deinit();
+            for (imps.items) |imp| {
+                if (imp.kind != .func) continue;
+                if (!std.mem.eql(u8, imp.module, "zdtd")) continue;
+                if (!std.mem.eql(u8, imp.name, "sense") and !std.mem.eql(u8, imp.name, "query")) continue;
+                if (!declaredHas(spec, imp.name)) {
+                    self.requiresFailed2("imports host verb '", imp.name, "' but does not declare it");
+                    return;
+                }
             }
         }
     }
@@ -1290,7 +1333,10 @@ pub const WasmHost = struct {
             self.reconcileClaims(idx, path_owned);
         }
         self.slots[idx].refreshDenied();
-        // Activate the new fiber (paper: reinstantiate + reinstall).
+        // Activate the new fiber (paper: reinstantiate + reinstall): a fresh
+        // instance has `activated` false, so set it beside its on_enable to
+        // keep the one-activation-per-instance rule after HMR.
+        self.slots[idx].activated = true;
         _ = self.slots[idx].callHook(.on_enable);
         return true;
     }
@@ -1469,9 +1515,16 @@ pub const WasmHost = struct {
         return n;
     }
 
-    /// Call on_enable for every loaded plugin (once, at enable).
+    /// Call on_enable for every not-yet-activated loaded plugin. Idempotent:
+    /// a second `enable` (or one after a reload already activated its
+    /// replacement) must not re-fire an initializer, matching the static
+    /// host's `enabled[]` guard.
     pub fn enable(self: *WasmHost) void {
-        for (0..self.n) |i| _ = self.slots[i].callHook(.on_enable);
+        for (0..self.n) |i| {
+            if (self.slots[i].activated) continue;
+            self.slots[i].activated = true;
+            _ = self.slots[i].callHook(.on_enable);
+        }
     }
 
     pub fn onTick(self: *WasmHost) void {
@@ -1745,3 +1798,66 @@ pub fn pluginForCaller(hc: *HostCtx, rt: *anyopaque) ?*Plugin {
 /// or an out-of-bounds range is a no-op for reads and an error for the guest.
 const imports = @import("imports.zig");
 const defineImports = imports.defineImports;
+
+test "declaredHas matches the validation loop's comma trim" {
+    const spec = "log,on_enable, queue";
+    try std.testing.expect(Plugin.declaredHas(spec, "log"));
+    try std.testing.expect(Plugin.declaredHas(spec, "on_enable"));
+    try std.testing.expect(Plugin.declaredHas(spec, "queue")); // trimmed on both sides
+    try std.testing.expect(!Plugin.declaredHas(spec, "que")); // whole token or nothing
+    try std.testing.expect(!Plugin.declaredHas("", "log"));
+    try std.testing.expect(Plugin.declaredHas("tick", "tick"));
+}
+
+test "an undeclared host verb import fails the declared contract on the strict path" {
+    // Hand-built module: imports zdtd.log and zdtd.queue, exports
+    // _zdtd_requires returning the spec "log" (data at 0, len 3 packed into
+    // the i64). The declared set omits the queue import, so a load under
+    // `require_declaration` (a discovered mod or a reload) is refused at the
+    // load boundary; the raw test-fixture path stays permissive.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+    };
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x12, 0x03, // type section: three types, payload 18
+        0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x00, // 0: (i32,i32,i32) -> () (log)
+        0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, // 1: (i32,i32,i32) -> i32 (sense)
+        0x60, 0x00, 0x01, 0x7e, // 2: () -> i64
+        0x02, 0x19, 0x02, // import section: one module, two funcs
+        0x04, 'z', 'd', 't', 'd', 0x03, 'l', 'o', 'g', 0x00, 0x00, // zdtd.log type 0
+        0x04, 'z', 'd', 't', 'd', 0x05, 's', 'e', 'n', 's', 'e', 0x00, 0x01, // zdtd.sense type 1
+        0x03, 0x02, 0x01, 0x02, // function section: one local func of type 2
+        0x05, 0x03, 0x01, 0x00, 0x01, // memory section: min 1 page
+        0x07, 0x12, 0x01, // export section: one entry
+        0x0e, '_',  'z',
+        'd',  't',  'd',
+        '_',  'r',  'e',
+        'q',  'u',  'i',
+        'r',  'e',  's',
+        0x00, 0x02,
+        0x0a, 0x0a, 0x01, 0x08, // code section: one body of 8 bytes
+        0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, // locals 0, i64.const 3<<32 ("log"), end
+        0x0b, 0x09, 0x01, // data section: one segment
+        0x00, 0x41, 0x00, 0x0b, // active at mem 0, offset 0
+        0x03, 'l', 'o', 'g', // the spec string
+    };
+    ctx.require_declaration = true;
+    try std.testing.expectError(
+        error.RequiresUnmet,
+        Plugin.load(std.testing.allocator, "undeclared_verb.wasm", &bytes, &ctx, .{ .fuel = 100_000 }),
+    );
+    ctx.require_declaration = false;
+    var p = try Plugin.load(std.testing.allocator, "undeclared_verb.wasm", &bytes, &ctx, .{ .fuel = 100_000 });
+    defer p.deinit();
+    try std.testing.expect(!p.requires_failed);
+}
