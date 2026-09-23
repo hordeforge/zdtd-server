@@ -165,6 +165,22 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
     // Interception (paper 3.2.3 / ADR 0039) runs first: a verb the effective
     // policy denies never reaches the ECS buffer or the host `bot` family.
     if (pluginVerbDenied(g, src, cmd)) return;
+    // External-entry policy (paper: boundary conditions belong to the
+    // enclosing context): any module exporting `on_mcp_frame` is reachable
+    // from the MCP HTTP client, so its queue can be steered from outside.
+    // The operator's `--mcp-allowlist` (default: none) therefore holds here,
+    // at the host's trust boundary, instead of trusting the guest's own
+    // self-filter (AGENTS rule 17: validate at the trust boundary).
+    if (src > 0) {
+        const idx: usize = @intCast(src - 1);
+        if (idx < g.wasm_plugins.n and
+            g.wasm_plugins.slots[idx].hook_present[@intFromEnum(plugin_mod.Hook.on_mcp_frame)] and
+            !mcpQueueAllowed(g, cmd))
+        {
+            notePluginVerbDenied(g, src, cmd);
+            return;
+        }
+    }
     // `bot <verb>` commands are host-side BotManager calls (ADR 0026), not ECS
     // ops: the BotManager owns spawn/move/look/shoot/remove/count and returns
     // true for any command starting with `bot `. Everything else falls through
@@ -212,14 +228,37 @@ fn pluginVerbDenied(g: *Game, src: i16, cmd: []const u8) bool {
         }
     }
     if (denied & mask == 0) return false;
+    notePluginVerbDenied(g, src, cmd);
+    return true;
+}
+
+/// Shared denial note for both queue gates (module/operator masks and the
+/// MCP allowlist): one counter, one throttled sanitized log line.
+fn notePluginVerbDenied(g: *Game, src: i16, cmd: []const u8) void {
     g.harness.counters.inc(.plugin_verbs_denied);
     const n = g.harness.counters.get(.plugin_verbs_denied);
     if (util_log.throttled(n)) {
+        const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
         var vb: [32]u8 = undefined;
         const vn = c2s_text.sanitizePlayerName(&vb, cmd[0..verb_end]);
         util_log.warn("wasm: plugin {d} queued denied verb '{s}' (n={d})\n", .{ src, vb[0..vn], n });
     }
-    return true;
+}
+
+/// `--mcp-allowlist` as comma-separated prefixes over `cmd` (the query
+/// surface serves the same list newline-separated and the guest matches the
+/// same way: raw prefix, so "bot count" allows "bot count 6"). Empty list =
+/// the documented default, nothing queues for an external-entry module.
+fn mcpQueueAllowed(g: *const Game, cmd: []const u8) bool {
+    var rest = g.mcp_allowlist;
+    while (rest.len > 0) {
+        const comma = std.mem.findScalar(u8, rest, ',') orelse rest.len;
+        const piece = std.mem.trim(u8, rest[0..comma], " \t");
+        if (piece.len > 0 and cmd.len >= piece.len and std.mem.eql(u8, cmd[0..piece.len], piece)) return true;
+        if (comma >= rest.len) break;
+        rest = rest[comma + 1 ..];
+    }
+    return false;
 }
 
 /// Install the operator's `[plugin] deny` / `allow` policy over every loaded

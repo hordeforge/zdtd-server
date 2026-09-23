@@ -6425,6 +6425,57 @@ test "queued-verb policy: a denied verb is dropped before the command buffer" {
     try std.testing.expectEqual(@as(u64, 2), g.harness.counters.get(.plugin_verbs_denied));
 }
 
+test "queued-verb policy: the mcp allowlist gates an external-entry module at the queue boundary" {
+    // `--mcp-allowlist` (default: none) is the enclosing context's condition
+    // for the MCP HTTP entry. The guest self-filters, but the host enforces
+    // it at `zdtd.queue` too: any module exporting on_mcp_frame can be
+    // steered from outside, and a boundary condition trusted to the fiber is
+    // the shape the paper rejects (AGENTS rule 17: validate at the trust
+    // boundary). Native src 0 and modules without the MCP hook stay out of
+    // the list's reach.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const wasm_host = @import("wasm_host.zig");
+    g.mcp_allowlist = "bot count";
+    g.wasm_plugins.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{"mods/mcp/mcp.wasm"},
+        &g.wasm_ctx,
+        .{},
+    );
+    defer g.wasm_plugins.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
+    try std.testing.expect(g.wasm_plugins.slots[0].hook_present[@intFromEnum(plugin_mod.Hook.on_mcp_frame)]);
+
+    const before = g.sim.commands.n;
+    const den_before = g.harness.counters.get(.plugin_verbs_denied);
+    // Not allowlisted: dropped before the buffer and the bot family.
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "spawn 0 61 0 100");
+    try std.testing.expectEqual(before, g.sim.commands.n);
+    try std.testing.expectEqual(den_before + 1, g.harness.counters.get(.plugin_verbs_denied));
+    // The allowlisted prefix reaches the host bot family (prefix match, so
+    // "bot count" allows "bot count 6").
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot count 6");
+    try std.testing.expectEqual(@as(u32, 6), g.bots.floor);
+    try std.testing.expectEqual(@as(i16, 1), g.bots.floor_src);
+    // Native src 0 keeps its full reach: the list gates the external entry,
+    // not the console.
+    wasm_host.wasmQueue(&g.wasm_ctx, 0, "spawn 0 61 0 100");
+    try std.testing.expectEqual(before + 1, g.sim.commands.n);
+    // Empty list = the documented default: even the allowlisted verb stops.
+    g.mcp_allowlist = "";
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot count 9");
+    try std.testing.expectEqual(@as(u32, 6), g.bots.floor);
+    try std.testing.expectEqual(den_before + 2, g.harness.counters.get(.plugin_verbs_denied));
+}
+
 test "starter_zombies gates the near-spawn demo hostiles" {
     // `[sim] starter_zombies`: the demo seeds (2 zombies + sleeper + animal)
     // are a zdtd convenience; stock spawns them lazily through the AIDirector
