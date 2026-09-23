@@ -1270,6 +1270,25 @@ test "the linker defines exactly the verbs the requires vocabulary accepts" {
     }
 }
 
+test "every override point names a hook the Hook table exports" {
+    // The third vocabulary edge: OverridePoint.hook returns a string that
+    // hookIndex turns into a hook_present subscript (claimSlot, the boot
+    // install and reconcileClaims all index with it), and hookIndex answers
+    // Hook.names.len on a miss. An added point variant whose name never
+    // reaches Hook.names would therefore read one past hook_present at the
+    // first dispatch through that point. Pin the strings the same way
+    // host_verbs and Hook.names are pinned.
+    inline for (@typeInfo(manifest.OverridePoint).@"enum".fields) |f| {
+        const point: manifest.OverridePoint = @enumFromInt(f.value);
+        const name = manifest.OverridePoint.hook(point);
+        var found = false;
+        inline for (Hook.names) |hn| {
+            if (std.mem.eql(u8, name, hn)) found = true;
+        }
+        try std.testing.expect(found);
+    }
+}
+
 const TestSense = struct {
     fn sense(_: *HostCtx, _: i16, _: []u8) usize {
         return 0;
