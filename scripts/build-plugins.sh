@@ -73,11 +73,12 @@ echo "done"
 # The committed C artifacts are the pinned clang major's output, so a different
 # clang produces different bytes and would make lint-plugins.sh report a stale
 # binary that no source change caused. The pin is therefore explicit: build
-# with clang-<CLANG_MAJOR> (default 18, the compiler that produced the
-# committed fixtures) and skip the C artifacts, loudly, on a host that does not
-# have it. A deliberate toolchain bump means setting CLANG_MAJOR to the new
-# major, rebuilding, and committing the new .wasm bytes with the bump.
-clang_major="${CLANG_MAJOR:-18}"
+# with clang-<CLANG_MAJOR> (default 22; bumped from 18 on 2026-09-23 so the
+# fixture specs and the committed C bytes share one current compiler) and skip
+# the C artifacts, loudly, on a host that does not have it. A deliberate
+# toolchain bump means setting CLANG_MAJOR to the new major, rebuilding, and
+# committing the new .wasm bytes with the bump.
+clang_major="${CLANG_MAJOR:-22}"
 clang_bin=""
 for candidate in ${CLANG:-} "clang-$clang_major" clang; do
   [ -n "$candidate" ] || continue
