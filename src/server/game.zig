@@ -101,6 +101,8 @@ const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
+const assets_paths = @import("../assets/paths.zig");
+const modlets = @import("../assets/modlets.zig");
 const movement = @import("movement.zig");
 const evidence_mod = @import("evidence.zig");
 const guard_policy = @import("guard_policy.zig");
@@ -484,6 +486,16 @@ pub const Game = struct {
     view_radius: i32 = default_view_radius,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
+    /// Effective server config (loaded file or struct defaults) for late
+    /// readers like the getoptions dump; owned here instead of a process
+    /// global (paper: shared mutable state belongs to the context).
+    effective_config: server_config.Config = .{},
+    /// Patch sources (mod Config dirs + --config-overrides) and the modlet
+    /// enable/disable state: per-Game data bound into the assets readers for
+    /// the load window only (paper: shared mutable state belongs to the
+    /// context; two Games in one process cannot read each other's).
+    paths_state: assets_paths.State = .{},
+    modlets_state: modlets.State = .{},
     /// PlayerSlotsAuthorizer tiers (IL=174); 0 = disabled.
     reserved_slots: u8 = 0,
     reserved_slots_permission: u8 = 0,
@@ -639,6 +651,7 @@ pub const Game = struct {
             .world = try world_store.World.init(allocator, world_dir),
             .stock_catalogs_requested = opts.game_dir != null or opts.config_dir != null,
             .view_radius = opts.view_radius,
+            .effective_config = opts.effective_config,
             .max_players = max_pl,
             .reserved_slots = opts.reserved_slots,
             .reserved_slots_permission = opts.reserved_slots_permission,

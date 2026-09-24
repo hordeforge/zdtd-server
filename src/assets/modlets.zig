@@ -59,53 +59,6 @@ pub const ModDir = struct {
 /// ignored; a name that is not installed is harmless (the mod may come back).
 pub const state_file_name = "modlets_disabled.txt";
 
-/// Mods the operator disabled (owned names), guarded because the webui poll
-/// thread toggles while the roster is read for rendering.
-var disabled: std.ArrayList([]const u8) = .empty;
-var disabled_lock: parallel.IoMutex = .{};
-/// Absolute path of the state file, set by `install` (owned by `state_alloc`).
-var state_path: ?[]const u8 = null;
-/// Allocator that owns `state_path` and the disabled names. Stored so a later
-/// install/deinit from a different allocator (the tests use one DebugAllocator
-/// per Game) never frees another allocator's memory.
-var state_alloc: ?std.mem.Allocator = null;
-
-/// Free the state in place. Caller holds `disabled_lock`.
-fn freeStateLocked() void {
-    if (state_alloc) |al| {
-        for (disabled.items) |d| al.free(d);
-        disabled.deinit(al);
-        if (state_path) |sp| al.free(sp);
-    }
-    disabled = .empty;
-    state_path = null;
-    state_alloc = null;
-}
-
-/// True when `name` is disabled (case-insensitive, like mod name matching).
-/// Caller must not hold `disabled_lock`.
-pub fn isDisabled(name: []const u8) bool {
-    disabled_lock.lock();
-    defer disabled_lock.unlock();
-    return isDisabledLocked(name);
-}
-
-/// Lock-free form for the loader (which already holds `disabled_lock`; the
-/// mutex is not recursive, so re-locking would deadlock).
-fn isDisabledLocked(name: []const u8) bool {
-    for (disabled.items) |d| {
-        if (std.ascii.eqlIgnoreCase(d, name)) return true;
-    }
-    return false;
-}
-
-/// Number of disabled mods (roster size minus enabled).
-pub fn disabledCount() usize {
-    disabled_lock.lock();
-    defer disabled_lock.unlock();
-    return disabled.items.len;
-}
-
 /// Result of a mods-root scan; all strings owned.
 pub const Scan = struct {
     mods: []Mod,
@@ -217,302 +170,388 @@ fn parseModInfo(folder: []const u8, info: []const u8) ?struct {
 /// is operator-editable. On I/O or OOM failure the previous list is left
 /// intact (fail closed): clearing first then aborting would re-enable every
 /// disabled modlet with no operator signal.
-fn loadDisabled(allocator: std.mem.Allocator, path: []const u8) void {
-    disabled_lock.lock();
-    defer disabled_lock.unlock();
-    const al = state_alloc orelse allocator;
-    const raw = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
-        error.FileNotFound => {
-            for (disabled.items) |d| al.free(d);
-            disabled.clearRetainingCapacity();
-            return;
-        },
-        else => {
-            util_log.err(
-                "zdtd: load modlet disabled list {s} failed: {s}\n",
-                .{ path, @errorName(err) },
-            );
-            return;
-        },
-    };
-    defer allocator.free(raw);
+pub const State = struct {
+    /// Mods the operator disabled (owned names), guarded because the webui poll
+    /// thread toggles while the roster is read for rendering.
+    disabled: std.ArrayList([]const u8) = .empty,
+    disabled_lock: parallel.IoMutex = .{},
+    /// Absolute path of the state file, set by `install` (owned by `state_alloc`).
+    state_path: ?[]const u8 = null,
+    /// Allocator that owns `state_path` and the disabled names. Stored so a later
+    /// install/deinit from a different allocator (the tests use one DebugAllocator
+    /// per Game) never frees another allocator's memory.
+    state_alloc: ?std.mem.Allocator = null,
+    installed: ?Scan = null,
 
-    var next: std.ArrayList([]const u8) = .empty;
-    var it = std.mem.splitScalar(u8, raw, '\n');
-    while (it.next()) |line_raw| {
-        const line = std.mem.trim(u8, line_raw, " \t\r");
-        if (line.len == 0 or line[0] == '#') continue;
-        if (isDisabledLocked(line)) continue;
-        const dup = al.dupe(u8, line) catch {
-            util_log.err("zdtd: load modlet disabled list {s}: out of memory\n", .{path});
-            for (next.items) |d| al.free(d);
-            next.deinit(al);
-            return;
-        };
-        next.append(al, dup) catch {
-            al.free(dup);
-            util_log.err("zdtd: load modlet disabled list {s}: out of memory\n", .{path});
-            for (next.items) |d| al.free(d);
-            next.deinit(al);
-            return;
-        };
-    }
-
-    for (disabled.items) |d| al.free(d);
-    disabled.deinit(al);
-    disabled = next;
-}
-
-/// Write the disabled list to `state_path` (create/overwrite). Caller holds no
-/// lock; takes it here.
-fn saveDisabled(allocator: std.mem.Allocator) !void {
-    const p = state_path orelse return;
-    disabled_lock.lock();
-    defer disabled_lock.unlock();
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
-    try buf.appendSlice(allocator, "# zdtd modlets disabled by the operator (webui / file edit); restart to apply\n");
-    for (disabled.items) |d| {
-        try buf.appendSlice(allocator, d);
-        try buf.append(allocator, '\n');
-    }
-    try io_fs.writeFile(p, buf.items);
-}
-
-/// Enable/disable one mod by name, persisting the state file. Returns false
-/// when the name is not installed (no state change).
-pub fn setDisabled(allocator: std.mem.Allocator, name: []const u8, disable: bool) !bool {
-    const al = state_alloc orelse allocator;
-    var known = false;
-    if (installed) |*s| {
-        for (s.mods) |*m| {
-            if (std.ascii.eqlIgnoreCase(m.name, name)) {
-                known = true;
-                break;
-            }
+    /// Free the state in place. Caller holds `disabled_lock`.
+    fn freeStateLocked(
+        self: *State,
+    ) void {
+        if (self.state_alloc) |al| {
+            for (self.disabled.items) |d| al.free(d);
+            self.disabled.deinit(al);
+            if (self.state_path) |sp| al.free(sp);
         }
+        self.disabled = .empty;
+        self.state_path = null;
+        self.state_alloc = null;
     }
-    if (!known) return false;
-    {
-        // The mutex is not reentrant and `saveDisabled` locks it itself, so
-        // only the mutation runs under the lock; the scoped defer releases it
-        // on the error paths too (an OOM must not wedge the webui poller).
-        disabled_lock.lock();
-        defer disabled_lock.unlock();
-        if (disable) {
-            var present = false;
-            for (disabled.items) |d| {
-                if (std.ascii.eqlIgnoreCase(d, name)) {
-                    present = true;
-                    break;
-                }
-            }
-            if (!present) {
-                const dup = try al.dupe(u8, name);
-                errdefer al.free(dup);
-                try disabled.append(al, dup);
-            }
-        } else {
-            var i: usize = 0;
-            while (i < disabled.items.len) {
-                if (std.ascii.eqlIgnoreCase(disabled.items[i], name)) {
-                    al.free(disabled.items[i]);
-                    _ = disabled.swapRemove(i);
-                    continue;
-                }
-                i += 1;
-            }
+
+    /// True when `name` is disabled (case-insensitive, like mod name matching).
+    /// Caller must not hold `disabled_lock`.
+    pub fn isDisabled(self: *State, name: []const u8) bool {
+        self.disabled_lock.lock();
+        defer self.disabled_lock.unlock();
+        return self.isDisabledLocked(name);
+    }
+
+    /// Lock-free form for the loader (which already holds `disabled_lock`; the
+    /// mutex is not recursive, so re-locking would deadlock).
+    fn isDisabledLocked(self: *State, name: []const u8) bool {
+        for (self.disabled.items) |d| {
+            if (std.ascii.eqlIgnoreCase(d, name)) return true;
         }
-    }
-    try saveDisabled(allocator);
-    return true;
-}
-
-/// Roster size (installed mods, enabled or not).
-pub fn rosterLen() usize {
-    const s = installed orelse return 0;
-    return s.mods.len;
-}
-
-/// Roster entry by index, for the operator UI. Null past the end.
-pub fn rosterAt(i: usize) ?*const Mod {
-    const s = installed orelse return null;
-    if (i >= s.mods.len) return null;
-    return &s.mods[i];
-}
-
-/// Scan `mods_root` for XML-only modlets. A missing root is a no-op (stock:
-/// no Mods folder = no mods), not an error. `state_path_in` (optional) is the
-/// persisted disabled list; the roster keeps every installed mod while
-/// `mod_dirs` carries only the enabled ones.
-pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: ?[]const u8) !Scan {
-    var mods: std.ArrayList(Mod) = .empty;
-    errdefer {
-        for (mods.items) |*m| m.deinit(allocator);
-        mods.deinit(allocator);
-    }
-    var mod_dirs: std.ArrayList(ModDir) = .empty;
-    errdefer {
-        for (mod_dirs.items) |md| {
-            allocator.free(md.config_dir);
-            allocator.free(md.mod_path);
-        }
-        mod_dirs.deinit(allocator);
+        return false;
     }
 
-    {
-        disabled_lock.lock();
-        defer disabled_lock.unlock();
-        freeStateLocked();
-        state_alloc = allocator;
-        if (state_path_in) |sp| {
-            state_path = try allocator.dupe(u8, sp);
-        }
-    }
-    loadDisabled(allocator, state_path orelse "");
-
-    const dir_names = io_fs.listDirNames(allocator, mods_root) catch |err| switch (err) {
-        error.FileNotFound => return .{ .mods = &.{}, .mod_dirs = &.{} },
-        else => return err,
-    };
-    defer {
-        for (dir_names) |n| allocator.free(n);
-        allocator.free(dir_names);
+    /// Number of disabled mods (roster size minus enabled).
+    pub fn disabledCount(
+        self: *State,
+    ) usize {
+        self.disabled_lock.lock();
+        defer self.disabled_lock.unlock();
+        return self.disabled.items.len;
     }
 
-    for (dir_names) |folder| {
-        var path_buf: [2048]u8 = undefined;
-        const mod_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ mods_root, folder }) catch continue;
-        var mi_buf: [2048]u8 = undefined;
-        const mi_path = std.fmt.bufPrint(&mi_buf, "{s}/ModInfo.xml", .{mod_path}) catch continue;
-        const info = io_fs.readFileAll(allocator, mi_path) catch |err| switch (err) {
+    fn loadDisabled(self: *State, allocator: std.mem.Allocator, path: []const u8) void {
+        self.disabled_lock.lock();
+        defer self.disabled_lock.unlock();
+        const al = self.state_alloc orelse allocator;
+        const raw = io_fs.readFileAll(allocator, path) catch |err| switch (err) {
             error.FileNotFound => {
-                util_log.warn("zdtd: [MODS]{s}/ModInfo.xml missing; mod skipped\n", .{folder});
-                continue;
+                for (self.disabled.items) |d| al.free(d);
+                self.disabled.clearRetainingCapacity();
+                return;
             },
             else => {
-                util_log.warn("zdtd: [MODS]{s}/ModInfo.xml unreadable: {s}; mod skipped\n", .{ folder, @errorName(err) });
-                continue;
+                util_log.err(
+                    "zdtd: load modlet self.disabled list {s} failed: {s}\n",
+                    .{ path, @errorName(err) },
+                );
+                return;
             },
         };
-        defer allocator.free(info);
-        const parsed = parseModInfo(folder, info) orelse continue;
+        defer allocator.free(raw);
 
-        var cfg_buf: [2048]u8 = undefined;
-        var config_dir: ?[]const u8 = null;
-        if (std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{mod_path})) |p| {
-            if (io_fs.dirExists(p)) config_dir = try allocator.dupe(u8, p);
-        } else |_| {}
+        var next: std.ArrayList([]const u8) = .empty;
+        var it = std.mem.splitScalar(u8, raw, '\n');
+        while (it.next()) |line_raw| {
+            const line = std.mem.trim(u8, line_raw, " \t\r");
+            if (line.len == 0 or line[0] == '#') continue;
+            if (self.isDisabledLocked(line)) continue;
+            const dup = al.dupe(u8, line) catch {
+                util_log.err("zdtd: load modlet self.disabled list {s}: out of memory\n", .{path});
+                for (next.items) |d| al.free(d);
+                next.deinit(al);
+                return;
+            };
+            next.append(al, dup) catch {
+                al.free(dup);
+                util_log.err("zdtd: load modlet self.disabled list {s}: out of memory\n", .{path});
+                for (next.items) |d| al.free(d);
+                next.deinit(al);
+                return;
+            };
+        }
 
-        var bnd_buf: [2048]u8 = undefined;
-        var has_bundles = false;
-        if (std.fmt.bufPrint(&bnd_buf, "{s}/Bundles", .{mod_path})) |p| {
-            has_bundles = io_fs.dirExists(p);
-        } else |_| {}
+        for (self.disabled.items) |d| al.free(d);
+        self.disabled.deinit(al);
+        self.disabled = next;
+    }
 
-        // Code detection: top-level `.dll` only (stock LoadAssemblies loads
-        // the mod's DLLs; exact glob is unverified, G2).
-        const dll_names = io_fs.listFileNames(allocator, mod_path) catch null;
-        var has_code = false;
-        if (dll_names) |dns| {
-            defer {
-                for (dns) |n| allocator.free(n);
-                allocator.free(dns);
-            }
-            for (dns) |n| {
-                if (std.mem.endsWith(u8, n, ".dll")) {
-                    has_code = true;
+    /// Write the disabled list to `state_path` (create/overwrite). Caller holds no
+    /// lock; takes it here.
+    fn saveDisabled(self: *State, allocator: std.mem.Allocator) !void {
+        const p = self.state_path orelse return;
+        self.disabled_lock.lock();
+        defer self.disabled_lock.unlock();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
+        try buf.appendSlice(allocator, "# zdtd modlets self.disabled by the operator (webui / file edit); restart to apply\n");
+        for (self.disabled.items) |d| {
+            try buf.appendSlice(allocator, d);
+            try buf.append(allocator, '\n');
+        }
+        try io_fs.writeFile(p, buf.items);
+    }
+
+    /// Enable/disable one mod by name, persisting the state file. Returns false
+    /// when the name is not installed (no state change).
+    pub fn setDisabled(self: *State, allocator: std.mem.Allocator, name: []const u8, disable: bool) !bool {
+        const al = self.state_alloc orelse allocator;
+        var known = false;
+        if (self.installed) |*s| {
+            for (s.mods) |*m| {
+                if (std.ascii.eqlIgnoreCase(m.name, name)) {
+                    known = true;
                     break;
                 }
             }
         }
-
-        try mods.append(allocator, .{
-            .name = try allocator.dupe(u8, parsed.name),
-            .display_name = try allocator.dupe(u8, parsed.display_name),
-            .path = try allocator.dupe(u8, mod_path),
-            .version = try allocator.dupe(u8, parsed.version),
-            .config_dir = config_dir,
-            .icon = if (parsed.icon) |ic| (if (ic.len > 0) try allocator.dupe(u8, ic) else null) else null,
-            .has_bundles = has_bundles,
-            .has_code = has_code,
-        });
-        if (config_dir) |cd| {
-            if (!isDisabled(parsed.name)) {
-                try mod_dirs.append(allocator, .{
-                    .config_dir = try allocator.dupe(u8, cd),
-                    .mod_path = try allocator.dupe(u8, mod_path),
-                });
+        if (!known) return false;
+        {
+            // The mutex is not reentrant and `saveDisabled` locks it itself, so
+            // only the mutation runs under the lock; the scoped defer releases it
+            // on the error paths too (an OOM must not wedge the webui poller).
+            self.disabled_lock.lock();
+            defer self.disabled_lock.unlock();
+            if (disable) {
+                var present = false;
+                for (self.disabled.items) |d| {
+                    if (std.ascii.eqlIgnoreCase(d, name)) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (!present) {
+                    const dup = try al.dupe(u8, name);
+                    errdefer al.free(dup);
+                    try self.disabled.append(al, dup);
+                }
+            } else {
+                var i: usize = 0;
+                while (i < self.disabled.items.len) {
+                    if (std.ascii.eqlIgnoreCase(self.disabled.items[i], name)) {
+                        al.free(self.disabled.items[i]);
+                        _ = self.disabled.swapRemove(i);
+                        continue;
+                    }
+                    i += 1;
+                }
             }
         }
-        if (has_code) {
-            util_log.warn("zdtd: mod '{s}' contains code (DLL); code part not hosted, XML patches still apply\n", .{parsed.name});
-        }
-        if (has_bundles) {
-            util_log.info("zdtd: mod '{s}' has Bundles/ (client-side rendering; not read by zdtd)\n", .{parsed.name});
-        }
-        if (isDisabled(parsed.name)) {
-            util_log.info("zdtd: modlet '{s}' v{s} disabled by operator; patches not applied\n", .{ parsed.name, parsed.version });
-        } else {
-            util_log.info("zdtd: modlet '{s}' v{s} '{s}' config={s}\n", .{ parsed.name, parsed.version, parsed.display_name, if (config_dir) |cd| cd else "(none)" });
-        }
+        try self.saveDisabled(allocator);
+        return true;
     }
-    return .{
-        .mods = try mods.toOwnedSlice(allocator),
-        .mod_dirs = try mod_dirs.toOwnedSlice(allocator),
-    };
+
+    /// Roster size (installed mods, enabled or not).
+    pub fn rosterLen(
+        self: *State,
+    ) usize {
+        const s = self.installed orelse return 0;
+        return s.mods.len;
+    }
+
+    /// Roster entry by index, for the operator UI. Null past the end.
+    pub fn rosterAt(self: *State, i: usize) ?*const Mod {
+        const s = self.installed orelse return null;
+        if (i >= s.mods.len) return null;
+        return &s.mods[i];
+    }
+
+    /// Scan `mods_root` for XML-only modlets. A missing root is a no-op (stock:
+    /// no Mods folder = no mods), not an error. `state_path_in` (optional) is the
+    /// persisted disabled list; the roster keeps every installed mod while
+    /// `mod_dirs` carries only the enabled ones.
+    pub fn scan(self: *State, allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: ?[]const u8) !Scan {
+        var mods: std.ArrayList(Mod) = .empty;
+        errdefer {
+            for (mods.items) |*m| m.deinit(allocator);
+            mods.deinit(allocator);
+        }
+        var mod_dirs: std.ArrayList(ModDir) = .empty;
+        errdefer {
+            for (mod_dirs.items) |md| {
+                allocator.free(md.config_dir);
+                allocator.free(md.mod_path);
+            }
+            mod_dirs.deinit(allocator);
+        }
+
+        {
+            self.disabled_lock.lock();
+            defer self.disabled_lock.unlock();
+            self.freeStateLocked();
+            self.state_alloc = allocator;
+            if (state_path_in) |sp| {
+                self.state_path = try allocator.dupe(u8, sp);
+            }
+        }
+        self.loadDisabled(allocator, self.state_path orelse "");
+
+        const dir_names = io_fs.listDirNames(allocator, mods_root) catch |err| switch (err) {
+            error.FileNotFound => return .{ .mods = &.{}, .mod_dirs = &.{} },
+            else => return err,
+        };
+        defer {
+            for (dir_names) |n| allocator.free(n);
+            allocator.free(dir_names);
+        }
+
+        for (dir_names) |folder| {
+            var path_buf: [2048]u8 = undefined;
+            const mod_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ mods_root, folder }) catch continue;
+            var mi_buf: [2048]u8 = undefined;
+            const mi_path = std.fmt.bufPrint(&mi_buf, "{s}/ModInfo.xml", .{mod_path}) catch continue;
+            const info = io_fs.readFileAll(allocator, mi_path) catch |err| switch (err) {
+                error.FileNotFound => {
+                    util_log.warn("zdtd: [MODS]{s}/ModInfo.xml missing; mod skipped\n", .{folder});
+                    continue;
+                },
+                else => {
+                    util_log.warn("zdtd: [MODS]{s}/ModInfo.xml unreadable: {s}; mod skipped\n", .{ folder, @errorName(err) });
+                    continue;
+                },
+            };
+            defer allocator.free(info);
+            const parsed = parseModInfo(folder, info) orelse continue;
+
+            var cfg_buf: [2048]u8 = undefined;
+            var config_dir: ?[]const u8 = null;
+            if (std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{mod_path})) |p| {
+                if (io_fs.dirExists(p)) config_dir = try allocator.dupe(u8, p);
+            } else |_| {}
+
+            var bnd_buf: [2048]u8 = undefined;
+            var has_bundles = false;
+            if (std.fmt.bufPrint(&bnd_buf, "{s}/Bundles", .{mod_path})) |p| {
+                has_bundles = io_fs.dirExists(p);
+            } else |_| {}
+
+            // Code detection: top-level `.dll` only (stock LoadAssemblies loads
+            // the mod's DLLs; exact glob is unverified, G2).
+            const dll_names = io_fs.listFileNames(allocator, mod_path) catch null;
+            var has_code = false;
+            if (dll_names) |dns| {
+                defer {
+                    for (dns) |n| allocator.free(n);
+                    allocator.free(dns);
+                }
+                for (dns) |n| {
+                    if (std.mem.endsWith(u8, n, ".dll")) {
+                        has_code = true;
+                        break;
+                    }
+                }
+            }
+
+            try mods.append(allocator, .{
+                .name = try allocator.dupe(u8, parsed.name),
+                .display_name = try allocator.dupe(u8, parsed.display_name),
+                .path = try allocator.dupe(u8, mod_path),
+                .version = try allocator.dupe(u8, parsed.version),
+                .config_dir = config_dir,
+                .icon = if (parsed.icon) |ic| (if (ic.len > 0) try allocator.dupe(u8, ic) else null) else null,
+                .has_bundles = has_bundles,
+                .has_code = has_code,
+            });
+            if (config_dir) |cd| {
+                if (!self.isDisabled(parsed.name)) {
+                    try mod_dirs.append(allocator, .{
+                        .config_dir = try allocator.dupe(u8, cd),
+                        .mod_path = try allocator.dupe(u8, mod_path),
+                    });
+                }
+            }
+            if (has_code) {
+                util_log.warn("zdtd: mod '{s}' contains code (DLL); code part not hosted, XML patches still apply\n", .{parsed.name});
+            }
+            if (has_bundles) {
+                util_log.info("zdtd: mod '{s}' has Bundles/ (client-side rendering; not read by zdtd)\n", .{parsed.name});
+            }
+            if (self.isDisabled(parsed.name)) {
+                util_log.info("zdtd: modlet '{s}' v{s} self.disabled by operator; patches not applied\n", .{ parsed.name, parsed.version });
+            } else {
+                util_log.info("zdtd: modlet '{s}' v{s} '{s}' config={s}\n", .{ parsed.name, parsed.version, parsed.display_name, if (config_dir) |cd| cd else "(none)" });
+            }
+        }
+        return .{
+            .mods = try mods.toOwnedSlice(allocator),
+            .mod_dirs = try mod_dirs.toOwnedSlice(allocator),
+        };
+    }
+
+    /// Installed scan (process lifetime; freed by `deinit` at shutdown).
+    pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
+        if (self.installed) |*s| {
+            s.deinit(allocator);
+            self.installed = null;
+        }
+        self.disabled_lock.lock();
+        defer self.disabled_lock.unlock();
+        self.freeStateLocked();
+    }
+
+    /// Scan `mods_root` and install the result; frees any previous scan.
+    /// Returns the mod `Config/` dirs + mod paths in mod order (feed to xml_patch
+    /// via `paths.setModDirs`).
+    pub fn install(self: *State, allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: ?[]const u8) ![]const ModDir {
+        const s = try self.scan(allocator, mods_root, state_path_in);
+        if (self.installed) |*old| old.deinit(allocator);
+        self.installed = s;
+        return s.mod_dirs;
+    }
+
+    /// True when a scanned mod carries `name` (case-insensitive).
+    pub fn isLoaded(self: *State, name: []const u8) bool {
+        const sc = self.installed orelse return false;
+        for (sc.mods) |*m| {
+            if (std.ascii.eqlIgnoreCase(m.name, name)) return true;
+        }
+        return false;
+    }
+
+    /// A scanned mod's version by Name.
+    pub fn versionByName(self: *State, name: []const u8) ?[]const u8 {
+        const sc = self.installed orelse return null;
+        for (sc.mods) |*m| {
+            if (std.ascii.eqlIgnoreCase(m.name, name)) return m.version;
+        }
+        return null;
+    }
+
+    /// A scanned mod's absolute path by V2 Name.
+    pub fn modPathByName(self: *State, name: []const u8) ?[]const u8 {
+        const sc = self.installed orelse return null;
+        for (sc.mods) |*m| {
+            if (std.mem.eql(u8, m.name, name)) return m.path;
+        }
+        return null;
+    }
+};
+
+/// Load-window borrow for the XML patchers: `mod_loaded('X')`,
+/// `mod_version('X')` and `@modfolder(X)` evaluate inside `readConfigXml`
+/// during the Game's `loadAssets`, which binds the loading Game's state for
+/// exactly that call (nil reads as "no mods", matching an empty roster).
+var active: ?*State = null;
+
+pub fn bind(s: *State) void {
+    active = s;
 }
 
-/// Installed scan (process lifetime; freed by `deinit` at shutdown).
-var installed: ?Scan = null;
-
-pub fn deinit(allocator: std.mem.Allocator) void {
-    if (installed) |*s| {
-        s.deinit(allocator);
-        installed = null;
-    }
-    disabled_lock.lock();
-    defer disabled_lock.unlock();
-    freeStateLocked();
-}
-
-/// Scan `mods_root` and install the result; frees any previous scan.
-/// Returns the mod `Config/` dirs + mod paths in mod order (feed to xml_patch
-/// via `paths.setModDirs`).
-pub fn install(allocator: std.mem.Allocator, mods_root: []const u8, state_path_in: ?[]const u8) ![]const ModDir {
-    const s = try scan(allocator, mods_root, state_path_in);
-    if (installed) |*old| old.deinit(allocator);
-    installed = s;
-    return s.mod_dirs;
+pub fn unbind() void {
+    active = null;
 }
 
 /// True when a scanned mod carries `name` (case-insensitive), for patch
 /// `<conditional>` `mod_loaded('X')` tests.
 pub fn isLoaded(name: []const u8) bool {
-    const s = installed orelse return false;
-    for (s.mods) |*m| {
-        if (std.ascii.eqlIgnoreCase(m.name, name)) return true;
-    }
-    return false;
+    const st = active orelse return false;
+    return st.isLoaded(name);
 }
 
 /// A scanned mod's version by Name, for `mod_version('X')` tests.
 pub fn versionByName(name: []const u8) ?[]const u8 {
-    const s = installed orelse return null;
-    for (s.mods) |*m| {
-        if (std.ascii.eqlIgnoreCase(m.name, name)) return m.version;
-    }
-    return null;
+    const st = active orelse return null;
+    return st.versionByName(name);
 }
 
 /// Lookup a mod's absolute path by V2 Name, for `@modfolder(Name):` include
 /// token rewriting (stock `ReadPatchXmlWithFixedModFolders`).
 pub fn modPathByName(name: []const u8) ?[]const u8 {
-    const s = installed orelse return null;
-    for (s.mods) |*m| {
-        if (std.mem.eql(u8, m.name, name)) return m.path;
-    }
-    return null;
+    const st = active orelse return null;
+    return st.modPathByName(name);
 }
 
 test "disabled modlets are listed but their patches are not applied" {
@@ -548,24 +587,25 @@ test "disabled modlets are listed but their patches are not applied" {
     defer std.testing.allocator.free(state);
     try io_fs.writeFile(state, "# operator state\nBDisabled\n");
 
-    const dirs = try install(std.testing.allocator, mods_root, state);
-    defer deinit(std.testing.allocator);
+    var st: State = .{};
+    defer st.deinit(std.testing.allocator);
+    const dirs = try st.install(std.testing.allocator, mods_root, state);
     try std.testing.expectEqual(@as(usize, 1), dirs.len);
     try std.testing.expect(std.mem.find(u8, dirs[0].config_dir, "AEnabled") != null);
-    try std.testing.expectEqual(@as(usize, 2), rosterLen());
-    try std.testing.expect(isDisabled("bdisabled"));
-    try std.testing.expect(!isDisabled("AEnabled"));
-    try std.testing.expectEqual(@as(usize, 1), disabledCount());
+    try std.testing.expectEqual(@as(usize, 2), st.rosterLen());
+    try std.testing.expect(st.isDisabled("bdisabled"));
+    try std.testing.expect(!st.isDisabled("AEnabled"));
+    try std.testing.expectEqual(@as(usize, 1), st.disabledCount());
 
     // Re-enabling writes the file back without that name.
-    try std.testing.expect(try setDisabled(std.testing.allocator, "BDisabled", false));
-    try std.testing.expect(!isDisabled("BDisabled"));
-    try std.testing.expectEqual(@as(usize, 0), disabledCount());
+    try std.testing.expect(try st.setDisabled(std.testing.allocator, "BDisabled", false));
+    try std.testing.expect(!st.isDisabled("BDisabled"));
+    try std.testing.expectEqual(@as(usize, 0), st.disabledCount());
     const after = try io_fs.readFileAll(std.testing.allocator, state);
     defer std.testing.allocator.free(after);
     try std.testing.expect(std.mem.find(u8, after, "BDisabled") == null);
     // An unknown name is refused (no state change).
-    try std.testing.expect(!try setDisabled(std.testing.allocator, "NoSuchMod", true));
+    try std.testing.expect(!try st.setDisabled(std.testing.allocator, "NoSuchMod", true));
 }
 
 test "parseModInfo accepts V2 and rejects malformed" {

@@ -1089,13 +1089,13 @@ pub fn tryLoad(
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
         var cur: []u8 = base;
-        if (paths.mod_dirs.len > 0) {
-            const m = try @import("xml_patch.zig").applyModDirs(allocator, cur, "quests.xml", paths.mod_dirs);
+        if (paths.modDirs().len > 0) {
+            const m = try @import("xml_patch.zig").applyModDirs(allocator, cur, "quests.xml", paths.modDirs());
             allocator.free(cur);
             cur = m;
         }
-        if (paths.override_dirs.len > 0) {
-            const m2 = try @import("xml_patch.zig").applyOverrideDirs(allocator, cur, "quests.xml", paths.override_dirs);
+        if (paths.overrideDirs().len > 0) {
+            const m2 = try @import("xml_patch.zig").applyOverrideDirs(allocator, cur, "quests.xml", paths.overrideDirs());
             allocator.free(cur);
             cur = m2;
         }

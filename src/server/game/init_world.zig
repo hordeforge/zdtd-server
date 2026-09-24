@@ -222,6 +222,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             return err;
         };
         self.webui.setAdminHandler(self, Game.webuiAdminThunk);
+        self.webui.modlets_state = &self.modlets_state;
         util_log.info("zdtd: webui http://{s}:{d}/ (auth: Bearer / X-Zdtd-Secret)\n", .{
             opts.webui_bind,
             self.webui.port,

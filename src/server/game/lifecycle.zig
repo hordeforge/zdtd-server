@@ -53,8 +53,8 @@ pub fn deinit(self: *Game) void {
 /// mid-create return cannot leave them for the next Game in the process.
 pub fn deinitProcessGlobals(self: *Game) void {
     @import("config_files.zig").deinitCache(self);
-    @import("../../assets/paths.zig").deinitModDirs(self.allocator);
-    @import("../../assets/modlets.zig").deinit(self.allocator);
+    self.paths_state.deinit(self.allocator);
+    self.modlets_state.deinit(self.allocator);
     if (self.serveradmin_path) |p| {
         self.allocator.free(p);
         self.serveradmin_path = null;

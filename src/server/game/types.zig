@@ -233,6 +233,12 @@ pub const LandClaim = struct {
 };
 
 pub const InitOptions = struct {
+    /// The effective server config (loaded file or struct defaults) the Game
+    /// owns so late readers (the getoptions dump) reach it through the owning
+    /// instance instead of a process global (paper: shared mutable state
+    /// belongs to the context).
+    effective_config: @import("../config.zig").Config = .{},
+
     map_dir: ?[]const u8 = null,
     game_dir: ?[]const u8 = null,
     config_dir: ?[]const u8 = null,

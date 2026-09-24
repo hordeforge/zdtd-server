@@ -10,6 +10,7 @@
 //! unchanged.
 
 const std = @import("std");
+const config_mod = @import("config.zig");
 const game_mod = @import("game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -24,7 +25,6 @@ const c2s_text = @import("c2s_text.zig");
 const plugin_compose = @import("game/plugin_compose.zig");
 const utf8_util = @import("../util/utf8.zig");
 const protocol = @import("../protocol.zig");
-const config_mod = @import("config.zig");
 const util_log = @import("../util/log.zig");
 const version = @import("../version.zig");
 const systems = @import("../ecs/systems.zig");
@@ -860,7 +860,7 @@ fn replyOptions(self: *Game) void {
 }
 
 fn optionValue(self: *Game, v: *const packages.GameStatsValues, name: []const u8, buf: []u8) ?[]const u8 {
-    const cfg = &config_mod.effective;
+    const cfg = &self.effective_config;
     const stats = v;
     if (std.mem.eql(u8, name, "ServerPort")) return std.fmt.bufPrint(buf, "{d}", .{self.net.port}) catch null;
     if (std.mem.eql(u8, name, "ServerMaxPlayerCount")) return std.fmt.bufPrint(buf, "{d}", .{self.max_players}) catch null;

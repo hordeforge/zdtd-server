@@ -23,67 +23,95 @@ pub fn resolveConfigXml(
     return null;
 }
 
-/// Optional modlet `Config/` dirs (stock mod order, PRD R6: applied before
-/// operator overrides). Owned by paths (see setModDirs) so Game teardown -
-/// which frees the mods scan these come from - cannot leave loaders with
-/// dangling dirs. Set at Game init from `mods.install`.
-var mod_dirs_owned: []mods.ModDir = &.{};
-pub var mod_dirs: []const mods.ModDir = &.{};
+/// Patch sources for the Game that is currently loading: the stock mod
+/// `Config/` dirs in mod order (PRD R6: applied before operator overrides)
+/// plus the operator's `--config-overrides` dirs. Owned by the Game
+/// (`paths_state`), so two Games in one process cannot read each other's
+/// dirs; the loaders reach it through a load-window borrow that reads as "no
+/// patches" outside the window (nil default).
+var active: ?*State = null;
 
-/// Optional override directories (xpath patch XMLs, filename order). Set at Game init.
-pub var override_dirs: []const []const u8 = &.{};
-
-fn freeOwnedModDirs(allocator: std.mem.Allocator, owned: []mods.ModDir, n: usize) void {
-    for (owned[0..n]) |md| {
-        allocator.free(md.config_dir);
-        allocator.free(md.mod_path);
-    }
-    allocator.free(owned);
+/// Bind the loading Game's patch state for the duration of `loadAssets`.
+pub fn bind(s: *State) void {
+    active = s;
 }
 
-/// Install the modlet Config/ dir list used by patched catalog loads.
-/// Clears any previous list. On allocation failure the previous list is left
-/// intact (fail closed): a silent empty `mod_dirs` would drop every modlet
-/// patch and still look like a clean boot.
-pub fn setModDirs(allocator: std.mem.Allocator, dirs: []const mods.ModDir) !void {
-    if (dirs.len == 0) {
-        deinitModDirs(allocator);
-        return;
-    }
-    const owned = try allocator.alloc(mods.ModDir, dirs.len);
-    errdefer allocator.free(owned);
-    var filled: usize = 0;
-    errdefer freeOwnedModDirs(allocator, owned, filled);
-    for (dirs, 0..) |d, idx| {
-        owned[idx].config_dir = try allocator.dupe(u8, d.config_dir);
-        owned[idx].mod_path = allocator.dupe(u8, d.mod_path) catch |err| {
-            allocator.free(owned[idx].config_dir);
-            return err;
-        };
-        filled = idx + 1;
-    }
-    deinitModDirs(allocator);
-    mod_dirs_owned = owned;
-    mod_dirs = owned;
+pub fn unbind() void {
+    active = null;
 }
 
-pub fn deinitModDirs(allocator: std.mem.Allocator) void {
-    for (mod_dirs_owned) |md| {
-        allocator.free(md.config_dir);
-        allocator.free(md.mod_path);
+pub const State = struct {
+    /// Owned copies of the merged mod `Config/` dir list.
+    mod_dirs_owned: []mods.ModDir = &.{},
+    /// Optional modlet `Config/` dirs (stock mod order, PRD R6).
+    mod_dirs: []const mods.ModDir = &.{},
+    /// Optional override directories (xpath patch XMLs, filename order).
+    override_dirs: []const []const u8 = &.{},
+
+    fn freeOwnedModDirs(allocator: std.mem.Allocator, owned: []mods.ModDir, n: usize) void {
+        for (owned[0..n]) |md| {
+            allocator.free(md.config_dir);
+            allocator.free(md.mod_path);
+        }
+        allocator.free(owned);
     }
-    if (mod_dirs_owned.len > 0) allocator.free(mod_dirs_owned);
-    mod_dirs_owned = &.{};
-    mod_dirs = &.{};
+
+    /// Install the modlet Config/ dir list used by patched catalog loads.
+    /// Clears any previous list. On allocation failure the previous list is
+    /// left intact (fail closed): an empty `mod_dirs` would drop every modlet
+    /// patch and still look like a clean boot.
+    pub fn setModDirs(self: *State, allocator: std.mem.Allocator, dirs: []const mods.ModDir) !void {
+        if (dirs.len == 0) {
+            self.deinit(allocator);
+            return;
+        }
+        const owned = try allocator.alloc(mods.ModDir, dirs.len);
+        errdefer allocator.free(owned);
+        var filled: usize = 0;
+        errdefer freeOwnedModDirs(allocator, owned, filled);
+        for (dirs, 0..) |d, idx| {
+            owned[idx].config_dir = try allocator.dupe(u8, d.config_dir);
+            owned[idx].mod_path = allocator.dupe(u8, d.mod_path) catch |err| {
+                allocator.free(owned[idx].config_dir);
+                return err;
+            };
+            filled = idx + 1;
+        }
+        self.deinit(allocator);
+        self.mod_dirs_owned = owned;
+        self.mod_dirs = owned;
+    }
+
+    pub fn setOverrideDirs(self: *State, dirs: []const []const u8) void {
+        self.override_dirs = dirs;
+    }
+
+    pub fn deinit(self: *State, allocator: std.mem.Allocator) void {
+        for (self.mod_dirs_owned) |md| {
+            allocator.free(md.config_dir);
+            allocator.free(md.mod_path);
+        }
+        if (self.mod_dirs_owned.len > 0) allocator.free(self.mod_dirs_owned);
+        self.mod_dirs_owned = &.{};
+        self.mod_dirs = &.{};
+    }
+};
+
+/// The load-window views the free functions below read (nil = no patches).
+pub fn modDirs() []const mods.ModDir {
+    const st = active orelse return &.{};
+    return st.mod_dirs;
 }
 
-pub fn setOverrideDirs(dirs: []const []const u8) void {
-    override_dirs = dirs;
+pub fn overrideDirs() []const []const u8 {
+    const st = active orelse return &.{};
+    return st.override_dirs;
 }
 
 /// True when any patch source is configured (fast-path guard for loaders).
 pub fn hasPatches() bool {
-    return mod_dirs.len > 0 or override_dirs.len > 0;
+    const st = active orelse return false;
+    return st.mod_dirs.len > 0 or st.override_dirs.len > 0;
 }
 
 /// Read base config XML and apply modlet patches (fatal on error, PRD R6) then
@@ -108,12 +136,13 @@ pub fn readConfigXml(
         }
         return null;
     };
-    if (!hasPatches()) return base;
+    const st = active orelse return base;
+    if (!(st.mod_dirs.len > 0 or st.override_dirs.len > 0)) return base;
     var cur: []u8 = base;
-    if (mod_dirs.len > 0) {
+    if (st.mod_dirs.len > 0) {
         // Modlet patches are mandatory: a patch that fails to apply changes
         // AssignIds vs the client, so the server must not start (PRD R6).
-        const m = xml_patch.applyModDirs(allocator, cur, file_name, mod_dirs) catch |err| {
+        const m = xml_patch.applyModDirs(allocator, cur, file_name, st.mod_dirs) catch |err| {
             std.debug.print(
                 "zdtd: mod patches for {s} failed: {s}; refusing to start (modlet desync risk)\n",
                 .{ file_name, @errorName(err) },
@@ -124,10 +153,10 @@ pub fn readConfigXml(
         allocator.free(cur);
         cur = m;
     }
-    if (override_dirs.len > 0) {
+    if (st.override_dirs.len > 0) {
         // Operator overrides stay optional: a bad override must not blank the
         // catalog; keep the mod-patched bytes.
-        const m2 = xml_patch.applyOverrideDirs(allocator, cur, file_name, override_dirs) catch |err| {
+        const m2 = xml_patch.applyOverrideDirs(allocator, cur, file_name, st.override_dirs) catch |err| {
             std.debug.print(
                 "zdtd: config overrides for {s} failed: {s}; keeping mod-patched base\n",
                 .{ file_name, @errorName(err) },
@@ -218,17 +247,18 @@ test "resolveConfigXml prefers config_dir" {
 
 test "setModDirs leaves prior list intact on OOM" {
     const a = std.testing.allocator;
-    defer deinitModDirs(a);
+    var st: State = .{};
+    defer st.deinit(a);
     const first = [_]mods.ModDir{.{ .config_dir = "/a/Config", .mod_path = "/a" }};
-    try setModDirs(a, &first);
-    try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
-    try std.testing.expectEqualStrings("/a/Config", mod_dirs[0].config_dir);
+    try st.setModDirs(a, &first);
+    try std.testing.expectEqual(@as(usize, 1), st.mod_dirs.len);
+    try std.testing.expectEqualStrings("/a/Config", st.mod_dirs[0].config_dir);
 
     // FailAllocator rejects every allocation: setModDirs must not clear the
     // installed list when it cannot install the replacement.
     var failing = std.testing.FailingAllocator.init(a, .{ .fail_index = 0 });
     const second = [_]mods.ModDir{.{ .config_dir = "/b/Config", .mod_path = "/b" }};
-    try std.testing.expectError(error.OutOfMemory, setModDirs(failing.allocator(), &second));
-    try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
-    try std.testing.expectEqualStrings("/a/Config", mod_dirs[0].config_dir);
+    try std.testing.expectError(error.OutOfMemory, st.setModDirs(failing.allocator(), &second));
+    try std.testing.expectEqual(@as(usize, 1), st.mod_dirs.len);
+    try std.testing.expectEqualStrings("/a/Config", st.mod_dirs[0].config_dir);
 }

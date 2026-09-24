@@ -615,7 +615,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     );
     // Effective config: loaded file or struct defaults (single source in config.zig).
     const cfg: server_config.Config = cfg_owned orelse .{};
-    server_config.effective = cfg;
 
     // CLI > env ZDTD_WEBUI_SECRET (prefer env: not visible in process listings).
     if (webui_secret.len == 0) {
@@ -743,6 +742,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .mcp_bind = mcp_bind,
         .mcp_token = mcp_token,
         .mcp_allowlist = mcp_allowlist,
+        .effective_config = cfg,
         .world_name = resolved_world_name,
         .server_description = cfg.server_description,
         .server_website_url = cfg.server_website_url,

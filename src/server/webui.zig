@@ -196,6 +196,12 @@ pub const Snapshot = struct {
 pub const AdminFn = *const fn (ctx: *anyopaque, line: []const u8, out: []u8) usize;
 
 pub const Server = struct {
+    /// The loading Game's modlet state (set beside the admin handler at Game
+    /// init): the roster and the enable/disable toggle reach the owning
+    /// instance instead of a process global (paper: shared mutable state
+    /// belongs to the context). Null in tests that do not exercise modlets;
+    /// the snapshot then reports an empty roster and the toggle fails closed.
+    modlets_state: ?*@import("../assets/modlets.zig").State = null,
     listener: tcp.Listener = .{},
     port: u16 = 0,
     bind_addr: u32 = 0x7f000001,
@@ -1835,7 +1841,11 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         return;
     }
     const disable = std.mem.eql(u8, action, "disable");
-    const known = modlets.setDisabled(self.allocator, name, disable) catch {
+    const mst = self.modlets_state orelse {
+        try self.modletClientError(req, plain, json, .internal_server_error, "could not save the modlet state\n", "<pre class=\"err\">Could not save the modlet state.</pre>\n");
+        return;
+    };
+    const known = mst.setDisabled(self.allocator, name, disable) catch {
         // Do not echo @errorName to the client: operators get a fixed message;
         // the concrete failure stays in the process log if the caller adds one.
         try self.modletClientError(req, plain, json, .internal_server_error, "could not save the modlet state\n", "<pre class=\"err\">Could not save the modlet state.</pre>\n");
@@ -2105,7 +2115,7 @@ fn renderStateJson(buf: []u8, srv: *const Server) ![]const u8 {
     // XML-only modlet roster for the Modules pane. Gated on the global roster,
     // not on the tick snapshot: the list changes only at scan/reload time.
     try w.writeAll(",\"modlets\":");
-    try writeModletsJson(&w);
+    try writeModletsJson(&w, srv.modlets_state);
     // Same ring, same order (oldest first, newest last) as the console pane.
     try w.writeAll(",\"console\":[");
     var k: usize = 0;
@@ -2124,10 +2134,14 @@ fn renderStateJson(buf: []u8, srv: *const Server) ![]const u8 {
 
 /// `"modlets":[...]` roster (assets/modlets.zig), the shape the Preact Modules
 /// pane reads. Every roster entry is populated (rosterLen/rosterAt).
-fn writeModletsJson(w: *std.Io.Writer) !void {
+fn writeModletsJson(w: *std.Io.Writer, mst: ?*modlets.State) !void {
     try w.writeAll("[");
+    const st = mst orelse {
+        try w.writeAll("]");
+        return;
+    };
     var i: usize = 0;
-    while (modlets.rosterAt(i)) |m| : (i += 1) {
+    while (st.rosterAt(i)) |m| : (i += 1) {
         if (i != 0) try w.writeAll(",");
         try w.writeAll("{\"name\":\"");
         try jsonEscapeWrite(w, m.name);
@@ -2135,7 +2149,7 @@ fn writeModletsJson(w: *std.Io.Writer) !void {
         try jsonEscapeWrite(w, m.version);
         try w.print("\",\"has_code\":{s},\"disabled\":{s}}}", .{
             if (m.has_code) "true" else "false",
-            if (modlets.isDisabled(m.name)) "true" else "false",
+            if (st.isDisabled(m.name)) "true" else "false",
         });
     }
     try w.writeAll("]");
@@ -2414,10 +2428,12 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     try io_fs.writeFile(mi, "<xml><Name value=\"UiMod\"/><DisplayName value=\"UI Mod\"/><Version value=\"1.0\"/></xml>");
     const state = try std.fmt.allocPrint(std.testing.allocator, "{s}/modlets_disabled.txt", .{root});
     defer std.testing.allocator.free(state);
-    _ = try modlets.install(std.testing.allocator, mods_root, state);
-    defer modlets.deinit(std.testing.allocator);
+    var mst: modlets.State = .{};
+    defer mst.deinit(std.testing.allocator);
+    _ = try mst.install(std.testing.allocator, mods_root, state);
 
     var s: Server = .{};
+    s.modlets_state = &mst;
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
     const nonce = [_]u8{0x5a} ** 32;
@@ -2436,7 +2452,7 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Content-Type: application/json") != null);
     try std.testing.expect(std.mem.find(u8, resp, "{\"ok\":true,\"reply\":\"modlet UiMod disable; restart zdtd to apply\\n\"}") != null);
-    try std.testing.expect(modlets.isDisabled("UiMod"));
+    try std.testing.expect(mst.isDisabled("UiMod"));
     const saved = try io_fs.readFileAll(std.testing.allocator, state);
     defer std.testing.allocator.free(saved);
     try std.testing.expect(std.mem.find(u8, saved, "UiMod") != null);
@@ -2448,7 +2464,7 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     try testServeHttp(&s, req2);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"session expired or invalid; reload the dashboard and try again\"}") != null);
-    try std.testing.expect(modlets.isDisabled("UiMod"));
+    try std.testing.expect(mst.isDisabled("UiMod"));
     const unknown = "csrf=s3cr3t&name=NoSuchMod&action=enable";
     const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ unknown.len, unknown });
     try testServeHttp(&s, req3);
@@ -2721,10 +2737,12 @@ test "GET /api/state.json carries the modlet roster as a populated array" {
     try io_fs.writeFile(mi, "<xml><Name value=\"UiMod\"/><DisplayName value=\"UI Mod\"/><Version value=\"1.0\"/></xml>");
     const state = try std.fmt.allocPrint(std.testing.allocator, "{s}/modlets_disabled.txt", .{root});
     defer std.testing.allocator.free(state);
-    _ = try modlets.install(std.testing.allocator, mods_root, state);
-    defer modlets.deinit(std.testing.allocator);
+    var mst: modlets.State = .{};
+    defer mst.deinit(std.testing.allocator);
+    _ = try mst.install(std.testing.allocator, mods_root, state);
 
     var s: Server = .{};
+    s.modlets_state = &mst;
     @memcpy(s.secret_buf[0..6], "s3cr3t");
     s.secret_len = 6;
     const nonce = [_]u8{0x5a} ** 32;

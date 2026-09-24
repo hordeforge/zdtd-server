@@ -69,6 +69,15 @@ fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result))
 }
 
 pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.InitOptions) !void {
+    // Load-window borrow for the patch readers: bound to THIS Game for the
+    // whole load so two Games in one process cannot read each other's patch
+    // sources; nil outside the window reads as no patches.
+    assets_paths.bind(&self.paths_state);
+    modlets.bind(&self.modlets_state);
+    defer {
+        assets_paths.unbind();
+        modlets.unbind();
+    }
     // Stock Mods/ scan (PRD R1) + self-contained manifest mods' Config/ dirs
     // (PRD 0003): merged into one patch list so both apply to the patched
     // catalogs - stock Mods/ first, then manifest mods (each existence-
@@ -103,7 +112,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             "{s}/{s}",
             .{ self.world.world_dir, modlets.state_file_name },
         ) catch null;
-        const mod_dirs = modlets.install(allocator, root, modlet_state) catch |err| {
+        const mod_dirs = self.modlets_state.install(allocator, root, modlet_state) catch |err| {
             util_log.err("zdtd: mods scan '{s}' failed: {s}\n", .{ root, @errorName(err) });
             return err;
         };
@@ -114,7 +123,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         manifest_tail = merged_mod_dirs.items.len;
         util_log.info("zdtd: modlets enabled={d} disabled={d} state={s}\n", .{
             mod_dirs.len,
-            modlets.disabledCount(),
+            self.modlets_state.disabledCount(),
             modlet_state orelse "(none)",
         });
     }
@@ -137,12 +146,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }
     }
     if (merged_mod_dirs.items.len > 0) {
-        assets_paths.setModDirs(allocator, merged_mod_dirs.items) catch |err| {
+        self.paths_state.setModDirs(allocator, merged_mod_dirs.items) catch |err| {
             util_log.err("zdtd: setModDirs failed: {s}\n", .{@errorName(err)});
             return err;
         };
     }
-    assets_paths.setOverrideDirs(opts.config_overrides);
+    self.paths_state.setOverrideDirs(opts.config_overrides);
     if (opts.config_overrides.len > 0) {
         util_log.info("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
     }

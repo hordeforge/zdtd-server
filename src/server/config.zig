@@ -442,8 +442,6 @@ fn sandboxIntU16(v: i32) u16 {
 /// `exportcurrentconfigs`); set by main after the parse merges. Values the
 /// admin `setgamepref` mutates live in the GameStats blob, which the option
 /// dump prefers for those names.
-pub var effective: Config = .{};
-
 /// Parse serverconfig.xml bytes (subset of stock ServerSettings).
 pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     var comment_end: usize = 0;

@@ -142,7 +142,7 @@ pub fn deflate(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 /// Load the base header and merge every mod's `Config/Localization.csv`.
 /// Null when the base file is absent (nothing to patch against).
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
-    return tryLoadWithMods(allocator, game_dir, config_dir, paths.mod_dirs);
+    return tryLoadWithMods(allocator, game_dir, config_dir, paths.modDirs());
 }
 
 /// Testable form of `tryLoad`: the mod dirs are passed in.
