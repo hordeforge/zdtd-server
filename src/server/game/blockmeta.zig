@@ -114,10 +114,7 @@ test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
 
     const gpa = std.testing.allocator;
     const g = try Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var path_buf: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path_buf, "{s}/blockmeta.zbm", .{g.world.world_dir});

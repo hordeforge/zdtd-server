@@ -166,10 +166,7 @@ test "deco suppression follows the prefab AllowDecorations property" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir, .map_dir = map_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
     // One pass over the shipped decorations: the first non-part POI that did
     // not opt into decorations gives a deterministic point inside a suppressed
@@ -2620,10 +2617,7 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2679,10 +2673,7 @@ test "equipped item passives fold into the survival VM (stock data)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2743,10 +2734,7 @@ test "rogue armor quiets stealth noise while crouching (NoiseMultiplier)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2795,10 +2783,7 @@ test "rogue armor dims stealth light in the dark (LightMultiplier)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2863,10 +2848,7 @@ test "rogue helmet raises loot stage (LootStage passive 159)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2907,10 +2889,7 @@ test "PainTolerance resists stun buffs (BuffResistance passive 197)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -2942,10 +2921,7 @@ test "NightStalker steal heals on hit (HealthSteal passive 167)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), g.healthGainLossMult(cl.slot, "HealthSteal"), 0.0001);
@@ -2966,10 +2942,7 @@ test "held torch burn proc lands on the victim" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3008,10 +2981,7 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3068,10 +3038,7 @@ test "MachineGunner refunds stamina on hit (attacked ModifyStats)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3115,10 +3082,7 @@ test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3161,10 +3125,7 @@ test "victim-directed cvar writes land on player victims" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -3208,10 +3169,7 @@ test "zombie fist infection lands on player victim" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_v: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap_v);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3240,10 +3198,7 @@ test "zombie victim carries bleedCounter through the cvar column" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3289,10 +3244,7 @@ test "BarBrawling rage grants on taking a hit (onOtherDamagedSelf)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3333,10 +3285,7 @@ test "combat entry grants the magnum criminal-pursuit buff" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3381,10 +3330,7 @@ test "fall impact escalates the leg-injury counter" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3413,10 +3359,7 @@ test "zombie fist applies exactly one wound per hit (fireOneBuff)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_v: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap_v);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3445,10 +3388,7 @@ test "buffInfectionMain escalates the infection counter" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3477,10 +3417,7 @@ test "victim PackMule display buff fires on being hit" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3520,10 +3457,7 @@ test "died rows set infectionCounter on player death" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3550,10 +3484,7 @@ test "leave-game rows clear harvest buff on disconnect" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3576,10 +3507,7 @@ test "CharismaticNature shares level with party member" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -3614,10 +3542,7 @@ test "multi-name RemoveBuff fans out (splint ladder)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3644,10 +3569,7 @@ test "delayed kill stamina lands after 1s" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3696,10 +3618,7 @@ test "power-attack kill refunds stamina via IsSecondaryAttack" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3745,10 +3664,7 @@ test "cure-all flags typed buffs only" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3779,10 +3695,7 @@ test "bleeding drains HP via cvar-scaled HealthChangeOT" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3808,10 +3721,7 @@ test "spawn-heal finish restores bars" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3838,10 +3748,7 @@ test "church-bell ring spawns the aggressive horde" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3874,10 +3781,7 @@ test "heal-health cvar add heals per update" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3908,10 +3812,7 @@ test "ranged ray-hit bleeds the victim (onSelfPrimaryActionRayHit)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -3960,10 +3861,7 @@ test "level-curved ModifyCVar indexes the perk's level" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     for (g.progression_table.perks) |pk| {
@@ -3989,10 +3887,7 @@ test "forgetting elixir resets progression and refunds points" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4036,10 +3931,7 @@ test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4083,10 +3975,7 @@ test "consumable buff expires when its duration cvars drain" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4137,10 +4026,7 @@ test "infection04 start subtract kills instantly" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4161,10 +4047,7 @@ test "radiation pool drains 20 stamina per update" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4196,10 +4079,7 @@ test "puking start drains 50 water immediately" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4225,10 +4105,7 @@ test "MotherLode penalizes harvest XP via Harvesting tag" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     cl.level = 1;
@@ -4257,10 +4134,7 @@ test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     try std.testing.expect(g.addProgressionLevel(cl.slot, "perkNightStalkerTwilightThief", 1));
@@ -4284,10 +4158,7 @@ test "stamina regen scales with water fraction (StaminaOT water gate)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4316,10 +4187,7 @@ test "fatigued victim takes scaled damage (HealthLoss passive 107)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4340,10 +4208,7 @@ test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4379,10 +4244,7 @@ test "kill trigger fires SiphoningStrikes heal on zombie kill" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4423,10 +4285,7 @@ test "morale start otherAOE cripples nearby zombies" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4454,10 +4313,7 @@ test "kill trigger grants Dentist silver on tagged zombie kill" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4519,10 +4375,7 @@ test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4554,10 +4407,7 @@ test "kill trigger grants Berserker on club kill at Strength 5" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4598,10 +4448,7 @@ test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4632,10 +4479,7 @@ test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4661,10 +4505,7 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4695,10 +4536,7 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4734,10 +4572,7 @@ test "sprint drain consumes running-tagged StaminaChangeOT (perkRuleOneCardio)" 
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4770,10 +4605,7 @@ test "walk regen consumes walking-tagged StaminaChangeOT (armorFarmerHelmet)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4816,10 +4648,7 @@ test "FoodChangeOT and WaterChangeOT join the survival totals" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.sim.rules.progression.food_depletion_per_hour = 0;
     g.sim.rules.progression.water_depletion_per_hour = 0;
     var capture: ln_peer.Capture = .{};
@@ -4869,10 +4698,7 @@ test "HungerMultiplier scales negative FoodChangeOT (loss sandbox modifier)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.sim.rules.progression.food_depletion_per_hour = 0;
     g.sim.rules.progression.water_depletion_per_hour = 0;
     var capture: ln_peer.Capture = .{};
@@ -4912,10 +4738,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -4986,10 +4809,7 @@ test "the survival pass reads the held item's tags for HoldingItemHasTags" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5031,10 +4851,7 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5088,10 +4905,7 @@ test "crafting tier follows the stock crafting-skill rows" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const recipe = g.recipes.byName("meleeToolRepairT1ClawHammer") orelse return error.SkipZigTest;
@@ -5122,10 +4936,7 @@ test "crafting consumes tier-scaled ingredients and yields a tier-quality item" 
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5174,10 +4985,7 @@ test "the survival pass folds the armor query into buff_phys_resist" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5223,10 +5031,7 @@ test "a gated perk row stops folding when its requirement fails" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5292,10 +5097,7 @@ test "every active buff fires its onSelfBuffStart rows once" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5328,10 +5130,7 @@ test "the armour status buffs gate on the worn-armour rating" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5355,10 +5154,7 @@ test "an entity can hold a full stock buff set, not just eight" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5397,10 +5193,7 @@ test "the entity class Buffs list parses from entityclasses.xml" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const pdef = g.entities.byHash(assets_unity_hash.class_player_male) orelse return error.SkipZigTest;
     try std.testing.expectEqual(@as(usize, 2), pdef.buffs.len);
     try std.testing.expectEqualStrings("buffStatusCheck01", pdef.buffs[0]);
@@ -5436,10 +5229,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5481,10 +5271,7 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -5531,10 +5318,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -6776,10 +6560,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(cl.slot) orelse return error.TestUnexpectedResult;
@@ -6860,10 +6641,7 @@ test "equipping rogue boots grants the worn marker buff and unequipping removes 
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -6912,10 +6690,7 @@ test "respawn grants the stock spawn-protection and trauma buffs" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -6949,10 +6724,7 @@ test "eating a bandage grants Physician-scaled XP through gated GiveExp rows" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -6979,10 +6751,7 @@ test "a held cripple mod rolls its damage proc through seeded cvars" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7021,10 +6790,7 @@ test "a cripple-modded hit cripples a walker victim" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7080,10 +6846,7 @@ test "reloading a penalty weapon grants the reload slow buff" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7118,10 +6881,7 @@ test "a damaged radiated zombie gains its regen buff and amount" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7154,10 +6914,7 @@ test "worn rogue boots soften the fall impact computation" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7203,10 +6960,7 @@ test "a radiated zombie regenerates through its class proc buff" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const zdef = g.entities.byName("zombieBoeRadiated") orelse return error.SkipZigTest;
@@ -7234,10 +6988,7 @@ test "a burning zombie takes damage over time" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&capture);
     const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
@@ -7260,10 +7011,7 @@ test "a placed torch feeds the AI heat map" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&capture);
     const torch = g.blocks.byName("wallTorchLightPlayer") orelse return error.SkipZigTest;
@@ -7292,10 +7040,7 @@ test "radiated regen stops at 80 percent HP" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&capture);
     const zdef = g.entities.byName("zombieBoeRadiated") orelse return error.SkipZigTest;
@@ -7322,10 +7067,7 @@ test "a burning zombie seeds its duration and self-extinguishes" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&capture);
     const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
@@ -7351,10 +7093,7 @@ test "a stunned zombie gains its cooldown on expiry" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&capture);
     const zid = g.sim.spawnZombie(258, 70, 258, 500).?;
@@ -7377,10 +7116,7 @@ test "died class rows reset hazard timers" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7403,10 +7139,7 @@ test "join seeds class entered-game cvars" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     try g.step();
@@ -7425,10 +7158,7 @@ test "buying StrengthMastery refreshes a held miner tool's healing cvars" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7460,10 +7190,7 @@ test "a torch hit sets the victim burning" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7508,10 +7235,7 @@ test "submersion mirrors the underwater cvar" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -7536,10 +7260,7 @@ test "dragging a damaged tool onto another combines durability" {
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;

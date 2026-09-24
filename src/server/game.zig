@@ -628,6 +628,14 @@ pub const Game = struct {
         return createWithOptions(allocator, world_dir, port, .{ .map_dir = map_dir });
     }
 
+    /// The exact opposite of `createWithOptions`: `deinit`, then free the
+    /// allocation. One obvious way for the create/destroy pair instead of
+    /// every caller repeating the two-step.
+    pub fn destroy(self: *Game) void {
+        self.deinit();
+        self.allocator.destroy(self);
+    }
+
     pub fn createWithOptions(allocator: std.mem.Allocator, world_dir: []const u8, port: u16, opts: InitOptions) !*Game {
         // Reject before allocating Game (large SoA); LiteNet uses ServerPort+2.
         if (port > std.math.maxInt(u16) - 2) return error.InvalidPort;

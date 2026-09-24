@@ -17,10 +17,7 @@ const barterSellScale = player.barterSellScale;
 test "skill ledger: level-up awards SP; purchase validates, level gate and spends" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ledger", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Minimal progression tree: one attribute + one perk whose level 1 is
     // gated on the attribute (stock's shape: the gate is `<level_requirements>`
     // on a progression name, not the perk's `parent` grouping name).
@@ -94,10 +91,7 @@ test "skill cost follows CalculatedCostForLevel and the row override table" {
 test "override_cost replaces the curve and refuses past its end" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_cost", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const attrs = [_]assets_progression.AttrDef{
         .{ .name = "attPerception", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
     };
@@ -135,10 +129,7 @@ test "override_cost replaces the curve and refuses past its end" {
 test "killXpAward scales by the on_entity_killed verdict percent" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killscale", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // killXpAward(slot, base, scale, trap, killed): 200 base x 150% = 300
     // (xp_multiplier default 100 keeps 1.0x). No corpse net id -> the shared
     // kill class falls back to the stock default (unused here, no party).
@@ -151,10 +142,7 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
 test "addProgressionLevel clamps to crafting_skill max and fails closed on unknown names" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magread", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const skills = [_]assets_progression.CraftingSkill{
         .{ .name = "craftingHarvestingTools", .max_level = 5, .entries = &.{} },
     };
@@ -172,10 +160,7 @@ test "addProgressionLevel clamps to crafting_skill max and fails closed on unkno
 test "grantMagazineRead awards GiveExp through the server ledger" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magxp", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const skills = [_]assets_progression.CraftingSkill{
         .{ .name = "craftingHarvestingTools", .max_level = 100, .entries = &.{} },
     };
@@ -203,10 +188,7 @@ test "grantMagazineRead SetProgressionLevel -1 sets perk to max" {
     // RE minevents.md IL=104: level=-1 sets ProgressionClass.MaxLevel.
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_setmax", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const perks = [_]assets_progression.PerkDef{
         .{ .name = "perkFiremansAlmanacHeat", .max_level = 5 },
         .{ .name = "perkFiremansAlmanacComplete", .max_level = 1 },
@@ -236,10 +218,7 @@ test "grantMagazineRead SetProgressionLevel -1 sets perk to max" {
 test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dismember143", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // No rows anywhere: the stock unbuffed value.
     try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, null));
     // Perk leg: a DismemberSelfChance base_add curve 0.1/level.
@@ -280,10 +259,7 @@ test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
 test "barter scales discount buying and bonus selling off the same fold" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_barter", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // No rows: scales are identity (slot 0 has no player yet, so the
     // buff leg resolves empty and only the empty perk ledger folds).
     // g is already *Game; &g would be **Game and mis-cast.

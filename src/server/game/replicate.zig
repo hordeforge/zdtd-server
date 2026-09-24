@@ -538,10 +538,7 @@ test "bot spawn encodes once for multiple viewers" {
     defer tmp.cleanup();
     const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);

@@ -1053,10 +1053,7 @@ fn tickMobRegen(self: *Game, dt: f32) void {
 test "per-slot look cache resets when the slot is recycled" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lookcache", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const aid = g.sim.spawnZombie(5, 70, 5, 40).?;
     const s = g.sim.slotOfNetId(aid).?;
     // allocSlot picks the lowest free slot, so every slot below s is occupied

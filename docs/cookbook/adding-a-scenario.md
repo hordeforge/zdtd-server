@@ -86,7 +86,7 @@ by hand. Copy the construction shape from
 ```
 
 `Game.create(allocator, world_dir, port)` heap-allocates and inits, and the
-caller must `deinit` then `allocator.destroy` (`src/server/game.zig:781-782`).
+caller releases it with `g.destroy()` (`deinit`, then free the allocation; `src/server/game.zig:630-637`).
 Use `std.testing.allocator` or a `DebugAllocator` so a leak fails the run.
 
 ## 4. Attach clients and a capture

@@ -1097,10 +1097,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     // The module path list is owned by main (split below); Game does not retain it.
     if (init_opts.plugin_modules.len > 0) gpa.free(init_opts.plugin_modules);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Always print the one-line config summary: scripts (e.g. auto_join) wait on
     // "zdtd: config port=" as the ready signal. Password / webui secret never printed.
@@ -1387,10 +1384,7 @@ test "integration world persist + damage + packages" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Offline (port 0) games never bind a socket: the DST sim is sealed from
     // the network stack, so the LiteNet port must stay 0.
     try std.testing.expectEqual(@as(u16, 0), g.bindPort());
@@ -1399,10 +1393,7 @@ test "integration world persist + damage + packages" {
     try g.world.saveAll();
 
     const g2 = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g2.deinit();
-        gpa.destroy(g2);
-    }
+    defer g2.destroy();
     const c = try g2.world.getOrCreate(.{ .x = 0, .z = 0 });
     try std.testing.expectEqual(@as(u16, 70), c.heightAt(10, 10));
 

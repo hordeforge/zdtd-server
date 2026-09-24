@@ -169,7 +169,7 @@ assert both the effect and the rejection path. The package is framed by name,
 so the test also exercises the negotiated id (`src/server/scenarios.zig:1441`).
 
 Assert the trust boundary explicitly by counting the reject before and after a
-spoofed send (`src/server/scenarios.zig:1458`):
+spoofed send (`src/server/scenarios.zig:1396`):
 
 ```zig
     const own_before = g.harness.counters.get(.ownership_rejects);
@@ -179,7 +179,7 @@ spoofed send (`src/server/scenarios.zig:1458`):
 ```
 
 Assert the fanout with the capture, which is also how the no-self-echo rule is
-pinned (`src/server/scenarios.zig:1447`):
+pinned (`src/server/scenarios.zig:1386`):
 
 ```zig
     const ws_id = packages.idOf("NetPackageWaterSet").?;

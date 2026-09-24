@@ -127,10 +127,7 @@ test "scenario a wrong challenge echo does not authenticate the peer" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const peer = &g.net.peers[0];
     peer.* = .{ .alive = true, .local_id = 1, .authenticated = false };
@@ -210,10 +207,7 @@ test "scenario a peer that never echoes is reaped past the auth age" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const peer = &g.net.peers[0];
     peer.* = .{ .alive = true, .local_id = 1, .authenticated = false };
@@ -251,10 +245,7 @@ test "scenario pre-login world package is rejected by production dispatch" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const peer = &g.net.peers[0];
     peer.* = .{ .alive = true, .local_id = 1, .authenticated = true };
@@ -283,10 +274,7 @@ test "scenario two-peer motion: B receives A PosAndRot" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motion", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -335,10 +323,7 @@ test "scenario animal movement state replicates (EntitySpeeds)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_animal_rep", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -365,10 +350,7 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_players", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -475,10 +457,7 @@ test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_relpos", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -556,10 +535,7 @@ test "scenario item drop commits with EntitySpawnResponse" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
 
@@ -609,10 +585,7 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -709,10 +682,7 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_block", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -776,10 +746,7 @@ test "scenario audio: a client sound relays to the other player, not the sender"
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_audio", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -848,10 +815,7 @@ test "scenario audio: a player's own sound feeds the AI noise model" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_audio_noise", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // An offline run has no game-dir sounds.xml; install the stock-valued
@@ -932,10 +896,7 @@ test "scenario sign: a client's sign text is applied and echoed to everyone" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_sign", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -1062,10 +1023,7 @@ test "scenario writable crate: the echo keeps the client's sign module" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_crate_sign", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const crate_block: u16 = world_store.block_stone;
@@ -1141,10 +1099,7 @@ test "scenario gameevents: the respawn sequence drives the stat restore" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_gameevents", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try test_tmp.rootOf(&tmp);
@@ -1306,10 +1261,7 @@ test "scenario sandbox MaxStackSize scales the stackable items" {
         const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_stacksize", 0, .{
             .sandbox_code = "AGHH",
         });
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         try std.testing.expectApproxEqAbs(@as(f32, 2), g.items.stack_size_modifier, 0.0001);
         // Builtin wood stacks 60000: stock scales first, then clamps at 30000.
         try std.testing.expectEqual(@as(u16, 30000), g.items.stackFor(7));
@@ -1321,10 +1273,7 @@ test "scenario sandbox MaxStackSize scales the stackable items" {
     // No code: the stock default multiplier is 1 and every raw stack stands.
     {
         const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stacksize", 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         try std.testing.expectApproxEqAbs(@as(f32, 1), g2.items.stack_size_modifier, 0.0001);
         try std.testing.expectEqual(@as(u16, 60000), g2.items.stackFor(7));
     }
@@ -1344,10 +1293,7 @@ test "scenario land claim: a stranger's blast meets the claim hardness" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const game = stock_paths.dedicated_server;
     var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     mt.tryMergeBundledAssignIds(gpa);
@@ -1399,10 +1345,7 @@ test "scenario treasure point: the server answers the client's dig-site request"
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_treasure", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -1449,10 +1392,7 @@ test "scenario waterset: a client water edit applies and reaches peer B" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_waterset", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -1505,10 +1445,7 @@ test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_disconnect", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.clients[c.slot].joined);
@@ -1532,10 +1469,7 @@ test "scenario replicate sends EntityVelocity for a falling zombie" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_vel", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.clients[c.slot].entered = true;
@@ -1575,10 +1509,7 @@ test "scenario replicate sends TurretSync on target change" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turret", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.clients[c.slot].entered = true;
@@ -1659,10 +1590,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bp", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.clients[c.slot].entered = true;
@@ -1759,10 +1687,7 @@ test "scenario ClientInfo broadcasts the player list every 5 s" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ci", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.clients[c.slot].entered = true;
@@ -1804,10 +1729,7 @@ test "scenario map: PersistentPlayerPositions broadcasts every 6 s" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ppp", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const a = try g.attachJoinedClient(&cap_a);
@@ -1849,10 +1771,7 @@ test "scenario map: MapPosition C2S arms the window and sends MapChunks" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_map", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.clients[c.slot].joined);
@@ -1916,10 +1835,7 @@ test "scenario hard disconnect reap saves before clearing the slot" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reap", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.clients[c.slot].joined);
@@ -1944,10 +1860,7 @@ test "scenario SetBlock lower damage repairs instead of adding" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_repair", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     var frame_buf: [512]u8 = undefined;
@@ -1974,10 +1887,7 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_upgrade", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -2025,10 +1935,7 @@ test "scenario downgrade swap: DowngradeBlock target accepted, break turns into 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_downgrade", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const game = stock_paths.dedicated_server;
@@ -2085,10 +1992,7 @@ test "scenario multi-block SetBlock places anchor + ischild children" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_multiblock", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const game = stock_paths.dedicated_server;
@@ -2144,10 +2048,7 @@ test "scenario party mate's shared quest advances on the killer's kill" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -2199,10 +2100,7 @@ test "scenario an armoured zombie halves the claimed damage" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -2258,10 +2156,7 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap1: ln_peer.Capture = .{};
     const c1 = try g.attachJoinedClient(&cap1);
     // Grant a buff through the real C2S path (validated + relayed).
@@ -2348,10 +2243,7 @@ test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -2391,10 +2283,7 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_explode", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var peer_cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&peer_cap);
     // Stock blocks.xml + materials.xml so block -> Material -> damage_category
@@ -2500,10 +2389,7 @@ test "scenario stability collapse spawns one singular fallingBlock per qualifyin
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_fall", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
 
@@ -2539,10 +2425,7 @@ test "scenario zombie opens a door on its path instead of chewing" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_door", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // A door-capable blocks table (builtin has no door): a minimal fixture with
     // the stock door name, loaded through the same loader the XML path uses.
     const DoorId = struct {
@@ -2594,10 +2477,7 @@ test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lowwall", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -2628,10 +2508,7 @@ test "scenario power switch: meta flip gates the grid and keeps the meta on the 
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_switch", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const switch_id = g.maxdamage.idByName("switch") orelse return error.SkipZigTest;
     try std.testing.expect(g.power_registry.lookup(switch_id) != null);
 
@@ -2683,10 +2560,7 @@ test "scenario powered trigger TE: malformed body leaves containers alone" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trigger", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
 
@@ -2727,10 +2601,7 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
 
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         try g.setBlock(7, 72, 9, world_store.block_stone);
         try g.world.saveAll();
         // also join once pre-restart
@@ -2742,10 +2613,7 @@ test "scenario persist: block write, process restart, read-back, rejoin" {
     // Restart: new Game process-equivalent (new struct, same world dir).
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         const c = try g2.world.getOrCreate(.{ .x = 0, .z = 0 });
         try std.testing.expectEqual(@as(u16, 72), c.heightAt(7, 9));
         try std.testing.expectEqual(world_store.block_stone, try g2.world.blockWorld(7, 72, 9));
@@ -2780,10 +2648,7 @@ test "scenario stock map: Game loads Navezgane, spawn join, height observable" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithMap(gpa, "worlds/zdtd_sc_stockmap", navezgane_path, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.world.heightmap != null);
     const sp = g.world.primarySpawn();
     try std.testing.expectEqual(@as(i32, -273), sp.x);
@@ -2823,10 +2688,7 @@ test "scenario deco streams beyond the join window as chunks stream" {
         .game_dir = game_dir,
         .map_dir = navezgane_path,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -3033,10 +2895,7 @@ test "scenario always-on radius effect: radiated barrel grants buffRadiation01" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const barrel_id = g.blocks.byName("cntBarrelRadiatedSingle00").?.id;
     const buff_id = g.buffs.indexOfName("buffRadiation01").?;
     // The radius scan runs in the 2 Hz side-work block; run it every step.
@@ -3167,10 +3026,7 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
     {
         const g = try game_mod.Game.createWithMap(gpa, dir, navezgane_path, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         const base_h = try g.world.heightWorld(edit_x, edit_z);
         edit_y = @as(i32, @intCast(base_h)) + 5;
         try g.setBlock(edit_x, edit_y, edit_z, world_store.block_stone);
@@ -3179,10 +3035,7 @@ test "scenario persist with stock map: edit survives restart under same --map" {
 
     {
         const g2 = try game_mod.Game.createWithMap(gpa, dir, navezgane_path, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         try std.testing.expect(g2.world.heightmap != null);
         // Overlay edit must still be present (disk heights still u8; API is u16).
         const h = try g2.world.heightWorld(edit_x, edit_z);
@@ -3212,10 +3065,7 @@ test "scenario destroy_on_close container breaks on unlock and drops contents" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_destroyclose", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
 
@@ -3299,10 +3149,7 @@ test "scenario synthetic DTM fixture always runs" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithMap(gpa, save_dir, map_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.world.heightmap != null);
     try std.testing.expectEqual(@as(i32, 32), g.world.heightmap.?.width);
     // world (0,0) → DTM (16,16) height 80 in fixture
@@ -3354,10 +3201,7 @@ test "scenario stock fixture quests.xml load" {
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     try std.testing.expectEqual(quest_mod.CatalogSource.stock_xml, g.sim.catalog.source);
     try std.testing.expect(g.sim.catalog.defs.len >= 4);
@@ -3430,10 +3274,7 @@ test "scenario quest accept kill complete and trader buy" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -3653,10 +3494,7 @@ test "scenario quest turn-in and phase advance fire on the stock trader lock-ope
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_trader_quest_open", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap); // auto-accepts the starter
     // info_id 0 = no trader_info hours, always open.
@@ -3734,10 +3572,7 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -3861,10 +3696,7 @@ test "scenario AI kill drops the player's real inventory as a death bag" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathbag", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -3899,10 +3731,7 @@ test "scenario vending machine opens via LockRequest with TraderData" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_vending", 0, .{});
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Seed a vending machine at (1,70,2): TraderID 3 (player-owned vending).
     const vp: vending_mod.PosKey = .{ .x = 1, .y = 70, .z = 2 };
     const v = g.vending.getOrCreate(vp, 1234, 3).?;
@@ -4021,10 +3850,7 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traders_close", 0, .{});
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.traders.deinit();
     g.traders = tt;
 
@@ -4105,10 +3931,7 @@ test "scenario blood moon parties pool nearby players into one horde" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmparty", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap_a);
@@ -4169,10 +3992,7 @@ test "party highest game stage feeds the director (max, not party level)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_gsmax", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -4204,10 +4024,7 @@ test "scenario trader RemoveQuest accepts and drops the quest from offers" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_qaccept", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // A persisted save from an earlier run may carry accepted quests; clear the
@@ -4267,10 +4084,7 @@ test "scenario vehicle refuel caps at the tank and refunds when full" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -4310,10 +4124,7 @@ test "scenario drowning damages a submerged player" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -4355,10 +4166,7 @@ test "scenario radiated biome damages the player" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -4405,10 +4213,7 @@ test "scenario explosion damages entities and credits the kill" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const zid = g.sim.spawnZombie(257, 70, 257, 30).?;
@@ -4485,10 +4290,7 @@ test "scenario bedroll respawn: placed bed is listed and used on death" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -4547,10 +4349,7 @@ test "scenario spawn confirm: forged echo dropped, own echo relayed to the other
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -4599,10 +4398,7 @@ test "scenario vehicle enter drive and turret kills with power" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.sim.countKind(.vehicle) >= 1);
@@ -4792,10 +4588,7 @@ test "scenario pressure plate trigger pulse powers wired load" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trig", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -4839,10 +4632,7 @@ test "scenario a joiner sees what other players are holding" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_holdspawn", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A joins and arms itself.
     var cap_a: ln_peer.Capture = .{};
@@ -4964,10 +4754,7 @@ test "scenario powered trigger echo carries every wire the sim holds" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trigwires", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     _ = c;
@@ -5038,10 +4825,7 @@ test "scenario inventory move drop place equip" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_inv", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -5178,10 +4962,7 @@ test "scenario aidirector night spawn" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dir", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     g.sim.director.clock.hours = 23.0;
@@ -5203,10 +4984,7 @@ test "scenario weather storm cycle and blood moon override" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_weather", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
 
@@ -5311,10 +5089,7 @@ test "scenario console storm commands force and clear the storm" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stormcmd", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
 
@@ -5366,10 +5141,7 @@ test "scenario craft invtx + explosion dig + lock deny" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_craft", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -5462,10 +5234,7 @@ test "scenario a locked tile entity stays locked on a different channel" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -5683,10 +5452,7 @@ test "scenario inventory keep-open refreshes the lock stale window" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -5744,10 +5510,7 @@ test "scenario entity physics body length matches the stock layout" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -5784,10 +5547,7 @@ test "scenario SetBlock beyond edit reach is rejected" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
@@ -5828,10 +5588,7 @@ test "scenario NetPackageBag naming another player is refused" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -5875,10 +5632,7 @@ test "scenario gas can refuel generator via InvTx place" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_refuel", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -5960,10 +5714,7 @@ test "scenario ItemActionEat via InvTx use applies food and hp" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_eat", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const inv = @import("../ecs/inventory.zig");
@@ -6002,10 +5753,7 @@ test "scenario ItemActionEat via PlayerInventory stack-loss applies food and hp"
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_eat_pi", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const inv = @import("../ecs/inventory.zig");
@@ -6051,10 +5799,7 @@ test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_speedhack", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -6103,10 +5848,7 @@ test "scenario observe mode records evidence but does not enforce (T19)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_observe", 0, .{ .authority_mode = .observe });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     try std.testing.expect(c.entity_id > 0);
@@ -6149,10 +5891,7 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ceiling", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.tick_n = 100; // a non-zero tick for the evidence stream
@@ -6202,10 +5941,7 @@ test "scenario void rescue suppresses the movement reject (T22)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_voidrescue", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -6243,10 +5979,7 @@ test "scenario guardreport shows the would-kick diff (T23)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guardreport", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     g.tick_n = 100;
@@ -6285,10 +6018,7 @@ test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stocktx", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -6360,10 +6090,7 @@ test "scenario whitelist gate fails closed on an un-keyable identity (admin audi
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_whitelist", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Whitelist-only: a DIFFERENT identity, so this player is not on it.
     try std.testing.expect(g.whitelist.add("Steam:111", 0));
     // Max-length id: "EOS:" + 64 chars = 68-char composite > the old 64 cap.
@@ -6384,10 +6111,7 @@ test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele 
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_coordbound", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -6459,10 +6183,7 @@ test "scenario teleport Y-clamp suppresses the raw claim on peers" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_tpclamp", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_mover: ln_peer.Capture = .{};
     var cap_obs: ln_peer.Capture = .{};
     const m = try g.attachJoinedClient(&cap_mover);
@@ -6553,10 +6274,7 @@ test "scenario join enter bundle arrives in full on the capture peer" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_enterbundle", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -6613,10 +6331,7 @@ test "scenario plugin withdrawal despawns applied spawns" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_withdraw", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // The flat world seeds a few zombies; assert relative to the baseline.
     const base = g.sim.countKind(.zombie);
@@ -6732,10 +6447,7 @@ test "scenario plugin disable withdraws pending commands before drain" {
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     var cap: ln_peer.Capture = .{};
@@ -6788,10 +6500,7 @@ test "scenario guard policy: two distinct strong signals log-only by default" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_log", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // Defaults are the safe rung: nothing enforced, nothing quarantined.
@@ -6818,10 +6527,7 @@ test "scenario guard policy: quarantine denies only the abused surface" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_quar", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Quarantine rung on; kick rung stays off (enforce=false, dry_run=true).
     g.guard = .{ .quarantine = true };
     var cap: ln_peer.Capture = .{};
@@ -6873,10 +6579,7 @@ test "scenario an enforced guard kick tells the client why" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_kick", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // Climb to the enforcing rung: the default ladder is log-only.
@@ -6921,10 +6624,7 @@ test "scenario the five unreliable packages leave the reliable window alone" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_unreliable", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const peer = c.peer orelse return error.TestUnexpectedResult;
@@ -6951,10 +6651,7 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ws", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -7081,10 +6778,7 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .config_dir = "assets/fixtures",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.recipes.source == .xml);
 
     var cap_a: ln_peer.Capture = .{};
@@ -7170,10 +6864,7 @@ test "scenario POIStayWithin bounds the stay zone to the quest POI rect" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -7232,10 +6923,7 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_unload", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
@@ -7322,10 +7010,7 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_hp_repl", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const stat_id = packages.idOf("NetPackageEntityStatChanged").?;
@@ -7418,10 +7103,7 @@ test "scenario ally invite accept and identity spoof reject" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ally", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Both peers log in with a real platform identity, so the identity the ally
     // wire uses comes out of the shipped NetPackagePlayerLogin decode.
@@ -7541,10 +7223,7 @@ test "scenario buff add relays to observers and expires on the server clock" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -7741,10 +7420,7 @@ test "scenario buff rejects unknown names and foreign entities" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff_rej", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -7804,10 +7480,7 @@ test "scenario replace-stack buff re-add restarts instead of duplicating" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_buff_stack", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -7865,10 +7538,7 @@ test "scenario replicate serialize-once: a second viewer costs fan-out, not enco
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rep_once", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
 
@@ -7925,10 +7595,7 @@ test "scenario replicate dirty gate: clean statics skip the off-heartbeat pass" 
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rep_dirty", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -7989,10 +7656,7 @@ test "scenario multi-seat: driver plus passenger, dismount frees the seat" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_seats", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -8119,10 +7783,7 @@ test "scenario wasm plugins: hello queues a sim command, looper disabled by fuel
         // Small fuel: the looper is cut off in microseconds, not seconds.
         .plugin_budget = .{ .fuel = 200_000 },
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.count());
     try std.testing.expectEqual(@as(usize, 0), g.wasm_plugins.disabledCount());
@@ -8179,10 +7840,7 @@ test "scenario mode pack rules overlay changes sim behaviour" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_rules", 0, .{ .rules = rules });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // The rule landed on the sim World.
     try std.testing.expectEqual(@as(f32, 42.0), g.sim.rules.combat.attack_damage);
 
@@ -8229,10 +7887,7 @@ test "scenario restart does not re-seed the starter chest" {
     gpa.destroy(g1);
     // Restart: the player's block survives (no fresh chest re-seeded).
     const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_seedchest", 0);
-    defer {
-        g2.deinit();
-        gpa.destroy(g2);
-    }
+    defer g2.destroy();
     try std.testing.expectEqual(world_store.block_stone, try g2.world.blockWorld(cx, cy, cz));
     std.debug.print("PASS seed-chest: restart keeps the player's block over the seed spot\n", .{});
 }
@@ -8248,10 +7903,7 @@ test "scenario join spawn area paces through the stream budget" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pacejoin", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // attachJoinedClient requests chunk_view_dim 4, so the spawn area is a
@@ -8298,10 +7950,7 @@ test "scenario proc world streams deco from the W3 biome field" {
         .game_dir = game_dir,
         .worldgen_seed = 7,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.world.terrain_source == .proc);
     try std.testing.expect(g.world.worldgen != null);
     var cap: ln_peer.Capture = .{};
@@ -8344,10 +7993,7 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
         .quests_path = "assets/fixtures/quests.xml",
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.count());
 
     var cap: ln_peer.Capture = .{};
@@ -8414,10 +8060,7 @@ test "scenario journal PDF carries max_journal quests (GAP 12)" {
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap); // auto-accepts the starter
     try std.testing.expect(c.entity_id > 0);
@@ -8464,10 +8107,7 @@ test "scenario quest journal ZPV5 restores by name and keeps the POI rect" {
         const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questpersist", 0, .{
             .quests_path = "assets/fixtures/quests.xml",
         });
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         g.sim.poi_fn = poi_stub;
         g.sim.nearest_poi_fn = poi_stub;
         var cap: ln_peer.Capture = .{};
@@ -8493,10 +8133,7 @@ test "scenario quest journal ZPV5 restores by name and keeps the POI rect" {
         const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questpersist", 0, .{
             .quests_path = "assets/fixtures/quests.xml",
         });
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const ps = g.sim.playerByPeer(c.slot).?;
@@ -8531,10 +8168,7 @@ test "scenario quest journal ZPV5 resolves the quest by name, not stored def_id"
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_questname", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const fetch_def = g.sim.catalog.byName("tier1_fetch") orelse return error.TestUnexpectedResult;
     const clear_def = g.sim.catalog.byName("tier1_clear") orelse return error.TestUnexpectedResult;
     try std.testing.expect(fetch_def.id != clear_def.id);
@@ -8611,10 +8245,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A POI rect at the origin so rally phases are real (not scaffolding) and
     // goto/stay quests bind a target center instead of degrading.
@@ -8746,10 +8377,7 @@ test "scenario treasure radius break fires the quest TreasureRadiusReduction amb
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Spy on the Game spawn hook (same shape as the phase-entry SpawnGSEnemy).
     const Call = struct { fired: bool = false, list: []const u8 = "", min: u8 = 0, max: u8 = 0, px: f32 = 0, pz: f32 = 0 };
@@ -8821,10 +8449,7 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A POI rect at the origin so POI-bound phases (goto/stay/rally) resolve.
     const PoiRect = @import("../ecs/components.zig").PoiRect;
@@ -8900,10 +8525,7 @@ test "scenario vending rent state machine (loot-economy §6)" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const puid: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClientAs(&cap, puid);
@@ -9054,10 +8676,7 @@ test "scenario TraderData copy-back: out-of-reach ignored, in-reach applied" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -9189,10 +8808,7 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const puid: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClientAs(&cap, puid);
@@ -9300,10 +8916,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
         .sandbox_code = "AAAJABJACJADJARFBNC",
         .sandbox_preset = "Adventurer",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(i32, 200), g.storm_frequency);
     // Weather scheduler divisor: 200% -> 2.0x (storms less often).
     try std.testing.expectEqual(@as(f32, 2.0), g.world.weather.storm_frequency);
@@ -9320,10 +8933,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
 
     // 0 disables storms (weather-environment.md: World.StormFrequency == 0).
     const g2 = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .storm_frequency = 0, .config_dir = "assets/fixtures" });
-    defer {
-        g2.deinit();
-        gpa.destroy(g2);
-    }
+    defer g2.destroy();
     try std.testing.expectEqual(@as(f32, 0), g2.world.weather.storm_frequency);
     try std.testing.expectEqual(@as(i32, 0), g2.gameStatsValues().storm_freq);
 }
@@ -9396,10 +9006,7 @@ test "scenario blood moon day re-send fires on the day roll" {
     io_fs.deleteFile("worlds/zdtd_sc_bmday/clock.zcl");
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmday", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     const gs_id = packages.idOf("NetPackageGameStats").?;
@@ -9439,10 +9046,7 @@ test "scenario quest completion pays out item and exp rewards" {
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -9483,10 +9087,7 @@ test "scenario quest reward items carry the stock stat roll" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // meleeToolRepairT0StoneAxe carries stock <stats> rows (EntityDamage /
@@ -9542,10 +9143,7 @@ test "scenario land claims persist across restart and re-map on login" {
     // Game A: the owner places a keystone claim; deinit persists claims.zlc.
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const kid = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
@@ -9568,10 +9166,7 @@ test "scenario land claims persist across restart and re-map on login" {
     // re-maps the entity, so their edit inside the claim is allowed.
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         const restored_claim = g2.land_claims[0];
         for (0..2) |_| {
             try persist.loadClaims(g2);
@@ -9601,10 +9196,7 @@ test "scenario land claims persist across restart and re-map on login" {
     // those exist for.
     {
         const g3 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g3.deinit();
-            gpa.destroy(g3);
-        }
+        defer g3.destroy();
         // Declares one record but carries no bytes for it.
         var short: [6]u8 = undefined;
         @memcpy(short[0..4], "ZCLC");
@@ -9676,10 +9268,7 @@ test "scenario a land claim blocks a non-owner's SetBlock" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -9723,10 +9312,7 @@ test "scenario world container loot rolls on first open, not at load" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lootopen", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     var frame_buf: [8192]u8 = undefined;
@@ -9776,10 +9362,7 @@ test "scenario container loot respawns after LootRespawnDays" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lootrespawn", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.loot_respawn_days = 1; // one-day interval for the test
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -9835,10 +9418,7 @@ test "scenario loot container size comes from the loot.xml size attr" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_lootsize", 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.loot_respawn_days = 1;
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -9889,10 +9469,7 @@ test "scenario trader quest offers follow the trader's class" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traders", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -9953,10 +9530,7 @@ test "scenario quest POI selection matches stock tags/tier/bands and feeds offer
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_poiselect", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Force the trader band walk to band 0 (≤500 m): worldTimeBits % 3.
     g.sim.director.clock.day = 1;
     g.sim.director.clock.hours = 0;
@@ -10095,10 +9669,7 @@ test "scenario block_activated objective event advances the phase" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_blockobj", 0, .{
         .quests_path = "assets/fixtures/quests.xml",
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // The join auto-accepts the starter; complete it to free a journal slot.
@@ -10146,10 +9717,7 @@ test "scenario party: accept invite fans a snapshot, leave disbands, disconnect 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10223,10 +9791,7 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10345,10 +9910,7 @@ test "scenario chat routes by recipient list and preserves the channel" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10454,10 +10016,7 @@ test "scenario party shared quest: accept shares to the party, disconnect remove
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10526,10 +10085,7 @@ test "scenario shared quest member journal carries the owner code" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10590,10 +10146,7 @@ test "scenario shared quest member add/remove reach the owner, not the sender" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10671,10 +10224,7 @@ test "scenario party quest change fans objective deltas to the other members" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -10722,10 +10272,7 @@ test "scenario trader restock rebuilds the window lazily on open" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_restock", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     // Joel's trader_info (1) has reset_interval 3 in stock traders.xml.
@@ -10775,10 +10322,7 @@ test "scenario trader stock persists across restart (traders.zst)" {
     var wood_name: []const u8 = "";
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         // Find the initWorld trader and shape a traded-against window: a
         // distinctive entry, drained wallet, and a 3-day reset cadence.
         var ts: ?ecs.Slot = null;
@@ -10815,10 +10359,7 @@ test "scenario trader stock persists across restart (traders.zst)" {
     }
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var ts: ?ecs.Slot = null;
         var s: usize = 0;
         while (s < ecs.max_entities) : (s += 1) {
@@ -10860,10 +10401,7 @@ test "scenario autosave tick writes traders.zst without admin save" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_traderautosave", 0, .{
         .save_interval_ticks = 1,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var ts: ?ecs.Slot = null;
     var s: usize = 0;
     while (s < ecs.max_entities) : (s += 1) {
@@ -10901,10 +10439,7 @@ test "scenario a trader entry with an unresolvable item does not shift the saved
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_tradersavecount", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var ts: ?ecs.Slot = null;
     var s: usize = 0;
     while (s < ecs.max_entities) : (s += 1) {
@@ -10959,10 +10494,7 @@ test "scenario traders.zst record for an absent trader does not desync the reade
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderdesync", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var ts: ?ecs.Slot = null;
     var s: usize = 0;
     while (s < ecs.max_entities) : (s += 1) {
@@ -11095,10 +10627,7 @@ test "scenario ZPV12 record claiming more slots than the array is bounded" {
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_zpv12bound", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const name = c.name[0..c.name_len];
@@ -11165,10 +10694,7 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     try std.testing.expect(g.air_drop_interval_hours > 0);
@@ -11205,10 +10731,7 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     g.sim.inventory[cs].slots[0] = .{ .item_id = 7, .count = 3, .quality = 1 };
     _ = g.saveAllStores();
     const g2 = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g2.deinit();
-        gpa.destroy(g2);
-    }
+    defer g2.destroy();
     var crates: usize = 0;
     var bags: usize = 0;
     var si: ecs.Slot = 0;
@@ -11295,10 +10818,7 @@ test "scenario a destroyed supply crate takes back both markers" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_cratedestroy", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -11352,10 +10872,7 @@ test "scenario bedroll ownership survives a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         c.has_bed = true;
@@ -11366,10 +10883,7 @@ test "scenario bedroll ownership survives a restart" {
 
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         var cap: ln_peer.Capture = .{};
         const c2 = try g2.attachJoinedClient(&cap);
         try std.testing.expect(c2.has_bed);
@@ -11394,10 +10908,7 @@ test "scenario bedroll: a save with no bedroll tail loads with has_bed false" {
 
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         _ = try g.attachJoinedClient(&cap);
         // has_bed stays false: this reproduces a save written before the
@@ -11408,10 +10919,7 @@ test "scenario bedroll: a save with no bedroll tail loads with has_bed false" {
 
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         var cap: ln_peer.Capture = .{};
         const c2 = try g2.attachJoinedClient(&cap);
         try std.testing.expect(!c2.has_bed);
@@ -11430,10 +10938,7 @@ test "scenario a burning workstation grants its ActiveRadiusEffects buff to near
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Test-only block table: one campfire-class id (106, the convention the
     // workstation persistence tests already use) carrying a radius effect.
     // buffIsOnFire is a real entry in the builtin buff catalog (no game-dir
@@ -11489,10 +10994,7 @@ test "scenario bot shoot is LOS-gated by solid voxels" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
     // Spawn the zombie at the terrain surface too so the eye-line is flat and
@@ -11539,10 +11041,7 @@ test "scenario bot host config flows from options (headshot multiplier)" {
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .bot_config = .{ .headshot_multiplier = 3.0 },
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
     const zy = g.groundHeight(12, 12);
@@ -11568,10 +11067,7 @@ test "scenario on_player_damage verdict denies PvP via the real core_pvp module"
     const gpa = gpa_impl.allocator();
     // pvp_mode 3 (PvP allowed natively): only the plugin verdict can stop it.
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .player_killing_mode = 3 });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Load the committed policy module into the Game's wasm host (its
     // sense/query fns are already wired in wasm_ctx).
     g.wasm_plugins.loadAll(gpa, &[_][]const u8{"plugins/core_pvp/core_pvp.wasm"}, &g.wasm_ctx, .{});
@@ -11622,10 +11118,7 @@ test "scenario core_announce broadcasts join via the say verb" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_announce", 0, .{
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     var cap: ln_peer.Capture = .{};
@@ -11683,10 +11176,7 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
         .quests_path = "assets/fixtures/quests.xml",
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     var cap: ln_peer.Capture = .{};
@@ -11736,10 +11226,7 @@ test "scenario core_pricegate scales trader buy prices (1.5x)" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pricegate", 0, .{
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     var cap: ln_peer.Capture = .{};
@@ -11775,10 +11262,7 @@ test "scenario core_damagegate halves incoming player damage (0.5x)" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_damagegate", 0, .{
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     const id_a: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
@@ -11812,10 +11296,7 @@ test "scenario core_adminverbs wave verb spawns zombies" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminverbs", 0, .{
         .plugin_modules = &modules,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
 
     // A joined client anchors the despawn distance, so the queued spawns at
@@ -11841,10 +11322,7 @@ test "scenario player dig routes the on_block_damage verdict (plugin_rules doubl
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const pa = g.sim.playerByPeer(c.slot).?;
@@ -11888,10 +11366,7 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const stone_id = g.blocks.byName("terrStone").?.id;
     const drops = g.blocks.harvestDrops(stone_id);
@@ -11945,10 +11420,7 @@ test "scenario harvest count scales by the held tool's HarvestCount passive" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const stone_id = g.blocks.byName("terrStone").?.id;
     const rock_id = g.items.byName("resourceRockSmall").?.id;
     const club_id = g.items.byName("meleeWpnClubT0WoodenClub").?.id;
@@ -12013,10 +11485,7 @@ test "scenario fall-event drops re-place debris at landing (terrDirt)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const dirt_id = g.blocks.byName("terrDirt").?.id;
     const fd = g.blocks.dropsFor(dirt_id, .fall);
     try std.testing.expect(fd.len > 0);
@@ -12067,10 +11536,7 @@ test "scenario destroy-event drops roll the bag at the blast (bathroomStallDoor)
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const door_id = g.blocks.byName("bathroomStallDoor").?.id;
     const scrap_id = g.items.byName("resourceScrapIron").?.id;
     const chunk_fill = @import("game/chunk_fill.zig");
@@ -12117,10 +11583,7 @@ test "scenario sound relay fans out to peers, excluding the sender" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -12181,10 +11644,7 @@ test "scenario forge completion dings NetPackageSoundAtPosition" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const pa = g.sim.playerByPeer(c.slot).?;
@@ -12231,10 +11691,7 @@ test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A catalog with one forbidden and one normal quest (names are the key).
     const defs = [_]quest_mod.QuestDef{
@@ -12268,10 +11725,7 @@ test "scenario on_craft_request verdict gates crafting (real core_craftgate)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A custom recipes table: one forbidden and one normal craft (names are
     // the stable key for the verdict).
@@ -12311,10 +11765,7 @@ test "scenario on_loot_roll verdict halves loot (real core_lootgate)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Control roll without any plugin: the seeded roll's stack count.
     var stacks: [64]assets_loot.Stack = undefined;
@@ -12351,10 +11802,7 @@ test "scenario collect rejects a bag claimed in another player's name" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -12400,10 +11848,7 @@ test "scenario a bag write beyond reach is rejected" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
@@ -12475,10 +11920,7 @@ test "scenario wrench pickup applies to the world and honours reach and claims" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -12550,10 +11992,7 @@ test "scenario block paint lands in the world and honours its gates" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
@@ -12644,10 +12083,7 @@ test "scenario a client-reported XP add mints nothing" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -12694,10 +12130,7 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -12762,10 +12195,7 @@ test "scenario the alive-flags jump edge fires the leg buffs' onSelfJump rows" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -12805,10 +12235,7 @@ test "scenario the alive-flags aim and crouch edges drive their buffs" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -12845,10 +12272,7 @@ test "scenario the respawn funnel fires onSelfRespawn rows" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
@@ -12885,10 +12309,7 @@ test "scenario a quest entity spawn summons one entity for the sender only" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -12966,10 +12387,7 @@ test "scenario walking away does not reset the decorations we sent" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.deco_trees); // the guard's precondition
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -13011,10 +12429,7 @@ test "scenario bots are grounded to terrain height on spawn and move" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Spawn grounds the bot onto the terrain surface at (8, 8), not the passed
     // flat y=70.
@@ -13043,10 +12458,7 @@ test "scenario a player can damage a bot and the bot records the attacker" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -13108,10 +12520,7 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var out: [64]u8 = undefined;
 
@@ -13151,10 +12560,7 @@ test "scenario wasmQuery path: nav path across loaded chunks" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Ensure chunks (0..1, 0..1) exist with a walkable floor at ground height.
     const h = g.groundHeight(0, 0);
@@ -13201,10 +12607,7 @@ test "scenario zombies aggro and melee bots (revenge + proximity)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // A bot and a zombie close enough for the zombie to sense the bot. No
     // players: the bot is the zombie's only target (ADR 0026 bot snap hook).
@@ -13242,10 +12645,7 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // `bot count 2` (as the wasm guest re-queues it) spawns a 2-bot floor.
     try std.testing.expect(g.bots.handleCommand(g, "bot count 2", 0));
@@ -13270,10 +12670,7 @@ test "scenario bot move/look/shoot only drive the issuing plugin's own bots" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Plugin src 1 spawns a bot; plugin src 2 must not be able to steer it,
     // or the effects land on src 1 and neither module's withdrawal reverts
@@ -13320,10 +12717,7 @@ test "scenario applyCountFloor tops up across repeated calls" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     _ = g.bots.handleCommand(g, "bot count 3", 0);
     try std.testing.expectEqual(@as(usize, 3), g.bots.n);
     _ = g.bots.handleCommand(g, "bot count 5", 0);
@@ -13355,10 +12749,7 @@ test "scenario bots collide with walls and slide instead of phasing through" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, world_dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // Bot at (8,_,8) heading east through (10,_,8); a wall blocks the path at
     // the bot's actual standing height (body cells floor(y) and +1).
@@ -13391,10 +12782,7 @@ test "scenario persist: blood-moon schedule survives restart (ZCL2)" {
     var first_bm: i32 = 0;
     {
         const g = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         g.sim.director.clock.bloodmoon_frequency = 7;
         g.sim.director.clock.bloodmoon_range = 2;
         g.sim.director.clock.day = 5;
@@ -13404,10 +12792,7 @@ test "scenario persist: blood-moon schedule survives restart (ZCL2)" {
     }
     {
         const g2 = try game_mod.Game.create(gpa, dir, 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         // The restored schedule keeps the same target (not recomputed from a
         // different stream) and stays monotonic with the live day.
         try std.testing.expectEqual(first_bm, g2.sim.director.clock.bloodMoonDayFor(5));
@@ -13428,10 +12813,7 @@ test "scenario dig wears the held tool (ItemValue.UseTimes)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -13463,10 +12845,7 @@ test "scenario admin ops verbs (getoptions/exportcurrentconfigs/loglevel/listthr
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminops", 0, .{});
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     const run = struct {
         fn call(g2: *game_mod.Game, sink_buf: []u8, cmd: []const u8) []const u8 {
             g2.admin_reply_len = 0;
@@ -13515,10 +12894,7 @@ test "scenario blood-moon music is per-party, not global" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_bmmusic", 0, .{});
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
     var cap2: ln_peer.Capture = .{};
@@ -13629,10 +13005,7 @@ test "scenario stock InventoryTransaction applies and acks" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -13832,10 +13205,7 @@ test "scenario mods AC4/AC5: exclusive core override point routes only to the cl
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim", 0, .{
         .plugin_plan = &plan,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
     // Claimant slot 0, exclusive on both points.
     try std.testing.expectEqual(@as(u8, 0), g.wasm_plugins.claims[@intFromEnum(plugin_mod.manifest.OverridePoint.craft_request)]);
@@ -13874,10 +13244,7 @@ test "scenario mods: a claim without the mapped hook is refused, not installed" 
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_no_hook", 0, .{
         .plugin_plan = &plan,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // The module loads (nothing else is wrong with it)...
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
     // ...but its claim is kept off the table, so the point keeps the ordinary
@@ -13913,10 +13280,7 @@ test "scenario mods: a disabled claimant releases its exclusive point" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_release", 0, .{
         .plugin_plan = &plan,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.n);
     const ci = g.wasm_plugins.findByName("claimant").?;
     const fi = g.wasm_plugins.findByName("fallback").?;
@@ -13964,10 +13328,7 @@ test "scenario mods AC6: override = name replaces the official mod" {
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_replace", 0, .{
         .plugin_plan = &plan,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
     // The loaded slot is the replacer (display = my_bot), not bot.
     try std.testing.expectEqualStrings("my_bot", g.wasm_plugins.slots[0].display);
@@ -14022,10 +13383,7 @@ test "scenario mods AC8: discovered mods run under the standard budget and attri
         .plugin_plan = &plan,
         .plugin_budget = .{ .fuel = 200_000 },
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Both loaded; the looper is disabled by fuel on its first tick (AC8:
     // budget enforced through loadResolved), the hello module survives.
     try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.n);
@@ -14049,10 +13407,7 @@ test "scenario mod scrub rejects illegal attachments server-authoritatively" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     // Static catalog: a gun (2 mod slots at every tier) tagged for barrel
     // mods, a knife (1 slot, melee-only), and the two mod items.
     var gun: assets_items.ItemDef = .{ .id = 100, .name = "testGun", .tags = "T0,gun,barrelAttachments", .mod_slots_n = 6 };
@@ -14112,10 +13467,7 @@ test "scenario powered door opens while powered, closes on power loss" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pwrdoor", 0, .{ .config_dir = cfg_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
 
@@ -14153,10 +13505,7 @@ test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     g.sim.director.clock.hours = 1; // night: the slice-1 ambient is 0
@@ -14189,10 +13538,7 @@ test "scenario a woken sleeper broadcasts NetPackageSleeperWakeup" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     g.sim.director.clock.hours = 12; // daylight: the wake light gate passes
@@ -14227,10 +13573,7 @@ test "scenario a recycled slot does not inherit the previous look-at target" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
@@ -14283,10 +13626,7 @@ test "scenario a reload naming no live entity is not relayed" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -14330,10 +13670,7 @@ test "scenario light tile entities ride the chunk stream" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const te_id = packages.idOf("NetPackageTileEntity") orelse
@@ -14418,10 +13755,7 @@ test "scenario a vending allow-list with a hole ships no empty identity" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const te_id = packages.idOf("NetPackageTileEntity") orelse
@@ -14531,10 +13865,7 @@ test "scenario a vending fill skips items this build cannot resolve" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_vendfill", 0, .{});
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.traders.deinit();
     g.traders = tt;
 
@@ -14573,10 +13904,7 @@ test "scenario animation data relays to the other players" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -14751,10 +14079,7 @@ test "scenario fall_sink clamps player vertical delta without the glide flag (mo
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .rules = .{ .glide = .{ .fall_sink_vy_mps = 1.5 } },
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // Advance past tick 20 so the envelope dt below spans a full second.
@@ -14786,10 +14111,7 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
     try std.testing.expectEqual(@as(u16, 0), ca.zombie_kills);
@@ -14906,10 +14228,7 @@ test "scenario kill and death counters survive a restart (ZPV14)" {
     const gpa = gpa_impl.allocator();
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         c.zombie_kills = 7;
@@ -14918,10 +14237,7 @@ test "scenario kill and death counters survive a restart (ZPV14)" {
     }
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         try std.testing.expectEqual(@as(u16, 7), c.zombie_kills);
@@ -14944,10 +14260,7 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -15029,10 +14342,7 @@ test "scenario every registered package id survives dispatch with a malformed bo
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
     const peer = ca.peer orelse return error.TestUnexpectedResult;
@@ -15108,10 +14418,7 @@ test "scenario entities.zen vehicle kind byte is range-checked before the cast" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_zentkind", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // One type-1 (vehicle) record whose kind byte is 0xff: past the enum.
     var body: [64]u8 = .{0} ** 64;
@@ -15184,10 +14491,7 @@ test "scenario the attack target is published on change and cleared when it dies
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
@@ -15259,10 +14563,7 @@ test "scenario a kill notifies the killer's client so kill challenges advance" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -15345,10 +14646,7 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const owner = try g.attachJoinedClient(&cap_a);
@@ -15431,10 +14729,7 @@ test "scenario a landed hit fans the applied damage to the victim's trackers" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -15480,10 +14775,7 @@ test "scenario a leg hit past the crawler threshold crawlers the zombie" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -15551,10 +14843,7 @@ test "scenario a perked attacker's dismember bonus reaches the S2C damage body" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -15632,10 +14921,7 @@ test "scenario player death sends the deficit sequence action under XPOnly" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathdeficit", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -15778,10 +15064,7 @@ test "scenario playerdata: a spoofed entity id cannot reach another player's inv
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pdata", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -15840,10 +15123,7 @@ test "scenario skill purchase: the ledger keeps catalog memory, not the packet b
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_skill", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -15897,10 +15177,7 @@ test "scenario perk purchase: the level requirement gates the spend" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_perkbuy", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16000,10 +15277,7 @@ test "scenario wire tool: a claimed foreign entity id is dropped, not relayed" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_wiretool", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -16072,10 +15346,7 @@ test "scenario item reload: the relay names the sender's own weapon" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reload", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -16122,10 +15393,7 @@ test "scenario shared quest member events reach only the sharer, and only in a p
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -16203,10 +15471,7 @@ test "scenario item action effects: only the firing player's own muzzle FX relay
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_iafx", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -16285,10 +15550,7 @@ test "scenario trade reach: a trader across the map cannot be traded with" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reach", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16342,10 +15604,7 @@ test "scenario trader open reach: quest turn-in needs the player at the trader" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_topen", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16395,10 +15654,7 @@ test "scenario npc quest list reach: offers and accepts need the player at the t
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_nqlr", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16448,10 +15704,7 @@ test "scenario storage te scope: a distant peer is not told about a chest edit" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_testcope", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_near: ln_peer.Capture = .{};
     var cap_far: ln_peer.Capture = .{};
@@ -16501,10 +15754,7 @@ test "scenario entity remove scope: a peer that never saw the bag is not told to
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rmscope", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_known: ln_peer.Capture = .{};
     var cap_unknown: ln_peer.Capture = .{};
@@ -16547,10 +15797,7 @@ test "scenario despawn remove scope: the far-mob cull tells only the peers that 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dspscope", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_known: ln_peer.Capture = .{};
     var cap_unknown: ln_peer.Capture = .{};
@@ -16597,10 +15844,7 @@ test "scenario trader override equal to the fallback is not mistaken for unset" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_markup", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16652,10 +15896,7 @@ test "scenario blood moon bonus loot survives the per-tick cadence re-push" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmbonus", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
@@ -16719,10 +15960,7 @@ test "scenario stock inventory transaction is all-or-nothing" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_invtx", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16789,10 +16027,7 @@ test "scenario pending power wires survive a save/load cycle" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pendwire", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         // An edge between two positions with no loaded nodes: exactly the
         // shape the loader produces for a base in an unvisited chunk.
         g.sim.power.addPendingWire(.{
@@ -16812,10 +16047,7 @@ test "scenario pending power wires survive a save/load cycle" {
     // gone for good.
     {
         const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pendwire", 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         try persist.loadEntities(g2);
         // Find our edge by its endpoints: the default world seeds its own
         // demo wire, which is live at save time and comes back pending too,
@@ -16845,10 +16077,7 @@ test "scenario vehicle basket stacks are clamped like every other client-written
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basket", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16907,10 +16136,7 @@ test "scenario container quarantine covers the bag path, not only tile entities"
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_qbag", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -16979,10 +16205,7 @@ test "scenario a forged entity id builds guard evidence, not just a counter" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ownev", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
@@ -17024,10 +16247,7 @@ test "scenario a saved stack over the current cap is corrected on load" {
     // catalog will not resolve on reload.
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_loadclamp", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const ps = g.sim.playerByPeer(c.slot).?;
@@ -17039,10 +16259,7 @@ test "scenario a saved stack over the current cap is corrected on load" {
     // Reload with a lowered cap for that item: the saved 40 comes down to 5.
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_loadclamp", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         const idefs = [_]assets_items.ItemDef{
             .{ .id = 2, .name = "food", .stack = 5 },
         };
@@ -17080,10 +16297,7 @@ test "scenario saved container stacks are clamped on restart, not just player on
     // Save a container holding a stack that is legal under the builtin cap.
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_storeclamp", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         const cont = g.containers.getOrCreate(pos, 8, 1) orelse return error.TestUnexpectedResult;
         cont.slots[0] = .{ .item_id = 2, .count = 40, .quality = 1 };
         cont.slots[1] = .{ .item_id = 4242, .count = 99, .quality = 1 };
@@ -17094,10 +16308,7 @@ test "scenario saved container stacks are clamped on restart, not just player on
     // unresolvable one keeps what the save recorded.
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_storeclamp", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         const idefs = [_]assets_items.ItemDef{
             .{ .id = 2, .name = "food", .stack = 5 },
         };
@@ -17124,10 +16335,7 @@ test "scenario the death bag takes the items instead of copying them" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathbag", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -17170,10 +16378,7 @@ test "scenario draining a death bag clears the backpack marker" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bpclear", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -17220,10 +16425,7 @@ test "scenario walking away from an open container stops the looting" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_creach", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -17271,10 +16473,7 @@ test "scenario the inventory transaction route honours both quarantine surfaces"
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_txq", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
@@ -17333,10 +16532,7 @@ test "scenario every saved inventory slot field survives a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_slotfields", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const ps = g.sim.playerByPeer(c.slot).?;
@@ -17367,10 +16563,7 @@ test "scenario every saved inventory slot field survives a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_slotfields", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const ps = g.sim.playerByPeer(c.slot).?;
@@ -17412,10 +16605,7 @@ test "scenario a vehicle basket survives a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basketpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         const vid = g.sim.spawnVehicle(.bicycle, bike_x, 70, bike_z) orelse
             return error.TestUnexpectedResult;
         const vs = g.sim.slotOfNetId(vid) orelse return error.TestUnexpectedResult;
@@ -17438,10 +16628,7 @@ test "scenario a vehicle basket survives a restart" {
 
     {
         const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basketpersist", 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         try persist.loadEntities(g2);
         // Find our bike by position: the default world seeds its own demo
         // vehicles, so the entity table holds more than one.
@@ -17488,10 +16675,7 @@ test "scenario a turret keeps its owner across a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turretowner", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         const tid = g.sim.spawnTurret(tx, 70, tz) orelse return error.TestUnexpectedResult;
@@ -17503,10 +16687,7 @@ test "scenario a turret keeps its owner across a restart" {
 
     {
         const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turretowner", 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         try persist.loadEntities(g2);
         var found: ?ecs.Slot = null;
         var i: usize = 0;
@@ -17557,10 +16738,7 @@ test "scenario the loot rate and party range the sim uses reach the GameStats wi
         .loot_abundance = 175,
         .party_shared_kill_range = 42,
     });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     // The sim really is using them: the loot table scales its counts by the
     // abundance percentage, and the XP share gates on the range.
@@ -17600,10 +16778,7 @@ test "scenario the world clock runs and advertises the stock TimeOfDayIncPerSec 
     const gpa = gpa_impl.allocator();
 
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .day_night_length = 90 });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 
     const clk = g.sim.director.clock;
     try std.testing.expectEqual(@as(u16, 90), clk.day_night_length);
@@ -17659,10 +16834,7 @@ test "scenario PlayerStats carries the held item, not bare hands" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
@@ -17726,10 +16898,7 @@ test "scenario a motion sensor keeps the target selection the player set" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motiontarget", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -17813,10 +16982,7 @@ test "scenario mining a powered block takes its node and container with it" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_removestores", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap);
 
@@ -18014,10 +17180,7 @@ test "scenario an explosion downgrade clears the old block's state and registers
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_blastdown", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
 
@@ -18083,10 +17246,7 @@ test "scenario a second death still drops a bag while the first is uncollected" 
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_twodeaths", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -18156,10 +17316,7 @@ test "scenario a kicked player's record is saved, not discarded" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_kicksave", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     // A marker is the cheapest piece of per-client state that rides the ZPV
@@ -18173,10 +17330,7 @@ test "scenario a kicked player's record is saved, not discarded" {
 
     // Reopen the world and rejoin: the marker must come back off disk.
     const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_kicksave", 0);
-    defer {
-        g2.deinit();
-        gpa.destroy(g2);
-    }
+    defer g2.destroy();
     var cap2: ln_peer.Capture = .{};
     const c2 = try g2.attachJoinedClient(&cap2);
     try std.testing.expectEqual(@as(u8, 1), g2.clients[c2.slot].backpack_n);
@@ -18202,10 +17356,7 @@ test "scenario a death bag and its contents survive a restart" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagpersist", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var inv: quest_mod_components.Inventory = .{};
         inv.slots[0] = .{ .item_id = 7, .count = 12, .quality = 3, .meta = 44, .use_times = 1.5, .seed = 21 };
         inv.slots[1] = .{ .item_id = 9, .count = 2, .quality = 1 };
@@ -18221,10 +17372,7 @@ test "scenario a death bag and its contents survive a restart" {
 
     {
         const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagpersist", 0);
-        defer {
-            g2.deinit();
-            gpa.destroy(g2);
-        }
+        defer g2.destroy();
         const bags_before = g2.sim.countKind(.loot_bag);
         try persist.loadEntities(g2);
         try std.testing.expect(g2.sim.countKind(.loot_bag) > bags_before);
@@ -18280,10 +17428,7 @@ test "scenario dropped-bag markers survive a restart with the bags" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagmarkers", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         c.addBackpack(11, 70, 22);
@@ -18294,10 +17439,7 @@ test "scenario dropped-bag markers survive a restart with the bags" {
 
     {
         const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagmarkers", 0);
-        defer {
-            g.deinit();
-            gpa.destroy(g);
-        }
+        defer g.destroy();
         var cap: ln_peer.Capture = .{};
         const c = try g.attachJoinedClient(&cap);
         // Both markers come back, in the order they were dropped, so the
@@ -18338,10 +17480,7 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     g.pvp_mode = 3; // damage between players is legal; the resist legs are what this tests
     // Six hits in a burst exceed the anti-abuse damage bucket; this test is
     // about mitigation, not the rate gate.
@@ -18467,10 +17606,7 @@ test "scenario PassThroughDamage walks the downgrade chain" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_passthrough", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const game = stock_paths.dedicated_server;
@@ -18545,10 +17681,7 @@ test "scenario sign data request serves the layered catalog" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     try std.testing.expect(g.signs.entries.len > 0);
     var layered: usize = 0;
     for (g.signs.entries) |e| {
@@ -18603,10 +17736,7 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
@@ -18682,10 +17812,7 @@ test "scenario buff finish chains the injury cooldown" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
@@ -18727,10 +17854,7 @@ test "scenario preacher armor resists zombie hits more" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
@@ -18784,10 +17908,7 @@ test "scenario seated players read attached" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
@@ -18820,10 +17941,7 @@ test "scenario comma buff lists apply each name" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -18852,10 +17970,7 @@ test "scenario buff stack fires its rows" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
@@ -18881,10 +17996,7 @@ test "scenario victim hit fires concussion counter" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
@@ -18973,10 +18085,7 @@ test "scenario material-based forge outputs survive queue validation" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const pa = g.sim.playerByPeer(c.slot).?;
