@@ -73,12 +73,10 @@ mono clock and forced-serial range parallelism, and an `errdefer` undoes that if
 construction fails (`src/server/game/init_world.zig:109-111`,
 `src/server/game/init_world.zig:123`). A scenario therefore never wires the clock
 by hand. Copy the construction shape from
-`src/server/scenarios.zig:241-249`:
+`src/server/scenarios.zig:275-281`:
 
 ```zig
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motion", 0);
     defer {

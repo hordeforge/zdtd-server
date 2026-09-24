@@ -577,9 +577,7 @@ fn testWorld(gpa: std.mem.Allocator, surface_y: i32, dir: []const u8) *store.Wor
 }
 
 test "stability: terrain supports a column; cutting the base fells it" {
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -621,9 +619,7 @@ test "stability: terrain supports a column; cutting the base fells it" {
 }
 
 test "stability: overhang beyond support falls after the support goes" {
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -659,9 +655,7 @@ test "stability: overhang beyond support falls after the support goes" {
 }
 
 test "stability: non-support blocks cap at 1 and never carry support" {
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -704,9 +698,7 @@ test "stability: a dig whose plane computes after the cell is air does not under
     // removed_stab reads 0. removeBlockAt must treat that as "nothing was
     // supported from below" instead of underflowing `cur_stab - 1` (the
     // pre-fix behaviour panicked on the first dig in any fresh chunk).
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -729,9 +721,7 @@ test "stability: a dig whose plane computes after the cell is air does not under
 }
 
 test "stability reset: row kernel matches the scalar reference" {
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -776,9 +766,7 @@ test "stability reset: row kernel matches the scalar reference" {
 }
 
 test "stability distribute: row scan matches the scalar reference" {
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();

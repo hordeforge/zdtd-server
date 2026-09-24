@@ -180,9 +180,7 @@ test "the stock leftover block ids match Block.assignLeftOverBlocks" {
     const game = stock_paths.dedicated_server;
     const cpath = game ++ "/Data/Config/blocks.xml";
     if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     var mt = (maxdamage_dep.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
     defer mt.deinit();
     mt.tryMergeBundledAssignIds(gpa);

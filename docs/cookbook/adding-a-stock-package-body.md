@@ -206,7 +206,7 @@ that the send site is reached.
 Second, extend `src/server/scenarios.zig` so the shape is observed on the wire
 at the advertised id. The pattern attaches a joined client whose capture records
 every send, then finds the frame by id and parses the body
-(`src/server/scenarios.zig:1448`):
+(`src/server/scenarios.zig:1446`):
 
 ```zig
     const ws_id = packages.idOf("NetPackageWaterSet").?;

@@ -164,9 +164,7 @@ test "deco suppression follows the prefab AllowDecorations property" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir, .map_dir = map_dir });
     defer {
         g.deinit();
@@ -2620,9 +2618,7 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2681,9 +2677,7 @@ test "equipped item passives fold into the survival VM (stock data)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2747,9 +2741,7 @@ test "rogue armor quiets stealth noise while crouching (NoiseMultiplier)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2801,9 +2793,7 @@ test "rogue armor dims stealth light in the dark (LightMultiplier)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2871,9 +2861,7 @@ test "rogue helmet raises loot stage (LootStage passive 159)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2917,9 +2905,7 @@ test "PainTolerance resists stun buffs (BuffResistance passive 197)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2954,9 +2940,7 @@ test "NightStalker steal heals on hit (HealthSteal passive 167)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -2980,9 +2964,7 @@ test "held torch burn proc lands on the victim" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3024,9 +3006,7 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3086,9 +3066,7 @@ test "MachineGunner refunds stamina on hit (attacked ModifyStats)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3135,9 +3113,7 @@ test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3183,9 +3159,7 @@ test "victim-directed cvar writes land on player victims" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3232,9 +3206,7 @@ test "zombie fist infection lands on player victim" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3266,9 +3238,7 @@ test "zombie victim carries bleedCounter through the cvar column" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3317,9 +3287,7 @@ test "BarBrawling rage grants on taking a hit (onOtherDamagedSelf)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3363,9 +3331,7 @@ test "combat entry grants the magnum criminal-pursuit buff" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3413,9 +3379,7 @@ test "fall impact escalates the leg-injury counter" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3447,9 +3411,7 @@ test "zombie fist applies exactly one wound per hit (fireOneBuff)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3481,9 +3443,7 @@ test "buffInfectionMain escalates the infection counter" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3515,9 +3475,7 @@ test "victim PackMule display buff fires on being hit" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3560,9 +3518,7 @@ test "died rows set infectionCounter on player death" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3592,9 +3548,7 @@ test "leave-game rows clear harvest buff on disconnect" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3620,9 +3574,7 @@ test "CharismaticNature shares level with party member" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3660,9 +3612,7 @@ test "multi-name RemoveBuff fans out (splint ladder)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3692,9 +3642,7 @@ test "delayed kill stamina lands after 1s" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3746,9 +3694,7 @@ test "power-attack kill refunds stamina via IsSecondaryAttack" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3797,9 +3743,7 @@ test "cure-all flags typed buffs only" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3833,9 +3777,7 @@ test "bleeding drains HP via cvar-scaled HealthChangeOT" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3864,9 +3806,7 @@ test "spawn-heal finish restores bars" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3896,9 +3836,7 @@ test "church-bell ring spawns the aggressive horde" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3934,9 +3872,7 @@ test "heal-health cvar add heals per update" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -3970,9 +3906,7 @@ test "ranged ray-hit bleeds the victim (onSelfPrimaryActionRayHit)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4024,9 +3958,7 @@ test "level-curved ModifyCVar indexes the perk's level" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4055,9 +3987,7 @@ test "forgetting elixir resets progression and refunds points" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4104,9 +4034,7 @@ test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4153,9 +4081,7 @@ test "consumable buff expires when its duration cvars drain" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4209,9 +4135,7 @@ test "infection04 start subtract kills instantly" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4235,9 +4159,7 @@ test "radiation pool drains 20 stamina per update" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4272,9 +4194,7 @@ test "puking start drains 50 water immediately" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4303,9 +4223,7 @@ test "MotherLode penalizes harvest XP via Harvesting tag" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4337,9 +4255,7 @@ test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4366,9 +4282,7 @@ test "stamina regen scales with water fraction (StaminaOT water gate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4400,9 +4314,7 @@ test "fatigued victim takes scaled damage (HealthLoss passive 107)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4426,9 +4338,7 @@ test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4467,9 +4377,7 @@ test "kill trigger fires SiphoningStrikes heal on zombie kill" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4513,9 +4421,7 @@ test "morale start otherAOE cripples nearby zombies" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4546,9 +4452,7 @@ test "kill trigger grants Dentist silver on tagged zombie kill" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4613,9 +4517,7 @@ test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4650,9 +4552,7 @@ test "kill trigger grants Berserker on club kill at Strength 5" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4696,9 +4596,7 @@ test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4732,9 +4630,7 @@ test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4763,9 +4659,7 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4799,9 +4693,7 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4840,9 +4732,7 @@ test "sprint drain consumes running-tagged StaminaChangeOT (perkRuleOneCardio)" 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4878,9 +4768,7 @@ test "walk regen consumes walking-tagged StaminaChangeOT (armorFarmerHelmet)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4926,9 +4814,7 @@ test "FoodChangeOT and WaterChangeOT join the survival totals" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -4981,9 +4867,7 @@ test "HungerMultiplier scales negative FoodChangeOT (loss sandbox modifier)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5026,9 +4910,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5102,9 +4984,7 @@ test "the survival pass reads the held item's tags for HoldingItemHasTags" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5149,9 +5029,7 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5208,9 +5086,7 @@ test "crafting tier follows the stock crafting-skill rows" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5244,9 +5120,7 @@ test "crafting consumes tier-scaled ingredients and yields a tier-quality item" 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5298,9 +5172,7 @@ test "the survival pass folds the armor query into buff_phys_resist" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5349,9 +5221,7 @@ test "a gated perk row stops folding when its requirement fails" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5420,9 +5290,7 @@ test "every active buff fires its onSelfBuffStart rows once" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5458,9 +5326,7 @@ test "the armour status buffs gate on the worn-armour rating" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5487,9 +5353,7 @@ test "an entity can hold a full stock buff set, not just eight" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5531,9 +5395,7 @@ test "the entity class Buffs list parses from entityclasses.xml" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5572,9 +5434,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5619,9 +5479,7 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -5671,9 +5529,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -6918,9 +6774,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7004,9 +6858,7 @@ test "equipping rogue boots grants the worn marker buff and unequipping removes 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7058,9 +6910,7 @@ test "respawn grants the stock spawn-protection and trauma buffs" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7097,9 +6947,7 @@ test "eating a bandage grants Physician-scaled XP through gated GiveExp rows" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7129,9 +6977,7 @@ test "a held cripple mod rolls its damage proc through seeded cvars" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7173,9 +7019,7 @@ test "a cripple-modded hit cripples a walker victim" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7234,9 +7078,7 @@ test "reloading a penalty weapon grants the reload slow buff" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7274,9 +7116,7 @@ test "a damaged radiated zombie gains its regen buff and amount" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7312,9 +7152,7 @@ test "worn rogue boots soften the fall impact computation" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7363,9 +7201,7 @@ test "a radiated zombie regenerates through its class proc buff" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7396,9 +7232,7 @@ test "a burning zombie takes damage over time" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7424,9 +7258,7 @@ test "a placed torch feeds the AI heat map" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7458,9 +7290,7 @@ test "radiated regen stops at 80 percent HP" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7490,9 +7320,7 @@ test "a burning zombie seeds its duration and self-extinguishes" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7521,9 +7349,7 @@ test "a stunned zombie gains its cooldown on expiry" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7549,9 +7375,7 @@ test "died class rows reset hazard timers" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7577,9 +7401,7 @@ test "join seeds class entered-game cvars" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7601,9 +7423,7 @@ test "buying StrengthMastery refreshes a held miner tool's healing cvars" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7638,9 +7458,7 @@ test "a torch hit sets the victim burning" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7688,9 +7506,7 @@ test "submersion mirrors the underwater cvar" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();
@@ -7718,9 +7534,7 @@ test "dragging a damaged tool onto another combines durability" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
     defer {
         g.deinit();

@@ -112,9 +112,7 @@ test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
 
-    var gpa_impl = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+    const gpa = std.testing.allocator;
     const g = try Game.create(gpa, world_dir, 0);
     defer {
         g.deinit();
