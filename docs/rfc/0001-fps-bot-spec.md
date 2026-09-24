@@ -417,7 +417,7 @@ which is honest: no bot addon, no bot commands.
   model), unchanged: it only talks through `zdtd.sense` / `zdtd.queue`. Build
   via the same clang→wasm32 path as `assets/fixtures/*.c`.
 - No separate bot fixture: the sense round-trip and command-parse tests load
-  the shipped `mods/fps_bot/fps_bot.wasm` directly (`src/plugin/tests.zig:1254`),
+  the shipped `mods/fps_bot/fps_bot.wasm` directly (`src/plugin/tests.zig:1248`),
   so the test and the operator run the same guest.
 - `docs/rfc/0001-fps-bot-spec.md` (RFC 0001), `docs/prd/0001-fps-bot.md` (PRD 0001),
   `docs/adr/0026-*.md`, `docs/IMPLEMENTATION_PLAN_BOTS.md` - this contract and its plan.

@@ -1,6 +1,6 @@
 # Shared utilities
 
-The `util` package is the leaf layer of the source tree: it owns process primitives that carry no game domain, namely the mono and virtual clock, the seeded PRNGs, one filesystem helper set, an optional range-parallel dispatcher, scratch arenas, process logging, constant-time secret comparison, deterministic sim mode with filesystem fault injection, non-blocking TCP listen, host metrics, and the comptime-reflected TOML binder. The boundary is stated in the package comment (`src/util/root.zig:3`): the package "must not import server, ecs, wire, world, assets, litenet, or apm". Every other package may import it, and the direction is machine-enforced by `check_edges util 'server|wire|world|ecs|assets|litenet|apm'` (`scripts/lint-architecture.sh:30`), so util is the contract surface every subsystem is allowed to build on and none is allowed to reach into. The twelve modules are re-exported by the facade (`src/util/root.zig:8`); leaf files stay importable directly, which is what most callers do.
+The `util` package is the leaf layer of the source tree: it owns process primitives that carry no game domain, namely the mono and virtual clock, the seeded PRNGs, one filesystem helper set, an optional range-parallel dispatcher, scratch arenas, process logging, constant-time secret comparison, deterministic sim mode with filesystem fault injection, non-blocking TCP listen, host metrics, and the comptime-reflected TOML binder. The boundary is stated in the package comment (`src/util/root.zig:3`): the package "must not import server, ecs, wire, world, assets, litenet, or apm". Every other package may import it, and the direction is machine-enforced by `check_edges util 'server|wire|world|ecs|assets|litenet|apm'` (`scripts/lint-architecture.sh:30`), so util is the contract surface every subsystem is allowed to build on and none is allowed to reach into. The twelve modules are re-exported by the facade (`src/util/root.zig:3`); leaf files stay importable directly, which is what most callers do.
 
 Nothing in util encodes or decodes a package, owns a save format, or persists state of its own. Its outputs are timestamps, RNG draws, byte ranges, booleans and bytes that callers write. The two places a util value reaches the wire are derived results: a connect-key comparison (`src/litenet/packet.zig:149`) and the challenge comparison (`src/server/game/net_handlers.zig:50`).
 
@@ -33,7 +33,7 @@ pub fn disable() void {
 
 `enable` sets virtual time plus forced serial, and `enableSeeded` also records the process-wide run seed (`src/util/sim.zig:39`, `:45`); `getSeed`/`formatSeed` let a failure log name the value that reproduces the run (`src/util/sim.zig:67`, `:73`). Two constants matter to callers: the default virtual epoch is 1 s so age math that subtracts from `monoNs` cannot underflow (`src/util/sim.zig:23`), and `tick_ns` repeats the 20 TPS formula locally because util cannot import `protocol` (`src/util/sim.zig:31`). `advanceTick` steps the virtual clock by one tick (`src/util/sim.zig:85`); the game step calls it after a completed tick (`src/server/game/step.zig:38`) and uses `isEnabled` to attach the seed to a failure line (`src/server/game/step.zig:51`).
 
-The fault hooks live in `io_fs` but are part of this lifecycle, because `sim.disable` clears them (`src/util/io_fs.zig:23`):
+The fault hooks live in `io_fs` but are part of this lifecycle, because `sim.disable` clears them (`src/util/io_fs.zig:24`):
 
 ```zig
 pub fn injectWriteFailures(n: u32) void {
@@ -41,7 +41,7 @@ pub fn injectWriteFailures(n: u32) void {
 }
 ```
 
-Each injected fault is consumed once through a CAS loop, so concurrent callers cannot double-spend it (`src/util/io_fs.zig:44`); a write fault returns `error.DiskQuota` before any syscall (`src/util/io_fs.zig:79`) and a read fault returns `error.InputOutput` (`src/util/io_fs.zig:161`). Production never enables sim mode. The one automatic entry point is world construction with `port == 0`, which calls `enableSeeded` with the worldgen seed or `default_seed` and installs an `errdefer` that disables again on a later init failure (`src/server/game/init_world.zig:109`, `:123`); the module comment states the same contract (`src/util/sim.zig:9`).
+Each injected fault is consumed once through a CAS loop, so concurrent callers cannot double-spend it (`src/util/io_fs.zig:45`); a write fault returns `error.DiskQuota` before any syscall (`src/util/io_fs.zig:45`) and a read fault returns `error.InputOutput` (`src/util/io_fs.zig:45`). Production never enables sim mode. The one automatic entry point is world construction with `port == 0`, which calls `enableSeeded` with the worldgen seed or `default_seed` and installs an `errdefer` that disables again on a later init failure (`src/server/game/init_world.zig:109`, `:123`); the module comment states the same contract (`src/util/sim.zig:9`).
 
 ## Deterministic streams: XorShift32 and GameRandom
 
@@ -74,13 +74,13 @@ pub fn seededOnPos(x: i32, y: i32, z: i32, seed: i32) GameRandom {
 }
 ```
 
-Callers pass a `*GameRandom` into asset-table rolls (`src/assets/items.zig:118`) and construct one per roll from an explicit seed (`src/server/game/loot.zig:285`); the blockplaceholder per-cell roll is the stock-fidelity path (`src/assets/blockplaceholders.zig:131`). The fidelity limit is worth stating plainly: the unit goldens are five draws per seed against Mono's `System.Random`, which proves the algorithm port (`src/util/game_random.zig:11`), not that every stock draw site in the server has been routed through it.
+Callers pass a `*GameRandom` into asset-table rolls (`src/assets/items.zig:118`) and construct one per roll from an explicit seed (`src/server/game/loot.zig:285`); the blockplaceholder per-cell roll is the stock-fidelity path (`src/assets/blockplaceholders.zig:132`). The fidelity limit is worth stating plainly: the unit goldens are five draws per seed against Mono's `System.Random`, which proves the algorithm port (`src/util/game_random.zig:11`), not that every stock draw site in the server has been routed through it.
 
 ## Filesystem and scratch arenas
 
-`io_fs.zig` is the one filesystem surface for application code: ordinary file and directory work goes through it or through `std.Io` directly, never through `std.os.linux` or raw posix (`src/util/io_fs.zig:1`). That is the application half of the stdlib policy in `docs/STD_ABSTRACTIONS.md:19`, which lists `sys_metrics.zig` as the only `std.os.linux` exception. Each helper constructs a short-lived `Io.Threaded` on `page_allocator`, so concurrent callers (a parallel chunk save, overlapping helpers) never share a `DebugAllocator` with `Threaded.init` and a helper can nest inside a bound socket `Threaded` (`src/util/io_fs.zig:57`, implementation at `:62`).
+`io_fs.zig` is the one filesystem surface for application code: ordinary file and directory work goes through it or through `std.Io` directly, never through `std.os.linux` or raw posix (`src/util/io_fs.zig:1`). That is the application half of the stdlib policy in `docs/STD_ABSTRACTIONS.md:19`, which lists `sys_metrics.zig` as the only `std.os.linux` exception. Each helper constructs a short-lived `Io.Threaded` on `page_allocator`, so concurrent callers (a parallel chunk save, overlapping helpers) never share a `DebugAllocator` with `Threaded.init` and a helper can nest inside a bound socket `Threaded` (`src/util/io_fs.zig:1`, implementation at `:62`).
 
-The write path is the durability property every caller relies on (`src/util/io_fs.zig:78`):
+The write path is the durability property every caller relies on (`src/util/io_fs.zig:79`):
 
 ```zig
 pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
@@ -90,7 +90,7 @@ pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
     const io = threaded.io();
 ```
 
-The materialize step is atomic, so a crash or full disk mid-write cannot corrupt the previous contents (`src/util/io_fs.zig:83`):
+The materialize step is atomic, so a crash or full disk mid-write cannot corrupt the previous contents (`src/util/io_fs.zig:84`):
 
 ```zig
     var atomic_file = try std.Io.Dir.cwd().createFileAtomic(io, rel_path, .{
@@ -101,7 +101,7 @@ The materialize step is atomic, so a crash or full disk mid-write cannot corrupt
 
 The rest of the surface is deliberate and narrow: `mkdirPath` (`:66`), `listFileNames` and `listDirNames`, both sorted so filesystem readdir order cannot leak into deterministic behaviour (`:101`, `:120`, `:132`), `readFileAll`/`readFileInto` (`:160`, `:169`), `fileExists`, `fileMtimeNanos`, `dirExists` (`:178`, `:190`, `:201`), `deleteFile`, `removeDirTree`, `readLinkAbsolute` (`:211`, `:224`, `:236`). The one tick-path call is the stock `serveradmin.xml` hot reload, which polls `fileMtimeNanos` every 100 ticks and re-applies the XML only when the stamp moves (`src/server/game/world_tick.zig:546`, `:547`, `:548`). Nothing else opens a file per tick.
 
-`entryKind` resolves unknown directory-entry types through directory-relative metadata without following symlinks (`src/util/io_fs.zig:244`). File/directory listings and prefab sign discovery use it so filesystems returning `DT_UNKNOWN` do not silently omit content; metadata errors propagate.
+`entryKind` resolves unknown directory-entry types through directory-relative metadata without following symlinks (`src/util/io_fs.zig:245`). File/directory listings and prefab sign discovery use it so filesystems returning `DT_UNKNOWN` do not silently omit content; metadata errors propagate.
 
 `arena.zig` is the matching allocation helper for init and load work: a lazy per-table scratch arena created on first use and reused after (`src/util/arena.zig:1`). `newArenaHolder` heap-allocates and initializes one, and the caller still owns `errdefer { deinit; destroy }` (`src/util/arena.zig:6`); `ensureLazyArena` returns the existing allocator or creates one behind an optional pointer (`src/util/arena.zig:12`). This is the escape hatch that keeps hot paths free of the arena pattern: allocation is fine at init and load, and forbidden on the tick, packet, interest and chunk-stream paths (`AGENTS.md`, Memory).
 
@@ -119,13 +119,13 @@ pub fn forRanges(
 
 The dispatcher degrades to serial whenever parallelism cannot pay: `total` below `min_parallel_items` of 24 (`src/util/parallel.zig:9`, `:147`), no started workers (`:147`), or a nested or concurrent call, which is detected by swapping an `in_run` flag and running `work(ctx, 0, total)` on the caller thread rather than clobbering the shared job slots (`:140`). `splitRanges` produces up to `max_workers` (8) contiguous ranges with empty tails omitted (`:7`, `:24`), the pool keeps `cpuWorkers() - 1` detached workers for the process lifetime (`:11`, `:87`), and the calling thread executes range 0 itself (`:177`). `force_serial` makes every call serial on the calling thread; `sim.enable` sets it and `sim.disable` clears it (`src/util/parallel.zig:192`, `:195`), which is what keeps DST independent of the OS scheduler.
 
-Two auxiliary exports exist because Zig 0.16 has no `std.Thread.Mutex` and an `std.Io.Mutex` needs an `Io`: `poolIo` hands out the pool's `Threaded` for callers that need a `Condition` (`src/util/parallel.zig:206`), and `IoMutex` wraps a mutex that resolves the pool's `Io` internally so callers need not thread one through (`:218`). Current consumers are the AI and turret system splits (`src/ecs/ai_tasks.zig:1221`, `src/ecs/turrets.zig:135`), the parallel chunk save (`src/world/store.zig:1704`), and the open ECS view scan that is also `groupSlice`'s test oracle (`src/ecs/query.zig:105`).
+Two auxiliary exports exist because Zig 0.16 has no `std.Thread.Mutex` and an `std.Io.Mutex` needs an `Io`: `poolIo` hands out the pool's `Threaded` for callers that need a `Condition` (`src/util/parallel.zig:206`), and `IoMutex` wraps a mutex that resolves the pool's `Io` internally so callers need not thread one through (`:218`). Current consumers are the AI and turret system splits (`src/ecs/ai_tasks.zig:1221`, `src/ecs/turrets.zig:135`), the parallel chunk save (`src/world/store.zig:1711`), and the open ECS view scan that is also `groupSlice`'s test oracle (`src/ecs/query.zig:105`).
 
 ## Logging, secrets, TCP listen, and host metrics
 
-`log.zig` is process-wide because the boot banners are emitted deep inside `Game.init`, far from argv parsing; the quiet flag is set once before any of them run (`src/util/log.zig:9`, set at `src/main.zig:441`). `info` is suppressed by `--quiet` or `loglevel >= 1`, while `warn` and `err` are never hidden by `--quiet` and always carry a wall-clock stamp plus a `[WARN]`/`[ERROR]` tag (`src/util/log.zig:41`, `:51`, `:59`), the stamp coming from `clock.wallStamp` (`:64`). `min_level` mirrors stock `Log.Level` 0..4 and is set by the `loglevel` admin verb (`src/util/log.zig:16`).
+`log.zig` is process-wide because the boot banners are emitted deep inside `Game.init`, far from argv parsing; the quiet flag is set once before any of them run (`src/util/log.zig:9`, set at `src/main.zig:442`). `info` is suppressed by `--quiet` or `loglevel >= 1`, while `warn` and `err` are never hidden by `--quiet` and always carry a wall-clock stamp plus a `[WARN]`/`[ERROR]` tag (`src/util/log.zig:41`, `:51`, `:59`), the stamp coming from `clock.wallStamp` (`:64`). `min_level` mirrors stock `Log.Level` 0..4 and is set by the `loglevel` admin verb (`src/util/log.zig:16`).
 
-`secret.zig` exists because `std.crypto.timing_safe.eql` only compares equal-length arrays of comptime-known length, which variable-length wire input is not (`src/util/secret.zig:4`). `constantTimeEql` always walks `max(a.len, b.len)` so a remote observer learns payload size rather than a length branch (`src/util/secret.zig:14`). The connect-key check is the canonical caller (`src/litenet/packet.zig:149`); the webui session token and the telnet admin password use the same comparator (`src/server/webui.zig:570`, `src/server/admin.zig:34`).
+`secret.zig` exists because `std.crypto.timing_safe.eql` only compares equal-length arrays of comptime-known length, which variable-length wire input is not (`src/util/secret.zig:4`). `constantTimeEql` always walks `max(a.len, b.len)` so a remote observer learns payload size rather than a length branch (`src/util/secret.zig:14`). The connect-key check is the canonical caller (`src/litenet/packet.zig:149`); the webui session token and the telnet admin password use the same comparator (`src/server/webui.zig:577`, `src/server/admin.zig:34`).
 
 `tcp_listen.zig` is the TCP counterpart of the UDP socket module: `Listener.listen` binds IPv4 through `std.Io.net` with `reuse_address`, and `accept` gates `posix.system.accept4` behind a zero-timeout `poll` because `Io.net.Server.accept` treats EAGAIN as a programmer bug (`src/util/tcp_listen.zig:21`, `:65`, `:81`; rationale at `docs/STD_ABSTRACTIONS.md:70`). `writeAll` retries short writes but caps total wait at 200 ms in 25 ms poll slices, so a paused peer cannot pin the tick thread (`src/util/tcp_listen.zig:104`, `:119`). Admin, GSI info, webui and the MCP transport are the consumers (`docs/STD_ABSTRACTIONS.md:35`).
 

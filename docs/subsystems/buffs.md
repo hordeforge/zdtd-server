@@ -117,7 +117,7 @@ Both counters advance with wrapping addition because stock's unchecked add wraps
 
 ## The buff phase in the tick
 
-The schedule names the buffs phase directly before the director and AI, because movement and damage must read this tick's buff state (`src/ecs/schedule.zig:12`, enum at `src/ecs/schedule.zig:10`):
+The schedule names the buffs phase directly before the director and AI, because movement and damage must read this tick's buff state (`src/ecs/schedule.zig:10`, enum at `src/ecs/schedule.zig:12`):
 
 ```zig
 pub const Phase = enum(u8) {
@@ -126,7 +126,7 @@ pub const Phase = enum(u8) {
     buffs,
 ```
 
-The phase order is pinned by a test and a mode pack may disable an entry through `w.rules.systems.<name>` but never reorder one, because the order encodes the dependency (`src/ecs/schedule.zig:67`). The buff slot in the run order is the first entry (`src/ecs/schedule.zig:76`). `run` calls the system only when the toggle is on, so a disabled system leaves its slice of the tick result zero rather than running a stub (`src/ecs/schedule.zig:83`). The system walks the alive bitset, skips entities without the buffs component mask, and treats an entity whose health reached zero as dead, which skips the started and duration half of the tick (`src/ecs/buff_tick.zig:15`, `:23`):
+The phase order is pinned by a test and a mode pack may disable an entry through `w.rules.systems.<name>` but never reorder one, because the order encodes the dependency (`src/ecs/schedule.zig:67`). The buff slot in the run order is the first entry (`src/ecs/schedule.zig:67`). `run` calls the system only when the toggle is on, so a disabled system leaves its slice of the tick result zero rather than running a stub (`src/ecs/schedule.zig:67`). The system walks the alive bitset, skips entities without the buffs component mask, and treats an entity whose health reached zero as dead, which skips the started and duration half of the tick (`src/ecs/buff_tick.zig:15`, `:23`):
 
 ```zig
 pub fn systemBuffs(w: *World, out: []buff.Expiry) u8 {
@@ -153,11 +153,11 @@ pub const BuffDef = struct {
     remove_on_death: bool = true,
 ```
 
-The caps are zdtd bounds measured against the stock file, not stock rules: 2048 buff defs against 483 stock definitions, 32 passive rows per buff against a maximum of 26 on `buffShocked`, and separate totals for stat mods and thresholds (`src/assets/buffs.zig:14`, `:19`, `:22`). Loading goes through `loadFromPath` into one arena (`src/assets/buffs.zig:687`), and the table keeps a lowercased name index next to the def list because stock's `BuffManager.Buffs` is a case-insensitive dictionary, so lookup must ignore case (`src/assets/buffs.zig:240`, `:262`). `byId` is the indexed accessor the sim uses; `byName` resolves a wire string (`src/assets/buffs.zig:274`, `:279`). With no XML the table falls back to five verbatim stock buffs, and the comment forbids inventing names there because the client resolves them against its own file (`src/assets/buffs.zig:220`). `passive_effects.zig` is a different artifact: it is the generated ordinal table for the stock `PassiveEffects` enum, the numeric id an `ItemValue` stat entry carries on the wire, 204 members including the `Count` sentinel (`src/assets/passive_effects.zig:1`, `:10`). It is the numbering, not the evaluator.
+The caps are zdtd bounds measured against the stock file, not stock rules: 2048 buff defs against 483 stock definitions, 32 passive rows per buff against a maximum of 26 on `buffShocked`, and separate totals for stat mods and thresholds (`src/assets/buffs.zig:14`, `:19`, `:22`). Loading goes through `loadFromPath` into one arena (`src/assets/buffs.zig:14`), and the table keeps a lowercased name index next to the def list because stock's `BuffManager.Buffs` is a case-insensitive dictionary, so lookup must ignore case (`src/assets/buffs.zig:14`, `:262`). `byId` is the indexed accessor the sim uses; `byName` resolves a wire string (`src/assets/buffs.zig:14`, `:279`). With no XML the table falls back to five verbatim stock buffs, and the comment forbids inventing names there because the client resolves them against its own file (`src/assets/buffs.zig:14`). `passive_effects.zig` is a different artifact: it is the generated ordinal table for the stock `PassiveEffects` enum, the numeric id an `ItemValue` stat entry carries on the wire, 204 members including the `Count` sentinel (`src/assets/passive_effects.zig:1`, `:10`). It is the numbering, not the evaluator.
 
 ## The perk and attribute passive path
 
-The passive effects that reach gameplay are folded into one POD of tracked stats: the four survival maxima, their change over time, the two injury blockage caps and the three damage resistances (`src/assets/buffs.zig:993`):
+The passive effects that reach gameplay are folded into one POD of tracked stats: the four survival maxima, their change over time, the two injury blockage caps and the three damage resistances (`src/assets/buffs.zig:987`):
 
 ```zig
 pub const TrackedDeltas = struct {
@@ -171,7 +171,7 @@ pub const TrackedDeltas = struct {
     stamina_ot: f32 = 0,
 ```
 
-Rows outside that surface are counted but not simulated, which the file states as recorded rather than guessed (`src/assets/buffs.zig:990`). Every delta is clamped to a named ceiling, 1e6 for finite values, with NaN folding to zero, so a pathological modded curve cannot reach the tick's integer casts (`src/assets/buffs.zig:1059`). The fold over an entity's active buffs is recomputation, not incremental state, so removing a buff drops its contribution exactly (`src/assets/buffs.zig:1107`):
+Rows outside that surface are counted but not simulated, which the file states as recorded rather than guessed (`src/assets/buffs.zig:984`). Every delta is clamped to a named ceiling, 1e6 for finite values, with NaN folding to zero, so a pathological modded curve cannot reach the tick's integer casts (`src/assets/buffs.zig:984`). The fold over an entity's active buffs is recomputation, not incremental state, so removing a buff drops its contribution exactly (`src/assets/buffs.zig:984`):
 
 ```zig
 pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
@@ -186,7 +186,7 @@ pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requir
 }
 ```
 
-Perk and attribute levels take the same route: `trackedDeltasAtLevel` folds a progression value's passive rows at the purchased level, curve segment `i` applying at level `i + 1`, gated by the row requirements, and `perkTotals` sums that over the player's skill ledger (`src/assets/progression.zig:235`, `:265`). The consumers add buff, perk and item contributions into one delta before applying it: a stamina regeneration pass computes `effectTotals` for the active buffs plus `perkTotals` for the ledger plus the held and equipped item rows (`src/server/game/tick.zig:851`). Named multiplicative passives leave the additive surface and use a separate chained fold, which is how `BuffResistance` is read from the active set (`src/assets/buffs.zig:1123`, `src/server/game/tick.zig:330`).
+Perk and attribute levels take the same route: `trackedDeltasAtLevel` folds a progression value's passive rows at the purchased level, curve segment `i` applying at level `i + 1`, gated by the row requirements, and `perkTotals` sums that over the player's skill ledger (`src/assets/progression.zig:235`, `:265`). The consumers add buff, perk and item contributions into one delta before applying it: a stamina regeneration pass computes `effectTotals` for the active buffs plus `perkTotals` for the ledger plus the held and equipped item rows (`src/server/game/tick.zig:851`). Named multiplicative passives leave the additive surface and use a separate chained fold, which is how `BuffResistance` is read from the active set (`src/assets/buffs.zig:1117`, `src/server/game/tick.zig:851`).
 
 What is incomplete is the triggered-effects virtual machine, and `docs/GAP_ANALYSIS.md` scores the perk and attribute passive-effects row as the one PARTIAL entry in Player progression, with the requirement vocabulary and the foreign-target kinds as the named shortfall (`docs/GAP_ANALYSIS.md:3689`). In this repository the bounded action set is evaluated for the tracked stats; every other action rides item, combat, weather or Twitch triggers and has no server-side consumer, which the same row records. `BuffDef.triggered` keeps the parsed rows, and the buff lifecycle consumes only the actions it implements (`src/assets/buffs.zig:215`).
 

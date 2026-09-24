@@ -106,7 +106,7 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
 ```
 
 The ledger cause reuses `.craft`, because there is no scrap-specific cause
-(`src/server/game/craft.zig:566`). The C2S route reaches it through the same `InvTx` op table
+(`src/server/game/craft.zig:567`). The C2S route reaches it through the same `InvTx` op table
 (`src/server/c2s/inv_txn.zig:130-131`).
 
 ## Loot rolls

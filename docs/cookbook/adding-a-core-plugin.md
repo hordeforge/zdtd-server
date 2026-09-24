@@ -183,14 +183,14 @@ gate never compares it.
 
 Then add the module path to the shipped-set list in the host contract test
 (`src/plugin/tests.zig:611-624`), which loads every shipped module and asserts
-each one declares the host contract version (`src/plugin/tests.zig:539`). The
+each one declares the host contract version (`src/plugin/tests.zig:607`). The
 host table holds 32 modules (`src/plugin/wasm.zig:954`), and the test asserts
 the shipped set fits.
 
 Discovery scans `mods/` and `plugins/` at boot and merges the manifests
 (`src/main.zig:766-770`), so no configuration is needed once the manifest is in
 place. A manifest-loaded module logs `zdtd: mod '<name>' [<tier>] loaded` at
-boot (`src/plugin/wasm.zig:1085`), and the admin verb `plugin list` prints each
+boot (`src/plugin/wasm.zig:1091`), and the admin verb `plugin list` prints each
 slot with its tier and enabled state (`src/server/game/wasm_host.zig:526-543`).
 
 ## 9. Rebuild and gate the committed binary
@@ -219,7 +219,7 @@ reclaimed), reloads the module into the same slot and runs `on_enable`
 
 Verdict and observer behavior belongs in an integration scenario that loads the
 committed `.wasm` and drives the hook through the production path. Copy the
-load shape from `src/server/scenarios.zig:11575`, which loads one module into
+load shape from `src/server/scenarios.zig:10701`, which loads one module into
 `g.wasm_plugins` before driving the event. See
 [`adding-a-scenario.md`](adding-a-scenario.md) for the construction and
 assertion shape.

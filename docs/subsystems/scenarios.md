@@ -8,7 +8,7 @@ Sources: [`src/server/scenarios.zig`](../../src/server/scenarios.zig), [`src/ser
 
 `src/server/scenarios.zig` is the multi-system integration suite: 279 `test` blocks in an 18,772-line file. The file states its own rule, that the scenarios call the shipped `Game` handlers (`onData`, `handlePackage`, `replicate`, `broadcast`) rather than mocks (`src/server/scenarios.zig:1-2`). It is aggregated into the server package by `pub const scenarios = @import("scenarios.zig")` (`src/server/root.zig:20`) and referenced from that package's test block (`src/server/root.zig:99`), which is what makes `zig build test` see it. `src/server/game/tests.zig` is the sibling suite for `Game` helpers - persistence migrations, block damage, evidence dumping - and is aggregated the same way (`src/server/root.zig:73`).
 
-Scenarios construct the server offline. `Game.create(allocator, world_dir, 0)` with port 0 is the harness entry point (`src/server/game.zig:782`), and port 0 makes init enter deterministic sim mode: virtual mono clock plus forced-serial `forRanges`, with an `errdefer` that undoes it if construction fails (`src/server/game/init_world.zig:109-111`, `src/server/game/init_world.zig:123`). That is deliberate, so a scenario does not have to wire the clock by hand (`src/util/sim.zig:9-11`).
+Scenarios construct the server offline. `Game.create(allocator, world_dir, 0)` with port 0 is the harness entry point (`src/server/game.zig:800`), and port 0 makes init enter deterministic sim mode: virtual mono clock plus forced-serial `forRanges`, with an `errdefer` that undoes it if construction fails (`src/server/game/init_world.zig:109-111`, `src/server/game/init_world.zig:123`). That is deliberate, so a scenario does not have to wire the clock by hand (`src/util/sim.zig:9-11`).
 
 Scenarios that need the chunk or streaming path own a world directory and wipe it first, because persisted state from a previous run otherwise leaks into the next one (`src/server/scenarios.zig:73-76`):
 
@@ -140,7 +140,7 @@ One claim category does land here: APM counter shapes are pinned by scenario ass
 
 ## Adding a scenario
 
-1. Decide what the test must observe. If it needs the chunk, deco or streaming path, give it a directory and wipe it with `freshScenarioDir` (`src/server/scenarios.zig:77`); otherwise use `std.testing.tmpDir` and pass the path in.
+1. Decide what the test must observe. If it needs the chunk, deco or streaming path, give it a directory and wipe it with `freshScenarioDir` (`src/server/scenarios.zig:78`); otherwise use `std.testing.tmpDir` and pass the path in.
 2. Create the server offline with port 0 so the virtual clock and serial ranges are already on (`src/server/game/init_world.zig:109-111`), and use `std.testing.allocator` or a `DebugAllocator` so a leak fails the run.
 3. Attach one `Capture` per participating peer with `attachJoinedClient` (`src/server/game/harness.zig:32`) and assert the returned client is joined.
 4. Drive the behaviour through production handlers: build the body with the `packages` builder, frame it with `packages.framed`, and inject it with `injectFramed`; advance the sim with `g.step()`; push interest with `g.replicate()` (`src/server/scenarios.zig:259-269`). Do not re-implement a parser or call a sim system directly when a client package exists that reaches it.

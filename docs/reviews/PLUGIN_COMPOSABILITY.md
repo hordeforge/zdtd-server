@@ -218,7 +218,7 @@ Re-traced 2026-09-12 against the current tree (read-only, no gates run).
   `defineFuncCtx` import list (10) are the same set; `Hook` (24 variants) and
   `Hook.names` (24) agree. No host import is undeclarable, no hook is
   unnameable. A new import missing from `host_verbs` would be undeclarable;
-  the two lists are single-sourced by the `src/plugin/tests.zig:1149` test.
+  the two lists are single-sourced by the `src/plugin/tests.zig:1060` test.
 - Reload (prompt check 1): `on_shutdown` -> withdraw -> deinit -> `loadInto` ->
   `on_enable`; the module name is duped before `deinit` (`wasm.zig:1154`);
   `rt_slot`/`plugin_slot` re-pointed; display/config/tier copied before
@@ -249,13 +249,13 @@ the series).
 Verified fixed and now gated (listed as open in the 2026-09-12 round):
 
 - **F7**: `slot_of_plan` translates plan slot to loaded slot at claim install
-  (`src/plugin/wasm.zig:1143`, `:1171`), gated by `point claims bind to the
+  (`src/plugin/wasm.zig:1149`, `:1171`), gated by `point claims bind to the
   loaded slot, not the plan index`.
 - **F8**: `Plugin.require_declaration` records the boot rule per slot and
   `reload` replays it (`src/plugin/wasm.zig:191`, the reload restore), gated by
   `plugin reload replays the boot declaration rule (review F8)`.
 - **F9**: `reconcileClaims` reads the on-disk declaration first and changes
-  state only on success (`src/plugin/wasm.zig:1392`), gated by
+  state only on success (`src/plugin/wasm.zig:1398`), gated by
   `reconcileClaims keeps claims and module deny when the manifest is invalid
   (review F9)`. That gate also surfaced a real leak: `bindManifest` never
   released the strings `toml_bind` had already duped when the bind or the
@@ -263,10 +263,10 @@ Verified fixed and now gated (listed as open in the 2026-09-12 round):
   reload attempt. Fixed with an `errdefer free` and a partial-safe
   `Manifest.free`.
 - **F10**: `bot spawn` / `bot remove` honor the `spawn` / `despawn` bits
-  (`src/server/game/wasm_host.zig:203`), gated by the queued-verb policy
+  (`src/server/game/wasm_host.zig:205`), gated by the queued-verb policy
   test's `bot spawn` block.
 - **F11**: reload re-reads `config.toml` through `rereadConfig`
-  (`src/plugin/wasm.zig:1302`), gated by `plugin reload re-reads config.toml
+  (`src/plugin/wasm.zig:1308`), gated by `plugin reload re-reads config.toml
   for a manifest-backed module`.
 
 New findings fixed in the loop rounds (ids continue F11):

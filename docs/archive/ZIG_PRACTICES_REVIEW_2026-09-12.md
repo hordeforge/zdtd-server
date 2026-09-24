@@ -22,7 +22,7 @@ Repo line count: `rg -c`/`wc -l` over `find src -name '*.zig'` = 151,405 total;
 | `world` -> `wire` imports | PASS (none) | `rg '@import' src/world \| grep wire` empty |
 | Facades `*/root.zig` complete | PASS | 9 facades (`apm assets ecs litenet plugin server util wire world`); `wire/packages.zig` re-exports every `stock_*.zig` |
 | Subfolder aggregation | PASS | `src/server/root.zig:29-80` imports all 44 `game/*` + 7 `c2s/*` with `_ = x;` |
-| `main.zig` stays thin | PASS | 1,324 lines; `main()` at `src/main.zig:303` plus flag helpers; test block at 1,238; no package body (only test `buildPosAndRotBody` at `:1312`) |
+| `main.zig` stays thin | PASS | 1,324 lines; `main()` at `src/main.zig:304` plus flag helpers; test block at 1,238; no package body (only test `buildPosAndRotBody` at `:1312`) |
 | One shape -> one builder | PASS | no duplicate `build*Body` names across `wire/`; no `build*Body` defined outside `wire/` |
 | System boundaries | PASS | `scripts/lint-architecture.sh` + `scripts/lint-cycles.sh` already enforce the edge set and the `src/server/` cycle exemption |
 | No god-files | **FAIL** | see S1 |
@@ -185,7 +185,7 @@ should take them:
 1. `src/plugin/manifest.zig:46,50,94,167,172` - drop `std.meta.tags`, drop the
    `QueueVerb.names` parallel table, parse via `@tagName` (C4).
 2. `src/protocol.zig:53,57,64` + 6 call sites (`:75,76,107,115-117,124-126`,
-   `src/world/store.zig:1297`-style locals are unrelated) - camelCase the three
+   `src/world/store.zig:1311`-style locals are unrelated) - camelCase the three
    `WireProfile` accessors (C1).
 3. `src/plugin/manifest.zig:49,171` + call sites (`manifest.zig:81,285`,
    `plugin/wasm.zig:1082,1249`) - `parse` -> `parseVerb` / `parsePoint` (P3,

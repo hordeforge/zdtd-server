@@ -13,7 +13,7 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
 ## Grounding facts that shape the plan (confirmed)
 
 - **Command buffer bound is a single host const.** The 128-byte text bound is
-  enforced only at `src/server/game/wasm_host.zig:48` (`max_plugin_cmd_len`);
+  enforced only at `src/server/game/wasm_host.zig:50` (`max_plugin_cmd_len`);
   the `zdtd.queue` import layer (`src/plugin/wasm.zig:507`) has no length cap.
   Bot commands fit in 128 bytes; raise to a named 256 const only as a margin.
 - **Adding `bot` to `components.Kind` forces one exhausting switch arm**:

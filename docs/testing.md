@@ -74,15 +74,15 @@ lines, which is the closest thing to a client-side A/B that runs unattended.
 `NetPackagePlayerLogin`, `NetPackageRequestToEnterGame`,
 `NetPackageRequestToSpawnPlayer`, all through `Game.onData`. `injectFramed`
 (`src/server/game/harness.zig:88`) sends any later package, and `Game.replicate`
-(`src/server/game/replicate.zig:20`) runs the interest pass.
+(`src/server/game/replicate.zig:23`) runs the interest pass.
 
 Representative coverage: join bundle completeness
-(`src/server/scenarios.zig:6509`), paced spawn-area streaming
-(`src/server/scenarios.zig:8295`), deco beyond the join window
-(`src/server/scenarios.zig:2778`), inventory move/drop/place/equip
-(`src/server/scenarios.zig:4998`), stock inventory transactions
-(`src/server/scenarios.zig:13473`), and persist across a restart
-(`src/server/scenarios.zig:2687`). Extend this file when a change crosses
+(`src/server/scenarios.zig:6013`), paced spawn-area streaming
+(`src/server/scenarios.zig:7112`), deco beyond the join window
+(`src/server/scenarios.zig:2551`), inventory move/drop/place/equip
+(`src/server/scenarios.zig:4617`), stock inventory transactions
+(`src/server/scenarios.zig:11415`), and persist across a restart
+(`src/server/scenarios.zig:2473`). Extend this file when a change crosses
 systems; do not duplicate the harness (`AGENTS.md:286`).
 
 ## Prove the guard fails
@@ -106,11 +106,11 @@ and must not run beside an editor or another build
 - Tests never write into the repository (`AGENTS.md:289`). Use
   `std.testing.tmpDir` and pass the path in.
 - A scenario that needs a world owns it and removes it first
-  (`src/server/scenarios.zig:77`). Leaked state fails the second `make check`
+  (`src/server/scenarios.zig:81`). Leaked state fails the second `make check`
   (`AGENTS.md:290`).
 - Prefer the real implementation. Mock only the expensive or nondeterministic
   boundary: the virtual clock (`src/util/clock.zig:25`, used at
-  `src/server/scenarios.zig:194`), the RNG, or the socket. The harness gives a
+  `src/server/scenarios.zig:182`), the RNG, or the socket. The harness gives a
   peer a fabricated address instead of opening one
   (`src/server/game/harness.zig:46`).
 - Instrument new hot-path cost with `apm` sections or counters rather than

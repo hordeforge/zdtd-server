@@ -29,10 +29,10 @@ Ranks are relative exploitability × blast radius for a typical LAN/public dedi,
 | TCP GameServerInfo (`ServerPort`) | on when `--port` ≠ 0 | `INADDR_ANY` | none (stock browser/list text) | `src/server/serverinfo_tcp.zig:173` |
 | UDP LiteNet (`ServerPort+2`) | on with info port | UDP bind of chosen port | `ServerPassword` as LiteNet connect key; empty = open | `src/litenet/server.zig:84`, `src/litenet/packet.zig:147` |
 | TCP admin / telnet | off (`--admin-port` / TelnetPort 0) | loopback if password empty; `0.0.0.0` if password set | line password when set; else any line on loopback | `src/server/admin.zig:79` |
-| HTTP webui | off (`--webui-port` 0) | loopback only | shared secret required to listen; HMAC session cookie | `src/server/webui.zig:260` |
-| HTTP MCP | off (`--mcp-port` 0) | loopback only | Bearer/token when configured; empty token = loopback anonymous | `src/server/mcp_transport.zig:75` |
+| HTTP webui | off (`--webui-port` 0) | loopback only | shared secret required to listen; HMAC session cookie | `src/server/webui.zig:267` |
+| HTTP MCP | off (`--mcp-port` 0) | loopback only | Bearer/token when configured; empty token = loopback anonymous | `src/server/mcp_transport.zig:76` |
 
-CLI and env that arm the surface: `src/main.zig:28` (usage text), flag parse from `src/main.zig:372`, webui secret env preference `src/main.zig:620`, MCP token env preference `src/main.zig:633`, loopback enforcement `src/main.zig:661` / `src/main.zig:691`.
+CLI and env that arm the surface: `src/main.zig:30` (usage text), flag parse from `src/main.zig:374`, webui secret env preference `src/main.zig:620`, MCP token env preference `src/main.zig:633`, loopback enforcement `src/main.zig:661` / `src/main.zig:691`.
 
 ### Other inputs
 
@@ -43,12 +43,12 @@ CLI and env that arm the surface: `src/main.zig:28` (usage text), flag parse fro
 | World save overlays (`.zch`, player, TE stores) | operator-trusted; must still length-check | `src/server/persist.zig`, `src/world/` |
 | Stock `game-dir` + `Mods/` XML / assetbundles | operator-supplied data; XPath patches applied | `src/assets/`, modlet load path |
 | Wasm modules under `plugins/` / `mods/` | operator-selected code in sandbox | `src/plugin/wasm.zig:1` |
-| CLI argv / env (`ZDTD_WEBUI_SECRET`, `ZDTD_MCP_TOKEN`, passwords) | secrets enter here; never log values | `src/main.zig:1091` |
+| CLI argv / env (`ZDTD_WEBUI_SECRET`, `ZDTD_MCP_TOKEN`, passwords) | secrets enter here; never log values | `src/main.zig:1092` |
 
 ### Surfaces listed nowhere else as security-critical
 
 - **Join IP throttle** (500 ms class, loopback exempt): `src/litenet/server.zig:18`.
-- **Webui login lockout** after failed POSTs: `src/server/webui.zig:45`.
+- **Webui login lockout** after failed POSTs: `src/server/webui.zig:46`.
 - **Admin failed-login lockout** (process-wide): `src/server/admin.zig:69`.
 - **Plugin fuel/memory budgets**: `src/plugin/wasm.zig:72`.
 
@@ -76,7 +76,7 @@ No separate debug HTTP port or metrics scrape listener exists beyond webui/APM d
 
 **Crosses:** console lines and HTTP that reach `runAdminLine` / MCP frame handler.
 
-**Must authenticate:** admin password or webui secret/session; MCP token when set. Webui refuses to listen without a secret (`src/server/webui.zig:262`). Admin without password warns and binds loopback only (`src/main.zig:1066`, `src/server/admin.zig:81`).
+**Must authenticate:** admin password or webui secret/session; MCP token when set. Webui refuses to listen without a secret (`src/server/webui.zig:269`). Admin without password warns and binds loopback only (`src/main.zig:1067`, `src/server/admin.zig:81`).
 
 **Privilege transition:** authenticated operator runs the full admin verb surface (kick, ban, give, shutdown, plugin reload, …). Treat possession of the secret/password/token as root on the game process.
 
@@ -92,10 +92,10 @@ No separate debug HTTP port or metrics scrape listener exists beyond webui/APM d
 
 | Secret | Enters | Lives | Leaves |
 |---|---|---|---|
-| ServerPassword | config / init options | `litenet.Server.server_password` slice | never logged as value (`src/main.zig:1091` prints `set`/`open`) |
+| ServerPassword | config / init options | `litenet.Server.server_password` slice | never logged as value (`src/main.zig:1092` prints `set`/`open`) |
 | TelnetPassword | config | `admin.Auth.password` | compared constant-time (`src/server/admin.zig:32`) |
-| Webui secret | CLI or `ZDTD_WEBUI_SECRET` | `webui` secret buffer; session is HMAC, not raw secret | cookie carries session token only (`src/server/webui.zig:200`) |
-| MCP token | CLI or `ZDTD_MCP_TOKEN` | transport token buffer; zeroed on deinit | Bearer header compare (`src/server/mcp_transport.zig:396`) |
+| Webui secret | CLI or `ZDTD_WEBUI_SECRET` | `webui` secret buffer; session is HMAC, not raw secret | cookie carries session token only (`src/server/webui.zig:207`) |
+| MCP token | CLI or `ZDTD_MCP_TOKEN` | transport token buffer; zeroed on deinit | Bearer header compare (`src/server/mcp_transport.zig:397`) |
 
 CLI `--webui-secret` / `--mcp-token` are warned as visible in process listings (`src/main.zig:627`, `:640`). No in-repo rotation protocol beyond restart with a new value.
 
@@ -132,7 +132,7 @@ PII is limited to player display names and platform ids handled for admin lists;
 
 ### Operator surfaces
 
-- **Spoofing / elevation:** stolen webui cookie or telnet password. Mitigations: session expiry (`src/server/webui.zig:52`); login lockouts; CSRF on mutating webui POSTs ([WEBUI.md](WEBUI.md)). Gap: single shared webui session model (one browser session token space per process).
+- **Spoofing / elevation:** stolen webui cookie or telnet password. Mitigations: session expiry (`src/server/webui.zig:53`); login lockouts; CSRF on mutating webui POSTs ([WEBUI.md](WEBUI.md)). Gap: single shared webui session model (one browser session token space per process).
 - **Disclosure:** `--webui-secret` on argv; admin greeting fields must not inject CR/LF (`src/server/admin.zig` telnetSafe path documented in [subsystems/admin.md](subsystems/admin.md)).
 
 ### Plugin guest → host
@@ -153,8 +153,8 @@ PII is limited to player display names and platform ids handled for admin lists;
 | Phase gate | pre-auth play packages | `src/server/phase_gate.zig:58` |
 | C2S hard checks + authority mode | grief, illegal state | [AUTHORITY.md](AUTHORITY.md), `src/server/c2s/` |
 | Admin bind rule + password + lockout | remote console takeover | `src/server/admin.zig:79` |
-| Webui loopback + secret + CSRF + lockout | remote ops UI takeover | `src/server/webui.zig:260` |
-| MCP loopback + frame caps + token | remote tool exec | `src/server/mcp_transport.zig:24`, `:75` |
+| Webui loopback + secret + CSRF + lockout | remote ops UI takeover | `src/server/webui.zig:267` |
+| MCP loopback + frame caps + token | remote tool exec | `src/server/mcp_transport.zig:25`, `:75` |
 | Wasm fuel/memory + effect withdraw | runaway / sticky plugin effects | `src/plugin/wasm.zig:72` |
 | Constant-time secret compare | timing oracle on passwords | `src/util/secret.zig` (via admin/webui/MCP/LiteNet) |
 
@@ -166,7 +166,7 @@ PII is limited to player display names and platform ids handled for admin lists;
 
 ### Documentation vs code
 
-Claims in [WEBUI.md](WEBUI.md) (loopback-only bind, secret required) match `src/server/webui.zig:262` and `src/main.zig:661`. Do not assume TLS inside zdtd: plain HTTP on loopback only; reverse proxy is operator-side.
+Claims in [WEBUI.md](WEBUI.md) (loopback-only bind, secret required) match `src/server/webui.zig:269` and `src/main.zig:661`. Do not assume TLS inside zdtd: plain HTTP on loopback only; reverse proxy is operator-side.
 
 ## Abuse cases (authenticated hostile player)
 
@@ -180,7 +180,7 @@ Client-side UI restrictions are not a control boundary; only server checks count
 
 ## Response readiness (notes only)
 
-- Webui keeps a small in-memory audit ring for operator commands (`src/server/webui.zig:251`); this is not a durable SIEM trail.
+- Webui keeps a small in-memory audit ring for operator commands (`src/server/webui.zig:258`); this is not a durable SIEM trail.
 - Guard/evidence rings support anti-cheat investigation ([AUTHORITY.md](AUTHORITY.md)); they are not a substitute for host auth logs.
 - Vulnerability → fix → ship path for versions is described in [RELEASES.md](RELEASES.md) and [../SECURITY.md](../SECURITY.md). No separate in-repo IR runbook.
 

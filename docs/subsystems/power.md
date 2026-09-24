@@ -105,7 +105,7 @@ pub const Registry = struct {
     n: usize = 0,
 ```
 
-Three values that stock block data does not pin live in the rules rather than in the registry: the battery capacity fallback scale, the initial charge fraction, and the trigger pulse duration (`src/ecs/rules.zig:768`). They are merged from `[rules.power]` and copied onto the registry and the grid at init (`src/server/game/init_assets.zig:820`). Chunk load scans the block plane for powered blocks, adds a node per cell, applies the resolved properties and then drains pending edges and pending player state before resolving once (`src/server/game/chunk_fill.zig:229`, `:254`). Placing a powered block, or a block landing through a placement or downgrade, runs the same registration (`src/server/c2s/inv_txn.zig:203`, `src/server/game/world.zig:388`).
+Three values that stock block data does not pin live in the rules rather than in the registry: the battery capacity fallback scale, the initial charge fraction, and the trigger pulse duration (`src/ecs/rules.zig:768`). They are merged from `[rules.power]` and copied onto the registry and the grid at init (`src/server/game/init_assets.zig:829`). Chunk load scans the block plane for powered blocks, adds a node per cell, applies the resolved properties and then drains pending edges and pending player state before resolving once (`src/server/game/chunk_fill.zig:229`, `:254`). Placing a powered block, or a block landing through a placement or downgrade, runs the same registration (`src/server/c2s/inv_txn.zig:203`, `src/server/game/world.zig:388`).
 
 ## The tile-entity and wire packages
 
@@ -144,7 +144,7 @@ The grid layout is not saved; it is rebuilt from the block plane when a chunk is
         try w.writeI32(n.target_type);
 ```
 
-On load, an edge whose endpoints have not come back yet queues as a pending wire and `reconnectPending` promotes it after each chunk power scan; node state queues the same way and `applyPendingState` clamps a restored fuel value to the current capacity, because a game-data change can lower it below what the save recorded (`src/ecs/electric.zig:202`, `:238`). The switch latch is deliberately absent from the save: it already rides the block meta, which the block plane persists (`src/ecs/electric.zig:129`). The trigger delay and duration defaults (instant, Triggered) and the pulse duration are the only values that cannot be recovered from block data, and they are the reason the node record exists at all (`src/server/persist.zig:646`).
+On load, an edge whose endpoints have not come back yet queues as a pending wire and `reconnectPending` promotes it after each chunk power scan; node state queues the same way and `applyPendingState` clamps a restored fuel value to the current capacity, because a game-data change can lower it below what the save recorded (`src/ecs/electric.zig:202`, `:238`). The switch latch is deliberately absent from the save: it already rides the block meta, which the block plane persists (`src/ecs/electric.zig:129`). The trigger delay and duration defaults (instant, Triggered) and the pulse duration are the only values that cannot be recovered from block data, and they are the reason the node record exists at all (`src/server/persist.zig:647`).
 
 ## See also
 

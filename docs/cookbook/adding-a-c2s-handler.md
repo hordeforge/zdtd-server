@@ -166,10 +166,10 @@ finished handler.
 Extend `src/server/scenarios.zig`; do not build a second harness. Attach a
 joined client whose capture records every send, inject the framed package, and
 assert both the effect and the rejection path. The package is framed by name,
-so the test also exercises the negotiated id (`src/server/scenarios.zig:1441`).
+so the test also exercises the negotiated id (`src/server/scenarios.zig:1341`).
 
 Assert the trust boundary explicitly by counting the reject before and after a
-spoofed send (`src/server/scenarios.zig:1396`):
+spoofed send (`src/server/scenarios.zig:1301`):
 
 ```zig
     const own_before = g.harness.counters.get(.ownership_rejects);
@@ -179,7 +179,7 @@ spoofed send (`src/server/scenarios.zig:1396`):
 ```
 
 Assert the fanout with the capture, which is also how the no-self-echo rule is
-pinned (`src/server/scenarios.zig:1386`):
+pinned (`src/server/scenarios.zig:1291`):
 
 ```zig
     const ws_id = packages.idOf("NetPackageWaterSet").?;

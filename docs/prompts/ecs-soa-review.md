@@ -331,7 +331,7 @@ filters). Update `docs/ECS_SYSTEMS.md` / STATUS only if ownership surface change
 - `systems.tickAll` owns AI/vehicles/turrets/director; Game broadcasts results
 - C2S: validate → system → encode S2C from ECS/world result
 - `query.forEachKind(.zombie, …)` for dense scans
-- `pushCommand` / `drainCommands` for mid-tick spawn/despawn
+- `commands.push` / `drainCommands` for mid-tick spawn/despawn
 - PowerGrid as resource; block place registers node by pos
 - Containers by `PosKey` in world store; open bag uses net id only for loot entities
 
@@ -341,7 +341,7 @@ filters). Update `docs/ECS_SYSTEMS.md` / STATUS only if ownership surface change
 
 ```bash
 # layout + system entrypoints
-rg -n "pub fn tickAll|forEach|pushCommand|spawnZombie|mask\\[" src/ecs/
+rg -n "pub fn tickAll|forEach|commands.push|spawnZombie|mask\\[" src/ecs/
 
 # stranded mutation in wire (code hits are findings; doc-comment hits are fine)
 rg -n "sim\\.|world\\.|health\\[|inventory\\[" src/wire/ --glob '*.zig'

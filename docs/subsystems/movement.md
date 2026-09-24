@@ -228,7 +228,7 @@ producers of transforms here. The tick contributes three fan-outs: motion replic
 where `replicate` returns early unless the tick is a `motion_replicate_period_ticks`
 multiple and then sends `NetPackageEntityPosAndRot` from the sim transform, with the
 owner's own peer slot excluded from the viewer mask so there is no self-echo
-(`src/server/game/replicate.zig:63`, `src/server/game/replicate.zig:216-239`); vehicle
+(`src/server/game/replicate.zig:64`, `src/server/game/replicate.zig:216-239`); vehicle
 positions every `vehicle_pos_send_ticks` (default 5), skipped while guard load shedding is
 open (`src/server/game/step.zig:406`, `src/server/game/vehicle.zig:99-119`,
 `src/server/game/types.zig:85-88`); and the sprint lapse, where `sprint_stale_cd` expiry

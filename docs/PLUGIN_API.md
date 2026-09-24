@@ -150,8 +150,8 @@ instance's linear memory is reachable. That is exactly the bare, capability-gate
 import table this design wants.
 
 **Verified 2026-08-06** against zwasm 2.4.1 under Zig 0.16, not assumed from the
-documentation: a typed export call returns the right value, `fuelRemaining()`
-reports the budget, and a module compiled from `(loop br 0)` stops with
+documentation: a typed export call returns the right value, and a module
+compiled from `(loop br 0)` stops with
 `error.OutOfFuel` rather than hanging the caller.
 
 **WASI: not used.** The import table is deliberately small so it can be audited.

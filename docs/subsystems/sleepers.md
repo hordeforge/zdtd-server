@@ -157,7 +157,7 @@ setting is zero (`src/server/game/sleeper.zig:250-282`).
 
 Volume work is 2 Hz side-work, not per-tick. `sleeper_tick_ticks` defaults to 10, which is once per
 half second at 20 TPS, and the same modulo drives airdrops, zombie block damage, workstations and the
-block radius effects (`src/server/game/types.zig:89`, `src/server/game/types.zig:362-365`,
+block radius effects (`src/server/game/types.zig:90`, `src/server/game/types.zig:362-365`,
 `src/server/game/step.zig:249-264`). The workstation step receives the elapsed time for the whole
 window rather than a single tick (`src/server/game/step.zig:255`).
 

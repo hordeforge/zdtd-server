@@ -128,10 +128,10 @@ Build into a caller buffer, then send by name
 ```
 
 Small bodies use a stack buffer at the call site, as above. Larger ones use the
-preallocated `Game` buffers (`send_buf` at `src/server/game.zig:456`, `body_buf`
-at `src/server/game.zig:457`) rather than allocating on the tick path.
+preallocated `Game` buffers (`send_buf` at `src/server/game.zig:455`, `body_buf`
+at `src/server/game.zig:455`) rather than allocating on the tick path.
 `sendGame` takes the package name, not an id, so the send site never touches a
-numeric id (`src/server/game/net.zig:95`). For more than one recipient use the
+numeric id (`src/server/game/net.zig:98`). For more than one recipient use the
 interest helpers in `src/server/game/net.zig` and obey the no-self-echo rule
 (AGENTS rule 19).
 
@@ -206,7 +206,7 @@ that the send site is reached.
 Second, extend `src/server/scenarios.zig` so the shape is observed on the wire
 at the advertised id. The pattern attaches a joined client whose capture records
 every send, then finds the frame by id and parses the body
-(`src/server/scenarios.zig:1386`):
+(`src/server/scenarios.zig:1291`):
 
 ```zig
     const ws_id = packages.idOf("NetPackageWaterSet").?;

@@ -104,7 +104,7 @@ itself (`src/world/stability.zig:350-365`). After the chain is consumed, the aff
 relaxed to a fixpoint, and a lowered cell propagates to its own neighbours so a second-order loss is
 not missed (`src/world/stability.zig:369-413`). The walk uses fixed stack arrays, so a removal never
 allocates, and it stops at the named caps rather than growing (`src/world/stability.zig:280-290`,
-`src/world/stability.zig:324`).
+`src/world/stability.zig:325`).
 
 `placeBlockAt` is the mirror and the cheap path (`src/world/stability.zig:417-438`):
 

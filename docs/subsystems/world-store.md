@@ -33,7 +33,7 @@ pub const Chunk = struct {
 
 `terrain` points at `World.terrain_ids`, so the heightmap fallback in `rawAt` synthesizes live AssignIds terrain rather than module pins (`src/world/store.zig:408-418`). `topsoil` is the stock `m_bTopSoilBroken` bitfield, one bit per XZ column (`src/world/store.zig:112-119`); it is set, never cleared, by `setTopSoilBroken` (`src/world/store.zig:307-311`) including the 1-wide neighbour-chunk pass (`markTopSoilBroken`, `src/world/store.zig:1071-1083`).
 
-`World.chunks` is a pointer-stable map of `*Chunk`, so a `*Chunk` held across a re-entrant `getOrCreate` survives a map resize; chunks are freed only on eviction or `deinit` (`src/world/store.zig:530-537`). Residency is capped at `max_resident_chunks = 4096` (`src/world/store.zig:825`); `evictOneChunk` picks the coldest `last_touch` (minimum key on ties, never HashMap order, so DST replay is stable), saves it, then frees it (`src/world/store.zig:827-857`). The `World` fields that matter here (`src/world/store.zig:529`, trimmed):
+`World.chunks` is a pointer-stable map of `*Chunk`, so a `*Chunk` held across a re-entrant `getOrCreate` survives a map resize; chunks are freed only on eviction or `deinit` (`src/world/store.zig:530-537`). Residency is capped at `max_resident_chunks = 4096` (`src/world/store.zig:825`); `evictOneChunk` picks the coldest `last_touch` (minimum key on ties, never HashMap order, so DST replay is stable), saves it, then frees it (`src/world/store.zig:827-857`). The `World` fields that matter here (`src/world/store.zig:825`, trimmed):
 
 ```zig
 pub const World = struct {
@@ -119,7 +119,7 @@ The queue is bounded by 512 entries and 64 MiB (`src/world/chunk_flush.zig:32-34
 
 Each TE store is a fixed-capacity array of records plus a `used` flag array, keyed by world position. Containers and signs additionally keep a compact `keys` mirror so `get` scans a few KiB instead of striding roughly 500-byte records (`src/world/containers.zig:104-115`; `src/world/signs.zig:38-60`). Positions are absolute world coordinates including Y, so a container in a cave and one on the surface at the same X/Z are distinct entries.
 
-The container record (`src/world/containers.zig:28`, doc comments trimmed):
+The container record (`src/world/containers.zig:29`, doc comments trimmed):
 
 ```zig
 pub const Container = struct {
@@ -136,9 +136,9 @@ pub const Container = struct {
     loot_list: []const u8 = "",
 ```
 
-`inv_guid` is deterministic from the position rather than a random GUID, so a client-issued inventory key resolves back to the same container across restarts (`guidFromPos`/`posFromGuid`, `src/world/containers.zig:66-88`); it is the key the C2S inventory path resolves (`src/server/c2s/inv_txn.zig:253`). The table holds 4096 containers (`src/world/containers.zig:14`). When it fills, `getOrCreate` evicts a world container (`player_storage == false`), which regenerates from the next chunk scan, and refuses to evict a player-placed one (`src/world/containers.zig:133-163`). Persisted to `containers.zct` as ZCT3 (full InvSlot stride); ZCT1/ZCT2 still load (`src/world/containers.zig:187-205,269-340`).
+`inv_guid` is deterministic from the position rather than a random GUID, so a client-issued inventory key resolves back to the same container across restarts (`guidFromPos`/`posFromGuid`, `src/world/containers.zig:66-88`); it is the key the C2S inventory path resolves (`src/server/c2s/inv_txn.zig:253`). The table holds 4096 containers (`src/world/containers.zig:15`). When it fills, `getOrCreate` evicts a world container (`player_storage == false`), which regenerates from the next chunk scan, and refuses to evict a player-placed one (`src/world/containers.zig:133-163`). Persisted to `containers.zct` as ZCT3 (full InvSlot stride); ZCT1/ZCT2 still load (`src/world/containers.zig:187-205,269-340`).
 
-The other stores are keyed the same way: signs and vending reuse `containers.PosKey`, lights and workstations carry plain `x`/`y`/`z` fields (`src/world/signs.zig:19`; `src/world/vending.zig:17`; `src/world/light_te.zig:18-22`; `src/world/workstations.zig:249-252`). Their record declarations are quoted verbatim below, with unrelated comments and blank lines trimmed. Signs (`src/world/signs.zig:29`):
+The other stores are keyed the same way: signs and vending reuse `containers.PosKey`, lights and workstations carry plain `x`/`y`/`z` fields (`src/world/signs.zig:20`; `src/world/vending.zig:18`; `src/world/light_te.zig:18-22`; `src/world/workstations.zig:249-252`). Their record declarations are quoted verbatim below, with unrelated comments and blank lines trimmed. Signs (`src/world/signs.zig:20`):
 
 ```zig
 pub const Sign = struct {
@@ -149,7 +149,7 @@ pub const Sign = struct {
 };
 ```
 
-Vending (`src/world/vending.zig:64`):
+Vending (`src/world/vending.zig:66`):
 
 ```zig
 pub const Vending = struct {
@@ -192,7 +192,7 @@ pub const Light = struct {
 
 Signs store the applied composite TE body verbatim, handle included, and replay it patched to the unsolicited `255`; the body is not re-encoded from parsed fields (`src/world/signs.zig:8-13`). The budget is 512 bytes per body and 256 signs, with an over-long body or a full table dropping the record while the edit still echoes (`src/world/signs.zig:24-25,62-91`). Persisted to `signs.zsg` (magic ZSG1, `src/world/signs.zig:122-127`). Vending holds 128 machines, 48 stock entries and 8 allowed users each, and persists to `vending.zvn` (magic ZVNM, `src/world/vending.zig:11-15,159,196`). Lights hold 2048 entries (`src/world/light_te.zig:16`).
 
-Workstations are the largest record: four 12-slot item groups (fuel, input, tools, output), the display-only `last_input` blob, a 4-deep craft queue, a craft-complete list, per-slot melt timers, and the on-wire array lengths (`src/world/workstations.zig:249-291`). Key fields (`src/world/workstations.zig:249`, trimmed):
+Workstations are the largest record: four 12-slot item groups (fuel, input, tools, output), the display-only `last_input` blob, a 4-deep craft queue, a craft-complete list, per-slot melt timers, and the on-wire array lengths (`src/world/workstations.zig:249-291`). Key fields (`src/world/workstations.zig:250`, trimmed):
 
 ```zig
 pub const Workstation = struct {

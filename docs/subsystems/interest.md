@@ -26,7 +26,7 @@ floor-divided by `cell_size`, which is 32 blocks (`src/ecs/interest.zig:9`).
 The floor, not a truncating cast, matters: "Floor the division, not the
 coordinate: truncating first puts every position in (-cell_size, 0) into cell 0
 and skews range around the origin" (`src/ecs/interest.zig:17`). Per-client range
-is carried in grid cells (`Client.view_radius`, `src/server/game/types.zig:628`),
+is carried in grid cells (`Client.view_radius`, `src/server/game/types.zig:634`),
 so `default_view_radius = 7` (`src/server/game/types.zig:177`) is a 15-by-15
 cell square centred on the player. The observer set is one word, one bit per
 client slot, produced by vector comparison rather than a client loop:
@@ -83,15 +83,15 @@ stock: "This is stock's per-entity `trackedPlayers` set computed on the fly
 (NetEntityDistributionEntry::SendToPlayers, asm.il:800867)"
 (`src/ecs/interest.zig:60`). The per-client inputs are filled once per motion
 pass
-(`src/server/game/replicate.zig:83`): `obs_r[ci]` from `cl.view_radius`, cells
+(`src/server/game/replicate.zig:85`): `obs_r[ci]` from `cl.view_radius`, cells
 from the player transform via `self.sim.slotOfNetId(cl.entity_id)`
-(`src/server/game/replicate.zig:87`), and `active` from clients that are
-`joined and entered and peer != null` (`src/server/game/replicate.zig:85`).
+(`src/server/game/replicate.zig:89`), and `active` from clients that are
+`joined and entered and peer != null` (`src/server/game/replicate.zig:86`).
 Inactive lanes are masked off, so their cell and radius entries need not be
 meaningful. Tile-entity broadcasts use a separate
 `interest_range: f32 = default_interest_range` of 160 blocks
 (`src/server/game/types.zig:99`), compared as squared world distance by
-`broadcastNear` (`src/server/game/net.zig:288`, `src/server/game/net.zig:305`).
+`broadcastNear` (`src/server/game/net.zig:289`, `src/server/game/net.zig:306`).
 
 ## Dirty bits: what makes an entity a candidate
 The grid is derived per entity from current positions, so nothing rebuilds when
@@ -139,7 +139,7 @@ set types. `alive_bits` is a `std.StaticBitSet(max_entities)` mirroring
 of probing every slot" (`src/ecs/world.zig:383`). `dirty_bits` is an
 `AtomicBits` over the same slot range, wrapping `std.atomic.Value(u64)` words
 so parallel workers cannot tear a word shared by adjacent ranges
-(`src/ecs/world.zig:52`). Those two helpers exist for the two candidate-set
+(`src/ecs/world.zig:53`). Those two helpers exist for the two candidate-set
 constructions in `replicate()` (`src/ecs/world.zig:94`,
 `src/ecs/world.zig:100`). Clearing is split by consumer: the motion pass clears
 pos, rot and flags (`src/ecs/interest.zig:48`) and deliberately leaves hp set,
@@ -149,13 +149,13 @@ because the health pass runs after it (comment and test at
 ## The per-tick replicate pass
 `replicate()` runs once per tick from `step()` (`src/server/game/step.zig:522`),
 in this order: resend pending reliable data per peer
-(`src/server/game/replicate.zig:23`); drain each client's pending spawn area
-against one shared budget (`src/server/game/replicate.zig:32`); run the chunk
+(`src/server/game/replicate.zig:25`); drain each client's pending spawn area
+against one shared budget (`src/server/game/replicate.zig:35`); run the chunk
 view stream every `chunk_stream_period_ticks` for entered clients
-(`src/server/game/replicate.zig:47`); replicate health
-(`src/server/game/replicate.zig:62`); then bail if this is not a motion tick
-(`src/server/game/replicate.zig:63`) or the sim is empty
-(`src/server/game/replicate.zig:67`). Candidate selection is the heartbeat
+(`src/server/game/replicate.zig:48`); replicate health
+(`src/server/game/replicate.zig:64`); then bail if this is not a motion tick
+(`src/server/game/replicate.zig:64`) or the sim is empty
+(`src/server/game/replicate.zig:69`). Candidate selection is the heartbeat
 split (src/server/game/replicate.zig:96):
 ```zig
     var candidates: ecs.world.AtomicBits = .initEmpty();
@@ -180,11 +180,11 @@ one cell and runs one vector mask query over `max_clients` lanes, then walks
 only the set bits. The per-client arrays are rebuilt once per motion pass with
 one `slotOfNetId` lookup each. Nothing allocates or grows on this path; the
 frame scratch is five stack buffers of `replicate_frame_cap = 256` bytes, and
-the bot pass adds one more (`src/server/game/replicate.zig:72`,
-`src/server/game/replicate.zig:360`, `src/server/game/types.zig:181`). Cadence
+the bot pass adds one more (`src/server/game/replicate.zig:73`,
+`src/server/game/replicate.zig:362`, `src/server/game/types.zig:181`). Cadence
 defaults are `motion_replicate_period_ticks = 2`
 (`src/server/game/types.zig:80`) and `pos_heartbeat_period_ticks = 5`
-(`src/server/game/types.zig:83`), so at 20 TPS the full-entity sweep lands once
+(`src/server/game/types.zig:84`), so at 20 TPS the full-entity sweep lands once
 per 250 ms and motion content is rebuilt every 100 ms.
 
 ## No self-echo and the fan-out
@@ -199,50 +199,50 @@ player entities only (src/server/game/replicate.zig:218):
 
 `bitOfPeerSlot` returns 0 for an out-of-range slot, so a malformed peer slot
 degrades to no exclusion rather than an out-of-bounds shift
-(`src/server/game.zig:133`). An empty viewer set counts
-`replicate_encodes_skipped` and continues (`src/server/game/replicate.zig:222`).
+(`src/server/game.zig:138`). An empty viewer set counts
+`replicate_encodes_skipped` and continues (`src/server/game/replicate.zig:223`).
 
 Everything shareable is encoded once, then copied per peer. The PosAndRot body
 is built into `self.body_buf` and framed into a stack buffer
-(`src/server/game/replicate.zig:228`, `src/server/game/replicate.zig:239`);
+(`src/server/game/replicate.zig:230`, `src/server/game/replicate.zig:240`);
 zombies and animals add entity speeds, alive flags and a delta-gated velocity
-frame (`src/server/game/replicate.zig:261`); turrets add a change-gated
-TurretSync frame (`src/server/game/replicate.zig:303`). The fan-out walks the
+frame (`src/server/game/replicate.zig:263`); turrets add a change-gated
+TurretSync frame (`src/server/game/replicate.zig:305`). The fan-out walks the
 viewer word: position and speeds go unreliable, alive flags go droppable, turret
-sync goes reliable (`src/server/game/replicate.zig:325`,
-`src/server/game/replicate.zig:329`). The pass then replays the dirty set,
+sync goes reliable (`src/server/game/replicate.zig:326`,
+`src/server/game/replicate.zig:331`). The pass then replays the dirty set,
 clearing motion bits one `clearAfterReplicate` plus `syncDirtyBit` per set bit
-(`src/server/game/replicate.zig:336`), reconciles dead entities
-(`src/server/game/replicate.zig:342`), and runs bot replication between the two
-(`src/server/game/replicate.zig:334`). The counters prove fan-out ratio and
+(`src/server/game/replicate.zig:338`), reconciles dead entities
+(`src/server/game/replicate.zig:343`), and runs bot replication between the two
+(`src/server/game/replicate.zig:336`). The counters prove fan-out ratio and
 skipped encodes inside zdtd; they are not evidence that a stock client accepts
 the bytes.
 
 ## Spawn, knowledge, and range-remove
 Only moving kinds spawn on approach: `is_mob` covers zombie, animal, trader and
-falling block (`src/server/game/replicate.zig:118`). For those, the in-range
+falling block (`src/server/game/replicate.zig:120`). For those, the in-range
 mask is filtered to viewers that have not received an EntitySpawn for the slot,
-using the per-client `known_entities` bitset (`src/server/game/replicate.zig:127`),
-which is indexed by ECS slot, not network id (`src/server/game/types.zig:665`).
+using the per-client `known_entities` bitset (`src/server/game/replicate.zig:128`),
+which is indexed by ECS slot, not network id (`src/server/game/types.zig:671`).
 The spawn body is built once, then sent to every bit in `spawn_mask` while the
-knowledge bit is set (`src/server/game/replicate.zig:180`,
-`src/server/game/replicate.zig:186`).
+knowledge bit is set (`src/server/game/replicate.zig:182`,
+`src/server/game/replicate.zig:187`).
 
 Removal mirrors it: for a known mob, any client now outside
 `cellsInRange(... cl.view_radius)` gets `NetPackageEntityRemove` with reason
-`.unloaded` and loses the knowledge bit (`src/server/game/replicate.zig:196`,
-`src/server/game/replicate.zig:201`). Dead knowledge is reconciled lazily, and
+`.unloaded` and loses the knowledge bit (`src/server/game/replicate.zig:197`,
+`src/server/game/replicate.zig:203`). Dead knowledge is reconciled lazily, and
 only when a slot was freed this tick, as a word-wise intersection of
 `known_entities` with `alive_bits` (`src/server/game/world_tick.zig:333`,
 `src/server/game/world_tick.zig:338`).
 
 Host-side bots are not ECS slots and carry their own `known_bots` bitset, "bit
-index = bot slot" (`src/server/game/types.zig:670`), max 16
+index = bot slot" (`src/server/game/types.zig:682`), max 16
 (`src/server/game/bot.zig:17`). They reuse the observer arrays computed for
-entities (`src/server/game/replicate.zig:388`), spawn with the player-mesh class
+entities (`src/server/game/replicate.zig:389`), spawn with the player-mesh class
 plus a name because "The player-mesh class REQUIRES a player spawn info body"
-(`src/server/game/replicate.zig:405`), and are cleaned only in that pass, never
-in the ECS reconcile (`src/server/game/replicate.zig:349`). No stealth, hidden,
+(`src/server/game/replicate.zig:407`), and are cleaned only in that pass, never
+in the ECS reconcile (`src/server/game/replicate.zig:351`). No stealth, hidden,
 or per-peer visibility gate exists in this path. Stealth is a sim phase
 (`systemStealth` runs before AI, `docs/ARCHITECTURE.md:408`), but nothing in
 `interest.zig` or `replicate.zig` reads a stealth or hidden value: the filters
@@ -250,7 +250,7 @@ are cell range, the active mask, and mob knowledge.
 
 ## Health and tile entities
 The health pass runs every tick before the motion cadence check
-(`src/server/game/replicate.zig:62`) and walks `dirty_bits` rather than all
+(`src/server/game/replicate.zig:64`) and walks `dirty_bits` rather than all
 slots: "this runs every tick and only an hp-dirty entity can have an update"
 (`src/server/game/replicate_health.zig:15`). It snapshots the set first because
 "the body destroys and re-marks entities on the death path while it walks"
@@ -267,7 +267,7 @@ reads sim and world state and writes package bodies; nothing here mutates the
 sim" (`src/server/game/replicate_te.zig:9`). Dirty workstations run on the
 workstation tick, not the replicate tick:
 `tickWorkstations` ends by calling `broadcastDirtyWorkstations`
-(`src/server/game/craft.zig:634`), which encodes each dirty station once and
+(`src/server/game/craft.zig:636`), which encodes each dirty station once and
 broadcasts at `interest_range` as `NetPackageTileEntity`
 (`src/server/game/replicate_te.zig:86`). A station whose client-declared array
 lengths are unknown is skipped and cleared rather than guessed, because "a
@@ -284,25 +284,25 @@ approximation: stock notifies the machine's listeners, zdtd uses "the view-radiu
 interest set - a superset of the open windows"
 (`src/server/game/replicate_te.zig:430`). Newly streamed chunks push all four TE kinds
 for that chunk, storage and signs and vending and lights, then workstations
-(`src/server/game/chunk_stream.zig:47`, `src/server/game/chunk_stream.zig:55`,
-`src/server/game/chunk_stream.zig:62`, `src/server/game/chunk_stream.zig:69`).
+(`src/server/game/chunk_stream.zig:49`, `src/server/game/chunk_stream.zig:57`,
+`src/server/game/chunk_stream.zig:64`, `src/server/game/chunk_stream.zig:71`).
 Those sends ride `sendGame` or `broadcastNear`, so they use the reliable pump
 and its window-drop rules rather than a per-tick cap.
 
 ## Per-tick caps
 `chunk_adds_per_stream_tick = 8` is a shared drain budget across all clients per
-tick (`src/server/game/types.zig:67`, `src/server/game/replicate.zig:32`), which
+tick (`src/server/game/types.zig:67`, `src/server/game/replicate.zig:35`), which
 is what stops concurrent joins from stacking chunk bodies in one tick;
 `chunk_stream_period_ticks = 5` paces the view stream
 (`src/server/game/types.zig:79`); `replicate_frame_cap = 256` bounds each
 serialize-once frame scratch (`src/server/game/types.zig:181`);
 `max_streamed_chunks_cap` bounds the per-client streamed-key set
-(`src/server/game/types.zig:632`); `max_entities = 512` bounds candidates
+(`src/server/game/types.zig:644`); `max_entities = 512` bounds candidates
 (`src/ecs/entity.zig:3`). Entity spawn fan-out has no per-tick counter cap; it
 is bounded by the 512-slot table times 64 clients. The reliable pump retry
 budget is `window_retry_budget_ns = 16_000_000`
 (`src/server/game/types.zig:166`), and a droppable package turns `WindowFull`
-into a silent drop (`src/server/game/net.zig:66`). A broadcast shares one such
+into a silent drop (`src/server/game/net.zig:67`). A broadcast shares one such
 window across its whole fan-out (`fanoutBudgetRemaining` in
 `src/server/game/net.zig`), so N wedged peers cost 16 ms total rather than
 N x 16 ms; peers reached after the window still get one send attempt, only the

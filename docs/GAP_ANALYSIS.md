@@ -295,7 +295,7 @@ area and the concrete work.
    `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
    runtime `AssignIds` range; it is not. 203350 of 952260 painted cells (21.4%)
    over a 120-POI sample are the wrong block, live-confirmed on the client
-   (`src/world/prefabs.zig:222`, stock does it at `Prefab::loadIdMapping`,
+   (`src/world/prefabs.zig:224`, stock does it at `Prefab::loadIdMapping`,
    asm.il:928850).
 
 4. **DONE 2026-08-06.** POIs: rotation direction and `YOffset`.
@@ -304,7 +304,7 @@ area and the concrete work.
    `Prefab::offsetToCoordRotated` asm.il:915424). Separately, `paintDecoration`
    never reads the prefab `YOffset`, so 679 of 1487 POIs sit too high and every
    cave, mine, quarry and bunker is stamped at the surface
-   (`src/world/prefabs.zig:222`, stock at asm.il:902414).
+   (`src/world/prefabs.zig:224`, stock at asm.il:902414).
 
 5. **DONE 2026-08-06.** Loot: make containers and bags roll the right table.
    (a) `maxdamage` now carries each block's `blocks.xml` `LootList` (resolved
@@ -1796,7 +1796,7 @@ encoding is one day high.
   and plumbed to both the clock and the director.
   *Anchors:* `src/ecs/aidirector.zig:100`, `:116`, `src/server/game.zig`,
   `:594`, `src/server/config.zig`
-  `asm.il:412894`, `src/server/config.zig:231`
+  `asm.il:412894`, `src/server/config.zig:232`
 
 - **Blood-moon night window (dusk to dawn)** `WORKS`
   `isBloodMoonNight` now mirrors stock `IsBloodMoonTime` (asm.il:1926341):
@@ -1932,7 +1932,7 @@ encoding is one day high.
   413818 / 412041) as `min(party_enemy_max 30, count * party.members)` per
   party; the 6 s burst wave (`max(1, count/2)`) is capped by the gamestages
   ladder's `maxAlive`, matching stock's burst cadence.
-  *Anchors:* `src/server/config.zig:226`, `src/ecs/aidirector.zig:401`, `:648`,
+  *Anchors:* `src/server/config.zig:227`, `src/ecs/aidirector.zig:401`, `:648`,
   `src/ecs/rules.zig:221`, `asm.il:413818`, `asm.il:412041`
 
 - **Alive-zombie budget during a blood moon** `WORKS` (2026-08-20)
@@ -1941,7 +1941,7 @@ encoding is one day high.
   1.9x ceiling - while the blood moon is active, so the horde does not thin
   at the ordinary cap. A spawn batch may overshoot the ceiling by its own
   size (the gate runs at tick start; stock CanSpawn behaves the same).
-  *Anchors:* `src/ecs/aidirector.zig:370`, `:378`, `src/server/config.zig:46`,
+  *Anchors:* `src/ecs/aidirector.zig:370`, `:378`, `src/server/config.zig:48`,
   `asm.il:413528`
 
 - **Spawn placement and spawn direction rotation** `WORKS` (2026-08-21)
@@ -1984,7 +1984,7 @@ encoding is one day high.
   class_table fallback (offline/builtin data, no ladder). Test
   `blood-moon HP floor applies only to unresolved fallback classes`.
   *Anchors:* `src/ecs/aidirector.zig:733` (bm_mul gate), `:218`,
-  `src/server/game.zig`, `src/server/config.zig:51`, `:57`
+  `src/server/game.zig`, `src/server/config.zig:53`, `:57`
 
 - **Blood-moon end and despawn at dawn** `WORKS` (2026-08-20)
   The horde window spans dusk to dawn (IsBloodMoonTime); at dawn the director
@@ -2160,7 +2160,7 @@ can walk into every POI but none of them is the building TFP authored.
   `y_is_groundlevel`, matching `DynamicPrefabDecorator.Load`'s attribute set. An
   independent parse of the same file yields 1559 decorations and the rotation
   histogram 473/363/377/346.
-  *Anchors:* `src/world/prefabs.zig:201`, `:237`, `:245`, `asm.il:902273-902400`
+  *Anchors:* `src/world/prefabs.zig:203`, `:237`, `:245`, `asm.il:902273-902400`
 
 - **Prefab .tts binary decode (v19)** `WORKS`
   Header, block plane, density, damage, sparse texture, sparse water and TE list.
@@ -2181,13 +2181,13 @@ can walk into every POI but none of them is the building TFP authored.
   `woodShapes:signLetter_period`; y69 id 1342 authored `cubeBaseboard` renders
   `cubeHalfLocalNorthFaceInside`. zdtd also pushes its own blocks NameIdMapping,
   so the client cannot correct it.
-  *Anchors:* `src/world/prefabs.zig:222`, `src/world/tts.zig:373`,
+  *Anchors:* `src/world/prefabs.zig:224`, `src/world/tts.zig:373`,
   `src/server/game.zig`, `asm.il`
 
 - **POI footprint / AABB placement** `WORKS`
   `boundsXZ` keeps position as the min corner and swaps size_x/size_z for
   rotations 1 and 3, identical to stock for all four rotations.
-  *Anchors:* `src/world/prefabs.zig:66`, `asm.il:921616-921637`,
+  *Anchors:* `src/world/prefabs.zig:68`, `asm.il:921616-921637`,
   `asm.il:944180-944243`
 
 - **Prefab rotation: block coordinate mapping** `WORKS` (2026-08-06)
@@ -2245,7 +2245,7 @@ can walk into every POI but none of them is the building TFP authored.
   authored sleeper volumes (wrecked ambulances, campsites, car accidents) and
   the volume-store ref build feeds them in, so a roadside ambulance spawns its
   hospital sleepers like stock.
-  *Anchors:* `src/world/prefabs.zig:232` (`isPaintablePart`),
+  *Anchors:* `src/world/prefabs.zig:234` (`isPaintablePart`),
   `src/server/game/init_world.zig:27-44`, `src/world/sleepers.zig:295`
 
 - **Multi-block / child blocks** `WORKS`
@@ -2369,7 +2369,7 @@ can walk into every POI but none of them is the building TFP authored.
   shapes the grid 2xN (cell COUNT is correct; the exact x/y column layout is
   cosmetic).
   *Anchors:* `src/server/game.zig` fillContainerFromLoot,
-  `src/world/containers.zig:31`, `Data/Config/loot.xml`
+  `src/world/containers.zig:33`, `Data/Config/loot.xml`
 
 - **Loot respawn (LootRespawnDays / LootTimer)** `WORKS` `(2026-08-07)`
   `serverconfig.xml LootRespawnDays` (default 7, 0 disables) drives a lazy
@@ -2381,7 +2381,7 @@ can walk into every POI but none of them is the building TFP authored.
   on load; older saves read 0 and do not respawn immediately). World containers
   are marked `player_storage=false` at materialization so they are eligible;
   player-placed storage never respawns (stock `bPlayerStorage`).
-  *Anchors:* `src/world/containers.zig:31`, `src/server/game.zig`
+  *Anchors:* `src/world/containers.zig:33`, `src/server/game.zig`
 
 - **POI reset / rebuild** `WORKS` (quest-tag filter residual)
   `resetPoiBlocks` re-paints a POI's baked .tts blocks over the area
@@ -2457,7 +2457,7 @@ can walk into every POI but none of them is the building TFP authored.
   linear over decorations per query (non-client-visible at quest-accept
   frequency, ~1.5k prefabs).
   *Anchors:* `src/server/game/hooks.zig` questPoiSelectAt/selectQuestPoi,
-  `src/world/prefabs.zig:66`, `:224`,
+  `src/world/prefabs.zig:68`, `:224`,
   `Data/Prefabs/POIs/AAA_utility_waterworks.xml`
 
 - **Sleeper volume parse** `WORKS`
@@ -2522,7 +2522,7 @@ can walk into every POI but none of them is the building TFP authored.
   its per-y ids are exactly the `.tts` cells of abandoned_house_07 at zdtd's
   rotated local column, so the paint reaches the client cell for cell. Applies to
   the heightmap terrain source only.
-  *Anchors:* `src/world/store.zig:589`, `src/world/prefabs.zig:222`, `:404`,
+  *Anchors:* `src/world/store.zig:589`, `src/world/prefabs.zig:224`, `:404`,
   `output_log_client_zdtd_connect.txt:20533`
 
 - **Trader areas / teleport volumes from prefabs.xml** `WORKS`
@@ -2583,7 +2583,7 @@ gamestage, no wandering hordes, and no screamers.
 - **Zombie speed bands** `WORKS`
   Recomputed every tick from day/night/feral/blood-moon state; index 0..4 maps to
   0.5/0.75/1.0/1.4/1.7. Parsed from serverconfig.
-  *Anchors:* `src/ecs/aidirector.zig:120-136`, `:149`, `src/server/config.zig:234`
+  *Anchors:* `src/ecs/aidirector.zig:120-136`, `:149`, `src/server/config.zig:235`
 
 - **MaxSpawnedZombies / MaxSpawnedAnimals caps** `WORKS`
   Both reach the director and gate spawning. 2026-08-23: the per-rule
@@ -2662,7 +2662,7 @@ gamestage, no wandering hordes, and no screamers.
   deterministic integer milli-weight (round(weight*1000), fixed-point walk so
   the pick path does not depend on f32 accumulation order).
   *Anchors:* `src/assets/entitygroups.zig:20-27` (arena slice), `:106-125`
-  (uncapped parse), `src/server/game/init_assets.zig:236` (n= count)
+  (uncapped parse), `src/server/game/init_assets.zig:254` (n= count)
 
 - **Entity class variety actually reachable at spawn** `RESOLVED (2026-08-08)`
   The class_table is still the fixed 16-slot offline cache, but a spawn-picked
@@ -2799,7 +2799,7 @@ gamestage, no wandering hordes, and no screamers.
   its attack task). The field rides the per-entity class copy on every spawn
   path; unprovoked, a timid animal flees or wanders instead of sprinting in.
   *Anchors:* `src/assets/entities.zig` resolvedAiAttacks,
-  `src/assets/entities.zig:799`, `src/ecs/world.zig:875-905`,
+  `src/assets/entities.zig:795`, `src/ecs/world.zig:875-905`,
   `$game/Data/Config/entityclasses.xml` lines 4724-4800
 
 - **Target sensing** `WORKS` `(2026-08-22 re-audit)`
@@ -2911,7 +2911,7 @@ gamestage, no wandering hordes, and no screamers.
   -> running state 2 with the approach flag), so the client no longer animates
   a sliding animal with movementState 0. Scenario `animal movement state
   replicates` asserts a wandering animal streams movement_state 1.
-  *Anchors:* `src/server/game/replicate.zig:224`, scenario `animal movement
+  *Anchors:* `src/server/game/replicate.zig:226`, scenario `animal movement
   state replicates`
 
 - **Night horde** `WORKS` (2026-08-25):
@@ -3370,7 +3370,7 @@ unvalidated, and durability, mods and repair do not exist.
   the sim rolled at the configured rate while every join told the client the
   struct default 100. `PartySharedKillRange` was missing from the same literal
   for the same reason and now rides it too.
-  *Anchors:* `src/server/config.zig:53`, `:237`, `src/server/game.zig`,
+  *Anchors:* `src/server/config.zig:55`, `:237`, `src/server/game.zig`,
   `src/assets/loot.zig:52-57`, `:157-177`
 
 - **Per-block loot list selection** `WORKS`
@@ -3611,7 +3611,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 - **XPMultiplier server option** `WORKS`
   Parsed, applied to awards, reported in the GameStats blob. Client log confirms
   `GameStat.XPMultiplier = 100` arrived.
-  *Anchors:* `src/server/config.zig:238`, `src/server/game.zig`, ``,
+  *Anchors:* `src/server/config.zig:239`, `src/server/game.zig`, ``,
   `output_log_client_zdtd_connect.txt:5236`
 
 - **XP from non-kill sources** `WORKS` `(2026-09-07)`
@@ -4905,7 +4905,7 @@ a finer server encoding.
   (GameInfoString 18/19) when the operator set them; unset keys are omitted
   (empty = client default, same as GameStats).
   *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
-  `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig:2890` `gameStatsValues`,
+  `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig:2908` `gameStatsValues`,
   `../../7dtd-engine-research/docs/gameplay/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
@@ -5452,7 +5452,7 @@ persists so little that a restart visibly damages a built base.
   `src/server/game/join.zig` (`sendWorldAreas`),
   `src/server/game/tick.zig` (`tickEntityLookAt`, `drainSleeperWakeups`),
   `src/server/game/player.zig` (`killXpAward`), `src/assets/map_atlas.zig`,
-  `src/server/game/replicate.zig:266` (TurretSync)
+  `src/server/game/replicate.zig:268` (TurretSync)
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`
   Stock `get_Channel` returns 1 for five packages on V3.2.0: NetPackageChunk,

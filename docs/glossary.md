@@ -48,7 +48,7 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
 - **chunk**: The resident world unit, 16 blocks on X and Z and 256 on Y
   (`src/world/store.zig:37`), with lazily allocated planes.
 - **streamed chunk**: A chunk key a peer is known to hold, tracked so the
-  streamer does not resend it (`src/server/game/types.zig:632`).
+  streamer does not resend it (`src/server/game/types.zig:644`).
 - **chunk body**: The body of `NetPackageChunk`: `overwrite=false | dataLen |
   stock Chunk.write payload` (`src/wire/stock_chunk.zig:852`). The
   `cx | cz | ydim | 256 heights` shape is a test helper
@@ -63,7 +63,7 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
 - **prefab**: A stock structure from `prefabs.xml`, with a footprint, a `.tts`
   paint and a `<name>.blocks.nim` id map (`src/world/prefabs.zig:1`).
 - **POI**: A placed prefab carrying quest data; stock `part_*` city pieces are
-  never quest POIs (`src/world/prefabs.zig:60`).
+  never quest POIs (`src/world/prefabs.zig:62`).
 - **biome map**: `biomes.png` decoded to biome ids; `BiomeMap` supplies a chunk's
   dominant id and per-cell ids through `atWorld` (`src/world/biomes.zig:219`).
 - **tile entity (TE)**: A world-position-keyed interactive block state such as a
@@ -76,14 +76,14 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
 - **ZCH3**: The per-chunk `.zch` file: magic, position, flags, heights, then
   optional planes ([world-store.md](subsystems/world-store.md)).
 - **ZCH4**: The non-stock column-height variant of ZCH3; a stock loader rejects
-  it (`src/world/store.zig:1385`). Unreachable since the `[wire] profile` config
+  it (`src/world/store.zig:1399`). Unreachable since the `[wire] profile` config
   was withdrawn (ADR 0036 amendment).
 - **ZPV17**: The player record format; v16 added per-slot `ItemValue` stats and
-  v17 appends `flags`/`mod_n`/`mod_qualities` (`src/server/persist.zig:124`).
+  v17 appends `flags`/`mod_n`/`mod_qualities` (`src/server/persist.zig:125`).
 - **ZCT3, ZSG1, ZVNM, ZWS1**: The container, sign, vending machine and
-  workstation store formats (`src/world/containers.zig:186`,
-  `src/world/signs.zig:122`, `src/world/vending.zig:159`,
-  `src/world/workstations.zig:708`).
+  workstation store formats (`src/world/containers.zig:188`,
+  `src/world/signs.zig:124`, `src/world/vending.zig:161`,
+  `src/world/workstations.zig:711`).
 
 ## Catalogs and content loading
 
@@ -137,10 +137,10 @@ data-loading policy, [AUTHORITY.md](AUTHORITY.md) state ownership, and
   ([plugin-host.md](subsystems/plugin-host.md)).
 - **plugin reload**: Disposing and reinstantiate a module in place, running
   `on_shutdown` then `on_enable`, without a server restart
-  (`src/plugin/wasm.zig:1177`).
+  (`src/plugin/wasm.zig:1180`).
 - **withdrawal of queued effects**: Dropping the still-pending `zdtd.queue`
   commands attributed to a disabled or reloaded module before the drain
-  (`src/plugin/wasm.zig:1414`).
+  (`src/plugin/wasm.zig:1420`).
 - **core plugin vs addon**: A core plugin ships under `plugins/` with Zig source
   rebuilt by `scripts/build-plugins.sh`; an addon lives under `mods/`
   ([PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)).

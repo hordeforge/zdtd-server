@@ -57,7 +57,7 @@ fn freshScenarioDir(dir: []const u8) void {
 Call `io_fs.mkdirPath("worlds")` first, then wipe a `worlds/zdtd_sc_<topic>`
 directory (`src/server/scenarios.zig:239-240`). `worlds/` is gitignored
 (`.gitignore:13`); the helper wraps `io_fs.removeDirTree`
-(`src/util/io_fs.zig:224`) and `io_fs.mkdirPath` (`src/util/io_fs.zig:66`).
+(`src/util/io_fs.zig:225`) and `io_fs.mkdirPath` (`src/util/io_fs.zig:68`).
 
 A package-only scenario uses `std.testing.tmpDir` and passes the path in, so it
 leaves nothing behind (`src/server/scenarios.zig:123-126`).
@@ -73,16 +73,13 @@ mono clock and forced-serial range parallelism, and an `errdefer` undoes that if
 construction fails (`src/server/game/init_world.zig:109-111`,
 `src/server/game/init_world.zig:123`). A scenario therefore never wires the clock
 by hand. Copy the construction shape from
-`src/server/scenarios.zig:275-281`:
+`src/server/scenarios.zig:266-269`:
 
 ```zig
     const gpa = std.testing.allocator;
 
     const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motion", 0);
-    defer {
-        g.deinit();
-        gpa.destroy(g);
-    }
+    defer g.destroy();
 ```
 
 `Game.create(allocator, world_dir, port)` heap-allocates and inits, and the
@@ -135,8 +132,8 @@ and inject it with `injectFramed`, which routes through `onData`
 ```
 
 Bodies go into a caller-owned stack buffer, never a per-send allocation. Advance
-the sim with `g.step()` (`src/server/game.zig:2973`) and push interest with
-`g.replicate()` (`src/server/game/replicate.zig:20`). Do not re-implement a
+the sim with `g.step()` (`src/server/game.zig:3009`) and push interest with
+`g.replicate()` (`src/server/game/replicate.zig:23`). Do not re-implement a
 parser or call a sim system directly when a client package reaches that code.
 
 Direct-world helpers exist for setup, not for the path under test:
@@ -192,8 +189,8 @@ A new `Detector` needs a classification in `decisionInputs`
 (`src/server/evidence.zig:46-53`); the coverage test in the same file forces
 that decision at compile time. Assert the ring itself, not only a counter, when
 a range gate is the claim: a forged entity id that survives the packet still
-proves nothing (`src/server/scenarios.zig:16819`). The observer wiring has its
-own scenario at `src/server/scenarios.zig:6129`.
+proves nothing (`src/server/scenarios.zig:15448`). The observer wiring has its
+own scenario at `src/server/scenarios.zig:5262`.
 
 ## 8. Keep it deterministic
 

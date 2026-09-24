@@ -39,9 +39,9 @@ The reader's counterpart plus the truncating variant (src/wire/binary.zig:63):
 
 ## Channel envelope and the two framers
 
-An inbound game message is not a `NetPackage` body: it is the channel envelope `channel u8 | payloadSize i32 | compressed u8 | encrypted u8 | count u16`, then `count` packages of `contentLen i32 | id u16 | body`, where `contentLen` covers the id and body only (`src/wire/frame.zig:98`, pinned by the offset test at `src/wire/frame.zig:257`). `payloadSize` counts bytes after the 9-byte header (`src/wire/frame.zig:136`).
+An inbound game message is not a `NetPackage` body: it is the channel envelope `channel u8 | payloadSize i32 | compressed u8 | encrypted u8 | count u16`, then `count` packages of `contentLen i32 | id u16 | body`, where `contentLen` covers the id and body only (`src/wire/frame.zig:98`, pinned by the offset test at `src/wire/frame.zig:98`). `payloadSize` counts bytes after the 9-byte header (`src/wire/frame.zig:98`).
 
-`framePackage` writes the uncompressed single-package form, which is the common S2C path (`src/wire/frame.zig:213`). `packages.framed` resolves the id and channel, then delegates to it (`src/wire/stock_frame.zig:41`).
+`framePackage` writes the uncompressed single-package form, which is the common S2C path (`src/wire/frame.zig:215`). `packages.framed` resolves the id and channel, then delegates to it (`src/wire/stock_frame.zig:41`).
 
 The parsed package record (src/wire/frame.zig:28):
 
@@ -52,7 +52,7 @@ pub const Package = struct {
 };
 ```
 
-`Package.body` slices either the input buffer or a module-level inflate buffer, so it is valid only until the next `parseChannelPayload` (`src/wire/frame.zig:20`). Compressed C2S envelopes inflate into that storage, capped at 512 KiB absolute and 64x the input size (`src/wire/frame.zig:13`, `src/wire/frame.zig:18`). Nested parses that would need inflate return zero instead of clobbering the outer body (`src/wire/frame.zig:105`). Encrypted payloads are rejected (`src/wire/frame.zig:122`).
+`Package.body` slices either the input buffer or a module-level inflate buffer, so it is valid only until the next `parseChannelPayload` (`src/wire/frame.zig:20`). Compressed C2S envelopes inflate into that storage, capped at 512 KiB absolute and 64x the input size (`src/wire/frame.zig:20`, `src/wire/frame.zig:20`). Nested parses that would need inflate return zero instead of clobbering the outer body (`src/wire/frame.zig:20`). Encrypted payloads are rejected (`src/wire/frame.zig:20`).
 
 Outbound compressed packages use a streaming framer, because the largest one (the `blocks` `NameIdMapping`, roughly 950 KB uncompressed) fits no body buffer (`src/wire/frame.zig:139`).
 
@@ -68,7 +68,7 @@ pub const DeflateFramer = struct {
     pub const window_len: usize = flate.max_window_len;
 ```
 
-Callers must pass a `body_len` to `begin` before the first body byte, then push exactly that many bytes and call `finish`, which patches `payloadSize` with the post-compression count (`src/wire/frame.zig:199`, `src/wire/frame.zig:205`). The 64 KiB window is a buffer size, not a wire divergence: `flate.max_window_len` is twice `flate.history_len`, and the emitted back-reference distance stays inside stock's 32 KiB (`src/wire/frame.zig:351`). Only the six stock `get_Compress`-true package names zdtd emits take this path (`src/server/game/net.zig:111`).
+Callers must pass a `body_len` to `begin` before the first body byte, then push exactly that many bytes and call `finish`, which patches `payloadSize` with the post-compression count (`src/wire/frame.zig:201`, `src/wire/frame.zig:201`). The 64 KiB window is a buffer size, not a wire divergence: `flate.max_window_len` is twice `flate.history_len`, and the emitted back-reference distance stays inside stock's 32 KiB (`src/wire/frame.zig:201`). Only the six stock `get_Compress`-true package names zdtd emits take this path (`src/server/game/net.zig:112`).
 
 `channelFor` returns 1 for exactly five names (`NetPackageChunk`, `NetPackageChunkRemove`, `NetPackageDynamicMesh`, `NetPackageMapChunks`, `NetPackageWorldFolder`) and 0 otherwise (`src/wire/stock_frame.zig:32`, `src/wire/stock_frame.zig:46`). The separate `protocol.zig` root leaf owns the challenge echo (`0xCA` plus 16 GUID bytes), the 20 TPS constants, the wire geometry profile, and the damage-type table; it is imported directly and deliberately not re-exported by `wire` (`src/protocol.zig:10`, `src/protocol.zig:5`).
 
@@ -122,7 +122,7 @@ A name absent from the registry returns `null` from `idOf`, and send helpers fai
 
 Every stock shape has exactly one builder (AGENTS rule 14). The contract is stated in the facade header: `buildXxx*` takes a caller-owned `buf` and returns the written slice, and no builder allocates (`src/wire/packages.zig:5`). `packages.zig` re-exports every `stock_*.zig` module, which `lint-architecture.sh` enforces, so callers import the facade and leaf files stay reachable for the owning domain (`src/wire/packages.zig:1`, `src/server/game/join.zig:513`).
 
-Server-side buffers are preallocated on `Game`: `send_buf` is 256 KiB and `body_buf` is 512 KiB (`src/server/game.zig:456`, `src/server/game.zig:457`). A body that does not fit is an error, not a truncation; the chunk builder reserves its own header bytes and rejects an undersized buffer up front (`src/wire/stock_chunk.zig:852`). The full blocks mapping is the one body that cannot be built into `body_buf`; it streams through `DeflateFramer` instead, and the `IdMapping` send site logs and skips when it would not fit (`src/server/game.zig:2499`, `src/server/game.zig:2520`).
+Server-side buffers are preallocated on `Game`: `send_buf` is 256 KiB and `body_buf` is 512 KiB (`src/server/game.zig:455`, `src/server/game.zig:455`). A body that does not fit is an error, not a truncation; the chunk builder reserves its own header bytes and rejects an undersized buffer up front (`src/wire/stock_chunk.zig:852`). The full blocks mapping is the one body that cannot be built into `body_buf`; it streams through `DeflateFramer` instead, and the `IdMapping` send site logs and skips when it would not fit (`src/server/game.zig:455`, `src/server/game.zig:455`).
 
 Parse-side entry points live in the same modules as their builders, with the same field order. Rotation is parsed but discarded, and the parser returns `wire_len` because the `bUseQRotation` branch makes the stock body length variable: a relay must forward `body[0..wire_len]` (`src/wire/stock_motion.zig:98`). Coordinates from the wire pass `readWorldF32`, which rejects non-finite and out-of-world values before the simulation sees them (`src/wire/stock_motion.zig:61`, `src/wire/stock_motion.zig:74`).
 
@@ -209,7 +209,7 @@ The version written is 3 (`src/wire/stock_buff.zig:11`), and the cvar section of
 
 The governing rule is AGENTS rule 24: if a body cannot be built correctly, omit it or send the stock empty or error form. Never truncate mid-field, zero-pad to a guessed size, or desync the client's `BinaryReader`. The code follows it in several distinct ways.
 
-Buffer exhaustion is an error at the builder, not a short body. `Writer.ensure` returns `Overflow` before any byte moves (`src/wire/binary.zig:113`), and `DeflateFramer.begin` rejects a buffer it cannot complete rather than emitting a partial frame (`src/wire/frame.zig:167`, test at `src/wire/frame.zig:396`).
+Buffer exhaustion is an error at the builder, not a short body. `Writer.ensure` returns `Overflow` before any byte moves (`src/wire/binary.zig:113`), and `DeflateFramer.begin` rejects a buffer it cannot complete rather than emitting a partial frame (`src/wire/frame.zig:169`, test at `src/wire/frame.zig:169`).
 
 A mapping blob is all-or-nothing. A truncated blob does not disable the client mapping: `LoadFromArray` swallows the failure and leaves the mapping live, so `AssignIds` renumbers every block the blob failed to name, silently (`src/wire/stock_nameid.zig:11`). `measure` therefore rejects an empty name, an over-long name, an out-of-range id, a duplicate id, and a header/row mismatch before any byte is written, and `write` re-checks the count it promised (`src/wire/stock_nameid.zig:82`, `src/wire/stock_nameid.zig:102`).
 

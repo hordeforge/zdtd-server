@@ -183,9 +183,9 @@ kill XP, death bag and sequence stay with the calling path.
 Queued-op shapes, illustrative:
 
 ```
-_ = w.pushCommand(.{ .spawn_zombie = .{ .x, .y, .z, .hp } });
-_ = w.pushCommand(.{ .despawn = .{ .net_id } });
-_ = w.pushCommand(.{ .damage = .{ .net_id, .amount } });
+_ = w.commands.push(.{ .spawn_zombie = .{ .x, .y, .z, .hp } });
+_ = w.commands.push(.{ .despawn = .{ .net_id } });
+_ = w.commands.push(.{ .damage = .{ .net_id, .amount } });
 // drained once at end of tickAll (also World.drainCommands)
 ```
 

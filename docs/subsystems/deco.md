@@ -182,7 +182,7 @@ recorded per client so the stream path does not regenerate them
 A client that later streams into a new deco chunk gets that chunk's objects through
 `sendDecoForStreamedChunk`, keyed against the recorded set, sent with `firstPackage = false` and
 mirrored the same way (`src/server/game/join.zig:189-231`,
-`src/server/game/chunk_stream.zig:354`):
+`src/server/game/chunk_stream.zig:356`):
 
 ```zig
 pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
