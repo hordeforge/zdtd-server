@@ -505,9 +505,7 @@ fn taskNameToId(name: []const u8) ?components.TaskId {
 }
 
 fn orTaskName(mask: *u16, raw: []const u8) void {
-    var tok = raw;
-    while (tok.len > 0 and std.ascii.isWhitespace(tok[0])) tok = tok[1..];
-    while (tok.len > 0 and std.ascii.isWhitespace(tok[tok.len - 1])) tok = tok[0 .. tok.len - 1];
+    const tok = std.mem.trim(u8, raw, " \t\r\n");
     if (tok.len == 0) return;
     var name = tok;
     if (std.mem.findScalar(u8, tok, ' ')) |sp| name = tok[0..sp];

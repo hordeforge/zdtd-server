@@ -170,11 +170,7 @@ test "wasm host loads the C fixture modules: hooks fire, looper disabled" {
     TestCtx.queued_n = 0;
     TestCtx.logged_n = 0;
     TestCtx.tick = 7;
-    var ctx = HostCtx{
-        .log_fn = &TestCtx.logFn,
-        .tick_fn = &TestCtx.tickFn,
-        .queue_fn = &TestCtx.queueFn,
-    };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const paths = [_][]const u8{
         "assets/fixtures/plugin_hello.wasm",
@@ -220,11 +216,7 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
     // denies, on_block_damage and on_quest_complete double, on_entity_killed
     // keeps. plugin_trap.wasm traps in on_entity_killed: the host disables only
     // that module and the kill still proceeds (trap -> keep).
-    var ctx = HostCtx{
-        .log_fn = &TestCtx.logFn,
-        .tick_fn = &TestCtx.tickFn,
-        .queue_fn = &TestCtx.queueFn,
-    };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const paths = [_][]const u8{
         "assets/fixtures/plugin_trap.wasm",
@@ -258,7 +250,7 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
 
 test "wasm plugin admin command hook handles ping/echo and falls through" {
     TestCtx.reset();
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const paths = [_][]const u8{"assets/fixtures/plugin_admin.wasm"};
     host.loadAll(std.testing.allocator, &paths, &ctx, .{});
@@ -286,7 +278,7 @@ test "wasm plugin admin command hook handles ping/echo and falls through" {
 
 test "wasm chat filter hook deny/rewrite/keep" {
     TestCtx.reset();
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const paths = [_][]const u8{"assets/fixtures/plugin_chat.wasm"};
     host.loadAll(std.testing.allocator, &paths, &ctx, .{});
@@ -305,7 +297,7 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     // T9 proof (WORK_PLAN): the join gate hook is covered with a real .wasm
     // fixture. "rejectme" is denied with the reason "nope"; any other name is
     // allowed; traps/fuel keep the gate open (allow).
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const paths = [_][]const u8{"assets/fixtures/plugin_login.wasm"};
     host.loadAll(std.testing.allocator, &paths, &ctx, .{});
@@ -388,7 +380,7 @@ test "core_killfeed.wasm observer keeps every verdict and never disables" {
     // loaded from the committed module, its verdict hooks must always keep
     // (0) and the module must never trap/disable - a pure observer is a
     // zero-risk addition (docs/PLUGIN_DEV.md "What belongs in a plugin").
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_killfeed/core_killfeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -486,7 +478,7 @@ test "core_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     TestCtx.reset();
     // The craft-request policy plugin (AGENTS rule 29): on_craft_request must
     // deny the forbidden recipe name and keep the rest, never disabling.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_craftgate/core_craftgate.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -501,7 +493,7 @@ test "core_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     TestCtx.reset();
     // The loot-roll policy plugin (AGENTS rule 29): on_loot_roll must return
     // 50 (scale percent) for every list and never disable.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_lootgate/core_lootgate.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -515,7 +507,7 @@ test "core_tradefeed.wasm observes trader events via on_trader_event" {
     TestCtx.reset();
     // The trader-event observer plugin (AGENTS rule 29): on_trader_event must
     // be present, fire for every kind without disabling, and stay loaded.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -532,7 +524,7 @@ test "_zdtd_requires validates declarative dependencies at load" {
     // Coeffect fail-closed (paper): a module declaring a capability it does
     // not export (typo'd hook) is rejected at load with a loud error, instead
     // of silently never firing. The valid tradefeed module passes.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -554,7 +546,7 @@ test "the guest contract version is read and a newer one is refused" {
     // version it was built against with `_zdtd_api() -> i32`. Newer than the
     // host fails closed through the `_zdtd_requires` channel; older is
     // accepted; absent keeps the permissive legacy path.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     // (module (func (export "_zdtd_api") (result i32) i32.const N))
     const V = struct {
         fn bytes(comptime ver: u8) [42]u8 {
@@ -618,13 +610,7 @@ test "shipped core plugins declare the host contract version" {
     // cannot import the host's api.zig), so this test is the drift gate: bump
     // one side without the other and every shipped plugin fails to load or
     // stops matching.
-    var ctx = HostCtx{
-        .log_fn = &TestCtx.logFn,
-        .tick_fn = &TestCtx.tickFn,
-        .queue_fn = &TestCtx.queueFn,
-        .sense_fn = &TestCtx.senseFn,
-        .query_fn = &TestCtx.queryFn,
-    };
+    var ctx = TestCtx.ctx();
     const modules = [_][]const u8{
         "plugins/core_announce/core_announce.wasm",
         "plugins/core_killfeed/core_killfeed.wasm",
@@ -660,7 +646,7 @@ test "plugin reload disposes and reinstantiates the module in place" {
     // HMR (paper): dispose the old fiber (on_shutdown + deinit), reload the
     // module from disk into the same slot, and re-activate (on_enable). The
     // reloaded module must be fully functional and not disabled.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -680,7 +666,7 @@ test "plugin reload keeps a heap-owned display name valid" {
     // on the next `plugin list` render, double free at shutdown). A resolved
     // mod slot (PRD 0005) owns its display string, so reload must transfer
     // that ownership, not release it under the slot.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -705,7 +691,7 @@ test "plugin reload keeps the module's config bytes" {
     // still logged "enabled", and the zdtd.config import then returned 0 bytes.
     // The wasm.zig reload tests all load through loadAll, where config_bytes is
     // already "", which is exactly why none of them caught it.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -750,7 +736,7 @@ test "plugin reload re-reads config.toml for a manifest-backed module" {
     // re-reads manifest.toml but kept the pre-reload config_bytes, so an
     // edited config.toml was never seen until a restart. The config is now
     // re-read with the declaration; a missing file fails closed to none.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try test_tmp.rootOf(&tmp);
@@ -795,7 +781,7 @@ test "a discovered mod must declare _zdtd_requires" {
     // (its manifest is a capability claim) while the raw load path stays
     // permissive, because the in-repo C fixtures export every symbol through
     // --export-all and so "exports a hook" is not evidence of intent there.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     // Hand-built module exporting only `on_tick` and declaring nothing: type
     // ()->(), one function of that type, the export, an empty body.
     const undeclared = undeclared_test_wasm;
@@ -821,7 +807,7 @@ test "plugin reload failure frees the display copy and reports false" {
     // hooks/deinit would run on undefined memory on the next tick or at
     // shutdown. The dead module is dropped from the range and later modules
     // shift down (HostCtx backlinks and override-point claims follow).
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(
         std.testing.allocator,
@@ -902,7 +888,7 @@ test "takeWithdrawn never reports more srcs than the caller's buffer holds" {
     // out-of-bounds read; marking the overflow withdrawn anyway would also
     // burn the one withdrawal those modules get. A src that does not fit stays
     // pending for the next pass instead.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(
         std.testing.allocator,
@@ -930,7 +916,7 @@ test "reload reconciles the module's manifest point claims" {
     // this a module replaced on disk kept exclusivity its new manifest had
     // dropped (its hook was still exported, so nothing else caught it) and one
     // that added a claim never got it.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     // Hand-built modules: one exports the loot.roll hook, one exports only
     // on_tick, so the hook-present refusal is observable.
     const with_hook = [_]u8{
@@ -1048,7 +1034,7 @@ test "point claims bind to the loaded slot, not the plan index" {
     defer plan.name_to_slot.deinit(a);
     try plan.point_claims.put(a, "loot.roll", 1);
 
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     defer host.shutdown();
     host.loadResolved(a, &plan, &ctx, .{});
@@ -1064,7 +1050,7 @@ test "queued-verb policy: module deny, operator right-bias, reload" {
     // Paper 3.2.3 interception (ADR 0039): a module declares verbs it will not
     // queue, the operator context is merged last (denies add, allows clear),
     // and a reload re-reads the declaration while keeping the operator's masks.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     const plain = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
         0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x1c, 0x02, 0x07,
@@ -1126,7 +1112,7 @@ test "queued-verb policy: module deny, operator right-bias, reload" {
 
 test "findByName matches display name and wasm stem suffix" {
     TestCtx.reset();
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(
         std.testing.allocator,
@@ -1249,7 +1235,7 @@ test "queue import attributes commands to the calling plugin slot" {
     // Temporal composability plumbing: plugin_hello queues a spawn each of the
     // first ticks; the queue import must hand the owner the 1-based slot so a
     // disabled plugin's pending effects can be withdrawn by src.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"assets/fixtures/plugin_hello.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -1794,7 +1780,7 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
 
 test "core_perkgate.wasm denies forbidden_* perk spends via on_perk_spend" {
     TestCtx.reset();
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn, .query_fn = &TestCtx.queryFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_perkgate/core_perkgate.wasm"}, &ctx, .{});
     defer host.shutdown();
@@ -2011,7 +1997,7 @@ test "a legacy [plugin] modules slot is not manifest-backed" {
     defer plan.point_claims.deinit(a);
     defer plan.name_to_slot.deinit(a);
 
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     defer host.shutdown();
     host.loadResolved(a, &plan, &ctx, .{});
@@ -2033,11 +2019,7 @@ test "enable activates each instance once and a reload reactivates its replaceme
     // exactly one activation beside its on_enable. plugin_hello's on_enable
     // logs "hello enabled" (the shutdown log and tick logs are filtered out).
     TestCtx.match("hello enabled");
-    var ctx = HostCtx{
-        .log_fn = &TestCtx.logFn,
-        .tick_fn = &TestCtx.tickFn,
-        .queue_fn = &TestCtx.queueFn,
-    };
+    var ctx = TestCtx.ctx();
     var host: WasmHost = .{};
     const path = "assets/fixtures/plugin_hello.wasm";
     host.loadAll(std.testing.allocator, &[_][]const u8{path}, &ctx, .{ .fuel = 1_000_000 });
@@ -2066,7 +2048,7 @@ test "plugin reload replays the boot declaration rule (review F8)" {
     // booted under, `reload` replays it, and the refused replacement leaves the
     // active range. The raw fixture path (in-repo C modules, `--export-all`)
     // keeps its permissive rule, proven by the same swap loading there.
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     const a = std.testing.allocator;
 
     // Strict boot (the discovered-mod rule), then the swap to undeclared.
@@ -2140,7 +2122,7 @@ test "reconcileClaims keeps claims and module deny when the manifest is invalid 
     // installed point claim or lift the module's queued-verb deny (the boot
     // path would refuse that manifest outright; the reload keeps the
     // declaration it booted with until a restart re-reads it).
-    var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
+    var ctx = TestCtx.ctx();
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
