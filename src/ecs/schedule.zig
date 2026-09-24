@@ -158,7 +158,7 @@ test "schedule.run drains commands and clears locals" {
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     w.locals.interest_n = 5;
-    try std.testing.expect(w.pushCommand(.{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } }));
+    try std.testing.expect(w.commands.push(.{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } }));
     const r = run(&w, 0.05);
     try std.testing.expectEqual(@as(u32, 1), r.commands_applied);
     try std.testing.expectEqual(@as(u32, 1), w.countKind(.zombie));
@@ -211,7 +211,7 @@ test "the commands phase off drops queued ops instead of banking them" {
     defer w.deinit();
     try w.ensureNetMap(std.testing.allocator);
     w.rules.systems.commands = false;
-    try std.testing.expect(w.pushCommand(.{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } }));
+    try std.testing.expect(w.commands.push(.{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } }));
     _ = run(&w, 0.05);
     try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
     try std.testing.expectEqual(@as(usize, 0), w.commands.len());

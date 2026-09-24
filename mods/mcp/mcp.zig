@@ -140,10 +140,6 @@ const Wbuf = struct {
     }
 };
 
-fn eqStr(a: []const u8, b: []const u8) bool {
-    return std.mem.eql(u8, a, b);
-}
-
 // ---------------------------------------------------------------------------
 // Response envelopes. The id is echoed verbatim (already capped by the caller).
 
@@ -308,7 +304,7 @@ fn runTool(tool: usize, verb: []const u8, w: *Wbuf) bool {
             while (i <= got) : (i += 1) {
                 if (i == got or resp[i] == '\n') {
                     const line = resp[line_start..i];
-                    if (line.len > 0 and verb.len >= line.len and eqStr(verb[0..line.len], line)) {
+                    if (line.len > 0 and verb.len >= line.len and std.mem.eql(u8, verb[0..line.len], line)) {
                         allowed = true;
                         break;
                     }
@@ -383,7 +379,7 @@ export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i3
         return if (w.overflow) 0 else @intCast(w.n);
     }
     const sl = hostJsonStr("jsonrpc", &sbuf);
-    if (sl != 3 or !eqStr(sbuf[0..3], "2.0")) {
+    if (sl != 3 or !std.mem.eql(u8, sbuf[0..3], "2.0")) {
         emitError(&w, "", false, json_rpc_invalid_request, "Invalid Request");
         return if (w.overflow) 0 else @intCast(w.n);
     }
@@ -405,7 +401,7 @@ export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i3
     // Notifications carry no id and get no response at all (JSON-RPC 2.0).
     const notif = !have_id;
 
-    if (eqStr(sbuf[0..ml], "initialize")) {
+    if (std.mem.eql(u8, sbuf[0..ml], "initialize")) {
         if (session_state != session_await_init) {
             if (!notif) emitError(&w, rbuf[0..rl], true, json_rpc_invalid_request, "Session already initialized");
             return if (w.overflow) 0 else @intCast(w.n);
@@ -416,13 +412,13 @@ export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i3
         session_state = session_init_sent;
         return if (w.overflow) 0 else @intCast(w.n);
     }
-    if (eqStr(sbuf[0..ml], "notifications/initialized")) {
+    if (std.mem.eql(u8, sbuf[0..ml], "notifications/initialized")) {
         // notification; only meaningful after initialize
         if (session_state == session_init_sent or session_state == session_ready)
             session_state = session_ready;
         return 0;
     }
-    if (eqStr(sbuf[0..ml], "ping")) {
+    if (std.mem.eql(u8, sbuf[0..ml], "ping")) {
         if (notif) return 0;
         emitResult(&w, rbuf[0..rl], true, "{}");
         return if (w.overflow) 0 else @intCast(w.n);
@@ -431,12 +427,12 @@ export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i3
         if (!notif) emitError(&w, rbuf[0..rl], true, mcp_server_not_initialized, "Server not initialized");
         return if (w.overflow) 0 else @intCast(w.n);
     }
-    if (eqStr(sbuf[0..ml], "tools/list")) {
+    if (std.mem.eql(u8, sbuf[0..ml], "tools/list")) {
         if (notif) return 0;
         emitResult(&w, rbuf[0..rl], true, tools_list_json);
         return if (w.overflow) 0 else @intCast(w.n);
     }
-    if (eqStr(sbuf[0..ml], "tools/call")) {
+    if (std.mem.eql(u8, sbuf[0..ml], "tools/call")) {
         if (notif) return 0;
         // params must be an object carrying a tool name.
         if (hostJsonObj("params") != 1) {
@@ -452,7 +448,7 @@ export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i3
         var tool: usize = tool_count;
         var t: usize = 0;
         while (t < tool_count) : (t += 1) {
-            if (eqStr(sbuf[0..nl], toolName(t))) {
+            if (std.mem.eql(u8, sbuf[0..nl], toolName(t))) {
                 tool = t;
                 break;
             }

@@ -996,11 +996,6 @@ pub const Plugin = struct {
             else => 0,
         };
     }
-
-    /// Export the remaining fuel (diagnostics; the runtime enforces the budget).
-    pub fn fuelRemaining(self: *Plugin) ?u64 {
-        return self.instance.fuelRemaining();
-    }
 };
 
 /// Fixed-table capacity for loaded .wasm plugins. A ceiling, not a policy: the

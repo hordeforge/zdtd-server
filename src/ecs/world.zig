@@ -2031,11 +2031,6 @@ pub const World = struct {
         self.reviveSlot(s);
     }
 
-    /// Enqueue a deferred sim op (spawn/despawn/damage). Drops when full.
-    pub fn pushCommand(self: *World, op: CommandOp) bool {
-        return self.commands.push(op);
-    }
-
     /// Apply and clear the ops queued at entry; ops pushed during drain stay for the next tick.
     /// `pre_drain_fn` runs first (plugin withdrawal) so a disabled module's
     /// still-pending commands are dropped before they apply. Ops whose source
