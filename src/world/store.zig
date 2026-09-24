@@ -870,6 +870,13 @@ pub const World = struct {
         self.worldgen = null;
     }
 
+    /// The exact opposite of `create`: `deinit`, then free the allocation
+    /// (the same create/destroy pair Game.destroy gives Game).
+    pub fn destroy(self: *World) void {
+        self.deinit();
+        self.allocator.destroy(self);
+    }
+
     pub fn deinit(self: *World) void {
         // Drain and join the writer *before* freeing chunks / world_dir: a
         // detached or still-running writer would lose queued saves at exit.

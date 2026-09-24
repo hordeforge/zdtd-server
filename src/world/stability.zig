@@ -585,10 +585,7 @@ test "stability: terrain supports a column; cutting the base fells it" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     // Column at (2, z=2) from y=60 up to 65 (4 blocks above the surface).
     var y: i32 = 60;
     while (y < 65) : (y += 1) {
@@ -627,10 +624,7 @@ test "stability: overhang beyond support falls after the support goes" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     // Shelf: three blocks at y=61 (on terrain at 60), overhanging one block
     // beyond the base at y=61: (10,61,10), (11,61,10) hangs over air.
     w.setBlockWorld(10, 61, 10, 1) catch unreachable;
@@ -663,10 +657,7 @@ test "stability: non-support blocks cap at 1 and never carry support" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     // A non-support block (id 2) sitting on terrain, with a support block (id 1)
     // above it.
     w.setBlockWorld(4, 60, 4, 2) catch unreachable;
@@ -706,10 +697,7 @@ test "stability: a dig whose plane computes after the cell is air does not under
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     w.setBlockWorld(4, 61, 4, 1) catch unreachable;
     // Air the cell first, exactly like the dig handler does before
     // stabilityAfterSetBlock, then remove: no crash, nothing falls (the
@@ -729,10 +717,7 @@ test "stability reset: row kernel matches the scalar reference" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     const t = store.World.worldToChunk(0, 0);
     const c = w.chunks.get((store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }).hash()).?;
 
@@ -774,10 +759,7 @@ test "stability distribute: row scan matches the scalar reference" {
     const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
 
     const w = testWorld(gpa, 60, dir);
-    defer {
-        w.deinit();
-        gpa.destroy(w);
-    }
+    defer w.destroy();
     const t = store.World.worldToChunk(0, 0);
     const c = w.chunks.get((store.ChunkPos{ .x = t.pos.x, .z = t.pos.z }).hash()).?;
 

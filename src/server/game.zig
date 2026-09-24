@@ -398,9 +398,6 @@ pub const Game = struct {
     /// it between the id mapping and the config files).
     localization: assets_localization.Table = .{},
     placeholders_loaded: bool = false,
-    /// Scratch the paint call reads the ctx through (it takes a pointer, so a
-    /// stack local in the caller would not do).
-    placeholder_ctx: world_tts.PlaceholderCtx = undefined,
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
