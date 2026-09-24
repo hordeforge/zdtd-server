@@ -722,19 +722,13 @@ pub const Survival = struct {
     }
 };
 
-fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
-    for (a, b) |x, y| if (std.ascii.toLower(x) != std.ascii.toLower(y)) return false;
-    return true;
-}
-
 /// Health lost per real second by `buff_name`'s ModifyStats Health row.
 fn healthLossPerSecond(t: *const Table, buff_name: []const u8) f32 {
     const d = t.byName(buff_name) orelse return 0;
     const rate_ticks: f32 = @floatFromInt(@max(1, d.update_rate_ticks));
     const secs = rate_ticks / 20.0; // update_rate is stored in 20 TPS ticks
     for (d.stat_mods) |m| {
-        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .base_subtract and m.op != .subtract) continue;
         if (m.value <= 0 or secs <= 0) continue;
         return m.value / secs;
@@ -757,9 +751,9 @@ pub fn survival(t: *const Table) Survival {
                 2
             else
                 continue;
-            if (eqIgnoreCase(th.stat, "Food") and std.mem.find(u8, th.buff, "Hungry") != null) {
+            if (std.ascii.eqlIgnoreCase(th.stat, "Food") and std.mem.find(u8, th.buff, "Hungry") != null) {
                 out.hungry_frac[stage] = th.value;
-            } else if (eqIgnoreCase(th.stat, "Water") and std.mem.find(u8, th.buff, "Thirsty") != null) {
+            } else if (std.ascii.eqlIgnoreCase(th.stat, "Water") and std.mem.find(u8, th.buff, "Thirsty") != null) {
                 out.thirsty_frac[stage] = th.value;
             }
         }
@@ -1197,7 +1191,7 @@ pub fn hpLossPerSecond(def: *const BuffDef) f32 {
     const rate_ticks: f32 = @floatFromInt(@max(1, def.update_rate_ticks));
     const secs = rate_ticks / 20.0;
     for (def.stat_mods) |m| {
-        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .base_subtract and m.op != .subtract) continue;
         if (m.value <= 0 or secs <= 0) continue;
         return m.value / secs;
@@ -1236,7 +1230,7 @@ fn triggeredHealthPerSecond(def: *const BuffDef, r: *const TriggeredResult) f32 
     const secs = rate_ticks / 20.0;
     var per_s: f32 = 0;
     for (r.mods[0..r.mod_n]) |m| {
-        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .base_subtract and m.op != .subtract) continue;
         if (m.value <= 0 or secs <= 0) continue;
         per_s += m.value / secs;
@@ -1251,7 +1245,7 @@ pub fn healthAddDelta(r: *const TriggeredResult) f32 {
     for (r.mods[0..r.mod_n]) |m| {
         // Victim-directed rows belong to the other applier, never self.
         if (m.target_other) continue;
-        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .add) continue;
         d += m.value;
     }
@@ -1266,7 +1260,7 @@ pub fn healthSubtractOnce(r: *const TriggeredResult) f32 {
     var d: f32 = 0;
     for (r.mods[0..r.mod_n]) |m| {
         if (m.target_other) continue;
-        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Health")) continue;
         if (m.op != .subtract) continue;
         d += m.value;
     }
@@ -1282,9 +1276,9 @@ pub fn foodWaterDelta(r: *const TriggeredResult) FoodWaterDelta {
     var out: FoodWaterDelta = .{};
     for (r.mods[0..r.mod_n]) |m| {
         if (m.target_other) continue;
-        if (eqIgnoreCase(m.stat, "Food")) {
+        if (std.ascii.eqlIgnoreCase(m.stat, "Food")) {
             if (m.op == .subtract) out.food -= m.value else if (m.op == .add) out.food += m.value else if (m.op == .set) out.food_set = m.value;
-        } else if (eqIgnoreCase(m.stat, "Water")) {
+        } else if (std.ascii.eqlIgnoreCase(m.stat, "Water")) {
             if (m.op == .subtract) out.water -= m.value else if (m.op == .add) out.water += m.value else if (m.op == .set) out.water_set = m.value;
         }
     }
@@ -1300,7 +1294,7 @@ pub fn staminaDelta(r: *const TriggeredResult) StaminaDelta {
     var out: StaminaDelta = .{};
     for (r.mods[0..r.mod_n]) |m| {
         if (m.target_other) continue;
-        if (!eqIgnoreCase(m.stat, "Stamina")) continue;
+        if (!std.ascii.eqlIgnoreCase(m.stat, "Stamina")) continue;
         if (m.op == .subtract) out.delta -= m.value else if (m.op == .add) out.delta += m.value else if (m.op == .set) out.set = m.value;
     }
     return out;

@@ -250,13 +250,10 @@ fn notePluginVerbDenied(g: *Game, src: i16, cmd: []const u8) void {
 /// same way: raw prefix, so "bot count" allows "bot count 6"). Empty list =
 /// the documented default, nothing queues for an external-entry module.
 fn mcpQueueAllowed(g: *const Game, cmd: []const u8) bool {
-    var rest = g.mcp_allowlist;
-    while (rest.len > 0) {
-        const comma = std.mem.findScalar(u8, rest, ',') orelse rest.len;
-        const piece = std.mem.trim(u8, rest[0..comma], " \t");
+    var it = std.mem.splitScalar(u8, g.mcp_allowlist, ',');
+    while (it.next()) |raw| {
+        const piece = std.mem.trim(u8, raw, " \t");
         if (piece.len > 0 and cmd.len >= piece.len and std.mem.eql(u8, cmd[0..piece.len], piece)) return true;
-        if (comma >= rest.len) break;
-        rest = rest[comma + 1 ..];
     }
     return false;
 }
@@ -538,22 +535,18 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
         if (it.next() != null) return 0;
         // Comma-separated verb prefixes from [mcp] config, served one per
         // line (the MCP guest matches verb prefixes against these lines).
-        var src = g.mcp_allowlist;
+        var pit = std.mem.splitScalar(u8, g.mcp_allowlist, ',');
         var n: usize = 0;
-        while (src.len > 0) {
-            const comma = std.mem.findScalar(u8, src, ',') orelse src.len;
-            const piece = std.mem.trim(u8, src[0..comma], " \t");
-            if (piece.len > 0) {
-                if (n > 0 and n < out.len) {
-                    out[n] = '\n';
-                    n += 1;
-                }
-                const m = @min(piece.len, out.len - n);
-                @memcpy(out[n..][0..m], piece[0..m]);
-                n += m;
+        while (pit.next()) |raw| {
+            const piece = std.mem.trim(u8, raw, " \t");
+            if (piece.len == 0) continue;
+            if (n > 0 and n < out.len) {
+                out[n] = '\n';
+                n += 1;
             }
-            if (comma >= src.len) break;
-            src = src[comma + 1 ..];
+            const m = @min(piece.len, out.len - n);
+            @memcpy(out[n..][0..m], piece[0..m]);
+            n += m;
         }
         return n;
     }

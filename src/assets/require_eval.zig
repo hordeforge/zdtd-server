@@ -228,22 +228,16 @@ const Sample = struct {
     base_max: f32 = 0,
 };
 
-fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
-    for (a, b) |x, y| if (std.ascii.toLower(x) != std.ascii.toLower(y)) return false;
-    return true;
-}
-
 /// The sample for a named stat; null for a name the ctx does not track (the
 /// caller counts that as unsupported).
 fn sample(name: []const u8, ctx: Ctx) ?Sample {
-    const frac, const mod_max, const base_max = if (eqIgnoreCase(name, "Health"))
+    const frac, const mod_max, const base_max = if (std.ascii.eqlIgnoreCase(name, "Health"))
         .{ ctx.hp_frac, ctx.hp_max, ctx.hp_base_max }
-    else if (eqIgnoreCase(name, "Stamina"))
+    else if (std.ascii.eqlIgnoreCase(name, "Stamina"))
         .{ ctx.stamina_frac, ctx.stamina_max, ctx.stamina_base_max }
-    else if (eqIgnoreCase(name, "Food"))
+    else if (std.ascii.eqlIgnoreCase(name, "Food"))
         .{ ctx.food_frac, ctx.food_max, ctx.food_base_max }
-    else if (eqIgnoreCase(name, "Water"))
+    else if (std.ascii.eqlIgnoreCase(name, "Water"))
         .{ ctx.water_frac, ctx.water_max, ctx.water_base_max }
     else
         return null;
@@ -258,7 +252,7 @@ fn sample(name: []const u8, ctx: Ctx) ?Sample {
 /// refuses rather than reading self.
 fn statOtherCtx(r: Requirement, ctx: Ctx) Ctx {
     if (r.target != .other) return ctx;
-    if (!eqIgnoreCase(r.arg, "Health")) return Ctx{
+    if (!std.ascii.eqlIgnoreCase(r.arg, "Health")) return Ctx{
         .hp_frac = 0,
         .hp_max = 0,
         .hp_base_max = 0,
@@ -322,7 +316,7 @@ fn evalStatComparePercModMaxToMax(r: Requirement, ctx: Ctx) Verdict {
 /// the row's operand (Health, Stamina, Water and Food are StatTypes 1..4; the
 /// `Armor` branch reads `Equipment::GetTotalPhysicalArmorRating`).
 fn evalStatCompareCurrent(r: Requirement, ctx: Ctx) Verdict {
-    if (eqIgnoreCase(r.arg, "Armor")) {
+    if (std.ascii.eqlIgnoreCase(r.arg, "Armor")) {
         return verdict(compare(ctx.armor_rating, r.op, operand(ctx, r)), r.negated);
     }
     const s = sample(r.arg, ctx) orelse return .unsupported;
