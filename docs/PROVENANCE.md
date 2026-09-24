@@ -432,6 +432,7 @@ Coverage targets, all enforced by the scan:
 | `src/util/io_fs.zig` | Z | Thin wrappers around Zig 0.16 `std.Io` for one-shot FS ops. Ordinary file/dir work goes through here or `std.Io` directly, never |
 | `src/util/log.zig` | Z | Leveled logging (debug/info/warn/err/crit on the stock Log.Level 0..4 ladder). |
 | `src/util/parallel.zig` | Z | Parallel-for over dense slot ranges with a persistent worker pool. Uses Zig 0.16 `std.Io` mutex/condition (no raw syscalls, no spawn-per-call) |
+| `src/util/test_tmp.zig` | Z | Test-only tmpDir root helper (one static path buffer for the serial test run); imported only by test files, never linked into the server binary |
 | `src/util/rng.zig` | Z | Seeded deterministic PRNG for sim paths (loot, AI wander, director picks). |
 | `src/util/root.zig` | Z | Shared process utilities (no game domain). |
 | `src/util/secret.zig` | Z | Secret comparison helpers shared by every credential check (LiteNet connect key, webui secret, telnet admin password) |
@@ -679,6 +680,7 @@ field-by-field provenance.
 | `ecs/aidirector.zig` WorldClock bm schedule (bm_cycle / bm_day_last / next_bm / bm_freq / bm_range) | persisted | R | Stock `CalcNextDay` (asm.il 412880): `nextBM = bmDayLast + frequency + RandomRange(0, range+1)`, persisted with the clock (ZCL2) so the red moon stays on the horde night across restarts and day jumps |
 | `wire/packages.zig cF_crouching` | 0x0200 | R | Stock EntityFlags `IsCrouching` bit 512 (protocol-packages.md 5.5.6); the sim reads it for the stealth sense gates |
 | `ecs/ai_tasks.zig` `leap_dy_min` | -5 | R | `EAILeap.CanExecute` lower `leapV.y` bound (IL_00BF): a path end more than 5 m below the body refuses the pounce |
+| `ecs/ai_tasks.zig` `vomit_warning_s` | 1.2 | R | `ItemActionVomit.ReadFrom` warningDelay default (ldc.r4 1.2 before the parse): the spit waits one stock warning window after releaseDelay before the burst when the class has no task telegraph |
 | `ecs/components.zig flag_*` | 0x0001..0x0200 | R | Canonical stock EntityAliveFlags bit table (protocol-frames.md 9, protocol-packages.md 5.5.6): the sim flags word mirrors the stock wire word and `wire/packages.zig` cF_* aliases these, one source of truth for the bit numbers (2026-08-28) |
 | `wire/packages.zig dmg_*` | 0x001..0x400 | R | V3.2.0 `NetPackageDamageEntity` packed flag bits (changelog-3.2.0 §3.1, protocol.md §6.5): the ten 3.1.0 booleans folded into one u32, bit 10 TrapKillXP new (2026-08-28) |
 | `assets/buffs.zig tracked_delta_max` | 1e6 | Z | **zdtd-owned** sanity ceiling for the passive-effects VM fold (stock stat values and deltas are < 1e4): a pathological modded curve value (1e38 / inf / nan) saturates instead of reaching the tick's `@trunc` casts on the max stats (2026-08-28) |

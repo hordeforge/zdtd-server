@@ -14,6 +14,7 @@
 //! rule "empty catch {} only for ... documented non-fatal").
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -542,8 +543,7 @@ test "the compressed set is exactly the stock get_Compress overrides we emit" {
 test "reliable send pumping defers queued game payloads" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -568,8 +568,7 @@ test "reliable send pumping defers queued game payloads" {
 test "broadcast soft-drops only droppable packages under WindowFull" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -591,8 +590,7 @@ test "broadcast soft-drops only droppable packages under WindowFull" {
 test "chunk removal retries without forgetting the client chunk" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -633,8 +631,7 @@ test "a broadcast fan-out shares one retry window across wedged peers" {
     // one window regardless of peer count (AGENTS rule 20).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();

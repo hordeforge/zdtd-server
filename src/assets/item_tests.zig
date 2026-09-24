@@ -4,6 +4,7 @@
 //! Split out of assets/items.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const items = @import("items.zig");
 const ItemTable = items.ItemTable;
 const ItemDef = items.ItemDef;
@@ -75,8 +76,7 @@ test "sandbox MaxStackSize scales stackable items but never quality ones" {
     // server code.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -171,8 +171,7 @@ test "XML item table fails closed instead of using builtin balance or ids" {
 test "magazine AddProgressionLevel parses onto the eat item" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -216,8 +215,7 @@ test "almanac SetProgressionLevel level=-1 parses as set-to-max" {
     // Stock ships only -1 (426 rows); non -1 is omitted.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -255,8 +253,7 @@ test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
     // closed in the attachment scrub).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path, "<items>\n" ++
@@ -289,8 +286,7 @@ test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
 test "DistractionTags + Distraction* effects parse (stock decoy shape)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path, "<items>\n" ++
@@ -343,8 +339,7 @@ test "HarvestCount held-tool rows parse and fold over base 1" {
     // a curve evaluates at the tool quality. Tag-gated by the drop row.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -671,8 +666,7 @@ test "HasQuality follows owner-tiered effect groups and inherits through Extends
     // the first ancestor that declares one.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path, "<items>\n" ++
@@ -718,8 +712,7 @@ test "items root max_quality_tier bounds the quality axes" {
     // server clamps a tier the client accepts.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -753,8 +746,7 @@ test "EconomicValue keeps stock's float range and fraction" {
     // "econ == 0" fallback of buy 5 / sell 1, i.e. not tradeable as authored.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
     try io_fs.writeFile(path,
@@ -784,8 +776,7 @@ test "items.xml stats rows parse with stock's field grammar and guards" {
     // by 0.005.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items_stats.xml", .{dir});
     try io_fs.writeFile(path,
@@ -860,8 +851,7 @@ test "SellableToTrader parses and inherits through Extends" {
     // unsellable master is unsellable too. 48 stock items declare it.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items_sell.xml", .{dir});
     try io_fs.writeFile(path,
@@ -907,8 +897,7 @@ test "TraderQualityMod parses and inherits through Extends" {
     // pair when the item declares none.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items_tqm.xml", .{dir});
     try io_fs.writeFile(path,
@@ -1030,8 +1019,7 @@ test "the vomit action parses, inherits through Extends, and carries its ammo pr
     // ammoProjectileZombieVomit, V3.2.0 items.xml).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/items_vomit.xml", .{dir});
     try io_fs.writeFile(path,

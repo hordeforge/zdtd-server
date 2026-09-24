@@ -2,6 +2,7 @@
 //! Verbatim move from game.zig - thin wrappers remain there as `ctx: ?*anyopaque` adapters.
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const world_store = @import("../../world/store.zig");
@@ -756,8 +757,7 @@ pub fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
 test "itemStackFor fails closed after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -773,8 +773,7 @@ test "itemStackFor fails closed after catalogs requested" {
 test "storage pins are not a second authority after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();

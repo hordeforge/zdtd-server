@@ -6,6 +6,7 @@
 //! wire layer; game.zig converts to platform ids at the send/parse boundary.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const max_vending: usize = 128;
@@ -380,8 +381,7 @@ test "vending store round-trips through the ZVNM1 save format" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try st.save(dir);
 
     var st2: VendingStore = .{};
@@ -419,8 +419,7 @@ test "a forged password length on disk is rejected, not stored" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try st.save(dir);
 
     var path: [std.Io.Dir.max_path_bytes]u8 = undefined;
@@ -475,8 +474,7 @@ test "a dropped ZVNM record does not desync the records after it" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try src.save(dir);
 
     // Load into a store that is full EXCEPT that the second record's position

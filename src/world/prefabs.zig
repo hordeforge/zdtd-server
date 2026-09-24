@@ -4,6 +4,7 @@
 //! each POI's `<name>.blocks.nim` (Prefab::loadIdMapping).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const io_fs = @import("../util/io_fs.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
@@ -1266,8 +1267,7 @@ test "deco suppressors are the non-AllowDecorations POI footprints" {
     // so the deco sampler pays it once per deco chunk (RFC 0007).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     try tmp.dir.createDirPath(std.testing.io, "POIs");
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "POIs/suppressme.xml", .data =
         \\<prefab><property name="AllowDecorations" value="false"/></prefab>

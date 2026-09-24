@@ -4,6 +4,7 @@
 //! Split out of plugin/wasm.zig (same code, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const wasm = @import("wasm.zig");
 const Plugin = wasm.Plugin;
 const WasmHost = wasm.WasmHost;
@@ -598,8 +599,7 @@ test "the guest contract version is read and a newer one is refused" {
     // loadAll is the shipping path: a newer guest is skipped, not loaded.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const cur_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "cur.wasm" });
     defer std.testing.allocator.free(cur_path);
     const next_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "next.wasm" });
@@ -753,8 +753,7 @@ test "plugin reload re-reads config.toml for a manifest-backed module" {
     var ctx = HostCtx{ .log_fn = &TestCtx.logFn, .tick_fn = &TestCtx.tickFn, .queue_fn = &TestCtx.queueFn };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const a = std.testing.allocator;
     const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
     defer a.free(wasm_path);
@@ -952,8 +951,7 @@ test "reload reconciles the module's manifest point claims" {
     };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const a = std.testing.allocator;
 
     // m0 and m1 both export loot.roll; m2 does not.
@@ -1034,8 +1032,7 @@ test "point claims bind to the loaded slot, not the plan index" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const gone_dir = try std.Io.Dir.path.join(a, &.{ dir, "gone" });
     defer a.free(gone_dir);
     io_fs.mkdirPath(gone_dir);
@@ -1078,8 +1075,7 @@ test "queued-verb policy: module deny, operator right-bias, reload" {
     };
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const a = std.testing.allocator;
     const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
     defer a.free(wasm_path);
@@ -1998,8 +1994,7 @@ test "a legacy [plugin] modules slot is not manifest-backed" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     // A .wasm with a config.toml beside it and NO manifest.toml: the shape an
     // operator gets from `modules = ["<path>.wasm"]`.
     const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "legacy.wasm" });
@@ -2149,8 +2144,7 @@ test "reconcileClaims keeps claims and module deny when the manifest is invalid 
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const wasm_path = try std.Io.Dir.path.join(a, &.{ dir, "m.wasm" });
     defer a.free(wasm_path);
     const man_path = try std.Io.Dir.path.join(a, &.{ dir, "manifest.toml" });

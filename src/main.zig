@@ -2,6 +2,7 @@
 //! Run `zdtd --help` for CLI options and precedence.
 
 const std = @import("std");
+const test_tmp = @import("util/test_tmp.zig");
 const game_mod = @import("server/game.zig");
 const packages = @import("wire/packages.zig");
 const frame = @import("wire/frame.zig");
@@ -1379,8 +1380,7 @@ test "server port must leave room for LiteNet offset" {
 test "integration world persist + damage + packages" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();

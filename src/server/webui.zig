@@ -9,6 +9,7 @@
 //! Design: docs/WEBUI.md
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const http = std.http;
 const flate = std.compress.flate;
 const tcp = @import("../util/tcp_listen.zig");
@@ -2416,8 +2417,7 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     // application/json (ADR 0040).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
     const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/Config", .{mods_root});
@@ -2725,8 +2725,7 @@ test "GET /api/state.json carries the modlet roster as a populated array" {
     // shows its no-mods note while real XML-only mods are loaded (ADR 0040).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
     const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/Config", .{mods_root});

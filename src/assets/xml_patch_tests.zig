@@ -3,6 +3,7 @@
 //! Split out of assets/xml_patch.zig (same code, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const xml_patch = @import("xml_patch.zig");
 const parseXPath = xml_patch.parseXPath;
 const XPredKind = xml_patch.XPredKind;
@@ -463,8 +464,7 @@ test "a realistic xml-only modlet applies through the scan and patch path" {
     // Localization.csv that the server tolerates without reading.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const mod_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods/SimpleMod", .{root});
     defer std.testing.allocator.free(mod_dir);
     const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/Config", .{mod_dir});
@@ -551,8 +551,7 @@ test "a realistic xml-only modlet applies through the scan and patch path" {
 test "include with @modfolder token pulls another patch file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
     const mod_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/A", .{mods_root});
@@ -597,8 +596,7 @@ test "include filename resolves against the including patch file's directory" {
     // a miss as fatal, so those modlets refused the boot.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var sub_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const sub = try std.fmt.bufPrint(&sub_buf, "{s}/Agility", .{dir});
     io_fs.mkdirPath(sub);

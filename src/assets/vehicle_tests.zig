@@ -3,6 +3,7 @@
 //! Split out of assets/vehicles.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const vehicles = @import("vehicles.zig");
 const Def = vehicles.Def;
 const Table = vehicles.Table;
@@ -42,8 +43,7 @@ test "resolveMaxHp takes the placeable item's DegradationMax" {
 test "missing velocityMax fails closed to 0" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/vehicles.xml", .{dir});
     const src =

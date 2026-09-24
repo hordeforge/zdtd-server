@@ -3,6 +3,7 @@
 //! Split out of assets/progression.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const progression = @import("progression.zig");
 const buffs = @import("buffs.zig");
 const cvars = @import("cvars.zig");
@@ -360,8 +361,7 @@ test "perkTotals folds purchased perk levels level-scaled and reverts" {
 test "effect_group and row requirements attach to the right passives" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/progression.xml", .{dir});
     try io_fs.writeFile(path,
@@ -507,8 +507,7 @@ test "a def stops at max_passives_per_def rows" {
     try buf.appendSlice(a, "</effect_group></perk></perks></progression>");
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/progression.xml", .{dir});
     try io_fs.writeFile(path, buf.items);

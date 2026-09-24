@@ -17,6 +17,7 @@
 //! installable tags reject the attachment.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const arena_util = @import("../util/arena.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
@@ -315,8 +316,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 test "item_modifiers parses installable/blocked/modifier gates" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/item_modifiers.xml", .{dir});
     try io_fs.writeFile(path,

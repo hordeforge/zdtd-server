@@ -6,6 +6,7 @@
 //! handItemDamage (entity damage from the hand item).
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const ecs = @import("../../ecs/root.zig");
 const components = @import("../../ecs/components.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
@@ -861,8 +862,7 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
 test "armorMitigation honors zero and missing XML resistance without offline floors" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -899,8 +899,7 @@ test "armorMitigation honors zero and missing XML resistance without offline flo
 test "itemIsArmor does not use offline pins after catalogs requested" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -930,8 +929,7 @@ test "getScrapableRecipe and tryScrap follow RE weight/category rules" {
     // when forge_category matches; no_scrapping and overweight output reject.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();

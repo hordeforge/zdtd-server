@@ -147,8 +147,10 @@ pub fn parseChannelPayload(st: *ParseState, data: []const u8, out: []Package) us
 
 /// Test-only entry over a module-scope scratch: a test reads bodies right
 /// after one call and never shares state with another session, so this keeps
-/// test call sites one-liners. Calling it outside a test build is a compile
-/// error; every production owner passes its own ParseState.
+/// test call sites one-liners. Same channel-envelope contract as
+/// `parseChannelPayload` (RE protocol-frames.md); calling it outside a test
+/// build is a compile error, and every production owner passes its own
+/// ParseState.
 pub fn parseChannelPayloadForTest(data: []const u8, out: []Package) usize {
     if (!@import("builtin").is_test)
         @compileError("frame.parseChannelPayloadForTest is test-only; pass a *frame.ParseState");

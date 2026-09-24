@@ -2,6 +2,7 @@
 //! Verbatim move - called via forwarder in game.zig.
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
@@ -535,8 +536,7 @@ test "bot spawn encodes once for multiple viewers" {
     const gpa = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(gpa, dir, 0);
     defer {
         g.deinit();

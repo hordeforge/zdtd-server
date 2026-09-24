@@ -20,6 +20,7 @@
 //! same relationship set so it survives a server restart.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const platform_user = @import("../wire/platform_user.zig");
 const io_fs = @import("../util/io_fs.zig");
 
@@ -339,8 +340,7 @@ test "a no-op transition never changes the stored status" {
 test "ally store persists across restart (allies.zal)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     {
         var store: Store = .{};
         try store.setStatus(.{ .platform = "Steam", .id = "1001" }, .{ .platform = "Steam", .id = "1002" }, .allies);
@@ -369,8 +369,7 @@ test "ally store persists across restart (allies.zal)" {
 test "an out-of-range status byte fails closed instead of panicking" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
 

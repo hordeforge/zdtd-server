@@ -1,6 +1,7 @@
 //! Minimal serverconfig.xml subset (port, max players, world name, password).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
@@ -627,8 +628,7 @@ test "parse config fixture" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -665,8 +665,7 @@ test "sandbox code applies gameplay tuning (RE sandbox-options §5)" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -693,8 +692,7 @@ test "sandbox DropOnDeath clamps picker 5/6 into sim range 0..4" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -712,8 +710,7 @@ test "sandbox code invalid index falls back to option default" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -730,8 +727,7 @@ test "malformed sandbox code leaves defaults (stock: version char reject)" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -798,8 +794,7 @@ test "parse gameplay options with clamping" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -841,8 +836,7 @@ test "parse land claim expiry and loot respawn days" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -901,8 +895,7 @@ test "near-miss property names still load known keys" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -1096,8 +1089,7 @@ test "BuildCreate and CameraRestrictionMode come from serverconfig" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
     try io_fs.writeFile(path, xml_src);

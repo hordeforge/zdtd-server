@@ -3,6 +3,7 @@
 //! Split out of assets/entities.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const entities = @import("entities.zig");
 const EntityDef = entities.EntityDef;
 const inferKind = entities.inferKind;
@@ -187,8 +188,7 @@ test "day/night speeds parse from entityclasses XML" {
     // per entity-ai.md 3312 moveSpeedNight seeds from moveSpeed).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec2.xml", .{dir});
     try io_fs.writeFile(path,
@@ -254,8 +254,7 @@ test "AITask attack gating parses from entityclasses XML" {
     // class with no AITask-* at all keeps the zombie-brain default (true).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec.xml", .{dir});
     try io_fs.writeFile(path,
@@ -296,8 +295,7 @@ test "AITask attack gating parses from entityclasses XML" {
 test "pipe AITask blob replaces parent list and numbered keys merge" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_pipe.xml", .{dir});
     try io_fs.writeFile(path,
@@ -369,8 +367,7 @@ test "Explosion class resolves per field through Extends with DamageBonus" {
     // the damages and inherit radius + DamageBonus from the base class.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec.xml", .{dir});
     try io_fs.writeFile(path,
@@ -461,8 +458,7 @@ test "dismember tuning resolves through Extends in an offline file" {
     // multipliers, so the leg values must inherit, not reset to 0.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec3.xml", .{dir});
     try io_fs.writeFile(path,
@@ -515,8 +511,7 @@ test "Leap maps to a native task and JumpMaxDistance parses" {
     // under EAILeap's 2.8 m floor).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_leap.xml", .{dir});
     try io_fs.writeFile(path,
@@ -553,8 +548,7 @@ test "RangedAttackTarget SetData params parse with stock ctor defaults" {
     // 20 - EAIRangedAttackTarget::.ctor / Init).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_ranged.xml", .{dir});
     try io_fs.writeFile(path,

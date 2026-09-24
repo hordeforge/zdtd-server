@@ -10,6 +10,7 @@
 //! the XML part) with a loud warning that the code part is not hosted.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const io_fs = @import("../util/io_fs.zig");
 const parallel = @import("../util/parallel.zig");
 const xml = @import("xml_util.zig");
@@ -560,8 +561,7 @@ test "disabled modlets are listed but their patches are not applied" {
     // Config/ dir is left out of the patch list.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
     const enabled_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/AEnabled/Config", .{mods_root});

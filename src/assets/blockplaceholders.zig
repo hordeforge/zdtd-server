@@ -25,6 +25,7 @@
 //! which has the world position and the biome.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -330,8 +331,7 @@ test "placeholders parse, weigh and resolve deterministically" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/placeholders.xml", .{dir});
     try io_fs.writeFile(path, src);

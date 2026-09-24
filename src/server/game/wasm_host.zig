@@ -2,6 +2,7 @@
 //! Extracted verbatim so game.zig keeps only a re-export.
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const plugin_mod = @import("../../plugin/root.zig");
@@ -713,8 +714,7 @@ test "plugin queue verbs fail closed on out-of-range coordinates" {
 test "redactPlayerPii strips login names and platform ids from wasm log lines" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();

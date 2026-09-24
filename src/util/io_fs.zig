@@ -10,6 +10,7 @@
 //! a seed without real I/O faults. `util.sim.disable` clears both counters.
 
 const std = @import("std");
+const test_tmp = @import("test_tmp.zig");
 const util_log = @import("log.zig");
 
 /// Remaining synthetic write failures for DST fault injection (0 = off).
@@ -330,8 +331,7 @@ test "write read roundtrip under cache dir" {
     const a = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_test.txt", .{dir});
     try writeFile(p, "hello");
@@ -351,8 +351,7 @@ test "injectWriteFailures fails then recovers" {
     defer injectWriteFailures(0);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_fault.txt", .{dir});
     injectWriteFailures(2);
@@ -368,8 +367,7 @@ test "injectReadFailures fails then recovers" {
     defer injectReadFailures(0);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var p_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const p = try std.fmt.bufPrint(&p_buf, "{s}/io_fs_read_fault.txt", .{dir});
     try writeFile(p, "payload");

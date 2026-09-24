@@ -8,6 +8,7 @@
 //! deinit, tests) are unchanged.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const game_mod = @import("game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -655,8 +656,7 @@ pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []cons
 test "player save upgrades offline v15 inventory slots" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -691,8 +691,7 @@ test "player save upgrades offline v15 inventory slots" {
 test "wipePlayerRecordsByName erases without leaving players.zsv.bak" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -726,8 +725,7 @@ test "wipePlayerRecordsByName erases without leaving players.zsv.bak" {
 test "player save preserves full inventory journal and buffs" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();

@@ -16,6 +16,7 @@
 //! never a fake body (ADR 0014).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const tcp = @import("../util/tcp_listen.zig");
 const http = std.http;
 const secret_mod = @import("../util/secret.zig");
@@ -692,8 +693,7 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
     // LIVE module answered at all.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const copy_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "mcp2.wasm" });
     defer std.testing.allocator.free(copy_path);
     const orig = try io_fs.readFileAll(std.testing.allocator, "mods/mcp/mcp.wasm");

@@ -17,6 +17,7 @@
 //! Non-patched columns are written empty, which is what stock's writer does.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 const mods = @import("modlets.zig");
@@ -324,8 +325,7 @@ fn parseCsvLine(line: []const u8, out: *[max_columns][]const u8) usize {
 test "localization CSV parses quoted fields and merges in mod order" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var cfg_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir});
     io_fs.mkdirPath(cfg);
@@ -389,8 +389,7 @@ test "localization CSV parses quoted fields and merges in mod order" {
 test "the localization blob is raw deflate the client can inflate" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var cfg_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir});
     io_fs.mkdirPath(cfg);

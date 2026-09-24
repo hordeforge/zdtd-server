@@ -3,6 +3,7 @@
 //! Split out of assets/blocks.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const blocks = @import("blocks.zig");
 const BlockTable = blocks.BlockTable;
 const maxdamage_dep = @import("maxdamage.zig");
@@ -789,8 +790,7 @@ test "CanPlayersSpawnOn and CanMobsSpawnOn parse and inherit through Extends" {
     // 24 mobs=true (terrain, farm plots, a few trees).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_spawn.xml", .{dir});
     try io_fs.writeFile(path,
@@ -829,8 +829,7 @@ test "PassThroughDamage parses and inherits through Extends" {
     // cntCar03SedanDamage0Master).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_pt.xml", .{dir});
     try io_fs.writeFile(path,

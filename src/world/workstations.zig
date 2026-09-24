@@ -6,6 +6,7 @@
 //! these types only.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const components = @import("../ecs/components.zig");
 const io_fs = @import("../util/io_fs.zig");
 
@@ -1326,8 +1327,7 @@ test "craft complete list drains to what the client acknowledged" {
 test "workstation save preserves partial and complete craft acknowledgements" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
 
     var s: WorkstationStore = .{};
     const w = s.getOrCreate(5, 70, 6).?;
@@ -1403,8 +1403,7 @@ test "workstation store save load roundtrip keeps queue, slots and flags" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try s.save(dir, std.testing.allocator);
 
     var s2: WorkstationStore = .{};
@@ -1438,8 +1437,7 @@ test "ZWS1 record with a group length past its array is rejected" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try s.save(dir, std.testing.allocator);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});
@@ -1486,8 +1484,7 @@ test "ZWS1 craft-complete name lengths past their array are rejected" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try s.save(dir, std.testing.allocator);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});
@@ -1543,8 +1540,7 @@ test "a duplicate position in workstations.zws overwrites instead of overflowing
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try s.save(dir, std.testing.allocator);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});

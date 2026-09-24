@@ -19,6 +19,7 @@ pub const sys_metrics = @import("sys_metrics.zig");
 pub const tcp_listen = @import("tcp_listen.zig");
 pub const toml_bind = @import("toml_bind.zig");
 pub const utf8 = @import("utf8.zig");
+pub const test_tmp = @import("test_tmp.zig");
 
 test {
     _ = arena;
@@ -35,4 +36,5 @@ test {
     _ = tcp_listen;
     _ = toml_bind;
     _ = utf8;
+    _ = test_tmp;
 }

@@ -9,6 +9,7 @@
 //! BFS over the grid. No heap allocation on the query path (fixed arrays).
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const store = @import("store.zig");
 const World = store.World;
 const Chunk = store.Chunk;
@@ -135,8 +136,7 @@ pub fn findPath(w: *const World, sx: i32, sz: i32, tx: i32, tz: i32, out: []Cell
 test "nav: flat floor cells are walkable and path across chunks" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
 
@@ -164,8 +164,7 @@ test "nav: flat floor cells are walkable and path across chunks" {
 test "nav: a wall blocks the path, gaps route around" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
 
@@ -205,8 +204,7 @@ test "nav: a wall blocks the path, gaps route around" {
 test "nav: an unloaded chunk is unwalkable, path to it fails" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var w = try World.init(std.testing.allocator, dir);
     defer w.deinit();
 

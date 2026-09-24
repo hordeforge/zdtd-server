@@ -3,6 +3,7 @@
 //! Split out of server/game/tests.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const Game = @import("../game.zig").Game;
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
@@ -44,8 +45,7 @@ const zpv2DropName = game.zpv2DropName;
 test "land claim removed when keystone breaks and expires offline" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -122,8 +122,7 @@ test "land claim count and dead-zone gates refuse over-limit and adjacent claims
     // count or inside another claim's dead zone is not registered.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -163,8 +162,7 @@ test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
     // register 300 and prove the save/restart round trip keeps every claim.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -195,8 +193,7 @@ test "block durability has no eviction cap (GAP 12)" {
     // blocks keeps its absolute value.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -221,8 +218,7 @@ test "block durability survives far past the old 1024 cap" {
     // the oldest entry mid-fight).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();

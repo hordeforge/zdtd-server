@@ -16,6 +16,7 @@
 //! The .zsv list files remain the runtime-persisted form.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const xml = @import("../assets/xml_util.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -280,8 +281,7 @@ test "serveradmin.xml sections merge into the operator lists" {
     var bans: admin_cmds.BanList = .{};
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
     defer std.testing.allocator.free(path);
     try io_fs.writeFile(path, xml_text);
@@ -340,8 +340,7 @@ test "serveradmin.xml accepts the older <admins><users> nesting" {
     var bans: admin_cmds.BanList = .{};
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
     defer std.testing.allocator.free(path);
     try io_fs.writeFile(path, xml_text);

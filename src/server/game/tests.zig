@@ -4,6 +4,7 @@
 //! `zig build test` aggregates them; game.zig no longer carries the suite inline.
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const Game = @import("../game.zig").Game;
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
@@ -162,8 +163,7 @@ test "deco suppression follows the prefab AllowDecorations property" {
     if (!io_fs.dirExists(map_dir)) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -622,8 +622,7 @@ fn adminRun(g: *Game, sink: []u8, line: []const u8) []const u8 {
 test "survival: food/water deplete, starvation damages, well-fed regens, S2C syncs" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -690,8 +689,7 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
 test "survival: zero decay rates do not disable the rest of the pass" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -721,8 +719,7 @@ test "survival: zero decay rates do not disable the rest of the pass" {
 test "compressible packages send deflated frames the parser can read back" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -771,8 +768,7 @@ test "stock client quest name gate accepts every stock family" {
 test "vehicles and turrets persist across restart (entities.zen)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     {
         const g = try Game.create(std.testing.allocator, dir, 0);
         defer {
@@ -823,8 +819,7 @@ test "vehicle basket C2S applies and echoes to peers" {
     // other clients (the stock S2C sender is unpinned).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -869,8 +864,7 @@ test "vehicle basket C2S applies and echoes to peers" {
 test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -931,8 +925,7 @@ test "a latched switch comes back on after a restart, not off" {
     // while the clients still rendered the switches as on.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -1010,8 +1003,7 @@ test "POI reset restores baked blocks over player edits" {
     // write into the repo).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var g = try Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
         .map_dir = map,
         .game_dir = game_dir,
@@ -1268,8 +1260,7 @@ test "biome gamestage and lootstage modifiers apply from biomes.xml" {
 test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -1306,8 +1297,7 @@ test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" 
 test "waypoint invites relay to allies (Friends) and all (Everyone)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1377,8 +1367,7 @@ test "waypoint invites relay to allies (Friends) and all (Everyone)" {
 test "game message relays verbatim to all clients including sender" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1425,8 +1414,7 @@ test "game message relays verbatim to all clients including sender" {
 test "sound at position relays to all clients except the owning player" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1476,8 +1464,7 @@ test "sound at position relays to all clients except the owning player" {
 test "entity award kill server is handled without re-crediting kills" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1511,8 +1498,7 @@ test "entity award kill server is handled without re-crediting kills" {
 test "platform-id ban rejects a rejoin with the same identity" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1546,8 +1532,7 @@ test "platform-id ban rejects a rejoin with the same identity" {
 test "whitelist gates the join: listed and admins enter, others are denied" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1577,8 +1562,7 @@ test "name-keyed admin entry does not grant a platform peer who spoofs the name"
     // (stock AdminUsers.HasEntry keys on PlatformId only, IL=30).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1601,8 +1585,7 @@ test "name-keyed admin entry does not grant a platform peer who spoofs the name"
 test "name-keyed whitelist entry does not admit a platform peer with that name" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1620,8 +1603,7 @@ test "name-keyed whitelist entry does not admit a platform peer with that name" 
 test "admin add from player console cannot grant a more privileged level" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1649,8 +1631,7 @@ test "admin add from player console cannot grant a more privileged level" {
 test "admin target key uses the platform id for an online session" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1673,8 +1654,7 @@ test "admin target key uses the platform id for an online session" {
 test "reserved and admin slots let privileged players join a full server" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .max_players = 2,
         .reserved_slots = 1,
@@ -1710,8 +1690,7 @@ test "reserved and admin slots let privileged players join a full server" {
 test "ServerReservedSlots=0 disables the reserved over-cap tier" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     // reserved_slots defaults to 0 (= disabled). A perm-0 admin must not
     // climb past max via the reserved formula privileged < max - 0.
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
@@ -1734,8 +1713,7 @@ test "ServerReservedSlots=0 disables the reserved over-cap tier" {
 test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const sa_path = try std.Io.Dir.path.join(std.testing.allocator, &.{ dir, "serveradmin.xml" });
     defer std.testing.allocator.free(sa_path);
     const xml_v1 =
@@ -1780,8 +1758,7 @@ test "serveradmin.xml hot-reload replaces the XML-sourced entries" {
 test "particle effects relay to all clients except the causing owner; stealth is a no-op" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1860,8 +1837,7 @@ test "particle effects relay to all clients except the causing owner; stealth is
 test "quest goto/treasure point reports are handled without double-completion" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1918,8 +1894,7 @@ test "quest goto/treasure point reports are handled without double-completion" {
 test "entity physics report is handled without touching the sim" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -1960,8 +1935,7 @@ test "entity physics report is handled without touching the sim" {
 test "entity ragdoll relays to other clients, not the owner" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -2016,8 +1990,7 @@ test "entity ragdoll relays to other clients, not the owner" {
 test "power wire edges persist and reconnect after a restart (entities.zen)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     {
         const g = try Game.create(std.testing.allocator, dir, 0);
         defer {
@@ -2066,8 +2039,7 @@ test "power wire edges persist and reconnect after a restart (entities.zen)" {
 test "in-game console runs admin verbs for admins, denies players" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -2120,8 +2092,7 @@ test "in-game console runs admin verbs for admins, denies players" {
 test "quest objective events mirror to party members" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -2203,8 +2174,7 @@ test "quest objective events mirror to party members" {
 test "poi lockout reports bedroll and land claim homes" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -2239,8 +2209,7 @@ test "breaking a bedroll clears the owner respawn point" {
     // bedroll block drops has_bed so the player respawns at the default.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -2276,8 +2245,7 @@ test "active quest stage modifiers scale the player gamestage" {
     // (mod .6, bonus 30) pushes the player's stage up while active.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -2327,8 +2295,7 @@ test "POI difficulty tier scales the loot stage (POITierMod/Bonus)" {
     // 0.1, bonus 6) pushes a level-10 player's loot stage to 10*(1.1)+6 = 17.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -2362,8 +2329,7 @@ test "quest reward stage scales by quest tier (GetTraderStage)" {
     // stock root quest_tier_mod="0,0.05,0.1,..." -> 10*(1.1) = 11.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -2392,8 +2358,7 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     // the skill-point cost by percent. The stat deltas stay native.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
 
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -2473,8 +2438,7 @@ test "GameEventRequest: IL=211 party gate + on_game_event verdict through the C2
     // gameevents.xml phase-machine engine stays plugin territory.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
 
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
@@ -2557,8 +2521,7 @@ test "on_stat_changed observer fires from the survival pass" {
     // authority. A food-depleted player triggers one call per tick.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -2600,8 +2563,7 @@ test "restored buffs re-apply through the effects VM (recompute-from-set)" {
     // restart for free.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const defs = [_]assets_buffs.BuffDef{
         .{
             .name = "testRegen",
@@ -2657,8 +2619,7 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2719,8 +2680,7 @@ test "equipped item passives fold into the survival VM (stock data)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2786,8 +2746,7 @@ test "rogue armor quiets stealth noise while crouching (NoiseMultiplier)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2841,8 +2800,7 @@ test "rogue armor dims stealth light in the dark (LightMultiplier)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2912,8 +2870,7 @@ test "rogue helmet raises loot stage (LootStage passive 159)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2959,8 +2916,7 @@ test "PainTolerance resists stun buffs (BuffResistance passive 197)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -2997,8 +2953,7 @@ test "NightStalker steal heals on hit (HealthSteal passive 167)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3024,8 +2979,7 @@ test "held torch burn proc lands on the victim" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3069,8 +3023,7 @@ test "Boomstick stun lands on the victim (target=other AddBuff)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3132,8 +3085,7 @@ test "MachineGunner refunds stamina on hit (attacked ModifyStats)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3182,8 +3134,7 @@ test "PummelPete combo counter rises per hit (attacked ModifyCVar)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3231,8 +3182,7 @@ test "victim-directed cvar writes land on player victims" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3281,8 +3231,7 @@ test "zombie fist infection lands on player victim" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3316,8 +3265,7 @@ test "zombie victim carries bleedCounter through the cvar column" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3368,8 +3316,7 @@ test "BarBrawling rage grants on taking a hit (onOtherDamagedSelf)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3415,8 +3362,7 @@ test "combat entry grants the magnum criminal-pursuit buff" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3466,8 +3412,7 @@ test "fall impact escalates the leg-injury counter" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3501,8 +3446,7 @@ test "zombie fist applies exactly one wound per hit (fireOneBuff)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3536,8 +3480,7 @@ test "buffInfectionMain escalates the infection counter" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3571,8 +3514,7 @@ test "victim PackMule display buff fires on being hit" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3617,8 +3559,7 @@ test "died rows set infectionCounter on player death" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3650,8 +3591,7 @@ test "leave-game rows clear harvest buff on disconnect" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3679,8 +3619,7 @@ test "CharismaticNature shares level with party member" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3720,8 +3659,7 @@ test "multi-name RemoveBuff fans out (splint ladder)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3753,8 +3691,7 @@ test "delayed kill stamina lands after 1s" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3808,8 +3745,7 @@ test "power-attack kill refunds stamina via IsSecondaryAttack" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3860,8 +3796,7 @@ test "cure-all flags typed buffs only" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3897,8 +3832,7 @@ test "bleeding drains HP via cvar-scaled HealthChangeOT" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3929,8 +3863,7 @@ test "spawn-heal finish restores bars" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -3962,8 +3895,7 @@ test "church-bell ring spawns the aggressive horde" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4001,8 +3933,7 @@ test "heal-health cvar add heals per update" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4038,8 +3969,7 @@ test "ranged ray-hit bleeds the victim (onSelfPrimaryActionRayHit)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4093,8 +4023,7 @@ test "level-curved ModifyCVar indexes the perk's level" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4125,8 +4054,7 @@ test "forgetting elixir resets progression and refunds points" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4175,8 +4103,7 @@ test "consumable item use grants its buffs (onSelfPrimaryActionEnd)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4225,8 +4152,7 @@ test "consumable buff expires when its duration cvars drain" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4282,8 +4208,7 @@ test "infection04 start subtract kills instantly" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4309,8 +4234,7 @@ test "radiation pool drains 20 stamina per update" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4347,8 +4271,7 @@ test "puking start drains 50 water immediately" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4379,8 +4302,7 @@ test "MotherLode penalizes harvest XP via Harvesting tag" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4414,8 +4336,7 @@ test "TwilightThief scales kill XP at night (PlayerExpGain Kill)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4444,8 +4365,7 @@ test "stamina regen scales with water fraction (StaminaOT water gate)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4479,8 +4399,7 @@ test "fatigued victim takes scaled damage (HealthLoss passive 107)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4506,8 +4425,7 @@ test "rogue set bonus scales dukes stacks (LootQuantity passive 81)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4548,8 +4466,7 @@ test "kill trigger fires SiphoningStrikes heal on zombie kill" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4595,8 +4512,7 @@ test "morale start otherAOE cripples nearby zombies" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4629,8 +4545,7 @@ test "kill trigger grants Dentist silver on tagged zombie kill" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4697,8 +4612,7 @@ test "kill trigger clears FortitudeMastery bleeds on zombie kill" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4735,8 +4649,7 @@ test "kill trigger grants Berserker on club kill at Strength 5" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4782,8 +4695,7 @@ test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4819,8 +4731,7 @@ test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4851,8 +4762,7 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4888,8 +4798,7 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4930,8 +4839,7 @@ test "sprint drain consumes running-tagged StaminaChangeOT (perkRuleOneCardio)" 
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -4969,8 +4877,7 @@ test "walk regen consumes walking-tagged StaminaChangeOT (armorFarmerHelmet)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5018,8 +4925,7 @@ test "FoodChangeOT and WaterChangeOT join the survival totals" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5074,8 +4980,7 @@ test "HungerMultiplier scales negative FoodChangeOT (loss sandbox modifier)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5120,8 +5025,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5197,8 +5101,7 @@ test "the survival pass reads the held item's tags for HoldingItemHasTags" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5245,8 +5148,7 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5305,8 +5207,7 @@ test "crafting tier follows the stock crafting-skill rows" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5342,8 +5243,7 @@ test "crafting consumes tier-scaled ingredients and yields a tier-quality item" 
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5397,8 +5297,7 @@ test "the survival pass folds the armor query into buff_phys_resist" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5449,8 +5348,7 @@ test "a gated perk row stops folding when its requirement fails" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5521,8 +5419,7 @@ test "every active buff fires its onSelfBuffStart rows once" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5560,8 +5457,7 @@ test "the armour status buffs gate on the worn-armour rating" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5590,8 +5486,7 @@ test "an entity can hold a full stock buff set, not just eight" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5635,8 +5530,7 @@ test "the entity class Buffs list parses from entityclasses.xml" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5677,8 +5571,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5725,8 +5618,7 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5778,8 +5670,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -5831,8 +5722,7 @@ test "breaking a container spills its pre-filled contents" { // 449 LootList blo
     // path spilled them; the break path dropped nothing).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();
@@ -5864,8 +5754,7 @@ test "the three client-sent reports the server must not apply are handled and dr
     // count) and change nothing (DIVERGENCES 1.15 to 1.17).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -5933,8 +5822,7 @@ test "the laser sight relays to other players but not back to the sender" {
     // GAP_ANALYSIS until 2026-09-06, which is why it went unimplemented.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -6015,8 +5903,7 @@ test "a fresh login sends the empty AuthConfirmation for the client to echo" {
     // existed without the send, so the round-trip never started.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -6047,8 +5934,7 @@ test "an owner receives their parked vehicles as a waypoint list" {
     // shows where they parked. Unowned vehicles are nobody's waypoints.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
     defer {
         g.deinit();
@@ -6115,8 +6001,7 @@ test "a generator's remaining fuel survives a restart instead of refilling" {
     // rebuilds the node.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
 
     const PowerStub = struct {
         power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
@@ -6322,8 +6207,7 @@ test "a POI reset discards container contents instead of spilling them" {
     // player edits" covers the reset call site, but needs a stock install.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -6365,8 +6249,7 @@ test "queued-verb policy: a denied verb is dropped before the command buffer" {
     // own declaration and operator allows clear it (right-biased merge).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -6435,8 +6318,7 @@ test "queued-verb policy: the mcp allowlist gates an external-entry module at th
     // the list's reach.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, dir, 0);
     defer {
         g.deinit();
@@ -6483,8 +6365,7 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     // when off and keep the demo world populated when on (default).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
 
     const off_dir = try std.Io.Dir.path.join(std.testing.allocator, &.{ root, "off" });
     defer std.testing.allocator.free(off_dir);
@@ -6535,8 +6416,7 @@ test "compact InvTx unknown op fails closed" {
     // used to map to `.list` and ack success; they must reject instead.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, root, 0, .{
         .starter_zombies = false,
         .demo_seed = false,
@@ -6566,8 +6446,7 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     // Stacknumber; an absent spec keeps the historical four-row default.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const root = try test_tmp.rootOf(&tmp);
 
     const kit_dir = try std.Io.Dir.path.join(std.testing.allocator, &.{ root, "kit" });
     defer std.testing.allocator.free(kit_dir);
@@ -6621,8 +6500,7 @@ test "loot prob passives scale tagged entries (stock perkDeadEye)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6675,8 +6553,7 @@ test "loot entry mods install on the spawned gun" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6740,8 +6617,7 @@ test "loot bag fill carries the rolled quality, stackables stay quality 1" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6791,8 +6667,7 @@ test "container loot starts a random-durability item worn" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6843,8 +6718,7 @@ test "container loot applies entry buffs to the opener" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6889,8 +6763,7 @@ test "progression update rows write $perkBookwormChance (stock data)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .game_dir = game_dir,
         .starter_zombies = false,
@@ -6939,8 +6812,7 @@ test "loot requirement gates read the opener's progression on the fill path" {
     // so the assertion is about the gate, not the catalog.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
         .starter_zombies = false,
         .demo_seed = false,
@@ -7045,8 +6917,7 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7132,8 +7003,7 @@ test "equipping rogue boots grants the worn marker buff and unequipping removes 
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7187,8 +7057,7 @@ test "respawn grants the stock spawn-protection and trauma buffs" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7227,8 +7096,7 @@ test "eating a bandage grants Physician-scaled XP through gated GiveExp rows" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7260,8 +7128,7 @@ test "a held cripple mod rolls its damage proc through seeded cvars" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7305,8 +7172,7 @@ test "a cripple-modded hit cripples a walker victim" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7367,8 +7233,7 @@ test "reloading a penalty weapon grants the reload slow buff" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7408,8 +7273,7 @@ test "a damaged radiated zombie gains its regen buff and amount" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7447,8 +7311,7 @@ test "worn rogue boots soften the fall impact computation" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7499,8 +7362,7 @@ test "a radiated zombie regenerates through its class proc buff" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7533,8 +7395,7 @@ test "a burning zombie takes damage over time" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7562,8 +7423,7 @@ test "a placed torch feeds the AI heat map" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7597,8 +7457,7 @@ test "radiated regen stops at 80 percent HP" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7630,8 +7489,7 @@ test "a burning zombie seeds its duration and self-extinguishes" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7662,8 +7520,7 @@ test "a stunned zombie gains its cooldown on expiry" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7691,8 +7548,7 @@ test "died class rows reset hazard timers" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7720,8 +7576,7 @@ test "join seeds class entered-game cvars" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7745,8 +7600,7 @@ test "buying StrengthMastery refreshes a held miner tool's healing cvars" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7783,8 +7637,7 @@ test "a torch hit sets the victim burning" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7834,8 +7687,7 @@ test "submersion mirrors the underwater cvar" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
@@ -7865,8 +7717,7 @@ test "dragging a damaged tool onto another combines durability" {
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();

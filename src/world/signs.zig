@@ -13,6 +13,7 @@
 //! drift from the module order the client sent.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const io_fs = @import("../util/io_fs.zig");
 const containers = @import("containers.zig");
 
@@ -220,8 +221,7 @@ test "sign store save and load round-trip" {
     _ = st.put(.{ .x = -5, .y = 71, .z = 9 }, 900, &body);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     try st.save(dir, std.testing.allocator);
     var st2: SignStore = .{};
     defer st2.deinit();

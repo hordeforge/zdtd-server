@@ -3,6 +3,7 @@
 //! this file persists only the `block_raw` rotation/meta cache mirror.
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const io_fs = @import("../../util/io_fs.zig");
@@ -109,8 +110,7 @@ test "block metadata buffer holds both stores at capacity" {
 test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
 
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();

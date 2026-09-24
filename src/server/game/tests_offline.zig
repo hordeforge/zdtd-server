@@ -3,6 +3,7 @@
 //! Split out of server/game/tests.zig (same tests, moved verbatim).
 
 const std = @import("std");
+const test_tmp = @import("../../util/test_tmp.zig");
 const Game = @import("../game.zig").Game;
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
@@ -46,8 +47,7 @@ test "evidence JSONL flush writes the ring to a file (P4)" {
     // formatted JSONL lines (no secrets, no packets).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const world_dir = try test_tmp.rootOf(&tmp);
     const g = try Game.create(std.testing.allocator, world_dir, 0);
     defer {
         g.deinit();

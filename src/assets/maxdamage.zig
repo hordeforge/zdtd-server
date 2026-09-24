@@ -3,6 +3,7 @@
 //! band defaults. Storage names (LootList / CompositeTileEntity) ride the same table.
 
 const std = @import("std");
+const test_tmp = @import("../util/test_tmp.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const arena_util = @import("../util/arena.zig");
@@ -1453,8 +1454,7 @@ test "deco facts follow Extends chains and fail closed" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_deco.xml", .{dir});
     try io_fs.writeFile(path, xml_src);
@@ -1789,8 +1789,7 @@ test "MaxDamage falls back to the Extends-resolved material's own MaxDamage" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var blocks_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_mhp.xml", .{dir});
     var mats_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
@@ -1842,8 +1841,7 @@ test "materials.xml CanDestroy gates block damage" {
     ;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var dir_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const dir = try test_tmp.rootOf(&tmp);
     var blocks_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_cd.xml", .{dir});
     var mats_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
