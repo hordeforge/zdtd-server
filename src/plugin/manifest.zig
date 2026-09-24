@@ -184,17 +184,6 @@ pub const OverridePoint = enum {
     pub fn wire(self: OverridePoint) []const u8 {
         return names[@intFromEnum(self)];
     }
-
-    /// The Hook name (wasm.zig) that implements this point.
-    pub fn hook(self: OverridePoint) []const u8 {
-        return switch (self) {
-            .loot_roll => "on_loot_roll",
-            .quest_payout => "on_quest_complete",
-            .damage_player_scale => "on_player_damage",
-            .craft_request => "on_craft_request",
-            .trade_price => "on_trade_price",
-        };
-    }
 };
 
 /// Parsed `manifest.toml`. Binder-backed: only declared fields bind; unknown keys

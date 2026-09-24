@@ -1020,11 +1020,19 @@ const max_wasm_module_bytes: usize = 16 * 1024 * 1024;
 /// allowed there); the tick path only calls hooks, which are already budgeted.
 /// Index of `name` in the fixed hook table, or `Hook.names.len` when the name
 /// is not a hook (callers must fail closed on that).
-fn hookIndex(name: []const u8) usize {
-    for (Hook.names, 0..) |hname, i| {
-        if (std.mem.eql(u8, hname, name)) return i;
-    }
-    return Hook.names.len;
+/// The exclusive-point -> hook link, typed: the three claim sites index
+/// `hook_present` with `@intFromEnum`, so an added OverridePoint variant can
+/// only name a hook that exists in the table (the stringly
+/// `hookIndex(name)` answer, `Hook.names.len` on a miss, read one past
+/// `hook_present` at the first dispatch through a mistyped point).
+pub fn overrideHook(p: manifest.OverridePoint) Hook {
+    return switch (p) {
+        .loot_roll => .on_loot_roll,
+        .quest_payout => .on_quest_complete,
+        .damage_player_scale => .on_player_damage,
+        .craft_request => .on_craft_request,
+        .trade_price => .on_trade_price,
+    };
 }
 
 /// A manifest's `deny` list as a verb mask. The resolver validated it at load,
@@ -1176,10 +1184,10 @@ pub const WasmHost = struct {
                 );
                 continue;
             }
-            if (slot < self.n and !self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+            if (slot < self.n and !self.slots[slot].hook_present[@intFromEnum(overrideHook(point))]) {
                 std.debug.print(
                     "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
-                    .{ self.slots[slot].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                    .{ self.slots[slot].display, manifest.OverridePoint.wire(point), Hook.names[@intFromEnum(overrideHook(point))] },
                 );
                 continue;
             }
@@ -1419,10 +1427,10 @@ pub const WasmHost = struct {
             if (name.len == 0) continue;
             const point = manifest.OverridePoint.parsePoint(name) orelse continue; // validate() rejected unknown names
             const pi = @intFromEnum(point);
-            if (!self.slots[idx].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+            if (!self.slots[idx].hook_present[@intFromEnum(overrideHook(point))]) {
                 std.debug.print(
                     "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
-                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), Hook.names[@intFromEnum(overrideHook(point))] },
                 );
                 continue;
             }
@@ -1581,7 +1589,7 @@ pub const WasmHost = struct {
         if (c == no_claim or c >= self.n) return null;
         const slot: usize = c;
         if (self.slots[slot].disabled) return null;
-        if (!self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) return null;
+        if (!self.slots[slot].hook_present[@intFromEnum(overrideHook(point))]) return null;
         return slot;
     }
 
