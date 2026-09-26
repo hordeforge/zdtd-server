@@ -149,9 +149,8 @@ fi
 # Explicit -l + pattern so we never enter create-tag mode on odd git versions.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
   # docs/RELEASES.md must name the newest product tag as the latest release.
-  # v0.* only: v3.1.0 is a stock-wire alias (same commit as v0.1.1), not a
-  # product release, and would otherwise sort ahead of every 0.x tag.
-  latest_product_tag=$(git tag -l 'v0.*' --sort=-v:refname 2>/dev/null | head -n1 || true)
+  # Ignore v3.1.0 (a stock-wire alias pointing at v0.1.1, not a product release).
+  latest_product_tag=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | grep -vx 'v3\.1\.0' | head -n1 || true)
   if [[ -n "$latest_product_tag" ]]; then
     # Soft-wrapped prose may split the sentence across lines; match on
     # collapsed whitespace.

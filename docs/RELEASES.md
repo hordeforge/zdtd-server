@@ -51,10 +51,13 @@ metadata requires a literal; `make check` rejects drift between them.
 - **Saved worlds:** a release must read the previous released format or provide
   an explicit migration. ZCH3 reads ZCH1 heights and ZCH2 heights. ZCH2 block
   edits are regenerated because the old format discarded required metadata.
-  ZCH4 (added with the withdrawn `[wire] profile` dialects, ADR 0036 amendment)
-  carries the column height in the header: a stock loader rejects it, and a
-  mismatched non-stock loader fails closed. No shipped config writes it. Downgrade compatibility is not promised. Back up
-  worlds before upgrading.
+  Player records (ZPV17, reads ZPV2+), entity records (ZEN2, reads ZENT), and
+  container records (ZCT3, reads ZCT1+) read older versions while writing the
+  unified slot stride. ZCH4 (added with the withdrawn `[wire] profile` dialects,
+  ADR 0036 amendment) carries the column height in the header: a stock loader
+  rejects it, and a mismatched non-stock loader fails closed. No shipped config
+  writes it. Downgrade compatibility is not promised. Back up worlds before
+  upgrading.
 - **Wire and saved data:** format changes are consumer-facing even when no Zig
   function signature changes. They must be listed under Breaking changes.
 

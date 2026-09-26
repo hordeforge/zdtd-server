@@ -1285,12 +1285,22 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         },
         .evidence => |path_opt| {
             if (path_opt) |p| {
+                // Reject path traversal and absolute paths to prevent arbitrary file writes.
+                if (std.mem.indexOf(u8, p, "..") != null or
+                    (p.len > 0 and (p[0] == '/' or p[0] == '\\')) or
+                    std.mem.indexOfScalar(u8, p, ':') != null)
+                {
+                    self.adminReply("evidence dump failed: path traversal rejected\n");
+                    return;
+                }
                 // JSONL flush (P4 evidence file): the ring only holds the
                 // last 64 events, so the operator can persist them.
                 var path_buf: [1024]u8 = undefined;
                 const path = if (p.len == 0) blk: {
                     break :blk std.fmt.bufPrint(&path_buf, "{s}/evidence.jsonl", .{self.world.world_dir}) catch "evidence.jsonl";
-                } else p;
+                } else blk: {
+                    break :blk std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ self.world.world_dir, p }) catch p;
+                };
                 const n = self.dumpEvidenceFile(path) catch |err| {
                     var eb: [256]u8 = undefined;
                     self.adminReply(std.fmt.bufPrint(&eb, "evidence dump failed: {s}\n", .{@errorName(err)}) catch "evidence dump failed\n");

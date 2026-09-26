@@ -65,6 +65,28 @@ test "evidence JSONL flush writes the ring to a file (P4)" {
     try std.testing.expect(std.mem.find(u8, read, "\"sev\":\"hard\"") != null);
 }
 
+test "evidence dump command rejects path traversal" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var out: [256]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = &out;
+    defer g.admin_reply_sink = null;
+
+    g.runAdminLine("evidence ../traversal.jsonl", "test");
+    try std.testing.expect(std.mem.find(u8, out[0..g.admin_reply_len], "path traversal rejected") != null);
+
+    g.admin_reply_len = 0;
+    g.runAdminLine("evidence /root/dump.jsonl", "test");
+    try std.testing.expect(std.mem.find(u8, out[0..g.admin_reply_len], "path traversal rejected") != null);
+}
+
 test "offline init failure restores deterministic sim globals" {
     util_sim.disable();
     try std.testing.expectError(error.SecretRequired, Game.createWithOptions(

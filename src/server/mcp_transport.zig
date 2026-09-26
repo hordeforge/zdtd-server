@@ -264,7 +264,7 @@ pub const Transport = struct {
         body: []const u8,
         extra: []const http.Header,
     ) !void {
-        var hdrs: [12]http.Header = undefined;
+        var hdrs: [14]http.Header = undefined;
         var n: usize = 0;
         if (content_type.len > 0) {
             hdrs[n] = .{ .name = "Content-Type", .value = content_type };
@@ -277,6 +277,10 @@ pub const Transport = struct {
         hdrs[n] = .{ .name = "X-Frame-Options", .value = "DENY" };
         n += 1;
         hdrs[n] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
+        n += 1;
+        hdrs[n] = .{ .name = "Cross-Origin-Opener-Policy", .value = "same-origin" };
+        n += 1;
+        hdrs[n] = .{ .name = "Cross-Origin-Resource-Policy", .value = "same-origin" };
         n += 1;
         hdrs[n] = .{ .name = "Content-Security-Policy", .value = "default-src 'none'; frame-ancestors 'none'" };
         n += 1;
@@ -303,10 +307,10 @@ pub const Transport = struct {
 
     /// Early raw response before std.http.Server is set up.
     fn rawRespond(self: *Transport, status: u16, body: []const u8) void {
-        var hdr: [512]u8 = undefined;
+        var hdr: [640]u8 = undefined;
         const h = std.fmt.bufPrint(
             &hdr,
-            "HTTP/1.1 {d} {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {d} {s}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Resource-Policy: same-origin\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
             .{ status, httpReasonPhrase(status), body.len },
         ) catch return;
         const fd = self.client_fd;
@@ -468,6 +472,8 @@ test "mcp transport: POST /mcp round-trips a frame and the response" {
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, t.testResp(), "X-Content-Type-Options: nosniff") != null);
     try std.testing.expect(std.mem.find(u8, t.testResp(), "X-Frame-Options: DENY") != null);
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "Cross-Origin-Opener-Policy: same-origin") != null);
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "Cross-Origin-Resource-Policy: same-origin") != null);
     try std.testing.expect(std.mem.find(u8, t.testResp(), Stub.resp) != null);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", Stub.seen[0..Stub.seen_len]);
     try std.testing.expectEqual(@as(u64, 1), t.served);

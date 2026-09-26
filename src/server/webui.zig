@@ -554,12 +554,20 @@ pub const Server = struct {
                 });
                 return;
             }
+            if (matchesIfNoneMatch(req.head_buffer, &favicon_etag)) {
+                try self.httpRespond(&req, .not_modified, "image/svg+xml; charset=utf-8", "", &.{
+                    .{ .name = "ETag", .value = &favicon_etag },
+                    .{ .name = "Cache-Control", .value = "public, max-age=604800, immutable" },
+                });
+                return;
+            }
             const body_svg: []const u8 = if (method == .HEAD) "" else favicon_svg;
             // Compile-time embed: the URL never changes without a binary rebuild,
             // so browsers may keep it for a week instead of re-fetching on every
             // sign-in / dashboard load (loopback still, but one fewer round trip
             // when the tab already has it).
             try self.httpRespond(&req, .ok, "image/svg+xml; charset=utf-8", body_svg, &.{
+                .{ .name = "ETag", .value = &favicon_etag },
                 .{ .name = "Cache-Control", .value = "public, max-age=604800, immutable" },
             });
             return;
@@ -677,8 +685,7 @@ pub const Server = struct {
                     return;
                 }
                 self.noteLoginFailure();
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} webui auth rejected (bad credential)\n", .{clock.wallStamp(&ts)});
+                util_log.warn("webui auth rejected (bad credential)\n", .{});
             }
             if (std.mem.startsWith(u8, path, "/api/")) {
                 // Machine clients: Bearer challenge + plain body (no HTML login form).
@@ -960,7 +967,7 @@ pub const Server = struct {
         body: []const u8,
         extra: []const http.Header,
     ) !void {
-        var hdrs: [18]http.Header = undefined;
+        var hdrs: [24]http.Header = undefined;
         var n: usize = 0;
         hdrs[n] = .{ .name = "Content-Type", .value = content_type };
         n += 1;
@@ -970,6 +977,10 @@ pub const Server = struct {
             n += 1;
         }
         appendSecurityHeaders(&hdrs, &n);
+        if (isCompressibleType(content_type) and !headerListHas(extra, "Vary")) {
+            hdrs[n] = .{ .name = "Vary", .value = "Accept-Encoding" };
+            n += 1;
+        }
         hdrs[n] = .{ .name = "Connection", .value = "close" };
         n += 1;
         var cookie_val: [128]u8 = undefined;
@@ -1003,8 +1014,10 @@ pub const Server = struct {
                 out_body = buf;
                 hdrs[n] = .{ .name = "Content-Encoding", .value = "gzip" };
                 n += 1;
-                hdrs[n] = .{ .name = "Vary", .value = "Accept-Encoding" };
-                n += 1;
+                if (!headerListHas(hdrs[0..n], "Vary")) {
+                    hdrs[n] = .{ .name = "Vary", .value = "Accept-Encoding" };
+                    n += 1;
+                }
             } else |_| {}
         }
         try req.respond(out_body, .{
@@ -1016,7 +1029,7 @@ pub const Server = struct {
     }
 
     fn httpRedirect(self: *Server, req: *http.Server.Request, loc: []const u8) !void {
-        var hdrs: [14]http.Header = undefined;
+        var hdrs: [16]http.Header = undefined;
         var n: usize = 0;
         hdrs[n] = .{ .name = "Location", .value = loc };
         n += 1;
@@ -1056,6 +1069,8 @@ pub const Server = struct {
                 .{ .name = "X-Content-Type-Options", .value = "nosniff" },
                 .{ .name = "X-Frame-Options", .value = "DENY" },
                 .{ .name = "Referrer-Policy", .value = "no-referrer" },
+                .{ .name = "Cross-Origin-Opener-Policy", .value = "same-origin" },
+                .{ .name = "Cross-Origin-Resource-Policy", .value = "same-origin" },
                 .{ .name = "Content-Security-Policy", .value = csp_policy },
                 .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" },
             },
@@ -1076,10 +1091,10 @@ pub const Server = struct {
 
     /// Fallback when http.Server is not yet set up (buffer overflow before parse).
     fn rawRespond(self: *Server, status: u16, content_type: []const u8, body: []const u8) void {
-        var hdr: [640]u8 = undefined;
+        var hdr: [768]u8 = undefined;
         const h = std.fmt.bufPrint(
             &hdr,
-            "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {s}\r\nPermissions-Policy: camera=(), microphone=(), geolocation=()\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Resource-Policy: same-origin\r\nContent-Security-Policy: {s}\r\nPermissions-Policy: camera=(), microphone=(), geolocation=()\r\nConnection: close\r\n\r\n",
             .{ status, httpReasonPhrase(status), content_type, body.len, csp_policy },
         ) catch return;
         const fd = self.client_fd;
@@ -1118,6 +1133,10 @@ fn appendSecurityHeaders(hdrs: []http.Header, n: *usize) void {
     n.* += 1;
     hdrs[n.*] = .{ .name = "Referrer-Policy", .value = "no-referrer" };
     n.* += 1;
+    hdrs[n.*] = .{ .name = "Cross-Origin-Opener-Policy", .value = "same-origin" };
+    n.* += 1;
+    hdrs[n.*] = .{ .name = "Cross-Origin-Resource-Policy", .value = "same-origin" };
+    n.* += 1;
     hdrs[n.*] = .{ .name = "Content-Security-Policy", .value = csp_policy };
     n.* += 1;
     hdrs[n.*] = .{ .name = "Permissions-Policy", .value = "camera=(), microphone=(), geolocation=()" };
@@ -1146,7 +1165,7 @@ fn acceptsGzip(head: []const u8) bool {
             const coding = std.mem.trim(u8, raw_coding, " \t");
             const semi = std.mem.findScalar(u8, coding, ';');
             const token = std.mem.trim(u8, if (semi) |i| coding[0..i] else coding, " \t");
-            if (!std.ascii.eqlIgnoreCase(token, "gzip")) continue;
+            if (!std.ascii.eqlIgnoreCase(token, "gzip") and !std.mem.eql(u8, token, "*")) continue;
             if (semi) |i| {
                 if (qualityZero(coding[i + 1 ..])) continue; // `gzip;q=0` refuses it
             }
@@ -1657,6 +1676,38 @@ fn embedTrimmed(comptime path: []const u8) []const u8 {
 /// auth (a browser requests it for the sign-in page too, and an auth-gated
 /// favicon answers 401 then 404 in the console of every load).
 const favicon_svg = embedTrimmed("webui/favicon.svg");
+const favicon_etag = blk: {
+    var h = std.hash.XxHash64.init(0);
+    h.update(favicon_svg);
+    const hash = h.final();
+    var hex: [18]u8 = undefined;
+    hex[0] = '"';
+    _ = std.fmt.bufPrint(hex[1..17], "{x:0>16}", .{hash}) catch unreachable;
+    hex[17] = '"';
+    const const_hex = hex;
+    break :blk const_hex;
+};
+
+/// True when the request's `If-None-Match` header matches `etag` or `*`.
+fn matchesIfNoneMatch(head: []const u8, etag: []const u8) bool {
+    var lines = std.mem.splitSequence(u8, head, "\r\n");
+    _ = lines.next() orelse return false;
+    while (lines.next()) |line| {
+        if (line.len == 0) break;
+        const colon = std.mem.findScalar(u8, line, ':') orelse continue;
+        const name = std.mem.trim(u8, line[0..colon], " \t");
+        if (!std.ascii.eqlIgnoreCase(name, "if-none-match")) continue;
+        var tags = std.mem.splitScalar(u8, line[colon + 1 ..], ',');
+        while (tags.next()) |raw_tag| {
+            const tag = std.mem.trim(u8, raw_tag, " \t");
+            if (std.mem.eql(u8, tag, "*") or std.mem.eql(u8, tag, etag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
 
 const login_html = embedTrimmed("webui/login.html");
 const login_lockout_html = embedTrimmed("webui/login_lockout.html");
@@ -2309,6 +2360,8 @@ test "browser session rejects revoked and renewed cookies" {
     const logout = try std.fmt.bufPrint(&req_buf, "POST /logout HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 37\r\n\r\ncsrf={s}", .{ old_token, old_token });
     try testServeHttp(&s, logout);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Cross-Origin-Opener-Policy: same-origin") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Cross-Origin-Resource-Policy: same-origin") != null);
     const replay = try std.fmt.bufPrint(&req_buf, "GET /api/apm.json HTTP/1.1\r\nCookie: zdtd_webui={s}\r\n\r\n", .{old_token});
     try testServeHttp(&s, replay);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
@@ -2319,6 +2372,8 @@ test "browser session rejects revoked and renewed cookies" {
     const current = try std.fmt.bufPrint(&req_buf, "GET /api/apm.json HTTP/1.1\r\nCookie: zdtd_webui={s}\r\n\r\n", .{renewed});
     try testServeHttp(&s, current);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Cross-Origin-Opener-Policy: same-origin") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "Cross-Origin-Resource-Policy: same-origin") != null);
     try testServeHttp(&s, login);
     try testServeHttp(&s, current);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 401 ") != null);
@@ -2502,12 +2557,23 @@ test "favicon is served before auth and mirrors HEAD" {
     try std.testing.expect(std.mem.find(u8, resp, "Content-Type: image/svg+xml; charset=utf-8") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: public, max-age=604800, immutable") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: no-store") == null);
+    try std.testing.expect(std.mem.find(u8, resp, "ETag: " ++ favicon_etag) != null);
     try std.testing.expect(std.mem.find(u8, resp, "<svg ") != null);
     try testServeHttp(&s, "HEAD /favicon.svg HTTP/1.1\r\n\r\n");
     const head_resp = s.testResp();
     try std.testing.expect(std.mem.find(u8, head_resp, "HTTP/1.1 200 ") != null);
     if (std.mem.find(u8, head_resp, "\r\n\r\n")) |end| {
         try std.testing.expectEqual(@as(usize, 0), head_resp[end + 4 ..].len);
+    } else {
+        return error.TestUnexpectedResult;
+    }
+    // Revalidation with matching ETag returns 304 Not Modified with empty body.
+    try testServeHttp(&s, "GET /favicon.svg HTTP/1.1\r\nIf-None-Match: " ++ favicon_etag ++ "\r\n\r\n");
+    const reval_resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, reval_resp, "HTTP/1.1 304 ") != null);
+    try std.testing.expect(std.mem.find(u8, reval_resp, "ETag: " ++ favicon_etag) != null);
+    if (std.mem.find(u8, reval_resp, "\r\n\r\n")) |end| {
+        try std.testing.expectEqual(@as(usize, 0), reval_resp[end + 4 ..].len);
     } else {
         return error.TestUnexpectedResult;
     }
@@ -2565,6 +2631,9 @@ test "acceptsGzip reads the negotiated coding and its q value" {
         .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip;q=0.000, br\r\n\r\n", .want = false },
         .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: br;q=1.0, gzip;q=0.5\r\n\r\n", .want = true },
         .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: gzip ; q=0.8\r\n\r\n", .want = true },
+        // Wildcard * accepts unless q=0.
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: *\r\n\r\n", .want = true },
+        .{ .head = "GET / HTTP/1.1\r\nAccept-Encoding: *;q=0\r\n\r\n", .want = false },
         // A header the parser folds elsewhere must not be mistaken for the coding.
         .{ .head = "GET / HTTP/1.1\r\nTE: gzip\r\n\r\n", .want = false },
     };
@@ -2627,6 +2696,7 @@ test "GET / gzips the shell only when the client asks for it" {
     fillSessionToken("s3cr3t", &nonce, &s2.session_token);
     try testServeHttp(&s2, "GET / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s2.testResp(), "Content-Encoding") == null);
+    try std.testing.expect(std.mem.find(u8, s2.testResp(), "Vary: Accept-Encoding") != null);
     try std.testing.expect(gz.len < s2.testResp().len);
 }
 

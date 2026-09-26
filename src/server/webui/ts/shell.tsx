@@ -1286,13 +1286,23 @@ function useTabRouting(): TabSlug {
     return activeTab;
 }
 
+/** Initial fetch started eagerly at script evaluation to overlap with Preact boot and DOM commit. */
+let initialFetchPromise: Promise<StateJson | null> | null = fetchState();
+
 function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: number) {
     const [state, setState] = useState<StateJson | null>(null);
     const [failed, setFailed] = useState(false);
 
     /** Returns true when a fresh snapshot was applied. */
     const reload = useCallback(async (): Promise<boolean> => {
-        const next = await fetchState();
+        let next: StateJson | null;
+        if (initialFetchPromise === null) {
+            next = await fetchState();
+        } else {
+            const p = initialFetchPromise;
+            initialFetchPromise = null;
+            next = await p;
+        }
         if (next === null) {
             setFailed(true);
             return false;
@@ -1303,15 +1313,15 @@ function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: numb
     }, []);
 
     useEffect(() => {
+        void reload();
+    }, [reload]);
+
+    useEffect(() => {
         if (!autoEnabled || pageHidden) {
             return undefined;
         }
-        const poll = async (): Promise<void> => {
-            await reload();
-        };
-        void poll();
         const timer = setInterval(() => {
-            void poll();
+            void reload();
         }, cadenceMs);
         return () => {
             clearInterval(timer);

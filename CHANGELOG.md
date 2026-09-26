@@ -5,6 +5,24 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **Misplaced credentials in zdtd.toml fail startup.** Startup now fails
+  closed with `error.SecretInToml` if password or secret keys (`password`,
+  `server_password`, `webui_secret`, `mcp_token`, `secret`, `token`) appear in
+  `zdtd.toml`. Operators must set `ServerPassword` in `serverconfig.xml` and
+  pass secrets via environment variables (`ZDTD_WEBUI_SECRET`, `ZDTD_MCP_TOKEN`).
+- **Unified inventory slot save format stride (ZPV17, ZEN2, ZCT3).** Player
+  records (`players.zsv`), persistent entities (`entities.zen`), and
+  containers write the unified `InvSlot` stride with activated flags, mod
+  qualities, and stats. Older saves (ZPV2-ZPV16, ZENT, ZCT1-ZCT2) load with
+  defaults for missing fields; saves written by this version cannot be read by
+  0.6.0 (no downgrade compatibility). Operators should back up worlds before
+  upgrading.
+- **MCP HTTP transport authentication.** When `ZDTD_MCP_TOKEN` is set in the
+  process environment, HTTP requests to the `/mcp` endpoint must provide
+  `Authorization: Bearer <token>`, failing with 401 Unauthorized otherwise.
+
 ### Added
 
 - **Hitting a church bell with the Duke note spawns the stock horde.** Block
@@ -13,7 +31,58 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `RandomRoll` gate run so a `churchBell` damage with `buffDukeNote` present
   spawns the aggressive sleeper list the way stock does.
 
+- **Replicate damaged blocks from zombie attacks.** Zombie chewing and digging
+  damage now replicates to connected peers as `DamageBlock` updates, rendering
+  stock block destruction states in multiplayer.
+
+- **Cop zombie acid spit ranged attack target execution.** Zombie AI evaluates
+  `RangedAttackTarget` from entity classes, allowing cop zombies to target and
+  launch ranged acid spit projectiles at players.
+
+- **Zombie leap attack pounce task.** The `EAILeap` pounce task is implemented
+  with `JumpMaxDistance` XML parsing, physics ray checks, and vertical window
+  gating.
+
+- **Zombie attack animations replicate to clients.** Zombie strike actions
+  emit `EntityAnimationData` to connected peers so attack swings and impacts
+  animate properly on clients.
+
+- **Inventory repair-by-combine via MergeBest.** Dragging a matching tool onto
+  another in inventory repairs durability using `MergeBest` while preserving
+  installed item mods.
+
+- **Light sources contribute to chunk AI heat.** Placed torches and candles
+  now register heat generation on the chunk AI heat map.
+
+- **Workstation forge material crafting.** The workstation crafting queue
+  accepts material-based forge recipes during queue validation.
+
+- **Mob buff processing and damage over time.** Buff lifecycle rows
+  (`onSelfBuffStart`, `onSelfBuffUpdate`, `onSelfBuffRemove`,
+  `onSelfBuffFinish`) and `HealthChangeOT` damage-over-time rows evaluate per
+  tick for zombies and animals.
+
+- **Entity, item mod, and perk trigger expansions.** Evaluates `PlayerItemCount`
+  and `HasTrackedEntity` requirements; executes entity-class triggered rows
+  (such as radiated regeneration), installed item mod triggers, weapon action
+  triggers, jump and crouch flag edges, respawn funnel rows, and consumable
+  `GiveExp` Physician scaling.
+
+- **Automated world backup script.** `scripts/backup-world.sh` provides world
+  directory archiving with configurable retention rotation.
+
 ### Fixed
+
+- **Redact player PII from server logs.** Player IP addresses and platform IDs
+  are masked in server logs, and authentication remnants are zeroed in memory.
+
+- **WebUI and MCP transport hardening.** Login requests guard against double
+  submission, and MCP transport enforces Content-Type and Accept header
+  validation.
+
+- **Peer join resilience.** Gated reserved over-capacity connections and
+  prevented aborted or wedged peer handshakes from blocking other joining
+  clients.
 
 - **Inventory slot extras survive a restart.** Player, entity, and container
   saves shared three different InvSlot widths, so `flags`, `mod_n`,
