@@ -10,24 +10,24 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 
 | Magic | File | Line | Enclosing function | Nearby doc |
 |---|---|---|---|---|
-| `ZAL1` | src/server/ally.zig | 204 | computeTransition | - |
-| `ZAL1` | src/server/ally.zig | 243 | computeTransition | - |
+| `ZAL1` | src/server/ally.zig | 205 | computeTransition | - |
+| `ZAL1` | src/server/ally.zig | 244 | computeTransition | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 16 | saveClock | - |
 | `ZCL1` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
-| `ZPV` | src/server/persist.zig | 92 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
-| `ZPV` | src/server/persist.zig | 624 | zpv2DropName | - |
-| `ZCT3` | src/world/containers.zig | 187 | posFromGuid | - |
-| `ZCT3` | src/world/containers.zig | 205 | posFromGuid | - |
-| `ZCT3` | src/world/containers.zig | 271 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 272 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 273 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 451 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 633 | posFromGuid | - |
-| `ZSG1` | src/world/signs.zig | 130 | - | - |
-| `ZSG1` | src/world/signs.zig | 156 | - | - |
-| `ZVNM1` | src/world/vending.zig | 152 | - | - |
-| `ZVNM` | src/world/vending.zig | 159 | - | - |
-| `ZWS1` | src/world/workstations.zig | 707 | commaListAt | - |
-| `ZWS1` | src/world/workstations.zig | 806 | commaListAt | - |
+| `ZPV` | src/server/persist.zig | 91 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
+| `ZPV` | src/server/persist.zig | 623 | zpv2DropName | - |
+| `ZCT3` | src/world/containers.zig | 188 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 206 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 272 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 273 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 274 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 449 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 629 | posFromGuid | - |
+| `ZSG1` | src/world/signs.zig | 131 | - | - |
+| `ZSG1` | src/world/signs.zig | 157 | - | - |
+| `ZVNM1` | src/world/vending.zig | 153 | - | - |
+| `ZVNM` | src/world/vending.zig | 160 | - | - |
+| `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |
+| `ZWS1` | src/world/workstations.zig | 807 | commaListAt | - |

@@ -1690,6 +1690,10 @@ pub const Game = struct {
         return game_world_tick.drainDigRequests(self);
     }
 
+    pub fn drainSpitHits(self: *Game) void {
+        return game_world_tick.drainSpitHits(self);
+    }
+
     pub fn drainSleeperWakeups(self: *Game) void {
         return game_world_tick.drainSleeperWakeups(self);
     }
@@ -1894,6 +1898,10 @@ pub const Game = struct {
 
     pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
         return game_world.addBlockDamage(self, x, y, z, dmg);
+    }
+
+    pub fn echoBlockDamage(self: *Game, x: i32, y: i32, z: i32, block_id: u16, stored: u16) void {
+        return game_world.echoBlockDamage(self, x, y, z, block_id, stored);
     }
 
     /// Run a parsed gameevents.xml sequence for a player (stock runs these

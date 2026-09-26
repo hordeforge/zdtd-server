@@ -13,6 +13,7 @@ const c2s_text = @import("../c2s_text.zig");
 const max_chat_msg_len = c2s_text.max_chat_msg_len;
 const chatMsgOk = c2s_text.chatMsgOk;
 const plugin_compose = @import("../game/plugin_compose.zig");
+const log = @import("../../util/log.zig");
 
 pub fn filteredChatText(self: *Game, c: *Client, msg: []const u8, native_buf: []u8, wasm_buf: []u8) ?[]const u8 {
     if (plugin_compose.chatFilter(self, c.entity_id, msg, native_buf, wasm_buf)) |f| {
@@ -55,7 +56,7 @@ pub fn handleChat(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                         if (rc.peer) |rpeer| {
                             self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
                                 self.harness.counters.inc(.net_send_errors);
-                                std.debug.print("zdtd: send chat failed: {s}\n", .{@errorName(err)});
+                                log.err("send chat failed: {s}\n", .{@errorName(err)});
                             };
                         }
                     }

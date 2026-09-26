@@ -330,6 +330,24 @@ pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
     return abs;
 }
 
+/// Echo one cell's stored block damage to every observer (stock
+/// `Block::OnBlockDamaged` IL_0457: a damage change goes out through
+/// `SetBlocksRPC`/`SetBlockRPC` whether or not the block survives, so clients
+/// see the cracking, not only the break). Wire damage is the stage-2-capped
+/// value. Callers hold the block id and the post-damage stored total. A cell
+/// with no block value, or one still at damage 0 (indestructible block, plugin
+/// verdict denied), is skipped: echoing those would repeat a no-op cell at
+/// tick rate.
+pub fn echoBlockDamage(self: *Game, x: i32, y: i32, z: i32, block_id: u16, stored: u16) void {
+    if (stored == 0) return;
+    const raw = self.blockRawAt(x, y, z);
+    if (raw == 0) return;
+    const wire_dmg = self.wireBlockDamage(block_id, stored);
+    if (packages.buildSetBlockBodyRaw(&self.body_buf, x, y, z, raw, wire_dmg, -1, -1)) |sb| {
+        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
+    } else |_| {}
+}
+
 pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
     const t = world_store.World.worldToChunk(x, z);
     const c = self.world.chunkAt(t.pos) orelse return;

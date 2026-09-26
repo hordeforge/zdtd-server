@@ -22,6 +22,19 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**A damaged block now reaches every watching client 2026-09-26**: stock
+`Block::OnBlockDamaged` (IL_0457) writes the new damage onto the block value and
+calls `SetBlocksRPC` / `SetBlockRPC` whether or not the block breaks, so every
+damage application is a replicated change. zdtd echoed a surviving block on the
+player SetBlock path, the explosion path and the vomit-impact path, but the
+per-tick zombie chew and the MoveHelper dig only broadcast on the break: a
+client watching a zombie chew a wall held a pristine cell until the block fell.
+Both drains now call `echoBlockDamage`, the one helper the other paths use,
+guarded so an indestructible block or a plugin-denied hit cannot repeat a no-op
+cell at tick rate. Gated by the extended
+`scenario zombie chews a 1-tall wall at feet level instead of getting stuck`,
+which now asserts a second client receives the damage-only SetBlock (wire
+`damage` equals the stored total) while the wall survives.
 **EAILeap pounce shipped 2026-09-22**: `zombieSpider` (pipe `AITask`, first
 entry) and `animalMountainLion` (`AITask-1 legs=4`) now pounce.
 `taskNameToId` maps `Leap`, `JumpMaxDistance` rides
@@ -98,8 +111,9 @@ sounds stay silent (zdtd has no server-side AI sound channel yet), the
 `unreachableRange` arm needs moveHelper flags zdtd does not model (window
 stays [min, max]), a target must keep being sensed for Continue (stock
 keeps its cached alive entityTarget), and the ammo's block impact
-(DamageBlock 120, acid pool, 4 s LifeTime) is not applied - gravity and
-the solid test retire the shot. Gated by four tests: the SetData parse
+(DamageBlock 120) lands on the solid cell the shot retires on. The acid
+pool, the 4 s LifeTime and the ammo's tagged DamageModifier rows (earth 0,
+stone 0.5) are not applied. Gated by four tests: the SetData parse
 test, the vomit/Extends/Projectile parse test, `system zombie spits at a
 target in its range window and the shot lands` (telegraph 3001, burst
 3000, hp drop, cooldown window) and `ranged attack refuses without a vomit

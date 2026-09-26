@@ -17,6 +17,7 @@ const wire_binary = @import("../../wire/binary.zig");
 const systems = @import("../../ecs/systems.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 const replicate_te = @import("../game/replicate_te.zig");
+const log = @import("../../util/log.zig");
 
 /// Type 3 lock-target payload: opaque 16 bytes to stock (RE netpackage-bodies.md).
 const lock_target_opaque_len: usize = 16;
@@ -238,7 +239,9 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                 }
             }
         } else |_| {
-            std.debug.print("zdtd: LockRequest parse fail body={d}\n", .{body.len});
+            self.harness.counters.inc(.c2s_malformed);
+            const mal = self.harness.counters.get(.c2s_malformed);
+            log.warnEvery(mal, "LockRequest parse fail slot={d} body_len={d} n={d}\n", .{ c.slot, body.len, mal });
         }
         return true;
     }

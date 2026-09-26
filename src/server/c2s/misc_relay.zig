@@ -8,6 +8,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
+const log = @import("../../util/log.zig");
 
 /// Exact stock NetPackageEntityPhysics body size: Flags u16 | EntityId i32 |
 /// 13xf32. `GetLength` (IL=2) returns 58, matching the read (IL=74).
@@ -28,7 +29,7 @@ pub fn relayBodyExcept(self: *Game, pkg: []const u8, body: []const u8, except_en
         }
         self.sendGame(peer, pkg, body) catch |err| {
             self.harness.counters.inc(.net_send_errors);
-            std.debug.print("zdtd: send {s} failed: {s}\n", .{ label, @errorName(err) });
+            log.err("send {s} failed: {s}\n", .{ label, @errorName(err) });
         };
     }
 }

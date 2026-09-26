@@ -150,8 +150,8 @@ fn triggerVolume(self: *Game, vi: usize) void {
 
     const grp = vol.groups[0];
     const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);
-    const cx: f32 = @floatFromInt(@divTrunc(@as(i64, vol.x0) + vol.x1, 2));
-    const cz: f32 = @floatFromInt(@divTrunc(@as(i64, vol.z0) + vol.z1, 2));
+    const cx: f32 = (@as(f32, @floatFromInt(vol.x0)) + @as(f32, @floatFromInt(vol.x1))) * 0.5;
+    const cz: f32 = (@as(f32, @floatFromInt(vol.z0)) + @as(f32, @floatFromInt(vol.z1))) * 0.5;
     const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, self.sleeper_party_radius));
     const stage_spawn = self.gamestages.sleeperEntityGroup(grp.class_name, vol_stage);
     const def = self.resolveSleeperClass(grp.class_name, stage_spawn, seed);

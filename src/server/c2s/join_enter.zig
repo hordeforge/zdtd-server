@@ -10,12 +10,13 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
 const game_player = @import("../game/player.zig");
+const log = @import("../../util/log.zig");
 
 /// True when `name` is an enter-game package and was handled.
 pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     const sp = self.world.primarySpawn();
     if (std.mem.eql(u8, name, "NetPackageRequestToEnterGame")) {
-        std.debug.print("zdtd: RequestToEnterGame entity={d} slot={d} local_id={d}\n", .{ c.entity_id, c.slot, peer.local_id });
+        log.infoTagged("RequestToEnterGame entity={d} slot={d} local_id={d}\n", .{ c.entity_id, c.slot, peer.local_id });
         // One deadline covers the whole must-deliver enter bundle. Clear it at
         // the request boundary so later critical exchanges (sign data,
         // PlayerId) receive their own bounded budget.
@@ -70,7 +71,7 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
     if (std.mem.eql(u8, name, "NetPackageAuthConfirmation")) {
         // Client echoes empty AuthConfirmation; stock AuthFinalizer expects the round-trip.
         // Nothing to apply; acknowledge by no-op so the session stays live.
-        std.debug.print("zdtd: AuthConfirmation body={d}\n", .{body.len});
+        log.info("zdtd: AuthConfirmation body={d}\n", .{body.len});
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageWorldFolder")) {
@@ -81,7 +82,7 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // empty last-part that clears the wait (uncompressWorld count=0).
         const part = try packages.buildEmptyWorldFolderTransfer(&self.body_buf);
         try self.sendGameCritical(peer, "NetPackageWorldFolder", part);
-        std.debug.print("zdtd: WorldFolder empty transfer local_id={d} body={d}\n", .{ peer.local_id, part.len });
+        log.info("zdtd: WorldFolder empty transfer local_id={d} body={d}\n", .{ peer.local_id, part.len });
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerSpawnedInWorld")) {
@@ -107,7 +108,7 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             const op = cl.peer orelse continue;
             self.sendGame(op, "NetPackagePlayerSpawnedInWorld", body) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: spawn confirm relay failed slot={d}: {s}\n", .{ cl.slot, @errorName(err) });
+                log.err("spawn confirm relay failed slot={d}: {s}\n", .{ cl.slot, @errorName(err) });
             };
         }
         return true;

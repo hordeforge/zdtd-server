@@ -15,19 +15,19 @@ Only imports of another package directory are counted; single-file imports
 |---|---|---|
 | `apm` | `util` | 2 |
 | `assets` | `ecs` | 14 |
-| `assets` | `util` | 101 |
+| `assets` | `util` | 115 |
 | `ecs` | `assets` | 1 |
 | `ecs` | `util` | 9 |
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
-| `plugin` | `util` | 5 |
+| `plugin` | `util` | 6 |
 | `server` | `apm` | 10 |
-| `server` | `assets` | 185 |
+| `server` | `assets` | 183 |
 | `server` | `ecs` | 153 |
 | `server` | `litenet` | 76 |
 | `server` | `plugin` | 16 |
-| `server` | `server/game` | 30 |
-| `server` | `util` | 118 |
+| `server` | `server/game` | 33 |
+| `server` | `util` | 161 |
 | `server` | `wire` | 137 |
 | `server` | `world` | 90 |
 | `wire` | `assets` | 10 |
@@ -36,7 +36,7 @@ Only imports of another package directory are counted; single-file imports
 | `wire` | `world` | 4 |
 | `world` | `assets` | 23 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 28 |
+| `world` | `util` | 36 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)

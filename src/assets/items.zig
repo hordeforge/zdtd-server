@@ -135,6 +135,8 @@ pub const ItemDef = struct {
     projectile_fly_time: f32 = 0,
     projectile_radius: f32 = 0,
     projectile_damage: f32 = 0,
+    /// The ammo's Projectile `DamageBlock` (stock vomit 120). 0 = none.
+    projectile_block_damage: f32 = 0,
     /// items.xml LightValue (held-item light: torch .35, flashlight02 .55,
     /// weapon lights .45). Feeds the PlayerStealth selfLight term (Inventory.
     /// GetLightLevel IL=76: an AlwaysActive held item's LightValue, clamped
@@ -862,6 +864,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_proj_radius.deinit(allocator);
     var stock_proj_dmg: std.ArrayList(f32) = .empty;
     defer stock_proj_dmg.deinit(allocator);
+    var stock_proj_block: std.ArrayList(f32) = .empty;
+    defer stock_proj_block.deinit(allocator);
     var stock_food_amt: std.ArrayList(f32) = .empty;
     defer stock_food_amt.deinit(allocator);
     var stock_food_hp: std.ArrayList(f32) = .empty;
@@ -1286,11 +1290,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             var proj_fly: f32 = 0;
             var proj_radius: f32 = 0;
             var proj_dmg: f32 = 0;
+            var proj_block: f32 = 0;
             if (itemActionProps(body, "Projectile")) |pb| {
                 if (xml.propertyValue(pb, "Velocity")) |v| proj_speed = xml.parseF32(v) orelse 0;
                 if (xml.propertyValue(pb, "FlyTime")) |v| proj_fly = xml.parseF32(v) orelse 0;
                 if (xml.propertyValue(pb, "CollisionRadius")) |v| proj_radius = xml.parseF32(v) orelse 0;
                 if (xml.propertyValue(pb, "DamageEntity")) |v| proj_dmg = xml.parseF32(v) orelse 0;
+                if (xml.propertyValue(pb, "DamageBlock")) |v| proj_block = xml.parseF32(v) orelse 0;
             }
             try stock_vomit_anim.append(allocator, vomit_anim);
             try stock_vomit_ammo.append(allocator, vomit_ammo);
@@ -1298,6 +1304,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_proj_fly.append(allocator, proj_fly);
             try stock_proj_radius.append(allocator, proj_radius);
             try stock_proj_dmg.append(allocator, proj_dmg);
+            try stock_proj_block.append(allocator, proj_block);
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
@@ -2067,6 +2074,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.projectile_fly_time = stock_proj_fly.items[idx];
                 def.projectile_radius = stock_proj_radius.items[idx];
                 def.projectile_damage = stock_proj_dmg.items[idx];
+                def.projectile_block_damage = stock_proj_block.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
                 def.food_health = stock_food_hp.items[idx];
                 def.water_amount = stock_water_amt.items[idx];
@@ -2132,6 +2140,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .projectile_fly_time = stock_proj_fly.items[idx],
             .projectile_radius = stock_proj_radius.items[idx],
             .projectile_damage = stock_proj_dmg.items[idx],
+            .projectile_block_damage = stock_proj_block.items[idx],
             .food_amount = stock_food_amt.items[idx],
             .food_health = stock_food_hp.items[idx],
             .water_amount = stock_water_amt.items[idx],

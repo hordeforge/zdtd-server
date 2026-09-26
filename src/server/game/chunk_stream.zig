@@ -130,6 +130,7 @@ pub fn clientRemoveStreamed(c: *Client, key: i64) void {
 /// right), side 1 right column (top to bottom), side 2 bottom row (right to
 /// left), side 3 left column (bottom to top).
 fn ringCell(ring: i32, j: u32) struct { dx: i32, dz: i32 } {
+    if (ring <= 0) return .{ .dx = 0, .dz = 0 };
     const side_len: u32 = @intCast(2 * ring);
     const side: u32 = j / side_len;
     const i: i32 = @intCast(j % side_len);

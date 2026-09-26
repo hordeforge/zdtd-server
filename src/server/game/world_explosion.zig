@@ -183,15 +183,8 @@ pub fn blastBlock(
     if (total < max_hp) {
         // Stock's explosion sends the changed cells as one SetBlockAndDamage
         // batch, damage-only entries included, so a blast that only cracks a
-        // block still shows on every client. Same echo the chew path uses
-        // (wire damage capped at the block's stage-2 threshold).
-        const raw = self.blockRawAt(wx, wy, wz);
-        if (raw != 0) {
-            const wire_dmg = self.wireBlockDamage(id, total);
-            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, raw, wire_dmg, -1, -1)) |sb| {
-                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-            } else |_| {}
-        }
+        // block still shows on every client.
+        self.echoBlockDamage(wx, wy, wz, id, total);
         return true;
     }
     // Downgrade swap (stock Block.OnBlockDamaged; the explosion routes through

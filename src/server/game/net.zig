@@ -365,8 +365,7 @@ pub fn pollNetOnce(self: *Game) void {
         .none => {},
         .connected => |p| self.onConnected(p) catch |e| {
             self.harness.counters.inc(.join_fail);
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} onConnected failed local_id={d}: {s}\n", .{ clock.wallStamp(&ts), p.local_id, @errorName(e) });
+            log.err("onConnected failed local_id={d}: {s}\n", .{ p.local_id, @errorName(e) });
         },
         .data => |d| self.onData(d.peer, d.payload) catch |err| {
             self.harness.counters.inc(.net_payload_errors);
@@ -385,8 +384,7 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
         if (c.peer) |p| {
             if (!p.alive) {
                 self.harness.counters.inc(.stale_peers_reaped);
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} peer reaped dead local_id={d} slot={d} entity={d}\n", .{ clock.wallStamp(&ts), p.local_id, c.slot, c.entity_id });
+                log.warn("peer reaped dead local_id={d} slot={d} entity={d}\n", .{ p.local_id, c.slot, c.entity_id });
                 // Hard-disconnect reap: persist before the slot clears so the
                 // player's data is not lost until the next autosave (GAP
                 // "Save on disconnect / kick"). Pre-join peers have no entity.

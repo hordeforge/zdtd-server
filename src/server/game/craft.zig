@@ -619,6 +619,7 @@ pub const SpitConfig = struct {
     fly_time: f32,
     radius: f32,
     damage: f32,
+    block_damage: f32,
 };
 
 pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?SpitConfig {
@@ -634,6 +635,7 @@ pub fn spitConfigFor(self: *Game, hand_item: []const u8) ?SpitConfig {
         .fly_time = ammo.projectile_fly_time,
         .radius = ammo.projectile_radius,
         .damage = ammo.projectile_damage,
+        .block_damage = ammo.projectile_block_damage,
     };
 }
 

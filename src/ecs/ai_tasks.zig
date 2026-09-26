@@ -678,9 +678,10 @@ fn fireVomit(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, ct: *const c.C
 /// feeds the same deferred accumulator the melee choke uses, so the victim
 /// folds (armor/GDR) and the attacker's held-item rows (infection counter,
 /// abrasion) run through applyDeferredDamage exactly like a landed punch.
-/// Stock also applies the ammo's DamageBlock (120) to a block and has a 4 s
-/// LifeTime; zdtd cancels on the first solid cell instead (recorded: no acid
-/// block damage, no lingering pool) and gravity terminates a miss.
+/// A solid cell retires the shot and pushes a block impact; the Game drain
+/// applies the ammo's DamageBlock (stock vomit 120). Not modelled: the 4 s
+/// LifeTime, the lingering acid pool, and the ammo's tagged DamageModifier
+/// rows (earth 0, stone 0.5). Gravity terminates a miss.
 fn advanceSpit(w: *World, s: Slot, dt: f32, dmg_fp: []u32, dmg_attacker: []u16, hits: *std.atomic.Value(u32)) void {
     if (!w.mask[s].zombie_ai) return;
     const ai = &w.zombie_ai[s];
@@ -719,7 +720,13 @@ fn advanceSpit(w: *World, s: Slot, dt: f32, dmg_fp: []u32, dmg_attacker: []u16, 
         }
     }
     if (w.solid_fn) |solid| {
-        if (solid(w.solid_ctx, @floor(px), @floor(py), @floor(pz))) {
+        const bx: i32 = @floor(px);
+        const by: i32 = @floor(py);
+        const bz: i32 = @floor(pz);
+        if (solid(w.solid_ctx, bx, by, bz)) {
+            // Stock ItemActionProjectile applies DamageBlock to the hit cell
+            // (vomit 120). The Game drains the request; the shot still retires.
+            if (ct.projectile_block_damage > 0) w.pushSpitHit(s, bx, by, bz);
             sp.active = false;
         }
     }
@@ -2955,6 +2962,7 @@ fn seedSpitter(w: *World, zs: Slot) void {
     w.class_id[zs].projectile_fly_time = 2;
     w.class_id[zs].projectile_radius = 0.24;
     w.class_id[zs].projectile_damage = 10;
+    w.class_id[zs].projectile_block_damage = 120;
     w.class_id[zs].ranged_min_dist = 4;
     w.class_id[zs].ranged_max_dist = 25;
     w.class_id[zs].ranged_duration_s = 4.0; // covers half + release + warning (3.7 s)
@@ -3013,6 +3021,45 @@ test "system zombie spits at a target in its range window and the shot lands" {
         try std.testing.expect(!w.zombie_ai[zs].ranged_released);
         try std.testing.expect(!w.zombie_ai[zs].spit.active);
     }
+}
+
+test "a spit that hits a solid cell pushes a block impact" {
+    // ItemActionProjectile.DamageBlock: the shot retires on the first solid
+    // cell and the Game drain applies the ammo's DamageBlock (stock vomit
+    // 120). The push is the sim's half; the drain lives on the Game.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const pid = w.spawnPlayer(5, 70, 0, 0).?;
+    const ps = w.slotOfNetId(pid).?;
+    seedSpitter(&w, zs);
+    w.transform[zs].yaw = 90;
+    // The wall sits past the player, so the aim and the sight ray stay clear.
+    // Once the shot is in the air the player steps aside and the wall catches
+    // it. The mouth is at y+1.5, so the cell the wall occupies is y 71.
+    const Wall = struct {
+        fn solid(_: ?*anyopaque, x: i32, y: i32, _: i32) bool {
+            // Floor under the fight, plus a wall past the player. The shot
+            // flies above the floor and meets the wall.
+            return y <= 69 or x == 12;
+        }
+    };
+    w.solid_fn = &Wall.solid;
+    var t: f32 = 0;
+    while (t < 10 and !w.zombie_ai[zs].spit.active) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[zs].spit.active);
+    w.transform[ps].z = 40;
+    while (t < 12 and w.zombie_ai[zs].spit.active) : (t += 0.05) {
+        w.beginTick();
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(!w.zombie_ai[zs].spit.active);
+    try std.testing.expectEqual(@as(usize, 1), w.spit_hit_n);
+    try std.testing.expectEqual(@as(i32, 12), w.spit_hit_reqs[0].x);
 }
 
 test "ranged attack refuses without a vomit config and outside the range window" {

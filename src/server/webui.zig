@@ -20,6 +20,7 @@ const utf8_util = @import("../util/utf8.zig");
 const plugin_mod = @import("../plugin/root.zig");
 const modlets = @import("../assets/modlets.zig");
 const io_fs = @import("../util/io_fs.zig");
+const util_log = @import("../util/log.zig");
 
 pub const max_req: usize = 8192;
 pub const max_secret: usize = 128;
@@ -388,8 +389,7 @@ pub const Server = struct {
         if (self.login_fails >= login_fail_limit) {
             self.login_lock_until_ns = clock.monoNs() +% login_lockout_ns;
             self.login_fails = 0;
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} webui login lockout ({d} s)\n", .{ clock.wallStamp(&ts), login_lockout_ns / std.time.ns_per_s });
+            util_log.warn("webui login lockout ({d} s)\n", .{login_lockout_ns / std.time.ns_per_s});
         }
     }
 
@@ -501,7 +501,7 @@ pub const Server = struct {
         if (self.recv_len < need) return;
 
         self.serveHttp() catch |err| {
-            std.debug.print("zdtd: webui request failed: {s}\n", .{@errorName(err)});
+            util_log.err("webui request failed: {s}\n", .{@errorName(err)});
             self.rawRespond(500, "text/plain; charset=utf-8", "internal error\n");
         };
         self.closeClient();
@@ -647,15 +647,13 @@ pub const Server = struct {
                     // Successes are as load-bearing as failures for an audit
                     // trail: /api/cmd runs privileged console lines under this
                     // session, and only this line dates the sign-in.
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} webui login ok\n", .{clock.wallStamp(&ts)});
+                    util_log.infoTagged("webui login ok\n", .{});
                     // 303 See Other: POST → GET dashboard (PRG; matches /logout).
                     try self.httpRedirect(&req, "/");
                     return;
                 }
                 self.noteLoginFailure();
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} webui login rejected (bad token)\n", .{clock.wallStamp(&ts)});
+                util_log.warn("webui login rejected (bad token)\n", .{});
                 var login_buf: [max_login_html]u8 = undefined;
                 try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                 return;

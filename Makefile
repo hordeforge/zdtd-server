@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all help build test test-one fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs plugins
+.PHONY: all help build test test-one fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-release smoke-modlet smoke-backup-restore clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs plugins
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -267,6 +267,10 @@ smoke: release
 # modlet scan + patched-config S2C cache, then the loadgen join when available.
 smoke-modlet: build
 	bash scripts/smoke-modlet.sh
+
+# Disaster recovery smoke: verify backup creation, rotation, safe restore, and daemon reboot.
+smoke-backup-restore: build
+	bash scripts/smoke-backup-restore.sh
 
 # Reproducibility gate (docs/RELEASES.md step 6): build the release config
 # twice in independent cache trees and require byte-identical binaries.

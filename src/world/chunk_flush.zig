@@ -107,7 +107,7 @@ pub const Flusher = struct {
         if (self.thread == null) {
             self.thread = std.Thread.spawn(.{}, writerMain, .{self}) catch |err| {
                 self.mu.unlock(io);
-                std.debug.print("zdtd: chunk flush writer spawn failed: {s}; writing inline\n", .{@errorName(err)});
+                log.err("chunk flush writer spawn failed: {s}; writing inline\n", .{@errorName(err)});
                 return error.Shutdown;
             };
             // Redundant with `arm`, but keeps submit self-sufficient if a

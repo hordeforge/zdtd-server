@@ -65,7 +65,7 @@ pub const warn_throttle_every: u64 = 100;
 /// Whether occurrence `n` (1-based running count, normally an apm counter
 /// read) is one of the ones `warn_throttle_every` lets through. Use directly
 /// only when the line needs local setup (a hex dump, a sanitized name);
-/// otherwise call `warnEvery`.
+/// otherwise call `warnEvery` or `errEvery`.
 pub fn throttled(n: u64) bool {
     return n == 1 or n % warn_throttle_every == 0;
 }
@@ -75,6 +75,21 @@ pub fn throttled(n: u64) bool {
 pub fn warnEvery(n: u64, comptime fmt: []const u8, args: anytype) void {
     if (!throttled(n)) return;
     warn(fmt, args);
+}
+
+/// `err` for occurrence `n`, gated by `throttled`. Callers pass the count
+/// they also print as `n={d}` so the line says how many were suppressed.
+pub fn errEvery(n: u64, comptime fmt: []const u8, args: anytype) void {
+    if (!throttled(n)) return;
+    err(fmt, args);
+}
+
+/// Runtime informational event line with timestamp and `INFO` severity tag.
+/// Suppressed by `--quiet` or `loglevel >= 1`.
+pub fn infoTagged(comptime fmt: []const u8, args: anytype) void {
+    if (quiet) return;
+    if (min_level >= 1) return;
+    emit("INFO", fmt, args);
 }
 
 fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void {
@@ -97,6 +112,9 @@ test "warn and error always emit with a timestamp and severity tag" {
     setQuiet(true);
     warn("items.xml unreadable\n", .{});
     err("world save failed: {s}\n", .{@errorName(@import("std").mem.Allocator.Error.OutOfMemory)});
+    errEvery(1, "throttled error\n", .{});
+    errEvery(2, "suppressed error\n", .{});
     setQuiet(false);
+    infoTagged("runtime event: started\n", .{});
     try std.testing.expect(clock.isVirtual());
 }

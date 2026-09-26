@@ -12,6 +12,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 const systems = @import("../../ecs/systems.zig");
+const log = @import("../../util/log.zig");
 
 /// Honored-`fatal` kill amount vs NPC kinds (zombies/animals). Stock fatal
 /// damage is client-computed; the server honors the flag only against NPCs
@@ -35,7 +36,7 @@ pub fn sendScoreUpdate(self: *Game, c: *Client, zombie_delta: u16, player_delta:
     })) |ab| {
         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
             self.harness.counters.inc(.net_send_errors);
-            std.debug.print("zdtd: send AddScoreClient failed: {s}\n", .{@errorName(err)});
+            log.err("send AddScoreClient failed: {s}\n", .{@errorName(err)});
         };
     } else |_| {}
 }
@@ -43,7 +44,10 @@ pub fn sendScoreUpdate(self: *Game, c: *Client, zombie_delta: u16, player_delta:
 /// True when `name` is a damage package and was handled.
 pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageDamageEntity")) {
-        const d = packages.parseDamageHead(body) catch return true;
+        const d = packages.parseDamageHead(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
         if (self.quarantineDenies(c, .damage)) return true;
         if (!self.takeDamageToken(c)) {
             self.harness.counters.inc(.c2s_throttle);

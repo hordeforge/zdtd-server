@@ -236,6 +236,11 @@ pub fn tickZombieBlockDamage(self: *Game) void {
                     self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
                 } else |_| {}
             }
+        } else {
+            // Survived the bite: stock still replicates the damage change
+            // (Block::OnBlockDamaged IL_0457), so a watching client sees the
+            // block crack instead of a pristine cell until it breaks.
+            self.echoBlockDamage(bx, by, bz, id, total);
         }
     }
 }
@@ -390,6 +395,59 @@ pub fn drainDigRequests(self: *Game) void {
                     self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
                 } else |_| {}
             }
+        } else {
+            // MoveHelper dig damage is a damage change like any other: stock
+            // replicates it (Block::OnBlockDamaged IL_0457) so the wall visibly
+            // cracks while the zombie digs in.
+            self.echoBlockDamage(d.x, d.y, d.z, id, total);
+        }
+    }
+}
+
+/// Drain vomit block impacts (ItemActionProjectile.DamageBlock, stock vomit
+/// 120). advanceSpit retires the shot on a solid cell and pushes it; this
+/// applies the shooter's projectile_block_damage through the same break path
+/// the dig drain uses. Consume-owns-drain.
+pub fn drainSpitHits(self: *Game) void {
+    const n = @min(self.sim.spit_hit_n, self.sim.spit_hit_reqs.len);
+    self.sim.spit_hit_n = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const h = self.sim.spit_hit_reqs[i];
+        if (!self.sim.alive[h.slot]) continue;
+        const raw: f32 = self.sim.class_id[h.slot].projectile_block_damage;
+        if (!(raw > 0)) continue;
+        const id = self.blockIdAtWorld(h.x, h.y, h.z);
+        if (id == 0) continue;
+        // The ammo's tagged DamageModifier rows (stock vomit zeroes earth and
+        // halves stone) are not folded here: they need the per-hit item query
+        // the block path does not run. Recorded, not applied.
+        const dmg: u16 = @intCast(@min(@as(u32, @trunc(raw)), 65535));
+        if (dmg == 0) continue;
+        const max_hp = self.maxDamageForBlock(id);
+        const total = self.addBlockDamage(h.x, h.y, h.z, dmg) catch continue;
+        if (total < max_hp) {
+            self.echoBlockDamage(h.x, h.y, h.z, id, total);
+            continue;
+        }
+        const down_raw = self.downgradeBreakRaw(h.x, h.y, h.z, id);
+        if (down_raw != 0) {
+            self.noteBlockRemoved(h.x, h.y, h.z, id);
+            _ = self.world.setBlockRawWorld(h.x, h.y, h.z, down_raw) catch continue;
+            self.noteBlockAdded(h.x, h.y, h.z, world_store.typeId(down_raw));
+            self.clearBlockHp(h.x, h.y, h.z);
+            self.clearBlockRaw(h.x, h.y, h.z);
+            if (packages.buildSetBlockBodyRaw(&self.body_buf, h.x, h.y, h.z, down_raw, 0, -1, -1)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(h.x), @floatFromInt(h.z), self.interest_range) catch {};
+            } else |_| {}
+        } else {
+            self.noteBlockRemoved(h.x, h.y, h.z, id);
+            self.world.setBlockWorld(h.x, h.y, h.z, 0) catch continue;
+            self.clearBlockHp(h.x, h.y, h.z);
+            self.clearBlockRaw(h.x, h.y, h.z);
+            if (packages.buildSetBlockBody(&self.body_buf, h.x, h.y, h.z, 0)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(h.x), @floatFromInt(h.z), self.interest_range) catch {};
+            } else |_| {}
         }
     }
 }

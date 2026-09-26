@@ -126,6 +126,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.projectile_fly_time = def.projectile_fly_time;
     cid.projectile_radius = def.projectile_radius;
     cid.projectile_damage = def.projectile_damage;
+    cid.projectile_block_damage = def.projectile_block_damage;
     cid.attack_damage = def.attack_damage;
     cid.phys_resist = def.phys_resist;
     cid.block_chew = def.block_chew;
@@ -216,6 +217,9 @@ pub const EntityClass = struct {
     projectile_fly_time: f32 = 0,
     projectile_radius: f32 = 0,
     projectile_damage: f32 = 0,
+    /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = a block
+    /// impact damages nothing.
+    projectile_block_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
     /// class's own rows (Extends-resolved). Applied only where the server
     /// computes the damage (turrets, the deferred accumulator), never to a
@@ -343,6 +347,11 @@ pub const World = struct {
     explode_n: usize = 0,
     dig_reqs: [c.dig_cap]c.DigRequest = undefined,
     dig_n: usize = 0,
+    /// Vomit block impacts (ItemActionProjectile.DamageBlock). advanceSpit
+    /// pushes the cell it retires on; the Game drains and applies the
+    /// shooter's projectile_block_damage. Consume-owns-drain like dig.
+    spit_hit_reqs: [c.spit_hit_cap]c.SpitHitRequest = undefined,
+    spit_hit_n: usize = 0,
     /// Sleeper wake requests (RE EntityAlive.ConditionalTriggerSleeperWakeUp):
     /// pushed by the AI/proximity/noise/damage paths when a sleeper flips to
     /// awake; the Game drains the ring and broadcasts NetPackageSleeperWakeup.
@@ -1056,6 +1065,14 @@ pub const World = struct {
         self.dig_reqs[n] = .{ .slot = @intCast(slot), .x = x, .y = y, .z = z };
     }
 
+    /// Push a vomit block impact (ItemActionProjectile.DamageBlock). advanceSpit
+    /// pushes; the Game drains in step and applies the shooter's block damage.
+    pub fn pushSpitHit(self: *World, slot: Slot, x: i32, y: i32, z: i32) void {
+        const n = @atomicRmw(usize, &self.spit_hit_n, .Add, 1, .monotonic);
+        if (n >= c.spit_hit_cap) return;
+        self.spit_hit_reqs[n] = .{ .slot = @intCast(slot), .x = x, .y = y, .z = z };
+    }
+
     /// Push a sleeper wake request (RE entity-ai.md sleeper wake; stock sends
     /// NetPackageSleeperWakeup from EntityAlive.ConditionalTriggerSleeperWakeUp).
     /// Parallel AI workers push; the Game drains in step and broadcasts the
@@ -1315,6 +1332,7 @@ pub const World = struct {
                 .projectile_fly_time = ct.projectile_fly_time,
                 .projectile_radius = ct.projectile_radius,
                 .projectile_damage = ct.projectile_damage,
+                .projectile_block_damage = ct.projectile_block_damage,
             };
         }
         return id;

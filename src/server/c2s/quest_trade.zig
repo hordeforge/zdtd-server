@@ -258,8 +258,9 @@ pub fn handleTrade(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // Stock term: RentTimeInDays (trader_info rent_time; Table default 30).
         // Explicit 0 / negative still floors to 30 (stock ctor default).
         const term: i32 = if (info.rent_time > 0) info.rent_time else 30;
-        const day_i: i32 = @intCast(day);
-        vm.rental_end_day = if (vm.rental_end_day > 0) vm.rental_end_day + term else day_i + term;
+        const day_i: i32 = @intCast(@min(day, @as(u32, std.math.maxInt(i32))));
+        const base: i32 = if (vm.rental_end_day > 0) vm.rental_end_day else day_i;
+        vm.rental_end_day = std.math.add(i32, base, term) catch std.math.maxInt(i32);
         vm.rentable = info.rentable;
         // The owning player sees its machine's stock; re-send the TE.
         try replicate_te.sendVendingTe(self, peer, acc.x, acc.y, acc.z);

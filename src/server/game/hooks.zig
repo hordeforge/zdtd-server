@@ -735,6 +735,7 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
 /// per-item durability metadata). GetSellPrice multiplies the sell base by
 /// this, so a worn tool sells for less (loot-economy.md §5).
 pub fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f32) f32 {
+    if (!std.math.isFinite(use_times) or use_times <= 0) return 1;
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const d = g.items.byId(item_id) orelse return 1;
     const max_use = maxUseTimes(d, quality);
@@ -751,7 +752,8 @@ pub fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
     const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
     const t: f32 = (q - 1.0) / 5.0;
     const v: f64 = @as(f64, d.degradation_min) + (@as(f64, d.degradation_max) - @as(f64, d.degradation_min)) * @as(f64, t);
-    return @trunc(v);
+    if (!std.math.isFinite(v) or v <= 0) return 0;
+    return @trunc(@min(v, @as(f64, std.math.maxInt(u32))));
 }
 
 test "itemStackFor fails closed after catalogs requested" {

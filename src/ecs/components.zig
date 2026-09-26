@@ -133,6 +133,9 @@ pub const ClassId = struct {
     projectile_fly_time: f32 = 0,
     projectile_radius: f32 = 0,
     projectile_damage: f32 = 0,
+    /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = the shot
+    /// damages nothing on a block impact.
+    projectile_block_damage: f32 = 0,
     attack_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
     /// class; 0 = class_table[id] then no resist. Applied only at the
@@ -1339,6 +1342,18 @@ pub const ExplodeRequest = struct {
 pub const dig_cap: usize = 16;
 
 pub const DigRequest = struct {
+    slot: u16,
+    x: i32,
+    y: i32,
+    z: i32,
+};
+
+/// One vomit projectile block impact (ItemActionProjectile.DamageBlock, stock
+/// vomit 120). The sim retires the shot on a solid cell and pushes the cell;
+/// the Game drains it and applies the shooter's projectile_block_damage.
+pub const spit_hit_cap: usize = 16;
+
+pub const SpitHitRequest = struct {
     slot: u16,
     x: i32,
     y: i32,

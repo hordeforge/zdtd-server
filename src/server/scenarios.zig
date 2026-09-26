@@ -1880,6 +1880,27 @@ test "scenario SetBlock lower damage repairs instead of adding" {
     try std.testing.expectEqual(@as(u16, 80), g.getBlockHp(250, 70, 250));
 }
 
+test "scenario land claim does not inflate the owner's block HP" {
+    // Stock Block.OnBlockDamaged (IL=497) breaks at Block::MaxDamage. The
+    // durability modifier is a damage divisor the client already applied
+    // (ItemActionAttack.Hit IL_023E), so a claimed block the owner hits must
+    // break at the same absolute damage an unclaimed one does.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_claimhp");
+    const gpa = std.testing.allocator;
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_claimhp", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.registerClaim(250, 70, 250, c.entity_id);
+    var frame_buf: [512]u8 = undefined;
+    var body: [64]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 70, 250, world_store.block_stone)));
+    const max_hp = g.maxDamageForBlock(world_store.block_stone);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, 250, 70, 250, world_store.block_stone, max_hp, 0, 0)));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(250, 70, 250));
+}
+
 test "scenario hammer upgrade validates the UpgradeBlock target" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_upgrade");
@@ -2484,6 +2505,14 @@ test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck
     g.sim.transform[ps].x = 7;
     g.sim.transform[ps].y = 71;
     g.sim.transform[ps].z = 5;
+    // Second client next to the wall: it is not the zombie's target, so any
+    // SetBlock it receives is the damage echo and nothing else.
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    const ps_b = g.sim.playerByPeer(cb.slot).?;
+    g.sim.transform[ps_b].x = 9;
+    g.sim.transform[ps_b].y = 71;
+    g.sim.transform[ps_b].z = 5;
     const zs = g.sim.spawnZombie(5, 71, 5, 200).?;
     const zi = g.sim.slotOfNetId(zs).?;
     g.sim.zombie_ai[zi].state = .chase;
@@ -2493,11 +2522,23 @@ test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck
     try std.testing.expect(try g.world.isSolidWorld(6, 71, 5));
     try std.testing.expect(!try g.world.isSolidWorld(6, 72, 5));
     const hp_before = g.getBlockHp(6, 71, 5);
+    cap_b.clear();
     g.tickZombieBlockDamage();
     // The wall took bite damage: hp moved.
     const hp_after = g.getBlockHp(6, 71, 5);
     try std.testing.expect(hp_after > hp_before);
-    std.debug.print("PASS zombie-lowwall: feet-level wall chewed (hp {d} -> {d})\n", .{ hp_before, hp_after });
+    // ...and the surviving block's damage change was replicated (stock
+    // Block::OnBlockDamaged IL_0457), so the other client sees it crack.
+    const sb_id = packages.idOf("NetPackageSetBlock").?;
+    const got = cap_b.findPkgId(sb_id) orelse return error.TestUnexpectedResult;
+    var changes: [2]packages.BlockChange = undefined;
+    const n = try packages.parseSetBlockChanges(got, changes[0..]);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(@as(i32, 6), changes[0].x);
+    try std.testing.expectEqual(@as(i32, 71), changes[0].y);
+    try std.testing.expectEqual(@as(i32, 5), changes[0].z);
+    try std.testing.expectEqual(hp_after, changes[0].damage);
+    std.debug.print("PASS zombie-lowwall: feet-level wall chewed (hp {d} -> {d}) and echoed to the other client\n", .{ hp_before, hp_after });
 }
 
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {

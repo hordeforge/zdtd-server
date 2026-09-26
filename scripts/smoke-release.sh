@@ -124,9 +124,11 @@ grep -Fq "\"value\": \"$zwasm_hash\"" "$sbom"
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).
 smoke_world=zig-out/smoke-world
-rm -rf "$smoke_world"
+smoke_backups=zig-out/smoke-backups
+smoke_restored=zig-out/smoke-restored-world
+rm -rf "$smoke_world" "$smoke_backups" "$smoke_restored"
 mkdir -p "$smoke_world"
-trap 'rm -rf "$smoke_world"' EXIT
+trap 'rm -rf "$smoke_world" "$smoke_backups" "$smoke_restored"' EXIT
 # High fixed port: avoids clashing with stock dedi 26902 and common local 27002.
 smoke_port=27111
 if ! timeout 15s "$bin" --port "$smoke_port" --world "$smoke_world" --once >"$smoke_world/once.log" 2>&1; then
@@ -140,4 +142,36 @@ if ! grep -q 'zdtd --once complete' "$smoke_world/once.log"; then
   exit 1
 fi
 
-echo "smoke-release: ok $bin (product $product, stock wire $wire)"
+# Disaster recovery smoke: verify backup creation, restore safeguards, and restored world execution.
+bash scripts/backup-world.sh "$smoke_world" "$smoke_backups" 3 >/dev/null
+backup_item=$(find "$smoke_backups" -mindepth 1 -maxdepth 1 -type d | head -n1)
+if [[ -z "$backup_item" ]]; then
+  echo "smoke-release: backup-world.sh produced no backup directory" >&2
+  exit 1
+fi
+
+# Restore without --force to existing non-empty directory must fail closed.
+if bash scripts/restore-world.sh "$backup_item" "$smoke_world" >/dev/null 2>&1; then
+  echo "smoke-release: restore-world.sh without --force unexpectedly succeeded over non-empty target" >&2
+  exit 1
+fi
+
+# Restore to fresh target directory must succeed.
+bash scripts/restore-world.sh "$backup_item" "$smoke_restored" >/dev/null
+
+# Restored world must load and execute cleanly with --once.
+if ! timeout 15s "$bin" --port "$smoke_port" --world "$smoke_restored" --once >"$smoke_restored/once.log" 2>&1; then
+  echo "smoke-release: restored world --once failed; log:" >&2
+  cat "$smoke_restored/once.log" >&2 || true
+  exit 1
+fi
+if ! grep -q 'zdtd --once complete' "$smoke_restored/once.log"; then
+  echo "smoke-release: restored world --once did not print completion marker; log:" >&2
+  cat "$smoke_restored/once.log" >&2 || true
+  exit 1
+fi
+
+# Force restore over existing directory must preserve pre-restore state.
+bash scripts/restore-world.sh "$backup_item" "$smoke_restored" --force >/dev/null
+
+echo "smoke-release: ok $bin (product $product, stock wire $wire; backup+restore verified)"

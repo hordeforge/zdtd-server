@@ -202,6 +202,8 @@ pub const LatencyHist = struct {
     /// Approximate percentile: walk buckets until cumulative count >= target.
     pub fn percentileNs(self: *const LatencyHist, p: f64) u64 {
         if (self.count == 0) return 0;
+        if (!std.math.isFinite(p) or p <= 0) return 0;
+        if (p >= 100.0) return self.max_ns;
         const target: u64 = @ceil(@as(f64, @floatFromInt(self.count)) * p / 100.0);
         var acc: u64 = 0;
         for (self.buckets, 0..) |c, i| {
@@ -247,4 +249,10 @@ test "hist percentile" {
     try std.testing.expect(h.meanNs() == 1_000_000);
     const p50 = h.percentileNs(50);
     try std.testing.expect(p50 >= 500_000 and p50 <= 2_000_000);
+    try std.testing.expectEqual(@as(u64, 0), h.percentileNs(0));
+    try std.testing.expectEqual(@as(u64, 0), h.percentileNs(-10));
+    try std.testing.expectEqual(@as(u64, 0), h.percentileNs(std.math.nan(f64)));
+    try std.testing.expectEqual(@as(u64, 0), h.percentileNs(-std.math.inf(f64)));
+    try std.testing.expectEqual(h.max_ns, h.percentileNs(100));
+    try std.testing.expectEqual(h.max_ns, h.percentileNs(150));
 }

@@ -20,6 +20,7 @@ const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
 const plugin_mod = @import("../../plugin/root.zig");
 const plugin_compose = @import("plugin_compose.zig");
+const log = @import("../../util/log.zig");
 
 /// Cap datagram polls per tick: one chatty peer must not monopolize the
 /// tick (the loop breaks on `.none` anyway; this bounds a flood).
@@ -48,17 +49,20 @@ pub fn step(self: *Game) !void {
         while (polls < max_net_polls_per_tick) : (polls += 1) {
             const ev = self.net.poll(&self.recv_buf) catch |err| {
                 self.harness.counters.inc(.net_poll_errors);
+                const n = self.harness.counters.get(.net_poll_errors);
                 if (util_sim.isEnabled()) {
                     var seed_buf: [32]u8 = undefined;
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} net poll error: {s} ({s})\n", .{
-                        clock.wallStamp(&ts),
+                    log.errEvery(n, "net poll error n={d}: {s} ({s})\n", .{
+                        n,
                         @errorName(err),
                         util_sim.formatSeed(&seed_buf),
                     });
                 } else {
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} net poll error: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+                    log.errEvery(
+                        n,
+                        "net poll error n={d}: {s}\n",
+                        .{ n, @errorName(err) },
+                    );
                 }
                 return err;
             };
@@ -66,10 +70,9 @@ pub fn step(self: *Game) !void {
                 .none => break,
                 .connected => |p| self.onConnected(p) catch |e| {
                     self.harness.counters.inc(.join_fail);
-                    var ts: [19]u8 = undefined;
-                    std.debug.print(
-                        "zdtd: {s} onConnected failed local_id={d}: {s}\n",
-                        .{ clock.wallStamp(&ts), p.local_id, @errorName(e) },
+                    log.err(
+                        "onConnected failed local_id={d}: {s}\n",
+                        .{ p.local_id, @errorName(e) },
                     );
                 },
                 .data => |d| self.onData(d.peer, d.payload) catch |err| {
@@ -172,6 +175,9 @@ pub fn step(self: *Game) !void {
         // MoveHelper dig damage (RE entity-ai.md DigUpdate): the sim runs the
         // cadence; the Game applies the block damage like the chase chew.
         self.drainDigRequests();
+        // Vomit block impacts (ItemActionProjectile.DamageBlock): advanceSpit
+        // retired shots on solid cells; apply the shooter's block damage.
+        self.drainSpitHits();
         // Sleeper wakes (RE EntityAlive.ConditionalTriggerSleeperWakeUp): the
         // sim flipped sleepers to awake (proximity/noise/damage); broadcast
         // NetPackageSleeperWakeup so clients play the wake animation.
@@ -235,8 +241,7 @@ pub fn step(self: *Game) !void {
             if (self.last_bm_day != bm) {
                 if (self.last_bm_day >= 0) self.broadcastGameStats() catch |err| {
                     self.harness.counters.inc(.net_send_errors);
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} broadcastGameStats failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+                    log.err("broadcastGameStats failed: {s}\n", .{@errorName(err)});
                 };
                 self.last_bm_day = bm;
             }
@@ -254,8 +259,7 @@ pub fn step(self: *Game) !void {
         if (self.tick_n % self.sleeper_tick_ticks == 0) {
             self.tickWorkstations(@as(f32, @floatFromInt(self.sleeper_tick_ticks)) * 0.05) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                var ts: [19]u8 = undefined;
-                std.debug.print("zdtd: {s} broadcastDirtyWorkstations failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+                log.err("broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
             };
             self.tickBlockRadiusEffects();
             // Always-on radius sources (torch/candle/radiated barrel/pumpkin,
@@ -572,8 +576,7 @@ pub fn step(self: *Game) !void {
         var report_ok = true;
         apm.report.writeJsonLine(&snap, &report_writer) catch |err| {
             report_ok = false;
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} apm report failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+            log.err("apm report failed: {s}\n", .{@errorName(err)});
         };
         if (report_ok) {
             const report = report_writer.buffered();
@@ -581,8 +584,7 @@ pub fn step(self: *Game) !void {
             // Io.Threaded (signal handlers + bookkeeping) on the tick path.
             if (self.net.sock.sock != null) {
                 std.Io.File.stdout().writeStreamingAll(self.net.sock.io(), report) catch |e| {
-                    var ts: [19]u8 = undefined;
-                    std.debug.print("zdtd: {s} apm report write failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(e) });
+                    log.err("apm report write failed: {s}\n", .{@errorName(e)});
                 };
             } else {
                 std.debug.print("{s}", .{report});

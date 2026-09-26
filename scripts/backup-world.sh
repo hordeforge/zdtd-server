@@ -60,6 +60,8 @@ fi
 STAGE="$DEST.partial.$$"
 rm -rf -- "$STAGE"
 mkdir -p -- "$STAGE"
+trap 'rm -rf -- "$STAGE"' EXIT INT TERM
+
 # Prefer cp -a for hardlinks-free portable trees; fall back without -a.
 if ! cp -a -- "$WORLD_DIR"/. "$STAGE"/ 2>/dev/null; then
   cp -R -- "$WORLD_DIR"/. "$STAGE"/
@@ -74,7 +76,16 @@ if [[ "$file_count" -lt 1 ]]; then
 fi
 
 mv -- "$STAGE" "$DEST"
+trap - EXIT INT TERM
 echo "zdtd: backup $DEST ($file_count files)"
+
+# Clean up stale partial directories from past crashed runs to prevent disk leaks.
+for partial in "$BACKUP_ROOT/${BASE}-"*.partial.*; do
+  if [[ -d "$partial" ]]; then
+    rm -rf -- "$partial"
+    echo "zdtd: cleaned up stale staging dir $partial"
+  fi
+done
 
 # Rotate: keep the newest KEEP complete backups for this world basename.
 # Skip leftover `*.partial.*` staging dirs so an interrupted copy cannot

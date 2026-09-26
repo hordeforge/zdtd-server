@@ -52,7 +52,9 @@ pub const LevelCurve = struct {
             exp,
         ));
         const cost: f32 = @as(f32, @floatFromInt(self.exp_to_level)) * powf;
+        if (!std.math.isFinite(cost)) return if (std.math.isNan(cost)) 0 else std.math.maxInt(i32);
         if (cost >= 2147483648.0) return std.math.maxInt(i32);
+        if (cost <= 0) return 0;
         return @trunc(cost);
     }
 };

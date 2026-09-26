@@ -16,6 +16,7 @@ const admin_cmds = @import("../admin_cmds.zig");
 const version_mod = @import("../../version.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 const game_player = @import("../game/player.zig");
+const log = @import("../../util/log.zig");
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 
 /// True when `name` is a login package and was handled.
@@ -69,10 +70,9 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                                 self.harness.counters.inc(.net_send_errors);
                         } else |_| self.harness.counters.inc(.encode_errors);
                     }
-                    var ts: [19]u8 = undefined;
-                    std.debug.print(
-                        "zdtd: {s} login version mismatch comp='{s}' want='{s}' slot={d} local_id={d}\n",
-                        .{ clock.wallStamp(&ts), login.compVersion(), version_mod.stock_wire_comp, c.slot, peer.local_id },
+                    log.warn(
+                        "login version mismatch comp='{s}' want='{s}' slot={d} local_id={d}\n",
+                        .{ login.compVersion(), version_mod.stock_wire_comp, c.slot, peer.local_id },
                     );
                     self.dropClientSlot(c.slot, "version-mismatch");
                     return true;
@@ -115,7 +115,7 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                                 self.harness.counters.inc(.net_send_errors);
                         } else |_| self.harness.counters.inc(.encode_errors);
                     }
-                    std.debug.print("zdtd: login server full slot={d} joined={d} max={d}\n", .{ c.slot, total, self.max_players });
+                    log.warn("login server full slot={d} joined={d} max={d}\n", .{ c.slot, total, self.max_players });
                     return true;
                 }
             } else |_| {
@@ -141,7 +141,7 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                 // Reason length only: the guest may echo the login name into the
                 // deny text (hooks receive the name), and process logs must not
                 // hold that string (same rule as PlayerLogin name_len).
-                std.debug.print("zdtd: PlayerLogin plugin deny slot={d} reason_len={d}\n", .{ c.slot, reason.len });
+                log.warn("PlayerLogin plugin deny slot={d} reason_len={d}\n", .{ c.slot, reason.len });
                 self.dropClientSlot(c.slot, "plugin-deny");
                 return true;
             }
@@ -186,10 +186,9 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                         self.harness.counters.inc(.net_send_errors);
                 } else |_| self.harness.counters.inc(.encode_errors);
             }
-            var ts: [19]u8 = undefined;
-            std.debug.print(
-                "zdtd: {s} login identity ban slot={d} name_len={d} local_id={d}\n",
-                .{ clock.wallStamp(&ts), c.slot, c.name_len, peer.local_id },
+            log.warn(
+                "login identity ban slot={d} name_len={d} local_id={d}\n",
+                .{ c.slot, c.name_len, peer.local_id },
             );
             self.dropClientSlot(c.slot, "identity-ban");
             return true;
@@ -213,7 +212,7 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                             self.harness.counters.inc(.net_send_errors);
                     } else |_| self.harness.counters.inc(.encode_errors);
                 }
-                std.debug.print("zdtd: login not on whitelist slot={d} name_len={d}\n", .{ c.slot, c.name_len });
+                log.warn("login not on whitelist slot={d} name_len={d}\n", .{ c.slot, c.name_len });
                 self.dropClientSlot(c.slot, "whitelist-deny");
                 return true;
             }
@@ -265,8 +264,8 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         }
         // Name length only in logs (name stays on admin listplayers / webui).
         // local_id ties this line to the earlier "peer connected" / challenge logs.
-        std.debug.print(
-            "zdtd: PlayerLogin name_len={d} entity={d} slot={d} local_id={d} body={d}\n",
+        log.infoTagged(
+            "PlayerLogin name_len={d} entity={d} slot={d} local_id={d} body={d}\n",
             .{ c.name_len, eid, c.slot, peer.local_id, body.len },
         );
         return true;

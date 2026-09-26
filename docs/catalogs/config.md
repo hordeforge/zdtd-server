@@ -8,68 +8,68 @@ Every operator-facing tunable, parsed from its declaration. Semantics live in
 
 ## serverconfig.xml keys
 
-`known_serverconfig_names` (src/server/config.zig:213) is the accepted key list; the
+`known_serverconfig_names` (src/server/config.zig:214) is the accepted key list; the
 destination column names the field the parser assigns.
 
 | Key | Destination field | Parsed in | Line |
 |---|---|---|---|
-| `ServerPort` | port | src/server/config.zig | 469 |
-| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 475 |
-| `GameName` | world_name | src/server/config.zig | 483 |
-| `GameWorld` | game_world | src/server/config.zig | 484 |
-| `ServerPassword` | password | src/server/config.zig | 492 |
-| `AdminPort` | admin_port | src/server/config.zig | 493 |
-| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 499 |
-| `TelnetPort` | telnet_port | src/server/config.zig | 503 |
-| `TelnetPassword` | telnet_password | src/server/config.zig | 510 |
-| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 511 |
-| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 513 |
-| `ViewRadius` | view_radius | src/server/config.zig | 515 |
-| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 517 |
-| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 518 |
-| `ServerAdminSlots` | admin_slots | src/server/config.zig | 519 |
-| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 520 |
-| `GameDifficulty` | game_difficulty | src/server/config.zig | 521 |
-| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 522 |
-| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 523 |
-| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 524 |
-| `DayNightLength` | day_night_length | src/server/config.zig | 525 |
-| `DayLightLength` | day_light_length | src/server/config.zig | 526 |
-| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 529 |
-| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 530 |
-| `ZombieMove` | zombie_move | src/server/config.zig | 531 |
-| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 532 |
-| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 533 |
-| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 534 |
-| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 535 |
-| `LootAbundance` | loot_abundance | src/server/config.zig | 536 |
-| `XPMultiplier` | xp_multiplier | src/server/config.zig | 537 |
-| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 538 |
-| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 539 |
-| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 540 |
-| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 541 |
-| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 542 |
-| `DropOnDeath` | drop_on_death | src/server/config.zig | 543 |
-| `BuildCreate` | build_create | src/server/config.zig | 544 |
-| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 548 |
-| `DeathPenalty` | death_penalty | src/server/config.zig | 549 |
-| `LandClaimSize` | land_claim_size | src/server/config.zig | 550 |
-| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 556 |
-| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 558 |
-| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 560 |
-| `LandClaimCount` | land_claim_count | src/server/config.zig | 562 |
-| `LandClaimDeadZone` | land_claim_dead_zone | src/server/config.zig | 564 |
-| `LandClaimOfflineDelay` | land_claim_offline_delay | src/server/config.zig | 566 |
-| `LandClaimDecayMode` | land_claim_decay_mode | src/server/config.zig | 568 |
-| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 570 |
-| `SandboxPreset` | sandbox_preset | src/server/config.zig | 486 |
-| `ServerDescription` | server_description | src/server/config.zig | 487 |
-| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 488 |
-| `Region` | region | src/server/config.zig | 489 |
-| `Language` | language | src/server/config.zig | 490 |
-| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 491 |
-| `SandboxCode` | sandbox_code | src/server/config.zig | 485 |
-| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 572 |
+| `ServerPort` | port | src/server/config.zig | 468 |
+| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 474 |
+| `GameName` | world_name | src/server/config.zig | 482 |
+| `GameWorld` | game_world | src/server/config.zig | 483 |
+| `ServerPassword` | password | src/server/config.zig | 491 |
+| `AdminPort` | admin_port | src/server/config.zig | 492 |
+| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 498 |
+| `TelnetPort` | telnet_port | src/server/config.zig | 502 |
+| `TelnetPassword` | telnet_password | src/server/config.zig | 509 |
+| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 510 |
+| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 512 |
+| `ViewRadius` | view_radius | src/server/config.zig | 514 |
+| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 516 |
+| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 517 |
+| `ServerAdminSlots` | admin_slots | src/server/config.zig | 518 |
+| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 519 |
+| `GameDifficulty` | game_difficulty | src/server/config.zig | 520 |
+| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 521 |
+| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 522 |
+| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 523 |
+| `DayNightLength` | day_night_length | src/server/config.zig | 524 |
+| `DayLightLength` | day_light_length | src/server/config.zig | 525 |
+| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 528 |
+| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 529 |
+| `ZombieMove` | zombie_move | src/server/config.zig | 530 |
+| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 531 |
+| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 532 |
+| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 533 |
+| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 534 |
+| `LootAbundance` | loot_abundance | src/server/config.zig | 535 |
+| `XPMultiplier` | xp_multiplier | src/server/config.zig | 536 |
+| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 537 |
+| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 538 |
+| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 539 |
+| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 540 |
+| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 541 |
+| `DropOnDeath` | drop_on_death | src/server/config.zig | 542 |
+| `BuildCreate` | build_create | src/server/config.zig | 543 |
+| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 547 |
+| `DeathPenalty` | death_penalty | src/server/config.zig | 548 |
+| `LandClaimSize` | land_claim_size | src/server/config.zig | 549 |
+| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 555 |
+| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 557 |
+| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 559 |
+| `LandClaimCount` | land_claim_count | src/server/config.zig | 561 |
+| `LandClaimDeadZone` | land_claim_dead_zone | src/server/config.zig | 563 |
+| `LandClaimOfflineDelay` | land_claim_offline_delay | src/server/config.zig | 565 |
+| `LandClaimDecayMode` | land_claim_decay_mode | src/server/config.zig | 567 |
+| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 569 |
+| `SandboxPreset` | sandbox_preset | src/server/config.zig | 485 |
+| `ServerDescription` | server_description | src/server/config.zig | 486 |
+| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 487 |
+| `Region` | region | src/server/config.zig | 488 |
+| `Language` | language | src/server/config.zig | 489 |
+| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 490 |
+| `SandboxCode` | sandbox_code | src/server/config.zig | 484 |
+| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 571 |
 
 
 ## zdtd.toml
@@ -264,7 +264,7 @@ No fields parsed.
 (ADR 0021).
 
 
-### `rules.systems` (`Systems`, `src/ecs/rules.zig:816`)
+### `rules.systems` (`Systems`, `src/ecs/rules.zig:817`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -280,7 +280,7 @@ No fields parsed.
 | `commands` | `bool` | `true` | 52 |
 
 
-### `rules.combat` (`Combat`, `src/ecs/rules.zig:817`)
+### `rules.combat` (`Combat`, `src/ecs/rules.zig:818`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -294,14 +294,14 @@ No fields parsed.
 | `knockback_seconds` | `f32` | `0.3` | 85 |
 
 
-### `rules.c2s` (`C2s`, `src/ecs/rules.zig:818`)
+### `rules.c2s` (`C2s`, `src/ecs/rules.zig:819`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `eat_units_per_push` | `u8` | `4` | 96 |
 
 
-### `rules.glide` (`Glide`, `src/ecs/rules.zig:819`)
+### `rules.glide` (`Glide`, `src/ecs/rules.zig:820`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -310,7 +310,7 @@ No fields parsed.
 | `fall_sink_vy_mps` | `f32` | `0` | 115 |
 
 
-### `rules.ai` (`Ai`, `src/ecs/rules.zig:820`)
+### `rules.ai` (`Ai`, `src/ecs/rules.zig:821`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -409,7 +409,7 @@ No fields parsed.
 | `dig_budget_ticks` | `u8` | `90` | 391 |
 
 
-### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:821`)
+### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:822`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -422,7 +422,7 @@ No fields parsed.
 | `wave_frac` | `f32` | `0.5` | 469 |
 
 
-### `rules.progression` (`Progression`, `src/ecs/rules.zig:822`)
+### `rules.progression` (`Progression`, `src/ecs/rules.zig:823`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -444,7 +444,7 @@ No fields parsed.
 | `trap_xp_party_share` | `bool` | `false` | 538 |
 
 
-### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:823`)
+### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:824`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -453,89 +453,89 @@ No fields parsed.
 | `poi_unlock_grace_ticks` | `u32` | `2000` | 554 |
 
 
-### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:824`)
+### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:825`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `sea_level` | `f32` | `64` | 571 |
-| `height_scale` | `f32` | `1.0` | 575 |
-| `height_offset` | `f32` | `0.0` | 577 |
-| `height_ceiling` | `u32` | `0` | 580 |
+| `height_scale` | `f32` | `1.0` | 576 |
+| `height_offset` | `f32` | `0.0` | 578 |
+| `height_ceiling` | `u32` | `0` | 581 |
 
 
-### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:825`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `base_height` | `f32` | `68` | 647 |
-| `height_amp` | `f32` | `24` | 649 |
-| `min_surface` | `u8` | `12` | 651 |
-| `max_surface` | `u8` | `200` | 652 |
-| `squash` | `f32` | `28` | 654 |
-| `noise_weight` | `f32` | `0.85` | 656 |
-| `y_scale` | `f32` | `2.0` | 658 |
-| `bedrock_h` | `i32` | `3` | 660 |
-
-
-### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:826`)
+### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:826`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `accel_mps2` | `f32` | `14.0` | 619 |
-| `reverse_frac` | `f32` | `0.3` | 621 |
-| `coast_decay` | `f32` | `0.8` | 623 |
-| `steer_deg_per_s` | `f32` | `100.0` | 625 |
-| `min_turn_speed_frac` | `f32` | `0.15` | 627 |
-| `fuel_per_m` | `f32` | `0.02` | 629 |
-| `fuel_cap` | `f32` | `100` | 631 |
-| `refuel_reach` | `f32` | `3.0` | 633 |
-| `gravity` | `f32` | `-9.81` | 636 |
+| `base_height` | `f32` | `68` | 648 |
+| `height_amp` | `f32` | `24` | 650 |
+| `min_surface` | `u8` | `12` | 652 |
+| `max_surface` | `u8` | `200` | 653 |
+| `squash` | `f32` | `28` | 655 |
+| `noise_weight` | `f32` | `0.85` | 657 |
+| `y_scale` | `f32` | `2.0` | 659 |
+| `bedrock_h` | `i32` | `3` | 661 |
 
 
-### `rules.director` (`Director`, `src/ecs/rules.zig:827`)
+### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:827`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `wander_start_after` | `u64` | `28_000` | 691 |
-| `wander_min_gap` | `u64` | `12_000` | 693 |
-| `wander_max_gap` | `u64` | `24_000` | 694 |
-| `wandering_horde_size` | `u32` | `6` | 695 |
-| `wandering_spawn_dist` | `f32` | `92.0` | 696 |
-| `heat_spawn_threshold` | `f32` | `25.0` | 697 |
-| `heat_check_seconds` | `f32` | `5.0` | 698 |
-| `heat_spawn_chance` | `f32` | `0.2` | 702 |
-| `heat_cooldown_seconds` | `f32` | `240.0` | 706 |
-| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 710 |
-| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 715 |
-| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 719 |
-| `heat_scout_dist` | `f32` | `10.0` | 720 |
-| `heat_scout_count` | `u32` | `2` | 722 |
-| `heat_event_ticks` | `f32` | `720.0` | 725 |
-| `enemy_spawn_ring_min` | `f32` | `28.0` | 728 |
-| `enemy_spawn_ring_max` | `f32` | `54.0` | 729 |
-| `animal_spawn_ring_min` | `f32` | `48.0` | 732 |
-| `animal_spawn_ring_max` | `f32` | `70.0` | 733 |
-| `initial_population_frac` | `f32` | `0.25` | 738 |
-| `horde_drip_cd` | `f32` | `45.0` | 741 |
-| `bloodmoon_horde_drip_cd` | `f32` | `8.0` | 742 |
-| `scout_drip_cd` | `f32` | `120.0` | 745 |
-| `animal_drip_cd` | `f32` | `60.0` | 747 |
-| `bloodmoon_wave_cd` | `f32` | `6.0` | 749 |
-| `bloodmoon_hp_mult` | `f32` | `1.5` | 751 |
-| `difficulty_hp_0` | `f32` | `0.5` | 755 |
-| `difficulty_hp_1` | `f32` | `0.75` | 756 |
-| `difficulty_hp_2` | `f32` | `1.0` | 757 |
-| `difficulty_hp_3` | `f32` | `1.25` | 758 |
-| `difficulty_hp_4` | `f32` | `1.5` | 759 |
-| `difficulty_hp_5` | `f32` | `2.0` | 760 |
-| `move_scale_0` | `f32` | `0.5` | 763 |
-| `move_scale_1` | `f32` | `0.75` | 764 |
-| `move_scale_2` | `f32` | `1.0` | 765 |
-| `move_scale_3` | `f32` | `1.4` | 766 |
-| `move_scale_4` | `f32` | `1.7` | 767 |
+| `accel_mps2` | `f32` | `14.0` | 620 |
+| `reverse_frac` | `f32` | `0.3` | 622 |
+| `coast_decay` | `f32` | `0.8` | 624 |
+| `steer_deg_per_s` | `f32` | `100.0` | 626 |
+| `min_turn_speed_frac` | `f32` | `0.15` | 628 |
+| `fuel_per_m` | `f32` | `0.02` | 630 |
+| `fuel_cap` | `f32` | `100` | 632 |
+| `refuel_reach` | `f32` | `3.0` | 634 |
+| `gravity` | `f32` | `-9.81` | 637 |
 
 
-### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:828`)
+### `rules.director` (`Director`, `src/ecs/rules.zig:828`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `wander_start_after` | `u64` | `28_000` | 692 |
+| `wander_min_gap` | `u64` | `12_000` | 694 |
+| `wander_max_gap` | `u64` | `24_000` | 695 |
+| `wandering_horde_size` | `u32` | `6` | 696 |
+| `wandering_spawn_dist` | `f32` | `92.0` | 697 |
+| `heat_spawn_threshold` | `f32` | `25.0` | 698 |
+| `heat_check_seconds` | `f32` | `5.0` | 699 |
+| `heat_spawn_chance` | `f32` | `0.2` | 703 |
+| `heat_cooldown_seconds` | `f32` | `240.0` | 707 |
+| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 711 |
+| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 716 |
+| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 720 |
+| `heat_scout_dist` | `f32` | `10.0` | 721 |
+| `heat_scout_count` | `u32` | `2` | 723 |
+| `heat_event_ticks` | `f32` | `720.0` | 726 |
+| `enemy_spawn_ring_min` | `f32` | `28.0` | 729 |
+| `enemy_spawn_ring_max` | `f32` | `54.0` | 730 |
+| `animal_spawn_ring_min` | `f32` | `48.0` | 733 |
+| `animal_spawn_ring_max` | `f32` | `70.0` | 734 |
+| `initial_population_frac` | `f32` | `0.25` | 739 |
+| `horde_drip_cd` | `f32` | `45.0` | 742 |
+| `bloodmoon_horde_drip_cd` | `f32` | `8.0` | 743 |
+| `scout_drip_cd` | `f32` | `120.0` | 746 |
+| `animal_drip_cd` | `f32` | `60.0` | 748 |
+| `bloodmoon_wave_cd` | `f32` | `6.0` | 750 |
+| `bloodmoon_hp_mult` | `f32` | `1.5` | 752 |
+| `difficulty_hp_0` | `f32` | `0.5` | 756 |
+| `difficulty_hp_1` | `f32` | `0.75` | 757 |
+| `difficulty_hp_2` | `f32` | `1.0` | 758 |
+| `difficulty_hp_3` | `f32` | `1.25` | 759 |
+| `difficulty_hp_4` | `f32` | `1.5` | 760 |
+| `difficulty_hp_5` | `f32` | `2.0` | 761 |
+| `move_scale_0` | `f32` | `0.5` | 764 |
+| `move_scale_1` | `f32` | `0.75` | 765 |
+| `move_scale_2` | `f32` | `1.0` | 766 |
+| `move_scale_3` | `f32` | `1.4` | 767 |
+| `move_scale_4` | `f32` | `1.7` | 768 |
+
+
+### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:829`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -553,28 +553,28 @@ No fields parsed.
 | `entity_incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].entity_incoming_damage` | 432 |
 
 
-### `rules.water` (`Water`, `src/ecs/rules.zig:829`)
+### `rules.water` (`Water`, `src/ecs/rules.zig:830`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `edits_per_tick` | `u8` | `4` | 776 |
-| `spread_cap` | `u16` | `128` | 778 |
-| `puddle_cap` | `u8` | `8` | 782 |
+| `edits_per_tick` | `u8` | `4` | 777 |
+| `spread_cap` | `u16` | `128` | 779 |
+| `puddle_cap` | `u8` | `8` | 783 |
 
 
-### `rules.power` (`Power`, `src/ecs/rules.zig:830`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `battery_capacity_scale` | `f32` | `10.0` | 790 |
-| `battery_initial_charge_frac` | `f32` | `0.5` | 792 |
-| `trigger_pulse_s` | `f32` | `0.5` | 795 |
-
-
-### `rules.trader` (`Trader`, `src/ecs/rules.zig:831`)
+### `rules.power` (`Power`, `src/ecs/rules.zig:831`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `max_tier` | `i32` | `6` | 804 |
-| `default_quality_min` | `u8` | `1` | 809 |
-| `default_quality_max` | `u8` | `6` | 810 |
+| `battery_capacity_scale` | `f32` | `10.0` | 791 |
+| `battery_initial_charge_frac` | `f32` | `0.5` | 793 |
+| `trigger_pulse_s` | `f32` | `0.5` | 796 |
+
+
+### `rules.trader` (`Trader`, `src/ecs/rules.zig:832`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `max_tier` | `i32` | `6` | 805 |
+| `default_quality_min` | `u8` | `1` | 810 |
+| `default_quality_max` | `u8` | `6` | 811 |

@@ -139,12 +139,12 @@ Subcommands of the `bot` admin verb handled by the host servant.
 
 | Verb | Line |
 |---|---|
-| `bot spawn` | 568 |
-| `bot move` | 590 |
-| `bot look` | 609 |
-| `bot shoot` | 616 |
-| `bot remove` | 632 |
-| `bot count` | 643 |
+| `bot spawn` | 613 |
+| `bot move` | 635 |
+| `bot look` | 656 |
+| `bot shoot` | 665 |
+| `bot remove` | 683 |
+| `bot count` | 694 |
 
 
 ## Plugin host verbs (`src/plugin/wasm.zig`)

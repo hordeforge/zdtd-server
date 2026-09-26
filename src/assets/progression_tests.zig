@@ -44,6 +44,12 @@ test "expForLevel matches stock GetExpForNextLevel golden values" {
     const noclamp: LevelCurve = .{ .clamp_exp_cost_at_level = 0 };
     try std.testing.expectEqual(@as(u64, 2082136064), noclamp.expForLevel(250));
     try std.testing.expectEqual(@as(u64, std.math.maxInt(i32)), noclamp.expForLevel(251));
+
+    // NaN multiplier fails closed to 0 instead of trapping float-to-int trunc.
+    const nan_mult: LevelCurve = .{ .experience_multiplier = std.math.nan(f32) };
+    try std.testing.expectEqual(@as(u64, 0), nan_mult.expForLevel(1));
+    const zero_exp: LevelCurve = .{ .exp_to_level = 0 };
+    try std.testing.expectEqual(@as(u64, 0), zero_exp.expForLevel(1));
 }
 
 test "load progression.xml when present" {

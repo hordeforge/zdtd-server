@@ -786,10 +786,12 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         // fraction never reaches 0.
         if (w.barter_buy_fn) |bf| {
             const scale = bf(w.barter_buy_ctx, player_peer);
-            if (scale < 1) {
+            if (std.math.isFinite(scale) and scale > 0 and scale < 1) {
                 const disc_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, 1 - scale);
                 const kept: f64 = @max(0, @as(f64, @floatFromInt(unit)) - disc_f);
-                unit = @intCast(@max(1, @as(u64, @ceil(kept))));
+                if (std.math.isFinite(kept)) {
+                    unit = @intCast(@max(1, @min(@as(u64, @ceil(kept)), std.math.maxInt(u32))));
+                }
             }
         }
         // Widen before the multiply: a verdict-scaled unit can sit at u32 max,
@@ -1968,6 +1970,25 @@ test "trade applies barter hook scales to buy cost and sell gain" {
     const before = w.wallet[ps].coins;
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
     try std.testing.expectEqual(before + 23, w.wallet[ps].coins);
+
+    // Negative / NaN / Inf barter buy scale does not collapse or trap price.
+    const Bad = struct {
+        fn nanScale(_: ?*anyopaque, _: usize) f32 {
+            return std.math.nan(f32);
+        }
+        fn negScale(_: ?*anyopaque, _: usize) f32 {
+            return -1.0;
+        }
+    };
+    w.barter_buy_fn = &Bad.nanScale;
+    const coins_pre_nan = w.wallet[ps].coins;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(coins_pre_nan - 20, w.wallet[ps].coins);
+
+    w.barter_buy_fn = &Bad.negScale;
+    const coins_pre_neg = w.wallet[ps].coins;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(coins_pre_neg - 20, w.wallet[ps].coins);
 }
 test "traderRestock honors per-trader reset_interval (never vs every N days)" {
     var w: World = .{};

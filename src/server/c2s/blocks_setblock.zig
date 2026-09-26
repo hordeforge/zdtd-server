@@ -31,7 +31,9 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         }
         var changes: [32]packages.BlockChange = undefined;
         const n = packages.parseSetBlockChanges(body, changes[0..]) catch {
-            std.debug.print("zdtd: SetBlock parse fail body={d}\n", .{body.len});
+            self.harness.counters.inc(.c2s_malformed);
+            const mal = self.harness.counters.get(.c2s_malformed);
+            log.warnEvery(mal, "SetBlock parse fail slot={d} body_len={d} n={d}\n", .{ c.slot, body.len, mal });
             return true;
         };
         if (n == 0) return true;
@@ -137,13 +139,13 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 if (abs > cur_dmg) {
                     if (self.sim.playerByPeer(c.slot)) |bps| self.fireBlockDamaged(bps, base_cur);
                 }
-                var max_hp = self.maxDamageForBlock(base_cur);
-                if (self.claimCovering(b.x, b.z)) |claim| {
-                    if (claim.owner_entity == editor_ent) {
-                        const dur = if (claim.owner_online) self.land_claim_online_dur else self.land_claim_offline_dur;
-                        if (dur > 0) max_hp = @intCast(@min(@as(u32, max_hp) * dur, std.math.maxInt(u16)));
-                    }
-                }
+                // Stock keeps MaxDamage plain (Block.OnBlockDamaged IL=497 reads
+                // Block::MaxDamage with no claim lookup). The durability
+                // modifier is a damage divisor the client already applied
+                // (ItemActionAttack.Hit IL_023E: damagePerHit /= Max(0.1,
+                // hardness) * GetLandProtectionHardnessModifier). Multiplying
+                // the server's HP would demand the modifier twice.
+                const max_hp = self.maxDamageForBlock(base_cur);
                 if (abs >= max_hp) {
                     // Stock Block.OnBlockDamaged downgrade swap: a block with
                     // a DowngradeBlock turns into it (rotation/meta preserved)
