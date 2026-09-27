@@ -53,18 +53,24 @@ done
 # cannot pass on a configuration (flags, locale, timezone, source epoch) that
 # differs from the one the shipped artifact is built with. RELEASE_TARGET is
 # inherited from the caller's environment; the script owns the default.
+#
+# The two halves also get different $HOME (and LC_ALL/TZ/SOURCE_DATE_EPOCH are
+# already pinned to the release values by release-build.sh). An artifact that
+# captured any build-host environment would then differ between the trees, so
+# this gate fails instead of passing on an env-dependent build.
 build_release() {
-  local tree="$1"
+  local tree="$1" home="$2"
   (
     cd "$tree/src"
-    ZIG="$ZIG" bash "$ROOT/scripts/release-build.sh" \
+    mkdir -p "$home"
+    HOME="$home" ZIG="$ZIG" bash "$ROOT/scripts/release-build.sh" \
       --cache-dir "$tree/cache" \
       --prefix "$tree/install"
   )
 }
 
-build_release "$A"
-build_release "$B"
+build_release "$A" "$A/home"
+build_release "$B" "$B/home-a-different-length"
 
 ba="$A/install/bin/zdtd"
 bb="$B/install/bin/zdtd"

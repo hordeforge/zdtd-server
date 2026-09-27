@@ -91,9 +91,10 @@ Before creating an immutable `vMAJOR.MINOR.PATCH` tag:
    -Dstrip=true -Dtarget=x86_64-linux-gnu -Dcpu=baseline` under a normalized
    locale, timezone, and source epoch.
    The pinned `.zigversion` compiler, `-Dcpu=baseline`, and `strip` make the
-   binary independent of build path, host CPU, and wall-clock time; a mismatch
-   means a nondeterminism slipped in and must be fixed before tagging. CI runs
-   this automatically on every tag build.
+   binary independent of build path, host CPU, and wall-clock time; the halves
+   also differ in `$HOME`, so a build that captured the host environment fails
+   the gate. A mismatch means a nondeterminism slipped in and must be fixed
+   before tagging. CI runs this automatically on every tag build.
 7. After releasing, bump `src/version.zig` and `build.zig.zon` on the development
    branch before landing any further change. The release check rejects a commit
    that reuses a product version already tagged on another commit.

@@ -28,8 +28,21 @@ pub fn build(b: *std.Build) void {
     const build_opts = b.addOptions();
     build_opts.addOption(bool, "tracy_enabled", tracy and tracy_src != null);
     // Test/offline stock paths resolve from $HOME so sources never embed a
-    // personal home directory (see src/util/stock_paths.zig).
+    // personal home directory (see src/util/stock_paths.zig). Only the test
+    // and fuzz modules get it: every stock_paths reference outside a `test`
+    // block is a skip-when-absent offline fixture lookup, so the shipped
+    // executable has nothing to resolve against an install.
     build_opts.addOption([]const u8, "home_dir", b.graph.environ_map.get("HOME") orelse "");
+
+    // The shipped executable builds with an empty stock root. Embedding the
+    // builder's $HOME would make the artifact's bytes depend on the build
+    // machine (breaking the reproducibility gate on any other host) and leak
+    // the builder's home path into an operator-facing binary. scripts/repro-
+    // release.sh gives its two trees different $HOME values so a reintroduced
+    // leak fails that gate instead of passing it.
+    const exe_build_opts = b.addOptions();
+    exe_build_opts.addOption(bool, "tracy_enabled", tracy and tracy_src != null);
+    exe_build_opts.addOption([]const u8, "home_dir", "");
 
     // Loud failure beats a silent shim: a no-op -Dtracy build would let an
     // operator believe they were profiling when they were not.
@@ -52,7 +65,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .strip = strip,
     });
-    wireApmOptions(root_mod, build_opts, tracy_cpp);
+    wireApmOptions(root_mod, exe_build_opts, tracy_cpp);
 
     // Wasm plugin runtime (ADR 0020, zwasm v2). Anything linking it needs
     // .use_llvm = true: Zig 0.16's self-hosted x86 backend fails on

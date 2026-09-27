@@ -69,7 +69,7 @@ help:
 	@echo "  make plugins                   rebuild committed plugin .wasm from source"
 	@echo "  make docs-catalogs             regenerate docs/catalogs from source"
 	@echo "  make docs-provenance            regenerate docs/provenance.html (markup + compiled CSS)"
-	@echo "  make clean                     zig-out, .zig-cache, .zdtd_cfg_cache"
+	@echo "  make clean                     zig-out, .zig-cache, .zig-cache-check, .zdtd_cfg_cache"
 	@echo "Toolchain: Zig from .zigversion; Bun from .bun-version; override with make ZIG=..."
 
 lint-webui: need-oxlint need-python3
@@ -124,8 +124,7 @@ build: need-zig
 # is mid-refactor goes red here, which is the point.
 check-clean-build: need-zig
 	rm -rf .zig-cache-check
-	$(ZIG) build -Doptimize=$(OPTIMIZE) --cache-dir .zig-cache-check
-	rm -rf .zig-cache-check
+	trap 'rm -rf .zig-cache-check' EXIT; $(ZIG) build -Doptimize=$(OPTIMIZE) --cache-dir .zig-cache-check
 
 test: need-zig
 	$(ZIG) build test -Doptimize=$(OPTIMIZE)
@@ -291,4 +290,4 @@ repro: release-check need-zig
 	RELEASE_TARGET="$(RELEASE_TARGET)" bash scripts/repro-release.sh
 
 clean:
-	rm -rf zig-out .zig-cache .zdtd_cfg_cache
+	rm -rf zig-out .zig-cache .zig-cache-check .zdtd_cfg_cache
