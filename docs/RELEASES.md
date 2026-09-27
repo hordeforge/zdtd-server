@@ -5,9 +5,8 @@
 
 zdtd is pre-1.0 research software. `0.7.0` (src/version.zig + build.zig.zon,
 drift-checked by `make check`) is the development line; `v0.7.0` is the latest
-release. (`v0.6.0` is the latest release until the `v0.7.0` tag lands; delete
-this sentence when it does.) A minor bump may land any time and does not signal
-a stable API commitment. Product tags: `v0.1.0`,
+release. A minor bump may land any time and does not signal a stable API
+commitment. Product tags: `v0.1.0`,
 `v0.1.1`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`, `v0.7.0`. (`v3.1.0` points at the same commit as `v0.1.1` and names
 a stock wire version rather than a product version; it predates this policy
 and is not a product release. `0.2.0` has a dated CHANGELOG section but was
