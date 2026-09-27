@@ -2078,7 +2078,9 @@ fn jsonEscapeWrite(w: *std.Io.Writer, s: []const u8) !void {
                 '\n' => try w.writeAll("\\n"),
                 '\r' => try w.writeAll("\\r"),
                 '\t' => try w.writeAll("\\t"),
-                0x00...0x1f => try w.print("\\u{x:0>4}", .{c}),
+                // The named arms above are inside 0x00..0x1f, and a Zig
+                // switch rejects an overlapping range.
+                0x00...0x08, 0x0b, 0x0c, 0x0e...0x1f => try w.print("\\u{x:0>4}", .{c}),
                 else => try w.writeByte(c),
             }
             continue;
@@ -2980,9 +2982,12 @@ test "jsonEscapeWrite keeps the document decodable when a value is not UTF-8" {
     try w.writeAll("\"}");
     const body = w.buffered();
     try std.testing.expect(std.unicode.utf8ValidateSlice(body));
+    // A multiline literal would keep `\u{1f680}` as source text. The writer
+    // emits the rocket's UTF-8 bytes and the JSON escapes as characters.
     try std.testing.expectEqualStrings(
-        \\{"n":"Caf\ufffd\ufffd \u{1f680}\"\\\n"}
-    , body);
+        "{\"n\":\"Caf\\ufffd\\ufffd \u{1f680}\\\"\\\\\\n\"}",
+        body,
+    );
 }
 
 test "GET /api/state.json carries the modlet roster as a populated array" {
