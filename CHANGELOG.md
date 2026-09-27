@@ -5,6 +5,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-28
+
+### Breaking changes
+
+- **`scripts/backup-world.sh` refuses a backup on the same filesystem as the world.** The default sibling `backups/` directory shares the disk it is meant to protect, so the script exits 2 unless `backup_root` is on another filesystem. Set `ZDTD_BACKUP_ALLOW_SAME_FS=1` to keep a same-disk copy on purpose.
+- **Container saves are ZCT4.** A padlock is stored with the container. ZCT1 through ZCT3 still load, and a record with no lock tail loads unlocked. A world written by 0.8.0 will not load on 0.7.0. Back up `world_dir` before upgrading.
+
 ### Changed
 
 - **The operator dashboard and the provenance dashboard run on Tailwind v4 with
@@ -28,6 +35,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - `make docs-provenance` regenerates the provenance dashboard (markup plus
   compiled CSS). The freshness gate now covers both steps, and the CSS splice
   fails when a class in the page has no generated rule.
+- `scripts/check-backup-freshness.sh` reports whether the newest complete
+  backup of a world is within a max age (default 24 hours).
+- **Canvas signs keep their text.** The sign TileEntity body is stored and
+  replayed to a client that comes into range.
+- **A container padlock is server state.** The lock is stored on the container
+  and streamed back, so a locked chest stays locked across a restart.
+- **Placing a vehicle item spawns that vehicle.** `NetPackageVehicleSpawn` is
+  accepted when the sender is the placer, the item places that vehicle class,
+  and the spot is in reach. The placer gets the waypoint, nearby clients see
+  the entity, and it is removed from interest when they walk away. A forged
+  placer or a mismatched item is dropped.
 
 ### Fixed
 
@@ -46,6 +64,25 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   read-only mount; pick a writable --world)`; the existing `AccessDenied` arm
   keeps the `check --world permissions` wording. Both are still a hard startup
   failure with exit code 1, and no Zig dump.
+- **A trader restocks at most once per reset interval.** A second pass on the
+  same day no longer refills the stock or refunds the money pool.
+- **Container reads and trader opens require the player to be in reach.** A
+  remote container or an unparsed trader open is rejected the same way a
+  missing target is.
+- **Localization CSV cells keep quotes, commas and line breaks.** Quoted
+  fields, doubled quotes, a leading UTF-8 BOM and a record that spans lines
+  are parsed as one cell.
+- **`admin_command` reports an over-long verb as a tool error.** The MCP guest
+  returns `verb too long` instead of an allowlist denial.
+- **A non-UTF-8 `serverconfig.xml` value fails startup.** Re-save the file as
+  UTF-8. Dashboard JSON writes a bad byte as `\ufffd` instead of making the
+  whole document undecodable, and fixed-size text cuts drop a malformed tail.
+- **`loglevel` and `--quiet` do not race the threads that log.** Both gates
+  are atomics. Runtime join, net, player, session and save lines go through
+  the same leveled log, with a timestamp and a severity tag.
+- **SetBlock uses stock's plain and damage-only flag pairs.** A plain change
+  asks the client to relight the cell. A damage echo is marked damage-only so
+  it cannot overwrite a cell that has already been replaced.
 
 ### Development
 
