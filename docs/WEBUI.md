@@ -11,7 +11,7 @@ dumps with a browser UI.
 | | |
 |---|---|
 | Status | **WU0–WU2 shipped** (dashboard + console cmds); WU3+ optional |
-| Stack | Preact dashboard over `GET /api/state.json` ([ADR 0040](adr/0040-webui-preact-json-state.md), superseding the htmx/Alpine plan in [ADR 0018](adr/0018-webui-ops-dashboard.md) decision 2); the bundle is inlined into the committed page by `scripts/build-webui-ts.sh`, login and lockout stay server-rendered |
+| Stack | Preact dashboard over `GET /api/state.json` ([ADR 0040](adr/0040-webui-preact-json-state.md), superseding the htmx/Alpine plan in [ADR 0018](adr/0018-webui-ops-dashboard.md) decision 2); the bundle is compiled to `shell.js` and referenced with `defer` by `scripts/build-webui-ts.sh` (login and lockout stay server-rendered, their ~1 KiB scripts inline) |
 | Server | Zig HTTP on a dedicated bind (loopback default) |
 | Related | [APM.md](APM.md), [AUTHORITY.md](AUTHORITY.md), `src/server/admin.zig`, [PLUGIN_API.md](PLUGIN_API.md) |
 
@@ -130,7 +130,7 @@ panel from it; tab selection is client state in the URL hash.
 | `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
 | `GET`/`HEAD` `/favicon.svg` | Unauthenticated brand mark linked by all three pages | embedded SVG (`src/server/webui/favicon.svg`) |
 | `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
-| `GET /static/*` | No such route: the CSS is inline and the Preact bundle is spliced into the shell page (ADR 0040) | - |
+| `GET /shell.js` | The compiled Preact bundle, `@embedFile`d and gzipped once per process; `ETag` + `must-revalidate` so a reload costs a 304. CSS stays inline (ADR 0040) | - |
 
 Status notes: auth runs before routing, so unauthenticated requests get **401**
 even on unknown paths or wrong methods. Authenticated: wrong method on a known
@@ -317,13 +317,19 @@ src/server/webui/ts/components/ui/    # the shadcn primitives (vendored, restyle
 src/server/webui/webui.css            # Tailwind v4 entry: shadcn token contract + @utility extras
 src/server/webui/webui-<page>.css     # per-page entry (@source set over webui.css)
 src/server/webui/shell.html           # page markup, @embedFile'd (AGENTS rule 12)
+src/server/webui/shell.js             # compiled dashboard bundle, @embedFile'd, served at /shell.js
 src/server/webui/login.html           # sign-in template (plain + failure states via placeholders)
 src/server/webui/login_lockout.html
 components.json                       # shadcn aliases + theme paths (read by @shadcn/lint)
 ```
 
 Markup is `@embedFile`d at comptime and templated by `__ZDTD_*__` placeholder
-substitution; nothing is read from disk at runtime. Vendor JS/CSS under
+substitution; nothing is read from disk at runtime. The dashboard bundle is
+the one exception to inlining: it is emitted as `shell.js` and referenced
+with `defer`, so the document is ~34 KB (8.4 KB gzipped, inside the initial
+congestion window) instead of ~126 KB, first paint does not wait on parsing
+~90 KB of script, and a reload revalidates the bundle with an `ETag` instead
+of re-downloading it. Vendor JS/CSS under
 `web/static/` stays a WU3 item (see the roadmap above), not a current path.
 
 ## Design system: the shadcn contract plus vendored components
@@ -402,7 +408,9 @@ cached `@tailwindcss/cli` (pinned `TAILWIND_VERSION`, staged by
 `scripts/webui-ts-project.sh`; no `package.json`/`node_modules` in the tree)
 and splices the output into each committed page between the
 `/* zdtd-css:<region> */` markers. There is no hand-written page stylesheet: every page's CSS is the compiled form of `webui.css`. Page JS is bundled by the same script with
-`bun build` between the `/* zdtd-ts:<page> */` markers. `zig build` runs
+`bun build` between the `/* zdtd-ts:<page> */` markers, and spliced inline
+except for the shell, whose bundle is written to `shell.js` and referenced as
+`<script src="/shell.js" defer>` inside the marker. `zig build` runs
 neither, so the Zig build stays pure and offline.
 
 `scripts/webui-ts-project.sh` stages the sources plus `components.json` into a

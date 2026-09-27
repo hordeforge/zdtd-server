@@ -232,6 +232,17 @@ pub const Server = struct {
     /// session token does. Freed on logout, re-login, and deinit.
     shell_gz: ?[]u8 = null,
     shell_gz_for: [session_token_hex_len]u8 = .{0} ** session_token_hex_len,
+    /// Gzip of the dashboard bundle, compressed once for the process. The
+    /// bundle is a compile-time constant, so this is the precompressed form
+    /// the review asks for: one compression at first request, none after.
+    /// Freed on deinit; never invalidated (the bytes cannot change at runtime).
+    shell_js_gz: ?[]u8 = null,
+    /// ETag over `shell_js`, computed once on first use. Runtime rather than
+    /// comptime: hashing the 90 KiB bundle in the interpreter exceeds the
+    /// backwards-branch budget, and the bytes are fixed before the first
+    /// request regardless.
+    shell_js_etag: [18:0]u8 = .{0} ** 18,
+    shell_js_etag_set: bool = false,
     /// Queued console line (legacy drain path; POST prefers admin_fn same-request).
     cmd_pending: bool = false,
     cmd_line_buf: [max_cmd_line]u8 = undefined,
@@ -313,6 +324,10 @@ pub const Server = struct {
         @memset(&self.session_token, '0');
         self.session_expires_ns = 0;
         self.clearShellGz();
+        if (self.shell_js_gz) |buf| {
+            self.allocator.free(buf);
+            self.shell_js_gz = null;
+        }
     }
 
     fn clearShellGz(self: *Server) void {
@@ -335,6 +350,27 @@ pub const Server = struct {
         self.shell_gz = packed_body;
         @memcpy(&self.shell_gz_for, tok);
         return packed_body;
+    }
+
+    /// Gzip the dashboard bundle once per process. Its bytes are a compile-time
+    /// constant, so unlike the session-scoped shell cache this never expires.
+    /// Caller must not free the returned slice.
+    fn ensureShellJsGzip(self: *Server) error{ OutOfMemory, NoSpaceLeft }![]const u8 {
+        if (self.shell_js_gz) |cached| return cached;
+        // Best level, not the per-request one: the cost is paid once for the
+        // process and every later load is a cache hit.
+        const gz = try gzipAlloc(self.allocator, shell_js, flate.Compress.Options.best);
+        self.shell_js_gz = gz;
+        return gz;
+    }
+
+    /// ETag of the dashboard bundle, computed on first use and then reused.
+    fn shellJsEtag(self: *Server) []const u8 {
+        if (!self.shell_js_etag_set) {
+            self.shell_js_etag = etagOf(shell_js);
+            self.shell_js_etag_set = true;
+        }
+        return &self.shell_js_etag;
     }
 
     fn secret(self: *const Server) []const u8 {
@@ -569,6 +605,52 @@ pub const Server = struct {
             try self.httpRespond(&req, .ok, "image/svg+xml; charset=utf-8", body_svg, &.{
                 .{ .name = "ETag", .value = &favicon_etag },
                 .{ .name = "Cache-Control", .value = "public, max-age=604800, immutable" },
+            });
+            return;
+        }
+
+        if (std.mem.eql(u8, path, "/shell.js")) {
+            // Static build output, served before auth on the favicon's
+            // precedent: the browser fetches it in parallel with the document
+            // (which is `defer`-referenced and auth-gated), so gating it would
+            // spend a round trip on a 401 and still not get there sooner. It
+            // carries no session, no secret, and no operator data.
+            if (method != .GET and method != .HEAD) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "GET, HEAD" },
+                });
+                return;
+            }
+            const etag = self.shellJsEtag();
+            if (matchesIfNoneMatch(req.head_buffer, etag)) {
+                try self.httpRespond(&req, .not_modified, "text/javascript; charset=utf-8", "", &.{
+                    .{ .name = "ETag", .value = etag },
+                    .{ .name = "Cache-Control", .value = shell_js_cache },
+                });
+                return;
+            }
+            const cache_hdrs = [_]http.Header{
+                .{ .name = "ETag", .value = etag },
+                // The URL is not content-hashed, so it must revalidate rather
+                // than pin the bytes a deploy is about to replace: the bundle
+                // only changes with a rebuild, and the document that references
+                // it is `no-store`, so a reload re-checks it every time.
+                .{ .name = "Cache-Control", .value = shell_js_cache },
+            };
+            if (shell_js.len >= gzip_min_bytes and acceptsGzip(req.head_buffer)) {
+                if (self.ensureShellJsGzip()) |gz| {
+                    try self.httpRespond(&req, .ok, "text/javascript; charset=utf-8", if (method == .HEAD) "" else gz, &.{
+                        cache_hdrs[0],
+                        cache_hdrs[1],
+                        .{ .name = "Content-Encoding", .value = "gzip" },
+                        .{ .name = "Vary", .value = "Accept-Encoding" },
+                    });
+                    return;
+                } else |_| {}
+            }
+            try self.httpRespond(&req, .ok, "text/javascript; charset=utf-8", if (method == .HEAD) "" else shell_js, &.{
+                cache_hdrs[0],
+                cache_hdrs[1],
             });
             return;
         }
@@ -1676,17 +1758,7 @@ fn embedTrimmed(comptime path: []const u8) []const u8 {
 /// auth (a browser requests it for the sign-in page too, and an auth-gated
 /// favicon answers 401 then 404 in the console of every load).
 const favicon_svg = embedTrimmed("webui/favicon.svg");
-const favicon_etag = blk: {
-    var h = std.hash.XxHash64.init(0);
-    h.update(favicon_svg);
-    const hash = h.final();
-    var hex: [18]u8 = undefined;
-    hex[0] = '"';
-    _ = std.fmt.bufPrint(hex[1..17], "{x:0>16}", .{hash}) catch unreachable;
-    hex[17] = '"';
-    const const_hex = hex;
-    break :blk const_hex;
-};
+const favicon_etag = etagOf(favicon_svg);
 
 /// True when the request's `If-None-Match` header matches `etag` or `*`.
 fn matchesIfNoneMatch(head: []const u8, etag: []const u8) bool {
@@ -1712,6 +1784,32 @@ fn matchesIfNoneMatch(head: []const u8, etag: []const u8) bool {
 const login_html = embedTrimmed("webui/login.html");
 const login_lockout_html = embedTrimmed("webui/login_lockout.html");
 const shell_html = embedTrimmed("webui/shell.html");
+
+/// Dashboard bundle, split out of shell.html by scripts/build-webui-ts.sh and
+/// referenced with `defer`. Inlined it was ~90 KiB of the document, which both
+/// blocked the first paint on parsing it and re-sent unchanged bytes on every
+/// load; as an asset it is compressed once and cached by the browser.
+const shell_js = embedTrimmed("webui/shell.js");
+
+/// The bundle's URL is fixed, so it must revalidate: `immutable` would pin the
+/// bytes a rebuild is about to replace. Short freshness keeps a normal reload
+/// off the network entirely, and the `no-store` document that references it
+/// re-checks the ETag on every load.
+const shell_js_cache = "public, max-age=300, must-revalidate";
+
+/// Strong ETag over an embedded asset's bytes, as an 18-byte `"<16 hex>"`.
+fn etagOf(content: []const u8) [18:0]u8 {
+    return blk: {
+        var h = std.hash.XxHash64.init(0);
+        h.update(content);
+        const hash = h.final();
+        var hex: [18:0]u8 = undefined;
+        hex[0] = '"';
+        _ = std.fmt.bufPrint(hex[1..17], "{x:0>16}", .{hash}) catch unreachable;
+        hex[17] = '"';
+        break :blk hex;
+    };
+}
 
 comptime {
     // A committed page that no longer fits must fail the build with this
@@ -2578,6 +2676,70 @@ test "favicon is served before auth and mirrors HEAD" {
         return error.TestUnexpectedResult;
     }
     try testServeHttp(&s, "POST /favicon.svg HTTP/1.1\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
+}
+
+test "dashboard bundle is a precompressed, revalidating asset off the critical path" {
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+
+    // The page references it with `defer` rather than carrying it inline: the
+    // document has to stay small enough to arrive inside the initial
+    // congestion window, and the parse must not stand between the browser and
+    // the first paint.
+    try std.testing.expect(std.mem.indexOf(u8, shell_html, "<script src=\"/shell.js\" defer></script>") != null);
+    // Inlining it again would put ~90 KiB of script back between the browser
+    // and the first paint, and re-send it on every load.
+    try std.testing.expect(shell_html.len < 64 * 1024);
+
+    // Served before auth, like the favicon: the document that references it is
+    // auth-gated, and gating this too would spend a round trip on a 401.
+    var want: [64]u8 = undefined;
+    const etag_hdr = try std.fmt.bufPrint(&want, "ETag: {s}", .{s.shellJsEtag()});
+
+    try testServeHttp(&s, "GET /shell.js HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n");
+    const resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Type: text/javascript; charset=utf-8") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Content-Encoding: gzip") != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Vary: Accept-Encoding") != null);
+    try std.testing.expect(std.mem.find(u8, resp, etag_hdr) != null);
+    // A fixed URL, so revalidate rather than `immutable`: a rebuild has to be
+    // able to replace the bytes.
+    try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: " ++ shell_js_cache) != null);
+    try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: no-store") == null);
+
+    // The compressed form is built once and reused, never recompressed.
+    try std.testing.expect(s.shell_js_gz != null);
+    const first_gz = s.shell_js_gz.?;
+    try testServeHttp(&s, "GET /shell.js HTTP/1.1\r\nAccept-Encoding: gzip\r\n\r\n");
+    try std.testing.expectEqual(@intFromPtr(first_gz.ptr), @intFromPtr(s.shell_js_gz.?.ptr));
+
+    // A client that does not accept gzip gets the plain bytes, and the shared
+    // cache control still applies.
+    try testServeHttp(&s, "GET /shell.js HTTP/1.1\r\n\r\n");
+    const plain_resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, plain_resp, "HTTP/1.1 200 ") != null);
+    try std.testing.expect(std.mem.find(u8, plain_resp, "Content-Encoding") == null);
+    try std.testing.expect(std.mem.find(u8, plain_resp, etag_hdr) != null);
+
+    try testServeHttp(&s, "HEAD /shell.js HTTP/1.1\r\n\r\n");
+    const head_resp = s.testResp();
+    try std.testing.expect(std.mem.find(u8, head_resp, "HTTP/1.1 200 ") != null);
+    if (std.mem.find(u8, head_resp, "\r\n\r\n")) |end| {
+        try std.testing.expectEqual(@as(usize, 0), head_resp[end + 4 ..].len);
+    } else {
+        return error.TestUnexpectedResult;
+    }
+
+    var reval_req: [128]u8 = undefined;
+    try testServeHttp(&s, try std.fmt.bufPrint(&reval_req, "GET /shell.js HTTP/1.1\r\nIf-None-Match: {s}\r\n\r\n", .{s.shellJsEtag()}));
+    const reval = s.testResp();
+    try std.testing.expect(std.mem.find(u8, reval, "HTTP/1.1 304 ") != null);
+    try std.testing.expect(std.mem.find(u8, reval, etag_hdr) != null);
+
+    try testServeHttp(&s, "POST /shell.js HTTP/1.1\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
 }
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Compile the webui TypeScript sources (src/server/webui/ts) and splice the
 # emitted JS into the committed pages between their `/* zdtd-ts:<page> */`
-# markers. Run this after editing a .ts/.tsx source and commit the regenerated
-# pages; `make lint` fails when the committed pages are stale.
+# markers. The dashboard bundle is large enough to ship as its own cacheable
+# asset (`shell.js`, referenced with `defer`) instead of inline; the two login
+# bundles stay inline. Run this after editing a .ts/.tsx source and commit the
+# regenerated pages; `make lint` fails when the committed pages are stale.
 #
 # Styling is Tailwind v4: markup in the .html/.tsx carries utilities, the
 # theme (design tokens) lives in src/server/webui/webui.css (@theme), and this
@@ -73,13 +75,22 @@ MARKER_JS = {
     "shell": "shell.js",
 }
 
+# Markers whose bundle is large enough to ship as its own cacheable asset
+# rather than inline. The dashboard bundle is ~90 KiB plain; inlined it made
+# the document ~126 KiB and blocked the first paint on parsing it, and every
+# reload re-downloaded bytes that never change. Served from `/shell.js` with
+# `defer` it parses off the critical path and survives in the browser cache
+# across loads. The two login bundles stay inline: each is ~1 KiB, and the
+# lockout one carries the server-substituted retry countdown.
+EXTERNAL_JS = {"shell": "/shell.js"}
+
 MARK = re.compile(r"/\* zdtd-ts:([A-Za-z0-9_-]+) \*/.*?/\* /zdtd-ts:\1 \*/", re.DOTALL)
 CSS_MARK = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/.*?/\* /zdtd-css:\1 \*/", re.DOTALL)
 
 # The Tailwind build is the whole page stylesheet: every zdtd-css region
 # marker in a page is replaced by that page's compiled bundle. The region name
 # is a label for humans reading the marker; one page carries one region.
-changed = 0
+changed = []
 for html_path in sorted(html_dir.glob("*.html")):
     text = html_path.read_text(encoding="utf-8")
 
@@ -89,6 +100,13 @@ for html_path in sorted(html_dir.glob("*.html")):
         if js is None:
             raise SystemExit(f"build-webui-ts: no TS source for marker '{name}' in {html_path}")
         body = (js_dir / js).read_text(encoding="utf-8").rstrip("\n")
+        if name in EXTERNAL_JS:
+            asset = html_dir / f"{name}.js"
+            body += "\n"
+            if not asset.is_file() or asset.read_text(encoding="utf-8") != body:
+                asset.write_text(body, encoding="utf-8")
+                changed.append(asset.name)
+            return f'/* zdtd-ts:{name} */\n<script src="{EXTERNAL_JS[name]}" defer></script>\n/* /zdtd-ts:{name} */'
         return f"/* zdtd-ts:{name} */\n{body}\n/* /zdtd-ts:{name} */"
 
     page_css_file = PAGE_CSS.get(html_path.name)
@@ -108,8 +126,8 @@ for html_path in sorted(html_dir.glob("*.html")):
         raise SystemExit(f"build-webui-ts: unclosed zdtd-css marker in {html_path}")
     if out != text:
         html_path.write_text(out, encoding="utf-8")
-        changed += 1
+        changed.append(html_path.name)
 
 if changed:
-    print(f"zdtd: build-webui-ts: regenerated {changed} page(s) in {html_dir}")
+    print(f"zdtd: build-webui-ts: regenerated {', '.join(sorted(changed))} in {html_dir}")
 PY
