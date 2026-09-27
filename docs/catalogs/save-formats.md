@@ -18,13 +18,15 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
 | `ZPV` | src/server/persist.zig | 91 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
 | `ZPV` | src/server/persist.zig | 623 | zpv2DropName | - |
-| `ZCT3` | src/world/containers.zig | 188 | posFromGuid | - |
-| `ZCT3` | src/world/containers.zig | 206 | posFromGuid | - |
-| `ZCT3` | src/world/containers.zig | 272 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 273 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 274 | posFromGuid | - |
-| `ZCT1` | src/world/containers.zig | 449 | posFromGuid | - |
-| `ZCT2` | src/world/containers.zig | 629 | posFromGuid | - |
+| `ZCT4` | src/world/containers.zig | 201 | posFromGuid | - |
+| `ZCT4` | src/world/containers.zig | 220 | posFromGuid | - |
+| `ZCT4` | src/world/containers.zig | 294 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 295 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 296 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 297 | posFromGuid | - |
+| `ZCT1` | src/world/containers.zig | 488 | posFromGuid | - |
+| `ZCT2` | src/world/containers.zig | 668 | posFromGuid | - |
+| `ZCT3` | src/world/containers.zig | 744 | posFromGuid | - |
 | `ZSG1` | src/world/signs.zig | 131 | - | - |
 | `ZSG1` | src/world/signs.zig | 157 | - | - |
 | `ZVNM1` | src/world/vending.zig | 153 | - | - |
