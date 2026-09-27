@@ -1039,9 +1039,15 @@ test "player distance scan: ties keep the lower index and out-of-range players d
     try std.testing.expectEqual(@as(?usize, 2), nearestSq(&scan, 0, 0, 50));
     // Nobody in range.
     try std.testing.expectEqual(@as(?usize, null), nearestSq(&scan, 0, 0, 5));
-    // A player standing on the sensed position is not a target, so the scan
-    // from that spot picks the next one out.
-    try std.testing.expectEqual(@as(?usize, 0), nearestSq(&scan, -10, 0, 1000));
+    // A player standing on the sensed position is not a target: from p1's own
+    // spot the scan skips it (d = 0) and picks the nearest other player, p2 at
+    // 3 m. This used to demand p0, which stands 20 m away - the literal
+    // contradicted both the vector scan and `nearestSqRef`, which agree over
+    // the 256-round random comparison above.
+    const self_spot = nearestSq(&scan, -10, 0, 1000);
+    try std.testing.expectEqual(@as(?usize, 2), self_spot);
+    try std.testing.expect(self_spot != 1); // never the player on the spot
+    try std.testing.expectEqual(nearestSqRef(&scan, -10, 0, 1000), self_spot);
     try std.testing.expect(anyWithin(&scan, 0, 0, 101));
     try std.testing.expect(!anyWithin(&scan, 0, 0, 9));
 }
