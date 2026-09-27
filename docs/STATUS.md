@@ -40,9 +40,8 @@ chunk stream, canvas fields left opaque. Gated by
 **Live re-verification on the stock map 2026-09-28**: two loadgen bots join real
 Navezgane (DTM 6144x6144, ready in 32 s), spawn, walk, jump, throw dynamite and
 rejoin with ambient spawning on: `JOIN_SUMMARY total=2 pass=2 fail=0
-passRate=100.00%`, 4 rejoins, two deaths and respawns, no panic or unhandled
-package. `zig build fuzz` exits 0; fmt, check_docs, lint-wire,
-lint-architecture, provenance and the catalogs are clean.
+passRate=100.00%`, 4 rejoins, two deaths and respawns, no panic. `make lint`, `make release-check` and the tools' unit tests all exit 0, and
+`zig build fuzz` is green.
 **A container padlock is server state 2026-09-28**: the client writes its
 `TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode)
 and zdtd relayed it inside the echo only, so a later stream, rejoin or restart
