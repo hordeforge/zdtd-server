@@ -23,7 +23,7 @@ const liveRegion: HTMLElement = liveCandidate;
 message.focus();
 
 let remaining = __ZDTD_RETRY_S__;
-const COUNTDOWN_TICK_MS = 1000;
+const COUNTDOWN_INTERVAL_MS = 1000;
 // Announce at a few milestones only: a per-second polite live region would
 // flood screen readers (WCAG 2.2.1 / 4.1.3).
 const ANNOUNCE_AT_2M = 120;
@@ -57,4 +57,4 @@ const countdown = setInterval(() => {
         clearInterval(countdown);
         globalThis.location.replace('/login');
     }
-}, COUNTDOWN_TICK_MS);
+}, COUNTDOWN_INTERVAL_MS);

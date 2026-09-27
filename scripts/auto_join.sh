@@ -36,35 +36,11 @@ cd "$ROOT"
 : >"$WORLD/server.log"
 ./zig-out/bin/zdtd --port "$PORT" --game-dir "$GAME" --world "$WORLD" >"$WORLD/server.log" 2>&1 &
 SPID=$!
-cleanup() {
-  if [[ -n "${SPID:-}" ]] && kill -0 "$SPID" 2>/dev/null; then
-    kill -TERM "$SPID" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "$SPID" 2>/dev/null || break
-      sleep 0.1
-    done
-    kill -KILL "$SPID" 2>/dev/null || true
-  fi
-  wait "$SPID" 2>/dev/null || true
-}
-trap cleanup EXIT
+# shellcheck disable=SC1091 # the path is built at runtime, so shellcheck cannot follow it; server_boot.sh is in scripts/*.sh and is linted on its own
+source "$(dirname "$0")/server_boot.sh"
+zdtd_stop_on_exit "$SPID"
 # Wait until config line is printed (socket bind is past that point), or die early.
-ready=0
-for _ in $(seq 1 40); do
-  if ! kill -0 "$SPID" 2>/dev/null; then
-    echo "auto_join: zdtd exited during startup; see $WORLD/server.log" >&2
-    exit 1
-  fi
-  if grep -q 'zdtd: config port=' "$WORLD/server.log" 2>/dev/null; then
-    ready=1
-    break
-  fi
-  sleep 0.25
-done
-if [[ "$ready" -ne 1 ]]; then
-  echo "auto_join: zdtd did not become ready in time; see $WORLD/server.log" >&2
-  exit 1
-fi
+zdtd_wait_ready auto_join "$SPID" "$WORLD/server.log" 40 0.25
 # LiteNet = ServerPort+2
 "$LOADGEN" --join --host 127.0.0.1 --port $((10#$PORT + 2)) --count 1 --actions 5 --timeout 30000 --no-spawn-zombies | tee "$WORLD/loadgen.log"
 rg -q "PASS joined" "$WORLD/loadgen.log"

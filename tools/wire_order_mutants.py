@@ -109,7 +109,7 @@ PROBE_PAIRS = 8
 MAX_UNFILTERED_RECHECKS = 5
 
 # The file currently mutated, as (path, backup), so a signal can put it back.
-_pending = []
+_pending: list[tuple[str, str]] = []
 
 
 def _restore_pending():
@@ -157,7 +157,11 @@ def literal_value(arg):
 
 
 def mutants_for(path):
-    """Yield (line_index, description) for each swappable adjacent pair.
+    """Return (file_lines, mutants) for every swappable adjacent pair.
+
+    `file_lines` is the untouched line list, returned so a caller can build a
+    swapped copy without re-reading the file; each mutant is
+    (line_index, description) with a 0-based index into those lines.
 
     Writes inside `test` blocks are skipped. Those lines build fixture bytes
     for a test to read back, so swapping two of them changes what the test
@@ -418,7 +422,10 @@ def main():
             if args.limit and total >= args.limit:
                 break
             total += 1
-            backup = tempfile.mktemp(suffix=".zig")
+            # mkstemp, not mktemp: the name has to be ours alone, and it is
+            # created empty and immediately overwritten by the copy below.
+            fd, backup = tempfile.mkstemp(suffix=".zig")
+            os.close(fd)
             shutil.copyfile(path, backup)
             # A `finally` only covers exceptions. SIGTERM or SIGINT - a timeout
             # killing the run, or Ctrl-C - skips it and leaves the mutated file

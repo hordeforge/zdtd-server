@@ -60,8 +60,8 @@ rebuilds twice and requires byte-identical output; it is deliberately outside
 `make check`.
 
 The loadgen scripts are invoked directly; only `smoke-modlet` has a Makefile
-target. `scripts/smoke-navezgane.sh:77` fails the run when the stock DTM did not
-load, and `scripts/smoke-navezgane.sh:91` then requires every bot join to pass.
+target. `scripts/smoke-navezgane.sh:63` fails the run when the stock DTM did not
+load, and `scripts/smoke-navezgane.sh:77` then requires every bot join to pass.
 `scripts/ab-join-smoke.sh:1` runs the same
 loadgen against the stock dedi and zdtd on one game dir and prints both stage
 lines, which is the closest thing to a client-side A/B that runs unattended.

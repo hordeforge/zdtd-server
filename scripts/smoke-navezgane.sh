@@ -51,37 +51,13 @@ cd "$ROOT"
 : >"$WORLD/server.log"
 ./zig-out/bin/zdtd --port "$PORT" --game-dir "$GAME" --world-name Navezgane --world "$WORLD" >"$WORLD/server.log" 2>&1 &
 SPID=$!
-cleanup() {
-  if [[ -n "${SPID:-}" ]] && kill -0 "$SPID" 2>/dev/null; then
-    kill -TERM "$SPID" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "$SPID" 2>/dev/null || break
-      sleep 0.1
-    done
-    kill -KILL "$SPID" 2>/dev/null || true
-  fi
-  wait "$SPID" 2>/dev/null || true
-}
-trap cleanup EXIT
+# shellcheck disable=SC1091 # the path is built at runtime, so shellcheck cannot follow it; server_boot.sh is in scripts/*.sh and is linted on its own
+source "$(dirname "$0")/server_boot.sh"
+zdtd_stop_on_exit "$SPID"
 
 # Navezgane load (DTM + prefabs) takes longer than a flat world: wait for the
 # map line, then for the listen line, or die with the server log.
-ready=0
-for _ in $(seq 1 120); do
-  if ! kill -0 "$SPID" 2>/dev/null; then
-    echo "smoke-navezgane: zdtd exited during startup; see $WORLD/server.log" >&2
-    exit 1
-  fi
-  if grep -q 'zdtd: config port=' "$WORLD/server.log" 2>/dev/null; then
-    ready=1
-    break
-  fi
-  sleep 0.5
-done
-if [[ "$ready" -ne 1 ]]; then
-  echo "smoke-navezgane: zdtd did not become ready in time; see $WORLD/server.log" >&2
-  exit 1
-fi
+zdtd_wait_ready smoke-navezgane "$SPID" "$WORLD/server.log" 120 0.5
 
 # Assert the stock map actually loaded (not the flat fallback).
 if ! rg -q 'dtm=6144x6144' "$WORLD/server.log"; then

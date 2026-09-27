@@ -42,36 +42,11 @@ cd "$ROOT"
 "$ZIG" build
 ./zig-out/bin/zdtd --port "$PORT" --game-dir "$SCRATCH/game" --world "$SCRATCH/world" >"$SCRATCH/server.log" 2>&1 &
 SPID=$!
-cleanup() {
-  if [[ -n "${SPID:-}" ]] && kill -0 "$SPID" 2>/dev/null; then
-    kill -TERM "$SPID" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "$SPID" 2>/dev/null || break
-      sleep 0.1
-    done
-    kill -KILL "$SPID" 2>/dev/null || true
-  fi
-  wait "$SPID" 2>/dev/null || true
-}
-trap cleanup EXIT
+# shellcheck disable=SC1091 # the path is built at runtime, so shellcheck cannot follow it; server_boot.sh is in scripts/*.sh and is linted on its own
+source "$(dirname "$0")/server_boot.sh"
+zdtd_stop_on_exit "$SPID"
 
-ready=0
-for _ in $(seq 1 40); do
-  if ! kill -0 "$SPID" 2>/dev/null; then
-    echo "smoke-modlet: zdtd exited during startup; see $SCRATCH/server.log" >&2
-    tail -40 "$SCRATCH/server.log" >&2 || true
-    exit 1
-  fi
-  if grep -q 'zdtd: config port=' "$SCRATCH/server.log" 2>/dev/null; then
-    ready=1
-    break
-  fi
-  sleep 0.25
-done
-if [[ "$ready" -ne 1 ]]; then
-  echo "smoke-modlet: zdtd did not become ready in time; see $SCRATCH/server.log" >&2
-  exit 1
-fi
+zdtd_wait_ready smoke-modlet "$SPID" "$SCRATCH/server.log" 40 0.25
 
 # The fixture modlet must be discovered and its Config patches must have built
 # the S2C cache for the three base configs present in gamedir_minimal.
