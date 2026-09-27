@@ -2902,11 +2902,13 @@ gamestage, no wandering hordes, and no screamers.
   `EntityDef.flying` reads the class row's `Class`/tags, rides into
   `ClassId.flying`, and `applyGravity` holds `groundY + fly_cruise_h` at
   `fly_vert_rate`: a picked vulture flies, and one chasing a target inside
-  `fly_dive_dist_sq` descends onto it (clamped above ground) then climbs back.
+  `fly_dive_dist_sq` descends onto it (clamped) then climbs back.
   The forced arm ships too: a blood-moon spawn aimed
   at a riding player swaps in `animalZombieVultureRadiated` on a deterministic
-  50% draw and skips the bonus-loot counter (IL_0031-0061). Residual: no
-  server-driven flight animation.
+  50% draw and skips the bonus-loot counter (IL_0031-0061). The bite lands after
+  the dive (melee measures x/z, so the swoop closes the vertical gap): pinned by
+  `a flying zombie dives onto its target and lands the bite`. Flight needs no
+  wire of its own; the body streams movement state like any mob.
   *Anchors:* `applyGravity` (`src/ecs/damage_apply.zig`), `fly_cruise_h` /
   `fly_vert_rate` (`src/ecs/rules.zig`), `flying` (`src/assets/entities.zig`),
   `spawnOneZombieClass` (`src/ecs/aidirector.zig`)

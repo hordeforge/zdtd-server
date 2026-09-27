@@ -3093,3 +3093,45 @@ test "ranged attack refuses without a vomit config and outside the range window"
         try std.testing.expect(!w.zombie_ai[zs].spit.active);
     }
 }
+
+test "a flying zombie dives onto its target and lands the bite" {
+    // End to end: the vulture flight model (cruise + dive) with the melee gate,
+    // which measures the target on the x/z plane, so the swoop is what closes
+    // the vertical gap before the bite lands.
+    const Terrain = struct {
+        fn ground(_: ?*anyopaque, _: i32, _: i32) f32 {
+            return 64.0;
+        }
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y < 64;
+        }
+    };
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .fly_cruise_h = 6, .fly_vert_rate = 6 } } };
+    defer w.deinit();
+    w.ground_ctx = null;
+    w.ground_fn = &Terrain.ground;
+    w.solid_ctx = null;
+    w.solid_fn = &Terrain.solid;
+
+    const p = w.spawnPlayer(6, 64, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    const z = w.spawnZombie(0, 70, 0, 200).?;
+    const zs = w.slotOfNetId(z).?;
+    w.mask[zs].class_id = true;
+    w.class_id[zs].flying = true;
+    w.class_id[zs].attack_damage = 20;
+    const hp0 = w.health[ps].hp;
+
+    var t: f32 = 0;
+    var lowest: f32 = std.math.floatMax(f32);
+    while (t < 8.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        lowest = @min(lowest, w.transform[zs].y);
+    }
+    // Dove from cruise toward the player's level without clipping the ground.
+    try std.testing.expect(lowest < 70.0);
+    try std.testing.expect(lowest >= 64.0);
+    // The bite landed through the deferred accumulator.
+    try std.testing.expect(w.health[ps].hp < hp0);
+    try std.testing.expectEqual(c.AiState.attack, w.zombie_ai[zs].state);
+}
