@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+- Nothing yet.
+
 ## [0.8.0] - 2026-09-28
 
 ### Breaking changes
