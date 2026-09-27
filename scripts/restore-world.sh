@@ -80,6 +80,12 @@ if [[ -d "$TARGET_WORLD_DIR" ]]; then
   fi
 fi
 
+# An empty target dir (operator precreated it, or a previous empty run left it)
+# would make the final mv nest the restored tree inside it, so drop it here.
+if [[ -d "$TARGET_WORLD_DIR" ]] && rmdir -- "$TARGET_WORLD_DIR" 2>/dev/null; then
+  echo "zdtd: removed empty target dir before restore: $TARGET_WORLD_DIR"
+fi
+
 STAGE="${TARGET_WORLD_DIR}.staging.$$"
 rm -rf -- "$STAGE"
 mkdir -p -- "$STAGE"

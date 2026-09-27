@@ -79,12 +79,21 @@ mv -- "$STAGE" "$DEST"
 trap - EXIT INT TERM
 echo "zdtd: backup $DEST ($file_count files)"
 
-# Clean up stale partial directories from past crashed runs to prevent disk leaks.
+# Clean up stale partial directories from past crashed runs to prevent disk
+# leaks. A concurrent run (cron overlap, or an operator running this by hand
+# during a scheduled one) is still copying into its own `${STAGE}`, named with
+# its PID, so skip a staging dir whose PID is still alive.
 for partial in "$BACKUP_ROOT/${BASE}-"*.partial.*; do
-  if [[ -d "$partial" ]]; then
-    rm -rf -- "$partial"
-    echo "zdtd: cleaned up stale staging dir $partial"
+  if [[ ! -d "$partial" ]]; then
+    continue
   fi
+  partial_pid="${partial##*.}"
+  if [[ "$partial_pid" =~ ^[0-9]+$ ]] && kill -0 "$partial_pid" 2>/dev/null; then
+    echo "zdtd: skipping in-progress staging dir (pid $partial_pid): $partial"
+    continue
+  fi
+  rm -rf -- "$partial"
+  echo "zdtd: cleaned up stale staging dir $partial"
 done
 
 # Rotate: keep the newest KEEP complete backups for this world basename.

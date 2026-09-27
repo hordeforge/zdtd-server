@@ -30,15 +30,19 @@ out_path() {
 
 build() {
   local mod="$1"
-  $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+  local out
+  out="$(out_path "plugins/$mod/$mod.wasm")"
+  # -femit-bin writes the artifact straight to its final path. Building in the
+  # repo root and moving it out would litter the working tree with untracked
+  # .wasm files on a mid-loop failure, which check-release.sh's clean-tree gate
+  # then reports as a dirty release tree.
+  "$ZIG" build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+    -femit-bin="$out" \
     --name "$mod" \
     --dep plugin_common --dep plugin_root \
     -Mroot="plugins/core_main.zig" \
     --dep plugin_common -Mplugin_root="plugins/$mod/$mod.zig" \
     -Mplugin_common=mods/plugin_common.zig
-  local out
-  out="$(out_path "plugins/$mod/$mod.wasm")"
-  mv "$mod.wasm" "$out"
   echo "built $out"
 }
 
@@ -51,14 +55,14 @@ done
 # Addons stay in mods/: mcp + parachute are Zig; bot stays C by design
 # (ADR 0026); example_chat_filter is untouched.
 for m in mcp parachute; do
-  $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+  out="$(out_path "mods/$m/$m.wasm")"
+  "$ZIG" build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+    -femit-bin="$out" \
     --name "$m" \
     --dep plugin_common --dep plugin_root \
     -Mroot="mods/$m/main.zig" \
     --dep plugin_common -Mplugin_root="mods/$m/$m.zig" \
     -Mplugin_common=mods/plugin_common.zig
-  out="$(out_path "mods/$m/$m.wasm")"
-  mv "$m.wasm" "$out"
   echo "built $out"
 done
 

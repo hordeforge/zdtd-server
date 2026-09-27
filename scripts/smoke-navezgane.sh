@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ZIG="${ZIG:-zig}"
 GAME="${GAME_DIR:-$HOME/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server}"
 LOADGEN="${LOADGEN:-$ROOT/../7dtd-loadgen/src/LoadGen/bin/Release/net8.0/7dtd-loadgen}"
-PORT="${PORT:-27120}"
+PORT="${PORT:-27130}"
 COUNT="${COUNT:-2}"
 ACTIONS="${ACTIONS:-8}"
 WORLD="${WORLD:-$ROOT/worlds/zdtd_nav_smoke}"
@@ -33,6 +33,16 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((10#$PORT > 65533)); then
   echo "smoke-navezgane: PORT must be an integer 0..65533 (got '$PORT')" >&2
   exit 2
 fi
+
+# The clean-boot reset below is an rm -rf on an env-overridable path, so only
+# accept a world dir under the repo's own overlay/scratch roots.
+case "$WORLD" in
+"$ROOT"/worlds/*|"$ROOT"/zig-out/*) ;;
+*)
+  echo "smoke-navezgane: refusing to reset '$WORLD': WORLD must be under $ROOT/worlds/ or $ROOT/zig-out/" >&2
+  exit 2
+  ;;
+esac
 
 rm -rf "$WORLD"
 mkdir -p "$WORLD"

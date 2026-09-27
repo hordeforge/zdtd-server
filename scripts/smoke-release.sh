@@ -116,10 +116,26 @@ test -s "$sbom" || {
   echo "smoke-release: missing $sbom" >&2
   exit 1
 }
-grep -q '"bomFormat": "CycloneDX"' "$sbom"
-grep -q '"name": "zwasm"' "$sbom"
-zwasm_hash="${dep_bom#dep_zwasm=}"
-grep -Fq "\"value\": \"$zwasm_hash\"" "$sbom"
+if ! grep -q '"bomFormat": "CycloneDX"' "$sbom"; then
+  echo "smoke-release: $sbom is not a CycloneDX document" >&2
+  exit 1
+fi
+if ! grep -q '"name": "zwasm"' "$sbom"; then
+  echo "smoke-release: $sbom does not name the zwasm runtime dependency" >&2
+  exit 1
+fi
+# Read the single dep_zwasm= line out of buildinfo.txt, not out of the dep-bom
+# blob: a second dependency would make the blob multi-line and the whole blob
+# would then be grepped for as one string.
+zwasm_hash="$(sed -n 's/^dep_zwasm=//p' zig-out/bin/buildinfo.txt | head -n1)"
+if [ -z "$zwasm_hash" ]; then
+  echo "smoke-release: buildinfo.txt has no dep_zwasm line" >&2
+  exit 1
+fi
+if ! grep -Fq "\"value\": \"$zwasm_hash\"" "$sbom"; then
+  echo "smoke-release: $sbom does not record the zwasm hash $zwasm_hash from build.zig.zon" >&2
+  exit 1
+fi
 
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).

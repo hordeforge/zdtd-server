@@ -148,6 +148,14 @@ fi
 # version, and the changelog must already contain that version's section.
 # Explicit -l + pattern so we never enter create-tag mode on odd git versions.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  # The tag gate below reads local v* refs. A shallow clone hides the older ones,
+  # so the gate silently degrades to "no tags, nothing to check" on exactly the
+  # runs where a reused version matters. Both workflows check out with
+  # fetch-depth: 0 for this reason; fail closed when someone forgets.
+  if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo true)" == "true" ]]; then
+    echo "release-check: refusing to run the tag gate on a shallow clone (git fetch --unshallow)" >&2
+    exit 1
+  fi
   # docs/RELEASES.md must name the newest product tag as the latest release.
   # Ignore v3.1.0 (a stock-wire alias pointing at v0.1.1, not a product release).
   latest_product_tag=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | grep -vx 'v3\.1\.0' | head -n1 || true)

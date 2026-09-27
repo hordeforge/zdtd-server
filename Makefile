@@ -64,6 +64,7 @@ help:
 	@echo "  make release                   stripped linux-x86_64 ReleaseSafe + sidecars"
 	@echo "  make smoke                     release + scripts/smoke-release.sh (CI release smoke)"
 	@echo "  make smoke-modlet              fixture modlet boot smoke"
+	@echo "  make smoke-backup-restore      backup, restore and fail-closed safeguards"
 	@echo "  make repro                     byte-identical release rebuild (tag CI only)"
 	@echo "  make webui-ts                  regenerate committed webui pages from TS"
 	@echo "  make plugins                   rebuild committed plugin .wasm from source"

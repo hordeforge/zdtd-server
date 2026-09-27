@@ -8,8 +8,11 @@
 # tripping one of the wasm host tests would ship a stale binary silently.
 #
 # This rebuilds every artifact into a scratch mirror and compares it to what is
-# committed. Same pattern as the webui page-freshness check in lint-webui.sh
-# and the docs/provenance.html staleness check in the Makefile.
+# committed, in both directions: the mirror catches a stale or uncommitted
+# artifact, and the committed set catches a .wasm whose source was deleted or
+# renamed, which produces no build output and would otherwise pass unnoticed.
+# Same pattern as the webui page-freshness check in lint-webui.sh and the
+# docs/provenance.html staleness check in the Makefile.
 #
 # The toolchain is deterministic (Zig pinned by .zigversion, and the C
 # artifacts pinned to clang's major by CLANG_MAJOR in build-plugins.sh), so a
@@ -51,9 +54,31 @@ while read -r built; do
   fi
 done < <(find "$mirror" -name '*.wasm' | LC_ALL=C sort)
 
+# Walk the committed set too, not just the mirror: a .wasm whose source was
+# deleted or renamed produces no build output, so the mirror-only loop above
+# would report green with the orphan still shipped. A C artifact is exempt from
+# the hard failure when the pinned clang major is absent (build-plugins.sh skips
+# it by design); it is listed as unverified instead, so the green line below can
+# no longer claim coverage it does not have.
+unverified=0
+while read -r rel; do
+  [ -f "$mirror/$rel" ] && continue
+  if [ -f "$root/${rel%.wasm}.c" ]; then
+    echo "zdtd: lint-plugins: $rel unverified (pinned clang absent; see build-plugins.sh)" >&2
+    unverified=$((unverified + 1))
+    continue
+  fi
+  echo "zdtd: lint-plugins: $rel is committed but was not rebuilt (its source is missing or renamed)" >&2
+  missing=1
+done < <(git -C "$root" ls-files -z 'plugins/*.wasm' 'mods/*.wasm' 'assets/fixtures/*.wasm' | tr '\0' '\n')
+
 if [ "$stale" -ne 0 ] || [ "$missing" -ne 0 ]; then
   echo "zdtd: lint-plugins: run 'make plugins' and commit the rebuilt .wasm" >&2
   exit 1
 fi
 
-echo "zdtd: lint-plugins: committed .wasm binaries match their sources"
+if [ "$unverified" -ne 0 ]; then
+  echo "zdtd: lint-plugins: $unverified committed .wasm binaries unverified (no pinned clang); the rest match their sources"
+else
+  echo "zdtd: lint-plugins: committed .wasm binaries match their sources"
+fi

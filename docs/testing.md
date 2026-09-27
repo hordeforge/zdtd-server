@@ -23,11 +23,11 @@ about zdtd's internal coherence, never about the client.
 
 | Gate | Command | Proves | Cannot prove |
 |---|---|---|---|
-| Unit and scenario tests | `zig build test` / `make test` (`Makefile:120`); focused: `make test-one FILTER=…` (`Makefile:127`) | Wire goldens, sim units, in-process join, spawn, chunk and inventory paths | Stock client `Read` survival, mesh, UI, scale |
-| Lint | `make lint` (`Makefile:183`) | Static invariants: fmt, script syntax, import cycles and edges, package-id rules, plugin and webui freshness, docs honesty | Anything at runtime |
-| Full local gate | `make check` (`Makefile:234`) | The above plus provenance coverage, XML audit, build, test, fuzz | Stock compatibility, throughput |
-| Release | `make release` (`Makefile:158`), `make release-check` (`Makefile:208`) | A pinned, stripped operator artifact with a hash and buildinfo record | Gameplay correctness |
-| Release smoke | `make smoke` (`Makefile:254`), `make smoke-modlet` (`Makefile:259`) | The shipped binary starts, parses `--version`/`--help`, is stripped, and one tick completes | Wire fidelity under a real client |
+| Unit and scenario tests | `zig build test` / `make test` (`Makefile:131`); focused: `make test-one FILTER=…` (`Makefile:138`) | Wire goldens, sim units, in-process join, spawn, chunk and inventory paths | Stock client `Read` survival, mesh, UI, scale |
+| Lint | `make lint` (`Makefile:194`) | Static invariants: fmt, script syntax, import cycles and edges, package-id rules, plugin and webui freshness, docs honesty | Anything at runtime |
+| Full local gate | `make check` (`Makefile:235`) | The above plus provenance coverage, XML audit, build, test, fuzz | Stock compatibility, throughput |
+| Release | `make release` (`Makefile:169`), `make release-check` (`Makefile:228`) | A pinned, stripped operator artifact with a hash and buildinfo record | Gameplay correctness |
+| Release smoke | `make smoke` (`Makefile:275`), `make smoke-modlet` (`Makefile:280`), `make smoke-backup-restore` (`Makefile:284`) | The shipped binary starts, parses `--version`/`--help`, is stripped, one tick completes, and a backup restores into a world the daemon boots | Wire fidelity under a real client |
 | Loadgen smoke | `scripts/auto_join.sh`, `scripts/smoke-navezgane.sh`, `scripts/ab-join-smoke.sh` | Join volume, map load, A/B stage parity against the stock dedi | Full client parse beyond the loadgen stages |
 | Stock client | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | The client stayed alive and observable state matches | CPU scale |
 | Performance | APM dump ([APM.md](APM.md)) | Tick cost against the 50 ms budget | Stock compatibility |
@@ -43,19 +43,19 @@ that guest helper is outside the server import graph.
 the architecture edge and barrel check (`scripts/lint-architecture.sh:30`), the
 cycle check, the wire check (`scripts/lint-wire.sh`), the plugin freshness
 check (`scripts/lint-plugins.sh`), the webui and HTML checks, and
-`tools/check_docs.py` (`Makefile:214`). It proves the tree is coherent; it runs
+`tools/check_docs.py` (`Makefile:215`). It proves the tree is coherent; it runs
 no game code.
 
-`make check` (`Makefile:215`) chains release-check, lint, a Python syntax gate,
+`make check` (`Makefile:235`) chains release-check, lint, a Python syntax gate,
 `tools/provenance_scan.py`, the `docs/provenance.html` freshness diff,
-`make check-xml-audit` (`Makefile:270`), build, test and fuzz. The XML audit
+`make check-xml-audit` (`Makefile:271`), build, test and fuzz. The XML audit
 proves stock data is read rather than hardcoded, and it skips with a notice when
-no game dir is present (`Makefile:268`). When a warm cache
-is suspect, run `make check-clean-build` (`Makefile:125`): a stale object can
+no game dir is present (`Makefile:269`). When a warm cache
+is suspect, run `make check-clean-build` (`Makefile:126`): a stale object can
 hide a latent exe-only compile error from both `build` and `test`.
 
 `make release` depends on release-check, so a version-drifted tree cannot
-produce a binary (`scripts/check-release.sh:66`). `make repro` (`Makefile:290`)
+produce a binary (`scripts/check-release.sh:66`). `make repro` (`Makefile:291`)
 rebuilds twice and requires byte-identical output; it is deliberately outside
 `make check`.
 
@@ -90,7 +90,7 @@ systems; do not duplicate the harness (`AGENTS.md:286`).
 A check guards only if the regression turns it red. Two mechanisms enforce that.
 
 `src/fuzz.zig` runs coverage-guided targets over every untrusted parser boundary
-(`src/fuzz.zig:1`) through `make fuzz` (`Makefile:134`).
+(`src/fuzz.zig:1`) through `make fuzz` (`Makefile:145`).
 
 `tools/wire_order_mutants.py` swaps each adjacent pair of same-width writes in a
 positional builder, runs the suite, and reports survivors

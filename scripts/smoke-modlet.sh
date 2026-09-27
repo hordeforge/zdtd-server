@@ -23,6 +23,16 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((10#$PORT > 65533)); then
   exit 2
 fi
 
+# The scratch reset below is an rm -rf on an env-overridable path, so only
+# accept a directory under the repo's own scratch root.
+case "$SCRATCH" in
+"$ROOT"/zig-out/*) ;;
+*)
+  echo "smoke-modlet: refusing to reset '$SCRATCH': SCRATCH must be under $ROOT/zig-out/" >&2
+  exit 2
+  ;;
+esac
+
 rm -rf "$SCRATCH"
 mkdir -p "$SCRATCH/world" "$SCRATCH/game" "$SCRATCH/game/Mods"
 cp -r "$ROOT/assets/fixtures/gamedir_minimal/." "$SCRATCH/game/"

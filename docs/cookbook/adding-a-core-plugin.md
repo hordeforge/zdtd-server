@@ -201,10 +201,10 @@ bash scripts/lint-plugins.sh
 ```
 
 `make plugins` rebuilds every `plugins/<name>/<name>.wasm` from its Zig source
-(`Makefile:53-54`). The committed `.wasm` is a build output checked in so
+(`Makefile:81-82`). The committed `.wasm` is a build output checked in so
 operators need no toolchain, so commit source and binary together
 (`mods/BUILDING.md`). `make lint` runs the freshness gate
-(`Makefile:155`, `scripts/lint-plugins.sh:44-52`): it rebuilds every artifact
+(`Makefile:221`, `scripts/lint-plugins.sh:40-74`): it rebuilds every artifact
 into a scratch mirror under `zig-out` and byte-compares it against what is
 committed, failing with `is stale (its source changed without a rebuild)`. Use
 `scripts/build-plugins.sh --dest DIR` to produce the mirror without touching the

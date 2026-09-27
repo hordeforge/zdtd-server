@@ -8,9 +8,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# A dependency is a block with both .url and .hash. Matching on the .url keeps a
+# .hash line that belongs to some other block (.paths and friends) from being
+# attributed to the dependency named by the previous block.
 bom="$(awk '
-  /^[[:space:]]*\.[A-Za-z_][A-Za-z0-9_]* = \.\{/ { name = $1; sub(/^\./, "", name) }
-  /^[[:space:]]*\.hash = "/ {
+  /^[[:space:]]*\.[A-Za-z_][A-Za-z0-9_]* = \.\{/ { name = $1; sub(/^\./, "", name); url = 0 }
+  /^[[:space:]]*\.url = "/ { url = 1 }
+  url && /^[[:space:]]*\.hash = "/ {
     hash = $0
     sub(/^[^"]*"/, "", hash)
     sub(/".*$/, "", hash)
