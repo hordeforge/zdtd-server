@@ -113,6 +113,37 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Remaining parity items (2026-09-28 session handoff)
+
+Four items stand between the current tree and a defensible 100%. Each is
+recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
+299 WORKS / 1 PARTIAL / 0 MISSING); this list only names where to start.
+
+- **Perk/attribute passive-effects VM coverage** (the one counted PARTIAL,
+  GAP section 10). The VM folds the tracked stats and every named fold
+  (LootProb/LootQuantity/LootStage/NoiseMultiplier/LightMultiplier/stage
+  modifiers); what is left is a long tail of requirement kinds that fail closed
+  and are counted in `apm requirement_unsupported`:
+  `EntityTagCompare target="other"` on the per-hit attacker path (items.xml),
+  `CVarCompare` rows whose write actions zdtd does not drive, and the
+  `RandomRoll` seed. Anchors: `src/assets/requirements.zig`,
+  `src/assets/buffs.zig` folds, `src/server/game/tick.zig` VM queries.
+- **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
+  (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
+  already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing
+  is the item's quality/mods and its carried wear, which needs a per-vehicle
+  wear model first, and a turret ammo capacity model (the reload path is
+  RE-blocked, see GAP section 7).
+- **Survival regen coupling** (GAP section 10 residual): `Stat.Tick` phase 4
+  drains food/water with the stamina/health regen scaled by passives 119/127/
+  120/126. The mechanism is pinned (`il/full-v3.1.0/_global/Stat.il.txt:48`);
+  what is missing is a live A/B against a stock dedi to pin the stock stamina
+  regen scale, because zdtd's 8/s floor would empty both bars in seconds at 1:1.
+- **Destroyed-vehicle waypoint refresh** (GAP section 7): nothing in zdtd
+  destroys a vehicle today, so the case is unreachable; when a destroy path
+  lands it must re-send the owner's list, the way
+  `VehicleManager::RemoveTrackedVehicle` IL_006E does.
+
 ### Perk and attribute progression (ADR 0023)
 
 **SHIPPED 2026-08-26/29** (all of T24-T28 below). `progression.xml`'s catalog
