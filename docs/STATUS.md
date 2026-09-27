@@ -31,18 +31,18 @@ placer gets the waypoint list and the new count at once. Gated by
 **A canvas sign's TE is server state 2026-09-28**: `TEFeatureCanvas` writes one
 `CanvasState` on the network path, and zdtd had no leg for a canvas-and-no-storage
 composite, so a painted canvas sign lived only in the edit-time echo: a later
-stream, rejoin or restart showed a blank canvas. Blocks.xml
+stream, rejoin or restart showed blank. Blocks.xml
 `CompositeFeatures` now stamps `BlockDef.canvas` (the flag gates the leg, like
 `signable`), and the body is walked, stored verbatim, echoed and replayed by the
 chunk stream, canvas fields left opaque. Gated by
 `a canvas composite body parses and a malformed canvas module is refused` and
 `scenario a canvas sign's TE body is stored and replayed`.
 **Live re-verification on the stock map 2026-09-28**: two loadgen bots join real
-Navezgane (DTM 6144x6144, ready in 35 s), spawn, walk, jump, throw dynamite and
-rejoin: `JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%`, 5 rejoins, one
-death, a respawn heal, no panic or encoder failure. `zig build fuzz` exits 0;
-fmt, check_docs, lint-wire, lint-architecture, provenance and the catalogs are
-clean.
+Navezgane (DTM 6144x6144, ready in 32 s), spawn, walk, jump, throw dynamite and
+rejoin with ambient spawning on: `JOIN_SUMMARY total=2 pass=2 fail=0
+passRate=100.00%`, 4 rejoins, two deaths and respawns, no panic or unhandled
+package. `zig build fuzz` exits 0; fmt, check_docs, lint-wire,
+lint-architecture, provenance and the catalogs are clean.
 **A container padlock is server state 2026-09-28**: the client writes its
 `TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode)
 and zdtd relayed it inside the echo only, so a later stream, rejoin or restart
@@ -54,7 +54,7 @@ unlocked); a storage-only write is the client's unlock. Enforcement stays on the
 `a container's lock module survives the ZCT4 round trip and ZCT3 loads unlocked`
 and `scenario a container padlock becomes server state and streams from it`.
 **A damaged block now reaches every watching client 2026-09-26**: stock
-`Block::OnBlockDamaged` replicates every damage change, broken or not. zdtd
+`Block::OnBlockDamaged` replicates every damage change, broken or not: zdtd
 echoed a surviving block on the player, explosion and vomit paths, but the
 per-tick zombie chew and the MoveHelper dig only broadcast on the break, so a
 client watching a zombie chew a wall held a pristine cell until it fell. Both
