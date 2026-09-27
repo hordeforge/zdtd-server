@@ -162,19 +162,25 @@ survives by construction. That was a third of the tree (356 pairs down to 270)
 and it was hiding real findings behind noise.
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 215/215 (100%).** Every row below carries a bucket and a
-  source; a file without a row, or a row without a bucket/source, fails.
+- **File coverage: 353/353 (100%).** Every `src/**/*.zig` file carries a row
+  below with a bucket and a source; a file without a row, or a row without a
+  bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
   comment or a ledger entry.
 - **Audit linkage: 100%.** Every A##/B## finding the hardcode audit names
   appears in this ledger.
 
+Bucket counts over the map rows below (measured 2026-09-27, `rg` over the
+table). They sum to 354: the 353 `.zig` files plus the embedded
+`src/assets/sandbox_presets.xml` TextAsset, which the scan does not count
+because it globs `.zig`.
+
 | Bucket | Meaning | Count |
 |---|---|---|
-| **A** stock data | Loaded from the operator install (`Data/Config` / world assets / AssignIds); provenance = the stock file | 35 |
-| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-engine-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 119 |
-| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 61 |
+| **A** stock data | Loaded from the operator install (`Data/Config` / world assets / AssignIds); provenance = the stock file | 58 |
+| **R** RE-cited | Stock behavior/wire reproduced from `../7dtd-engine-research/docs` IL-verified narratives (or the bundled AssignIds dump); citation in the row | 226 |
+| **Z** zdtd-owned | Engineering/policy/instrumentation with no stock counterpart; not a provenance claim | 70 |
 
 ### File provenance map
 
@@ -339,11 +345,10 @@ Coverage targets, all enforced by the scan:
 | `src/server/c2s/misc_spawn.zig` | R | C2S spawn arms (quest entity spawn, request-to-spawn-entity). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_admin.zig` | R | C2S admin arms (console command, editor volume drop). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_damage.zig` | R | C2S damage arm (kill claims, XP awards, score updates). Split out of misc.zig verbatim |
-| `src/server/c2s/misc_lock.zig` | R | C2S lock arm (container/door lock requests). Split out of misc.zig verbatim |
+| `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, container/door lock requests, trader and vending window open, unlock). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_vehicle.zig` | R | C2S vehicle + attach arms (data sync, spawn control, entity attach). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_wire.zig` | R | C2S wire arms (block wire actions, wire-tool parent ops). Split out of misc.zig verbatim |
 | `src/server/c2s/misc_turret.zig` | R | C2S turret arms (animation-data relay, turret spawn). Split out of misc.zig verbatim |
-| `src/server/c2s/misc_lock.zig` | R | C2S lock arm (lock request gates, trader and vending window open, unlock). Split out of misc.zig verbatim |
 | `src/server/c2s/move.zig` | R | C2S movement and entity-state handling: absolute/relative position, the animation no-op, loot-bag collect, alive flags, motion speeds (sprint |
 | `src/server/c2s/quest.zig` | R | C2S quest/social/trade domain: shared quests, party and ally actions, buff add/remove, quest events and objective updates, the NPC quest list, |
 | `src/server/c2s/move_position.zig` | R | C2S movement arms (absolute/relative position, collect, alive flags). Split out of move.zig verbatim |
@@ -533,7 +538,6 @@ Coverage targets, all enforced by the scan:
 | `src/world/light_te.zig` | R | Prefab `.tts` Light (18) TE persistency payloads (RE TileEntityLight.read IL=68 + TileEntity.il base read): parsed intensity/range/Color32/type/angle/shadows plus the version-gated state/rate/delay tail into a world store; the network body lives in `wire/stock_te.zig` (TileEntityLight.write IL=48). |
 | `src/world/water.zig` | R | Stock water_info.xml point sources (used as local water-table hints); the leveling queue backing the dig-leveling pour (zdtd-owned, GAP water flow PARTIAL) |
 | `src/world/weather.zig` | R | Stock WeatherManager storm / bloodMoon state machine, server side. Live-verified 2026-08-12: stock `weather` telnet dump shows the 5-slot param vector (Temperature/Precipitation/CloudThickness/Wind/Fog) per biome, `default` group, no storms in the day-1 grace (worldTime < 22000), and `weather clouds N` drives forceClouds (value/100) -> GetCloudThickness. |
-| `src/world/weather.zig` storm schedule | R | `update_interval_ticks = 5` matches stock `BiomeWeather.ServerTimeUpdate` cadence; storm_state 0/1/2 (clear/stormbuild/storm) matches stock `BiomeWeather.stormState`. |
 | `src/world/workstations.zig` | Z | World-position keyed workstation state (forge/campfire/workbench TE 12). Slots mirror TileEntityWorkstation arrays; craft tick advances the queue  The craft output keeps the queue item's quality, so two crafts at different tiers never merge (stock TileEntityWorkstation builds the output ItemValue from RecipeQueueItem.Quality) (2026-09-13).|
 | `src/world/worldgen.zig` | R | On-the-fly procedural chunk generation (W0/W1/W2). Pure function of (seed, chunkX, chunkZ): no full-map bake, no global RNG |
 ## 3. Constants ledger (behavioral values)
@@ -793,32 +797,15 @@ below is therefore the surviving record of the final live statuses.
 | XP/level/gamestage math | RE: `../7dtd-engine-research/docs/gameplay/progression.md` (AddLevelExp → recursive level-up → skill points → RefreshPerks); `src/server/game/player.zig` |
 | Perk requirement graphs / effect application | **Partial**: [ADR 0023](adr/0023-perk-attribute-system.md) accepted; catalog + XP math ship (rows above); per-player perk levels, spend, and requirement graphs remain WORK_PLAN (T16+). `Rules.Progression.*` floors stand in until the resolver lands |
 
+The B findings whose coverage is a constant anchor rather than a file row:
+
+| Id | Anchor | Value | Provenance |
+|---|---|---|---|
 | B38 | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | zdtd engineering (Z), documented as fixed-size architecture |
 | B39 | `game.zig:352` | `sleeper_party_radius` (default 100.0), now a single `[sim]`-bound field (deduped; was duplicated at game.zig + game/sleeper.zig:13) | R: CalcGameStageAround radius (asm.il ~1093363) |
 | B40 | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig` `builtinStockName` | zdtd mirror; divergence caught by existing id tests |
 
-## 4. Coverage and maintenance
-
-- **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **215/215 (100%)**; a new src file without a ledger
-  row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
-- **Constants:** the ledger covers the behavioral values; the authoritative
-  field-by-field provenance for the rules surface lives inline in
-  `src/ecs/rules.zig`.
-- **After a game update:** re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,
-  then re-verify the R rows and the divergence register against the new pin
-  (see RE_GAP_CLOSURE §4).
-- **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
-  table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
-
-- `python3 tools/provenance_scan.py` gates **file coverage 215/215** and ledger
-  well-formedness (every row: bucket + non-empty source; every constant anchor
-  file exists).
-- After a game update: re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,
-  then re-verify the R rows against the new pin (see RE_GAP_CLOSURE §4).
-- Divergences are tracked in GAP_ANALYSIS / WORK_PLAN; the audit's per-finding
-  table lives in `archive/HARDCODE_AUDIT_2026-08-08.md` (re-verify on change).
-### 3.7 Recent additions (2026-08-25 lift + gap sweeps)
+### 3.12 Recent additions (2026-08-25 lift + gap sweeps)
 
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
@@ -842,7 +829,7 @@ below is therefore the surviving record of the final live statuses.
 | `apm` survival section / counters | per tick | Z | The survival/effects pass runs under the `survival` profiler section with `survival_players` / `vm_recomputes` counters (P4b): the per-player VM fold stays observable against the 50 ms budget |
 | `items.zig` StaminaLoss | per item | A | items.xml StaminaLoss (base_set, first value) = the per-attack stamina cost; the landed-hit choke drains it x `[rules.combat] stamina_usage_multiplier` (RE ItemActionMelee IL). 2-value rows = normal/power pair (first used); negative quality-curve rows recorded |
 | `buffs.zig` curve_levels / `curveValueAtLevels` | explicit anchors | R | The XML `level="a,b,..."` anchor pairs (progression.xml's dominant form, 617/648 rows): value[i] sits at level[i], piecewise-linear between, out-of-range applies nothing (stock PassiveEffect.ModValue IL=796); `curveAt` prefers the anchors over the implicit scaled-index fallback |
-| `weather.zig` NetPackageWeather | per-biome params | R | The server's temperature input leg: per-biome weather groups (temperature ranges from biomes.xml) roll into the slot-0 param and ship on join + broadcast; the felt temperature and cold/hot buffs are client-computed in stock (weather-environment.md §4) - client-owned by design, not a server gap |
+| `wire/stock_weather.zig` NetPackageWeather | per-biome params | R | The server's temperature input leg: per-biome weather groups (temperature ranges from biomes.xml) roll into the slot-0 param and ship on join + broadcast; the felt temperature and cold/hot buffs are client-computed in stock (weather-environment.md §4) - client-owned by design, not a server gap |
 | `Health.base_max_hp` + the survival max-stat recompute | per player | R | The passive-effects VM's max-stat deltas apply revertibly: `max_hp = base_max_hp + deltas` recomputed every survival tick (base captured at spawn), hp clamps down on reduction; food/water/stamina maxes recompute from the 100 base. perkFortitudeMastery HealthMax level 5 = 200, revert to 100 |
 | survival stamina-OT consumer | perc fraction of max/s | R | The VM's StaminaChangeOT total joins the idle regen (`value x max / 100` per second, the same conversion as the stage-3 penalty): perkRuleOneCardio level 5 adds 0.45/s on a 150 cap; the sprint branch keeps the stage-3 penalty |
 | `chunk_fill.tryContainerSpill` | per break | R | A broken container spills its pre-filled contents into a loot bag at the block (all 449 blocks.xml LootList blocks are CompositeTileEntity containers; the eviction path already spilled, the break path dropped nothing). maxdamage.lootListFor resolves the LootList for the pre-fill |
@@ -851,3 +838,20 @@ below is therefore the surviving record of the final live statuses.
 | `items.zig` armor PDR/EDR parse | per-item curves | A | items.xml PhysicalDamageResist/ElementalDamageResist (passives 41/42) quality curves parsed per item and resolved through the Extends chain; `armorPdr` (server hook) feeds armorMitigation like stock GetTotalPhysicalArmorRating sums passive 41 |
 | `items.zig` DegradationPerUse / TargetArmor | flat per item | A | items.xml DegradationPerUse (base_set, per-use durability wear; wired into degradeUse) and TargetArmor (perc_add, armor penetration; wired into armorMitigationVs at the damage chokes, RE GetTotalPhysicalArmorRating IL=47). The perk-tag-gated rows (perkJavelinMaster etc.) apply when the attacker owns the tagged perk - the tag is the perk name, checked at the choke. BlockDamage/StaminaLoss/HarvestCount/LootProb recorded with their exact choke reasons |
 | `ItemDef.passives` | per-item row list | A | items.xml `<passive_effect>` rows parsed with their `effect_group` + row gates through the shared `buffs.scanPassives` scanner (3030 rows over 272 items in V3.2.0; only the tracked names are consumed), resolved through `Extends` like every other item property, and folded by the survival tick for the equipped slots and the holding item (stock `EffectManager.GetValue` layers 7/8). Evaluated on `buffs.Axis.quality` (`itemQualityValue`, RE PassiveEffect.ModValue IL=796: explicit anchors interpolate, a single segment is level-independent, a multi-segment curve spreads across the tier range). The `IsEquipped` gate (IL=97) reads `Ctx.item_equipped`. PhysicalDamageResist/ElementalDamageResist stay on the dedicated curve fields above |
+| `world/weather.zig` `update_interval_ticks` / `storm_state` | 5, 0/1/2 | R | `update_interval_ticks = 5` matches stock `BiomeWeather.ServerTimeUpdate` cadence; storm_state 0/1/2 (clear/stormbuild/storm) matches stock `BiomeWeather.stormState` |
+
+## 4. Coverage and maintenance
+
+- **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
+  It gates **file coverage 353/353 (100%)** and ledger well-formedness (every
+  file row: bucket + non-empty source; every constant row: anchor that still
+  resolves in `src/`). A new src file without a ledger row, or a row without a
+  bucket/source, fails (AGENTS.md rule 15).
+- **Constants:** the ledger covers the behavioral values; the authoritative
+  field-by-field provenance for the rules surface lives inline in
+  `src/ecs/rules.zig`.
+- **After a game update:** re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,
+  then re-verify the R rows and the divergence register against the new pin
+  (see RE_GAP_CLOSURE §4).
+- **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
+  table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
