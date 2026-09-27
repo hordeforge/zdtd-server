@@ -27,7 +27,7 @@ Only imports of another package directory are counted; single-file imports
 | `server` | `litenet` | 76 |
 | `server` | `plugin` | 16 |
 | `server` | `server/game` | 33 |
-| `server` | `util` | 161 |
+| `server` | `util` | 165 |
 | `server` | `wire` | 137 |
 | `server` | `world` | 90 |
 | `wire` | `assets` | 10 |
