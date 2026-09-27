@@ -1962,22 +1962,41 @@ fn writeCmdError(w: *std.Io.Writer, msg: []const u8) !void {
     try w.writeAll("\",\"reply\":\"\"}\n");
 }
 
+/// Write `s` as the body of a JSON string (no surrounding quotes). Bytes that
+/// are not part of a well-formed UTF-8 sequence become U+FFFD rather than
+/// passing through: an operator-supplied value (a `serverconfig.xml` written
+/// in latin-1, a modlet `DisplayName`, a filename read from disk) can hold any
+/// byte, and one stray byte makes the whole document invalid UTF-8, which
+/// breaks `Response.json()` for the whole dashboard rather than one field.
 fn jsonEscapeWrite(w: *std.Io.Writer, s: []const u8) !void {
-    for (s) |c| {
-        switch (c) {
-            '"' => try w.writeAll("\\\""),
-            '\\' => try w.writeAll("\\\\"),
-            '\n' => try w.writeAll("\\n"),
-            '\r' => try w.writeAll("\\r"),
-            '\t' => try w.writeAll("\\t"),
-            else => {
-                if (c < 0x20) {
-                    try w.print("\\u{x:0>4}", .{c});
-                } else {
-                    try w.writeByte(c);
-                }
-            },
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c < 0x80) {
+            i += 1;
+            switch (c) {
+                '"' => try w.writeAll("\\\""),
+                '\\' => try w.writeAll("\\\\"),
+                '\n' => try w.writeAll("\\n"),
+                '\r' => try w.writeAll("\\r"),
+                '\t' => try w.writeAll("\\t"),
+                0x00...0x1f => try w.print("\\u{x:0>4}", .{c}),
+                else => try w.writeByte(c),
+            }
+            continue;
         }
+        const seq = std.unicode.utf8ByteSequenceLength(c) catch {
+            try w.writeAll("\\ufffd");
+            i += 1;
+            continue;
+        };
+        if (i + seq > s.len or !std.unicode.utf8ValidateSlice(s[i..][0..seq])) {
+            try w.writeAll("\\ufffd");
+            i += 1;
+            continue;
+        }
+        try w.writeAll(s[i..][0..seq]);
+        i += seq;
     }
 }
 
@@ -2786,6 +2805,22 @@ test "GET /api/state.json with an idle server has empty arrays" {
     defer parsed.deinit();
     try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get("players").?.array.items.len);
     try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get("console").?.array.items.len);
+}
+
+test "jsonEscapeWrite keeps the document decodable when a value is not UTF-8" {
+    // An operator's serverconfig.xml saved as latin-1 puts a lone 0xE9 in
+    // world_name, and a truncated lead byte is a legal tail of any buffer. The
+    // escaped result must still be valid UTF-8 so `Response.json()` works.
+    var buf: [128]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try w.writeAll("{\"n\":\"");
+    try jsonEscapeWrite(&w, "Caf\xE9\xC3 \u{1f680}\"\\\n");
+    try w.writeAll("\"}");
+    const body = w.buffered();
+    try std.testing.expect(std.unicode.utf8ValidateSlice(body));
+    try std.testing.expectEqualStrings(
+        \\{"n":"Caf\ufffd\ufffd \u{1f680}\"\\\n"}
+    , body);
 }
 
 test "GET /api/state.json carries the modlet roster as a populated array" {
