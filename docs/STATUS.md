@@ -26,22 +26,23 @@ plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 `NetPackageVehicleSpawn` body is served authoritatively (placer ownership, the
 claimed class must be the vehicle that item places, reach, finite pose), so
 players can place vehicles and `Vehicle.owner_slot` has a production writer: the
-placer gets the waypoint list and the new `NetPackageVehicleCount` at once.
-Gated by `scenario a placeable vehicle item spawns an owned vehicle`.
+placer gets the waypoint list and the new count at once. Gated by
+`scenario a placeable vehicle item spawns an owned vehicle`.
 **A canvas sign's TE is server state 2026-09-28**: `TEFeatureCanvas` writes one
-`CanvasState` on the network path, and zdtd had no leg for a body whose composite
-carries canvas and no storage, so a painted canvas sign lived only in the
-edit-time echo: a later stream, rejoin or restart showed a blank canvas. Blocks.xml
+`CanvasState` on the network path, and zdtd had no leg for a canvas-and-no-storage
+composite, so a painted canvas sign lived only in the edit-time echo: a later
+stream, rejoin or restart showed a blank canvas. Blocks.xml
 `CompositeFeatures` now stamps `BlockDef.canvas` (the flag gates the leg, like
 `signable`), and the body is walked, stored verbatim, echoed and replayed by the
 chunk stream, canvas fields left opaque. Gated by
 `a canvas composite body parses and a malformed canvas module is refused` and
 `scenario a canvas sign's TE body is stored and replayed`.
 **Live re-verification on the stock map 2026-09-28**: two loadgen bots join real
-Navezgane, spawn, walk, jump, throw dynamite and rejoin: `JOIN_SUMMARY total=2
-pass=2 fail=0 passRate=100.00%`, 5 rejoins, one death, a respawn heal, no panic
-or encoder failure. `zig build fuzz` exits 0; fmt, check_docs, lint-wire,
-lint-architecture, provenance and the doc catalogs are clean.
+Navezgane (DTM 6144x6144, ready in 35 s), spawn, walk, jump, throw dynamite and
+rejoin: `JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%`, 5 rejoins, one
+death, a respawn heal, no panic or encoder failure. `zig build fuzz` exits 0;
+fmt, check_docs, lint-wire, lint-architecture, provenance and the catalogs are
+clean.
 **A container padlock is server state 2026-09-28**: the client writes its
 `TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode)
 and zdtd relayed it inside the echo only, so a later stream, rejoin or restart
