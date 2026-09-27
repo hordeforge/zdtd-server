@@ -95,7 +95,7 @@ The per-instance values are `Game` fields filled from `zdtd.toml` (`src/server/g
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
 ```
 
-`sanitizeInitOptions` owns the clamps (`src/server/zdtd_config.zig:490-541`): `max_streamed_chunks` is raised to 1 and lowered to 625; both stream radii are clamped to `max_radius_for_budget`, the largest radius whose `(2r+1)^2` fits `max_streamed_chunks` (`src/server/zdtd_config.zig:502-526`); a zero adds-per-tick, stream period or spawn radius becomes 1. Two docs are stale against this code and should be read as gaps, not specification: `docs/GAME_OPTIONS.md:163` still says the compile cap is 169, and `docs/wire/WIRE_CHUNK.md:105` still describes the topsoil bitfield as all `0xFF`, while the encoder now writes the chunk's real bitfield (`src/wire/stock_chunk.zig:590`).
+`sanitizeInitOptions` owns the clamps (`src/server/zdtd_config.zig:490-541`): `max_streamed_chunks` is raised to 1 and lowered to 625; both stream radii are clamped to `max_radius_for_budget`, the largest radius whose `(2r+1)^2` fits `max_streamed_chunks` (`src/server/zdtd_config.zig:502-526`); a zero adds-per-tick, stream period or spawn radius becomes 1. Two docs are stale against this code and should be read as gaps, not specification: `docs/GAME_OPTIONS.md:163` still says the compile cap is 169, and `docs/wire/WIRE_CHUNK.md:107` still describes the topsoil bitfield as all `0xFF`, while the encoder now writes the chunk's real bitfield (`src/wire/stock_chunk.zig:590`).
 
 ## What triggers a send
 

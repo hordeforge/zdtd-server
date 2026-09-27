@@ -83,7 +83,7 @@ Representative coverage: join bundle completeness
 (`src/server/scenarios.zig:4617`), stock inventory transactions
 (`src/server/scenarios.zig:11415`), and persist across a restart
 (`src/server/scenarios.zig:2473`). Extend this file when a change crosses
-systems; do not duplicate the harness (`AGENTS.md:286`).
+systems; do not duplicate the harness (`AGENTS.md:300`).
 
 ## Prove the guard fails
 
@@ -103,29 +103,29 @@ and must not run beside an editor or another build
 
 ## Rules that keep the suite meaningful
 
-- Tests never write into the repository (`AGENTS.md:289`). Use
+- Tests never write into the repository (`AGENTS.md:303`). Use
   `std.testing.tmpDir` and pass the path in.
 - A scenario that needs a world owns it and removes it first
   (`src/server/scenarios.zig:81`). Leaked state fails the second `make check`
-  (`AGENTS.md:290`).
+  (`AGENTS.md:304`).
 - Prefer the real implementation. Mock only the expensive or nondeterministic
   boundary: the virtual clock (`src/util/clock.zig:25`, used at
   `src/server/scenarios.zig:182`), the RNG, or the socket. The harness gives a
   peer a fabricated address instead of opening one
   (`src/server/game/harness.zig:46`).
 - Instrument new hot-path cost with `apm` sections or counters rather than
-  guessing (`AGENTS.md:245`).
+  guessing (`AGENTS.md:259`).
 - Every new `src/` file needs a `docs/PROVENANCE.md` row, or
   `tools/provenance_scan.py` fails `make check`.
 
 ## Where performance judgement comes from
 
 The performance record is a zdtd APM dump, never a `7dtd-server-apm` session
-(`AGENTS.md:52`, `docs/APM.md:8`). A bounded `--ticks N` or `--once` run prints
+(`AGENTS.md:55`, `docs/APM.md:8`). A bounded `--ticks N` or `--once` run prints
 the text dump on exit, an unbounded run emits one `{"type":"zdtd_apm",...}` line
 per minute on stdout, and admin `apm` prints the same counters on demand
 (`docs/APM.md:137`). Compare builds by running both with the same `--ticks`
-value and the same loadgen profile (`docs/APM.md:256`).
+value and the same loadgen profile (`docs/APM.md:257`).
 
 ## See also
 

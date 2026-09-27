@@ -28,7 +28,7 @@ fact". Decide what the page is before naming it:
 
 A behavior map belongs in `docs/ARCHITECTURE.md`; status belongs in
 `docs/STATUS.md`; generated exhaustive tables belong under `docs/catalogs/` and
-are never hand-edited (`docs/AGENTS.md:29`).
+are never hand-edited (`docs/AGENTS.md:28`).
 
 ## 2. Take the number and the filename
 

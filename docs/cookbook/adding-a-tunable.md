@@ -107,7 +107,7 @@ itself fails the same test.
 comment is the source, and the `[rules]` tables in
 [docs/GAME_OPTIONS.md](../GAME_OPTIONS.md) are what the docs test greps. Add one
 row to the matching `[rules.<group>]` table (the group's table starts at
-`docs/GAME_OPTIONS.md:192` for the main block, and the later groups have their
+`docs/GAME_OPTIONS.md:196` for the main block, and the later groups have their
 own tables) with the key, the default and a `Floor` or `Policy` clause.
 
 The test that enforces this is "GAME_OPTIONS.md documents every Rules field"

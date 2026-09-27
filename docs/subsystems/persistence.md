@@ -23,7 +23,7 @@ The periodic autosave in `Game.step` and graceful shutdown in `lifecycle.deinit`
 
 Nothing else is durable and none of it is meant to be: peer and interest caches, reliable windows and per-session client state reset on reconnect; the plugin runtime reloads and its budgets re-arm with no persisted plugin state; apm counters and histograms are per-process; admin TCP is a fresh connection per attach (`docs/prd/0004-hot-restart.md:61`). Inside a chunk, the per-block stability plane is derived state that is explicitly never persisted (`src/world/store.zig:135`), and the `te_scanned` and `power_scanned` flags are runtime-only, so the storage-TE scan and the power-grid rebuild repeat on first touch after a restart (`src/world/store.zig:135`, `src/server/game/chunk_fill.zig:52`).
 
-Every format here is zdtd-owned: the magics are `ZPV<version>`, `ZEN2` (legacy `ZENT` still loads), `ZCLC`, `ZCL2`, `ZWTH1`, `ZBM2`, `ZCT3` (legacy `ZCT1`/`ZCT2` still load), `ZWS1` and `ZCH3`/`ZCH4`. None of these files is the stock dedicated server's region or PlayerDataFile format, and nothing in the read paths emits one; the persistence inventory is the contract the PRD tracks, not a stock-save compatibility claim (`docs/prd/0004-hot-restart.md:69`).
+Every format here is zdtd-owned: the magics are `ZPV<version>`, `ZEN2` (legacy `ZENT` still loads), `ZCLC`, `ZCL2`, `ZWTH1`, `ZBM2`, `ZCT3` (legacy `ZCT1`/`ZCT2` still load), `ZWS1` and `ZCH3`/`ZCH4`. None of these files is the stock dedicated server's region or PlayerDataFile format, and nothing in the read paths emits one; the persistence inventory is the contract the PRD tracks, not a stock-save compatibility claim (`docs/prd/0004-hot-restart.md:70`).
 
 ## Files on disk
 
@@ -203,7 +203,7 @@ Automated backup is driven by `scripts/backup-world.sh <world_dir> [backup_root]
 
 Recovery is driven by `scripts/restore-world.sh <backup_dir> <target_world_dir> [--force]`. The restore tool verifies the backup directory contains data, rejects overlapping or nested paths, and fails closed if the target directory already contains files unless `--force` is specified. When `--force` is supplied, the tool moves the existing target to a timestamped `.prerestore` directory before staging the backup copy, ensuring that a botched restore or erroneous backup selection does not permanently erase existing data. Once restored, the daemon is restarted pointing to `target_world_dir`. Both backup and restore workflows are exercised automatically during release qualification in `scripts/smoke-release.sh`, verifying round-trip backup, safety gates, and successful `--once` startup on restored world data.
 
-The two design docs in this area lag the code on versions: `docs/prd/0004-hot-restart.md:76` records player records as ZPV13 and `docs/ARCHITECTURE.md:655` as ZPV12, while this build writes ZPV16 (`src/server/persist.zig:125`) and reads ZPV2 and later (`src/server/persist.zig:125`). PRD 0004 section 5 is otherwise the operator-visible inventory to keep in sync when a store or field is added (`docs/prd/0004-hot-restart.md:110`).
+The two design docs in this area lag the code on versions: `docs/prd/0004-hot-restart.md:76` records player records as ZPV13 and `docs/ARCHITECTURE.md:655` as ZPV12, while this build writes ZPV16 (`src/server/persist.zig:125`) and reads ZPV2 and later (`src/server/persist.zig:125`). PRD 0004 section 5 is otherwise the operator-visible inventory to keep in sync when a store or field is added (`docs/prd/0004-hot-restart.md:111`).
 
 ## See also
 
