@@ -6,7 +6,6 @@
 //! Split out of tick.zig (same functions, moved verbatim); buff-event
 //! drivers and the survival VM stay in tick.zig.
 
-const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -17,6 +16,7 @@ const clock = @import("../../util/clock.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const admin_xml = @import("../admin_xml.zig");
+const log = @import("../../util/log.zig");
 
 /// Current whole world-hour (day*24 + hour), for time-based scheduling.
 /// Power consumer actuation (RE tile-entities-power.md PowerConsumer
@@ -125,7 +125,7 @@ pub fn tickAirDrop(self: *Game) void {
             if (packages.buildNavObjectAdd(self.body_buf[8192..8704], "supply_drop", "", t.x, t.y + 2, t.z, @intCast(bag_nid))) |nb| {
                 self.broadcast("NetPackageNavObject", nb) catch {};
             } else |_| {}
-            std.debug.print("zdtd: air drop supply crate at ({d:.0},{d:.0}) hour={d}\n", .{ t.x, t.z, now });
+            log.infoTagged("air drop supply crate at ({d:.0},{d:.0}) hour={d}\n", .{ t.x, t.z, now });
         }
         return;
     }
@@ -277,8 +277,8 @@ pub fn reapStalePeers(self: *Game) void {
         const p = c.peer orelse continue;
         if (!p.alive) {
             self.harness.counters.inc(.stale_peers_reaped);
-            std.debug.print(
-                "zdtd: peer reaped dead local_id={d} slot={d} entity={d}\n",
+            log.infoTagged(
+                "peer reaped dead local_id={d} slot={d} entity={d}\n",
                 .{ p.local_id, c.slot, c.entity_id },
             );
             // One drop path owns the teardown (persist, party removal, claims,
@@ -297,8 +297,8 @@ pub fn reapStalePeers(self: *Game) void {
         // challenge_ns == 0 and skip this arm.
         if (c.challenge_ns != 0 and now -% c.challenge_ns > auth_ns) {
             self.harness.counters.inc(.stale_peers_reaped);
-            std.debug.print(
-                "zdtd: peer reaped in-auth local_id={d} slot={d} age_ms={d}\n",
+            log.warn(
+                "peer reaped in-auth (never echoed the challenge) local_id={d} slot={d} age_ms={d}\n",
                 .{ p.local_id, c.slot, (now -% c.challenge_ns) / 1_000_000 },
             );
             releaseReapedPeer(p);
@@ -307,8 +307,8 @@ pub fn reapStalePeers(self: *Game) void {
         }
         if (now -% p.last_recv_ns > stale_ns) {
             self.harness.counters.inc(.stale_peers_reaped);
-            std.debug.print(
-                "zdtd: peer reaped stale local_id={d} slot={d} entity={d} idle_ms={d}\n",
+            log.infoTagged(
+                "peer reaped stale local_id={d} slot={d} entity={d} idle_ms={d}\n",
                 .{ p.local_id, c.slot, c.entity_id, (now -% p.last_recv_ns) / 1_000_000 },
             );
             releaseReapedPeer(p);
@@ -606,11 +606,10 @@ pub fn tickServerAdminReload(self: *Game) void {
     self.whitelist.clearXml();
     self.ban_list.clearXml();
     admin_xml.load(self.allocator, path, &self.admin_list, &self.whitelist, &self.ban_list) catch |err| {
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} warning: serveradmin.xml reload failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+        log.warn("serveradmin.xml reload failed: {s}\n", .{@errorName(err)});
         return;
     };
-    std.debug.print("zdtd: serveradmin.xml reloaded (mtime {d})\n", .{mtime});
+    log.infoTagged("serveradmin.xml reloaded (mtime {d})\n", .{mtime});
 }
 
 pub fn tickClientInfo(self: *Game) void {

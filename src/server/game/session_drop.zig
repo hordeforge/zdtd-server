@@ -1,15 +1,15 @@
 //! Client slot teardown extracted from game.zig.
 
-const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
 const persist = @import("../persist.zig");
 const plugin_compose = @import("plugin_compose.zig");
+const log = @import("../../util/log.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
-    std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
+    log.infoTagged("player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
     // Wasm-first (AGENTS rule 29): a joined player's disconnect is an event
     // for plugins (announcements/observers), not native behavior. Mirrors the
     // on_player_join notification; pre-join drops have no entity to report.
@@ -28,13 +28,13 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     }
     if (self.clients[slot].peer) |p| p.alive = false;
     self.unseatRider(self.clients[slot].entity_id) catch |err| {
-        std.debug.print("zdtd: unseat on drop failed entity={d}: {s}\n", .{ self.clients[slot].entity_id, @errorName(err) });
+        log.warn("unseat on drop failed entity={d}: {s}\n", .{ self.clients[slot].entity_id, @errorName(err) });
     };
     self.clearLocksForPeer(slot);
     self.markClaimsForEntity(self.clients[slot].entity_id, false);
     if (self.parties.removePlayer(self.clients[slot].entity_id)) |r| {
         self.broadcastPartyRemoval(r, @intFromEnum(packages.stock_party.PartyActions.disconnected)) catch |err| {
-            std.debug.print("zdtd: party disconnect broadcast failed: {s}\n", .{@errorName(err)});
+            log.warn("party disconnect broadcast failed: {s}\n", .{@errorName(err)});
         };
     }
     if (self.sim.playerByPeer(slot)) |ps| {

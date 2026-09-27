@@ -24,6 +24,7 @@ const game_stability = @import("stability.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");
+const log = @import("../../util/log.zig");
 const interest = @import("../../ecs/interest.zig");
 const assets_items = @import("../../assets/items.zig");
 const io_fs = @import("../../util/io_fs.zig");
@@ -382,9 +383,10 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
         // client keeps retrying local generation it cannot do.
         const body = try deco.buildDecoUpdate(&self.body_buf, true, &.{});
         try self.sendGameCritical(peer, "NetPackageDecoUpdate", body);
-        std.debug.print(
-            "zdtd: DecoUpdate first=true objs=0 (deco_trees={s} biomemap={s} biome_decos={s})\n",
+        log.infoTagged(
+            "DecoUpdate first=true objs=0 local_id={d} (deco_trees={s} biomemap={s} biome_decos={s})\n",
             .{
+                peer.local_id,
                 if (self.deco_trees) "on" else "off",
                 if (self.world.biomes != null) "yes" else "no",
                 if (self.world.biome_layers_table.hasDecos()) "yes" else "no",
@@ -460,9 +462,9 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
             }
         }
     }
-    std.debug.print(
-        "zdtd: DecoUpdate objs={d} pkgs={d} r={d} mirrored={d} capped={}\n",
-        .{ total, pw.sent, r, mirrored, capped },
+    log.infoTagged(
+        "DecoUpdate objs={d} pkgs={d} r={d} mirrored={d} capped={} local_id={d}\n",
+        .{ total, pw.sent, r, mirrored, capped, peer.local_id },
     );
 }
 
@@ -514,7 +516,7 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
     if (self.signs.entries.len == 0) {
         const resp = try packages.buildSignDataResponseEmptyLast(self.body_buf[0..16]);
         try self.sendGameCritical(peer, "NetPackageSignDataResponse", resp);
-        std.debug.print("zdtd: SignDataRequest -> empty last batch entity peer\n", .{});
+        log.infoTagged("SignDataRequest -> empty last batch local_id={d}\n", .{peer.local_id});
         return;
     }
     var start: usize = 0;
@@ -547,7 +549,7 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
         }
         self.pollNetOnce();
     }
-    std.debug.print("zdtd: SignDataRequest -> batches={d} signs={d}\n", .{ batches, self.signs.entries.len });
+    log.infoTagged("SignDataRequest -> batches={d} signs={d} local_id={d}\n", .{ batches, self.signs.entries.len, peer.local_id });
 }
 
 pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
@@ -812,7 +814,7 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
         self.pollNetOnce();
         if (sent >= 16) break;
     }
-    std.debug.print("zdtd: stock EntitySpawn mobs sent={d} alive_z={d} around=({d},{d})\n", .{ sent, alive_z, px, pz });
+    log.infoTagged("stock EntitySpawn mobs sent={d} alive_z={d} around=({d},{d}) local_id={d}\n", .{ sent, alive_z, px, pz, peer.local_id });
 }
 
 /// Spawn connected players to each other (stock EntitySpawn with the player
@@ -1150,8 +1152,8 @@ pub fn spawnSurface(self: *Game, sx: i32, sz: i32) SpawnSurface {
             // Ensure surface cell solid.
             const cur = self.world.blockWorld(px, feet_y, pz) catch 0;
             if (cur == 0) self.world.setBlockWorld(px, feet_y, pz, dirt) catch |err| {
-                std.debug.print(
-                    "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
+                log.warn(
+                    "spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
                     .{ px, feet_y, pz, @errorName(err) },
                 );
             };
@@ -1159,8 +1161,8 @@ pub fn spawnSurface(self: *Game, sx: i32, sz: i32) SpawnSurface {
             if (feet_y > 0) {
                 const below = self.world.blockWorld(px, feet_y - 1, pz) catch 0;
                 if (below == 0) self.world.setBlockWorld(px, feet_y - 1, pz, dirt) catch |err| {
-                    std.debug.print(
-                        "zdtd: spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
+                    log.warn(
+                        "spawn pad setBlock ({d},{d},{d}) failed: {s}\n",
                         .{ px, feet_y - 1, pz, @errorName(err) },
                     );
                 };

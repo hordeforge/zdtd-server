@@ -9,6 +9,7 @@ const Client = game_mod.Client;
 const io_fs = @import("../util/io_fs.zig");
 const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
+const log = @import("../util/log.zig");
 const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
 const utf8_util = @import("../util/utf8.zig");
@@ -500,8 +501,8 @@ pub fn savePlayers(self: *Game) !void {
         // is a counted notice rather than a write refusal.
         if (tail_has_prog and cl.puid_primary.get() == null and self.harness.counters.get(.identity_less_saves) == 0) {
             self.harness.counters.inc(.identity_less_saves);
-            std.debug.print(
-                "zdtd: player save has no platform identity; row stays name-keyed (ADR 0038)\n",
+            log.infoTagged(
+                "player save has no platform identity; row stays name-keyed (ADR 0038)\n",
                 .{},
             );
         }
@@ -515,7 +516,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     if (c.name_len == 0) return;
     var path_buf: [512]u8 = undefined;
     const path = self.playersPath(&path_buf) catch |err| {
-        std.debug.print("zdtd: restore player: path failed: {s}\n", .{@errorName(err)});
+        log.warn("restore player: path failed: {s}\n", .{@errorName(err)});
         return;
     };
     const data = io_fs.readFileAll(self.allocator, path) catch |e| {
@@ -524,11 +525,11 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or data[2] != 'V') {
-        std.debug.print("zdtd: restore player: bad players file header\n", .{});
+        log.warn("restore player: bad players file header\n", .{});
         return;
     }
     const version = zpvVersionFromMagic(data[3]) orelse {
-        std.debug.print("zdtd: restore player: bad players file header\n", .{});
+        log.warn("restore player: bad players file header\n", .{});
         return;
     };
     const v3 = version >= 3;
@@ -538,14 +539,14 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     var i: u32 = 0;
     while (i < n) : (i += 1) {
         if (off >= data.len) {
-            std.debug.print("zdtd: restore player: truncated at record {d}/{d}\n", .{ i, n });
+            log.warn("restore player: truncated at record {d}/{d}\n", .{ i, n });
             return;
         }
         const rec_start = off;
         const nl: usize = data[off];
         off += 1;
         if (nl > 32 or off + nl + 16 + 1 > data.len) {
-            std.debug.print("zdtd: restore player: corrupt record {d}/{d} (name_len={d})\n", .{ i, n, nl });
+            log.warn("restore player: corrupt record {d}/{d} (name_len={d})\n", .{ i, n, nl });
             return;
         }
         const name_slice = data[off..][0..nl];
@@ -566,7 +567,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         const inv_n: usize = data[off];
         off += 1;
         if (off + inv_n * slot_stride + 1 > data.len) {
-            std.debug.print("zdtd: restore player: truncated inventory at record {d}/{d}\n", .{ i, n });
+            log.warn("restore player: truncated inventory at record {d}/{d}\n", .{ i, n });
             return;
         }
         var inv: [ecs.components.max_inv_slots]ecs.components.InvSlot = undefined;
@@ -581,7 +582,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         const jn: usize = data[off];
         off += 1;
         if (off + jn * 10 > data.len) {
-            std.debug.print("zdtd: restore player: truncated journal at record {d}/{d}\n", .{ i, n });
+            log.warn("restore player: truncated journal at record {d}/{d}\n", .{ i, n });
             return;
         }
         var quests: [ecs.components.max_journal]ecs.components.QuestProgress = undefined;
@@ -593,7 +594,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // restored quest into a different one (byName wins over the stored
             // parse-order def_id); the rect keeps the POI the quest was handed.
             if (off + 10 > data.len) {
-                std.debug.print("zdtd: restore player: truncated journal core at record {d}/{d}\n", .{ i, n });
+                log.warn("restore player: truncated journal core at record {d}/{d}\n", .{ i, n });
                 return;
             }
             const qb = data[off..][0..10];
@@ -615,13 +616,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             if (version >= 5) {
                 // name_len + name + poi_valid + rect(24)
                 if (off >= data.len) {
-                    std.debug.print("zdtd: restore player: truncated journal name at record {d}/{d}\n", .{ i, n });
+                    log.warn("restore player: truncated journal name at record {d}/{d}\n", .{ i, n });
                     return;
                 }
                 const qnl: usize = data[off];
                 off += 1;
                 if (qnl > max_quest_name_len or off + qnl + 25 > data.len) {
-                    std.debug.print("zdtd: restore player: truncated journal name/rect at record {d}/{d}\n", .{ i, n });
+                    log.warn("restore player: truncated journal name/rect at record {d}/{d}\n", .{ i, n });
                     return;
                 }
                 if (qi < quests.len) {
@@ -648,13 +649,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                     if (version >= 6) {
                         // obj_n + obj_n×u16 per-objective progress
                         if (off >= data.len) {
-                            std.debug.print("zdtd: restore player: truncated journal obj_n at record {d}/{d}\n", .{ i, n });
+                            log.warn("restore player: truncated journal obj_n at record {d}/{d}\n", .{ i, n });
                             return;
                         }
                         const obj_n: usize = data[off];
                         off += 1;
                         if (obj_n > ecs.quest.max_quest_objectives or off + obj_n * 2 > data.len) {
-                            std.debug.print("zdtd: restore player: truncated journal obj_progress at record {d}/{d}\n", .{ i, n });
+                            log.warn("restore player: truncated journal obj_progress at record {d}/{d}\n", .{ i, n });
                             return;
                         }
                         var oi: usize = 0;
@@ -668,7 +669,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                     off += qnl + 25;
                     if (version >= 6) {
                         if (off >= data.len) {
-                            std.debug.print("zdtd: restore player: truncated journal obj_n at record {d}/{d}\n", .{ i, n });
+                            log.warn("restore player: truncated journal obj_n at record {d}/{d}\n", .{ i, n });
                             return;
                         }
                         const obj_n: usize = data[off];
@@ -689,7 +690,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // aligned with the next record.
             if (v3) {
                 off = rec_start + (zpvRecordLen(data, rec_start, version) catch |e| {
-                    std.debug.print("zdtd: restore player: corrupt tail at record {d}/{d} ({s})\n", .{ i, n, @errorName(e) });
+                    log.warn("restore player: corrupt tail at record {d}/{d} ({s})\n", .{ i, n, @errorName(e) });
                     return;
                 });
             }

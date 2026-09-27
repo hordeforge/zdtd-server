@@ -14,7 +14,8 @@ const log = @import("../../util/log.zig");
 pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     const c = self.clientFor(peer) orelse {
         self.harness.counters.inc(.join_fail);
-        std.debug.print("zdtd: join rejected (transport full) local_id={d}\n", .{peer.local_id});
+        const fails = self.harness.counters.get(.join_fail);
+        log.warnEvery(fails, "join rejected (transport full) local_id={d} n={d}\n", .{ peer.local_id, fails });
         peer.alive = false;
         return;
     };
@@ -22,7 +23,7 @@ pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     peer.pump_ctx = self;
     const ip = Game.peerIpKey(peer);
     if (self.isBanned(ip)) {
-        std.debug.print("zdtd: ban reject local_id={d}\n", .{peer.local_id});
+        log.infoTagged("ban reject local_id={d}\n", .{peer.local_id});
         self.harness.counters.inc(.join_fail);
         // Defer the PlayerDenied until PackageIds has been exchanged (the
         // client cannot decode a game package before the name->id map); the
@@ -37,10 +38,10 @@ pub fn onConnected(self: *Game, peer: *ln_peer.Peer) !void {
     self.sendReliablePumped(peer, "challenge", &ch, game_mod.window_retry_budget_ns, 64, false) catch |err| {
         self.harness.counters.inc(.net_send_errors);
         self.harness.counters.inc(.join_fail);
-        std.debug.print("zdtd: challenge send failed local_id={d} error={s}\n", .{ peer.local_id, @errorName(err) });
+        log.err("challenge send failed local_id={d} error={s}\n", .{ peer.local_id, @errorName(err) });
         return;
     };
-    std.debug.print("zdtd: peer connected local_id={d} → challenge sent\n", .{peer.local_id});
+    log.infoTagged("peer connected local_id={d} → challenge sent\n", .{peer.local_id});
 }
 
 pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!void {
@@ -58,7 +59,7 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
             const body = try packages.buildPackageIdsBody(&self.body_buf, .{}, &packages.default_mappings);
             try self.sendGame(peer, "NetPackagePackageIds", body);
             peer.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
-            std.debug.print("zdtd: challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
+            log.infoTagged("challenge ok local_id={d} package_maps={d}\n", .{ peer.local_id, packages.default_mappings.len });
             // Deferred join-time reject (banned): the client now has the
             // name->id map, so NetPackagePlayerDenied decodes and the client
             // shows the reason instead of hanging on its own timeout.
@@ -140,6 +141,18 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
     }
     var i: usize = 0;
     while (i < n) : (i += 1) {
-        try self.handlePackage(c, peer, pkgs[i].id, pkgs[i].body);
+        self.handlePackage(c, peer, pkgs[i].id, pkgs[i].body) catch |err| {
+            // Name the package the handler died on: pollNetOnce's payload line
+            // names the peer and the error but not which of the (up to 16)
+            // packages in this payload failed, so an operator had a decode or
+            // bounds fault with no way to tell the culprit C2S. Sampled on the
+            // same net_payload_errors cadence as that line, so one flood still
+            // produces one pair of lines, not one pair per packet.
+            const id = pkgs[i].id;
+            const name = if (id < packages.default_mappings.len) packages.default_mappings[id] else "unmapped";
+            const nth = self.harness.counters.get(.net_payload_errors) + 1;
+            log.warnEvery(nth, "c2s handler failed pkg={s} local_id={d} body_len={d} error={s} n={d}\n", .{ name, peer.local_id, pkgs[i].body.len, @errorName(err), nth });
+            return err;
+        };
     }
 }

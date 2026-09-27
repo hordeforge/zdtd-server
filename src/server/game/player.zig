@@ -104,7 +104,7 @@ fn awardXpTyped(self: *Game, slot: usize, base: u64, notify_type: ?i16) void {
                     })) |xb| {
                         self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
                             self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send AddExpClient failed: {s}\n", .{@errorName(err)});
+                            log.warn("send AddExpClient failed: {s}\n", .{@errorName(err)});
                         };
                     } else |_| {}
                 }
@@ -254,7 +254,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         })) |xb| {
             self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send AddExpClient failed: {s}\n", .{@errorName(err)});
+                log.warn("send AddExpClient failed: {s}\n", .{@errorName(err)});
             };
         } else |_| {}
     }
@@ -272,7 +272,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
                     })) |skb| {
                         self.sendGame(peer, "NetPackageSharedPartyKill", skb) catch |err| {
                             self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send SharedPartyKill failed: {s}\n", .{@errorName(err)});
+                            log.warn("send SharedPartyKill failed: {s}\n", .{@errorName(err)});
                         };
                     } else |_| {}
                 }
@@ -301,7 +301,7 @@ pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) v
     const body = packages.buildAwardKillBody(&buf, killer.entity_id, killed_entity_id) catch return;
     self.sendGame(peer, "NetPackageEntityAwardKillServer", body) catch |err| {
         self.harness.counters.inc(.net_send_errors);
-        std.debug.print("zdtd: send AwardKill failed: {s}\n", .{@errorName(err)});
+        log.warn("send AwardKill failed: {s}\n", .{@errorName(err)});
     };
 }
 
@@ -386,7 +386,7 @@ pub fn tickStealthBroadcast(self: *Game) void {
             if (packages.buildEntityStealthCrouchBody(self.body_buf[0..16], c.entity_id, crouch)) |cb| {
                 self.broadcastExcept("NetPackageEntityStealth", cb, null) catch |err| {
                     self.harness.counters.inc(.net_send_errors);
-                    std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
+                    log.warn("EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
                 };
             } else |_| {}
         }
@@ -394,7 +394,7 @@ pub fn tickStealthBroadcast(self: *Game) void {
         if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert)) |sb| {
             self.broadcastExcept("NetPackageEntityStealth", sb, null) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
+                log.warn("EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
             };
         } else |_| {}
     }
@@ -1543,8 +1543,8 @@ pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
     var it = std.mem.tokenizeAny(u8, text, ",;");
     while (it.next()) |raw| {
         if (self.sim.starter_kit_n >= ecs.world.max_starter_kit) {
-            std.debug.print(
-                "zdtd: spawn_starter_kit: more than {d} rows; the rest are ignored\n",
+            log.warn(
+                "spawn_starter_kit: more than {d} rows; the rest are ignored\n",
                 .{ecs.world.max_starter_kit},
             );
             break;
@@ -1557,14 +1557,14 @@ pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
             name = std.mem.trim(u8, parts[0], " \t");
             const ctext = std.mem.trim(u8, parts[1], " \t");
             count = std.fmt.parseInt(u16, ctext, 10) catch {
-                std.debug.print("zdtd: spawn_starter_kit: bad count '{s}' for '{s}'; row skipped\n", .{ ctext, name });
+                log.warn("spawn_starter_kit: bad count '{s}' for '{s}'; row skipped\n", .{ ctext, name });
                 continue;
             };
         }
         if (name.len == 0 or count == 0) continue;
         const id = self.items.ecsIdByName(name);
         if (id == 0) {
-            std.debug.print("zdtd: spawn_starter_kit: '{s}' is not in items.xml; omitted\n", .{name});
+            log.warn("spawn_starter_kit: '{s}' is not in items.xml; omitted\n", .{name});
         } else {
             const cap = self.sim.maxStack(id);
             if (cap > 0 and count > cap) count = cap;
