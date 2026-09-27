@@ -25,7 +25,7 @@ about zdtd's internal coherence, never about the client.
 |---|---|---|---|
 | Unit and scenario tests | `zig build test` / `make test` (`Makefile:120`); focused: `make test-one FILTER=…` (`Makefile:127`) | Wire goldens, sim units, in-process join, spawn, chunk and inventory paths | Stock client `Read` survival, mesh, UI, scale |
 | Lint | `make lint` (`Makefile:183`) | Static invariants: fmt, script syntax, import cycles and edges, package-id rules, plugin and webui freshness, docs honesty | Anything at runtime |
-| Full local gate | `make check` (`Makefile:215`) | The above plus provenance coverage, XML audit, build, test, fuzz | Stock compatibility, throughput |
+| Full local gate | `make check` (`Makefile:234`) | The above plus provenance coverage, XML audit, build, test, fuzz | Stock compatibility, throughput |
 | Release | `make release` (`Makefile:158`), `make release-check` (`Makefile:208`) | A pinned, stripped operator artifact with a hash and buildinfo record | Gameplay correctness |
 | Release smoke | `make smoke` (`Makefile:254`), `make smoke-modlet` (`Makefile:259`) | The shipped binary starts, parses `--version`/`--help`, is stripped, and one tick completes | Wire fidelity under a real client |
 | Loadgen smoke | `scripts/auto_join.sh`, `scripts/smoke-navezgane.sh`, `scripts/ab-join-smoke.sh` | Join volume, map load, A/B stage parity against the stock dedi | Full client parse beyond the loadgen stages |
@@ -43,19 +43,19 @@ that guest helper is outside the server import graph.
 the architecture edge and barrel check (`scripts/lint-architecture.sh:30`), the
 cycle check, the wire check (`scripts/lint-wire.sh`), the plugin freshness
 check (`scripts/lint-plugins.sh`), the webui and HTML checks, and
-`tools/check_docs.py` (`Makefile:198`). It proves the tree is coherent; it runs
+`tools/check_docs.py` (`Makefile:214`). It proves the tree is coherent; it runs
 no game code.
 
 `make check` (`Makefile:215`) chains release-check, lint, a Python syntax gate,
 `tools/provenance_scan.py`, the `docs/provenance.html` freshness diff,
-`make check-xml-audit` (`Makefile:250`), build, test and fuzz. The XML audit
+`make check-xml-audit` (`Makefile:270`), build, test and fuzz. The XML audit
 proves stock data is read rather than hardcoded, and it skips with a notice when
-no game dir is present (`Makefile:248`). When a warm cache
-is suspect, run `make check-clean-build` (`Makefile:115`): a stale object can
+no game dir is present (`Makefile:268`). When a warm cache
+is suspect, run `make check-clean-build` (`Makefile:125`): a stale object can
 hide a latent exe-only compile error from both `build` and `test`.
 
 `make release` depends on release-check, so a version-drifted tree cannot
-produce a binary (`scripts/check-release.sh:66`). `make repro` (`Makefile:266`)
+produce a binary (`scripts/check-release.sh:66`). `make repro` (`Makefile:290`)
 rebuilds twice and requires byte-identical output; it is deliberately outside
 `make check`.
 

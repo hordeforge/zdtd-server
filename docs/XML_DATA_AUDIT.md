@@ -121,7 +121,11 @@ values to a connected stock client:
   `ZombiesAll` (director default group), `foodCanChili` (load probe), trader
   currency `casinoCoin` (offline builtin map), `forge` (`craft.zig`
   onStationCraftDone - the stock TileEntityForge ding gate; other
-  workstations are silent, RE tile-entities-power.md), and the
+  workstations are silent, RE tile-entities-power.md), the buff-catalog
+  respawn rows `buffStatusCheck01`/`buffStatusCheck02`/
+  `buffDeathFoodDrinkAdjust`/`buffNearDeathTraumaTrigger` (`join_spawn.zig`
+  stock playerMale respawn rows; `addCatalogBuff` resolves each through the
+  loaded catalog and fails closed when a modlet renames one), and the
   biome-name/`terr*` resolve keys (`store.zig`, `init_assets.zig`,
   `biomes.zig`).
 - **Machine gate:** `tools/check_xml_audit.py` (part of `make check` via

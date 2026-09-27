@@ -96,6 +96,14 @@ ALLOWLIST = {
     # c2s/misc.zig damage path): resolved through the loaded buff catalog
     # (addCatalogBuff fails closed when a modlet renames it).
     "buffSpectersGrace",
+    # Stock playerMale respawn rows (c2s/join_spawn.zig respawnPlayer): the
+    # two status checks, the 6.5 s spawn-protection buff and the near-death
+    # trauma trigger. Selection keys, not values: addCatalogBuff resolves each
+    # through the loaded buff catalog by name and fails closed when absent, so
+    # a modlet that renames one drops the add rather than shipping a stock
+    # name into the sim.
+    "buffStatusCheck01", "buffStatusCheck02",
+    "buffDeathFoodDrinkAdjust", "buffNearDeathTraumaTrigger",
     # Offline class_table default (ecs/world.zig, stock ^healthNormalFeral 550).
     "zombieBoeFeral",
     # Offline loot-bag entity class default (ecs/world.zig class_table).

@@ -139,12 +139,16 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&default_collision.step);
 
     // Uncreatable --world must fail closed at startup (exit 1, no Zig dump).
+    // The cause is environment-determined: /nonexistent is AccessDenied under a
+    // normal root and ReadOnlyFileSystem under a read-only mount, so assert the
+    // contract (dedicated world-dir message naming the path, which main.zig
+    // emits for both) rather than one host's errno.
     const bad_world = b.addRunArtifact(exe);
     bad_world.addArgs(&.{ "--world", "/nonexistent/zdtd_cli_world", "--once", "--port", "0", "--quiet" });
     bad_world.expectExitCode(1);
     bad_world.expectStdOutEqual("");
-    bad_world.expectStdErrEqual(
-        "zdtd: cannot create world dir '/nonexistent/zdtd_cli_world': AccessDenied (check --world permissions)\n",
+    bad_world.expectStdErrMatch(
+        "zdtd: cannot create world dir '/nonexistent/zdtd_cli_world': ",
     );
     cli_test_step.dependOn(&bad_world.step);
 

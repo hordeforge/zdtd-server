@@ -1088,9 +1088,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     const g = game_mod.Game.createWithOptions(gpa, world_dir, port, init_opts) catch |err| switch (err) {
-        // World.mkdirPathStatus failed: say so instead of a generic "cannot start".
+        // World.mkdirPathStatus failed: say so instead of a generic "cannot start",
+        // and name the remedy, because the two causes need different fixes. A
+        // permission problem is chmod/chown; a read-only mount or filesystem is
+        // a different --world path, and no amount of chmod will help. Reporting
+        // both here is what the build.zig test asserts (the shared prefix).
         error.AccessDenied => fatal(
             "cannot create world dir '{s}': AccessDenied (check --world permissions)",
+            .{world_dir},
+        ),
+        error.ReadOnlyFileSystem => fatal(
+            "cannot create world dir '{s}': ReadOnlyFileSystem (that path is on a read-only mount; pick a writable --world)",
             .{world_dir},
         ),
         else => fatal("cannot start server: {s} (world '{s}', port {d})", .{ @errorName(err), world_dir, port }),
