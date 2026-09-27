@@ -18594,6 +18594,14 @@ test "scenario a placeable vehicle item spawns an owned vehicle" {
         if (g.sim.vehicle[s].owner_slot == @as(i16, @intCast(c.slot))) owned = true;
     }
     try std.testing.expect(owned);
+    // ...and the placer's map gets the parked-vehicle waypoint right away
+    // (`VehicleManager.UpdateVehicleWaypointsForPlayer` runs on a list change,
+    // not only at join).
+    const wl_id = packages.idOf("NetPackageEntityWaypointList") orelse return error.TestUnexpectedResult;
+    const wl = cap.findPkgId(wl_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(wl.len >= 6);
+    try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, wl[0..2], .little)); // Vehicle
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, wl[2..6], .little));
 
     // A body claiming another entity placed it is dropped (stock's
     // ValidEntityIdForSender), and so is an item that does not place the class.

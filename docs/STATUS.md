@@ -22,54 +22,51 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**A placeable vehicle item spawns an owned vehicle 2026-09-28**: the stock
+`NetPackageVehicleSpawn` body is served authoritatively (placer ownership, the
+claimed class must be the vehicle that item places, reach, finite pose), so
+players can place vehicles and `Vehicle.owner_slot` has a production writer: the
+placer gets the parked-vehicle waypoint list at once. Gated by
+`scenario a placeable vehicle item spawns an owned vehicle`.
 **A canvas sign's TE is server state 2026-09-28**: `TEFeatureCanvas` writes one
-`CanvasState` on the network path (libraryId, sign Guid, blend mode, rotation,
-imposter flag; IL=552), and zdtd had no leg for a body whose composite carries
-canvas and no storage, so a painted canvas sign lived only in the edit-time
-echo: a later stream, rejoin or restart showed a blank canvas. Blocks.xml
+`CanvasState` on the network path, and zdtd had no leg for a body whose composite
+carries canvas and no storage, so a painted canvas sign lived only in the
+edit-time echo: a later stream, rejoin or restart showed a blank canvas. Blocks.xml
 `CompositeFeatures` now stamps `BlockDef.canvas` (the flag gates the leg, like
 `signable`), the body is walked, stored verbatim in the sign-family store, echoed
-and replayed by the chunk stream, with the canvas fields left opaque. Gated by
+and replayed by the chunk stream, canvas fields left opaque. Gated by
 `a canvas composite body parses and a malformed canvas module is refused` and
 `scenario a canvas sign's TE body is stored and replayed`.
 **Live re-verification on the stock map 2026-09-28**: two loadgen bots join real
-Navezgane (`--game-dir`, DTM 6144x6144), spawn, walk, jump, throw dynamite and
-rejoin: `JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%`, 5 rejoins, one
-death, a respawn heal, and no panic, unhandled package or encode failure.
-`zig build fuzz` exits 0 (1306 tests); fmt, check_docs, lint-wire,
+Navezgane, spawn, walk, jump, throw dynamite and rejoin: `JOIN_SUMMARY total=2
+pass=2 fail=0 passRate=100.00%`, 5 rejoins, one death, a respawn heal, no panic
+or encoder failure. `zig build fuzz` exits 0; fmt, check_docs, lint-wire,
 lint-architecture, provenance and the doc catalogs are clean.
 **A container padlock is server state 2026-09-28**: the client writes its
-`TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode,
-`ProcessPackage` IL_0082) and zdtd relayed it inside the echo only, so a later
-stream, rejoin or restart showed an unlocked chest. The body (`locked`, allowed
-users, password hash; `TEFeatureLockable::Write` IL=42) is now walked, stored
-verbatim on the container, emitted by every TE the chunk stream, a rejoin or a
-lock grant builds, and persisted in ZCT4 (ZCT1-ZCT3 load unlocked); a
-storage-only write is the client's unlock. Enforcement stays where stock has it,
-on the client's own TE mirror. Gated by
+`TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode)
+and zdtd relayed it inside the echo only, so a later stream, rejoin or restart
+showed an unlocked chest. The body (`locked`, allowed users, password hash) is
+now walked, stored verbatim on the container, emitted by every TE the chunk
+stream, a rejoin or a lock grant builds, and persisted in ZCT4 (ZCT1-ZCT3 load
+unlocked); a storage-only write is the client's unlock. Enforcement stays on the client's own TE mirror, where stock has it. Gated by
 `a locked container writes the lockable module and reads it back`,
 `a container's lock module survives the ZCT4 round trip and ZCT3 loads unlocked`
 and `scenario a container padlock becomes server state and streams from it`.
 **A damaged block now reaches every watching client 2026-09-26**: stock
-`Block::OnBlockDamaged` (IL_0457) replicates every damage change, broken or not.
-zdtd echoed a surviving block on the player, explosion and vomit paths, but the
-per-tick zombie chew and the MoveHelper dig only broadcast on the break: a
+`Block::OnBlockDamaged` replicates every damage change, broken or not. zdtd
+echoed a surviving block on the player, explosion and vomit paths, but the
+per-tick zombie chew and the MoveHelper dig only broadcast on the break, so a
 client watching a zombie chew a wall held a pristine cell until it fell. Both
-drains now call `echoBlockDamage`, the one helper the other paths use,
-guarded so an indestructible block or a plugin-denied hit cannot repeat a no-op
-cell at tick rate. Gated by the extended
+drains now call `echoBlockDamage`, guarded so an indestructible block or a
+plugin-denied hit cannot repeat a no-op cell at tick rate. Gated by
 `scenario zombie chews a 1-tall wall at feet level instead of getting stuck`,
-which now asserts a second client receives the damage-only SetBlock (wire
-`damage` equals the stored total) while the wall survives. The flags byte was
-the other half of that fix (2026-09-28): stock marks a plain change
-`bChangeBlockValue|bUpdateLight` = 0x11 (`WorldBase::SetBlockRPC(bvRef, bv)`)
-and a surviving-block damage change `bChangeBlockValue|bChangeDamage` = 0x03
-(`Block::OnBlockDamaged` IL_0457), while every SetBlock body zdtd built carried
-the bare value bit. A block flip therefore never asked the client to relight
-the cell it changed, and a damage echo could overwrite a cell that had already
-been replaced. `buildSetBlockBodyRawFlags` is the one encoder behind both
-forms, pinned by
-`setblock flags carry stock's plain and damage-only pairs` and by the
+which now asserts a second client receives the damage-only SetBlock. The flags
+byte was the other half (2026-09-28): stock sends 0x11 for a plain change
+(`bChangeBlockValue|bUpdateLight`) and 0x03 for a surviving-block damage change
+(`bChangeDamage`), while every SetBlock body zdtd built carried the bare value
+bit, so a flip never asked the client to relight and a damage echo could
+overwrite a replaced cell. `buildSetBlockBodyRawFlags` is the one encoder,
+pinned by `setblock flags carry stock's plain and damage-only pairs` and the
 power-switch and chew scenarios.
 **EAILeap pounce shipped 2026-09-22**: `zombieSpider` (pipe `AITask`, first
 entry) and `animalMountainLion` (`AITask-1 legs=4`) now pounce.

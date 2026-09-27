@@ -102,6 +102,10 @@ pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                 cl.known_entities.unset(vs);
             }
         }
+        // The placer sees the parked vehicle on their map right away:
+        // VehicleManager.UpdateVehicleWaypointsForPlayer runs when the vehicle
+        // list changes, not only at join.
+        if (c.peer) |p| try self.sendVehicleWaypoints(p, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAttach")) {
