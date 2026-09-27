@@ -79,11 +79,12 @@ test "evidence dump command rejects path traversal" {
     g.admin_reply_sink = &out;
     defer g.admin_reply_sink = null;
 
-    g.runAdminLine("evidence ../traversal.jsonl", "test");
+    // The dump subcommand is what takes a path (`evidence dump [path]`).
+    g.runAdminLine("evidence dump ../traversal.jsonl", "test");
     try std.testing.expect(std.mem.find(u8, out[0..g.admin_reply_len], "path traversal rejected") != null);
 
     g.admin_reply_len = 0;
-    g.runAdminLine("evidence /root/dump.jsonl", "test");
+    g.runAdminLine("evidence dump /root/dump.jsonl", "test");
     try std.testing.expect(std.mem.find(u8, out[0..g.admin_reply_len], "path traversal rejected") != null);
 }
 
