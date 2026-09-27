@@ -135,15 +135,20 @@ cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 # one oxlint's unlisted-external-imports rule reads, while --config points at
 # the cache copy whose jsPlugins paths resolve beside it. tsgolint is not on
 # the user's PATH; oxlint finds it via PATH lookup.
+# Every source under ts/ is listed explicitly: oxlint takes files, not
+# directories, so a new tree (lib/, components/ui/) has to be named here or it
+# silently escapes the gate. Step 3 fails if a source is not in that set.
 ( cd "$webui_ts_project" && PATH="$cache_dir/node_modules/.bin:$PATH" \
-    bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc.jsonc" --deny-warnings ./*.ts ./*.tsx )
+    bunx --bun "oxlint@$oxlint_version" --config "$cache_dir/oxlintrc.jsonc" --deny-warnings \
+        ./*.ts ./*.tsx ./lib/*.ts ./components/ui/*.tsx )
 
-# 3. Design tokens: webui.css @theme is the one home, built by the Tailwind
-#    CLI and spliced into the pages by the build. Every page must carry its
-#    region marker. shared.css is the legacy source kept for provenance;
-#    a page that hand-edits its CSS instead of the theme fails the freshness
-#    gate.
+# 3. Design tokens: webui.css is the one home, built by the Tailwind CLI and
+#    spliced into the pages by the build. Every page must carry its region
+#    marker, or a hand-edited page stylesheet would slip past the freshness
+#    gate. The shadcn contract (components.json + the @theme inline block) and
+#    the source coverage of tsc/oxlint are checked here too.
 python3 - "$root" <<'PY'
+import json
 import pathlib
 import re
 import sys
@@ -163,8 +168,54 @@ for page, wanted in required.items():
     for name in wanted:
         if not re.search(rf"/\* zdtd-css:{name} \*/.*?/\* /zdtd-css:{name} \*/", text, re.S):
             raise SystemExit(f"zdtd: lint-webui: {page} is missing the {name} region marker")
-tokens = re.findall(r"(--color-[a-z0-9-]+|--font-[a-z0-9-]+|--radius-[a-z0-9-]+|--shadow-[a-z0-9-]+|--spacing-[a-z0-9_]+|--text-[a-z0-9-]+|--tracking-[a-z0-9-]+|--leading-[a-z0-9-]+):", theme_block.group(1))
+TOKEN = r"(--color-[a-z0-9-]+|--font-[a-z0-9-]+|--radius-[a-z0-9-]+|--shadow-[a-z0-9-]+|--spacing-[a-z0-9_]+|--text-[a-z0-9-]+|--tracking-[a-z0-9-]+|--leading-[a-z0-9-]+):"
+tokens = re.findall(TOKEN, theme_block.group(1))
+# The @theme inline block publishes the shadcn contract; count it too, so the
+# number is the whole token surface and not just the palette.
+contract_block = re.search(r"@theme inline \{(.*?)\n\}", theme, re.S)
+tokens += re.findall(TOKEN, contract_block.group(1)) if contract_block else []
 print(f"zdtd: lint-webui: {len(tokens)} theme tokens declared")
+
+# The shadcn contract the primitives are written against: @shadcn/lint reads
+# these to check a page against the design system, and a page whose
+# components.json is missing would fall back to its bundled grammar silently.
+contract = pathlib.Path(sys.argv[1]) / "components.json"
+shadcn = json.loads(contract.read_text(encoding="utf-8")) if contract.is_file() else None
+if shadcn is None:
+    raise SystemExit("zdtd: lint-webui: components.json is missing (the shadcn alias contract)")
+for key in ("ui", "utils", "components"):
+    if not isinstance(shadcn.get("aliases", {}).get(key), str):
+        raise SystemExit(f"zdtd: lint-webui: components.json aliases.{key} must name the import path")
+css = shadcn.get("tailwind", {}).get("css")
+if not isinstance(css, str) or not (pathlib.Path(sys.argv[1]) / css).is_file():
+    raise SystemExit(f"zdtd: lint-webui: components.json tailwind.css must point at an existing stylesheet, got {css!r}")
+root = pathlib.Path(sys.argv[1])
+inline = re.search(r"@theme inline \{(.*?)\n\}", theme, re.S)
+if inline is None or "--color-card:" not in inline.group(1):
+    raise SystemExit("zdtd: lint-webui: webui.css must publish the shadcn contract in an @theme inline block")
+
+# Coverage: every authored source is in the tsc program AND in the oxlint file
+# set, so a new file cannot escape either gate by being unlisted.
+# tsconfig.json carries // comments, so read the files array rather than parse it.
+tsc_text = (pathlib.Path(sys.argv[1]) / "src/server/webui/ts/tsconfig.json").read_text(encoding="utf-8")
+files_block = re.search(r'"files"\s*:\s*\[(.*?)\]', tsc_text, re.S)
+if files_block is None:
+    raise SystemExit("zdtd: lint-webui: tsconfig.json must declare an explicit files list")
+listed = set(re.findall(r'"([^"]+)"', files_block.group(1)))
+authored = {
+    str(p.relative_to(pathlib.Path(sys.argv[1]) / "src/server/webui/ts"))
+    for p in (pathlib.Path(sys.argv[1]) / "src/server/webui/ts").rglob("*.ts")
+} | {
+    str(p.relative_to(pathlib.Path(sys.argv[1]) / "src/server/webui/ts"))
+    for p in (pathlib.Path(sys.argv[1]) / "src/server/webui/ts").rglob("*.tsx")
+}
+unlisted = sorted(a for a in authored if a not in listed)
+if unlisted:
+    raise SystemExit(
+        "zdtd: lint-webui: sources missing from tsconfig files (so tsc and oxlint both skip them): "
+        + ", ".join(unlisted)
+    )
+print(f"zdtd: lint-webui: {len(authored)} sources covered by tsc and oxlint")
 PY
 
 # 4. Freshness: regenerate into a temp copy of the pages and diff.

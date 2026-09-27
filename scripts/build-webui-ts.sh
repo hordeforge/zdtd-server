@@ -54,13 +54,12 @@ for entry in login lockout shell; do
     --define 'process.env.NODE_ENV="production"'
 done
 
-python3 - "$tmp" "$dest" "$root/src/server/webui/shared.css" <<'PY'
+python3 - "$tmp" "$dest" <<'PY'
 import pathlib
 import re
 import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-shared_css_path = pathlib.Path(sys.argv[3])
 PAGE_CSS = {
     "shell.html": "webui-shell.css",
     "login.html": "webui-login.css",
@@ -77,14 +76,9 @@ MARKER_JS = {
 MARK = re.compile(r"/\* zdtd-ts:([A-Za-z0-9_-]+) \*/.*?/\* /zdtd-ts:\1 \*/", re.DOTALL)
 CSS_MARK = re.compile(r"/\* zdtd-css:([a-z0-9-]+) \*/.*?/\* /zdtd-css:\1 \*/", re.DOTALL)
 
-# The Tailwind build is the whole page stylesheet now: every zdtd-css region
-# marker is replaced by the compiled output. shared.css remains the legacy
-# token/chrome source kept for provenance; it is read for the region-name
-# check but no longer spliced.
-css_regions = {}
-for match in CSS_MARK.finditer(shared_css_path.read_text(encoding="utf-8")):
-    css_regions[match.group(1)] = match.group(0)
-
+# The Tailwind build is the whole page stylesheet: every zdtd-css region
+# marker in a page is replaced by that page's compiled bundle. The region name
+# is a label for humans reading the marker; one page carries one region.
 changed = 0
 for html_path in sorted(html_dir.glob("*.html")):
     text = html_path.read_text(encoding="utf-8")
@@ -104,11 +98,6 @@ for html_path in sorted(html_dir.glob("*.html")):
 
     def splice_css(m):
         name = m.group(1)
-        if name not in css_regions:
-            raise SystemExit(
-                f"build-webui-ts: no '{name}' region in {shared_css_path.name} "
-                f"for the marker in {html_path.name}"
-            )
         return f"/* zdtd-css:{name} */\n{page_css}\n/* /zdtd-css:{name} */"
 
     out, n = MARK.subn(splice, text)

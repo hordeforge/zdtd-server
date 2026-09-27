@@ -101,7 +101,7 @@ jobs:
           path: |
             ~/.cache/zdtd
             ~/.bun/install/cache
-          key: webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-${{ hashFiles('scripts/lint-webui.sh', 'scripts/lint-html.sh', 'scripts/webui-ts-project.sh', 'scripts/build-webui-ts.sh', '.oxlintrc.jsonc', 'ruff.toml') }}
+          key: webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-${{ hashFiles('scripts/lint-webui.sh', 'scripts/lint-html.sh', 'scripts/webui-ts-project.sh', 'scripts/build-webui-ts.sh', 'scripts/build-doc-css.sh', 'scripts/strip-generated-regions.py', 'scripts/gen_provenance.py', '.oxlintrc.jsonc', 'components.json', 'ruff.toml') }}
           restore-keys: |
             webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-
 

@@ -42,8 +42,9 @@ Status is one of: **accepted**, **superseded**, **deprecated** - a decision stil
 | [0038](0038-player-persist-platform-identity.md) | Player persist identity is the platform account, not the login name (supersedes 0017) | accepted |
 | [0039](0039-plugin-verb-interception-policy.md) | Plugin queued-verb interception: a module's `manifest.toml deny` plus the operator `[plugin] deny`/`allow` lists, right-biased, enforced at the `zdtd.queue` boundary | accepted |
 | [0040](0040-webui-preact-json-state.md) | WebUI dashboard is a Preact client over `GET /api/state.json`; `/partials/*` retires; the bundle ships inline (supersedes ADR 0018 decision 2) | accepted |
+| [0041](0041-shadcn-webui-design-system.md) | The webui design system is the shadcn/ui token contract plus a vendored component layer in `ts/components/ui`; `className` is the merge prop and `no-restyle` is enforced | accepted |
 
-Numbers 0027–0029 were never assigned. Next free number is **0041**.
+Numbers 0027–0029 were never assigned. Next free number is **0042**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),

@@ -5,7 +5,36 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
-- Nothing yet.
+### Changed
+
+- **The operator dashboard and the provenance dashboard run on Tailwind v4 with
+  the shadcn/ui token contract (ADR 0041).** Visual result is unchanged: same
+  paper ground, card chrome, single green signal and dark terminal deck. What
+  changed is that there is one token home. `src/server/webui/webui.css` now
+  carries a shadcn semantic contract (`:root` published through
+  `@theme inline`), every page is written against it, and the repeated
+  presentations (card, state pill, button, input, label, table, alert, progress)
+  moved into vendored Preact primitives under
+  `src/server/webui/ts/components/ui/`. `shadcn/no-restyle` is now enforced, so
+  a page can pass layout classes to a component but not restyle it.
+- **The design system's CSS can no longer drift.** `docs/provenance.html` was
+  carrying its own 20-token palette and 68 lines of hand-written CSS; it now
+  imports the shared contract and is compiled per page. No stylesheet in the
+  repo is hand-written any more: `src/server/webui/shared.css` is deleted, and
+  every page's CSS is the compiled form of `webui.css`.
+
+### Added
+
+- `make docs-provenance` regenerates the provenance dashboard (markup plus
+  compiled CSS). The freshness gate now covers both steps, and the CSS splice
+  fails when a class in the page has no generated rule.
+
+### Development
+
+- The webui toolchain pins `clsx`, `tailwind-merge` and
+  `class-variance-authority` alongside `preact`; `components.json` declares the
+  shadcn aliases. All are staged into the cache project by
+  `scripts/webui-ts-project.sh`, so the Zig build stays offline and untracked.
 
 ## [0.7.0] - 2026-09-26
 

@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all help build test test-one fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-release smoke-modlet smoke-backup-restore clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs plugins
+.PHONY: all help build test test-one fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-release smoke-modlet smoke-backup-restore clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit docs-catalogs docs-provenance plugins
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -68,6 +68,7 @@ help:
 	@echo "  make webui-ts                  regenerate committed webui pages from TS"
 	@echo "  make plugins                   rebuild committed plugin .wasm from source"
 	@echo "  make docs-catalogs             regenerate docs/catalogs from source"
+	@echo "  make docs-provenance            regenerate docs/provenance.html (markup + compiled CSS)"
 	@echo "  make clean                     zig-out, .zig-cache, .zdtd_cfg_cache"
 	@echo "Toolchain: Zig from .zigversion; Bun from .bun-version; override with make ZIG=..."
 
@@ -99,6 +100,15 @@ lint-html: need-oxlint need-java
 # page no longer matches source, so regeneration and the doc change land together.
 docs-catalogs: need-python3
 	python3 tools/gen_docs_catalogs.py
+
+# Provenance dashboard: scripts/gen_provenance.py writes the markup (Tailwind
+# utilities on the shadcn contract) with an empty CSS region, then
+# scripts/build-doc-css.sh compiles docs/provenance.css and splices the bundle
+# in, so the page stays one self-contained file. Regenerate and commit the page
+# with the doc change; the freshness gate in `check` fails otherwise.
+docs-provenance: need-python3 need-oxlint
+	python3 scripts/gen_provenance.py
+	bash scripts/build-doc-css.sh
 
 all: build
 
@@ -195,7 +205,7 @@ lint: need-zig need-python3 lint-webui lint-html
 	}
 	for script in scripts/*.sh; do bash -n "$$script"; done
 	shellcheck -o add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat scripts/*.sh
-	ruff check tools/ scripts/gen_provenance.py
+	ruff check tools/ scripts/gen_provenance.py scripts/strip-generated-regions.py
 	$(ZIG) fmt --check build.zig build.zig.zon src mods plugins assets/fixtures
 	bash scripts/lint-architecture.sh
 	# Documentation gate: dead links, code citations in range, quoted Zig blocks
@@ -235,14 +245,15 @@ check:
 	# tools/gen_docs_catalogs.py; regenerate with `make docs-catalogs` and commit
 	# the pages with the source change. Same pattern as the provenance page gate.
 	python3 tools/gen_docs_catalogs.py --check
-	# Dashboard freshness gate: gen_provenance.py regenerates docs/provenance.html
-	# from the live GAP_ANALYSIS markers; fail when the committed page is stale
-	# (regenerate and commit it with the doc change). Same pattern as the webui
-	# page-freshness gate in lint-webui.sh.
-	python3 scripts/gen_provenance.py >/dev/null
+	# Dashboard freshness gate: the provenance page is markup from
+	# gen_provenance.py plus compiled CSS from build-doc-css.sh, so both steps
+	# run before the diff. Fail when the committed page is stale (regenerate and
+	# commit it with the doc change). Same pattern as the webui page-freshness
+	# gate in lint-webui.sh.
+	$(MAKE) docs-provenance >/dev/null
 	if git rev-parse --git-dir >/dev/null 2>&1; then \
 	  git diff --quiet -- docs/provenance.html || { \
-	    echo "make check: docs/provenance.html is stale (run python3 scripts/gen_provenance.py and commit the regenerated page)" >&2; \
+	    echo "make check: docs/provenance.html is stale (run make docs-provenance and commit the regenerated page)" >&2; \
 	    exit 1; \
 	  }; \
 	fi

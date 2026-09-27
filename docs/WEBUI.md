@@ -309,34 +309,116 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 ## Zig module layout (as shipped)
 
 ```text
-src/server/webui.zig          # listener, router, auth, snapshot, cmd queue, fragments
-src/server/webui/ts/*.ts      # page JS authored as TypeScript (strict; tsc-pinned)
-src/server/webui/webui.css    # Tailwind v4 theme entry (@theme tokens + @utility extras)
-src/server/webui/shell.html   # page markup, @embedFile'd (AGENTS rule 12)
-src/server/webui/login.html   # sign-in template (plain + failure states via placeholders)
+src/server/webui.zig                  # listener, router, auth, snapshot, cmd queue, fragments
+src/server/webui/ts/*.tsx             # page TSX authored as TypeScript (strict; tsc-pinned)
+src/server/webui/ts/chart.ts          # the tick chart canvas painter
+src/server/webui/ts/lib/utils.ts      # cn() (clsx + tailwind-merge)
+src/server/webui/ts/components/ui/    # the shadcn primitives (vendored, restyled)
+src/server/webui/webui.css            # Tailwind v4 entry: shadcn token contract + @utility extras
+src/server/webui/webui-<page>.css     # per-page entry (@source set over webui.css)
+src/server/webui/shell.html           # page markup, @embedFile'd (AGENTS rule 12)
+src/server/webui/login.html           # sign-in template (plain + failure states via placeholders)
 src/server/webui/login_lockout.html
+components.json                       # shadcn aliases + theme paths (read by @shadcn/lint)
 ```
 
 Markup is `@embedFile`d at comptime and templated by `__ZDTD_*__` placeholder
 substitution; nothing is read from disk at runtime. Vendor JS/CSS under
 `web/static/` stays a WU3 item (see the roadmap above), not a current path.
 
-Styling is Tailwind v4: markup carries utilities, theme tokens live in
-`src/server/webui/webui.css` (`@theme`). `scripts/build-webui-ts.sh` compiles
-that entry with the cached `@tailwindcss/cli` (pinned `TAILWIND_VERSION`,
-staged by `scripts/webui-ts-project.sh`; no `package.json`/`node_modules` in
-the tree), splicing the output into each committed page between `/*
-zdtd-css:<region> */` markers; `shared.css` is the legacy token source,
-provenance only, not spliced. Page JS is TypeScript in
-`src/server/webui/ts/`, bundled by the same script with `bun build` between
-`/* zdtd-ts:<page> */` markers. `zig build` runs neither, so the Zig build
-stays pure and offline. `scripts/lint-webui.sh` (part of `make lint`)
-type-checks with `tsc --noEmit`, lints the `.ts` sources with oxlint
-(`.oxlintrc.jsonc`, anti-slop plus `@shadcn/lint` token/appearance rules,
-`--deny-warnings`), and fails when the committed pages are stale (`make
-webui-ts` regenerates them). vnu (Nu HTML Checker) checks the HTML and
-embedded CSS (`scripts/lint-html.sh` with `vnu-filter.txt`, part of `make
-lint`); the `hx-*` poller attributes are the one deliberate deviation,
+## Design system: the shadcn contract plus vendored components
+
+[ADR 0041](adr/0041-shadcn-webui-design-system.md) is the decision; this is
+the map of where things live.
+
+**Tokens.** `src/server/webui/webui.css` is the single Tailwind entry. Its
+`:root` block is the shadcn semantic contract (`--background`, `--card`,
+`--card-foreground`, `--popover`, `--primary`, `--primary-foreground`,
+`--secondary`, `--muted`, `--muted-foreground`, `--accent`,
+`--accent-foreground`, `--destructive`, `--destructive-foreground`, `--border`,
+`--input`, `--ring`, `--radius`, `--chart-1..5`) holding the paper-cockpit
+values, plus the status extensions shadcn has no name for
+(`destructive-soft`, `destructive-border`, `border-strong`, `success-border`,
+`warning`, `warning-soft`, `warning-border`, `primary-ghost`). `@theme inline`
+publishes those as Tailwind colors; a second `@theme` holds what the contract
+does not name: the terminal palette, the type scale, `--radius-card`,
+`--radius-ctl` and `--shadow-card`. One name per value: `bg-card` is the only
+way to say "card surface". The `@layer components` block at the bottom holds the
+legacy classes the Zig-injected fragments carry, and `@utility` holds the three
+things utilities cannot express (`signin-shell`, `cmd-hint`, `chart-surface`)
+plus the flash keyframe.
+
+**Components.** `src/server/webui/ts/components/ui/` is the shadcn/ui
+component layer, vendored: the registry source (new-york, v4) restyled to the
+paper cockpit, each file carrying `data-slot` attributes and `cva` variants
+(`button.tsx`, `card.tsx`, `badge.tsx`, `alert.tsx`, `input.tsx`, `label.tsx`,
+`table.tsx`, `progress.tsx`). They are Preact, not React, and they are ours,
+not a dependency.
+They already diverge from the registry on purpose: no `asChild` and no radix,
+`CardTitle` renders an `<h2>` so a card that is a page section keeps a real
+heading, `Badge` has the deck's four state variants, and `Table` adds
+`TableNumber`, `TableRowHeader` and `TableEmpty`. `cn()` is
+`src/server/webui/ts/lib/utils.ts`; `@/...` maps to `ts/` through
+`tsconfig.json` and `components.json`.
+
+**Conventions.** `className` is the merge prop everywhere in the TSX layer,
+including on plain elements, because that is the prop `@shadcn/lint` reads
+when deciding whether a call site restyles a component. A restyle a page
+genuinely needs becomes a variant in the component, not a class at the call
+site: `shadcn/no-restyle` is on with layout classes allowed, and the
+`components/ui` directory is exempt so the components own their own classes.
+
+**Server-rendered pages** (the two sign-in pages, the dashboard header and the
+nav) carry the same token names as plain utilities. They cannot call the TSX
+primitives, so where a variant is needed it is an `@utility` in `webui.css`.
+
+**The provenance dashboard is the second consumer.** `docs/provenance.css`
+imports `webui.css` by path, so `docs/provenance.html` is written in the same
+utilities against the same contract rather than carrying its own token block.
+It is generated, so its CSS is a second build step:
+`scripts/gen_provenance.py` writes the markup with an empty
+`zdtd-css:provenance` region, then `scripts/build-doc-css.sh` compiles the
+entry against the committed page and splices the bundle in (`make
+docs-provenance`, gated by `make check`). The splice also fails when a class
+in the page has no generated rule, because a utility the theme cannot generate
+otherwise drops a style with no error anywhere. The page stays one
+self-contained file that opens over `file://`: the CSS is inlined, never
+linked.
+
+A generated page has no component layer, so the variant sets it repeats many
+times are `@utility` rules in `webui.css` next to the other three
+(`signin-shell`, `cmd-hint`, `chart-surface`): `score-cell` (four state fills
+plus the colour-vision outline, ~300 uses) and `feat-state` (the four state
+text colors, ~366 uses). Written per call site those two would be 100 KB of
+duplicated class list. Everything else on the page is an ordinary class list.
+The port is bigger on disk and close on the wire: 158 KB raw / 20.5 KB gzipped
+against the hand-written CSS's 81 KB / 16 KB, for a page opened from the repo
+rather than served.
+
+## Build and gates
+
+`scripts/build-webui-ts.sh` compiles each `webui-<page>.css` entry with the
+cached `@tailwindcss/cli` (pinned `TAILWIND_VERSION`, staged by
+`scripts/webui-ts-project.sh`; no `package.json`/`node_modules` in the tree)
+and splices the output into each committed page between the
+`/* zdtd-css:<region> */` markers. There is no hand-written page stylesheet: every page's CSS is the compiled form of `webui.css`. Page JS is bundled by the same script with
+`bun build` between the `/* zdtd-ts:<page> */` markers. `zig build` runs
+neither, so the Zig build stays pure and offline.
+
+`scripts/webui-ts-project.sh` stages the sources plus `components.json` into a
+cache project, and blanks the generated regions on the staged page copies
+(`scripts/strip-generated-regions.py`): the Tailwind scanner reads
+class-shaped tokens anywhere in a file, so a compiled `.transition-colors{...}`
+rule inside a committed page would regenerate its own utility forever and keep
+a rule alive after its source stopped using it.
+
+`scripts/lint-webui.sh` (part of `make lint`) type-checks with `tsc --noEmit`,
+lints the sources with oxlint (`.oxlintrc.jsonc`: anti-slop plus the
+`@shadcn/lint` rules including `no-restyle`, `--deny-warnings`), checks the
+token contract and the page markers, and fails when the committed pages are
+stale (`make webui-ts` regenerates them). vnu (Nu HTML Checker) checks the
+HTML and embedded CSS (`scripts/lint-html.sh` with `vnu-filter.txt`, part of
+`make lint`); the `hx-*` poller attributes are the one deliberate deviation,
 filtered there.
 
 Facades: `server/root.zig` exports webui init. **No** import of webui from
@@ -366,7 +448,7 @@ Precedence: CLI > env > defaults.
 | Unit | cmd queue bounds; snapshot copy; HTML escape; auth HMAC |
 | Unit | parse same strings as admin.zig |
 | Integration | start Game with webui port on 127.0.0.1; HTTP GET status; POST give |
-| Lint | Page JS (TypeScript in `src/server/webui/ts/`) is type-checked (tsc) and linted by oxlint (`scripts/lint-webui.sh`, wired into `make lint`) with the anti-slop rule set plus `@shadcn/lint` token/appearance rules in `.oxlintrc.jsonc`; a freshness gate fails when the committed pages were not regenerated (`make webui-ts`) |
+| Lint | Page TSX (in `src/server/webui/ts/`, primitives in `ts/components/ui/`) is type-checked (tsc) and linted by oxlint (`scripts/lint-webui.sh`, wired into `make lint`) with the anti-slop rule set plus the `@shadcn/lint` rules in `.oxlintrc.jsonc`, `no-restyle` included; a freshness gate fails when the committed pages were not regenerated (`make webui-ts`) |
 | Lint | All repo HTML + embedded CSS is checked by vnu (`scripts/lint-html.sh`, `vnu-filter.txt`, wired into `make lint`); the deliberate `hx-*` poller attributes are filtered there |
 | Manual | browser checklist in docs |
 | Load | webui poll must not move tick_overruns under loadgen |

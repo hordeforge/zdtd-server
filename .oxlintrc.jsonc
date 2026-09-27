@@ -61,9 +61,10 @@
   // lint-webui.sh from a cached install; see the provenance note above. The
   // dmmulroy/anti-slop plugin is vendored source at a pinned SHA (same cache),
   // and @oxlint/plugins is its plugin-API dependency, installed in the same
-  // npm invocation. @shadcn/lint is the Tailwind design-system plugin
-  // (no-restyle is off: there is no component library here, only page markup;
-  // the token/appearance rules guard the utility port).
+  // npm invocation. @shadcn/lint is the Tailwind design-system plugin: it
+  // reads the contract (components.json + webui.css) and the primitives in
+  // src/server/webui/ts/components/ui, so it checks the pages against the
+  // design system, not only against a raw utility grammar.
   "jsPlugins": [
     "@rikalabs/oxlint-standards/plugin",
     { "name": "anti-slop", "specifier": "./anti-slop-src/index.js" },
@@ -71,10 +72,33 @@
   ],
   "settings": {
     "shadcn": {
-      "note": "zdtd webui: theme tokens come from src/server/webui/webui.css (@theme).",
+      "note": "zdtd webui: the shadcn token contract lives in src/server/webui/webui.css (:root plus @theme inline) and the primitives in src/server/webui/ts/components/ui. Restyle a component in its own file, not at the call site.",
+      "ui": "@/components/ui",
       "componentImports": ["^preact(/|$)"]
     }
   },
+  // Two overrides, both with a reason.
+  "overrides": [
+    {
+      // The primitives own their own classes; a page may pass layout classes
+      // and nothing else. Same shape the shadcn lint README uses for a shared
+      // component library.
+      "files": ["**/components/ui/**"],
+      "rules": {
+        "shadcn/no-restyle": "off"
+      }
+    },
+    {
+      // lib/utils.ts is the shadcn contract's own path: components.json names
+      // it as aliases.utils, and every registry component imports cn() from
+      // it. Renaming it would break `shadcn add` and the contract, so the
+      // generic-name rule stands down for this one file.
+      "files": ["**/lib/utils.ts"],
+      "rules": {
+        "@rikalabs/no-generic-module-names": "off"
+      }
+    }
+  ],
   // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
   // the rules below reference (same list as the baseline's strict-core preset);
   // import + promise are the two that would otherwise not be loaded.
@@ -272,9 +296,12 @@
     "@rikalabs/no-debug-residue-filenames": "error",
     "@rikalabs/no-hardcoded-secrets": "error",
     "@rikalabs/no-sql-string-concat": "error",
-    // ---- @shadcn/lint (Tailwind design system; theme in webui.css) ----
-    // no-restyle stays off: no component library, only page markup.
-    "shadcn/no-restyle": "off",
+    // ---- @shadcn/lint (Tailwind design system; contract in webui.css,
+    //      primitives in ts/components/ui; see settings.shadcn above) ----
+    // Layout at a call site is the page's business (placement, width, grid);
+    // padding, color, shape and typography belong to the component. The
+    // components/ override above exempts the primitives themselves.
+    "shadcn/no-restyle": ["error", { "allow": ["layout"] }],
     "shadcn/no-raw-colors": "error",
     "shadcn/no-arbitrary-values": ["error", { "allow": ["layout"] }],
     "shadcn/no-inline-styles": ["error", { "allow": ["transform"] }],

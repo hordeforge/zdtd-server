@@ -1,34 +1,117 @@
-/* Webui Tailwind v4 theme: tokens + @utility extras shared by every page entry.
-   Each page entry (webui-<page>.css) imports tailwindcss, this theme, and
-   declares its own @source set so the built CSS per page carries only the
-   utilities that page uses. Markup styling lives in Tailwind utilities in
-   the .html/.tsx; @utility rules below exist only for what utilities cannot
-   express: the terminal chart canvas theme, the flash keyframe, placeholder
-   and sign-in chrome, and forced-colors fallbacks. */
+/* Webui Tailwind v4 theme: the one entry every page CSS imports, carrying the
+   shadcn/ui token contract, the design's own palette, and the @utility extras
+   utilities cannot express (terminal chart canvas theme, flash keyframe,
+   placeholder and sign-in chrome, forced-colors fallbacks).
+
+   Token layers, one name per value:
+     * the :root shadcn contract below holds every semantic color the primitives
+       in ts/components/ui and the page markup are written against
+       (background, card, primary, destructive, ...), with the paper-cockpit
+       values behind them;
+     * @theme inline publishes those names as Tailwind theme colors, so
+       `bg-card` and friends exist;
+     * @theme adds what the contract has no name for: the terminal palette
+       (shadcn has no terminal), the type scale, the card radius and the deck
+       shadow.
+   Each page entry (webui-<page>.css) imports this file and declares its own
+   @source set, so the built CSS per page carries only the utilities that page
+   uses. */
+
+@import "tailwindcss" source(none);
+
+/* shadcn/ui token contract. destructive-soft, border-strong, success-border
+   and warning-* are the paper cockpit's own soft fills and borders, which
+   shadcn has no stock name for. */
+:root {
+  --radius: 0.625rem;
+
+  --background: #f7f5f0;
+  --foreground: #1a1d21;
+  --card: #fffdf8;
+  --card-foreground: #1a1d21;
+  --popover: #fffdf8;
+  --popover-foreground: #1a1d21;
+  --primary: #0f5c37;
+  --primary-foreground: #ffffff;
+  /* The poll-change flash is primary at 6%. A token, because a keyframe cannot
+     express an alpha modifier on a theme color. */
+  --primary-ghost: rgba(15, 92, 55, 0.06);
+  --secondary: #efece4;
+  --secondary-foreground: #1a1d21;
+  --muted: #efece4;
+  --muted-foreground: #4d545c;
+  --accent: #dcefe1;
+  --accent-foreground: #0c4a2d;
+  --destructive: #8a2318;
+  --destructive-foreground: #3d0d07;
+  --destructive-soft: #f5c9c2;
+  --destructive-border: #d59f96;
+  --border: #e2ddd0;
+  --border-strong: #cfc8b6;
+  --input: #5f686f;
+  --ring: #0f5c37;
+  --success-border: #9cc6aa;
+  --warning: #6b4a00;
+  --warning-soft: #f2dbaa;
+  --warning-border: #cbab72;
+
+  /* shadcn chart slots. The tick chart paints from the terminal palette
+     directly (chart.ts reads it with getComputedStyle); these name the same
+     five series for anything drawn with utilities. */
+  --chart-1: #22303c;
+  --chart-2: #2c3f4e;
+  --chart-3: #0f5c37;
+  --chart-4: #ffd8a0;
+  --chart-5: #ff7364;
+}
+
+/* Publish the contract as Tailwind theme colors. `inline` makes the utilities
+   resolve the contract variables directly, so a high-contrast or dark override
+   of :root restyles the primitives without a rebuild. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-ghost: var(--primary-ghost);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-border: var(--destructive-border);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
 
 @theme {
-  --color-paper: #f7f5f0;
-  --color-paper2: #efece4;
-  --color-panel: #fffdf8;
-  --color-well: #fffdf8;
-  --color-line: #e2ddd0;
-  --color-line2: #cfc8b6;
-  --color-edge: #5f686f;
-  --color-ink: #1a1d21;
-  --color-muted: #4d545c;
-  --color-muted2: #5f686f;
-  --color-acc: #0f5c37;
-  --color-acc-ink: #0c4a2d;
-  --color-acc-soft: #dcefe1;
-  --color-acc-ghost: rgba(15, 92, 55, 0.06);
-  --color-ok: #0f5c37;
-  --color-warn: #6b4a00;
-  --color-warn-soft: #f2dbaa;
-  --color-err: #8a2318;
-  --color-err-ink: #3d0d07;
-  --color-err-border: #d59f96;
-  --color-err-field: rgba(138, 35, 24, 0.45);
-  --color-err-soft: #f5c9c2;
+  /* What the shadcn contract has no name for: the terminal the tick chart and
+     the console log are painted into, the type scale the design was tuned at,
+     and the card chrome. */
   --color-term: #101418;
   --color-term2: #1a2129;
   --color-term-line: #2a333d;
@@ -48,13 +131,13 @@
 
   --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.06), 0 8px 24px -12px rgba(26, 29, 33, 0.18);
 
-  /* Non-standard spacing step used by the port (px-4_5): the default scale
-     jumps from 4 to 5. */
+  /* Non-standard spacing step used by the header buttons (px-4_5): the default
+     scale jumps from 4 to 5. */
   --spacing-4_5: 1.125rem;
 
-  /* Prose sizes carried over from the hand-written CSS (exact px the design
-     was tuned at). Declared so no-arbitrary-values passes without rounding
-     the design to the nearest default step. */
+  /* Prose sizes carried over from the hand-written CSS (the exact px the
+     design was tuned at). Declared so no-arbitrary-values passes without
+     rounding the design to the nearest default step. */
   --text-hud: 0.72rem;
   --text-body2: 0.8rem;
   --text-num: 0.88rem;
@@ -77,52 +160,6 @@
   --leading-term: 1.7;
   --leading-card: 1.5;
   --leading-prose: 1.6;
-
-  /* Pill borders that were hex in the hand-written CSS. */
-  --color-ok-border: #9cc6aa;
-  --color-warn-border: #cbab72;
-}
-
-/* Legacy token aliases: the --bg/--fg aliases keep the Zig error fragments
-   and any unported markup working during the transition. */
-:root {
-  --bg: var(--color-paper);
-  --bg2: var(--color-paper2);
-  --panel: var(--color-panel);
-  --well: var(--color-well);
-  --line: var(--color-line);
-  --line2: var(--color-line2);
-  --edge: var(--color-edge);
-  --fg: var(--color-ink);
-  --muted: var(--color-muted);
-  --muted2: var(--color-muted2);
-  --acc: var(--color-acc);
-  --acc-ink: var(--color-acc-ink);
-  --acc-soft: var(--color-acc-soft);
-  --acc-ghost: var(--color-acc-ghost);
-  --ok: var(--color-ok);
-  --warn: var(--color-warn);
-  --warn-soft: var(--color-warn-soft);
-  --err: var(--color-err);
-  --err-ink: var(--color-err-ink);
-  --err-border: var(--color-err-border);
-  --err-field: var(--color-err-field);
-  --err-soft: var(--color-err-soft);
-  --term: var(--color-term);
-  --term2: var(--color-term2);
-  --term-line: var(--color-term-line);
-  --term-band1: var(--color-term-band1);
-  --term-band2: var(--color-term-band2);
-  --term-text: var(--color-term-text);
-  --term-faint: var(--color-term-faint);
-  --term-key: var(--color-term-key);
-  --term-ok: var(--color-term-ok);
-  --term-bad: var(--color-term-bad);
-  --sans: var(--font-sans);
-  --mono: var(--font-mono);
-  --r: var(--radius-card);
-  --r-ctl: var(--radius-ctl);
-  --shadow: var(--shadow-card);
 }
 
 /* Chart canvas theme: read by chart.ts via getComputedStyle, not paintable
@@ -136,7 +173,7 @@
 /* Poll-change flash: a keyframe utilities cannot declare. */
 @keyframes zdtd-flash {
   0% {
-    background: var(--color-acc-ghost);
+    background: var(--primary-ghost);
   }
   100% {
     background: transparent;
@@ -158,10 +195,9 @@
    lint rule, so it lives here as a plain-CSS utility. */
 @utility cmd-hint {
   & input::placeholder {
-    color: var(--color-muted2);
+    color: var(--muted-foreground);
   }
 }
-
 
 /* Base page defaults utilities cannot carry: visible focus ring on everything
    focusable (44px targets alone are not enough), stable scrollbar gutter, and
@@ -183,7 +219,7 @@
   select:focus-visible,
   summary:focus-visible,
   [tabindex]:focus-visible {
-    outline: 2px solid var(--color-acc);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
   a, button, input, [tabindex] {
@@ -191,22 +227,36 @@
   }
 }
 
-/* Forced-colors fallback: remap the theme; the canvas palette re-reads via
+/* Forced-colors fallback: remap the contract; the canvas palette re-reads via
    getComputedStyle in chart.ts. */
 @media (forced-colors: active) {
   :root {
-    --color-paper: Canvas;
-    --color-panel: Canvas;
-    --color-well: Canvas;
-    --color-paper2: Canvas;
-    --color-ink: CanvasText;
-    --color-muted: CanvasText;
-    --color-muted2: CanvasText;
-    --color-line: CanvasText;
-    --color-line2: CanvasText;
-    --color-edge: CanvasText;
-    --color-acc: LinkText;
-    --color-acc-ink: LinkText;
+    --background: Canvas;
+    --foreground: CanvasText;
+    --card: Canvas;
+    --card-foreground: CanvasText;
+    --popover: Canvas;
+    --popover-foreground: CanvasText;
+    --primary: LinkText;
+    --primary-foreground: Canvas;
+    --secondary: Canvas;
+    --secondary-foreground: CanvasText;
+    --muted: Canvas;
+    --muted-foreground: CanvasText;
+    --accent: Canvas;
+    --accent-foreground: LinkText;
+    --destructive: Mark;
+    --destructive-foreground: CanvasText;
+    --destructive-soft: Canvas;
+    --destructive-border: CanvasText;
+    --border: CanvasText;
+    --border-strong: CanvasText;
+    --input: CanvasText;
+    --ring: LinkText;
+    --success-border: CanvasText;
+    --warning: CanvasText;
+    --warning-soft: Canvas;
+    --warning-border: CanvasText;
     --color-term: Canvas;
     --color-term2: Canvas;
     --color-term-line: CanvasText;
@@ -220,13 +270,12 @@
   }
 }
 
-
 /* Server-rendered fragment compat: Zig error/console/login-banner fragments
-   (webui.zig) carry these legacy classes outside the TSX layer. Plain CSS so
-   the non-JS and plain-HTML fallbacks keep their styling. */
+   (webui.zig) carry these classes outside the TSX layer. Plain CSS so the
+   non-JS and plain-HTML fallbacks keep their styling. */
 @layer components {
   .lead {
-    color: var(--color-muted);
+    color: var(--muted-foreground);
     font-size: 1rem;
     margin: 0 0 1rem;
     line-height: 1.6;
@@ -235,14 +284,14 @@
     margin: 0 0 0.85rem;
     padding: 0.9rem 1rem;
     border-radius: var(--radius-card);
-    background: var(--color-err-soft);
-    border: 1px solid var(--color-err-border);
-    color: var(--color-err-ink);
+    background: var(--destructive-soft);
+    border: 1px solid var(--destructive-border);
+    color: var(--destructive-foreground);
     font-size: 1rem;
     line-height: 1.5;
   }
   .ok {
-    color: var(--color-ok);
+    color: var(--primary);
   }
   pre.cmd-out,
   pre.cmd-log {
@@ -278,14 +327,85 @@
   }
 }
 
+/* Provenance dashboard score cell. Its state variants are a 13-utility set the
+   page repeats ~300 times, and the defrag map is generated markup with no
+   component layer to hold them, so the set lives here as one utility: written
+   per cell it is 180 KB of duplicated class list. The open states are outlined
+   as well as coloured, because a few amber squares among ~300 green ones
+   vanish on hue alone and are gone entirely for red/green colour vision
+   deficiency. */
+@utility score-cell {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 1px;
+  background: var(--primary);
+
+  &[data-state="PARTIAL"] {
+    width: 0.8rem;
+    height: 0.8rem;
+    margin-block: -0.125rem;
+    border-radius: 2px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    box-shadow: 0 0 0 2px var(--muted), 0 0 0 3px currentColor;
+  }
+
+  &[data-state="MISSING"] {
+    width: 0.8rem;
+    height: 0.8rem;
+    margin-block: -0.125rem;
+    border-radius: 2px;
+    background: var(--destructive-soft);
+    color: var(--destructive);
+    box-shadow: 0 0 0 2px var(--muted), 0 0 0 3px currentColor;
+  }
+
+  @media (forced-colors: active) {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+
+    &[data-state="PARTIAL"],
+    &[data-state="MISSING"] {
+      outline: 2px solid Highlight;
+    }
+  }
+}
+
+/* Provenance dashboard feature-state cell. Same reason as score-cell: the four
+   state colours are a variant set the generated page would otherwise repeat on
+   every feature row, and a generated page has no component layer to hold them. */
+@utility feat-state {
+  width: 7rem;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--text-body2);
+  white-space: nowrap;
+  color: var(--muted-foreground);
+
+  &[data-state="WORKS"] {
+    color: var(--primary);
+  }
+  &[data-state="PARTIAL"] {
+    color: var(--warning);
+  }
+  &[data-state="MISSING"] {
+    color: var(--destructive);
+  }
+  &[data-state="ad-hoc"] {
+    color: var(--accent-foreground);
+  }
+}
+
 /* Sign-in chrome that stays element-scoped (no per-page utility churn): the
    login pages are server-rendered with no TSX component layer. */
 @utility signin-shell {
   min-width: 0;
   overflow-wrap: anywhere;
   width: min(26rem, 100%);
-  background: var(--color-panel);
-  border: 1px solid var(--color-line);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: 1.5rem 1.5rem 1.25rem;

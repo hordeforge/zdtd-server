@@ -1,0 +1,11 @@
+/* Tailwind v4 entry for the provenance dashboard: the same theme the operator
+   console uses, compiled for this page's markup only. scripts/build-doc-css.sh
+   compiles it and scripts/gen_provenance.py splices the output into
+   docs/provenance.html between the zdtd-css:provenance markers, so the page
+   stays a single self-contained file that opens over file://.
+
+   The theme is imported by path rather than copied: the shadcn token contract
+   has one home (src/server/webui/webui.css, ADR 0041) and this page is its
+   second consumer, not its second copy. */
+@import "../src/server/webui/webui.css";
+@source "./provenance.html";

@@ -57,7 +57,7 @@ Each fact has exactly one home. Everywhere else, link to it.
 | `tools/check_docs.py` | dead relative links (docs/ plus the root rule pages), `file:LINE` out of range, quoted `zig` block drift, missing `../7dtd-engine-research/` paths, registry rows, the subsystem page contract, word budgets | `make lint` |
 | `tools/gen_docs_catalogs.py --check` | `docs/catalogs/` is fresh from source | `make check` |
 | `tools/provenance_scan.py` | every `src/` file has a PROVENANCE row | `make check` |
-| `scripts/gen_provenance.py` | `docs/provenance.html` is fresh | `make check` |
+| `scripts/gen_provenance.py` + `scripts/build-doc-css.sh` | `docs/provenance.html` is fresh: the first writes the Tailwind markup with an empty CSS region, the second compiles `docs/provenance.css` (the shared shadcn contract) and splices it in. Every class in the page must have a generated rule, or the build fails | `make check` |
 | `scripts/lint-architecture.sh` | package edges and `root.zig` barrel coverage | `make lint` |
 | `scripts/lint-webui.sh` | webui TypeScript and page freshness | `make lint` |
 | `scripts/lint-html.sh` | webui HTML/CSS (vnu) | `make lint` |

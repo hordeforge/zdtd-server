@@ -26,14 +26,15 @@ job-file record. The console is one section down, not one tab away.
 - **Paper by day, no dark mode.** The scene is daylight ops on a laptop
   next to the game client; the pinned direction chose paper ground with
   the chart as the single terminal. `forced-colors` remaps everything.
-  The provenance scorecard uses the same paper tokens (no dark shell, no
-  second accent).
+  The provenance scorecard shares the token contract itself (ADR 0041), so
+  there is no second palette to drift (no dark shell, no second accent).
 - **Sans reads, mono is the machine.** Headings, labels, buttons, stats,
   table cells are sans; ids, source, listings, key names are mono.
   Tabular numerals on every comparable number.
-- **State is words in pills**, never bare colour. `ok`/`warn`/`bad`
-  pills in tables and the glance band; numeric alerts keep the
-  `num warn-text`/`num err` classes on values.
+- **State is words in pills**, never bare colour. The `Badge` primitive
+  carries the four states (success, warning, destructive, secondary) in
+  tables and the glance band; numeric alerts keep the muted/warning/
+  destructive text tones on values.
 - **Tables stack at ≤55rem** with `data-label` on every cell (the
   Label-Travels rule); wide ledgers keep `min-width:34rem` only at
   desktop widths.
@@ -41,8 +42,9 @@ job-file record. The console is one section down, not one tab away.
   markers, faint grid, stacked section fills, scrub cursor, still frame
   under `prefers-reduced-motion`.
 - **Accepted deviations**: detector `flat-type-hierarchy` (the mono
-  micro-label system is deliberate); `.meter i` width transition (a 10px
-  bar easing on 1s polls, disabled under reduced motion).
+  micro-label system is deliberate); the `Progress` meter snaps to each
+  poll instead of easing, which is what a 1s reading cadence wants and
+  what `prefers-reduced-motion` already required.
 
 ## Contract
 

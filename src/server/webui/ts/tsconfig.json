@@ -25,7 +25,29 @@
     "noUnusedParameters": true,
     "allowUnreachableCode": false,
     "noEmitOnError": true,
-    "types": []
+    "types": [],
+    // shadcn's alias contract (components.json): `@/...` is this directory, so
+    // the primitives and cn() import the way the registry sources do. tsc and
+    // bun build both read these paths; oxlint resolves the component alias from
+    // the staged copy of this file beside the sources it lints. No baseUrl:
+    // paths are relative to this file, and tsgolint rejects the option.
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
-  "files": ["login.ts", "lockout.ts", "shell.tsx", "chart.ts"]
+  "files": [
+    "login.ts",
+    "lockout.ts",
+    "shell.tsx",
+    "chart.ts",
+    "lib/utils.ts",
+    "components/ui/alert.tsx",
+    "components/ui/badge.tsx",
+    "components/ui/button.tsx",
+    "components/ui/card.tsx",
+    "components/ui/input.tsx",
+    "components/ui/label.tsx",
+    "components/ui/progress.tsx",
+    "components/ui/table.tsx"
+  ]
 }
