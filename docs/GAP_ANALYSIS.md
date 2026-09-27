@@ -3460,25 +3460,32 @@ unvalidated, and durability, mods and repair do not exist.
   creation (deterministic per block) and respawns by touched_day, so the
   server-side lazy-roll key (RE loot-economy.md `LootContainerOpened`) is not
   needed and the client UI does not render the list name.
-  **Residual, recorded 2026-09-09: only the Storage feature ships.** A
-  composite TE is a module list, and `TileEntityComposite::write`
-  (`TileEntityComposite.il.txt:1709`) emits every feature the block declares;
-  zdtd hardcodes a count of 1 and the Storage hash
-  (`src/wire/stock_te.zig:131-133`), and the parser skips any other hash
-  (`:263`). Stock blocks.xml pairs Storage with others on real blocks: 457
-  Storage uses alongside 83 `TEFeatureLockable`, 178 `TEFeatureCanvas` and 10
-  `TEFeatureLockPickable` (`cntWallSafe` = Storage + LockPickable,
-  `cntWoodWritableCrate` = Storage + Lockable + Canvas). This is **not** a
-  stream desync: each module is bounded by its own size marker and
+  **Residual, recorded 2026-09-09, narrowed 2026-09-28: the Lockable module
+  is server-owned, LockPickable and Canvas are not.** A composite TE is a
+  module list, and `TileEntityComposite::write` (`TileEntityComposite.il.txt:1709`)
+  emits every feature the block declares; stock blocks.xml pairs Storage with
+  others on real blocks: 457 Storage uses alongside 83 `TEFeatureLockable`, 178
+  `TEFeatureCanvas` and 10 `TEFeatureLockPickable` (`cntWallSafe` = Storage +
+  LockPickable, `cntWoodWritableCrate` = Storage + Lockable + Canvas). zdtd now
+  parses and stores the `TEFeatureLockable` body verbatim on the container
+  (`TEFeatureLockable::Write IL=42`: `locked` bool, the allowed users, the
+  password hash), writes it back from server state on every TE the chunk
+  stream, a rejoin or a lock grant sends, and persists it in ZCT4, so a
+  padlocked chest stays padlocked for a client that never saw the client's own
+  echo. A storage-only body is the client's unlock and clears it. Still open:
+  the `TEFeatureLockPickable` lockpick flow (a wall safe cannot be picked) and
+  `TEFeatureCanvas` (a painted container face is not modelled); both need
+  their own sim state and C2S shapes. Enforcement of a lock on the open path is
+  not attempted, matching stock: the client refuses the window it may not open
+  from its own TE mirror. The extra modules are still not spliced into an echo
+  that lacks them, so the echo mirrors whatever the client sent. This is **not**
+  a stream desync: each module is bounded by its own size marker and
   `TileEntityComposite::read` only warns for features missing from the stream
-  and defaults them (`:1665`). The real gap is upstream of the wire - zdtd has
-  no container lock state to send (`world/containers.zig` has no locked /
-  password / allowed-user fields; only vending machines model those), so
-  padlocking a chest does not replicate. Closing this is a sim feature plus
-  the extra module writers, not an encoder tweak.
-  *Anchors:* `src/wire/stock_te.zig:148-162` (grid), `src/server/c2s/inv.zig`
-  (lock-path size capture), `src/world/containers.zig` (ZCT2),
-  `asm.il:156979`
+  and defaults them (`:1665`).
+  *Anchors:* `src/wire/stock_te.zig` (`buildStorageTeBody` module list,
+  `parseStorageTeBody` lock capture), `src/server/c2s/inv_te.zig` (lock adopt),
+  `src/world/containers.zig` (lock blob + ZCT4),
+  `_global/TEFeatureLockable.il.txt:465`/`:517`
 
 - **Storage TileEntity C2S apply and broadcast** `WORKS`
   Parse, range check against the acting player, apply, broadcast. Slot quality and

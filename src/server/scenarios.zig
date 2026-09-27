@@ -18337,3 +18337,84 @@ test "scenario material-based forge outputs survive queue validation" {
     try std.testing.expectEqual(@as(i16, 1), st.queue[st.queue_len - 1].output_count);
     std.debug.print("PASS material queue: ammoDartIron survives validation at the forge\n", .{});
 }
+
+test "scenario a container padlock becomes server state and streams from it" {
+    // Stock's client writes its TEFeatureLockable module through
+    // NetPackageTileEntity (StreamModeRead.FromClient, ProcessPackage IL=0082).
+    // zdtd used to relay that module in the echo only, so the padlock lived in
+    // one package: a player who streamed the chunk later, rejoined, or came
+    // back after a restart saw an unlocked chest. The module is server state
+    // now and the server's own TE body carries it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_padlock");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_padlock", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const bx: i32 = 260;
+    const by: i32 = 71;
+    const bz: i32 = 260;
+    g.sim.transform[ps].x = @floatFromInt(bx);
+    g.sim.transform[ps].y = @floatFromInt(by);
+    g.sim.transform[ps].z = @floatFromInt(bz);
+    const crate_block: u16 = world_store.block_stone;
+    try g.setBlock(bx, by, bz, crate_block);
+
+    // The client's composite: the storage module plus the lockable module it
+    // wrote for a fresh padlock (locked true, no allowed users, no password).
+    var cont: containers_mod.Container = .{ .pos = .{ .x = bx, .y = by, .z = bz }, .block_id = crate_block, .slot_count = 8 };
+    var sbuf: [4096]u8 = undefined;
+    const storage_only = try packages.stock_te.buildStorageTeBody(&sbuf, 4, bx, by, bz, crate_block, &cont, null, null);
+    var sbuf2: [8192]u8 = undefined;
+    @memcpy(sbuf2[0..storage_only.len], storage_only);
+    const pay_len = std.mem.readInt(i32, sbuf2[17..21], .little);
+    const pay_end = 21 + @as(usize, @intCast(pay_len));
+    var mbuf: [64]u8 = undefined;
+    var mw: binary.Writer = .{ .buf = &mbuf };
+    try mw.writeBool(true);
+    try mw.writeI32(0);
+    try mw.writeString("");
+    const lock_body = mw.written();
+    var add_buf: [64]u8 = undefined;
+    var aw: binary.Writer = .{ .buf = &add_buf };
+    try aw.writeI32(packages.stock_te.feature_hash_lockable);
+    try aw.writeU32(@intCast(4 + lock_body.len));
+    try aw.writeBytes(lock_body);
+    const add = aw.written();
+    @memcpy(sbuf2[pay_end..][0..add.len], add);
+    std.mem.writeInt(i32, sbuf2[17..21], @intCast(pay_end - 21 + add.len), .little);
+    const marker_off = 21 + 12;
+    const old_marker = std.mem.readInt(u32, sbuf2[marker_off..][0..4], .little);
+    std.mem.writeInt(u32, sbuf2[marker_off..][0..4], old_marker + @as(u32, @intCast(add.len)), .little);
+    const count_off = 21 + 12 + 4 + 4 + 1;
+    sbuf2[count_off] += 1;
+    const body = sbuf2[0 .. pay_end + add.len];
+
+    var frame_buf: [8192]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+    const stored = g.containers.get(.{ .x = bx, .y = by, .z = bz }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, @intCast(lock_body.len)), stored.lock_len);
+    try std.testing.expectEqualSlices(u8, lock_body, stored.lock_blob[0..stored.lock_len]);
+
+    // The server's own TE body (chunk stream / rejoin / lock grant path) now
+    // carries the module, so a client that never saw the echo is still shown a
+    // padlocked chest.
+    cap.clear();
+    try replicate_te.sendStorageTe(g, c.peer.?, bx, by, bz);
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    const sent = cap.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    const parsed = try packages.stock_te.parseStorageTeBody(sent);
+    try std.testing.expect(parsed.found_lock);
+    try std.testing.expectEqualSlices(u8, lock_body, sent[parsed.lock_blob_off..][0..parsed.lock_blob_len]);
+
+    // A storage-only write is the client's unlock: the server drops the lock
+    // rather than re-showing a padlock the player just removed.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageTileEntity", storage_only));
+    const after = g.containers.get(.{ .x = bx, .y = by, .z = bz }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, 0), after.lock_len);
+    std.debug.print("PASS padlock: client lock adopted, streamed from server state, cleared on unlock\n", .{});
+}

@@ -187,6 +187,21 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             }
             inv_apply.applyParsedToContainer(&parsed, cont, reverseItemType, self);
             self.clampStackSlots(cont.slots[0..cont.slot_count]);
+            // TEFeatureLockable: the client's padlock change becomes server
+            // state here, so the chunk stream, a rejoin and the next restart
+            // all carry it (before this the module only rode the echo, and a
+            // player who streamed the area later saw an unlocked chest). A
+            // composite without the module is the client's unlock or removal,
+            // so it clears what we held.
+            if (parsed.found_lock and parsed.lock_blob_len > 0 and
+                parsed.lock_blob_len <= containers_mod.max_lock_feature_bytes and
+                parsed.lock_blob_off + parsed.lock_blob_len <= body.len)
+            {
+                cont.lock_len = @intCast(parsed.lock_blob_len);
+                @memcpy(cont.lock_blob[0..parsed.lock_blob_len], body[parsed.lock_blob_off..][0..parsed.lock_blob_len]);
+            } else {
+                cont.lock_len = 0;
+            }
             // A player looting a container is the server-side trigger for
             // FetchFromContainer quests (stock's quest object observes the
             // container TE); advance fetch phases so they can reach turn-in.

@@ -39,6 +39,15 @@ pub const feature_hash_storage: i32 = 731446478;
 /// `CompositeFeatures`, blocks.xml). Same hash formula as the row above.
 pub const feature_hash_signable: i32 = 924617576;
 
+/// GetStableHashCode("TEFeatureLockable"): the composite module that carries a
+/// container's padlock state (`locked`, the allowed users and the password
+/// hash; TEFeatureLockable::Write IL=42). Same hash formula as the rows above.
+pub const feature_hash_lockable: i32 = unity_hash.getStableHashCode("TEFeatureLockable");
+
+/// Stock's allowed-user list for one lockable module. The XUI caps the list it
+/// writes; zdtd refuses a larger claim instead of sizing a store to it.
+pub const max_lock_users: i32 = 32;
+
 /// Longest authored sign text zdtd accepts from a client. Stock puts no limit
 /// on the wire (the XUI input caps the typed text), so an over-long claim fails
 /// closed (`error.Overflow`) instead of being truncated mid-string.
@@ -138,12 +147,22 @@ fn writeCompositeStoragePayload(
     const outer = try reserveU32(&w);
     try w.writeI32(block_id);
     try w.writeByte(0); // null owner
-    try w.writeByte(1); // one module: Storage
+    // Modules the client declares for this block: Storage always, plus the
+    // padlock module when the server holds one for this container.
+    const has_lock = cont.lock_len > 0;
+    try w.writeByte(if (has_lock) 2 else 1);
 
     try w.writeI32(feature_hash_storage);
     const feat_mark = try reserveU32(&w);
     try writeStorageFeature(&w, cont, resolve, ctx);
     finalizeU32(&w, feat_mark);
+
+    if (has_lock) {
+        try w.writeI32(feature_hash_lockable);
+        const lock_mark = try reserveU32(&w);
+        try w.writeBytes(cont.lock_blob[0..cont.lock_len]);
+        finalizeU32(&w, lock_mark);
+    }
 
     finalizeU32(&w, outer);
     return w.written();
@@ -273,6 +292,13 @@ pub const ParsedTe = struct {
     /// back over this exact span.
     storage_blob_off: usize = 0,
     storage_blob_len: usize = 0,
+    /// The composite carried a TEFeatureLockable module, and its body passed
+    /// the field walk. The caller copies `body[lock_blob_off..][0..lock_blob_len]`
+    /// onto the container so the padlock is server-owned (chunk re-stream,
+    /// rejoin, restart) instead of surviving only inside one echo.
+    found_lock: bool = false,
+    lock_blob_off: usize = 0,
+    lock_blob_len: usize = 0,
     /// Stock `worldTimeTouched`: the world time the container was last looted.
     /// TEFeatureStorage.UpdateTick derives LootRespawnDays from it, so it is
     /// state and not a formality.
@@ -328,6 +354,14 @@ pub fn parseStorageTeBody(body: []const u8) (binary.ReadError || error{NotStorag
             out.storage_blob_off = (@intFromPtr(pr.data.ptr) - @intFromPtr(body.ptr)) + pr.pos;
             out.storage_blob_len = feat_payload_len;
             try parseStorageFeature(&pr, &out);
+        } else if (hash == feature_hash_lockable and feat_payload_len <= containers.max_lock_feature_bytes) {
+            // Walk the module before storing it: the bytes are re-emitted to
+            // every client that streams the container, so a body that does not
+            // hold the stock fields never becomes the server's lock state.
+            try validateLockFeature(&pr, feat_payload_len);
+            out.found_lock = true;
+            out.lock_blob_off = (@intFromPtr(pr.data.ptr) - @intFromPtr(body.ptr)) + feat_start;
+            out.lock_blob_len = feat_payload_len;
         } else {
             pr.pos += feat_payload_len;
         }
@@ -338,6 +372,29 @@ pub fn parseStorageTeBody(body: []const u8) (binary.ReadError || error{NotStorag
     }
     if (!out.found_storage) return error.NotStorageTe;
     return out;
+}
+
+/// Walk a TEFeatureLockable module body: `locked` bool | i32 allowed-user
+/// count | count x PlatformUserIdentifierAbs | password hash string
+/// (TEFeatureLockable::Read IL=50). `payload_len` is the module's declared
+/// body; the walk must end inside it, so a body that merely claims to be a
+/// lockable module is refused instead of stored as the server's lock state.
+fn validateLockFeature(pr: *binary.Reader, payload_len: usize) binary.ReadError!void {
+    const end = pr.pos + payload_len;
+    _ = try pr.readBool();
+    const users = try pr.readI32();
+    if (users < 0 or users > max_lock_users) return error.InvalidString;
+    var i: i32 = 0;
+    while (i < users) : (i += 1) try platform_user.skip(pr);
+    try pr.skipString();
+    if (pr.pos > end) return error.InvalidString;
+}
+
+/// Test hook: walk one TEFeatureLockable module body exactly as the composite
+/// parser does, without building a whole TE around it.
+pub fn validateLockFeatureForTest(blob: []const u8) binary.ReadError!void {
+    var r: binary.Reader = .{ .data = blob };
+    return validateLockFeature(&r, blob.len);
 }
 
 /// A composite TE that carries `TEFeatureSignable` (a sign, or a writable

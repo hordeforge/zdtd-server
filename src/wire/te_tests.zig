@@ -687,3 +687,48 @@ test "light TE body round-trips the stock network layout" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.5), try r.readF32(), 0.001); // delay
     try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
+
+test "a locked container writes the lockable module and reads it back" {
+    // TEFeatureLockable::Write IL=42 in network mode: `locked` bool | i32
+    // allowed-user count | count x PlatformUserIdentifierAbs | password hash
+    // string. zdtd keeps the module body verbatim so the padlock survives the
+    // chunk stream, a rejoin and a restart instead of only riding one echo.
+    var cont: containers.Container = .{
+        .pos = .{ .x = 4, .y = 70, .z = 4 },
+        .block_id = 500,
+        .slot_count = 8,
+    };
+    var lb: [containers.max_lock_feature_bytes]u8 = undefined;
+    var lw: binary.Writer = .{ .buf = &lb };
+    try lw.writeBool(true);
+    try lw.writeI32(0); // no allowed users
+    try lw.writeString(""); // empty password hash
+    const lock = lw.written();
+    cont.lock_len = @intCast(lock.len);
+    @memcpy(cont.lock_blob[0..lock.len], lock);
+    try std.testing.expectEqual(stock_te.feature_hash_lockable, unity_hash.getStableHashCode("TEFeatureLockable"));
+
+    var buf: [8192]u8 = undefined;
+    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed = try parseStorageTeBody(body);
+    try std.testing.expect(parsed.found_storage);
+    try std.testing.expect(parsed.found_lock);
+    try std.testing.expectEqual(lock.len, parsed.lock_blob_len);
+    try std.testing.expectEqualSlices(u8, lock, body[parsed.lock_blob_off..][0..parsed.lock_blob_len]);
+    // Unlocked: the composite declares the storage module alone.
+    cont.lock_len = 0;
+    const plain = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed_plain = try parseStorageTeBody(plain);
+    try std.testing.expect(parsed_plain.found_storage);
+    try std.testing.expect(!parsed_plain.found_lock);
+    // A module whose declared body is not a lockable field walk is refused, so
+    // a forged blob never becomes the server's lock state.
+    var bad: [64]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &bad };
+    try bw.writeBool(true);
+    try bw.writeI32(stock_te.max_lock_users + 1);
+    const bad_lock = bw.written();
+    var short_lock: [16]u8 = undefined;
+    @memcpy(short_lock[0..bad_lock.len], bad_lock);
+    try std.testing.expectError(error.InvalidString, stock_te.validateLockFeatureForTest(short_lock[0..bad_lock.len]));
+}

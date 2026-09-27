@@ -22,6 +22,22 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**A container padlock is server state 2026-09-28**: stock's client writes its
+`TEFeatureLockable` module through `NetPackageTileEntity` (the FromClient read
+mode, `ProcessPackage` IL_0082), and a dedi keeps that TE. zdtd relayed the
+module inside the echo only, so the padlock lived in one package: a player who
+streamed the chunk later, rejoined, or came back after a restart saw an
+unlocked chest. The module body (`TEFeatureLockable::Write` IL=42: `locked`
+bool, the allowed users, the password hash) is now walked and stored verbatim on
+the container, emitted from that state by every TE the chunk stream, a rejoin
+or a lock grant builds, and persisted in ZCT4 (ZCT1-ZCT3 still load, unlocked).
+A storage-only write is the client's unlock and clears it. LockPickable (the
+wall-safe pick flow) and Canvas stay open, and enforcement stays where stock has
+it, on the client's own TE mirror. Gated by
+`a locked container writes the lockable module and reads it back`,
+`a container's lock module survives the ZCT4 round trip and ZCT3 loads unlocked`
+and `scenario a container padlock becomes server state and streams from it`
+(adopt, stream from server state, clear on unlock).
 **A damaged block now reaches every watching client 2026-09-26**: stock
 `Block::OnBlockDamaged` (IL_0457) writes the new damage onto the block value and
 calls `SetBlocksRPC` / `SetBlockRPC` whether or not the block breaks, so every

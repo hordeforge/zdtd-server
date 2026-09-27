@@ -6,6 +6,11 @@ const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
 pub const max_container_slots: usize = 54; // 9x6 common chest
+/// Largest TEFeatureLockable module body zdtd keeps: the `locked` bool, the
+/// allowed-user count and its platform ids, and the password hash string
+/// (TEFeatureLockable::Write IL=42). Stock ships no bound; a larger module is
+/// dropped (the container keeps its previous lock, never a truncated one).
+pub const max_lock_feature_bytes: usize = 256;
 /// Game embeds ContainerStore on the heap (allocator.create), so the array is
 /// sized for a long-lived world; the save path buffers on the heap, not the
 /// stack. GAP 12: 256 silently dropped the 257th container on save (raised to
@@ -13,7 +18,7 @@ pub const max_container_slots: usize = 54; // 9x6 common chest
 /// alone has thousands of loot containers and a hard cap truncates the tail  -
 /// every container past it comes back empty).
 pub const max_containers: usize = 4096;
-const persisted_container_size: usize = 20 + max_container_slots * components.inv_slot_persist_stride + 4 + 2; // + touched_day u32 + size_x/size_y u8 (ZCT3)
+const persisted_container_size: usize = 20 + max_container_slots * components.inv_slot_persist_stride + 4 + 2 + 2 + max_lock_feature_bytes; // + touched_day u32 + size_x/size_y u8 (ZCT3) + lock_len u16 and lock module (ZCT4)
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
 pub const PosKey = struct {
@@ -50,6 +55,14 @@ pub const Container = struct {
     /// fill path; the destroy_on_close check reads it). Points into the loot
     /// table's arena; not persisted (a reload re-derives it at fill).
     loot_list: []const u8 = "",
+    /// Server-owned `TEFeatureLockable` module body, verbatim as the client
+    /// wrote it: the `locked` flag, the allowed users and the password hash
+    /// (TEFeatureLockable::Write IL=42). 0 = no module, i.e. this container is
+    /// not padlocked. Kept so the lock survives a chunk re-stream, a rejoin and
+    /// a restart: zdtd used to relay the client's module in the echo only, so a
+    /// player who streamed the area later saw an unlocked chest.
+    lock_blob: [max_lock_feature_bytes]u8 = undefined,
+    lock_len: u16 = 0,
 
     pub fn clear(self: *Container) void {
         self.slots = [_]components.InvSlot{.{}} ** max_container_slots;
@@ -185,12 +198,13 @@ pub const ContainerStore = struct {
         }
     }
 
-    /// Persist file: magic "ZCT3" | u16 count | per container:
+    /// Persist file: magic "ZCT4" | u16 count | per container:
     /// pos xyz i32*3 | block_id i32 | slot_count u16 | touched u8 | player u8 |
     /// slot_count * InvSlot persist stride (same shape as ZPV17/ZEN2) |
-    /// touched_day u32 | size_x u8 | size_y u8. ZCT1 (7-byte slots, no
-    /// touched_day/sizes) and ZCT2 (7-byte slots + day + sizes) still load;
-    /// ZCT3 keeps mods, stats, flags, and durability across restarts.
+    /// touched_day u32 | size_x u8 | size_y u8 | lock_len u16 | lock module
+    /// bytes. ZCT1 (7-byte slots, no touched_day/sizes) and ZCT2 (7-byte slots
+    /// + day + sizes) and ZCT3 (full slots, no lock) still load; ZCT4 keeps the
+    /// container's TEFeatureLockable module across restarts.
     ///
     /// Records are sorted by world pos so bytes are independent of sparse slot
     /// assignment order (needed for DST fault injection / mid-save replay).
@@ -203,7 +217,7 @@ pub const ContainerStore = struct {
         const buf = try allocator.alloc(u8, save_capacity);
         defer allocator.free(buf);
         var o: usize = 0;
-        @memcpy(buf[0..4], "ZCT3");
+        @memcpy(buf[0..4], "ZCT4");
         o = 6; // count patched below
 
         // Collect used indices, sort by (x,y,z). max_containers is fixed.
@@ -230,10 +244,10 @@ pub const ContainerStore = struct {
         for (idxs[0..n_idx]) |ii| {
             const c = &self.items[ii];
             // Must cover everything the body below writes: header, slots,
-            // touched_day u32 AND the size_x/size_y pair. save_capacity
-            // budgets the full record, so this never trips today, but
-            // a guard that under-counts what it guards is a latent overrun.
-            if (o + 20 + @as(usize, c.slot_count) * slot_stride + 4 + 2 > buf.len) break;
+            // touched_day u32, the size_x/size_y pair AND the lock tail.
+            // save_capacity budgets the full record, so this never trips today,
+            // but a guard that under-counts what it guards is a latent overrun.
+            if (o + 20 + @as(usize, c.slot_count) * slot_stride + 4 + 2 + 2 + c.lock_len > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
             std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.pos.z, .little);
@@ -255,21 +269,30 @@ pub const ContainerStore = struct {
             buf[o] = c.size_x;
             buf[o + 1] = c.size_y;
             o += 2;
+            // ZCT4: the TEFeatureLockable module body, verbatim.
+            std.mem.writeInt(u16, buf[o..][0..2], c.lock_len, .little);
+            o += 2;
+            if (c.lock_len > 0) {
+                @memcpy(buf[o..][0..c.lock_len], c.lock_blob[0..c.lock_len]);
+                o += c.lock_len;
+            }
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
         try io_fs.writeFile(p, buf[0..o]);
     }
 
-    /// Decode a ZCT1/ZCT2/ZCT3 buffer (magic | count | records). Used by load and
-    /// fuzz. ZCT3 slots use the shared InvSlot persist stride; ZCT1/ZCT2 keep
-    /// the legacy 7-byte head. ZCT2/ZCT3 carry size_x/size_y after touched_day;
-    /// ZCT1 records end after the slots and load sizes as 0
-    /// (the wire writer synthesizes the grid).
+    /// Decode a ZCT1/ZCT2/ZCT3/ZCT4 buffer (magic | count | records). Used by
+    /// load and fuzz. ZCT3/ZCT4 slots use the shared InvSlot persist stride;
+    /// ZCT1/ZCT2 keep the legacy 7-byte head. ZCT2+ carry size_x/size_y after
+    /// touched_day; ZCT1 records end after the slots and load sizes as 0
+    /// (the wire writer synthesizes the grid). ZCT4 appends the container's
+    /// TEFeatureLockable module after the sizes; older saves load unlocked.
     pub fn loadFromSlice(self: *ContainerStore, buf: []const u8) !void {
         const len = buf.len;
         if (len < 6) return error.ReadFailed;
-        const full_slots = std.mem.eql(u8, buf[0..4], "ZCT3");
+        const with_lock = std.mem.eql(u8, buf[0..4], "ZCT4");
+        const full_slots = with_lock or std.mem.eql(u8, buf[0..4], "ZCT3");
         const with_size = full_slots or std.mem.eql(u8, buf[0..4], "ZCT2");
         if (!full_slots and !with_size and !std.mem.eql(u8, buf[0..4], "ZCT1")) return error.ReadFailed;
         const slot_stride: usize = if (full_slots) components.inv_slot_persist_stride else 7;
@@ -338,6 +361,22 @@ pub const ContainerStore = struct {
                     c.size_y = buf[o + 1];
                 }
                 o += 2;
+            }
+            // ZCT4: lock_len u16 then that many TEFeatureLockable module bytes.
+            // A record is consumed whole even when the store is full, and an
+            // over-long or truncated lock tail is a hard read failure: the
+            // writer never emits one, so continuing would shift every record
+            // after it.
+            if (with_lock) {
+                if (o + 2 > len) return error.ReadFailed;
+                const lock_len = std.mem.readInt(u16, buf[o..][0..2], .little);
+                o += 2;
+                if (@as(usize, lock_len) > max_lock_feature_bytes or o + lock_len > len) return error.ReadFailed;
+                if (maybe_c) |c| {
+                    c.lock_len = lock_len;
+                    if (lock_len > 0) @memcpy(c.lock_blob[0..lock_len], buf[o..][0..lock_len]);
+                }
+                o += lock_len;
             }
         }
     }
@@ -667,4 +706,64 @@ test "container store evicts world containers before dropping (cap 4096)" {
     try std.testing.expect(s.get(.{ .x = 1, .y = 0, .z = 0 }) == null);
     const kept = s.get(.{ .x = 0, .y = 0, .z = 0 }).?;
     try std.testing.expect(kept.player_storage);
+}
+
+test "a container's lock module survives the ZCT4 round trip and ZCT3 loads unlocked" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
+    const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 8, 500).?;
+    c.size_x = 6;
+    c.size_y = 2;
+    c.touched_day = 9;
+    // locked=true, no allowed users, empty password hash (the module body the
+    // client writes for a fresh padlock).
+    const lock = [_]u8{ 1, 0, 0, 0, 0, 0 };
+    c.lock_len = lock.len;
+    @memcpy(c.lock_blob[0..lock.len], &lock);
+    try s.save(dir, std.testing.allocator);
+
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
+    try s2.load(dir);
+    const r = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
+    try std.testing.expectEqual(@as(u16, lock.len), r.lock_len);
+    try std.testing.expectEqualSlices(u8, &lock, r.lock_blob[0..r.lock_len]);
+    try std.testing.expectEqual(@as(u8, 6), r.size_x);
+    try std.testing.expectEqual(@as(u32, 9), r.touched_day);
+
+    // A legacy ZCT3 buffer has no lock tail: it loads unlocked, not as garbage.
+    const stride = components.inv_slot_persist_stride;
+    var legacy: [6 + 20 + 4 * stride + 4 + 2]u8 = undefined;
+    @memcpy(legacy[0..4], "ZCT3");
+    std.mem.writeInt(u16, legacy[4..6], 1, .little);
+    var o: usize = 6;
+    std.mem.writeInt(i32, legacy[o..][0..4], 7, .little);
+    std.mem.writeInt(i32, legacy[o + 4 ..][0..4], 70, .little);
+    std.mem.writeInt(i32, legacy[o + 8 ..][0..4], 8, .little);
+    std.mem.writeInt(i32, legacy[o + 12 ..][0..4], 500, .little);
+    std.mem.writeInt(u16, legacy[o + 16 ..][0..2], 4, .little);
+    legacy[o + 18] = 0;
+    legacy[o + 19] = 1;
+    o += 20;
+    @memset(legacy[o..][0 .. 4 * components.inv_slot_persist_stride], 0);
+    o += 4 * components.inv_slot_persist_stride;
+    std.mem.writeInt(u32, legacy[o..][0..4], 3, .little);
+    o += 4;
+    legacy[o] = 2;
+    legacy[o + 1] = 3;
+    o += 2;
+    const s3_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s3_box);
+    s3_box.* = .{};
+    try s3_box.loadFromSlice(legacy[0..o]);
+    const l = s3_box.get(.{ .x = 7, .y = 70, .z = 8 }).?;
+    try std.testing.expectEqual(@as(u16, 0), l.lock_len);
+    try std.testing.expectEqual(@as(u8, 2), l.size_x);
 }
