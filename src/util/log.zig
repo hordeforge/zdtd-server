@@ -13,6 +13,13 @@ const std = @import("std");
 const clock = @import("clock.zig");
 
 var quiet: bool = false;
+
+/// When non-null, log lines go to this buffer instead of stderr and the write
+/// is bounded: overflow is dropped, never grown. A log line is unobservable
+/// from a test otherwise, so the severity and quiet gates could only be
+/// asserted by reading the runner's output. Cleared by `stopCapture`.
+var capture: ?[]u8 = null;
+var capture_len: usize = 0;
 /// Stock Log.Level (ConsoleCmdLoglevel): 0 = Info (everything), 1 = Warning,
 /// 2 = Error, 3 = Exception, 4 = Off. `info`/`warn`/`err` map to 0/1/2 and
 /// are suppressed when below `min_level`. Set by the `loglevel` admin verb.
@@ -37,7 +44,9 @@ pub fn setLevel(l: u8) void {
 pub fn info(comptime fmt: []const u8, args: anytype) void {
     if (quiet) return;
     if (min_level >= 1) return;
-    std.debug.print(fmt, args);
+    var w: std.Io.Writer = .fixed(&line_buf);
+    w.print(fmt, args) catch {};
+    write(w.buffered());
 }
 
 /// Runtime warning line. Suppressed by `loglevel >= 2` (never hidden by
@@ -95,26 +104,131 @@ pub fn infoTagged(comptime fmt: []const u8, args: anytype) void {
 fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void {
     var ts: [19]u8 = undefined;
     const stamp = clock.wallStamp(&ts);
-    std.debug.print("zdtd: {s} [" ++ tag ++ "] " ++ fmt, .{stamp} ++ args);
+    var w: std.Io.Writer = .fixed(&line_buf);
+    w.print("zdtd: {s} [" ++ tag ++ "] " ++ fmt, .{stamp} ++ args) catch {};
+    write(w.buffered());
 }
 
-test "quiet gates info output" {
+/// Scratch a line is formatted into before it reaches the sink. A log line
+/// past this size is truncated at a line boundary, never silently dropped.
+var line_buf: [line_cap]u8 = undefined;
+const line_cap = 1024;
+
+fn write(bytes: []const u8) void {
+    const dest = capture orelse {
+        std.debug.print("{s}", .{bytes});
+        return;
+    };
+    const room = dest.len -| capture_len;
+    const n = @min(room, bytes.len);
+    @memcpy(dest[capture_len..][0..n], bytes[0..n]);
+    capture_len += n;
+}
+
+/// Route log output into `buf` instead of stderr. The buffer is filled from
+/// index 0 and overflow is dropped; `captured` returns what was written so far.
+/// Test seam only: nothing in the process path calls it.
+pub fn startCapture(buf: []u8) void {
+    capture = buf;
+    capture_len = 0;
+}
+
+/// Everything written since `startCapture`, truncated at the buffer end if it
+/// overflowed. Empty when no capture is active.
+pub fn captured() []const u8 {
+    const buf = capture orelse return "";
+    return buf[0..capture_len];
+}
+
+pub fn stopCapture() void {
+    capture = null;
+    capture_len = 0;
+}
+
+test "quiet and loglevel gate info, never warn or err" {
+    // warn/err must ignore --quiet so a problem can never be hidden by a
+    // script's -q. Deterministic stamp via the virtual clock.
+    defer clock.disableVirtual();
+    clock.enableVirtual(86_400_000_000_000); // 1970-01-02 00:00:00
+
+    var buf: [512]u8 = undefined;
+    defer stopCapture();
+    startCapture(&buf);
+
     setQuiet(true);
-    info("this line must not print\n", .{});
+    info("boot banner\n", .{});
+    infoTagged("runtime event\n", .{});
+    try std.testing.expectEqualStrings("", captured());
+
     setQuiet(false);
+    setLevel(1); // ConsoleCmdLoglevel Warning
+    info("boot banner\n", .{});
+    try std.testing.expectEqualStrings("", captured());
+
+    setLevel(0);
+    info("boot banner\n", .{});
+    try std.testing.expectEqualStrings("boot banner\n", captured());
 }
 
 test "warn and error always emit with a timestamp and severity tag" {
-    // Deterministic timestamp via the virtual clock; warn/err must ignore the
-    // quiet flag so a problem can never be hidden by a script's -q.
     defer clock.disableVirtual();
     clock.enableVirtual(86_400_000_000_000); // 1970-01-02 00:00:00
+
+    var buf: [512]u8 = undefined;
+    defer stopCapture();
+    startCapture(&buf);
+
     setQuiet(true);
     warn("items.xml unreadable\n", .{});
-    err("world save failed: {s}\n", .{@errorName(@import("std").mem.Allocator.Error.OutOfMemory)});
-    errEvery(1, "throttled error\n", .{});
-    errEvery(2, "suppressed error\n", .{});
+    try std.testing.expectEqualStrings(
+        "zdtd: 1970-01-02 00:00:00 [WARN] items.xml unreadable\n",
+        captured(),
+    );
+
+    err("world save failed: OutOfMemory\n", .{});
+    try std.testing.expectEqualStrings(
+        "zdtd: 1970-01-02 00:00:00 [WARN] items.xml unreadable\n" ++
+            "zdtd: 1970-01-02 00:00:00 [ERROR] world save failed: OutOfMemory\n",
+        captured(),
+    );
+
     setQuiet(false);
     infoTagged("runtime event: started\n", .{});
-    try std.testing.expect(clock.isVirtual());
+    try std.testing.expect(std.mem.endsWith(u8, captured(), "[INFO] runtime event: started\n"));
+}
+
+test "errEvery lets the first occurrence through and throttles the rest" {
+    defer setLevel(0);
+    var buf: [1024]u8 = undefined;
+    defer stopCapture();
+    startCapture(&buf);
+
+    setLevel(0);
+    errEvery(1, "first\n", .{});
+    errEvery(2, "suppressed\n", .{});
+    errEvery(warn_throttle_every, "hundredth\n", .{});
+    const out = captured();
+    try std.testing.expect(std.mem.indexOf(u8, out, "[ERROR] first\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "suppressed") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[ERROR] hundredth\n") != null);
+}
+
+test "loglevel clamps to the stock Off value and gates by severity" {
+    defer setLevel(0);
+    var buf: [512]u8 = undefined;
+    defer stopCapture();
+    startCapture(&buf);
+
+    setLevel(9);
+    try std.testing.expectEqual(@as(u8, 4), level());
+    warn("off\n", .{});
+    err("off\n", .{});
+    try std.testing.expectEqualStrings("", captured());
+
+    setLevel(2); // Error
+    warn("below level\n", .{});
+    err("at level\n", .{});
+    const out = captured();
+    try std.testing.expect(std.mem.indexOf(u8, out, "below level") == null);
+    try std.testing.expect(std.mem.endsWith(u8, out, "[ERROR] at level\n"));
 }
