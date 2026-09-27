@@ -1,6 +1,8 @@
 # ADR 0040: WebUI dashboard as a Preact client over a JSON state endpoint
 
-- **Status:** accepted
+- **Status:** accepted (decision 3's toolchain note corrected 2026-09-27: the
+  `tsc` pass moved to `scripts/lint-webui.sh` and the build script also
+  compiles Tailwind; see "Amendment")
 - **Date:** 2026-09-18
 - **Related:** [ADR 0018](0018-webui-ops-dashboard.md), [WEBUI.md](../WEBUI.md), [DESIGN-webui.md](../DESIGN-webui.md), [subsystems/webui.md](../subsystems/webui.md)
 
@@ -68,3 +70,19 @@ default off).
 - A cache-cold checkout needs network once for the pinned preact tarball, as the
   anti-slop plugin already does. The Zig build stays offline: it embeds the
   committed pages and never runs the JS toolchain.
+
+## Amendment 2026-09-27: decision 3's toolchain split
+
+The shape of decision 3 stands: pages ship the compiled bundle inline, the Zig
+build stays offline, and a stale page fails `make lint`. What moved is which
+script does what. `scripts/build-webui-ts.sh` no longer runs `tsc`; it stages
+the cached project (`scripts/webui-ts-project.sh`), compiles one Tailwind
+bundle per page entry, runs `bun build --format=iife` per page entry and
+splices both into the committed pages. The type pass is `tsc --noEmit` in
+`scripts/lint-webui.sh`, in the same staged project, so a type error fails
+lint without a rebuild. Both scripts share the staging helper and its pinned
+package versions, so the pinned-preact fact in decision 3 is unchanged.
+
+The Context's `src/server/webui/ts/shell.ts` poller is now
+`src/server/webui/ts/shell.tsx`; the shadcn port (ADR 0041) made the dashboard
+entry JSX.

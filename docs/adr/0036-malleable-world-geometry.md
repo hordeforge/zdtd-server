@@ -58,16 +58,18 @@ block layers carry tall truth.
 ## Consequences
 
 **Easy now:** a world/modpack can ship compressed or sea-level-mapped terrain
-via `[rules.geometry]` with a stock client; the wire/save/storage seam for a
-taller column exists, is config-declared, and is proven by a `tall-512`
-scenario (128-layer wire bodies, ZCH4 save round-trip, production chunk_fill
-stream) - no stock bytes changed (golden tests guard).
+via `[rules.geometry]` with a stock client. The wire/save/storage seam for a
+taller column existed and was proven by a `tall-512` scenario (128-layer wire
+bodies, ZCH4 save round-trip, production chunk_fill stream), no stock bytes
+changed (golden tests guard) - but the 2026-09-20 amendment withdrew the
+config surface and that scenario, so the seam is no longer config-declared.
 
 **Harder / costs:** a dense non-stock chunk can exceed the fixed 512 KiB
 `body_buf` (stock worst case ~262 KiB); today that fails loudly (encode
 Overflow) rather than corrupting - a profile-sized send buffer is follow-on
-work. `tall-512` is a synthetic dialect: no real client can read it, so it is
-test-only; implementing an actual RealEarth-compatible dialect needs RE of
+work. `tall-512` was a synthetic dialect: no real client can read it, so it was
+test-only, and the 2026-09-20 amendment dropped it; implementing an actual
+RealEarth-compatible dialect needs RE of
 their patched formats in the research repo plus a patched client in the test
 env (out of scope here). Proc terrain is not yet projection-driven (its
 elevation model is the generator's own params) - documented, not silent.
@@ -83,7 +85,9 @@ boundary for world geometry - plugins gate *behavior*, not format.
 `tall-512` scenario. The reason is the one decision 2 already named as its own
 cost: no real client reads a non-stock dialect, so the config surface only ever
 selected a synthetic, test-only profile while costing an operator-visible key
-that could break a world.
+that could break a world. Decision 2's text above (and the "Easy now" and
+"Harder" paragraphs under Consequences) describe the state as it stood before
+this amendment and are kept for the record, not as the current tree.
 
 What remains: `protocol.WireProfile` is a fixed-height carry for the save and
 chunk wire builders, pinned to `stock_profile` in `src/main.zig`
