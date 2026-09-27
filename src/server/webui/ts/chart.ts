@@ -53,7 +53,7 @@ const PLACEHOLDER_WINDOW_MS = 60000;
 const CHART_FONT_SIZE_PX = 10;
 // The mono token is the type the terminal is drawn in, so the canvas reads it
 // with the same stack webui.css declares rather than a second copy of it.
-const MONO_FALLBACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+const MONO_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 const CAPTION_STALE = "live data unavailable - showing last samples";
 const CAPTION_COLLECTING = "collecting samples…";
 const CIRCLE = 2;
@@ -118,7 +118,7 @@ function cssVar(name: string, fallback: string): string {
 // for the transition. Each fallback mirrors the token it stands in for
 // (webui.css @theme): a frame drawn before the variables resolve is the
 // paper cockpit's terminal, not a stock grey.
-const TERM_FALLBACK = {
+const TERM_PALETTE = {
     text: "#d8e2dc",
     faint: "#7f8b94",
     line: "#2a333d",
@@ -128,25 +128,25 @@ const TERM_FALLBACK = {
     key: "#ffd8a0",
 };
 
-let CHART_LINE_COLOR = TERM_FALLBACK.ok;
-let CHART_GHOST_COLOR = TERM_FALLBACK.faint;
-let CHART_GRID_COLOR = TERM_FALLBACK.line;
-let CHART_LABEL_COLOR = TERM_FALLBACK.faint;
-let CHART_BUDGET_COLOR = TERM_FALLBACK.key;
+let CHART_LINE_COLOR = TERM_PALETTE.ok;
+let CHART_GHOST_COLOR = TERM_PALETTE.faint;
+let CHART_GRID_COLOR = TERM_PALETTE.line;
+let CHART_LABEL_COLOR = TERM_PALETTE.faint;
+let CHART_BUDGET_COLOR = TERM_PALETTE.key;
 let SECTION_FILL_COLORS: ReadonlyArray<string> = [];
 
 function refreshChartPalette(): void {
-    CHART_LINE_COLOR = cssVar("--color-term-ok", TERM_FALLBACK.ok);
-    CHART_GHOST_COLOR = cssVar("--color-term-faint", TERM_FALLBACK.faint);
-    CHART_GRID_COLOR = cssVar("--color-term-line", TERM_FALLBACK.line);
-    CHART_LABEL_COLOR = cssVar("--color-term-faint", TERM_FALLBACK.faint);
-    CHART_BUDGET_COLOR = cssVar("--color-term-key", TERM_FALLBACK.key);
+    CHART_LINE_COLOR = cssVar("--color-term-ok", TERM_PALETTE.ok);
+    CHART_GHOST_COLOR = cssVar("--color-term-faint", TERM_PALETTE.faint);
+    CHART_GRID_COLOR = cssVar("--color-term-line", TERM_PALETTE.line);
+    CHART_LABEL_COLOR = cssVar("--color-term-faint", TERM_PALETTE.faint);
+    CHART_BUDGET_COLOR = cssVar("--color-term-key", TERM_PALETTE.key);
     SECTION_FILL_COLORS = [
-        cssVar("--color-term-line", TERM_FALLBACK.line),
-        cssVar("--color-term-band1", TERM_FALLBACK.band1),
-        cssVar("--color-term-band2", TERM_FALLBACK.band2),
-        cssVar("--color-term-faint", TERM_FALLBACK.faint),
-        cssVar("--color-term-text", TERM_FALLBACK.text),
+        cssVar("--color-term-line", TERM_PALETTE.line),
+        cssVar("--color-term-band1", TERM_PALETTE.band1),
+        cssVar("--color-term-band2", TERM_PALETTE.band2),
+        cssVar("--color-term-faint", TERM_PALETTE.faint),
+        cssVar("--color-term-text", TERM_PALETTE.text),
     ];
 }
 
@@ -282,7 +282,7 @@ function sizeChartCanvas(): boolean {
 }
 
 function chartFont(): string {
-    return `${CHART_FONT_SIZE_PX}px ${cssVar("--font-mono", MONO_FALLBACK)}`;
+    return `${CHART_FONT_SIZE_PX}px ${cssVar("--font-mono", MONO_STACK)}`;
 }
 
 function drawPlaceholder(ctx: CanvasRenderingContext2D): void {
