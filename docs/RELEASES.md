@@ -3,13 +3,18 @@
 > **What this is:** the version and compatibility policy - what SemVer means here, what is covered by compat promises (stock client, Zig, config, saves, wire), and the gate for tagging a release.
 > **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
 
-zdtd is pre-1.0 research software: `0.8.0` (src/version.zig + build.zig.zon,
+zdtd is pre-1.0 research software. `0.8.0` (src/version.zig + build.zig.zon,
 drift-checked by `make check`) is the development line and `v0.7.0` the latest
-release. A minor bump carries no stable API commitment. Product tags: `v0.1.0`,
-`v0.1.1`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`, `v0.7.0`. (`v3.1.0` points at the same commit as `v0.1.1` and names
-a stock wire version rather than a product version; it predates this policy
-and is not a product release. `0.2.0` has a dated CHANGELOG section but was
-never tagged, so its entries shipped as part of `0.3.0`.)
+release. A minor bump may land any time and carries no stable API commitment.
+Product tags: `v0.1.0`, `v0.1.1`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`,
+`v0.7.0`.
+
+Two tags predate this policy. `v0.1.1` and `v3.1.0` point at one commit whose
+`src/version.zig` declares `0.2.0`, so read that commit as the 0.2.0 tree, not
+as a fix-only patch over `v0.1.0`. `v3.1.0` names a stock wire version rather
+than a product version and is not a product release. `0.2.0` has a dated
+CHANGELOG section but was never tagged, so its entries shipped as part of
+`0.3.0`.
 
 ## Version policy
 

@@ -29,12 +29,31 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   compiled CSS). The freshness gate now covers both steps, and the CSS splice
   fails when a class in the page has no generated rule.
 
+### Fixed
+
+- **A read-only mount is named as the cause of an uncreatable world dir.** Both
+  `AccessDenied` and `ReadOnlyFileSystem` mean the same thing to the operator
+  (the world dir could not be created) and need different remedies, but only
+  the permission one was reported. Startup now prints
+  `cannot create world dir '<path>': ReadOnlyFileSystem (that path is on a
+  read-only mount; pick a writable --world)`; the existing `AccessDenied` arm
+  keeps the `check --world permissions` wording. Both are still a hard startup
+  failure with exit code 1, and no Zig dump.
+
 ### Development
 
 - The webui toolchain pins `clsx`, `tailwind-merge` and
   `class-variance-authority` alongside `preact`; `components.json` declares the
   shadcn aliases. All are staged into the cache project by
   `scripts/webui-ts-project.sh`, so the Zig build stays offline and untracked.
+- **The release binary no longer embeds the build host's home directory.**
+  `build.zig` passes the `$HOME`-derived stock root (`src/util/stock_paths.zig`)
+  to the test and fuzz modules only; the shipped executable builds with an
+  empty root, because every non-test reference is a skip-when-absent offline
+  fixture lookup. The artifact's bytes no longer depend on the build machine,
+  and a builder's home path is not in an operator-facing binary.
+  `make repro` now gives its two scratch trees different `$HOME` values, so a
+  reintroduced capture fails the reproducibility gate instead of passing it.
 
 ## [0.7.0] - 2026-09-26
 
