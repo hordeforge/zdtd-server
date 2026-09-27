@@ -38,7 +38,7 @@ trap 'rm -rf "$tmp"' EXIT
 # (the login pages stay small instead of carrying the dashboard's chart and
 # table utilities). Theme (@theme in webui.css) rides along in each output.
 for page in shell login lockout; do
-  ( cd "$project" && bunx --bun @tailwindcss/cli \
+  ( cd "$project" && bunx --bun "@tailwindcss/cli@$webui_ts_tailwind_version" \
     -i "$project/webui-$page.css" -o "$tmp/webui-$page.css" --minify )
 done
 

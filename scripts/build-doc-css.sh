@@ -48,7 +48,7 @@ python3 "$root/scripts/strip-generated-regions.py" "$dest/provenance.html" "$sta
 
 # Run from the staged project so the pinned @tailwindcss/cli resolves. Tailwind
 # resolves @import and @source relative to the entry file, not the cwd.
-( cd "$project" && bunx --bun @tailwindcss/cli -i "$stage/docs/provenance.css" -o "$stage/provenance.out.css" --minify )
+( cd "$project" && bunx --bun "@tailwindcss/cli@$webui_ts_tailwind_version" -i "$stage/docs/provenance.css" -o "$stage/provenance.out.css" --minify )
 
 python3 - "$stage/provenance.out.css" "$dest/provenance.html" <<'PY'
 import pathlib

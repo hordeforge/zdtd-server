@@ -1,12 +1,13 @@
 # Third-party components
 
 zdtd links or evaluates third-party code through its Zig package manager
-(`build.zig.zon`). This file is the running license inventory.
+(`build.zig.zon`) and its webui JS toolchain (the version pins in
+`scripts/webui-ts-project.sh`). This file is the running license inventory.
 
-> Maintenance rule: when the dependency set in `build.zig.zon` changes
-> (add, remove, or version bump), update the inventory below. Anything
-> linked into the zdtd binary must be permissively licensed and carry its
-> license text with the distributed work.
+> Maintenance rule: when the dependency set in `build.zig.zon` or the webui
+> pins change (add, remove, or version bump), update the inventory below and
+> `scripts/release-sbom.sh`. Anything linked into the zdtd binary must be
+> permissively licensed and carry its license text with the distributed work.
 
 ## Linked into the zdtd binary
 
@@ -14,6 +15,11 @@ zdtd links or evaluates third-party code through its Zig package manager
 |---|---|---|---|---|
 | [zwasm](https://github.com/clojurewasm/zwasm) | 2.5.0 | Apache-2.0 | 2026 zwasm Contributors | WebAssembly runtime for the native plugin host (`src/plugin/wasm.zig`). Hash-pinned in `build.zig.zon`. |
 | [preact](https://github.com/preactjs/preact) | 10.29.8 | MIT | 2015-present Jason Miller | Dashboard client (ADR 0040), bundled by `scripts/build-webui-ts.sh` into the pages embedded in the binary. Version pinned by `PREACT_VERSION`. |
+| [clsx](https://github.com/lukeed/clsx) | 2.1.1 | MIT | 2015 Luke Edwards | Conditional class joins behind `cn()` (`ts/lib/utils.ts`); bundled into the embedded pages. Pinned by `CLSX_VERSION`. |
+| [tailwind-merge](https://github.com/dcastil/tailwind-merge) | 3.4.1 | MIT | 2021-2024 Victor Cazanova | Tailwind conflict resolution behind `cn()`; bundled into the embedded pages. Pinned by `TAILWIND_MERGE_VERSION`. |
+| [class-variance-authority](https://github.com/joe-bell/cva) | 0.7.1 | Apache-2.0 | 2023 Joe Bell | Variant class maps for the shadcn primitives; bundled into the embedded pages. Pinned by `CVA_VERSION`. |
+| [tailwindcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | 2017-present Tailwind Labs Inc. | Utility compiler; its output CSS is spliced into the pages embedded in the binary. Pinned by `TAILWIND_VERSION`. |
+| [@tailwindcss/cli](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | 2017-present Tailwind Labs Inc. | Command-line wrapper that drives the pinned compiler above. Pinned by `TAILWIND_VERSION`. |
 
 Apache-2.0 section 4 requires that recipients of derivative works receive a
 copy of the license. The full Apache-2.0 text is reproduced below.

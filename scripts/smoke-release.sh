@@ -136,6 +136,14 @@ if ! grep -Fq "\"value\": \"$zwasm_hash\"" "$sbom"; then
   echo "smoke-release: $sbom does not record the zwasm hash $zwasm_hash from build.zig.zon" >&2
   exit 1
 fi
+# The webui pages are embedded in the binary, so the packages bundled into them
+# belong in the inventory too (see THIRD_PARTY.md).
+for webui_pkg in preact clsx tailwind-merge class-variance-authority tailwindcss '@tailwindcss/cli'; do
+  if ! grep -Fq "\"name\": \"$webui_pkg\"" "$sbom"; then
+    echo "smoke-release: $sbom does not name the embedded webui package $webui_pkg" >&2
+    exit 1
+  fi
+done
 
 # Startup smoke: bind sockets, run one tick, save, exit.
 # Use zig-out (gitignored, disk-backed) rather than /tmp (tmpfs on some hosts).
