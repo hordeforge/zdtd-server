@@ -191,7 +191,7 @@ Nothing about bots persists. No bot state is written by the persistence layer, a
 - ADR 0026 lists `bot cfg <id> <key> <val>` as a host verb (docs/adr/0026-fps-bot-wasm-module.md:109) and mentions a `BotDef` component; the shipped host has neither, and `bot skill` / `bot cfg` are guest-local state (mods/fps_bot/fps_bot.c:1362, 1389).
 - `docs/IMPLEMENTATION_PLAN_BOTS.md` still describes bots as an ECS `Kind` with a `BotDef` column and `is_mob` replication, with line references that no longer resolve; the ADR 0026 amendment and `src/server/game/bot.zig:1` supersede it.
 - Two doc comments still say a 32-byte sense record (src/server/game/bot.zig:655; src/server/game/wasm_host.zig:286) while the record is 40 bytes (src/server/game/bot.zig:91).
-- Stock fidelity: a bot reaches the client as a stock player-mesh entity spawn plus `PosAndRot`, built by the stock builders (src/server/game/replicate.zig:390). No stock-client proof of bot appearance is cited in this page's sources; the integration test drives the committed guest through the host sense/queue boundary, which proves self-consistency, not stock compatibility (src/plugin/tests.zig:1254).
+- Stock fidelity: a bot reaches the client as a stock player-mesh entity spawn plus `PosAndRot`, built by the stock builders (src/server/game/replicate.zig:390). No stock-client proof of bot appearance is cited in this page's sources; the integration test drives the committed guest through the host sense/queue boundary, which proves self-consistency, not stock compatibility (src/plugin/wasm_tests.zig:1254).
 
 ## See also
 

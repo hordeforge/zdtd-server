@@ -182,8 +182,8 @@ module missing from the list is never built into the mirror, so the freshness
 gate never compares it.
 
 Then add the module path to the shipped-set list in the host contract test
-(`src/plugin/tests.zig:611-624`), which loads every shipped module and asserts
-each one declares the host contract version (`src/plugin/tests.zig:607`). The
+(`src/plugin/wasm_tests.zig:611-624`), which loads every shipped module and asserts
+each one declares the host contract version (`src/plugin/wasm_tests.zig:607`). The
 host table holds 32 modules (`src/plugin/wasm.zig:954`), and the test asserts
 the shipped set fits.
 

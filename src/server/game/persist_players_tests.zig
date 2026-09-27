@@ -1,6 +1,6 @@
 //! Game integration tests: peer keys, player persistence (ZPV).
 //!
-//! Split out of server/game/tests.zig (same tests, moved verbatim).
+//! Split out of server/game/game_tests.zig (same tests, moved verbatim).
 
 const std = @import("std");
 const test_tmp = @import("../../util/test_tmp.zig");

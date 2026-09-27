@@ -11,7 +11,7 @@ pub const host = @import("host.zig");
 pub const wasm = @import("wasm.zig");
 pub const manifest = @import("manifest.zig");
 pub const resolver = @import("resolver.zig");
-pub const tests = @import("tests.zig");
+pub const wasm_tests = @import("wasm_tests.zig");
 pub const imports = @import("imports.zig");
 
 pub const WasmHost = wasm.WasmHost;
@@ -30,6 +30,6 @@ test {
     _ = wasm;
     _ = manifest;
     _ = resolver;
-    _ = tests;
+    _ = wasm_tests;
     _ = imports;
 }

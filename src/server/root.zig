@@ -82,10 +82,10 @@ pub const game_wasm_host = @import("game/wasm_host.zig");
 pub const game_plugin_compose = @import("game/plugin_compose.zig");
 pub const game_constants = @import("game/constants.zig");
 pub const game_lifecycle = @import("game/lifecycle.zig");
-pub const game_tests = @import("game/tests.zig");
-pub const game_tests_players = @import("game/tests_players.zig");
-pub const game_tests_claims = @import("game/tests_claims.zig");
-pub const game_tests_offline = @import("game/tests_offline.zig");
+pub const game_tests = @import("game/game_tests.zig");
+pub const game_persist_players_tests = @import("game/persist_players_tests.zig");
+pub const game_claims_tests = @import("game/claims_tests.zig");
+pub const game_offline_tests = @import("game/offline_tests.zig");
 // C2S handlers (server/c2s/)
 pub const c2s_inv = @import("c2s/inv.zig");
 pub const c2s_inv_reload = @import("c2s/inv_reload.zig");
@@ -211,9 +211,9 @@ test {
     _ = game_constants;
     _ = game_lifecycle;
     _ = game_tests;
-    _ = game_tests_players;
-    _ = game_tests_claims;
-    _ = game_tests_offline;
+    _ = game_persist_players_tests;
+    _ = game_claims_tests;
+    _ = game_offline_tests;
     _ = c2s_inv;
     _ = c2s_inv_reload;
     _ = c2s_inv_holding;

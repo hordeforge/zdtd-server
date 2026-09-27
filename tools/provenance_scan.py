@@ -697,7 +697,7 @@ def main():
         "src/server/persist_entities.zig",
         # Test-only bodies: fixtures the tests feed themselves.
         "src/server/scenarios.zig",
-        "src/server/game/tests.zig",
+        "src/server/game/game_tests.zig",
         "src/server/game/harness.zig",
         # Holds a Writer only to carry a buffer into writeHoldingItem; the
         # bytes are the builder's. Its two hand-rolled bodies are gone: the

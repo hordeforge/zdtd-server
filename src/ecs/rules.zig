@@ -182,7 +182,7 @@ pub const Ai = struct {
     noise_events_per_tick: u8 = 2,
     /// --- Movement-noise volume model (RE entity-ai.md PlayerStealth) ---
     /// The per-clip volumes/decays themselves are game data (sounds.xml
-    /// `<Noise>` rows, loaded by assets/noise.zig); these are the stock model
+    /// `<Noise>` rows, loaded by assets/sound_noise.zig); these are the stock model
     /// constants, all configurable via mode packs.
     /// Geometric decay per stealth-list slot in CalcVolume (0.6^i weighting).
     stealth_noise_decay: f32 = 0.6,

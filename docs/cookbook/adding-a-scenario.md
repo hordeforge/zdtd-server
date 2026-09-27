@@ -21,7 +21,7 @@ Use the smallest proof that fails when the behavior breaks.
 | Change | Proof |
 |---|---|
 | one function, one file | a `test` block at the bottom of the owning file |
-| a `Game` helper or the persistence path | `src/server/game/tests.zig` |
+| a `Game` helper or the persistence path | `src/server/game/game_tests.zig` |
 | join, spawn, chunk, inventory, replication, a wire round trip | a scenario |
 
 Multi-system join/inv/chunk paths extend `src/server/scenarios.zig` rather than

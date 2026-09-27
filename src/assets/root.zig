@@ -37,7 +37,7 @@ pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
 pub const gamestage_tests = @import("gamestage_tests.zig");
 pub const maxdamage = @import("maxdamage.zig");
-pub const noise = @import("noise.zig");
+pub const sound_noise = @import("sound_noise.zig");
 pub const traders = @import("traders.zig");
 pub const trader_tests = @import("trader_tests.zig");
 pub const npc = @import("npc.zig");
@@ -102,7 +102,7 @@ test {
     _ = gamestages;
     _ = gamestage_tests;
     _ = maxdamage;
-    _ = noise;
+    _ = sound_noise;
     _ = traders;
     _ = trader_tests;
     _ = npc;
