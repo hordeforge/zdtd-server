@@ -176,6 +176,38 @@ test "net id lookup falls back to authoritative columns when index misses" {
     try std.testing.expectEqual(expected, w.slotOfNetId(id).?);
 }
 
+test "destroy leaves no dangling net id and a recycled slot never aliases it" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const dead_id = w.spawnZombie(1, 2, 3, 40).?;
+    const dead_slot = w.slotOfNetId(dead_id).?;
+    const dead_handle = w.handleOfSlot(dead_slot);
+    w.destroy(dead_slot);
+    // net_to_slot is the authority on a healthy map, so a destroyed entity's
+    // id must not resolve. A stale entry would answer every late target
+    // lookup with whatever now owns the slot.
+    try std.testing.expect(w.net_to_slot.get(dead_id) == null);
+    try std.testing.expectEqual(null, w.slotOfNetId(dead_id));
+    try std.testing.expect(!w.handleAlive(dead_handle));
+    // freed_this_tick holds the slot for the EntityRemove broadcast.
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const fresh = w.spawnZombie(@floatFromInt(i), 2, 3, 40).?;
+        try std.testing.expect(w.slotOfNetId(fresh).? != dead_slot);
+    }
+    // Once the tick rolls, the slot comes back with a fresh id and a moved
+    // generation: the old id still resolves to nothing, and the handle taken
+    // before the destroy cannot address the new entity.
+    w.beginTick();
+    const live_id = w.spawnZombie(9, 2, 3, 40).?;
+    try std.testing.expect(live_id != dead_id);
+    try std.testing.expectEqual(dead_slot, w.slotOfNetId(live_id).?);
+    try std.testing.expectEqual(null, w.slotOfNetId(dead_id));
+    try std.testing.expect(!w.handleAlive(dead_handle));
+    try std.testing.expect(w.handleOfSlot(dead_slot).gen != dead_handle.gen);
+}
+
 test "player peer index follows replacement and destroy" {
     var w: World = .{};
     defer w.deinit();
