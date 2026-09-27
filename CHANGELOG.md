@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-26
+
 ### Breaking changes
 
 - **Misplaced credentials in zdtd.toml fail startup.** Startup now fails

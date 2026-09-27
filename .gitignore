@@ -42,6 +42,7 @@ assets/fixtures/assignids_v314.txt
 .cache_fixed_block_ids.txt
 .ruff_cache/
 .opencode/
+.zdtd_agent_cache/
 
 # Editor / agent scratch
 .claude.bak/
