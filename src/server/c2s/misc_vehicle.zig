@@ -94,6 +94,12 @@ pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
             // PlatformUserIdentifier, which is what the map waypoint list
             // filters on (VehicleManager.UpdateVehicleWaypointsForPlayer).
             self.sim.vehicle[vs].owner_slot = @intCast(c.slot);
+            // The class the ECD announces: the one the body claimed, already
+            // resolved to a vehicle through entityclasses.xml above. Without
+            // it the announce falls back to the zombie class, so replicate
+            // only announces vehicles whose class resolves.
+            self.sim.mask[vs].class_id = true;
+            self.sim.class_id[vs].hash = req.entity_type;
             self.sim.transform[vs].yaw = req.ry;
             // Force the next interest pass to send the ECD, so peers see the
             // vehicle entity and not just its transform stream.

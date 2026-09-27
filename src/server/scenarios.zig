@@ -1566,8 +1566,8 @@ test "scenario replicate sends TurretSync on target change" {
         try w.writeF32(tx); // pos
         try w.writeF32(ty);
         try w.writeF32(tz);
-        try w.writeF32(0); // rot
-        try w.writeF32(0);
+        try w.writeF32(0); // rot: stock sends (0, playerYaw, 0)
+        try w.writeF32(37);
         try w.writeF32(0);
         try w.writeByte(0); // ItemValue.None
         try w.writeI32(c.entity_id); // entityThatPlaced
@@ -1575,11 +1575,17 @@ test "scenario replicate sends TurretSync on target change" {
         try g.injectFramed(c, try packages.framed(&sfb, "NetPackageTurretSpawn", w.written()));
         try std.testing.expectEqual(before + 1, g.sim.countKind(.turret));
         // Placed where the client asked, not at a bit-pattern coordinate.
+        // ...and facing the yaw the body carried (stock's ProcessPackage sets
+        // the turret's rotation from it before spawning), which is what the
+        // client renders and what the ECD the peers receive carries.
         var placed = false;
         for (g.sim.kind_groups.slice(.turret)) |slot| {
             if (!g.sim.alive[slot]) continue;
             const tt = g.sim.transform[slot];
-            if (@abs(tt.x - tx) < 1.5 and @abs(tt.z - tz) < 1.5) placed = true;
+            if (@abs(tt.x - tx) < 1.5 and @abs(tt.z - tz) < 1.5) {
+                placed = true;
+                try std.testing.expectApproxEqAbs(@as(f32, 37), tt.yaw, 0.001);
+            }
         }
         try std.testing.expect(placed);
     }
@@ -18619,4 +18625,130 @@ test "scenario a placeable vehicle item spawns an owned vehicle" {
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageVehicleSpawn", wrong_item));
     try std.testing.expectEqual(before + 1, g.sim.countKind(.vehicle));
     std.debug.print("PASS vehicle-place: stock body spawns an owned vehicle; forged placer and item are refused\n", .{});
+}
+
+test "scenario a placed turret and vehicle are announced to the stock client" {
+    // Vehicles and turrets are real entities on the client: without the ECD it
+    // has no GameObject for NetPackageTurretSync or NetPackageVehiclePositions
+    // to land on, so a placed turret (or a worldgen/vehicle-spawn vehicle) was
+    // invisible. The announce carries the class hash the body named, resolved
+    // through entityclasses.xml; an unresolved class is not announced at all,
+    // because the ECD fallback is the zombie class.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_announce");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_announce", 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[ca.slot].entered = true;
+    g.clients[cb.slot].entered = true;
+    const aps = g.sim.playerByPeer(ca.slot).?;
+    const bps = g.sim.playerByPeer(cb.slot).?;
+    g.sim.transform[aps].x = 200;
+    g.sim.transform[aps].y = 70;
+    g.sim.transform[aps].z = 200;
+    g.sim.transform[bps].x = 202;
+    g.sim.transform[bps].y = 70;
+    g.sim.transform[bps].z = 200;
+
+    const turret_hash: i32 = 5150;
+    const vehicle_hash: i32 = 4242;
+    var edefs = [_]assets_entities.EntityDef{
+        .{ .name = "junkTurretGun", .hash = turret_hash, .kind = .turret },
+        .{ .name = "vehicleMinibike", .hash = vehicle_hash, .kind = .vehicle },
+    };
+    g.entities = .{ .defs = &edefs };
+    var vdefs = [_]assets_vehicles.Def{.{
+        .name = "vehicleMinibike",
+        .kind = .minibike,
+        .max_hp = 2000,
+        .velocity_max = 14,
+        .seat_count = 2,
+    }};
+    g.vehicles = .{ .defs = &vdefs };
+    const placeable_stock_type: i32 = 5000;
+    var idefs = [_]assets_items.ItemDef{.{
+        .id = 777,
+        .name = "vehicleMinibikePlaceable",
+        .stock_type = placeable_stock_type,
+    }};
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var frame_buf: [512]u8 = undefined;
+    const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
+
+    // A stock turret body: entityType | pos | rot | ItemValue | placer.
+    {
+        var sb: [64]u8 = .{0} ** 64;
+        var w: binary.Writer = .{ .buf = &sb };
+        try w.writeI32(turret_hash);
+        try w.writeF32(201);
+        try w.writeF32(70);
+        try w.writeF32(200);
+        try w.writeF32(0);
+        try w.writeF32(37);
+        try w.writeF32(0);
+        try w.writeByte(0); // ItemValue.None
+        try w.writeI32(ca.entity_id);
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTurretSpawn", w.written()));
+        // The turret we just placed carries the yaw from the body.
+        var our_turret: i32 = -1;
+        for (ecs_query.groupSlice(&g.sim, .turret)) |s2| {
+            if (@abs(g.sim.transform[s2].yaw - 37) < 0.01) our_turret = g.sim.network_id[s2].id;
+        }
+        try std.testing.expect(our_turret > 0);
+        try g.replicate();
+        const ecd = cap_b.findPkgIdEntity(spawn_id, our_turret) orelse return error.TestUnexpectedResult;
+        var r = binary.Reader{ .data = ecd };
+        try std.testing.expectEqual(our_turret, try r.readI32());
+        _ = try r.readByte(); // EntityCreationData fileVersion
+        try std.testing.expectEqual(turret_hash, try r.readI32());
+    }
+
+    // A stock vehicle body: entityType | pos | rot | ItemValue | placer.
+    {
+        var sb: [128]u8 = .{0} ** 128;
+        var w: binary.Writer = .{ .buf = &sb };
+        try w.writeI32(vehicle_hash);
+        try w.writeF32(203);
+        try w.writeF32(70);
+        try w.writeF32(200);
+        try w.writeF32(0);
+        try w.writeF32(90);
+        try w.writeF32(0);
+        try w.writeByte(9); // ItemValue v9
+        try w.writeByte(0);
+        try w.writeU16(@intCast(placeable_stock_type));
+        try w.writeF32(1);
+        try w.writeU16(1);
+        try w.writeU16(0);
+        try w.writeByte(0);
+        try w.writeByte(0);
+        try w.writeByte(0);
+        try w.writeByte(0);
+        try w.writeByte(0);
+        try w.writeU16(0);
+        try w.writeBool(false);
+        try w.writeI32(ca.entity_id);
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageVehicleSpawn", w.written()));
+        var our_vehicle: i32 = -1;
+        for (ecs_query.groupSlice(&g.sim, .vehicle)) |s2| {
+            if (g.sim.vehicle[s2].owner_slot == @as(i16, @intCast(ca.slot))) our_vehicle = g.sim.network_id[s2].id;
+        }
+        try std.testing.expect(our_vehicle > 0);
+        try g.replicate();
+        const ecd = cap_b.findPkgIdEntity(spawn_id, our_vehicle) orelse return error.TestUnexpectedResult;
+        var r = binary.Reader{ .data = ecd };
+        try std.testing.expectEqual(our_vehicle, try r.readI32());
+        _ = try r.readByte(); // EntityCreationData fileVersion
+        try std.testing.expectEqual(vehicle_hash, try r.readI32());
+    }
+    std.debug.print("PASS announce: placed turret and vehicle reach the other client as ECDs\n", .{});
 }

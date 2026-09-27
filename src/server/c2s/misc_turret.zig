@@ -44,6 +44,27 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         // the float bit patterns as coordinates in the billions, which the
         // reach gate then rejected: a real client's turret never got placed.
         const stock = body.len >= 16;
+        // The tail after the position is rot Vector3 | ItemValue |
+        // entityThatPlaced. Stock applies the rotation to the spawned turret
+        // (the client renders it facing where the placer aimed) and stores the
+        // source item on the entity; zdtd has no turret item model, so only the
+        // yaw is applied. The placer is taken from the sender, which is
+        // stricter than the body's own id and matches ValidEntityIdForSender.
+        // The head carries the entity class the client wants (stock
+        // EntityFactory.CreateEntity(entityType, ...)). Resolved fail-closed
+        // against entityclasses.xml: the class is what the ECD announces, and
+        // an unresolved one would fall back to the zombie class in replicate.
+        const stock_class: ?i32 = if (stock) blk: {
+            const et = std.mem.readInt(i32, body[0..4], .little);
+            const e = self.entities.byHash(et) orelse break :blk null;
+            if (e.kind != .turret) break :blk null;
+            break :blk et;
+        } else null;
+        const stock_yaw: f32 = if (stock and body.len >= 28) blk: {
+            const ry: f32 = @bitCast(std.mem.readInt(u32, body[20..24], .little));
+            if (!std.math.isFinite(ry)) return true;
+            break :blk ry;
+        } else 0;
         const x, const y, const z = if (stock) blk: {
             const fx: f32 = @bitCast(std.mem.readInt(u32, body[4..8], .little));
             const fy: f32 = @bitCast(std.mem.readInt(u32, body[8..12], .little));
@@ -73,6 +94,13 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             // is added (`TurretTracker` IL_002D), next to the vehicle count.
             self.broadcastVehicleCount();
             if (self.sim.slotOfNetId(tid)) |ts| {
+                // Stock's ProcessPackage sets the turret's rotation from the
+                // body before spawning it into the world.
+                self.sim.transform[ts].yaw = stock_yaw;
+                if (stock_class) |ch| {
+                    self.sim.mask[ts].class_id = true;
+                    self.sim.class_id[ts].hash = ch;
+                }
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
                 // The slot dies with the session; the name is what lets a
                 // restart hand the turret back to whoever placed it.

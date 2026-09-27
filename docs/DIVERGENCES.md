@@ -719,9 +719,13 @@ the guard was verified by removing it and watching the test panic.
   drive. Stock's body is `entityType` i32 | pos Vector3 | rot Vector3 |
   ItemValue | `entityThatPlaced` i32 (write IL=24), a different shape for a
   different purpose. The handler gates on the exact 13-byte length
-  (`c2s/misc.zig`), so a stock spawn body cannot be read as a control command;
-  it falls through unhandled instead, which is the honest outcome given zdtd
-  does not implement client-requested vehicle spawning.
+  (`c2s/misc.zig`), so a stock spawn body cannot be read as a control command.
+  The stock shape is served since 2026-09-28 as a placement request (GAP
+  "Placeable vehicle as entity spawn stock"): placer ownership, class-to-item
+  match, reach, spawn through the admin/worldgen path, owner stamp and the
+  waypoint and count packets. The item is still consumed by the client and
+  lands through the inventory path, so a client that never pushes its
+  inventory keeps the item in the server's copy.
 - **`NetPackageInventoryTransactionRequest`** accepts a compact form beside the
   stock `InventoryTransaction.Write` op list. The stock layout is tried first
   (`parseStockInvTx`), so a real client always takes the stock path; the compact
@@ -734,8 +738,11 @@ the guard was verified by removing it and watching the test panic.
   client's turret never appeared. The handler now reads the stock float
   position for any body of 16 bytes or more; only loadgen and the scenarios
   send the shorter form. The rotation, `ItemValue` and `entityThatPlaced` tail
-  is still not applied: zdtd turrets carry no rotation or source item, and the
-  placer is taken from the sender rather than the body.
+  of the body is applied as far as zdtd models it (2026-09-28): the rotation
+  sets the spawned turret's yaw, which the client renders and the peer ECD
+  carries; the `ItemValue` is still dropped (zdtd turrets carry a flat ammo
+  count, not a source item), and the placer is taken from the sender rather
+  than the body, which is stricter than stock's `ValidEntityIdForSender`.
 
 One of the 55 is not in a waived category and is recorded here rather than
 buried in that list: **`NetPackageVehicleCount`** (body `vehicleCount i32 |

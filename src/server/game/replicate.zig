@@ -127,8 +127,16 @@ pub fn replicate(self: *Game) !void {
             self.sim.kind[i] == .animal or
             self.sim.kind[i] == .trader or
             is_falling);
+        // Vehicles and turrets are real entities on the stock client: without
+        // the ECD it has no GameObject for NetPackageVehiclePositions or
+        // NetPackageTurretSync to land on, so a placed turret or vehicle is
+        // invisible. Only announced when the class resolves, because the ECD
+        // fallback class is a zombie and would dress a turret as one.
+        const is_spawnable_extra = self.sim.mask[i].kind and
+            (self.sim.kind[i] == .vehicle or self.sim.kind[i] == .turret) and
+            self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0;
         var spawn_mask: game_mod.ObsMask = 0;
-        if (is_mob) {
+        if (is_mob or is_spawnable_extra) {
             var m = in_range;
             while (m != 0) : (m &= m - 1) {
                 const ci = @ctz(m);
