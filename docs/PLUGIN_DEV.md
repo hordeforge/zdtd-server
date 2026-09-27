@@ -60,6 +60,7 @@ tier = "user"               # "official" (ships with zdtd) or "user"; "core" is 
 # points = "loot.roll"      # exclusive core override points this mod claims (comma-separated)
 # claim_mode = "exclusive"  # only "exclusive"; "chain" (call-next) is reserved, rejected at load
 # requires = "on_tick"      # extra hook/verb declarations (same vocabulary as _zdtd_requires)
+# deny = "say,damage"       # queued verbs this mod may not issue through zdtd.queue
 # enabled = false           # do not auto-load; load via [plugin] modules instead
 description = "Scales loot, denies crafts."
 ```
@@ -185,7 +186,8 @@ import **field** names are bare (`log`, not `zdtd_log`); importing
 | `zdtd` . `tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
 | `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
 | `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (RFC 0001 §3; **v4** = magic `ZBS4`, 40-byte records: net_id/kind/self/alive/pos/hp/yaw/vy/target/wearing, ADR 0037); returns bytes written (0 = no sense surface) |
-| `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query (RFC 0001 §3): write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer) |
+| `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query: write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer). Verbs are under [Query verbs](#query-verbs) |
+| `zdtd` . `config` | `(out_ptr: i32, out_cap: i32) -> i32` | The mod's own `config.toml`, raw text ([Self-contained config](#self-contained-config-configtoml)); returns the bytes written, 0 = no config |
 | `zdtd` . `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory `(ptr, len)` with Zig's `std.json` (ADR 0031 D3); 0 = ok, <0 = parse error. The parsed doc is per-plugin state, replaced on the next call, stored in a lazily allocated fixed buffer (`json_buf_max`, 64 KiB) reset per frame - no heap on the tick path, and the cap also bounds nesting. One doc at a time: frames must be processed before the next parse |
 | `zdtd` . `json_str` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Decoded string at a dot-separated key path (`method`, `params.name`, ...); returns the FULL length, 0 = missing or not a string, <0 = no parsed doc / bad path. Compare the length against your buffer cap to detect truncation |
 | `zdtd` . `json_raw` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Raw JSON bytes of the value at a path (for echoing an id verbatim); FULL length, 0 = missing, <0 = error |
@@ -236,6 +238,21 @@ Commands are applied by the sim on a later tick's drain (the fixed 64-slot
 command buffer; a full buffer drops new commands). Unknown or malformed
 commands are dropped with a log line. The guest never touches sim state
 directly: everything goes through this queue.
+
+### Query verbs
+
+`zdtd.query` takes one space-separated text request and answers with bytes at
+`out_ptr`. An unknown, malformed or out-of-range request answers `0`. The whole
+response shares a 64-byte host budget (`query_resp_max`), so ask one question
+per call; an answer that does not fit is dropped, never cut.
+
+| Request | Answer |
+|---|---|
+| `quest <def_id>` | the quest name (the stable key a gate compares) |
+| `kind <net_id>` | `0` player, `1` zombie/animal, `2` bot |
+| `cover <x> <z> <tx> <tz>` | `<cx> <cz>`: a point near `(x,z)` not visible from `(tx,tz)`, or empty |
+| `path <sx> <sz> <tx> <tz>` | `<n> <x1> <z1> ... <xn> <zn>` nav waypoints in block coords, or empty |
+| `mcp.allowlist` | the operator's `--mcp-allowlist` entries, one per line, prefix-matched by the MCP guest |
 
 ## Rules you cannot get around
 
@@ -491,17 +508,21 @@ pub extern "C" fn on_tick() { /* ... */ }
 
 **Zig**
 
+`zig build-exe` needs an entry point and the plugin ABI has none, so the hooks
+need a wrapper module that references them:
+
 ```sh
-zig build-exe plugin.zig -target wasm32-freestanding -rdynamic -OReleaseSmall \
-  --name my_plugin
-mv my_plugin.wasm my_plugin_final.wasm
+# plugin.zig: export fn on_tick() void { }
+# main.zig:   comptime { _ = @import("plugin"); } / export fn _start() void {}
+zig build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+  -femit-bin=my_plugin.wasm --name my_plugin \
+  --dep plugin -Mroot=main.zig -Mplugin=plugin.zig
 ```
 
-`zig build-exe` needs an entry point even for freestanding targets; the
-committed core plugins get it from the shared
-[`plugins/core_main.zig`](../plugins/core_main.zig) wrapper (see
-[mods/BUILDING.md](../mods/BUILDING.md)). zwasm runs the start section only if
-the module declares one, which ours never do, so `_start` is never invoked.
+zwasm runs a start section only when one is declared, so `_start` is never
+invoked; the core plugins use the shared
+[`plugins/core_main.zig`](../plugins/core_main.zig) wrapper for this (see
+[mods/BUILDING.md](../mods/BUILDING.md)).
 
 The exported hook body can be empty (illustrative):
 
@@ -530,6 +551,9 @@ instantiate, because the host does not provide those imports.
 ```sh
 wasm-objdump -x plugin.wasm | grep -A20 "Export\[\|Import\["
 ```
+
+Without wabt, both names are plain strings in the module:
+`grep -aoE 'on_[a-z_]+|zdtd' plugin.wasm | sort -u`.
 
 Confirm that the exports are the hook names you meant, and that the import list
 contains only host functions you were granted. An unexpected import is the usual

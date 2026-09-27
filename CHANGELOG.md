@@ -31,6 +31,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- **A `zdtd.query` answer is now whole or absent, never cut.** The MCP guest
+  prefix-matches a verb against each `mcp.allowlist` line, so a line truncated
+  to the 64-byte response budget matched MORE verbs than the operator's
+  `--mcp-allowlist` allowed. An entry that does not fit is now dropped (the
+  verb is denied) instead of shortened, and `quest <def_id>` answers nothing
+  rather than serving a truncated name, which is a different key than the one a
+  quest gate compares.
 - **A read-only mount is named as the cause of an uncreatable world dir.** Both
   `AccessDenied` and `ReadOnlyFileSystem` mean the same thing to the operator
   (the world dir could not be created) and need different remedies, but only

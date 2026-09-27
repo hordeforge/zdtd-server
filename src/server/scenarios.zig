@@ -12668,6 +12668,59 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     try std.testing.expect(cx < 0 and cz < 0);
 }
 
+test "scenario wasmQuery mcp.allowlist: entries are served whole, never cut" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer g.destroy();
+
+    // Ten-byte entries: five fit the 64-byte response budget with their
+    // separators (5*10 + 4 = 54, a sixth would need 65).
+    g.mcp_allowlist = "aaaaaaaaaa,bbbbbbbbbb,cccccccccc,dddddddddd," ++
+        "eeeeeeeeee,ffffffffff,gggggggggg";
+    var out: [64]u8 = undefined;
+    const n = game_wasm_host.wasmQuery(&g.wasm_ctx, "mcp.allowlist", &out);
+    try std.testing.expectEqual(@as(usize, 54), n);
+
+    // The guest prefix-matches a verb against each line, so a cut line would
+    // authorize verbs the operator never allowed. Every served line is a whole
+    // configured entry; the overflow is a drop, not a truncation.
+    var lines = std.mem.splitScalar(u8, out[0..n], '\n');
+    while (lines.next()) |line| {
+        var whole = false;
+        var entries = std.mem.splitScalar(u8, g.mcp_allowlist, ',');
+        while (entries.next()) |raw| {
+            if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t"), line)) {
+                whole = true;
+                break;
+            }
+        }
+        try std.testing.expect(whole);
+    }
+
+    // An empty operator list serves nothing, and a trailing separator does not
+    // leave a blank line for the guest to read as an empty allowlist entry.
+    g.mcp_allowlist = "bot count,,";
+    const m = game_wasm_host.wasmQuery(&g.wasm_ctx, "mcp.allowlist", &out);
+    try std.testing.expectEqualStrings("bot count", out[0..m]);
+
+    // A quest name is the key a gate compares, so a name that does not fit is
+    // absent, not a shorter key. (Vacuous without a quest catalog, the shape
+    // this harness runs in.)
+    var req_buf: [16]u8 = undefined;
+    var small: [4]u8 = undefined;
+    for (0..256) |def_id| {
+        const req = try std.fmt.bufPrint(&req_buf, "quest {d}", .{def_id});
+        if (game_wasm_host.wasmQuery(&g.wasm_ctx, req, &out) == 0) continue;
+        try std.testing.expectEqual(@as(usize, 0), game_wasm_host.wasmQuery(&g.wasm_ctx, req, &small));
+    }
+}
+
 test "scenario wasmQuery path: nav path across loaded chunks" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

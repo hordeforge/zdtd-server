@@ -517,6 +517,9 @@ fn hasTag(tags: []const u8, tag: []const u8) bool {
 ///                                 PvP/friendly-fire policies).
 ///   "quest <def_id>"           -> the quest def's name (stable key), or ""
 ///                                 when unknown (lets plugins gate by name).
+///   "path <sx> <sz> <tx> <tz>" -> "<n> <x1> <z1> ... <xn> <zn>" nav waypoints.
+///   "mcp.allowlist"            -> the operator's `--mcp-allowlist` entries, one
+///                                 per line; whole entries only (see below).
 /// MCP frame handler (mcp_transport.FrameFn): route one client JSON-RPC
 /// frame to the first plugin that exports on_mcp_frame; returns the guest's
 /// response bytes (0 = no MCP module / nothing to send). The transport owns
@@ -536,18 +539,22 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
         if (it.next() != null) return 0;
         // Comma-separated verb prefixes from [mcp] config, served one per
         // line (the MCP guest matches verb prefixes against these lines).
+        // Whole entries only: the guest prefix-matches, so a cut entry would
+        // match MORE verbs than the operator allowed. An entry that does not
+        // fit the response budget is dropped (deny), never truncated.
         var pit = std.mem.splitScalar(u8, g.mcp_allowlist, ',');
         var n: usize = 0;
         while (pit.next()) |raw| {
             const piece = std.mem.trim(u8, raw, " \t");
             if (piece.len == 0) continue;
-            if (n > 0 and n < out.len) {
+            const sep: usize = if (n > 0) 1 else 0;
+            if (sep + piece.len > out.len - n) continue;
+            if (sep == 1) {
                 out[n] = '\n';
                 n += 1;
             }
-            const m = @min(piece.len, out.len - n);
-            @memcpy(out[n..][0..m], piece[0..m]);
-            n += m;
+            @memcpy(out[n..][0..piece.len], piece);
+            n += piece.len;
         }
         return n;
     }
@@ -556,9 +563,11 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
         if (it.next() != null) return 0;
         const id = std.fmt.parseInt(u16, id_s, 10) catch return 0;
         const d = g.sim.catalog.byId(id) orelse return 0;
-        const n = @min(d.name.len, out.len);
-        @memcpy(out[0..n], d.name[0..n]);
-        return n;
+        // Whole or nothing: a name cut to the guest's buffer is a different
+        // key than the one a gate compares against.
+        if (d.name.len > out.len) return 0;
+        @memcpy(out[0..d.name.len], d.name);
+        return d.name.len;
     }
     if (std.mem.eql(u8, verb, "kind")) {
         const id_s = it.next() orelse return 0;
