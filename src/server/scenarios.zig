@@ -2538,6 +2538,9 @@ test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck
     try std.testing.expectEqual(@as(i32, 71), changes[0].y);
     try std.testing.expectEqual(@as(i32, 5), changes[0].z);
     try std.testing.expectEqual(hp_after, changes[0].damage);
+    // Stock marks the change damage-only (bChangeDamage, no bUpdateLight), so
+    // the client drops it if the cell was replaced before it arrived.
+    try std.testing.expectEqual(@as(u8, 0x03), got[20]);
     std.debug.print("PASS zombie-lowwall: feet-level wall chewed (hp {d} -> {d}) and echoed to the other client\n", .{ hp_before, hp_after });
 }
 
@@ -2571,7 +2574,7 @@ test "scenario power switch: meta flip gates the grid and keeps the meta on the 
     // whole BlockValue, so the wire flags are bChangeBlockValue|bUpdateLight.
     const raw_on = packages.withBlockMeta(@as(u32, switch_id), packages.block_meta_on);
     const flip = try packages.buildSetBlockBodyRaw(&sb, 250, 70, 251, raw_on, 0, ca.entity_id, ca.entity_id);
-    flip[20] = 0x11;
+    try std.testing.expectEqual(packages.block_change_flags_plain, flip[20]);
     cap_b.clear();
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", flip));
     try std.testing.expect(g.sim.power.nodes[ni].on);
@@ -2587,7 +2590,7 @@ test "scenario power switch: meta flip gates the grid and keeps the meta on the 
     // Flipping back closes the gate again.
     const raw_off = packages.withBlockMeta(@as(u32, switch_id), 0);
     const unflip = try packages.buildSetBlockBodyRaw(&sb, 250, 70, 251, raw_off, 0, ca.entity_id, ca.entity_id);
-    unflip[20] = 0x11;
+    try std.testing.expectEqual(packages.block_change_flags_plain, unflip[20]);
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSetBlock", unflip));
     try std.testing.expect(!g.sim.power.nodes[ni].on);
     std.debug.print("PASS power-switch: meta flip drives the grid latch and survives the echo\n", .{});

@@ -34,7 +34,17 @@ guarded so an indestructible block or a plugin-denied hit cannot repeat a no-op
 cell at tick rate. Gated by the extended
 `scenario zombie chews a 1-tall wall at feet level instead of getting stuck`,
 which now asserts a second client receives the damage-only SetBlock (wire
-`damage` equals the stored total) while the wall survives.
+`damage` equals the stored total) while the wall survives. The flags byte was
+the other half of that fix (2026-09-28): stock marks a plain change
+`bChangeBlockValue|bUpdateLight` = 0x11 (`WorldBase::SetBlockRPC(bvRef, bv)`)
+and a surviving-block damage change `bChangeBlockValue|bChangeDamage` = 0x03
+(`Block::OnBlockDamaged` IL_0457), while every SetBlock body zdtd built carried
+the bare value bit. A block flip therefore never asked the client to relight
+the cell it changed, and a damage echo could overwrite a cell that had already
+been replaced. `buildSetBlockBodyRawFlags` is the one encoder behind both
+forms, pinned by
+`setblock flags carry stock's plain and damage-only pairs` and by the
+power-switch and chew scenarios.
 **EAILeap pounce shipped 2026-09-22**: `zombieSpider` (pipe `AITask`, first
 entry) and `animalMountainLion` (`AITask-1 legs=4`) now pounce.
 `taskNameToId` maps `Leap`, `JumpMaxDistance` rides

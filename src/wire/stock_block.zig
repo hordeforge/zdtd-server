@@ -23,6 +23,17 @@ pub const block_change_flags_known: u8 =
     block_change_flag_value | block_change_flag_damage | block_change_flag_density |
     block_change_flag_force_density | block_change_flag_update_light | block_change_flag_texture;
 
+/// Flags stock sends for a plain block change: `WorldBase::SetBlockRPC(bvRef, bv)`
+/// builds `BlockChangeInfo(bvRef, bv, updateLight: true)` (WorldBase.il.txt:76),
+/// so the receiver relights the cell.
+pub const block_change_flags_plain: u8 = block_change_flag_value | block_change_flag_update_light;
+/// Flags stock sends for a damage-only change: `Block::OnBlockDamaged` IL_0457
+/// builds `BlockChangeInfo(bvRef, bv, updateLight: false, onlyDamage: true)`
+/// (Block.il.txt:4881). The receiver drops the change when the cell no longer
+/// holds that block type (GameManager::ChangeBlocks IL_0145), so a stale echo
+/// can never resurrect a replaced block.
+pub const block_change_flags_damage_only: u8 = block_change_flag_value | block_change_flag_damage;
+
 /// BlockValue.type: low 16 of rawData (asm.il BlockValue.get_type).
 pub const block_type_mask: u32 = 0xffff;
 
@@ -73,10 +84,12 @@ pub fn buildSetBlockBodyDamage(
 /// i16 | count x BlockChangeInfo.Write | `localPlayerThatChanged` i32.
 ///
 /// BlockChangeInfo.Write is BlockValueRef | `changedByEntityId` i32 | flags u8,
-/// then the payloads the flags select. We set bChangeBlockValue only, so what
+/// then the payloads the flags select. The plain form sets
+/// bChangeBlockValue | bUpdateLight (stock's `SetBlockRPC(bvRef, bv)`), so what
 /// follows is BlockValue.Write = `rawData` u32 + `damage` u16 (Write IL=10).
 /// The damage u16 belongs to BlockValue, not to the bChangeDamage flag: that
-/// flag only tells the receiver to apply the damage that already rides here.
+/// flag tells the receiver this is a damage-only change (apply it only while
+/// the cell still holds this block type) and skips the relight.
 pub fn buildSetBlockBodyRaw(
     buf: []u8,
     x: i32,
@@ -87,6 +100,27 @@ pub fn buildSetBlockBodyRaw(
     changed_by_entity: i32,
     local_player_that_changed: i32,
 ) ![]u8 {
+    return buildSetBlockBodyRawFlags(buf, x, y, z, raw, damage, changed_by_entity, local_player_that_changed, block_change_flags_plain);
+}
+
+/// The one SetBlock encoder: `buildSetBlockBodyRaw` is this with stock's plain
+/// flags, and a damage-only echo passes `block_change_flags_damage_only`. Same
+/// stock shape, one writer (rule 14).
+/// NetPackageSetBlock BlockChangeInfo flags (RE protocol-packages.md 6.9):
+/// plain is `bChangeBlockValue|bUpdateLight` (WorldBase::SetBlockRPC,
+/// WorldBase.il.txt:76) and damage-only is `bChangeBlockValue|bChangeDamage`
+/// (Block::OnBlockDamaged IL_0457).
+pub fn buildSetBlockBodyRawFlags(
+    buf: []u8,
+    x: i32,
+    y: i32,
+    z: i32,
+    raw: u32,
+    damage: u16,
+    changed_by_entity: i32,
+    local_player_that_changed: i32,
+    flags: u8,
+) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try platform_user.write(&w, null);
     try w.writeI16(1); // one BlockChangeInfo
@@ -96,7 +130,7 @@ pub fn buildSetBlockBodyRaw(
     try w.writeI32(y);
     try w.writeI32(z);
     try w.writeI32(changed_by_entity);
-    try w.writeByte(block_change_flag_value);
+    try w.writeByte(flags);
     try w.writeU32(raw);
     try w.writeU16(damage);
     try w.writeI32(local_player_that_changed);
@@ -376,6 +410,23 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     return ch;
 }
 
+test "setblock flags carry stock's plain and damage-only pairs" {
+    // WorldBase::SetBlockRPC(bvRef, bv) builds BlockChangeInfo(bvRef, bv,
+    // updateLight: true) (WorldBase.il.txt:76); Block::OnBlockDamaged IL_0457
+    // builds the damage-only form (updateLight false, onlyDamage true). The
+    // flags byte is the only field that tells the two apart on the wire.
+    var buf: [64]u8 = undefined;
+    const plain = try buildSetBlockBodyRaw(&buf, 1, 2, 3, 19200, 0, -1, -1);
+    try std.testing.expectEqual(block_change_flags_plain, plain[20]);
+    try std.testing.expectEqual(@as(u8, 0x11), plain[20]);
+    const dmg = try buildSetBlockBodyRawFlags(&buf, 1, 2, 3, 19200, 7, -1, -1, block_change_flags_damage_only);
+    try std.testing.expectEqual(block_change_flags_damage_only, dmg[20]);
+    try std.testing.expectEqual(@as(u8, 0x03), dmg[20]);
+    // Both are the same shape, so the damage-only body still reads back.
+    var one: [1]BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(dmg, one[0..]));
+    try std.testing.expectEqual(@as(u16, 7), one[0].damage);
+}
 test "setblock stock body roundtrip" {
     var buf: [64]u8 = undefined;
     const body = try buildSetBlockBodyRaw(&buf, -10, 61, 400, 13, 0, 106, 106);

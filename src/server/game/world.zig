@@ -333,17 +333,20 @@ pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
 /// Echo one cell's stored block damage to every observer (stock
 /// `Block::OnBlockDamaged` IL_0457: a damage change goes out through
 /// `SetBlocksRPC`/`SetBlockRPC` whether or not the block survives, so clients
-/// see the cracking, not only the break). Wire damage is the stage-2-capped
-/// value. Callers hold the block id and the post-damage stored total. A cell
-/// with no block value, or one still at damage 0 (indestructible block, plugin
-/// verdict denied), is skipped: echoing those would repeat a no-op cell at
-/// tick rate.
+/// see the cracking, not only the break). The flags are stock's damage-only
+/// pair: bChangeDamage tells the receiver to drop the change when the cell no
+/// longer holds that block type (GameManager::ChangeBlocks IL_0145), and no
+/// bUpdateLight, so a stale echo cannot resurrect a replaced block. Wire
+/// damage is the stage-2-capped value. Callers hold the block id and the
+/// post-damage stored total. A cell with no block value, or one still at
+/// damage 0 (indestructible block, plugin verdict denied), is skipped:
+/// echoing those would repeat a no-op cell at tick rate.
 pub fn echoBlockDamage(self: *Game, x: i32, y: i32, z: i32, block_id: u16, stored: u16) void {
     if (stored == 0) return;
     const raw = self.blockRawAt(x, y, z);
     if (raw == 0) return;
     const wire_dmg = self.wireBlockDamage(block_id, stored);
-    if (packages.buildSetBlockBodyRaw(&self.body_buf, x, y, z, raw, wire_dmg, -1, -1)) |sb| {
+    if (packages.buildSetBlockBodyRawFlags(&self.body_buf, x, y, z, raw, wire_dmg, -1, -1, packages.block_change_flags_damage_only)) |sb| {
         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
     } else |_| {}
 }

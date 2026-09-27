@@ -84,6 +84,11 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
             var place_id: u16 = b.block_id;
             var out_dmg: u16 = 0;
             var mutated = false;
+            // A same-type damage claim echoes as stock's damage-only change
+            // (bChangeDamage, no bUpdateLight: Block::OnBlockDamaged IL_0457).
+            // Anything that moves the block type, rotation or meta is a plain
+            // block change instead.
+            var damage_only = false;
             // Downgrade swap raw (stock Block.OnBlockDamaged): carries the
             // downgrade target id with the old block's rotation/meta bits.
             var place_down_raw: u32 = 0;
@@ -246,6 +251,7 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                     }
                     place_id = if (cur_id != 0) cur_id else b.block_id;
                     out_dmg = abs;
+                    damage_only = place_id != 0;
                     try self.setBlockHp(b.x, b.y, b.z, abs);
                 }
                 mutated = true;
@@ -331,7 +337,11 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 // Stage2Health: the echo damage caps at the stage-2 threshold
                 // (doors show the binary cracked state; internal damage stays).
                 const echo_dmg = self.wireBlockDamage(place_id, out_dmg);
-                if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], b.x, b.y, b.z, echo_raw, echo_dmg, editor_ent, editor_ent)) |sb| {
+                const echo_flags: u8 = if (damage_only)
+                    packages.block_change_flags_damage_only
+                else
+                    packages.block_change_flags_plain;
+                if (packages.buildSetBlockBodyRawFlags(self.body_buf[0..96], b.x, b.y, b.z, echo_raw, echo_dmg, editor_ent, editor_ent, echo_flags)) |sb| {
                     try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
                 } else |_| {}
             }
