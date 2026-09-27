@@ -205,7 +205,10 @@ lint: need-zig need-python3 lint-webui lint-html
 	}
 	for script in scripts/*.sh; do bash -n "$$script"; done
 	shellcheck -o add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat scripts/*.sh
-	ruff check tools/ scripts/gen_provenance.py scripts/strip-generated-regions.py
+	# Glob every repo Python source: naming the two scripts/*.py files by hand
+	# let a new one escape the gate silently, the same hole lint-webui.sh
+	# closes for the webui sources.
+	ruff check tools/ scripts/*.py
 	$(ZIG) fmt --check build.zig build.zig.zon src mods plugins assets/fixtures
 	bash scripts/lint-architecture.sh
 	# Documentation gate: dead links, code citations in range, quoted Zig blocks
@@ -238,7 +241,7 @@ check:
 	# Syntax-compile every repo Python source (stdlib ast gate): provenance_scan
 	# and check_xml_audit are executed below anyway, but gen_provenance.py never
 	# runs in check, so a syntax error there would otherwise land unseen.
-	python3 -m py_compile tools/*.py scripts/gen_provenance.py
+	python3 -m py_compile tools/*.py scripts/*.py
 	python3 -B -m unittest discover -s tools -p 'test_*.py'
 	python3 tools/provenance_scan.py
 	# Catalog freshness gate: docs/catalogs/*.md is rendered from source by

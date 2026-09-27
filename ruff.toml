@@ -1,19 +1,22 @@
-# Ruff gate for repo Python (tools/*.py, scripts/gen_provenance.py).
+# Ruff gate for repo Python (tools/*.py, scripts/*.py).
 # Wired by `make lint` / CI; versions: whatever `ruff` on PATH reports
 # (CI pins 0.16.4 in the "Install ruff" step of .github/workflows/ci.yml).
 # Only rule groups the tree
 # already passes are selected so the gate is a ratchet, not a mass rewrite.
 # Line length is the smallest multiple of 10 the tree already clears (max
-# observed line was 407); do not tighten without reformatting first.
+# observed line is 557, in the markup block of scripts/gen_provenance.py);
+# E501 is selected, so the cap is enforced rather than merely declared; do not
+# tighten without reformatting first.
 
 target-version = "py311"
-line-length = 420
+line-length = 560
 
 [lint]
 select = [
     "F",   # pyflakes
-    "E9",  # runtime / syntax (pycodestyle)
+    "E",   # pycodestyle: layout (E1/E2/E3/E7) plus E501 against line-length
     "W",   # pycodestyle warnings
+    "PLE", # pylint errors (defects, not the opinionated PL refactor rules)
     "B",   # flake8-bugbear
     "A",   # flake8-builtins
     "RUF", # ruff-specific
