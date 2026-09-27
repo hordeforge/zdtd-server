@@ -44,6 +44,17 @@ pub const feature_hash_signable: i32 = 924617576;
 /// hash; TEFeatureLockable::Write IL=42). Same hash formula as the rows above.
 pub const feature_hash_lockable: i32 = unity_hash.getStableHashCode("TEFeatureLockable");
 
+/// GetStableHashCode("TEFeatureCanvas"): the composite module that carries a
+/// canvas sign's state as an opaque body (`libraryId` string, the 16-byte sign
+/// Guid, blend mode, rotation, imposter flag; `SignCanvas/CanvasState::Write`
+/// IL=18). zdtd stores and replays the bytes, never re-encodes them.
+pub const feature_hash_canvas: i32 = unity_hash.getStableHashCode("TEFeatureCanvas");
+
+/// Bound for one stored TEFeatureCanvas module body. The client's library id
+/// is short and the rest is 19 fixed bytes; a longer claim is dropped rather
+/// than sized for.
+pub const max_canvas_feature_bytes: usize = 128;
+
 /// Stock's allowed-user list for one lockable module. The XUI caps the list it
 /// writes; zdtd refuses a larger claim instead of sizing a store to it.
 pub const max_lock_users: i32 = 32;
@@ -397,6 +408,29 @@ pub fn validateLockFeatureForTest(blob: []const u8) binary.ReadError!void {
     return validateLockFeature(&r, blob.len);
 }
 
+/// Walk a TEFeatureCanvas module body: `GlobalSignId` (`libraryId` string then
+/// a 16-byte Guid, GlobalSignId::ToStream IL=124) followed by BlendMode u8,
+/// CanvasRotation u8 and ShowOnImposter bool (CanvasState::Write IL=18). The
+/// walk must end inside the declared body, so a body that only claims to be a
+/// canvas module is refused instead of stored and replayed.
+fn validateCanvasFeature(pr: *binary.Reader, payload_len: usize) binary.ReadError!void {
+    const end = pr.pos + payload_len;
+    try pr.skipString();
+    if (pr.remaining() < 16) return error.EndOfStream;
+    pr.pos += 16; // signGuid
+    _ = try pr.readByte(); // BlendMode
+    _ = try pr.readByte(); // CanvasRotation
+    _ = try pr.readBool(); // ShowOnImposter
+    if (pr.pos > end) return error.InvalidString;
+}
+
+/// Test hook: walk one TEFeatureCanvas module body exactly as the composite
+/// parser does.
+pub fn validateCanvasFeatureForTest(blob: []const u8) binary.ReadError!void {
+    var r: binary.Reader = .{ .data = blob };
+    return validateCanvasFeature(&r, blob.len);
+}
+
 /// A composite TE that carries `TEFeatureSignable` (a sign, or a writable
 /// crate that also has storage). Filled by `parseSignableTeBody`.
 pub const ParsedSignTe = struct {
@@ -411,6 +445,11 @@ pub const ParsedSignTe = struct {
     /// The same composite carries TEFeatureStorage: that leg owns the body
     /// (it must still apply the item list), so the sign leg stands down.
     has_storage: bool = false,
+    /// The composite carries TEFeatureCanvas (a canvas sign, or a writable
+    /// crate's painted face). The body is stored verbatim so the canvas state
+    /// survives a chunk re-stream, a rejoin and a restart; zdtd never parses
+    /// the canvas fields themselves.
+    has_canvas: bool = false,
 };
 
 pub const ParseSignTeError = binary.ReadError || error{ NotSignableTe, Overflow };
@@ -470,13 +509,17 @@ pub fn parseSignableTeBody(body: []const u8, text_buf: []u8) ParseSignTeError!Pa
             }
         } else {
             if (hash == feature_hash_storage) out.has_storage = true;
-            pr.pos += feat_payload_len;
+            if (hash == feature_hash_canvas and feat_payload_len <= max_canvas_feature_bytes) {
+                try validateCanvasFeature(&pr, feat_payload_len);
+                out.has_canvas = true;
+            }
+            pr.pos = feat_start + feat_payload_len;
         }
         const consumed = pr.pos - feat_start;
         if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
         if (consumed > feat_payload_len) return error.InvalidString;
     }
-    if (!found) return error.NotSignableTe;
+    if (!found and !out.has_canvas) return error.NotSignableTe;
     return out;
 }
 

@@ -1,10 +1,13 @@
-//! Sign text store: the applied composite TileEntity body of a sign block
-//! (`TEFeatureSignable`), keyed by world position.
+//! Sign-family TileEntity store: the applied composite body of a block whose
+//! `CompositeFeatures` carry `TEFeatureSignable` (authored text) or
+//! `TEFeatureCanvas` (a canvas sign or a writable crate's painted face),
+//! keyed by world position.
 //!
-//! Stock keeps a sign's TE in the chunk and ships it with the chunk, so a
-//! player who joins later or reloads the area still sees the authored text.
-//! The C2S leg echoes a write to everyone in range at edit time, which covers
-//! only the session; this store is the copy the chunk stream replays.
+//! Stock keeps such a TE in the chunk and ships it with the chunk, so a
+//! player who joins later or reloads the area still sees the authored text or
+//! canvas state. The C2S leg echoes a write to everyone in range at edit time,
+//! which covers only the session; this store is the copy the chunk stream
+//! replays.
 //!
 //! The body is stored verbatim (handle included, patched to the unsolicited
 //! `255` on replay) rather than re-encoded from parsed fields: stock's server

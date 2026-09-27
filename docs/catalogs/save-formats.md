@@ -27,8 +27,8 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCT1` | src/world/containers.zig | 488 | posFromGuid | - |
 | `ZCT2` | src/world/containers.zig | 668 | posFromGuid | - |
 | `ZCT3` | src/world/containers.zig | 744 | posFromGuid | - |
-| `ZSG1` | src/world/signs.zig | 131 | - | - |
-| `ZSG1` | src/world/signs.zig | 157 | - | - |
+| `ZSG1` | src/world/signs.zig | 134 | - | - |
+| `ZSG1` | src/world/signs.zig | 160 | - | - |
 | `ZVNM1` | src/world/vending.zig | 153 | - | - |
 | `ZVNM` | src/world/vending.zig | 160 | - | - |
 | `ZWS1` | src/world/workstations.zig | 708 | commaListAt | - |

@@ -732,3 +732,67 @@ test "a locked container writes the lockable module and reads it back" {
     @memcpy(short_lock[0..bad_lock.len], bad_lock);
     try std.testing.expectError(error.InvalidString, stock_te.validateLockFeatureForTest(short_lock[0..bad_lock.len]));
 }
+
+test "a canvas composite body parses and a malformed canvas module is refused" {
+    // TEFeatureCanvas::Write (network) emits one CanvasState: the GlobalSignId
+    // (`libraryId` string + 16-byte Guid, GlobalSignId::ToStream IL=124) then
+    // BlendMode u8, CanvasRotation u8 and ShowOnImposter bool (CanvasState
+    // Write IL=18). zdtd keeps the body verbatim, so the walk is what keeps a
+    // forged module out of the sign store.
+    var cbuf: [64]u8 = undefined;
+    var cw: binary.Writer = .{ .buf = &cbuf };
+    try cw.writeString("prefab");
+    try cw.writeBytes(&([_]u8{7} ** 16));
+    try cw.writeByte(2); // BlendMode
+    try cw.writeByte(1); // CanvasRotation
+    try cw.writeBool(true); // ShowOnImposter
+    const canvas = cw.written();
+    try stock_te.validateCanvasFeatureForTest(canvas);
+
+    // Compose the full NetPackageTileEntity body the client sends.
+    var pay_buf: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pay_buf };
+    try pw.writeI32(3); // chunkPos
+    try pw.writeI32(70);
+    try pw.writeI32(4);
+    const outer = pw.pos;
+    try pw.writeU32(0); // marker patched below
+    try pw.writeI32(2000); // blockId
+    try pw.writeByte(0); // null owner
+    try pw.writeByte(1); // one module
+    try pw.writeI32(stock_te.feature_hash_canvas);
+    try pw.writeU32(@intCast(4 + canvas.len));
+    try pw.writeBytes(canvas);
+    const marker = pw.pos - outer;
+    std.mem.writeInt(u32, pay_buf[outer..][0..4], @intCast(marker), .little);
+    const payload = pw.written();
+
+    var body_buf: [512]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &body_buf };
+    try bw.writeByte(7); // handle
+    try bw.writeI32(3);
+    try bw.writeI32(70);
+    try bw.writeI32(4);
+    try bw.writeI32(2000);
+    try bw.writeI32(@intCast(payload.len));
+    try bw.writeBytes(payload);
+    const body = bw.written();
+
+    var text: [64]u8 = undefined;
+    const parsed = try parseSignableTeBody(body, &text);
+    try std.testing.expect(parsed.has_canvas);
+    try std.testing.expect(!parsed.has_text);
+    try std.testing.expectEqual(@as(i32, 2000), parsed.block_id);
+    try std.testing.expectEqual(@as(i32, 3), parsed.world_x);
+
+    // A module whose declared body cannot be walked as a canvas state fails
+    // closed instead of being stored.
+    try std.testing.expectError(error.EndOfStream, stock_te.validateCanvasFeatureForTest(&[_]u8{ 0, 2 }));
+    // A body with neither signable nor canvas is still not a sign TE.
+    var none_buf: [256]u8 = undefined;
+    @memcpy(none_buf[0..body.len], body);
+    // Module count to zero: the payload then carries no module at all.
+    const count_off = 21 + 12 + 4 + 4 + 1;
+    none_buf[count_off] = 0;
+    try std.testing.expectError(error.NotSignableTe, parseSignableTeBody(none_buf[0..body.len], &text));
+}

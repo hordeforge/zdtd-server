@@ -133,6 +133,11 @@ pub const BlockDef = struct {
     /// letters and the writable crates). Only these positions accept a C2S
     /// sign-text TE write.
     signable: bool = false,
+    /// The block's composite TE carries `TEFeatureCanvas` (a canvas sign, or a
+    /// writable crate's painted face). Like `signable`, the module list comes
+    /// from the block's `CompositeFeatures`, so this flag gates the C2S canvas
+    /// TE leg; the module body itself is stored opaquely.
+    canvas: bool = false,
     /// IndexName="TraderOnOff": trader-area gate/loudspeaker blocks that
     /// TraderArea::SetClosed toggles (doors lock, lights flip meta bit 0x2).
     trader_onoff: bool = false,
@@ -552,6 +557,7 @@ pub fn loadFromPath(
         block_tag: ?[]const u8 = null,
         is_door: bool = false,
         signable: bool = false,
+        canvas: bool = false,
         /// `Shape="Terrain"` (stock `BlockShape::IsTerrain`, the 17 terrain
         /// rows): leftovers take ids from 0 rather than 0xff.
         terrain: bool = false,
@@ -635,6 +641,7 @@ pub fn loadFromPath(
         var block_tag: ?[]const u8 = null;
         var tags: ?[]const u8 = null;
         var signable = false;
+        var canvas = false;
         var lp_hardness_scale: f32 = 1;
         var lp_declared = false;
         var heat_strength: f32 = 0;
@@ -726,6 +733,7 @@ pub fn loadFromPath(
                 // module order decides the wire feature order.
                 if (xml.attr(clean, pi, "class")) |cn| {
                     if (std.ascii.eqlIgnoreCase(cn, "TEFeatureSignable")) signable = true;
+                    if (std.ascii.eqlIgnoreCase(cn, "TEFeatureCanvas")) canvas = true;
                 }
                 p = pi + 10;
                 continue;
@@ -870,6 +878,7 @@ pub fn loadFromPath(
             .block_tag = if (block_tag) |bt| try arena.dupe(u8, bt) else null,
             .is_door = false, // resolved from BlockTag after the Extends walk
             .signable = signable,
+            .canvas = canvas,
             .lp_hardness_scale = lp_hardness_scale,
             .lp_declared = lp_declared,
             .heat_strength = heat_strength,
@@ -931,6 +940,7 @@ pub fn loadFromPath(
         var own_pass_through = pb.pass_through;
         var own_pass_through_declared = pb.pass_through_declared;
         var own_signable = pb.signable;
+        var own_canvas = pb.canvas;
         var own_tag = pb.block_tag;
         var own_tags = pb.tags;
         var own_lp = pb.lp_hardness_scale;
@@ -994,6 +1004,7 @@ pub fn loadFromPath(
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
             if (!own_signable) own_signable = base_p.signable;
+            if (!own_canvas) own_canvas = base_p.canvas;
             // BlockTag follows the chain like the other string properties
             // (own wins; no stock row excludes it through param1). An
             // explicitly-tagged row never changes the result down-chain, so
@@ -1038,6 +1049,7 @@ pub fn loadFromPath(
         pb.pass_through = own_pass_through;
         pb.pass_through_declared = own_pass_through_declared;
         pb.signable = own_signable;
+        pb.canvas = own_canvas;
         pb.lp_hardness_scale = own_lp;
         pb.lp_declared = own_lp_declared;
         pb.harvest_drops = own_drops;
@@ -1096,6 +1108,7 @@ pub fn loadFromPath(
             .trader_onoff = pb.trader_onoff,
             .is_door = pb.is_door,
             .signable = pb.signable,
+            .canvas = pb.canvas,
             .lp_hardness_scale = pb.lp_hardness_scale,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,

@@ -22,39 +22,40 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
-**Live re-verification on the stock map 2026-09-28**: two loadgen bots join the
-real Navezgane map (`--game-dir`, DTM 6144x6144, the operator's modlet Config
-patches applied), spawn, walk, jump, throw dynamite and rejoin:
-`JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%` with 5 rejoins, one death
-and a respawn heal, and the server log holds no panic, no unhandled-package
-warning and no encode failure. This run covers the SetBlock flags and container
-padlock changes below. `zig build fuzz` exits 0 (1306 tests) and fmt,
-check_docs, lint-wire, lint-architecture, provenance and the doc catalogs are
-clean.
-**A container padlock is server state 2026-09-28**: stock's client writes its
-`TEFeatureLockable` module through `NetPackageTileEntity` (the FromClient read
-mode, `ProcessPackage` IL_0082), and a dedi keeps that TE. zdtd relayed the
-module inside the echo only, so the padlock lived in one package: a player who
-streamed the chunk later, rejoined, or came back after a restart saw an
-unlocked chest. The module body (`TEFeatureLockable::Write` IL=42: `locked`
-bool, the allowed users, the password hash) is now walked and stored verbatim on
-the container, emitted from that state by every TE the chunk stream, a rejoin
-or a lock grant builds, and persisted in ZCT4 (ZCT1-ZCT3 still load, unlocked).
-A storage-only write is the client's unlock and clears it. LockPickable (the
-wall-safe pick flow) and Canvas stay open, and enforcement stays where stock has
-it, on the client's own TE mirror. Gated by
+**A canvas sign's TE is server state 2026-09-28**: `TEFeatureCanvas` writes one
+`CanvasState` on the network path (libraryId, sign Guid, blend mode, rotation,
+imposter flag; IL=552), and zdtd had no leg for a body whose composite carries
+canvas and no storage, so a painted canvas sign lived only in the edit-time
+echo: a later stream, rejoin or restart showed a blank canvas. Blocks.xml
+`CompositeFeatures` now stamps `BlockDef.canvas` (the flag gates the leg, like
+`signable`), the body is walked, stored verbatim in the sign-family store, echoed
+and replayed by the chunk stream, with the canvas fields left opaque. Gated by
+`a canvas composite body parses and a malformed canvas module is refused` and
+`scenario a canvas sign's TE body is stored and replayed`.
+**Live re-verification on the stock map 2026-09-28**: two loadgen bots join real
+Navezgane (`--game-dir`, DTM 6144x6144), spawn, walk, jump, throw dynamite and
+rejoin: `JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%`, 5 rejoins, one
+death, a respawn heal, and no panic, unhandled package or encode failure.
+`zig build fuzz` exits 0 (1306 tests); fmt, check_docs, lint-wire,
+lint-architecture, provenance and the doc catalogs are clean.
+**A container padlock is server state 2026-09-28**: the client writes its
+`TEFeatureLockable` module through `NetPackageTileEntity` (FromClient read mode,
+`ProcessPackage` IL_0082) and zdtd relayed it inside the echo only, so a later
+stream, rejoin or restart showed an unlocked chest. The body (`locked`, allowed
+users, password hash; `TEFeatureLockable::Write` IL=42) is now walked, stored
+verbatim on the container, emitted by every TE the chunk stream, a rejoin or a
+lock grant builds, and persisted in ZCT4 (ZCT1-ZCT3 load unlocked); a
+storage-only write is the client's unlock. Enforcement stays where stock has it,
+on the client's own TE mirror. Gated by
 `a locked container writes the lockable module and reads it back`,
 `a container's lock module survives the ZCT4 round trip and ZCT3 loads unlocked`
-and `scenario a container padlock becomes server state and streams from it`
-(adopt, stream from server state, clear on unlock).
+and `scenario a container padlock becomes server state and streams from it`.
 **A damaged block now reaches every watching client 2026-09-26**: stock
-`Block::OnBlockDamaged` (IL_0457) writes the new damage onto the block value and
-calls `SetBlocksRPC` / `SetBlockRPC` whether or not the block breaks, so every
-damage application is a replicated change. zdtd echoed a surviving block on the
-player SetBlock path, the explosion path and the vomit-impact path, but the
+`Block::OnBlockDamaged` (IL_0457) replicates every damage change, broken or not.
+zdtd echoed a surviving block on the player, explosion and vomit paths, but the
 per-tick zombie chew and the MoveHelper dig only broadcast on the break: a
-client watching a zombie chew a wall held a pristine cell until the block fell.
-Both drains now call `echoBlockDamage`, the one helper the other paths use,
+client watching a zombie chew a wall held a pristine cell until it fell. Both
+drains now call `echoBlockDamage`, the one helper the other paths use,
 guarded so an indestructible block or a plugin-denied hit cannot repeat a no-op
 cell at tick rate. Gated by the extended
 `scenario zombie chews a 1-tall wall at feet level instead of getting stuck`,

@@ -3483,16 +3483,26 @@ unvalidated, and durability, mods and repair do not exist.
   `DowngradeToUnlockedVariant` `SetBlockRPC` on the block's blocks.xml
   `DowngradeBlock` chain (IL=510, `cntWallSafe` to `cntWallSafeInsecure`),
   which the SetBlock arm already validates, so parking the module changes
-  nothing server-side. Still open and genuinely stateful:
-  `TEFeatureCanvas`, whose network `Write` emits a `CanvasState` (IL=552) that
-  zdtd drops, so a canvas design does not survive a re-stream. Enforcement of a
+  nothing server-side. `TEFeatureCanvas` closed 2026-09-28: its network `Write`
+  emits one `CanvasState` (`libraryId` string, the 16-byte sign Guid, blend
+  mode, rotation, imposter flag, IL=552), and a body whose composite carries
+  canvas and no storage now has its own leg: the module body is walked
+  (GlobalSignId::ToStream IL=124 plus CanvasState::Write IL=18), stored verbatim
+  in the sign-family store keyed by position, echoed to peers, and replayed by
+  the chunk stream, so a canvas sign survives a re-stream, a rejoin and a
+  restart. `blocks.xml` `CompositeFeatures` now stamps the block's
+  `TEFeatureCanvas` declaration onto `BlockDef.canvas` (the flag gates the leg,
+  like `signable`). Enforcement of a
   lock on the open path is not attempted, matching stock: the client refuses
-  the window it may not open from its own TE mirror. The extra modules are
+  the window it may not open from its own TE mirror. Extra modules are
   still not spliced into an echo that lacks them, so the echo mirrors whatever
   the client sent.
   *Anchors:* `src/wire/stock_te.zig` (`buildStorageTeBody` module list,
-  `parseStorageTeBody` lock capture), `src/server/c2s/inv_te.zig` (lock adopt),
+  `parseStorageTeBody` lock capture, `parseSignableTeBody` canvas capture),
+  `src/server/c2s/inv_te.zig` (lock adopt, canvas leg),
   `src/world/containers.zig` (lock blob + ZCT4),
+  `src/world/signs.zig` (sign-family TE store),
+  `src/assets/blocks.zig` (`canvas`),
   `_global/TEFeatureLockable.il.txt:465`/`:517`,
   `_global/TileEntityComposite.il.txt:1240`, `_global/TEFeatureCanvas.il.txt:552`
 

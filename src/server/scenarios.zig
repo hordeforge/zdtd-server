@@ -18418,3 +18418,87 @@ test "scenario a container padlock becomes server state and streams from it" {
     try std.testing.expectEqual(@as(u16, 0), after.lock_len);
     std.debug.print("PASS padlock: client lock adopted, streamed from server state, cleared on unlock\n", .{});
 }
+
+test "scenario a canvas sign's TE body is stored and replayed" {
+    // A canvas sign's state is one TEFeatureCanvas module (CanvasState: the
+    // sign library id, its Guid, blend mode, rotation, imposter flag). Stock
+    // keeps the TE in the chunk and ships it with the chunk, so a player who
+    // streams the area later still sees the canvas. zdtd had no leg for a
+    // body whose composite carries canvas and no storage, so the state lived
+    // only in the edit-time echo.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_canvas");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_canvas", 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const canvas_block: u16 = world_store.block_stone;
+    var defs = [_]assets_blocks.BlockDef{.{
+        .id = canvas_block,
+        .name = "signCanvasWood1x1",
+        .canvas = true,
+    }};
+    g.blocks.deinit();
+    g.blocks = .{ .defs = &defs };
+    const bx: i32 = 270;
+    const by: i32 = 71;
+    const bz: i32 = 270;
+    try g.setBlock(bx, by, bz, canvas_block);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    g.sim.transform[ps].x = @floatFromInt(bx + 1);
+    g.sim.transform[ps].y = @floatFromInt(by);
+    g.sim.transform[ps].z = @floatFromInt(bz);
+
+    // The client's composite: one canvas module, no storage.
+    var cbuf: [64]u8 = undefined;
+    var cw: binary.Writer = .{ .buf = &cbuf };
+    try cw.writeString("prefab");
+    try cw.writeBytes(&([_]u8{9} ** 16));
+    try cw.writeByte(2);
+    try cw.writeByte(0);
+    try cw.writeBool(false);
+    const canvas = cw.written();
+    var pay_buf: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pay_buf };
+    try pw.writeI32(@mod(bx, 16));
+    try pw.writeI32(by);
+    try pw.writeI32(@mod(bz, 16));
+    const outer = pw.pos;
+    try pw.writeU32(0);
+    try pw.writeI32(canvas_block);
+    try pw.writeByte(0);
+    try pw.writeByte(1);
+    try pw.writeI32(packages.stock_te.feature_hash_canvas);
+    try pw.writeU32(@intCast(4 + canvas.len));
+    try pw.writeBytes(canvas);
+    std.mem.writeInt(u32, pay_buf[outer..][0..4], @intCast(pw.pos - outer), .little);
+    const payload = pw.written();
+    var body_buf: [512]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &body_buf };
+    try bw.writeByte(9);
+    try bw.writeI32(bx);
+    try bw.writeI32(by);
+    try bw.writeI32(bz);
+    try bw.writeI32(canvas_block);
+    try bw.writeI32(@intCast(payload.len));
+    try bw.writeBytes(payload);
+    const body = bw.written();
+
+    cap_a.clear();
+    cap_b.clear();
+    var frame_buf: [1024]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+    // Stored under its position, so the chunk stream can replay it.
+    const stored = g.sign_texts.get(.{ .x = bx, .y = by, .z = bz }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, stored.len), body.len);
+    try std.testing.expectEqualSlices(u8, body, stored.body[0..stored.len]);
+    // ...and the other client saw it at edit time.
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    try std.testing.expect(cap_b.findPkgId(te_id) != null);
+    std.debug.print("PASS canvas-te: canvas body stored for replay and echoed\n", .{});
+}

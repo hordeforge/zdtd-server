@@ -132,13 +132,13 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                 // Stock drops the package when the block at the addressed
                 // position no longer matches the claimed type; zdtd also
                 // requires the block to be one whose composite carries the
-                // signable module, so a forged body cannot write sign text
-                // into an unrelated block's TE slot.
+                // module the body wrote (signable text or a canvas state), so a
+                // forged body cannot write into an unrelated block's TE slot.
                 if (sign.block_id <= 0 or sign.block_id > std.math.maxInt(u16)) return true;
                 const cur = self.world.blockWorld(sign.world_x, sign.world_y, sign.world_z) catch return true;
                 if (@as(i32, cur) != sign.block_id) return true;
                 const bdef = self.blocks.byId(@intCast(sign.block_id)) orelse return true;
-                if (!bdef.signable) return true;
+                if (!bdef.signable and !bdef.canvas) return true;
                 // Keep the applied body so the chunk stream can replay it to a
                 // client that streams this area later (stock ships the TE with
                 // the chunk). A table-full or oversized body only loses the
