@@ -1002,6 +1002,14 @@ pub const Director = struct {
         if (st.count > 0) st.count -= 1;
     }
 
+    /// Stock's blood-moon vulture swap roll (`SpawnZombie` IL_0049: the
+    /// controller's `RandomFloat() < 0.5`). Deterministic here, drawn from the
+    /// same per-spawn mix as the placement jitter, so a replay of the same
+    /// spawn counter makes the same choice.
+    pub fn bloodMoonVultureSwap(seed: u32) bool {
+        return spawnJitter(seed) < 5000;
+    }
+
     /// Deterministic per-spawn jitter seed (0..9999) from the spawn counter,
     /// so consecutive waves place zombies on varied bearings without a global
     /// RNG (RE spawn placement, asm.il:413135).
@@ -1112,7 +1120,22 @@ pub const Director = struct {
                 const x = party.focus_x + @cos(ang) * r;
                 const z = party.focus_z + @sin(ang) * r;
                 const y = w.groundY(x, z) orelse (nearestPlayerY(w, x, z) orelse continue);
-                const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .bloodmoon) orelse continue;
+                // Stock's forced radiated vulture: when the targeted player is
+                // attached to an entity (a vehicle), a 50% roll replaces the
+                // group pick with `animalZombieVultureRadiated`, and that spawn
+                // does not feed the bonus-loot counter (SpawnZombie
+                // IL_0031-0061). The roll is a deterministic mix of the spawn
+                // counter, like the placement jitter.
+                const seed = self.total_spawned +% n;
+                var class_override: ?[]const u8 = null;
+                var loot_kind: LootKind = .bloodmoon;
+                if (nearestPlayerSlot(w, x, z)) |ps| {
+                    if (w.ridesVehicle(w.network_id[ps].id) and bloodMoonVultureSwap(seed)) {
+                        class_override = "animalZombieVultureRadiated";
+                        loot_kind = .none;
+                    }
+                }
+                const slot = self.spawnOneZombieClass(w, x, y, z, group, seed, true, loot_kind, class_override) orelse continue;
                 if (nearestPlayerSlot(w, x, z)) |ps| {
                     w.zombie_ai[slot].state = .chase;
                     w.zombie_ai[slot].target_id = w.network_id[ps].id;
@@ -1161,6 +1184,16 @@ pub const Director = struct {
         return self.spawnOneZombieLoot(w, x, y, z, group_override, seed, mark_horde, .none);
     }
     pub fn spawnOneZombieLoot(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind) ?ecs_world.Slot {
+        return self.spawnOneZombieClass(w, x, y, z, group_override, seed, mark_horde, loot_kind, null);
+    }
+
+    /// Same spawn with a forced class: stock's blood-moon spawner replaces the
+    /// group pick with `animalZombieVultureRadiated` when its targeted player
+    /// rides an entity, and that spawn skips the bonus-loot counter
+    /// (AIDirectorBloodMoonParty::SpawnZombie IL_0031-0061). `class_override`
+    /// is that class name; it resolves through the same class table/XML path
+    /// the group picker uses.
+    pub fn spawnOneZombieClass(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind, class_override: ?[]const u8) ?ecs_world.Slot {
         // Stock `Chunk::CanMobsSpawnAtPos` ground gate: the cell under the
         // spawn must carry CanMobsSpawnOn and be movement-solid, so a
         // player-built floor (which declares neither) does not host spawns.
@@ -1181,7 +1214,18 @@ pub const Director = struct {
         else
             fallback;
         var resolved: ?ecs_world.EntityClass = null;
-        if (grp.len > 0) {
+        if (class_override) |cname| {
+            for (w.class_table) |slot_ct| {
+                if (std.mem.eql(u8, slot_ct.name, cname)) {
+                    ct = slot_ct;
+                    resolved = ct;
+                    break;
+                }
+            }
+            if (resolved == null) {
+                if (self.class_resolve_fn) |f| resolved = f(self.class_resolve_ctx, cname);
+            }
+        } else if (grp.len > 0) {
             if (self.group_pick_fn) |pick| {
                 if (pick(self.group_pick_ctx, grp, seed)) |cname| {
                     for (w.class_table) |slot_ct| {

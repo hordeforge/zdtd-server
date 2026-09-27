@@ -151,15 +151,7 @@ pub fn holdingItemBroken(self: *const Game, ps: ecs.Slot) bool {
 /// for `IsAttachedToEntity`; stock attaches on EntityVehicle). Linear scan
 /// over live vehicles; seated players are rare and the fold runs per player.
 pub fn isSeated(sim: *const ecs.World, entity_id: i32) bool {
-    var it = sim.alive_bits.iterator(.{});
-    while (it.next()) |idx| {
-        const i: ecs.Slot = @intCast(idx);
-        if (!sim.mask[i].vehicle) continue;
-        for (sim.vehicle[i].seats[0..sim.vehicle[i].usableSeats()]) |rider| {
-            if (rider == entity_id) return true;
-        }
-    }
-    return false;
+    return sim.ridesVehicle(entity_id);
 }
 
 /// Passive-effects VM recomputes per player per tick: the untagged stats query

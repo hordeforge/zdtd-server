@@ -1173,3 +1173,47 @@ test "a spawn whose ground forbids mobs is refused" {
     var d2: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
     try std.testing.expect(d2.spawnOneZombieLoot(&w, 12.0, 70.0, 12.0, "", 9, false, .none) != null);
 }
+
+test "a blood-moon spawn swaps in the radiated vulture for a riding target" {
+    // Stock AIDirectorBloodMoonParty::SpawnZombie IL_0031-0061: when the
+    // targeted player is attached to an entity (a vehicle), a 50% roll picks
+    // `animalZombieVultureRadiated` instead of the group class, and that spawn
+    // does not advance the bonus-loot counter.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const veh = w.spawnVehicle(.minibike, 0, 70, 0).?;
+    const vs = w.slotOfNetId(veh).?;
+    // Nobody rides yet: the target is not attached.
+    try std.testing.expect(!w.ridesVehicle(w.network_id[w.slotOfNetId(p).?].id));
+    w.vehicle[vs].seats[0] = w.network_id[w.slotOfNetId(p).?].id;
+    try std.testing.expect(w.ridesVehicle(w.network_id[w.slotOfNetId(p).?].id));
+
+    // The roll is a deterministic 50% over the spawn counter (not seeded by
+    // wall clock), so the same counter always makes the same choice.
+    var swaps: u32 = 0;
+    var seed: u32 = 0;
+    while (seed < 1000) : (seed += 1) {
+        if (Director.bloodMoonVultureSwap(seed)) swaps += 1;
+    }
+    try std.testing.expect(swaps > 400 and swaps < 600);
+
+    // The forced class resolves through the same hook the group picker uses,
+    // and a `.none` loot kind leaves the bonus counter alone.
+    const Resolver = struct {
+        fn resolve(_: ?*anyopaque, name: []const u8) ?ecs_world.EntityClass {
+            if (!std.mem.eql(u8, name, "animalZombieVultureRadiated")) return null;
+            return .{ .name = "animalZombieVultureRadiated", .hash = 909090, .kind = .zombie, .flying = true, .max_hp = 400 };
+        }
+    };
+    var dir: Director = .{};
+    dir.class_resolve_ctx = null;
+    dir.class_resolve_fn = &Resolver.resolve;
+    dir.setBloodMoonBonus(4, 25);
+    const before_bonus = dir.bm_bonus_count;
+    const slot = dir.spawnOneZombieClass(&w, 0, 70, 0, "", 7, true, .none, "animalZombieVultureRadiated") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(w.mask[slot].class_id);
+    try std.testing.expectEqual(@as(i32, 909090), w.class_id[slot].hash);
+    try std.testing.expect(!w.class_id[slot].bonus_loot);
+    try std.testing.expectEqual(before_bonus, dir.bm_bonus_count);
+}

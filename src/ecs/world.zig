@@ -1097,6 +1097,23 @@ pub const World = struct {
         self.sleeper_wake_reqs[n] = .{ .slot = @intCast(slot), .groan = true };
     }
 
+    /// Whether the entity with this net id rides in any vehicle seat (stock
+    /// `Entity::AttachedToEntity`, set on EntityVehicle). The blood-moon
+    /// spawner reads it for its forced radiated-vulture arm, and the
+    /// `IsAttachedToEntity` requirement reads it through the Game helper.
+    pub fn ridesVehicle(self: *const World, net_id: i32) bool {
+        if (net_id <= 0) return false;
+        var it = self.alive_bits.iterator(.{});
+        while (it.next()) |idx| {
+            const i: Slot = @intCast(idx);
+            if (!self.mask[i].vehicle) continue;
+            for (self.vehicle[i].seats[0..self.vehicle[i].usableSeats()]) |rider| {
+                if (rider == net_id) return true;
+            }
+        }
+        return false;
+    }
+
     /// Resting terrain height at world (x,z) via the optional ground hook, or
     /// null when unset (no terrain data; caller skips physics).
     pub fn groundY(self: *const World, x: f32, z: f32) ?f32 {

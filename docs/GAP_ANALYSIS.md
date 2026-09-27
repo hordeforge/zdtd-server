@@ -2899,15 +2899,17 @@ gamestage, no wandering hordes, and no screamers.
   `$game/Data/Config/spawning.xml` lines 31-33
 
 - **Vultures / flying entities** `PARTIAL` (2026-09-28: flight shipped)
-  `EntityDef.flying` reads the class row's `Class`/tags (`animalZombieVulture`
-  is `Class="EntityVulture"`), rides into `ClassId.flying`, and `applyGravity`
-  holds `groundY + fly_cruise_h` at `fly_vert_rate`: a picked vulture flies,
-  and one chasing a target inside `fly_dive_dist_sq` descends onto it (clamped
-  above ground) then climbs back, the swoop being the attack.
-  Residuals: no forced radiated-vulture spawn (stock's `SpawnZombie` arm) and no
+  `EntityDef.flying` reads the class row's `Class`/tags, rides into
+  `ClassId.flying`, and `applyGravity` holds `groundY + fly_cruise_h` at
+  `fly_vert_rate`: a picked vulture flies, and one chasing a target inside
+  `fly_dive_dist_sq` descends onto it (clamped above ground) then climbs back.
+  The forced arm ships too: a blood-moon spawn aimed
+  at a riding player swaps in `animalZombieVultureRadiated` on a deterministic
+  50% draw and skips the bonus-loot counter (IL_0031-0061). Residual: no
   server-driven flight animation.
   *Anchors:* `applyGravity` (`src/ecs/damage_apply.zig`), `fly_cruise_h` /
-  `fly_vert_rate` (`src/ecs/rules.zig`), `flying` (`src/assets/entities.zig`)
+  `fly_vert_rate` (`src/ecs/rules.zig`), `flying` (`src/assets/entities.zig`),
+  `spawnOneZombieClass` (`src/ecs/aidirector.zig`)
 
 - **Animals never despawn** `WORKS` `(2026-08-22)`
   `systemDespawnFar` now walks both mob kind groups (zombie and animal) with
