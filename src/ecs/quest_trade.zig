@@ -948,11 +948,11 @@ pub fn traderRestock(w: *World) void {
         if (!w.alive[i] or !w.mask[i].trader_stock) continue;
         var stock = &w.trader_stock[i];
         if (stock.reset_interval < 0) continue;
-        if (stock.reset_interval > 0) {
-            // Wrapping-safe window test: day - last < interval, never a
-            // last + interval u32 add that could wrap in ReleaseFast.
-            if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) continue;
-        }
+        // Wrapping-safe window test: day - last < interval, never a
+        // last + interval u32 add that could wrap in ReleaseFast. Interval 0
+        // is stock's daily row, so its window is one day: a rerun on the same
+        // day is a no-op, and the lazy open path applies the identical test.
+        if (day -| stock.last_restock_day < @as(u32, @intCast(@max(stock.reset_interval, 1)))) continue;
         stock.last_restock_day = day;
         var e: usize = 0;
         while (e < stock.n) : (e += 1) {
@@ -1890,8 +1890,10 @@ test "trader wallet debits on sell, credits on buy and refuses overdraft" {
     try std.testing.expect(trade(&w, 0, trader_id, 99, 1, 0, 6));
     try std.testing.expectEqual(@as(i32, 10), w.trader_stock[ts].wallet);
 
-    // Restock regenerates the pool toward the spawn default.
+    // Restock regenerates the pool toward the spawn default, on the next day
+    // (reset_interval 0 is the daily row).
     w.trader_stock[ts].wallet = 0;
+    w.director.clock.day = 1;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
 }
@@ -1918,7 +1920,9 @@ test "trade leaves entry markup alone; restock resets" {
     // A sell leaves markup at neutral too.
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
-    // A restock rebuilds fresh entries: markup back to neutral.
+    // A restock rebuilds fresh entries: markup back to neutral. Interval 0 is
+    // the daily row, so the day has to roll before the rebuild runs.
+    w.director.clock.day = 1;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
 }
@@ -2032,6 +2036,34 @@ test "traderRestock honors per-trader reset_interval (never vs every N days)" {
     w.director.clock.day = 7;
     traderRestock(&w);
     try std.testing.expectEqual(@as(i32, 1000), w.trader_stock[st].wallet);
+}
+test "traderRestock with reset_interval 0 restocks once a day, not on every call" {
+    // ResetInterval 0 is stock's "daily" row. Without the day window a rerun
+    // on the same day re-filled the trader, so a second pass (a day-roll pass
+    // replayed, or the lazy open path) minted back a drained money pool.
+    var w: World = .{};
+    defer w.deinit();
+    const tid = w.spawnTrader("TraderDaily", 100, 70, 100, 0, 1000).?;
+    const ts = w.slotOfNetId(tid).?;
+    w.trader_stock[ts].reset_interval = 0; // daily
+    w.director.clock.day = 3;
+    w.trader_stock[ts].last_restock_day = 3;
+    w.trader_stock[ts].entries[0].count = 1;
+
+    traderRestock(&w);
+    traderRestock(&w);
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(u32, 3), w.trader_stock[ts].last_restock_day);
+    try std.testing.expectEqual(@as(u16, 1), w.trader_stock[ts].entries[0].count);
+    w.trader_stock[ts].wallet = 0;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(i32, 0), w.trader_stock[ts].wallet);
+
+    // The next day roll opens the window again.
+    w.director.clock.day = 4;
+    traderRestock(&w);
+    try std.testing.expectEqual(@as(u32, 4), w.trader_stock[ts].last_restock_day);
+    try std.testing.expectEqual(@as(i32, 1000), w.trader_stock[ts].wallet);
 }
 test "traderRestock honors the configured cap and refill" {
     var w: World = .{};

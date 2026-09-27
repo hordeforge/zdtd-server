@@ -10345,6 +10345,28 @@ test "scenario trader restock rebuilds the window lazily on open" {
     g.sim.director.clock.day = 60;
     g.maybeRestockTrader(nts);
     try std.testing.expectEqual(@as(u32, 1), g.sim.trader_stock[nts].last_restock_day);
+    // reset_interval 0 is the stock daily row, and the lock-open is
+    // re-sent/repealed freely. A second open on the same day must not rebuild
+    // the window: the rebuild tops the money pool back up to its spawn
+    // default, so re-opening the trader refilled the pool the player had
+    // just drained.
+    const daily_id = g.sim.spawnTrader("npcTraderDaily", 140, 70, 140, 0, 5000).?;
+    const dts = g.sim.slotOfNetId(daily_id).?;
+    g.fillTraderFromXml(daily_id);
+    g.sim.trader_stock[dts].reset_interval = 0;
+    g.sim.trader_stock[dts].last_restock_day = 4;
+    g.sim.director.clock.day = 4;
+    g.sim.trader_stock[dts].wallet = 0;
+    g.maybeRestockTrader(dts);
+    try std.testing.expectEqual(@as(i32, 0), g.sim.trader_stock[dts].wallet);
+    g.maybeRestockTrader(dts);
+    try std.testing.expectEqual(@as(i32, 0), g.sim.trader_stock[dts].wallet);
+    try std.testing.expectEqual(@as(u32, 4), g.sim.trader_stock[dts].last_restock_day);
+    // The next day opens the daily window.
+    g.sim.director.clock.day = 5;
+    g.maybeRestockTrader(dts);
+    try std.testing.expectEqual(@as(u32, 5), g.sim.trader_stock[dts].last_restock_day);
+    try std.testing.expect(g.sim.trader_stock[dts].wallet >= 5000);
     std.debug.print("PASS trader-restock: lazy window rebuild on open after reset_interval\n", .{});
 }
 

@@ -275,9 +275,11 @@ pub fn maybeRestockTrader(self: *Game, ts: ecs.Slot) void {
     const stock = &self.sim.trader_stock[ts];
     if (stock.reset_interval < 0) return; // never restocks
     const day = self.sim.director.clock.day;
-    if (stock.reset_interval > 0) {
-        if (day -| stock.last_restock_day < @as(u32, @intCast(stock.reset_interval))) return;
-    }
+    // ResetInterval 0 is stock's "daily" row, so its window is one day.
+    // Without that the rebuild ran on every window open, and it tops the money
+    // pool back up to wallet_default, so a client that opened the trader a
+    // second time refilled the pool it had just drained.
+    if (day -| stock.last_restock_day < @as(u32, @intCast(@max(stock.reset_interval, 1)))) return;
     self.fillTraderFromXml(self.sim.network_id[ts].id);
     // fillTraderFromXml advances the day only when a trader_info row exists
     // (XML mode); the restock decision is ours, so pin it here regardless.

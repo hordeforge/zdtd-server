@@ -302,13 +302,16 @@ denied outside hours), and `src/server/game/trader_wire.zig` (`handleTrade`,
 `applyTraderDataCopyFrom`).
 
 Restock cadence (`TraderStock.reset_interval` from traders.xml ResetInterval):
--1 never, 0 daily (spawn default), N > 0 every N days. The roll is
-deterministic (world seed x trader id x day). Wallet: the trader `wallet` is
-credited when players buy and debited when the trader buys from players (a
-sell is refused once the pool runs out); it regrows toward `wallet_default` at
-each restock. The C2S CopyFrom mirrors the client's post-trade stock deltas
-and money back. Markup demand delta rides the wire (+100 after a buy, -4 after
-a sell) and resets on restock.
+-1 never, 0 daily (spawn default), N > 0 every N days. Every non-negative
+interval is gated on a day having passed since `last_restock_day`, so a
+second open (or a second day-roll pass) on the same day is a no-op; without
+that gate the rebuild refunded the money pool the player had just drained.
+The roll is deterministic (world seed x trader id x day). Wallet: the trader
+`wallet` is credited when players buy and debited when the trader buys from
+players (a sell is refused once the pool runs out); it regrows toward
+`wallet_default` at each restock. The C2S CopyFrom mirrors the client's
+post-trade stock deltas and money back. Markup demand delta rides the wire
+(+100 after a buy, -4 after a sell) and resets on restock.
 
 ## 10. Vehicle multi-seat
 
