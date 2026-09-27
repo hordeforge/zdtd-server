@@ -22,6 +22,15 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Live re-verification on the stock map 2026-09-28**: two loadgen bots join the
+real Navezgane map (`--game-dir`, DTM 6144x6144, the operator's modlet Config
+patches applied), spawn, walk, jump, throw dynamite and rejoin:
+`JOIN_SUMMARY total=2 pass=2 fail=0 passRate=100.00%` with 5 rejoins, one death
+and a respawn heal, and the server log holds no panic, no unhandled-package
+warning and no encode failure. This run covers the SetBlock flags and container
+padlock changes below. `zig build fuzz` exits 0 (1306 tests) and fmt,
+check_docs, lint-wire, lint-architecture, provenance and the doc catalogs are
+clean.
 **A container padlock is server state 2026-09-28**: stock's client writes its
 `TEFeatureLockable` module through `NetPackageTileEntity` (the FromClient read
 mode, `ProcessPackage` IL_0082), and a dedi keeps that TE. zdtd relayed the

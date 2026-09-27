@@ -3472,20 +3472,29 @@ unvalidated, and durability, mods and repair do not exist.
   password hash), writes it back from server state on every TE the chunk
   stream, a rejoin or a lock grant sends, and persists it in ZCT4, so a
   padlocked chest stays padlocked for a client that never saw the client's own
-  echo. A storage-only body is the client's unlock and clears it. Still open:
-  the `TEFeatureLockPickable` lockpick flow (a wall safe cannot be picked) and
-  `TEFeatureCanvas` (a painted container face is not modelled); both need
-  their own sim state and C2S shapes. Enforcement of a lock on the open path is
-  not attempted, matching stock: the client refuses the window it may not open
-  from its own TE mirror. The extra modules are still not spliced into an echo
-  that lacks them, so the echo mirrors whatever the client sent. This is **not**
-  a stream desync: each module is bounded by its own size marker and
-  `TileEntityComposite::read` only warns for features missing from the stream
-  and defaults them (`:1665`).
+  echo. A storage-only body is the client's unlock and clears it. What is
+  **not** a gap: a body that declares fewer modules than the block defines is
+  accepted, because the network read pins the version to 18
+  (`TileEntityComposite::read` IL_0009) and the count-mismatch
+  "Skipping TE payload" branch is the legacy `version < 17` path (IL_00BE
+  jumps past it), so the client defaults the features its own blocks.xml
+  declares. `TEFeatureLockPickable` rides that: its network
+  `Write` emits no payload at all (IL=152), its flow is local UI plus a
+  `DowngradeToUnlockedVariant` `SetBlockRPC` on the block's blocks.xml
+  `DowngradeBlock` chain (IL=510, `cntWallSafe` to `cntWallSafeInsecure`),
+  which the SetBlock arm already validates, so parking the module changes
+  nothing server-side. Still open and genuinely stateful:
+  `TEFeatureCanvas`, whose network `Write` emits a `CanvasState` (IL=552) that
+  zdtd drops, so a canvas design does not survive a re-stream. Enforcement of a
+  lock on the open path is not attempted, matching stock: the client refuses
+  the window it may not open from its own TE mirror. The extra modules are
+  still not spliced into an echo that lacks them, so the echo mirrors whatever
+  the client sent.
   *Anchors:* `src/wire/stock_te.zig` (`buildStorageTeBody` module list,
   `parseStorageTeBody` lock capture), `src/server/c2s/inv_te.zig` (lock adopt),
   `src/world/containers.zig` (lock blob + ZCT4),
-  `_global/TEFeatureLockable.il.txt:465`/`:517`
+  `_global/TEFeatureLockable.il.txt:465`/`:517`,
+  `_global/TileEntityComposite.il.txt:1240`, `_global/TEFeatureCanvas.il.txt:552`
 
 - **Storage TileEntity C2S apply and broadcast** `WORKS`
   Parse, range check against the acting player, apply, broadcast. Slot quality and
