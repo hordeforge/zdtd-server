@@ -121,6 +121,7 @@ STRUCTURAL_CONSTANTS = {
     "block_change_flag_force_density", "block_change_flag_update_light",
     "block_change_flag_texture", "block_change_flags_known",
     "layers_n", "cells_per_layer", "simd_u8_w", "simd_u32_w", "simd_u64_w", "simd_u16_w",
+    "dist_lanes",
     "class_player_male", "class_player_female",
     "max_ws_slots", "max_ws_queue", "max_ws_melt", "max_craft_complete",
     "last_input_blob_max", "recipe_queue_item_version", "craft_complete_version",
