@@ -141,7 +141,9 @@ pub fn handleTrade(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // what the leading bytes mean: an entity id when isEntity, otherwise
         // the tile-entity position (a vending machine). The zdtd short open
         // body carries neither, so it has no position to check.
+        var open_reach_checked = false;
         if (packages.parseTraderDataToServer(body) catch null) |open| {
+            open_reach_checked = true;
             if (open.is_entity) {
                 const ni = self.sim.slotOfNetId(open.entity_id) orelse return true;
                 if (!self.sim.mask[ni].transform) return true;
@@ -162,6 +164,21 @@ pub fn handleTrade(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         }
         // Stock trader quest offers (npc from open body when present).
         const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
+        // A body the open header reader rejects carries no position the reach
+        // gate above could check, but the fallthrough still reads its leading
+        // i32 as a trader id and acts on it. Same rule as the header leg: a
+        // trader the player cannot reach may not advance quest phases or hand
+        // out its offers from across the map.
+        if (!open_reach_checked) {
+            if (self.sim.slotOfNetId(npc_id)) |nslot| {
+                if (!self.sim.mask[nslot].transform) return true;
+                const ntp = self.sim.transform[nslot];
+                if (!self.inTradeReach(c, ntp.x, ntp.y, ntp.z)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
+            }
+        }
         systems.questOnTraderOpen(&self.sim, c.slot);
         // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
         if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {

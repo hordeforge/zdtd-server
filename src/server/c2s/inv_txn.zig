@@ -16,6 +16,37 @@ const game_locks = @import("../game/locks.zig");
 const eatProps = game_mod.Game.eatProps;
 const containers_mod = @import("../../world/containers.zig");
 
+/// Resolve the container a stock InvDataRequest names, but only when the
+/// requester stands within edit reach of it. Returns null for a key that
+/// does not decode, a container that does not exist, and one out of reach;
+/// the caller answers the same stock not-found body for all three, so a
+/// remote container stays indistinguishable from an absent one.
+fn containerInReach(
+    self: *Game,
+    c: *Client,
+    peer_local: i32,
+    key: ?containers_mod.PosKey,
+) ?*containers_mod.Container {
+    const k = key orelse return null;
+    const cont = self.containers.get(k) orelse return null;
+    const ps = self.sim.playerByPeer(c.slot) orelse return null;
+    if (!self.sim.mask[ps].transform) return null;
+    const t = self.sim.transform[ps];
+    if (self.rejectIfBeyondEditRange(
+        c,
+        peer_local,
+        c.entity_id,
+        .container,
+        t.x,
+        t.y,
+        t.z,
+        @floatFromInt(k.x),
+        @floatFromInt(k.y),
+        @floatFromInt(k.z),
+    )) return null;
+    return cont;
+}
+
 /// True when `name` is a transaction/data package and was handled.
 pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageInventoryTransactionRequest")) {
@@ -272,7 +303,12 @@ pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8,
         // Stock: KeyHashPair (Guid+hash) + managerToken Guid.
         // Serve TE container slots when Guid matches our deterministic pos-key.
         if (packages.parseInvDataRequestStock(body)) |req| {
-            if (self.containers.getByGuid(&req.inventory_key)) |cont| {
+            // The stock key IS the container's world position in the clear
+            // (containers.guidFromPos writes x/y/z then the "ZTE1" tag), so a
+            // client can name any container on the map. Reach is the gate the
+            // TE write path already applies: a container the player cannot
+            // touch is one whose contents and loot state they may not read.
+            if (containerInReach(self, c, peer.local_id, containers_mod.posFromGuid(&req.inventory_key))) |cont| {
                 // Stock LootManager.LootContainerOpened: an untouched world
                 // container rolls here with the opener's loot stage (the roll
                 // no longer happens at chunk load), and a looted one re-rolls
@@ -313,6 +349,26 @@ pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8,
                 // Loot containers only: another player's slots are not a
                 // lootable inventory, and echoing them leaks their bag.
                 if (self.sim.mask[si].inventory and !self.sim.mask[si].player) {
+                    // Same reach gate as the container leg above: the request
+                    // names the entity, so a peer that never walked to the bag
+                    // must not read it.
+                    const rps = self.sim.playerByPeer(c.slot) orelse return true;
+                    if (!self.sim.mask[rps].transform) return true;
+                    const rt = self.sim.transform[rps];
+                    if (!self.sim.mask[si].transform) return true;
+                    const bt = self.sim.transform[si];
+                    if (self.rejectIfBeyondEditRange(
+                        c,
+                        peer.local_id,
+                        c.entity_id,
+                        .container,
+                        rt.x,
+                        rt.y,
+                        rt.z,
+                        bt.x,
+                        bt.y,
+                        bt.z,
+                    )) return true;
                     const body_out = try packages.buildInventoryBodyStockResolved(
                         &self.body_buf,
                         &self.sim.inventory[si],

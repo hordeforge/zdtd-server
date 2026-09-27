@@ -9395,6 +9395,60 @@ test "scenario world container loot rolls on first open, not at load" {
     std.debug.print("PASS loot-open: world chest rolls {d} stacks on first open, player storage untouched\n", .{rolled});
 }
 
+test "scenario container data request beyond edit reach is refused" {
+    // The stock InventoryDataRequest key IS the container's world position in
+    // the clear (containers.guidFromPos writes x/y/z then the "ZTE1" tag), so
+    // a client can name any container on the map by composing the guid. The
+    // read carries no lock and no streamed-chunk proof, so reach is the only
+    // thing keeping one peer from reading a chest they never walked to, and
+    // from rolling its deferred loot (ensureContainerLoot) from spawn.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const ep = g.sim.transform[ps];
+    const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
+    var fb: [8192]u8 = undefined;
+    var req: [36]u8 = undefined;
+
+    // Within reach: served, so the far refusal below is the reach gate and not
+    // a request body the parser rejects for some other reason.
+    const near = containers_mod.PosKey{ .x = @trunc(ep.x + g.max_edit_range - 4), .y = 70, .z = @trunc(ep.z) };
+    const ncont = g.containers.getOrCreate(near, 8, chest_id) orelse return error.TestUnexpectedResult;
+    ncont.player_storage = false;
+    ncont.loot_list = "woodenChest";
+    @memcpy(req[0..16], &ncont.inv_guid);
+    std.mem.writeInt(i32, req[16..20], 0, .little);
+    @memcpy(req[20..36], &ncont.inv_guid);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryDataRequest", &req));
+    try std.testing.expect(ncont.touched);
+
+    // Same request shape, container well beyond reach: refused. No loot roll,
+    // and the seeded stack is still the server's own, so the read never
+    // reached the response builder.
+    const far = containers_mod.PosKey{ .x = @trunc(ep.x + g.max_edit_range * 4), .y = 70, .z = @trunc(ep.z) };
+    const fcont = g.containers.getOrCreate(far, 8, chest_id) orelse return error.TestUnexpectedResult;
+    fcont.player_storage = false;
+    fcont.loot_list = "woodenChest";
+    fcont.setSlot(0, .{ .item_id = 1, .count = 5, .quality = 1 });
+    fcont.touched = false; // setSlot counts as a write; the open must not.
+    @memcpy(req[0..16], &fcont.inv_guid);
+    @memcpy(req[20..36], &fcont.inv_guid);
+    const before = g.harness.counters.get(.bounds_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryDataRequest", &req));
+    try std.testing.expect(g.harness.counters.get(.bounds_rejects) > before);
+    try std.testing.expect(!fcont.touched);
+    try std.testing.expectEqual(@as(u16, 1), fcont.slots[0].item_id);
+    std.debug.print("PASS invdata-reach: near container served, far container refused\n", .{});
+}
+
 test "scenario container loot respawns after LootRespawnDays" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootrespawn");
@@ -15693,6 +15747,17 @@ test "scenario trader open reach: quest turn-in needs the player at the trader" 
     const bounds_before = g.harness.counters.get(.bounds_rejects);
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", &open));
     try std.testing.expectEqual(bounds_before + 1, g.harness.counters.get(.bounds_rejects));
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
+
+    // A body too short for the open header to parse carries no position the
+    // reach gate can read, and the arm still takes its leading i32 as the
+    // trader. Same distance, same refusal: the short form is not a way around
+    // the gate.
+    var short_open: [4]u8 = undefined;
+    std.mem.writeInt(i32, &short_open, tid, .little);
+    const bounds_after_short = g.harness.counters.get(.bounds_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", &short_open));
+    try std.testing.expectEqual(bounds_after_short + 1, g.harness.counters.get(.bounds_rejects));
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
 
     // Standing at the trader, the same body turns the quest in.
