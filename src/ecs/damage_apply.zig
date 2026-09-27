@@ -31,7 +31,22 @@ pub fn applyGravity(w: *World, s: Slot, dt: f32) void {
     if (w.mask[s].class_id and w.class_id[s].flying) {
         const cruise = w.rules.ai.fly_cruise_h;
         const rate = @max(0.1, w.rules.ai.fly_vert_rate);
-        const want = (w.groundY(t.x, t.z) orelse t.y) + cruise;
+        const ground = w.groundY(t.x, t.z) orelse t.y;
+        var want = ground + cruise;
+        // The swoop is the attack: a flyer chasing a target inside the dive
+        // range descends onto it (clamped above the ground so the body does
+        // not clip through terrain) and climbs back to cruise once the chase
+        // ends, instead of holding altitude and biting from the sky.
+        if ((ai.state == .chase or ai.state == .attack) and ai.target_id >= 0) {
+            if (w.slotOfNetId(ai.target_id)) |ts| {
+                const tt = w.transform[ts];
+                const dx = tt.x - t.x;
+                const dz = tt.z - t.z;
+                if (dx * dx + dz * dz <= w.rules.ai.fly_dive_dist_sq) {
+                    want = @max(ground + 1.0, tt.y + 0.5);
+                }
+            }
+        }
         const dy = want - t.y;
         const step = std.math.clamp(dy, -rate * dt, rate * dt);
         t.y += step;
@@ -403,6 +418,21 @@ test "a flying class holds its cruise altitude instead of falling" {
     w.transform[s].y = 66.0;
     for (0..200) |_| applyGravity(&w, s, 0.05);
     try std.testing.expectApproxEqAbs(@as(f32, 72.0), w.transform[s].y, 0.5);
+
+    // The swoop: chasing a target inside the dive range descends onto it,
+    // clamped above the ground, and the climb back resumes once the chase ends.
+    const p = w.spawnPlayer(20, 70, 5, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.zombie_ai[s].state = .chase;
+    w.zombie_ai[s].target_id = p;
+    for (0..300) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 70.5), w.transform[s].y, 0.6);
+    try std.testing.expect(w.transform[s].y >= 65.0); // never through the ground
+    w.zombie_ai[s].state = .idle;
+    w.zombie_ai[s].target_id = -1;
+    for (0..300) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 72.0), w.transform[s].y, 0.5);
+    _ = ps;
 
     // Control: the same spawn without the flag falls to the ground top.
     const z2 = w.spawnZombieClass(5, 70, 5, 200, 7, "").?;

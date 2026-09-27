@@ -261,6 +261,7 @@ test, so a retune cannot land silently).
 | `swim_speed_frac` | 0.5 | Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed) |
 | `fly_cruise_h` | 8.0 | Flying classes (stock `EntityVulture`, class `animalZombieVulture`) hold this altitude above the resting ground instead of integrating gravity |
 | `fly_vert_rate` | 4.0 | Vertical rate (blocks/s) a flying body climbs or descends at toward its cruise altitude |
+| `fly_dive_dist_sq` | 900.0 | Horizontal range (squared, blocks) inside which a flying body dives at the target it is chasing instead of holding cruise (30 m); the swoop is the vulture attack |
 | `gravity` | -1.6 | Vertical acceleration, blocks/s². RE: `World::Gravity` 0.08 blocks/tick (World cctor) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) → ~1.6 blocks/s², self-capping ~ -3.9 |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor** (night chase): `entityclasses.xml` `MoveSpeedAggro` max wins when non-zero; the day chase uses `MoveSpeedAggro` min (`chase_speed_day`). Stock `GetMoveSpeedAggro`: dark → aggroMax (passive 134), day → aggro (passive 133); the XML comment "min/max (like day or night)" pins the split |

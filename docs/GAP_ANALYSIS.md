@@ -2901,10 +2901,11 @@ gamestage, no wandering hordes, and no screamers.
 - **Vultures / flying entities** `PARTIAL` (2026-09-28: flight shipped)
   `EntityDef.flying` reads the class row's `Class`/tags (`animalZombieVulture`
   is `Class="EntityVulture"`), rides into `ClassId.flying`, and `applyGravity`
-  holds `groundY + fly_cruise_h` at `fly_vert_rate` instead of falling, so a
-  horde group that picks a vulture gets a body that flies rather than one that
-  walks. Residuals: no forced radiated-vulture spawn (stock's `SpawnZombie`
-  arm), no dive attack, no server-driven flight animation.
+  holds `groundY + fly_cruise_h` at `fly_vert_rate`: a picked vulture flies,
+  and one chasing a target inside `fly_dive_dist_sq` descends onto it (clamped
+  above ground) then climbs back, the swoop being the attack.
+  Residuals: no forced radiated-vulture spawn (stock's `SpawnZombie` arm) and no
+  server-driven flight animation.
   *Anchors:* `applyGravity` (`src/ecs/damage_apply.zig`), `fly_cruise_h` /
   `fly_vert_rate` (`src/ecs/rules.zig`), `flying` (`src/assets/entities.zig`)
 
