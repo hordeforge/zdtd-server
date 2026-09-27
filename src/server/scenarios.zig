@@ -18749,6 +18749,15 @@ test "scenario a placed turret and vehicle are announced to the stock client" {
         try std.testing.expectEqual(our_vehicle, try r.readI32());
         _ = try r.readByte(); // EntityCreationData fileVersion
         try std.testing.expectEqual(vehicle_hash, try r.readI32());
+
+        // Leaving interest must unspawn it again, or the client keeps a ghost
+        // GameObject; the announce path and the unload path share the same
+        // entity set.
+        g.sim.transform[bps].x = 4000;
+        cap_b.clear();
+        try g.replicate();
+        const rem_id = packages.idOf("NetPackageEntityRemove") orelse return error.TestUnexpectedResult;
+        try std.testing.expect(cap_b.findPkgIdEntity(rem_id, our_vehicle) != null);
     }
     std.debug.print("PASS announce: placed turret and vehicle reach the other client as ECDs\n", .{});
 }

@@ -208,9 +208,12 @@ pub fn replicate(self: *Game) !void {
             }
         }
 
-        if (is_mob) {
+        if (is_mob or is_spawnable_extra) {
             // Known but out of interest: walk present ∩ ~in_range bits (the
-            // observerMask word already encodes cellsInRange per lane).
+            // observerMask word already encodes cellsInRange per lane). Covers
+            // vehicles and turrets like any other announced entity: without
+            // this the client keeps a ghost GameObject for a vehicle that left
+            // interest.
             var leave = present & ~in_range;
             while (leave != 0) : (leave &= leave - 1) {
                 const ci = @ctz(leave);
