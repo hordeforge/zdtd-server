@@ -127,6 +127,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.projectile_radius = def.projectile_radius;
     cid.projectile_damage = def.projectile_damage;
     cid.projectile_block_damage = def.projectile_block_damage;
+    cid.flying = def.flying;
     cid.attack_damage = def.attack_damage;
     cid.phys_resist = def.phys_resist;
     cid.block_chew = def.block_chew;
@@ -220,6 +221,9 @@ pub const EntityClass = struct {
     /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = a block
     /// impact damages nothing.
     projectile_block_damage: f32 = 0,
+    /// Stock `EntityFlying` class (the vulture): `applyGravity` holds an
+    /// altitude above the terrain for these bodies instead of falling.
+    flying: bool = false,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
     /// class's own rows (Extends-resolved). Applied only where the server
     /// computes the damage (turrets, the deferred accumulator), never to a

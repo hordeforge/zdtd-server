@@ -259,6 +259,8 @@ test, so a retune cannot land silently).
 | `swim_gravity_per` | 0.025 | Swim gravity fraction (stock cSwimGravityPer): a submerged AI body falls with gravity*0.025 |
 | `swim_drag_y` | 0.91 | Swim y-drag (stock cSwimDragY): the vertical drag while submerged |
 | `swim_speed_frac` | 0.5 | Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed) |
+| `fly_cruise_h` | 8.0 | Flying classes (stock `EntityVulture`, class `animalZombieVulture`) hold this altitude above the resting ground instead of integrating gravity |
+| `fly_vert_rate` | 4.0 | Vertical rate (blocks/s) a flying body climbs or descends at toward its cruise altitude |
 | `gravity` | -1.6 | Vertical acceleration, blocks/s². RE: `World::Gravity` 0.08 blocks/tick (World cctor) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) → ~1.6 blocks/s², self-capping ~ -3.9 |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
 | `chase_speed` | 2.2 | **Floor** (night chase): `entityclasses.xml` `MoveSpeedAggro` max wins when non-zero; the day chase uses `MoveSpeedAggro` min (`chase_speed_day`). Stock `GetMoveSpeedAggro`: dark → aggroMax (passive 134), day → aggro (passive 133); the XML comment "min/max (like day or night)" pins the split |

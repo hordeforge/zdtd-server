@@ -287,6 +287,12 @@ pub const Ai = struct {
     swim_drag_y: f32 = 0.91,
     /// Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed).
     swim_speed_frac: f32 = 0.5,
+    /// Flying classes (stock `EntityVulture`) hold an altitude above the
+    /// terrain instead of integrating gravity: the cruise height above the
+    /// resting ground, and the vertical rate the body climbs or descends at
+    /// (blocks/s), so the client sees a smooth arc rather than a snap.
+    fly_cruise_h: f32 = 8.0,
+    fly_vert_rate: f32 = 4.0,
     /// Despawn range for director-spawned zombies, squared blocks.
     despawn_dist_sq: f32 = 200.0 * 200.0,
     /// Chase speed, blocks/s. **Floor**: entityclasses.xml MoveSpeedAggro wins
@@ -903,6 +909,8 @@ pub const AiOverlay = struct {
     swim_gravity_per: ?f32 = null,
     swim_drag_y: ?f32 = null,
     swim_speed_frac: ?f32 = null,
+    fly_cruise_h: ?f32 = null,
+    fly_vert_rate: ?f32 = null,
     despawn_dist_sq: ?f32 = null,
     chase_speed: ?f32 = null,
     wander_speed: ?f32 = null,

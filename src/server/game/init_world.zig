@@ -422,6 +422,7 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .projectile_radius = if (spit) |sc| sc.radius else 0,
         .projectile_damage = if (spit) |sc| sc.damage else 0,
         .projectile_block_damage = if (spit) |sc| sc.block_damage else 0,
+        .flying = d.flying,
         .attack_damage = self.handItemDamage(d.hand_item),
         .time_stay = d.time_stay,
         .sight_range = d.sight_range,

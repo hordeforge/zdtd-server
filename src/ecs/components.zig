@@ -136,6 +136,10 @@ pub const ClassId = struct {
     /// The ammo's Projectile DamageBlock (stock vomit 120). 0 = the shot
     /// damages nothing on a block impact.
     projectile_block_damage: f32 = 0,
+    /// Stock `EntityFlying` class (`EntityVulture`): the body holds an altitude
+    /// above the terrain instead of falling (see `applyGravity`). Parsed from
+    /// the class's `Class`/tags in entityclasses.xml.
+    flying: bool = false,
     attack_damage: f32 = 0,
     /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
     /// class; 0 = class_table[id] then no resist. Applied only at the

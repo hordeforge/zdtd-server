@@ -2898,10 +2898,15 @@ gamestage, no wandering hordes, and no screamers.
   `src/ecs/aidirector.zig:505-575` tickAnimals/spawnAnimalsNearPlayers,
   `$game/Data/Config/spawning.xml` lines 31-33
 
-- **Vultures / flying entities** `PARTIAL (waived)`
-  No flying `EntityKind`/vertical AI; vultures not spawned. Needs vertical
-  movement + `EntityFlying` parity - waived as entity-variety, not parity gate.
-  *Anchors:* `src/ecs/components.zig:5-13`
+- **Vultures / flying entities** `PARTIAL` (2026-09-28: flight shipped)
+  `EntityDef.flying` reads the class row's `Class`/tags (`animalZombieVulture`
+  is `Class="EntityVulture"`), rides into `ClassId.flying`, and `applyGravity`
+  holds `groundY + fly_cruise_h` at `fly_vert_rate` instead of falling, so a
+  horde group that picks a vulture gets a body that flies rather than one that
+  walks. Residuals: no forced radiated-vulture spawn (stock's `SpawnZombie`
+  arm), no dive attack, no server-driven flight animation.
+  *Anchors:* `applyGravity` (`src/ecs/damage_apply.zig`), `fly_cruise_h` /
+  `fly_vert_rate` (`src/ecs/rules.zig`), `flying` (`src/assets/entities.zig`)
 
 - **Animals never despawn** `WORKS` `(2026-08-22)`
   `systemDespawnFar` now walks both mob kind groups (zombie and animal) with
@@ -3460,8 +3465,8 @@ unvalidated, and durability, mods and repair do not exist.
   creation (deterministic per block) and respawns by touched_day, so the
   server-side lazy-roll key (RE loot-economy.md `LootContainerOpened`) is not
   needed and the client UI does not render the list name.
-  **Residual, recorded 2026-09-09, narrowed 2026-09-28: the Lockable module
-  is server-owned, LockPickable and Canvas are not.** A composite TE is a
+  **Residual, recorded 2026-09-09, narrowed 2026-09-28: Lockable is
+  server-owned, LockPickable and Canvas are not.** A composite TE is a
   module list, and `TileEntityComposite::write` (`TileEntityComposite.il.txt:1709`)
   emits every feature the block declares; stock blocks.xml pairs Storage with
   others on real blocks: 457 Storage uses alongside 83 `TEFeatureLockable`, 178
@@ -6853,7 +6858,7 @@ not stock:
 | Storage / fuel items | PARTIAL (fuel float + the basket C2S apply ships 2026-08-27: NetPackageBag is parsed (entityId i32 + blobLen u16 + Bag.Write v1 blob) and applied to the vehicle's basket array, item ids validated by the reverse resolver, with an S2C echo to the other clients - the stock S2C broadcast sender is unpinned (research dedicated-misc-systems.md vehicle storage pin v2); basket contents persist across restart since 2026-09-10 as their own entities.zen record type, carrying the full v12 slot shape (quality, meta, use_times, seed, mod ids) and clamped on load with the other saved stores) |
 | Vehicle collision / terrain stick | PARTIAL (server gravity + terrain-top clamp; no entity/block-side collision) |
 | `NetPackageVehicleCount` broadcast | WORKS (2026-09-28: emitted after a placed vehicle and a turret spawn, stock's senders; its only reader is console-gated `CanAddMoreVehicles`, so this is wire parity - DIVERGENCES)
-| Placeable vehicle as entity spawn stock | WORKS (2026-09-28: the stock `NetPackageVehicleSpawn` body (`entityType` i32 | pos | rot | ItemValue | `entityThatPlaced`, write IL=24) is served authoritatively. The sender must own the placer id (stock `ValidEntityIdForSender`), the class must resolve to a vehicle whose vehicles.xml def maps to the item the body claims (`placeableItemName`), the spot must be in reach, and the pose finite; the spawn then reuses the admin/worldgen path (`spawnVehicleEx` with vehicles.xml hp/speed/seats), stamps `Vehicle.owner_slot` from the placer, and sends the placer the parked-vehicle waypoint list, so `NetPackageEntityWaypointList` finally has a production owner. The item is consumed by the client and lands through the inventory path; the over-cap arm drops the request, stock's refund outcome without the drop. Gated by `scenario a placeable vehicle item spawns an owned vehicle`. The spawn stamps the ECD class hash, and replicate now announces `.vehicle` and `.turret` entities (an unresolved class is skipped: the ECD fallback is the zombie class), so a placed vehicle or turret reaches the client as an entity (and is removed again when interest drops) instead of being invisible to the TurretSync and position packets; gated by `scenario a placed turret and vehicle are announced to the stock client`) |
+| Placeable vehicle as entity spawn stock | WORKS (2026-09-28: the stock `NetPackageVehicleSpawn` body (`entityType` i32 | pos | rot | ItemValue | `entityThatPlaced`, write IL=24) is served authoritatively. The sender must own the placer id (stock `ValidEntityIdForSender`), the class must resolve to a vehicle whose vehicles.xml def maps to the item the body claims (`placeableItemName`), the spot must be in reach, and the pose finite; the spawn then reuses the admin/worldgen path (`spawnVehicleEx` with vehicles.xml hp/speed/seats), stamps `Vehicle.owner_slot` from the placer, and sends the placer the parked-vehicle waypoint list, so `NetPackageEntityWaypointList` finally has a production owner. The item is consumed by the client and lands through the inventory path; the over-cap arm drops the request, stock's refund outcome without the drop. Gated by `scenario a placeable vehicle item spawns an owned vehicle`. The spawn stamps the ECD class hash, and replicate announces `.vehicle` and `.turret` entities (an unresolved class is skipped: the ECD fallback is the zombie class), so a placed vehicle or turret reaches the client as an entity and is removed when interest drops; gated by `scenario a placed turret and vehicle are announced to the stock client`) |
 | Power grid BFS | HAVE (flood from generators, demand>gen drop) |
 | Placeable electrical blocks in world | HAVE (SetBlock → PowerGrid node, real watts) |
 | Stock `NetPackageWireActions` SetParent/RemoveParent | HAVE |

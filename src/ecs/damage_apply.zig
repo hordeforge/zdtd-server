@@ -21,10 +21,25 @@ const dmg_scale: u32 = 100;
 /// long drop cannot outrun the per-tick probe. Runs once per AI tick so an
 /// idle or attacking body still settles.
 pub fn applyGravity(w: *World, s: Slot, dt: f32) void {
-    const solid_fn = w.solid_fn orelse return;
     const t = &w.transform[s];
     const ai = &w.zombie_ai[s];
     if (ai.jump_cd > 0) ai.jump_cd -= dt;
+    // Flying classes (stock EntityVulture) never integrate gravity: they hold
+    // a cruise altitude above the resting ground and approach it at the
+    // configured vertical rate, so a patrol reads as flight and a dive as a
+    // descent rather than a fall (RE entity-ai.md EntityFlying).
+    if (w.mask[s].class_id and w.class_id[s].flying) {
+        const cruise = w.rules.ai.fly_cruise_h;
+        const rate = @max(0.1, w.rules.ai.fly_vert_rate);
+        const want = (w.groundY(t.x, t.z) orelse t.y) + cruise;
+        const dy = want - t.y;
+        const step = std.math.clamp(dy, -rate * dt, rate * dt);
+        t.y += step;
+        ai.vy = 0;
+        return;
+    }
+    // Everything below is ground physics, which needs the solid probe.
+    const solid_fn = w.solid_fn orelse return;
     const below: i32 = @floor(t.y - 0.05);
     const rising = ai.jumping and ai.vy > 0;
     // Swim: a submerged body (mid cell is water) floats - gravity scaled by
@@ -356,4 +371,42 @@ test "deferred AI damage passes GeneralDamageResist and the armor leg" {
     try std.testing.expect(inventory.armorMitigation(&w, 0) >= 0.09);
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectApproxEqAbs(@as(f32, 94.6), w.health[ps].hp, 0.001);
+}
+
+test "a flying class holds its cruise altitude instead of falling" {
+    // Stock EntityVulture (animalZombieVulture, Class="EntityVulture") patrols
+    // above the terrain: applyGravity must hold ground + fly_cruise_h and
+    // approach it at fly_vert_rate, while the same body without the flag falls.
+    const Terrain = struct {
+        fn ground(_: ?*anyopaque, _: i32, _: i32) f32 {
+            return 64.0;
+        }
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y < 64;
+        }
+    };
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6, .fly_cruise_h = 8, .fly_vert_rate = 4 } } };
+    defer w.deinit();
+    w.ground_ctx = null;
+    w.ground_fn = &Terrain.ground;
+    w.solid_ctx = null;
+    w.solid_fn = &Terrain.solid;
+
+    const z = w.spawnZombieClass(5, 70, 5, 200, 7, "").?;
+    const s = w.slotOfNetId(z).?;
+    w.mask[s].class_id = true;
+    w.class_id[s].flying = true;
+    // Starts above the cruise line and descends to it, not past it.
+    for (0..200) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 72.0), w.transform[s].y, 0.5);
+    // Below the line it climbs back instead of sinking.
+    w.transform[s].y = 66.0;
+    for (0..200) |_| applyGravity(&w, s, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 72.0), w.transform[s].y, 0.5);
+
+    // Control: the same spawn without the flag falls to the ground top.
+    const z2 = w.spawnZombieClass(5, 70, 5, 200, 7, "").?;
+    const s2 = w.slotOfNetId(z2).?;
+    for (0..200) |_| applyGravity(&w, s2, 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 64.0), w.transform[s2].y, 0.5);
 }

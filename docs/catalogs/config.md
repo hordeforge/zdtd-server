@@ -264,7 +264,7 @@ No fields parsed.
 (ADR 0021).
 
 
-### `rules.systems` (`Systems`, `src/ecs/rules.zig:817`)
+### `rules.systems` (`Systems`, `src/ecs/rules.zig:823`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -280,7 +280,7 @@ No fields parsed.
 | `commands` | `bool` | `true` | 52 |
 
 
-### `rules.combat` (`Combat`, `src/ecs/rules.zig:818`)
+### `rules.combat` (`Combat`, `src/ecs/rules.zig:824`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -294,14 +294,14 @@ No fields parsed.
 | `knockback_seconds` | `f32` | `0.3` | 85 |
 
 
-### `rules.c2s` (`C2s`, `src/ecs/rules.zig:819`)
+### `rules.c2s` (`C2s`, `src/ecs/rules.zig:825`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `eat_units_per_push` | `u8` | `4` | 96 |
 
 
-### `rules.glide` (`Glide`, `src/ecs/rules.zig:820`)
+### `rules.glide` (`Glide`, `src/ecs/rules.zig:826`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -310,7 +310,7 @@ No fields parsed.
 | `fall_sink_vy_mps` | `f32` | `0` | 115 |
 
 
-### `rules.ai` (`Ai`, `src/ecs/rules.zig:821`)
+### `rules.ai` (`Ai`, `src/ecs/rules.zig:827`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -363,218 +363,220 @@ No fields parsed.
 | `swim_gravity_per` | `f32` | `0.025` | 286 |
 | `swim_drag_y` | `f32` | `0.91` | 287 |
 | `swim_speed_frac` | `f32` | `0.5` | 289 |
-| `despawn_dist_sq` | `f32` | `200.0 * 200.0` | 291 |
-| `chase_speed` | `f32` | `2.2` | 295 |
-| `wander_speed` | `f32` | `0.8` | 299 |
-| `path_replan_interval_s` | `f32` | `0.35` | 306 |
-| `path_max_expand` | `u32` | `96` | 308 |
-| `path_wp_arrive` | `f32` | `0.55` | 310 |
-| `path_goal_slack` | `u32` | `2` | 312 |
-| `spot_arrive` | `f32` | `0.75` | 314 |
-| `territorial_radius` | `f32` | `32.0` | 316 |
-| `execute_delay_scale` | `f32` | `0.85` | 318 |
-| `look_turn_interval_s` | `f32` | `14.0 / 20.0` | 320 |
-| `look_yaw_range_deg` | `f32` | `120.0` | 322 |
-| `look_yaw_slow_at_deg` | `f32` | `35.0` | 324 |
-| `look_turn_speed_deg` | `f32` | `250.0` | 326 |
-| `look_turn_speed_min_deg` | `f32` | `20.0` | 328 |
-| `wander_look_min_s` | `f32` | `0.5` | 330 |
-| `wander_look_max_s` | `f32` | `5.0` | 331 |
-| `spot_look_base_s` | `f32` | `5.0` | 333 |
-| `spot_look_rand_s` | `f32` | `3.0` | 334 |
-| `distraction_look_s` | `f32` | `2.0` | 336 |
-| `distraction_close_sq` | `f32` | `2.25` | 338 |
-| `distraction_broadcast_ticks` | `i32` | `20` | 340 |
-| `distraction_replan_min` | `i32` | `20` | 342 |
-| `distraction_replan_rand` | `i32` | `20` | 343 |
-| `wander_time_max_s` | `f32` | `30.0` | 345 |
-| `wander_arrive` | `f32` | `0.2` | 347 |
-| `flee_distance` | `f32` | `20.0` | 350 |
-| `timid_danger_distance` | `f32` | `20.0` | 356 |
-| `timid_safe_distance` | `f32` | `20.0` | 357 |
-| `mount_range_sq` | `f32` | `64.0` | 359 |
-| `destroy_area_rng_mod` | `u32` | `16` | 361 |
-| `revenge_window_s` | `f32` | `20.0` | 363 |
-| `no_target_scale` | `f32` | `0.1` | 368 |
-| `sleep_dist_mult` | `f32` | `4.0` | 372 |
-| `sleep_decision_scale` | `f32` | `0.05` | 374 |
-| `sleep_wander_interval_s` | `f32` | `1.0` | 376 |
-| `sleep_wander_speed_frac` | `f32` | `0.5` | 378 |
-| `fear_scan_cd_s` | `f32` | `0.5` | 380 |
-| `move_arrive` | `f32` | `0.2` | 382 |
-| `push_range` | `f32` | `0.7` | 385 |
-| `push_y_tol` | `f32` | `1.5` | 386 |
-| `push_shove` | `f32` | `0.15` | 387 |
-| `dig_windup_ticks` | `u8` | `18` | 390 |
-| `dig_budget_ticks` | `u8` | `90` | 391 |
+| `fly_cruise_h` | `f32` | `8.0` | 294 |
+| `fly_vert_rate` | `f32` | `4.0` | 295 |
+| `despawn_dist_sq` | `f32` | `200.0 * 200.0` | 297 |
+| `chase_speed` | `f32` | `2.2` | 301 |
+| `wander_speed` | `f32` | `0.8` | 305 |
+| `path_replan_interval_s` | `f32` | `0.35` | 312 |
+| `path_max_expand` | `u32` | `96` | 314 |
+| `path_wp_arrive` | `f32` | `0.55` | 316 |
+| `path_goal_slack` | `u32` | `2` | 318 |
+| `spot_arrive` | `f32` | `0.75` | 320 |
+| `territorial_radius` | `f32` | `32.0` | 322 |
+| `execute_delay_scale` | `f32` | `0.85` | 324 |
+| `look_turn_interval_s` | `f32` | `14.0 / 20.0` | 326 |
+| `look_yaw_range_deg` | `f32` | `120.0` | 328 |
+| `look_yaw_slow_at_deg` | `f32` | `35.0` | 330 |
+| `look_turn_speed_deg` | `f32` | `250.0` | 332 |
+| `look_turn_speed_min_deg` | `f32` | `20.0` | 334 |
+| `wander_look_min_s` | `f32` | `0.5` | 336 |
+| `wander_look_max_s` | `f32` | `5.0` | 337 |
+| `spot_look_base_s` | `f32` | `5.0` | 339 |
+| `spot_look_rand_s` | `f32` | `3.0` | 340 |
+| `distraction_look_s` | `f32` | `2.0` | 342 |
+| `distraction_close_sq` | `f32` | `2.25` | 344 |
+| `distraction_broadcast_ticks` | `i32` | `20` | 346 |
+| `distraction_replan_min` | `i32` | `20` | 348 |
+| `distraction_replan_rand` | `i32` | `20` | 349 |
+| `wander_time_max_s` | `f32` | `30.0` | 351 |
+| `wander_arrive` | `f32` | `0.2` | 353 |
+| `flee_distance` | `f32` | `20.0` | 356 |
+| `timid_danger_distance` | `f32` | `20.0` | 362 |
+| `timid_safe_distance` | `f32` | `20.0` | 363 |
+| `mount_range_sq` | `f32` | `64.0` | 365 |
+| `destroy_area_rng_mod` | `u32` | `16` | 367 |
+| `revenge_window_s` | `f32` | `20.0` | 369 |
+| `no_target_scale` | `f32` | `0.1` | 374 |
+| `sleep_dist_mult` | `f32` | `4.0` | 378 |
+| `sleep_decision_scale` | `f32` | `0.05` | 380 |
+| `sleep_wander_interval_s` | `f32` | `1.0` | 382 |
+| `sleep_wander_speed_frac` | `f32` | `0.5` | 384 |
+| `fear_scan_cd_s` | `f32` | `0.5` | 386 |
+| `move_arrive` | `f32` | `0.2` | 388 |
+| `push_range` | `f32` | `0.7` | 391 |
+| `push_y_tol` | `f32` | `1.5` | 392 |
+| `push_shove` | `f32` | `0.15` | 393 |
+| `dig_windup_ticks` | `u8` | `18` | 396 |
+| `dig_budget_ticks` | `u8` | `90` | 397 |
 
 
-### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:822`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `party_join_dist` | `f32` | `80.0` | 458 |
-| `party_teleport_dist` | `f32` | `150.0` | 459 |
-| `party_spawn_dist` | `f32` | `40.0` | 460 |
-| `party_enemy_max` | `u32` | `30` | 461 |
-| `max_parties` | `u32` | `8` | 464 |
-| `budget_scale` | `f32` | `1.9` | 467 |
-| `wave_frac` | `f32` | `0.5` | 469 |
-
-
-### `rules.progression` (`Progression`, `src/ecs/rules.zig:823`)
+### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:828`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `food_depletion_per_hour` | `f32` | `2.0` | 491 |
-| `water_depletion_per_hour` | `f32` | `2.5` | 493 |
-| `starvation_damage_per_hour` | `f32` | `12.0` | 496 |
-| `well_fed_regen_per_hour` | `f32` | `10.0` | 499 |
-| `well_fed_threshold` | `f32` | `80.0` | 501 |
-| `stamina_drain_per_second` | `f32` | `12.0` | 503 |
-| `stamina_regen_per_second` | `f32` | `8.0` | 505 |
-| `sprint_stale_seconds` | `f32` | `0.5` | 507 |
-| `survival_sync_seconds` | `f32` | `2.0` | 510 |
-| `block_bite_damage` | `f32` | `10.0` | 513 |
-| `drowning_damage_per_second` | `f32` | `2.0` | 516 |
-| `radiation_damage_per_second` | `f32` | `8.0` | 519 |
-| `block_damage_range` | `f32` | `3.0` | 522 |
-| `kill_xp_fallback` | `f32` | `100` | 526 |
-| `trap_kill_xp_frac` | `f32` | `0.0` | 534 |
-| `trap_xp_party_share` | `bool` | `false` | 538 |
+| `party_join_dist` | `f32` | `80.0` | 464 |
+| `party_teleport_dist` | `f32` | `150.0` | 465 |
+| `party_spawn_dist` | `f32` | `40.0` | 466 |
+| `party_enemy_max` | `u32` | `30` | 467 |
+| `max_parties` | `u32` | `8` | 470 |
+| `budget_scale` | `f32` | `1.9` | 473 |
+| `wave_frac` | `f32` | `0.5` | 475 |
 
 
-### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:824`)
+### `rules.progression` (`Progression`, `src/ecs/rules.zig:829`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `container_open_range` | `f32` | `8.0` | 546 |
-| `topsoil_all_broken` | `bool` | `false` | 552 |
-| `poi_unlock_grace_ticks` | `u32` | `2000` | 554 |
+| `food_depletion_per_hour` | `f32` | `2.0` | 497 |
+| `water_depletion_per_hour` | `f32` | `2.5` | 499 |
+| `starvation_damage_per_hour` | `f32` | `12.0` | 502 |
+| `well_fed_regen_per_hour` | `f32` | `10.0` | 505 |
+| `well_fed_threshold` | `f32` | `80.0` | 507 |
+| `stamina_drain_per_second` | `f32` | `12.0` | 509 |
+| `stamina_regen_per_second` | `f32` | `8.0` | 511 |
+| `sprint_stale_seconds` | `f32` | `0.5` | 513 |
+| `survival_sync_seconds` | `f32` | `2.0` | 516 |
+| `block_bite_damage` | `f32` | `10.0` | 519 |
+| `drowning_damage_per_second` | `f32` | `2.0` | 522 |
+| `radiation_damage_per_second` | `f32` | `8.0` | 525 |
+| `block_damage_range` | `f32` | `3.0` | 528 |
+| `kill_xp_fallback` | `f32` | `100` | 532 |
+| `trap_kill_xp_frac` | `f32` | `0.0` | 540 |
+| `trap_xp_party_share` | `bool` | `false` | 544 |
 
 
-### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:825`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `sea_level` | `f32` | `64` | 571 |
-| `height_scale` | `f32` | `1.0` | 576 |
-| `height_offset` | `f32` | `0.0` | 578 |
-| `height_ceiling` | `u32` | `0` | 581 |
-
-
-### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:826`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `base_height` | `f32` | `68` | 648 |
-| `height_amp` | `f32` | `24` | 650 |
-| `min_surface` | `u8` | `12` | 652 |
-| `max_surface` | `u8` | `200` | 653 |
-| `squash` | `f32` | `28` | 655 |
-| `noise_weight` | `f32` | `0.85` | 657 |
-| `y_scale` | `f32` | `2.0` | 659 |
-| `bedrock_h` | `i32` | `3` | 661 |
-
-
-### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:827`)
+### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:830`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `accel_mps2` | `f32` | `14.0` | 620 |
-| `reverse_frac` | `f32` | `0.3` | 622 |
-| `coast_decay` | `f32` | `0.8` | 624 |
-| `steer_deg_per_s` | `f32` | `100.0` | 626 |
-| `min_turn_speed_frac` | `f32` | `0.15` | 628 |
-| `fuel_per_m` | `f32` | `0.02` | 630 |
-| `fuel_cap` | `f32` | `100` | 632 |
-| `refuel_reach` | `f32` | `3.0` | 634 |
-| `gravity` | `f32` | `-9.81` | 637 |
+| `container_open_range` | `f32` | `8.0` | 552 |
+| `topsoil_all_broken` | `bool` | `false` | 558 |
+| `poi_unlock_grace_ticks` | `u32` | `2000` | 560 |
 
 
-### `rules.director` (`Director`, `src/ecs/rules.zig:828`)
+### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:831`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `wander_start_after` | `u64` | `28_000` | 692 |
-| `wander_min_gap` | `u64` | `12_000` | 694 |
-| `wander_max_gap` | `u64` | `24_000` | 695 |
-| `wandering_horde_size` | `u32` | `6` | 696 |
-| `wandering_spawn_dist` | `f32` | `92.0` | 697 |
-| `heat_spawn_threshold` | `f32` | `25.0` | 698 |
-| `heat_check_seconds` | `f32` | `5.0` | 699 |
-| `heat_spawn_chance` | `f32` | `0.2` | 703 |
-| `heat_cooldown_seconds` | `f32` | `240.0` | 707 |
-| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 711 |
-| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 716 |
-| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 720 |
-| `heat_scout_dist` | `f32` | `10.0` | 721 |
-| `heat_scout_count` | `u32` | `2` | 723 |
-| `heat_event_ticks` | `f32` | `720.0` | 726 |
-| `enemy_spawn_ring_min` | `f32` | `28.0` | 729 |
-| `enemy_spawn_ring_max` | `f32` | `54.0` | 730 |
-| `animal_spawn_ring_min` | `f32` | `48.0` | 733 |
-| `animal_spawn_ring_max` | `f32` | `70.0` | 734 |
-| `initial_population_frac` | `f32` | `0.25` | 739 |
-| `horde_drip_cd` | `f32` | `45.0` | 742 |
-| `bloodmoon_horde_drip_cd` | `f32` | `8.0` | 743 |
-| `scout_drip_cd` | `f32` | `120.0` | 746 |
-| `animal_drip_cd` | `f32` | `60.0` | 748 |
-| `bloodmoon_wave_cd` | `f32` | `6.0` | 750 |
-| `bloodmoon_hp_mult` | `f32` | `1.5` | 752 |
-| `difficulty_hp_0` | `f32` | `0.5` | 756 |
-| `difficulty_hp_1` | `f32` | `0.75` | 757 |
-| `difficulty_hp_2` | `f32` | `1.0` | 758 |
-| `difficulty_hp_3` | `f32` | `1.25` | 759 |
-| `difficulty_hp_4` | `f32` | `1.5` | 760 |
-| `difficulty_hp_5` | `f32` | `2.0` | 761 |
-| `move_scale_0` | `f32` | `0.5` | 764 |
-| `move_scale_1` | `f32` | `0.75` | 765 |
-| `move_scale_2` | `f32` | `1.0` | 766 |
-| `move_scale_3` | `f32` | `1.4` | 767 |
-| `move_scale_4` | `f32` | `1.7` | 768 |
+| `sea_level` | `f32` | `64` | 577 |
+| `height_scale` | `f32` | `1.0` | 582 |
+| `height_offset` | `f32` | `0.0` | 584 |
+| `height_ceiling` | `u32` | `0` | 587 |
 
 
-### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:829`)
+### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:832`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `incoming_damage_0` | `f32` | `sandbox_presets.difficulty[0].incoming_damage` | 416 |
-| `incoming_damage_1` | `f32` | `sandbox_presets.difficulty[1].incoming_damage` | 417 |
-| `incoming_damage_2` | `f32` | `sandbox_presets.difficulty[2].incoming_damage` | 418 |
-| `incoming_damage_3` | `f32` | `sandbox_presets.difficulty[3].incoming_damage` | 419 |
-| `incoming_damage_4` | `f32` | `sandbox_presets.difficulty[4].incoming_damage` | 420 |
-| `incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].incoming_damage` | 421 |
-| `entity_incoming_damage_0` | `f32` | `sandbox_presets.difficulty[0].entity_incoming_damage` | 427 |
-| `entity_incoming_damage_1` | `f32` | `sandbox_presets.difficulty[1].entity_incoming_damage` | 428 |
-| `entity_incoming_damage_2` | `f32` | `sandbox_presets.difficulty[2].entity_incoming_damage` | 429 |
-| `entity_incoming_damage_3` | `f32` | `sandbox_presets.difficulty[3].entity_incoming_damage` | 430 |
-| `entity_incoming_damage_4` | `f32` | `sandbox_presets.difficulty[4].entity_incoming_damage` | 431 |
-| `entity_incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].entity_incoming_damage` | 432 |
+| `base_height` | `f32` | `68` | 654 |
+| `height_amp` | `f32` | `24` | 656 |
+| `min_surface` | `u8` | `12` | 658 |
+| `max_surface` | `u8` | `200` | 659 |
+| `squash` | `f32` | `28` | 661 |
+| `noise_weight` | `f32` | `0.85` | 663 |
+| `y_scale` | `f32` | `2.0` | 665 |
+| `bedrock_h` | `i32` | `3` | 667 |
 
 
-### `rules.water` (`Water`, `src/ecs/rules.zig:830`)
+### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:833`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `edits_per_tick` | `u8` | `4` | 777 |
-| `spread_cap` | `u16` | `128` | 779 |
-| `puddle_cap` | `u8` | `8` | 783 |
+| `accel_mps2` | `f32` | `14.0` | 626 |
+| `reverse_frac` | `f32` | `0.3` | 628 |
+| `coast_decay` | `f32` | `0.8` | 630 |
+| `steer_deg_per_s` | `f32` | `100.0` | 632 |
+| `min_turn_speed_frac` | `f32` | `0.15` | 634 |
+| `fuel_per_m` | `f32` | `0.02` | 636 |
+| `fuel_cap` | `f32` | `100` | 638 |
+| `refuel_reach` | `f32` | `3.0` | 640 |
+| `gravity` | `f32` | `-9.81` | 643 |
 
 
-### `rules.power` (`Power`, `src/ecs/rules.zig:831`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `battery_capacity_scale` | `f32` | `10.0` | 791 |
-| `battery_initial_charge_frac` | `f32` | `0.5` | 793 |
-| `trigger_pulse_s` | `f32` | `0.5` | 796 |
-
-
-### `rules.trader` (`Trader`, `src/ecs/rules.zig:832`)
+### `rules.director` (`Director`, `src/ecs/rules.zig:834`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `max_tier` | `i32` | `6` | 805 |
-| `default_quality_min` | `u8` | `1` | 810 |
-| `default_quality_max` | `u8` | `6` | 811 |
+| `wander_start_after` | `u64` | `28_000` | 698 |
+| `wander_min_gap` | `u64` | `12_000` | 700 |
+| `wander_max_gap` | `u64` | `24_000` | 701 |
+| `wandering_horde_size` | `u32` | `6` | 702 |
+| `wandering_spawn_dist` | `f32` | `92.0` | 703 |
+| `heat_spawn_threshold` | `f32` | `25.0` | 704 |
+| `heat_check_seconds` | `f32` | `5.0` | 705 |
+| `heat_spawn_chance` | `f32` | `0.2` | 709 |
+| `heat_cooldown_seconds` | `f32` | `240.0` | 713 |
+| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 717 |
+| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 722 |
+| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 726 |
+| `heat_scout_dist` | `f32` | `10.0` | 727 |
+| `heat_scout_count` | `u32` | `2` | 729 |
+| `heat_event_ticks` | `f32` | `720.0` | 732 |
+| `enemy_spawn_ring_min` | `f32` | `28.0` | 735 |
+| `enemy_spawn_ring_max` | `f32` | `54.0` | 736 |
+| `animal_spawn_ring_min` | `f32` | `48.0` | 739 |
+| `animal_spawn_ring_max` | `f32` | `70.0` | 740 |
+| `initial_population_frac` | `f32` | `0.25` | 745 |
+| `horde_drip_cd` | `f32` | `45.0` | 748 |
+| `bloodmoon_horde_drip_cd` | `f32` | `8.0` | 749 |
+| `scout_drip_cd` | `f32` | `120.0` | 752 |
+| `animal_drip_cd` | `f32` | `60.0` | 754 |
+| `bloodmoon_wave_cd` | `f32` | `6.0` | 756 |
+| `bloodmoon_hp_mult` | `f32` | `1.5` | 758 |
+| `difficulty_hp_0` | `f32` | `0.5` | 762 |
+| `difficulty_hp_1` | `f32` | `0.75` | 763 |
+| `difficulty_hp_2` | `f32` | `1.0` | 764 |
+| `difficulty_hp_3` | `f32` | `1.25` | 765 |
+| `difficulty_hp_4` | `f32` | `1.5` | 766 |
+| `difficulty_hp_5` | `f32` | `2.0` | 767 |
+| `move_scale_0` | `f32` | `0.5` | 770 |
+| `move_scale_1` | `f32` | `0.75` | 771 |
+| `move_scale_2` | `f32` | `1.0` | 772 |
+| `move_scale_3` | `f32` | `1.4` | 773 |
+| `move_scale_4` | `f32` | `1.7` | 774 |
+
+
+### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:835`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `incoming_damage_0` | `f32` | `sandbox_presets.difficulty[0].incoming_damage` | 422 |
+| `incoming_damage_1` | `f32` | `sandbox_presets.difficulty[1].incoming_damage` | 423 |
+| `incoming_damage_2` | `f32` | `sandbox_presets.difficulty[2].incoming_damage` | 424 |
+| `incoming_damage_3` | `f32` | `sandbox_presets.difficulty[3].incoming_damage` | 425 |
+| `incoming_damage_4` | `f32` | `sandbox_presets.difficulty[4].incoming_damage` | 426 |
+| `incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].incoming_damage` | 427 |
+| `entity_incoming_damage_0` | `f32` | `sandbox_presets.difficulty[0].entity_incoming_damage` | 433 |
+| `entity_incoming_damage_1` | `f32` | `sandbox_presets.difficulty[1].entity_incoming_damage` | 434 |
+| `entity_incoming_damage_2` | `f32` | `sandbox_presets.difficulty[2].entity_incoming_damage` | 435 |
+| `entity_incoming_damage_3` | `f32` | `sandbox_presets.difficulty[3].entity_incoming_damage` | 436 |
+| `entity_incoming_damage_4` | `f32` | `sandbox_presets.difficulty[4].entity_incoming_damage` | 437 |
+| `entity_incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].entity_incoming_damage` | 438 |
+
+
+### `rules.water` (`Water`, `src/ecs/rules.zig:836`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `edits_per_tick` | `u8` | `4` | 783 |
+| `spread_cap` | `u16` | `128` | 785 |
+| `puddle_cap` | `u8` | `8` | 789 |
+
+
+### `rules.power` (`Power`, `src/ecs/rules.zig:837`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `battery_capacity_scale` | `f32` | `10.0` | 797 |
+| `battery_initial_charge_frac` | `f32` | `0.5` | 799 |
+| `trigger_pulse_s` | `f32` | `0.5` | 802 |
+
+
+### `rules.trader` (`Trader`, `src/ecs/rules.zig:838`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `max_tier` | `i32` | `6` | 811 |
+| `default_quality_min` | `u8` | `1` | 816 |
+| `default_quality_max` | `u8` | `6` | 817 |

@@ -43,6 +43,9 @@ pub const EntityDef = struct {
     tags: []const u8 = "",
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
+    /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude
+    /// above the terrain for these bodies instead of falling.
+    flying: bool = false,
     /// Loot.xml container name for the death bag (LootDropEntityClass resolved
     /// through the bag class's own LootList, e.g. zombieBoe → zPackReg); empty
     /// if none.
@@ -1034,6 +1037,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
         const block_if = resolvedBlockIfAlert(&classes, name);
         const kind = inferKind(name, tags, is_animal);
+        // Stock EntityFlying (the vulture): `Class="EntityVulture"`. Read from
+        // the class row's Class property, with the stock tag as the fallback,
+        // so a modded flyer with either shape is honoured.
+        const class_name = resolveProp(&classes, name, "Class", 0) orelse "";
+        const flying = std.mem.indexOf(u8, class_name, "Flying") != null or
+            std.mem.eql(u8, class_name, "EntityVulture") or
+            std.mem.indexOf(u8, tags, "vulture") != null;
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
         var max_hp = defaultHp(kind);
@@ -1283,6 +1293,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .tags = if (tags.len > 0) try arena.dupe(u8, tags) else "",
             .max_hp = max_hp,
             .kind = kind,
+            .flying = flying,
             .loot_list = loot,
             .loot_drop_prob = drop_prob,
             .spawnable = spawnable,
