@@ -600,6 +600,12 @@ area and the concrete work.
     Food/Water **RegenerationAmount** staging inside `Stat.Tick`, not the
     current value, so with zdtd's direct-to-value OT path there is no
     separate coupling to wire (applying it to value double-counts the OT).
+    Anchors for the live A/B that would settle the scale:
+    `../7dtd-engine-research/il/full-v3.1.0/_global/Stat.il.txt:48` holds
+    `Stat::Tick` (the 127/119 pair at IL_01C1/IL_0209 with base 1.0, run when
+    the regen stat is Stamina and its regen amount is positive), and the
+    player class's `StaminaChangeOT base_set 10` row in stock
+    `Data/Config/entityclasses.xml` is the regen those rows scale.
     **HealthOT water gate closed 2026-09-18** (`UpdatePlayerHealthOT`
     IL=179: positive regen only below full HP, scaled by water fraction;
     negative leg rides DamageEntity per buff) and **StaminaOT water gate**
