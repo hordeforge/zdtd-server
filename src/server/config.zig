@@ -175,7 +175,14 @@ fn prop(hay: []const u8, name: []const u8) ?[]const u8 {
 /// Decode an XML attribute value into arena-owned storage. `xml.attr` returns
 /// the source spelling, but credentials and display names must use the value
 /// an XML reader exposes (for example, `a&amp;b` means `a&b`).
+///
+/// The source file is UTF-8 (what stock writes and what every other reader in
+/// the tree assumes), so a value that does not decode as UTF-8 is a file saved
+/// in another encoding, not text. It fails closed here instead of travelling
+/// into the GSI string, the webui documents and the persisted config as
+/// mojibake that every later reader has to guess at.
 fn decodeAttr(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
+    if (!std.unicode.utf8ValidateSlice(raw)) return error.BadServerConfig;
     if (std.mem.findScalar(u8, raw, '&') == null) return try arena.dupe(u8, raw);
 
     const out = try arena.alloc(u8, raw.len);
@@ -751,6 +758,19 @@ test "string properties decode XML attribute entities" {
     try std.testing.expectEqualStrings("Rock & Roll 🎸", cfg.world_name);
     try std.testing.expectEqualStrings("a&b<c>d\"e'f", cfg.password);
     try std.testing.expectEqualStrings("pin#42", cfg.telnet_password);
+}
+
+test "a value saved in another encoding is rejected, not carried as mojibake" {
+    // A latin-1 serverconfig.xml (or any editor that wrote lone high bytes)
+    // must not reach the GSI string, the webui and the persisted config as
+    // undecodable bytes.
+    const xml_src =
+        "<ServerSettings>\n  <property name=\"GameName\" value=\"Caf\xE9 Server\"/>\n</ServerSettings>\n";
+    try std.testing.expectError(error.BadServerConfig, parse(std.testing.allocator, xml_src));
+    // A truncated multi-byte sequence at the end of the value is the same
+    // defect and fails the same way.
+    const truncated = "<ServerSettings>\n  <property name=\"GameName\" value=\"Caf\xC3\"/>\n</ServerSettings>\n";
+    try std.testing.expectError(error.BadServerConfig, parse(std.testing.allocator, truncated));
 }
 
 test "property-prefixed elements do not override server settings" {
