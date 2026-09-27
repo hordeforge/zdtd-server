@@ -123,3 +123,20 @@ pub fn broadcastTurretSync(self: *Game) !void {
     // Our multi-entity blob breaks ItemValue.Read and kills the client reader thread.
     _ = self;
 }
+
+/// Broadcast the server's tracked counts (`NetPackageVehicleCount`, body
+/// `vehicleCount | turretCount | droneCount`). Stock sends it whenever a
+/// tracked vehicle or turret is added or removed: `VehicleManager` IL_004B,
+/// `TurretTracker` IL_002D and `NetPackageVehicleSpawn::ProcessPackage`
+/// IL_00E5 (right after a placed vehicle spawns). The client stores it as the
+/// server-side counts behind its limit UI, which otherwise stays at zero for
+/// the whole session. Drones have no sim entity, so that count is 0.
+pub fn broadcastVehicleCount(self: *Game) void {
+    const body = packages.buildVehicleCountBody(
+        &self.body_buf,
+        self.sim.countKind(.vehicle),
+        self.sim.countKind(.turret),
+        0,
+    ) catch return;
+    self.broadcast("NetPackageVehicleCount", body) catch {};
+}

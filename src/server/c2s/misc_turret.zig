@@ -69,6 +69,9 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         // spam loop cannot plant turrets map-wide and drain the entity table.
         if (!self.placeAllowed(c, x, y, z)) return true;
         if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
+            // Stock sends the new counts from the turret tracker when a turret
+            // is added (`TurretTracker` IL_002D), next to the vehicle count.
+            self.broadcastVehicleCount();
             if (self.sim.slotOfNetId(tid)) |ts| {
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
                 // The slot dies with the session; the name is what lets a

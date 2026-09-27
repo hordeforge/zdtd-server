@@ -106,6 +106,9 @@ pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
         // VehicleManager.UpdateVehicleWaypointsForPlayer runs when the vehicle
         // list changes, not only at join.
         if (c.peer) |p| try self.sendVehicleWaypoints(p, c.slot);
+        // Stock sends the new server-side counts from the spawn package's own
+        // ProcessPackage (IL_00E5), which is what the client's limit UI reads.
+        self.broadcastVehicleCount();
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAttach")) {

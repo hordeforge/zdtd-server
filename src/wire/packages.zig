@@ -362,6 +362,7 @@ pub const VehicleDataSync = stock_vehicle.VehicleDataSync;
 pub const parseVehicleDataSync = stock_vehicle.parseVehicleDataSync;
 pub const VehicleSpawnRequest = stock_vehicle.VehicleSpawnRequest;
 pub const parseVehicleSpawn = stock_vehicle.parseVehicleSpawn;
+pub const buildVehicleCountBody = stock_vehicle.buildVehicleCountBody;
 pub const vehicle_spawn_min_len: usize = stock_vehicle.vehicle_spawn_min_len;
 pub const vehicle_control_len: usize = stock_vehicle.vehicle_control_len;
 pub const parseVehicleControl = stock_vehicle.parseVehicleControl;

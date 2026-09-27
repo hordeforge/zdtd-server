@@ -18594,6 +18594,13 @@ test "scenario a placeable vehicle item spawns an owned vehicle" {
         if (g.sim.vehicle[s].owner_slot == @as(i16, @intCast(c.slot))) owned = true;
     }
     try std.testing.expect(owned);
+    // Stock also sends the new server-side counts from the spawn package's
+    // own ProcessPackage, so the client's limit UI is not stuck at zero.
+    const vc_id = packages.idOf("NetPackageVehicleCount") orelse return error.TestUnexpectedResult;
+    const vc = cap.findPkgId(vc_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 12), vc.len);
+    try std.testing.expectEqual(@as(i32, @intCast(before + 1)), std.mem.readInt(i32, vc[0..4], .little));
+
     // ...and the placer's map gets the parked-vehicle waypoint right away
     // (`VehicleManager.UpdateVehicleWaypointsForPlayer` runs on a list change,
     // not only at join).

@@ -3057,6 +3057,10 @@ pub const Game = struct {
         try game_vehicle.broadcastVehiclePositions(self);
     }
 
+    pub fn broadcastVehicleCount(self: *Game) void {
+        game_vehicle.broadcastVehicleCount(self);
+    }
+
     pub fn broadcastTurretSync(self: *Game) !void {
         try game_vehicle.broadcastTurretSync(self);
     }

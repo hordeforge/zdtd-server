@@ -26,15 +26,15 @@ plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 `NetPackageVehicleSpawn` body is served authoritatively (placer ownership, the
 claimed class must be the vehicle that item places, reach, finite pose), so
 players can place vehicles and `Vehicle.owner_slot` has a production writer: the
-placer gets the parked-vehicle waypoint list at once. Gated by
-`scenario a placeable vehicle item spawns an owned vehicle`.
+placer gets the waypoint list and the new `NetPackageVehicleCount` at once.
+Gated by `scenario a placeable vehicle item spawns an owned vehicle`.
 **A canvas sign's TE is server state 2026-09-28**: `TEFeatureCanvas` writes one
 `CanvasState` on the network path, and zdtd had no leg for a body whose composite
 carries canvas and no storage, so a painted canvas sign lived only in the
 edit-time echo: a later stream, rejoin or restart showed a blank canvas. Blocks.xml
 `CompositeFeatures` now stamps `BlockDef.canvas` (the flag gates the leg, like
-`signable`), the body is walked, stored verbatim in the sign-family store, echoed
-and replayed by the chunk stream, canvas fields left opaque. Gated by
+`signable`), and the body is walked, stored verbatim, echoed and replayed by the
+chunk stream, canvas fields left opaque. Gated by
 `a canvas composite body parses and a malformed canvas module is refused` and
 `scenario a canvas sign's TE body is stored and replayed`.
 **Live re-verification on the stock map 2026-09-28**: two loadgen bots join real

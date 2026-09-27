@@ -764,7 +764,10 @@ statics.
 The package is therefore console-only bookkeeping on this platform, not a
 missing behaviour, and zdtd having no 500-entity spawn cap matches what a stock
 Linux dedicated does. Still worth noting as a divergence from *console* stock,
-which is why this paragraph stays.
+which is why this paragraph stays. Emitted anyway since 2026-09-28, so the wire
+surface matches stock even though the value drives nothing here: the counts ship
+after a placed vehicle (`NetPackageVehicleSpawn::ProcessPackage` IL_00E5) and
+after a turret is added (`TurretTracker` IL_002D).
 
 Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
 action set. It does not fire every stock verb (vehicles, drones, twitch

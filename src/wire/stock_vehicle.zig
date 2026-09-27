@@ -139,3 +139,16 @@ test "vehicle data sync header framing" {
     const empty = try parseVehicleDataSync(&[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
     try std.testing.expectEqual(@as(usize, 0), empty.data.len);
 }
+
+/// NetPackageVehicleCount body (write IL=16): `vehicleCount` i32 |
+/// `turretCount` i32 | `droneCount` i32. The server sends it whenever a
+/// tracked vehicle or turret is added or removed (`VehicleManager` IL_004B,
+/// `TurretTracker` IL_002D, `NetPackageVehicleSpawn::ProcessPackage` IL_00E5),
+/// and the client stores it as the server-side counts for its limit UI.
+pub fn buildVehicleCountBody(buf: []u8, vehicle: u32, turret: u32, drone: u32) ![]u8 {
+    if (buf.len < 12) return error.Overflow;
+    std.mem.writeInt(i32, buf[0..4], @intCast(@min(vehicle, std.math.maxInt(i32))), .little);
+    std.mem.writeInt(i32, buf[4..8], @intCast(@min(turret, std.math.maxInt(i32))), .little);
+    std.mem.writeInt(i32, buf[8..12], @intCast(@min(drone, std.math.maxInt(i32))), .little);
+    return buf[0..12];
+}
