@@ -50,7 +50,10 @@ const GHOST_MARKER_RADIUS_PX = 2.5;
 // Structure shown while the first samples arrive: the grid renders at the
 // nominal window/scale so the empty instrument is visible immediately.
 const PLACEHOLDER_WINDOW_MS = 60000;
-const CHART_FONT = "10px ui-monospace, Menlo, Consolas, monospace";
+const CHART_FONT_SIZE_PX = 10;
+// The mono token is the type the terminal is drawn in, so the canvas reads it
+// with the same stack webui.css declares rather than a second copy of it.
+const MONO_FALLBACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 const CAPTION_STALE = "live data unavailable - showing last samples";
 const CAPTION_COLLECTING = "collecting samples…";
 const CIRCLE = 2;
@@ -104,34 +107,46 @@ const SECTION_NAMES: ReadonlyArray<string> = ["network", "sim", "replication", "
 type ApmSample = { at: number; tickMeanMs: number; tickP99Ms: number; sectionsMs: ReadonlyArray<number> };
 type EdgeLerp = { fromMs: number; targetMs: number; startAt: number };
 
-function cssVar(name: string): string {
+function cssVar(name: string, fallback: string): string {
     const styles = globalThis.getComputedStyle(document.documentElement);
-    return styles.getPropertyValue(name).trim() || "#6b7280";
+    return styles.getPropertyValue(name).trim() || fallback;
 }
 
 // The palette is re-read rather than frozen: forced-colors swaps the CSS
 // variables, and the canvas is not recoloured by the browser. Reads the
 // --color-* theme names; the legacy --term-* aliases in webui.css exist only
-// for the transition.
-let CHART_LINE_COLOR = "#6b7280";
-let CHART_GHOST_COLOR = "#6b7280";
-let CHART_GRID_COLOR = "#6b7280";
-let CHART_LABEL_COLOR = "#6b7280";
-let CHART_BUDGET_COLOR = "#6b7280";
+// for the transition. Each fallback mirrors the token it stands in for
+// (webui.css @theme): a frame drawn before the variables resolve is the
+// paper cockpit's terminal, not a stock grey.
+const TERM_FALLBACK = {
+    text: "#d8e2dc",
+    faint: "#7f8b94",
+    line: "#2a333d",
+    band1: "#22303c",
+    band2: "#2c3f4e",
+    ok: "#5fd894",
+    key: "#ffd8a0",
+};
+
+let CHART_LINE_COLOR = TERM_FALLBACK.ok;
+let CHART_GHOST_COLOR = TERM_FALLBACK.faint;
+let CHART_GRID_COLOR = TERM_FALLBACK.line;
+let CHART_LABEL_COLOR = TERM_FALLBACK.faint;
+let CHART_BUDGET_COLOR = TERM_FALLBACK.key;
 let SECTION_FILL_COLORS: ReadonlyArray<string> = [];
 
 function refreshChartPalette(): void {
-    CHART_LINE_COLOR = cssVar("--color-term-ok");
-    CHART_GHOST_COLOR = cssVar("--color-term-faint");
-    CHART_GRID_COLOR = cssVar("--color-term-line");
-    CHART_LABEL_COLOR = cssVar("--color-term-faint");
-    CHART_BUDGET_COLOR = cssVar("--color-term-key");
+    CHART_LINE_COLOR = cssVar("--color-term-ok", TERM_FALLBACK.ok);
+    CHART_GHOST_COLOR = cssVar("--color-term-faint", TERM_FALLBACK.faint);
+    CHART_GRID_COLOR = cssVar("--color-term-line", TERM_FALLBACK.line);
+    CHART_LABEL_COLOR = cssVar("--color-term-faint", TERM_FALLBACK.faint);
+    CHART_BUDGET_COLOR = cssVar("--color-term-key", TERM_FALLBACK.key);
     SECTION_FILL_COLORS = [
-        cssVar("--color-term-line"),
-        cssVar("--color-term-band1"),
-        cssVar("--color-term-band2"),
-        cssVar("--color-term-faint"),
-        cssVar("--color-term-text"),
+        cssVar("--color-term-line", TERM_FALLBACK.line),
+        cssVar("--color-term-band1", TERM_FALLBACK.band1),
+        cssVar("--color-term-band2", TERM_FALLBACK.band2),
+        cssVar("--color-term-faint", TERM_FALLBACK.faint),
+        cssVar("--color-term-text", TERM_FALLBACK.text),
     ];
 }
 
@@ -266,9 +281,13 @@ function sizeChartCanvas(): boolean {
     return true;
 }
 
+function chartFont(): string {
+    return `${CHART_FONT_SIZE_PX}px ${cssVar("--font-mono", MONO_FALLBACK)}`;
+}
+
 function drawPlaceholder(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = CHART_LABEL_COLOR;
-    ctx.font = CHART_FONT;
+    ctx.font = chartFont();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(CAPTION_COLLECTING, EDGE_PAD_PX + plotDims().w / 2, EDGE_PAD_PX + plotDims().h / 2);
@@ -278,7 +297,7 @@ function drawGrid(ctx: CanvasRenderingContext2D): void {
     const plot = plotDims();
     ctx.strokeStyle = CHART_GRID_COLOR;
     ctx.fillStyle = CHART_LABEL_COLOR;
-    ctx.font = CHART_FONT;
+    ctx.font = chartFont();
     ctx.lineWidth = 1;
     ctx.globalAlpha = ALPHA_GRID;
     const timeStep = pickGridStep(TIME_GRID_STEPS_MS, chartMaxAgeMs, MAX_TIME_GRID_LINES);
