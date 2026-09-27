@@ -5,6 +5,8 @@
 //! import via `packages.stock_vehicle` like the other stock_* leaves.
 
 const std = @import("std");
+const binary = @import("binary.zig");
+const stock_inv = @import("stock_inv.zig");
 
 /// Stock NetPackageVehicleDataSync header (asm.il:844254, read at asm.il:844340):
 /// senderId i32 | vehicleId i32 | syncFlags u16 | dataLen u16 | data[dataLen].
@@ -29,6 +31,55 @@ pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
         .vehicle_id = std.mem.readInt(i32, body[4..8], .little),
         .sync_flags = std.mem.readInt(u16, body[8..10], .little),
         .data = body[12 .. 12 + @as(usize, data_len)],
+    };
+}
+
+/// One C2S NetPackageVehicleSpawn body (stock write IL=24): `entityType` i32 |
+/// `pos` Vector3 | `rot` Vector3 | ItemValue | `entityThatPlaced` i32. The
+/// client's `ItemActionSpawnVehicle.ExecuteAction` sends it when a placeable
+/// vehicle item is used; stock's ProcessPackage spawns the entity with the
+/// placer as owner when `VehicleManager.CanAddMoreVehicles()` holds, and drops
+/// the item back otherwise.
+pub const VehicleSpawnRequest = struct {
+    entity_type: i32,
+    x: f32,
+    y: f32,
+    z: f32,
+    rx: f32,
+    ry: f32,
+    rz: f32,
+    item: stock_inv.StockSlot,
+    entity_that_placed: i32,
+};
+
+/// Smallest stock body: entityType 4 | pos 12 | rot 12 | ItemValue (>= 4) |
+/// placer 4.
+pub const vehicle_spawn_min_len: usize = 36;
+
+/// NetPackageVehicleSpawn (stock write IL=24): `entityType` i32 | `pos`
+/// Vector3 | `rot` Vector3 | ItemValue | `entityThatPlaced` i32.
+pub fn parseVehicleSpawn(body: []const u8) !VehicleSpawnRequest {
+    if (body.len < vehicle_spawn_min_len) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    const entity_type = try r.readI32();
+    const x = try r.readF32();
+    const y = try r.readF32();
+    const z = try r.readF32();
+    const rx = try r.readF32();
+    const ry = try r.readF32();
+    const rz = try r.readF32();
+    const item = try stock_inv.readItemValue(&r);
+    const placer = try r.readI32();
+    return .{
+        .entity_type = entity_type,
+        .x = x,
+        .y = y,
+        .z = z,
+        .rx = rx,
+        .ry = ry,
+        .rz = rz,
+        .item = item,
+        .entity_that_placed = placer,
     };
 }
 

@@ -626,10 +626,8 @@ pub const Vehicle = struct {
     /// (VehicleManager.UpdateVehicleWaypointsForPlayer).
     ///
     ///
-    /// Not persisted: no production path sets it. Vehicles reach the world
-    /// through worldgen and the admin console, never through a player
-    /// placement package, so every live vehicle is unowned and the waypoint
-    /// list is empty until a placement path exists.
+    /// NetPackageVehicleSpawn sets this from the placing player's slot.
+    /// Not persisted.
     owner_slot: i16 = -1,
 
     pub fn driverNetId(self: *const Vehicle) i32 {

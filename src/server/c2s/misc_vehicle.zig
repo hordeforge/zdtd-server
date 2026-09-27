@@ -10,10 +10,10 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const systems = @import("../../ecs/systems.zig");
 const protocol = @import("../../protocol.zig");
+const assets_vehicles = @import("../../assets/vehicles.zig");
 
 /// True when `name` is a vehicle/attach package and was handled.
 pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
-    _ = peer;
     if (std.mem.eql(u8, name, "NetPackageVehicleDataSync")) {
         // Real stock body (asm.il:844254); the opaque ReadSyncData payload
         // stays undecoded and is only relayed, as the stock server does.
@@ -38,6 +38,69 @@ pub fn handleVehicle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                 systems.vehicleControl(&self.sim, vi, vc.throttle, vc.steer, 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second)));
             },
             else => {},
+        }
+        return true;
+    }
+    // A stock NetPackageVehicleSpawn body is a placement request: the client's
+    // ItemActionSpawnVehicle sends it when a placeable vehicle item is used
+    // (shop write IL=24: entityType i32 | pos | rot | ItemValue | placer).
+    // zdtd serves it authoritatively: the sender must own the placer id, the
+    // claimed entity class must be a stock vehicle whose placeable item is the
+    // one claimed, and the spot must be in reach. The item itself is consumed
+    // by the client and lands through the inventory path, as every other
+    // client-side consume does.
+    if (std.mem.eql(u8, name, "NetPackageVehicleSpawn") and body.len >= packages.vehicle_spawn_min_len) {
+        const req = packages.parseVehicleSpawn(body) catch return true;
+        // Stock's ProcessPackage gate: ValidEntityIdForSender(placer).
+        if (req.entity_that_placed != c.entity_id) return true;
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const pt = self.sim.transform[ps];
+        if (self.rejectIfBeyondEditRange(
+            c,
+            peer.local_id,
+            c.entity_id,
+            .block,
+            pt.x,
+            pt.y,
+            pt.z,
+            req.x,
+            req.y,
+            req.z,
+        )) return true;
+        // The claimed class must be a vehicle the claimed item places: resolve
+        // the class hash through entityclasses.xml, its vehicles.xml def, and
+        // the placeable item name that def implies, then require the packet's
+        // ItemValue to be that item. A forged body cannot spawn a zombie or an
+        // unowned vehicle by naming a class the item does not place.
+        const edef = self.entities.byHash(req.entity_type) orelse return true;
+        if (edef.kind != .vehicle) return true;
+        const vd = self.vehicles.byName(edef.name) orelse return true;
+        const want_item = assets_vehicles.placeableItemName(vd.kind) orelse return true;
+        const item_ecs = Game.reverseItemType(self, req.item.type_id);
+        const idef = self.items.byId(item_ecs) orelse return true;
+        if (!std.mem.eql(u8, idef.name, want_item)) return true;
+        if (!std.math.isFinite(req.x) or !std.math.isFinite(req.y) or !std.math.isFinite(req.z)) return true;
+        const nid = self.sim.spawnVehicleEx(
+            vd.kind,
+            req.x,
+            req.y,
+            req.z,
+            vd.max_hp,
+            vd.velocity_max,
+            vd.seat_count,
+        ) orelse return true;
+        if (self.sim.slotOfNetId(nid)) |vs| {
+            // Owner: stock sets EntityVehicle.SetOwner from the placer's
+            // PlatformUserIdentifier, which is what the map waypoint list
+            // filters on (VehicleManager.UpdateVehicleWaypointsForPlayer).
+            self.sim.vehicle[vs].owner_slot = @intCast(c.slot);
+            self.sim.transform[vs].yaw = req.ry;
+            // Force the next interest pass to send the ECD, so peers see the
+            // vehicle entity and not just its transform stream.
+            for (&self.clients) |*cl| {
+                if (!cl.joined) continue;
+                cl.known_entities.unset(vs);
+            }
         }
         return true;
     }

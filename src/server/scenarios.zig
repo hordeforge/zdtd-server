@@ -27,6 +27,7 @@ const systems = @import("../ecs/systems.zig");
 const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
+const ecs_query = @import("../ecs/query.zig");
 const io_fs = @import("../util/io_fs.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
@@ -35,6 +36,8 @@ const binary = @import("../wire/binary.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
 const assets_items = @import("../assets/items.zig");
+const assets_entities = @import("../assets/entities.zig");
+const assets_vehicles = @import("../assets/vehicles.zig");
 const assets_progression = @import("../assets/progression.zig");
 const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
@@ -18501,4 +18504,104 @@ test "scenario a canvas sign's TE body is stored and replayed" {
     const te_id = packages.idOf("NetPackageTileEntity").?;
     try std.testing.expect(cap_b.findPkgId(te_id) != null);
     std.debug.print("PASS canvas-te: canvas body stored for replay and echoed\n", .{});
+}
+
+test "scenario a placeable vehicle item spawns an owned vehicle" {
+    // The client's ItemActionSpawnVehicle sends the stock NetPackageVehicleSpawn
+    // body (entityType | pos | rot | ItemValue | placer) and stock's server
+    // spawns the entity with the placer as owner. zdtd had no leg for the stock
+    // shape (its own 13-byte control body shares the package name), so a player
+    // could not place a vehicle at all and no vehicle was ever owned.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_vehicle");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_vehicle", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 100;
+    g.sim.transform[ps].y = 70;
+    g.sim.transform[ps].z = 100;
+
+    // Catalog: the entity class, its vehicles.xml def and the placeable item.
+    const class_hash: i32 = 4242;
+    var edefs = [_]assets_entities.EntityDef{.{
+        .name = "vehicleMinibike",
+        .hash = class_hash,
+        .kind = .vehicle,
+    }};
+    g.entities = .{ .defs = &edefs };
+    var vdefs = [_]assets_vehicles.Def{.{
+        .name = "vehicleMinibike",
+        .kind = .minibike,
+        .max_hp = 2000,
+        .velocity_max = 14,
+        .seat_count = 2,
+    }};
+    g.vehicles = .{ .defs = &vdefs };
+    const placeable_stock_type: i32 = 5000;
+    var idefs = [_]assets_items.ItemDef{.{
+        .id = 777,
+        .name = "vehicleMinibikePlaceable",
+        .stock_type = placeable_stock_type,
+    }};
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const buildBody = struct {
+        fn build(buf: []u8, class: i32, item_type: i32, placer: i32) ![]u8 {
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeI32(class);
+            try w.writeF32(100.5);
+            try w.writeF32(70);
+            try w.writeF32(100.5);
+            try w.writeF32(0);
+            try w.writeF32(90);
+            try w.writeF32(0);
+            // ItemValue v9 (ItemValue.Write): version, flags, type, use_times,
+            // quality, meta, metadata count, mods, cosmetics, flags, ammo,
+            // seed, texture.
+            try w.writeByte(9);
+            try w.writeByte(0);
+            try w.writeU16(@intCast(item_type));
+            try w.writeF32(1);
+            try w.writeU16(1);
+            try w.writeU16(0);
+            try w.writeByte(0);
+            try w.writeByte(0);
+            try w.writeByte(0);
+            try w.writeByte(0);
+            try w.writeByte(0);
+            try w.writeU16(0);
+            try w.writeBool(false);
+            try w.writeI32(placer);
+            return w.written();
+        }
+    };
+
+    var body_buf: [128]u8 = undefined;
+    var frame_buf: [256]u8 = undefined;
+    const before = g.sim.countKind(.vehicle);
+    const body = try buildBody.build(&body_buf, class_hash, placeable_stock_type, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageVehicleSpawn", body));
+    try std.testing.expectEqual(before + 1, g.sim.countKind(.vehicle));
+    // The placer owns it, which is what the map waypoint list filters on.
+    // The flat world may already hold an unowned vehicle, so match the slot.
+    var owned = false;
+    for (ecs_query.groupSlice(&g.sim, .vehicle)) |s| {
+        if (g.sim.vehicle[s].owner_slot == @as(i16, @intCast(c.slot))) owned = true;
+    }
+    try std.testing.expect(owned);
+
+    // A body claiming another entity placed it is dropped (stock's
+    // ValidEntityIdForSender), and so is an item that does not place the class.
+    const forged = try buildBody.build(&body_buf, class_hash, placeable_stock_type, c.entity_id + 1);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageVehicleSpawn", forged));
+    try std.testing.expectEqual(before + 1, g.sim.countKind(.vehicle));
+    const wrong_item = try buildBody.build(&body_buf, class_hash, 30001, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageVehicleSpawn", wrong_item));
+    try std.testing.expectEqual(before + 1, g.sim.countKind(.vehicle));
+    std.debug.print("PASS vehicle-place: stock body spawns an owned vehicle; forged placer and item are refused\n", .{});
 }
