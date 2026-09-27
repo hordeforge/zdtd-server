@@ -478,7 +478,8 @@ test "non-ASCII cells, a BOM header and a line break inside a cell all survive" 
     const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir});
     io_fs.mkdirPath(cfg);
     var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    try io_fs.writeFile(try std.fmt.bufPrint(&base_buf, "{s}/Localization.csv", .{cfg}),
+    try io_fs.writeFile(
+        try std.fmt.bufPrint(&base_buf, "{s}/Localization.csv", .{cfg}),
         "\xEF\xBB\xBFKey,english,japanese\nbaseOnly,base value,ベース\n",
     );
     var mod_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;

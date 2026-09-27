@@ -46,7 +46,12 @@ if [[ "$initial_files" -lt 1 ]]; then
 fi
 
 echo "smoke-backup-restore: 2. creating backup"
-bash scripts/backup-world.sh "$SCRATCH/world" "$SCRATCH/backups" 2 >"$SCRATCH/backup.log"
+# The scratch tree is one filesystem, which backup-world.sh refuses by default.
+if env -u ZDTD_BACKUP_ALLOW_SAME_FS bash scripts/backup-world.sh "$SCRATCH/world" "$SCRATCH/backups" 2 >/dev/null 2>&1; then
+  echo "smoke-backup-restore: backup-world.sh accepted a backup_root on the world filesystem" >&2
+  exit 1
+fi
+ZDTD_BACKUP_ALLOW_SAME_FS=1 bash scripts/backup-world.sh "$SCRATCH/world" "$SCRATCH/backups" 2 >"$SCRATCH/backup.log"
 
 backup_item=$(find "$SCRATCH/backups" -mindepth 1 -maxdepth 1 -type d | head -n1)
 if [[ -z "$backup_item" ]]; then
@@ -75,7 +80,26 @@ if [[ "$restored_files" -ne "$backup_files" ]]; then
   exit 1
 fi
 
-echo "smoke-backup-restore: 5. executing daemon on restored world"
+echo "smoke-backup-restore: 5. verifying restored bytes match the backup"
+# File counts alone pass on a truncated or silently corrupted copy, so hash
+# every file in both trees and compare the manifests.
+if command -v sha256sum >/dev/null 2>&1; then
+  hash_tree() { (cd "$1" && find . -type f | LC_ALL=C sort | xargs -r sha256sum); }
+elif command -v shasum >/dev/null 2>&1; then
+  hash_tree() { (cd "$1" && find . -type f | LC_ALL=C sort | xargs -r shasum -a 256); }
+else
+  echo "smoke-backup-restore: missing sha256sum or shasum" >&2
+  exit 127
+fi
+hash_tree "$backup_item" >"$SCRATCH/backup.sha256"
+hash_tree "$SCRATCH/restored" >"$SCRATCH/restored.sha256"
+if ! diff -u "$SCRATCH/backup.sha256" "$SCRATCH/restored.sha256" >"$SCRATCH/restore.diff"; then
+  echo "smoke-backup-restore: restored content differs from the backup:" >&2
+  head -20 "$SCRATCH/restore.diff" >&2
+  exit 1
+fi
+
+echo "smoke-backup-restore: 6. executing daemon on restored world"
 if ! timeout 15s "$bin" --port "$SMOKE_PORT" --world "$SCRATCH/restored" --once >"$SCRATCH/restored.log" 2>&1; then
   echo "smoke-backup-restore: daemon failed to boot on restored world; log:" >&2
   cat "$SCRATCH/restored.log" >&2 || true
@@ -87,7 +111,7 @@ if ! grep -q 'zdtd --once complete' "$SCRATCH/restored.log"; then
   exit 1
 fi
 
-echo "smoke-backup-restore: 6. verifying force-restore preserves pre-restore snapshot"
+echo "smoke-backup-restore: 7. verifying force-restore preserves pre-restore snapshot"
 bash scripts/restore-world.sh "$backup_item" "$SCRATCH/restored" --force >"$SCRATCH/force_restore.log"
 prerestore_item=$(find "$SCRATCH" -maxdepth 1 -name "restored.prerestore.*" -type d | head -n1)
 if [[ -z "$prerestore_item" ]]; then
@@ -95,4 +119,22 @@ if [[ -z "$prerestore_item" ]]; then
   exit 1
 fi
 
-echo "smoke-backup-restore: ok (backup, restore safeguards, and execution verified)"
+echo "smoke-backup-restore: 8. verifying backup freshness check"
+if ! bash scripts/check-backup-freshness.sh "$SCRATCH/world" "$SCRATCH/backups" 3600 >/dev/null; then
+  echo "smoke-backup-restore: freshness check failed on a just-made backup" >&2
+  exit 1
+fi
+# An aged backup must be reported, so a stopped job is visible to monitoring.
+touch -d '2001-01-01 00:00:00' "$backup_item"
+if bash scripts/check-backup-freshness.sh "$SCRATCH/world" "$SCRATCH/backups" 3600 >/dev/null 2>&1; then
+  echo "smoke-backup-restore: freshness check passed on a 20-year-old backup" >&2
+  exit 1
+fi
+# A world that was never backed up has no recovery point at all.
+mkdir -p "$SCRATCH/never"
+if bash scripts/check-backup-freshness.sh "$SCRATCH/never" "$SCRATCH/backups" 3600 >/dev/null 2>&1; then
+  echo "smoke-backup-restore: freshness check passed with no backup on disk" >&2
+  exit 1
+fi
+
+echo "smoke-backup-restore: ok (backup, restore safeguards, byte equality, freshness, execution)"

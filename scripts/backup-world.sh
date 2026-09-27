@@ -7,6 +7,10 @@
 #   scripts/backup-world.sh <world_dir> [backup_root] [keep]
 # Defaults: backup_root=<world_dir>/../backups, keep=7
 # Exit non-zero on any failure (missing source, copy error, empty result).
+#
+# backup_root on the same filesystem as world_dir is refused: the default
+# sibling directory shares the disk it is supposed to protect. Set
+# ZDTD_BACKUP_ALLOW_SAME_FS=1 only for a deliberate same-host copy.
 
 set -euo pipefail
 
@@ -47,6 +51,23 @@ case "$BACKUP_ROOT" in
   *)
     ;;
 esac
+
+# Device id of the filesystem holding $1, or empty when stat cannot say.
+fs_device() {
+  stat -c %d -- "$1" 2>/dev/null || stat -f %d -- "$1" 2>/dev/null || true
+}
+
+# A backup on the same filesystem dies with the disk it protects: the copy
+# looks like a safety net while sharing the failure domain it is meant to
+# cover. Fail closed and let the operator opt out explicitly.
+world_dev=$(fs_device "$WORLD_DIR")
+backup_dev=$(fs_device "$BACKUP_ROOT")
+if [[ -n "$world_dev" && "$world_dev" == "$backup_dev" && "${ZDTD_BACKUP_ALLOW_SAME_FS:-0}" != "1" ]]; then
+  echo "zdtd: backup_root is on the same filesystem as world_dir (device $world_dev): $BACKUP_ROOT" >&2
+  echo "zdtd: a disk failure destroys both; pass a backup_root on another filesystem" >&2
+  echo "zdtd: set ZDTD_BACKUP_ALLOW_SAME_FS=1 to accept that risk deliberately" >&2
+  exit 2
+fi
 
 BASE=$(basename -- "$WORLD_DIR")
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)

@@ -167,7 +167,9 @@ if ! grep -q 'zdtd --once complete' "$smoke_world/once.log"; then
 fi
 
 # Disaster recovery smoke: verify backup creation, restore safeguards, and restored world execution.
-bash scripts/backup-world.sh "$smoke_world" "$smoke_backups" 3 >/dev/null
+# The scratch tree shares one filesystem, which backup-world.sh refuses by
+# default: the opt-in keeps this smoke about the copy/restore path.
+ZDTD_BACKUP_ALLOW_SAME_FS=1 bash scripts/backup-world.sh "$smoke_world" "$smoke_backups" 3 >/dev/null
 backup_item=$(find "$smoke_backups" -mindepth 1 -maxdepth 1 -type d | head -n1)
 if [[ -z "$backup_item" ]]; then
   echo "smoke-release: backup-world.sh produced no backup directory" >&2
