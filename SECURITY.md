@@ -23,10 +23,15 @@ exploit detail until operators can upgrade, as stated in
 zdtd is a research dedicated server for the stock client wire (EAC off). The
 living attack-surface map is [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
-Operator HTTP (webui, MCP) refuses non-loopback binds in-process; admin TCP
-without a password binds loopback only. Those defaults are controls, not a
-substitute for host firewall policy on a shared machine. There is no in-process
-TLS terminator.
+Operator HTTP (webui, MCP) refuses non-loopback binds in-process
+(`src/server/webui.zig:292`, `src/server/mcp_transport.zig:81`); admin TCP
+without a password binds loopback only (`src/server/admin.zig:79`). Those
+defaults are controls, not a substitute for host firewall policy on a shared
+machine. There is no in-process TLS terminator.
+
+An authenticated webui session is full operator authority, including the one
+route that writes outside the process, `POST /api/modlet`, which changes which
+`Mods/<name>` configs load on the next start (`src/server/webui.zig:733`).
 
 Known authority exceptions (for example client-trusted player hold inventory)
 are named in the threat model and in [docs/AUTHORITY.md](docs/AUTHORITY.md); they
