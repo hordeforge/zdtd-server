@@ -56,6 +56,15 @@ pub const QuestData = struct {
 
 pub const max_teleport_volumes: usize = 8;
 
+/// Free the cache-owned strings of a `QuestData`. Used both by `Index.deinit`
+/// and by `questData`'s every early return, so a partial parse can never leak
+/// the copies it already took.
+fn freeQuestStrings(allocator: std.mem.Allocator, qd: *const QuestData) void {
+    if (qd.tags.len != 0) allocator.free(qd.tags);
+    if (qd.poi_tags.len != 0) allocator.free(qd.poi_tags);
+    if (qd.trader_tag.len != 0) allocator.free(qd.trader_tag);
+}
+
 /// City parts (driveways, roads, sewer caps, ...) are the stock `part_*`
 /// naming: never quest POIs, skipped for sleeper-volume budget, and given a
 /// flat pad and fallback size.
@@ -216,9 +225,7 @@ pub const Index = struct {
         self.tts_cache.deinit(self.allocator);
         var qit = self.quest_cache.iterator();
         while (qit.next()) |e| {
-            if (e.value_ptr.tags.len != 0) self.allocator.free(e.value_ptr.tags);
-            if (e.value_ptr.poi_tags.len != 0) self.allocator.free(e.value_ptr.poi_tags);
-            if (e.value_ptr.trader_tag.len != 0) self.allocator.free(e.value_ptr.trader_tag);
+            freeQuestStrings(self.allocator, e.value_ptr);
         }
         self.quest_cache.deinit(self.allocator);
         self.allocator.free(self.items);
@@ -549,6 +556,12 @@ pub const Index = struct {
     pub fn questData(self: *Index, name: []const u8) ?QuestData {
         if (self.quest_cache.get(name)) |qd| return qd;
         var qd: QuestData = .{};
+        // The parse dupes three strings one at a time and can bail between
+        // them, so the copies taken so far are owned by `qd` until the cache
+        // entry takes them. One defer covers every early return; the manual
+        // free chains below are gone so a new field cannot be half-freed.
+        var cached = false;
+        defer if (!cached) freeQuestStrings(self.allocator, &qd);
         var path_buf: [2048]u8 = undefined;
         if (self.findPrefabPath(name, ".xml", &path_buf)) |path| {
             const raw = io_fs.readFileAll(self.allocator, path) catch |err| {
@@ -598,8 +611,6 @@ pub const Index = struct {
             if (xml_util.propertyValue(raw, "ThemeTags")) |v| {
                 if (std.mem.startsWith(u8, v, "trader") and v.len > 6) {
                     qd.trader_tag = self.allocator.dupe(u8, v) catch |err| {
-                        if (qd.tags.len != 0) self.allocator.free(qd.tags);
-                        if (qd.poi_tags.len != 0) self.allocator.free(qd.poi_tags);
                         std.debug.print("zdtd: prefab trader tag allocation failed {s}: {s}\n", .{ path, @errorName(err) });
                         return null;
                     };
@@ -625,12 +636,10 @@ pub const Index = struct {
             );
         }
         self.quest_cache.put(self.allocator, name, qd) catch {
-            if (qd.tags.len != 0) self.allocator.free(qd.tags);
-            if (qd.poi_tags.len != 0) self.allocator.free(qd.poi_tags);
-            if (qd.trader_tag.len != 0) self.allocator.free(qd.trader_tag);
             std.debug.print("zdtd: prefab quest metadata cache allocation failed for {s}\n", .{name});
             return null;
         };
+        cached = true;
         return self.quest_cache.get(name);
     }
 

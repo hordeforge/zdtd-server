@@ -436,22 +436,45 @@ pub const State = struct {
                 }
             }
 
-            try mods.append(allocator, .{
+            // Fill the row field by field: a `try` inside an append argument
+            // list aborts the whole statement and orphans the strings already
+            // duped, so the row is built under one errdefer and handed to
+            // `mods` (which takes ownership) only once complete.
+            var row = Mod{
                 .name = try allocator.dupe(u8, parsed.name),
-                .display_name = try allocator.dupe(u8, parsed.display_name),
-                .path = try allocator.dupe(u8, mod_path),
-                .version = try allocator.dupe(u8, parsed.version),
+                .display_name = "",
+                .path = "",
                 .config_dir = config_dir,
-                .icon = if (parsed.icon) |ic| (if (ic.len > 0) try allocator.dupe(u8, ic) else null) else null,
+                .version = "",
                 .has_bundles = has_bundles,
                 .has_code = has_code,
-            });
+            };
+            var row_moved = false;
+            errdefer if (!row_moved) row.deinit(allocator);
+            row.display_name = try allocator.dupe(u8, parsed.display_name);
+            row.path = try allocator.dupe(u8, mod_path);
+            row.version = try allocator.dupe(u8, parsed.version);
+            if (parsed.icon) |ic| {
+                if (ic.len > 0) row.icon = try allocator.dupe(u8, ic);
+            }
+            try mods.append(allocator, row);
+            row_moved = true;
             if (config_dir) |cd| {
                 if (!self.isDisabled(parsed.name)) {
-                    try mod_dirs.append(allocator, .{
+                    // Same rule as the row above: on a failed dupe the
+                    // already-taken `config_dir` copy is released.
+                    var md = ModDir{
                         .config_dir = try allocator.dupe(u8, cd),
-                        .mod_path = try allocator.dupe(u8, mod_path),
-                    });
+                        .mod_path = "",
+                    };
+                    var md_moved = false;
+                    errdefer if (!md_moved) {
+                        allocator.free(md.config_dir);
+                        allocator.free(md.mod_path);
+                    };
+                    md.mod_path = try allocator.dupe(u8, mod_path);
+                    try mod_dirs.append(allocator, md);
+                    md_moved = true;
                 }
             }
             if (has_code) {
