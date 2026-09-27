@@ -11,6 +11,8 @@ const query = @import("query.zig");
 const protocol = @import("../protocol.zig");
 const stealthLightLevel = @import("sensing.zig").stealthLightLevel;
 const PlayerSnap = @import("sensing.zig").PlayerSnap;
+const PlayerScan = @import("sensing.zig").PlayerScan;
+const scanFromSnaps = @import("sensing.zig").scanFromSnaps;
 const canSensePlayer = @import("sensing.zig").canSensePlayer;
 const stealthLightAttackPercent = @import("sensing.zig").stealthLightAttackPercent;
 const nearestPlayerSnap = @import("sensing.zig").nearestPlayerSnap;
@@ -249,16 +251,20 @@ test "stealth: crouch muffles the hearing gate through walls" {
     var snaps = [_]PlayerSnap{
         .{ .id = 100, .slot = 0, .x = 8, .y = 70, .z = 0, .crouching = false },
     };
+    var scan: PlayerScan = .{};
+    scanFromSnaps(&scan, &snaps);
     // Standing at 8 m (hear 10): heard through the wall.
-    const t_stand = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    const t_stand = nearestPlayerSnap(&w, &scan, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, 100), t_stand.id);
     // Crouched at 8 m (hear 10 x 0.5 = 5): muffled, sight blocked: not sensed.
     snaps[0].crouching = true;
-    const t_crouch = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    scanFromSnaps(&scan, &snaps);
+    const t_crouch = nearestPlayerSnap(&w, &scan, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, -1), t_crouch.id);
     // Crouched but close (3 m < 5): still heard.
     snaps[0] = .{ .id = 100, .slot = 0, .x = 3, .y = 70, .z = 0, .crouching = true };
-    const t_close = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    scanFromSnaps(&scan, &snaps);
+    const t_close = nearestPlayerSnap(&w, &scan, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, 100), t_close.id);
 }
 test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" {

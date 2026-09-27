@@ -39,21 +39,212 @@ pub const PlayerSnap = struct {
     self_light: f32 = 0,
 };
 
+/// Capacity of one tick's player snapshot. A slot-ascending group walk fills
+/// the first `max_players` entries; extra players are not sensed (stock
+/// EAISetNearestEntityAsTarget is a bounded local search too).
+pub const max_players: usize = 64;
+
+/// One tick's player snapshot: the AoS snaps every AI gate reads, plus the
+/// x/z pair packed into its own columns. The per-zombie distance scan
+/// (`nearestSq`, `anyWithin`) runs over the columns eight lanes at a time
+/// instead of striding the 40-byte snap, which is the inner loop of the AI
+/// pass and of the despawn pass.
+pub const PlayerScan = struct {
+    snaps: [max_players]PlayerSnap = undefined,
+    xs: [max_players]f32 = undefined,
+    zs: [max_players]f32 = undefined,
+    n: usize = 0,
+
+    pub fn slice(self: *const PlayerScan) []const PlayerSnap {
+        return self.snaps[0..self.n];
+    }
+};
+
+/// Scalar reference for `anyWithin`. Tests only.
+pub fn anyWithinRef(scan: *const PlayerScan, x: f32, z: f32, d2: f32) bool {
+    for (0..scan.n) |i| {
+        const dx = scan.xs[i] - x;
+        const dz = scan.zs[i] - z;
+        if (dx * dx + dz * dz < d2) return true;
+    }
+    return false;
+}
+
+/// Indices of the first `n` entries of the packed columns lying within
+/// `r2` (inclusive) of (x, z), written to `out` in ascending order. The
+/// combat-noise fan-out walks a whole mob group per event, so the radius test
+/// is a map, not a search: eight lanes at a time, scalar tail. `out` must
+/// hold `n` entries; the count returned is how many were written.
+pub fn withinRadius(out: []Slot, xs: []const f32, zs: []const f32, n: usize, x: f32, z: f32, r2: f32) usize {
+    std.debug.assert(out.len >= n);
+    const vx: dist_v = @splat(x);
+    const vz: dist_v = @splat(z);
+    const vr2: dist_v = @splat(r2);
+    var k: usize = 0;
+    var i: usize = 0;
+    while (i + dist_lanes <= n) : (i += dist_lanes) {
+        const cx: dist_v = xs[i..][0..dist_lanes].*;
+        const cz: dist_v = zs[i..][0..dist_lanes].*;
+        const dx = cx - vx;
+        const dz = cz - vz;
+        const hit: @Vector(dist_lanes, bool) = (dx * dx + dz * dz) <= vr2;
+        // A bool vector has no runtime lane index, so the mask becomes a bit
+        // word: bit j is lane j, and clearing the low bit walks the hits in
+        // ascending lane order.
+        var bits: u8 = @bitCast(hit);
+        while (bits != 0) {
+            out[k] = @intCast(i + @ctz(bits));
+            k += 1;
+            bits &= bits - 1;
+        }
+    }
+    while (i < n) : (i += 1) {
+        const dx = xs[i] - x;
+        const dz = zs[i] - z;
+        if (dx * dx + dz * dz <= r2) {
+            out[k] = @intCast(i);
+            k += 1;
+        }
+    }
+    return k;
+}
+
+/// Scalar reference for `withinRadius`. Tests only.
+pub fn withinRadiusRef(out: []Slot, xs: []const f32, zs: []const f32, n: usize, x: f32, z: f32, r2: f32) usize {
+    var k: usize = 0;
+    for (0..n) |i| {
+        const dx = xs[i] - x;
+        const dz = zs[i] - z;
+        if (dx * dx + dz * dz <= r2) {
+            out[k] = @intCast(i);
+            k += 1;
+        }
+    }
+    return k;
+}
+
+/// Pack literal snaps into a scan. Fixtures and tests build one this way
+/// instead of a world; production fills it through `snapshotPlayers`.
+pub fn scanFromSnaps(out: *PlayerScan, snaps: []const PlayerSnap) void {
+    out.n = @min(snaps.len, max_players);
+    for (out.snaps[0..out.n], 0..) |*dst, i| {
+        dst.* = snaps[i];
+        out.xs[i] = snaps[i].x;
+        out.zs[i] = snaps[i].z;
+    }
+}
+
+/// Lanes per distance step. 8 f32 lanes is one AVX register (or two SSE
+/// halves) and divides `max_players`, so the full-column path never peels.
+const dist_lanes: usize = 8;
+const dist_v = @Vector(dist_lanes, f32);
+
+/// A player standing exactly on the sensed position is not a target (the
+/// scalar gate's `d > 0.0001`); shared so the vector prefilter and the
+/// scalar reference agree on the edge.
+const min_target_d2: f32 = 0.0001;
+
+/// Index of the nearest snap with `min_target_d2 < d2 < max_d2`, or null when
+/// none qualifies. Ties go to the lowest index, matching the scalar scan's
+/// strict `<` (a later player at the same distance never displaces the
+/// earlier one).
+pub fn nearestSq(scan: *const PlayerScan, x: f32, z: f32, max_d2: f32) ?usize {
+    const vx: dist_v = @splat(x);
+    const vz: dist_v = @splat(z);
+    const vmin: dist_v = @splat(min_target_d2);
+    const vmax: dist_v = @splat(max_d2);
+    var best: f32 = max_d2;
+    var best_i: usize = max_players;
+    var i: usize = 0;
+    while (i + dist_lanes <= scan.n) : (i += dist_lanes) {
+        const xs: dist_v = scan.xs[i..][0..dist_lanes].*;
+        const zs: dist_v = scan.zs[i..][0..dist_lanes].*;
+        const dx = xs - vx;
+        const dz = zs - vz;
+        const d = dx * dx + dz * dz;
+        // Lanes outside the range (or on the exact position) are pushed to
+        // +inf so they cannot win the min and never become the index.
+        const keep = @select(f32, (d > vmin) & (d < vmax), d, @as(dist_v, @splat(std.math.inf(f32))));
+        const lane_min = @reduce(.Min, keep);
+        if (lane_min >= best) continue;
+        best = lane_min;
+        // Lowest lane holding the min, so the tie-break is the lowest index.
+        const hit: @Vector(dist_lanes, bool) = keep == @as(dist_v, @splat(lane_min));
+        const bits: u8 = @bitCast(hit);
+        best_i = i + @ctz(bits);
+    }
+    // Tail lanes (scan.n not a multiple of dist_lanes) and lanes whose
+    // candidate loses on distance are settled by the scalar reference, which
+    // owns the same tie-break.
+    var t = (scan.n / dist_lanes) * dist_lanes;
+    while (t < scan.n) : (t += 1) {
+        const dx = scan.xs[t] - x;
+        const dz = scan.zs[t] - z;
+        const d = dx * dx + dz * dz;
+        if (d > min_target_d2 and d < best) {
+            best = d;
+            best_i = t;
+        }
+    }
+    if (best_i == max_players) return null;
+    return best_i;
+}
+
+/// Scalar reference for `nearestSq`. Tests only.
+pub fn nearestSqRef(scan: *const PlayerScan, x: f32, z: f32, max_d2: f32) ?usize {
+    var best: f32 = max_d2;
+    var best_i: usize = max_players;
+    for (0..scan.n) |i| {
+        const dx = scan.xs[i] - x;
+        const dz = scan.zs[i] - z;
+        const d = dx * dx + dz * dz;
+        if (d < best and d > min_target_d2) {
+            best = d;
+            best_i = i;
+        }
+    }
+    return if (best_i == max_players) null else best_i;
+}
+
+/// Whether any snap is strictly closer than `d2` to (x, z).
+pub fn anyWithin(scan: *const PlayerScan, x: f32, z: f32, d2: f32) bool {
+    const vx: dist_v = @splat(x);
+    const vz: dist_v = @splat(z);
+    const vmax: dist_v = @splat(d2);
+    var i: usize = 0;
+    while (i + dist_lanes <= scan.n) : (i += dist_lanes) {
+        const xs: dist_v = scan.xs[i..][0..dist_lanes].*;
+        const zs: dist_v = scan.zs[i..][0..dist_lanes].*;
+        const dx = xs - vx;
+        const dz = zs - vz;
+        if (@reduce(.Or, (dx * dx + dz * dz) < vmax)) return true;
+    }
+    var t = (scan.n / dist_lanes) * dist_lanes;
+    while (t < scan.n) : (t += 1) {
+        const dx = scan.xs[t] - x;
+        const dz = scan.zs[t] - z;
+        if (dx * dx + dz * dz < d2) return true;
+    }
+    return false;
+}
+
 /// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
 /// set, players who died during the active blood moon are excluded (stock
 /// EAISetNearestEntityAsTarget skips IsBloodMoonDead players, so the horde
 /// hunts the living); the despawn pass keeps them so a corpse still pins
 /// distant zombies.
-pub fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: bool) usize {
+pub fn snapshotPlayers(w: *const World, out: *PlayerScan, skip_blood_moon_dead: bool) usize {
     var n: usize = 0;
     // Cached player group instead of a 512-slot scan; it is slot-ascending, so
     // the first 64 entries are the same 64 in the same order (nearest-player
     // tie-breaks depend on it). Nothing here spawns or destroys.
     for (query.groupSlice(w, .player)) |j| {
-        if (n >= out.len) break;
+        if (n >= out.snaps.len) break;
         if (!w.mask[j].player or !w.mask[j].transform) continue;
         if (skip_blood_moon_dead and w.player[j].is_blood_moon_dead) continue;
-        out[n] = .{
+        out.xs[n] = w.transform[j].x;
+        out.zs[n] = w.transform[j].z;
+        out.snaps[n] = .{
             .id = w.network_id[j].id,
             .slot = j,
             .x = w.transform[j].x,
@@ -65,6 +256,7 @@ pub fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_de
         };
         n += 1;
     }
+    out.n = n;
     return n;
 }
 
@@ -237,25 +429,37 @@ fn smellRadiusFor(w: *const World, slot: Slot) f32 {
     return w.rules.ai.smell_radius;
 }
 
-pub fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
+pub fn nearestPlayerSnap(w: *const World, scan: *const PlayerScan, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
     // `BlockIf condition=alert e 0` (the hostile-animal template): while the
     // entity is unalerted the executing BlockIf holds MutexBits=1 over
     // SetNearestEntityAsTarget, so no fresh sense acquisition. Revenge and
     // the latched aggro below still run (SetAsTargetIfHurt is priority 1 and
     // hurt sets alert, which drops this gate). Bit 1 = alert arm parsed.
+    const sense_d2 = w.rules.ai.sense_dist_sq;
+    const none: TargetSnap = .{ .id = -1, .slot = 0, .d2 = sense_d2, .px = zx, .pz = zz };
     if (w.class_id[zslot].block_if_alert_only & 2 != 0 and !w.zombie_ai[zslot].alert) {
-        return .{ .id = -1, .slot = 0, .d2 = w.rules.ai.sense_dist_sq, .px = zx, .pz = zz };
+        return none;
     }
+    // Distance prefilter: the packed columns give the nearest in-range player
+    // in eight lanes at a time, which is what every zombie in the pass asks
+    // for. A zombie out of earshot of everyone (the common case) returns
+    // without touching the gates below.
+    const near = nearestSq(scan, zx, zz, sense_d2) orelse return none;
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
-    var best_d: f32 = w.rules.ai.sense_dist_sq;
+    var best_d: f32 = sense_d2;
     var px: f32 = zx;
     var pz: f32 = zz;
-    for (snaps) |p| {
+    // The winner is the global minimum over the same candidates the scalar
+    // scan considers, so when it passes its gate the answer is the nearest
+    // sensed player either way. A rejected winner (blocked sight, muffled
+    // hearing) falls through to the full scan, which then walks the
+    // remaining candidates in order.
+    for (scan.slice(), 0..) |p, i| {
         const dx = p.x - zx;
         const dz = p.z - zz;
         const d = dx * dx + dz * dz;
-        if (d < best_d and d > 0.0001) {
+        if (d < best_d and d > min_target_d2) {
             // Smell passes walls (RE PlayerStealth cSmellRadius*): within the
             // player's effective smell radius the zombie senses regardless of
             // sight or hearing (a bleeding player reeks from further away).
@@ -274,6 +478,7 @@ pub fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot
             best_slot = p.slot;
             px = p.x;
             pz = p.z;
+            if (i == near) break;
         }
     }
     return .{ .id = best_id, .slot = best_slot, .d2 = best_d, .px = px, .pz = pz };
@@ -568,10 +773,10 @@ test "blood-moon-dead players are skipped as AI targets but kept for despawn" {
     _ = w.spawnPlayer(1, 70, 5, 1).?;
     const ps = w.playerByPeer(1).?;
     w.player[ps].is_blood_moon_dead = true; // died during the horde
-    var snaps: [64]PlayerSnap = undefined;
-    const ai_n = snapshotPlayers(&w, &snaps, true);
+    var scan: PlayerScan = .{};
+    const ai_n = snapshotPlayers(&w, &scan, true);
     try std.testing.expectEqual(@as(usize, 1), ai_n);
-    const des_n = snapshotPlayers(&w, &snaps, false);
+    const des_n = snapshotPlayers(&w, &scan, false);
     try std.testing.expectEqual(@as(usize, 2), des_n);
 }
 test "sense range comes from entityclasses SightRange, not the global rule" {
@@ -668,7 +873,9 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
         .{ .id = 100, .slot = 0, .x = 20, .y = 70, .z = 0 },
         .{ .id = 101, .slot = 1, .x = 20, .y = 70, .z = 0 },
     };
-    const t = nearestPlayerSnap(&w, &snaps, 0, 0, 70, 0, 90.0);
+    var scan: PlayerScan = .{};
+    scanFromSnaps(&scan, &snaps);
+    const t = nearestPlayerSnap(&w, &scan, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, 101), t.id);
     try std.testing.expectEqual(@as(Slot, 1), t.slot);
     // Both players at 20 m (beyond every non-bleed radius): nobody sensed.
@@ -676,6 +883,8 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
         .{ .id = 100, .slot = 0, .x = 20, .y = 70, .z = 0 },
         .{ .id = 101, .slot = 1, .x = 20, .y = 70, .z = 0 },
     };
+    var far_scan: PlayerScan = .{};
+    scanFromSnaps(&far_scan, &far_snaps);
     var w2: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
     defer w2.deinit();
     // Same wall as above: without smell, the 20 m players are behind it, out
@@ -689,7 +898,7 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
     };
     w2.smell_ctx = null;
     w2.smell_fn = &FarSmell.radius;
-    const t2 = nearestPlayerSnap(&w2, &far_snaps, 0, 0, 70, 0, 90.0);
+    const t2 = nearestPlayerSnap(&w2, &far_scan, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, -1), t2.id);
 }
 
@@ -783,4 +992,83 @@ test "AI move: wander target inside a wall does not clip through it" {
     // Goal inside the wall block: the body stops at the near face (x < 5).
     for (0..80) |_| stepToward(&w, s, 6, 0, 2.2, 0.05);
     try std.testing.expect(w.transform[s].x < 5.0);
+}
+
+test "player distance scan: vector prefilter matches the scalar reference" {
+    // The AI and despawn passes read these columns for every mob, so the
+    // eight-lane path must agree with the scalar reference on the nearest
+    // index, on ties, and on the tail (scan.n need not be a lane multiple).
+    var prng = std.Random.DefaultPrng.init(0x5117_2ea1);
+    const rnd = prng.random();
+    var scan: PlayerScan = .{};
+    var round: usize = 0;
+    while (round < 256) : (round += 1) {
+        scan.n = rnd.intRangeAtMost(usize, 0, max_players);
+        for (0..scan.n) |i| {
+            scan.xs[i] = rnd.float(f32) * 200.0 - 100.0;
+            scan.zs[i] = rnd.float(f32) * 200.0 - 100.0;
+            scan.snaps[i] = .{ .id = @intCast(i), .slot = @intCast(i), .x = scan.xs[i], .y = 70, .z = scan.zs[i] };
+        }
+        const x = rnd.float(f32) * 200.0 - 100.0;
+        const z = rnd.float(f32) * 200.0 - 100.0;
+        const max_d2 = rnd.float(f32) * 6000.0;
+        try std.testing.expectEqual(nearestSqRef(&scan, x, z, max_d2), nearestSq(&scan, x, z, max_d2));
+        // anyWithin is the despawn pass's "a player pins this mob" test.
+        var want = false;
+        for (0..scan.n) |i| {
+            const dx = scan.xs[i] - x;
+            const dz = scan.zs[i] - z;
+            if (dx * dx + dz * dz < max_d2) want = true;
+        }
+        try std.testing.expectEqual(want, anyWithin(&scan, x, z, max_d2));
+    }
+}
+
+test "player distance scan: ties keep the lower index and out-of-range players drop out" {
+    var snaps = [_]PlayerSnap{
+        .{ .id = 10, .slot = 0, .x = 10, .y = 70, .z = 0 },
+        .{ .id = 11, .slot = 1, .x = -10, .y = 70, .z = 0 },
+        .{ .id = 12, .slot = 2, .x = 0, .y = 70, .z = 3 },
+    };
+    var scan: PlayerScan = .{};
+    scanFromSnaps(&scan, &snaps);
+    // p0 and p1 tie at 10 m: the scalar scan's strict `<` keeps the first,
+    // and so must the vector reduce, but p2 at 3 m outranks both.
+    try std.testing.expectEqual(@as(?usize, 2), nearestSq(&scan, 0, 0, 1000));
+    // A range that only reaches p2.
+    try std.testing.expectEqual(@as(?usize, 2), nearestSq(&scan, 0, 0, 50));
+    // Nobody in range.
+    try std.testing.expectEqual(@as(?usize, null), nearestSq(&scan, 0, 0, 5));
+    // A player standing on the sensed position is not a target, so the scan
+    // from that spot picks the next one out.
+    try std.testing.expectEqual(@as(?usize, 0), nearestSq(&scan, -10, 0, 1000));
+    try std.testing.expect(anyWithin(&scan, 0, 0, 101));
+    try std.testing.expect(!anyWithin(&scan, 0, 0, 9));
+}
+
+test "radius fan-out: vector mask matches the scalar reference" {
+    // The combat-noise pass maps every mob through one radius test, so the
+    // hit set (and its order: the sleeper-wake ring is drained in it) has to
+    // come out identical, tails included.
+    var prng = std.Random.DefaultPrng.init(0x9a1e_5d3f);
+    const rnd = prng.random();
+    var xs: [64]f32 = undefined;
+    var zs: [64]f32 = undefined;
+    var got: [64]Slot = undefined;
+    var want: [64]Slot = undefined;
+    var round: usize = 0;
+    while (round < 256) : (round += 1) {
+        const n = rnd.intRangeAtMost(usize, 0, xs.len);
+        for (0..n) |i| {
+            xs[i] = rnd.float(f32) * 400.0 - 200.0;
+            zs[i] = rnd.float(f32) * 400.0 - 200.0;
+        }
+        const x = rnd.float(f32) * 400.0 - 200.0;
+        const z = rnd.float(f32) * 400.0 - 200.0;
+        const r2 = rnd.float(f32) * 40000.0;
+        const gn = withinRadius(got[0..], xs[0..], zs[0..], n, x, z, r2);
+        const wn = withinRadiusRef(want[0..], xs[0..], zs[0..], n, x, z, r2);
+        try std.testing.expectEqual(wn, gn);
+        try std.testing.expectEqualSlices(Slot, want[0..wn], got[0..gn]);
+    }
 }

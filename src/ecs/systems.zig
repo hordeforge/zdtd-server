@@ -5,6 +5,9 @@ const World = @import("world.zig").World;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
 const query = @import("query.zig");
+const withinRadius = sensing.withinRadius;
+const max_entities = @import("world.zig").max_entities;
+const Slot = @import("world.zig").Slot;
 const parallel = @import("../util/parallel.zig");
 
 /// Fixed-point damage unit (1.0 hp = 100). zdtd-owned structural scale.
@@ -14,6 +17,8 @@ pub const sensing = @import("sensing.zig");
 pub const lodScale = sensing.lodScale;
 pub const TargetSnap = sensing.TargetSnap;
 pub const PlayerSnap = sensing.PlayerSnap;
+pub const PlayerScan = sensing.PlayerScan;
+pub const max_players = sensing.max_players;
 pub const snapshotPlayers = sensing.snapshotPlayers;
 pub const stealthLightAttackPercent = sensing.stealthLightAttackPercent;
 pub const stealthLightPreBlend = sensing.stealthLightPreBlend;
@@ -82,15 +87,31 @@ pub const systemStealth = stealth.systemStealth;
 /// (tests) and the net-poll-then-sim ordering both rely on consume-owns-drain.
 pub fn consumeCombatNoise(w: *World) void {
     const take = @min(@min(w.noise_n, c.noise_events_cap), w.rules.ai.noise_events_per_tick);
+    if (take == 0) {
+        w.noise_n = 0;
+        return;
+    }
+    // The radius test is the same map for every event, so the group is packed
+    // into x/z columns once and each event scans them eight lanes at a time.
+    // Hits keep the group order the scalar walk produced, so the sleeper-wake
+    // ring is drained in the same sequence.
+    const group = query.groupSlice(w, .zombie);
+    const gn = group.len;
+    var gx: [max_entities]f32 = undefined;
+    var gz: [max_entities]f32 = undefined;
+    var hits: [max_entities]Slot = undefined;
+    for (group, 0..) |s, i| {
+        gx[i] = w.transform[s].x;
+        gz[i] = w.transform[s].z;
+    }
     var i: usize = 0;
     while (i < take) : (i += 1) {
         const ev = w.noise_events[i];
         const r2 = ev.radius * ev.radius;
-        for (query.groupSlice(w, .zombie)) |s| {
+        const hn = withinRadius(hits[0..], gx[0..gn], gz[0..gn], gn, ev.x, ev.z, r2);
+        for (hits[0..hn]) |h| {
+            const s = group[h];
             if (!w.alive[s] or !w.mask[s].zombie_ai or !w.mask[s].transform) continue;
-            const dx = w.transform[s].x - ev.x;
-            const dz = w.transform[s].z - ev.z;
-            if (dx * dx + dz * dz > r2) continue;
             const ai = &w.zombie_ai[s];
             if (w.mask[s].sleeper and !w.sleeper[s].awake) {
                 // Wake and investigate the noise (stock sleeper wake).

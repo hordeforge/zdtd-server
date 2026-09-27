@@ -11,7 +11,7 @@ const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const systems = @import("systems.zig");
 const TargetSnap = systems.TargetSnap;
-const PlayerSnap = systems.PlayerSnap;
+const PlayerScan = systems.PlayerScan;
 const snapshotPlayers = systems.snapshotPlayers;
 const nearestPlayerSnap = systems.nearestPlayerSnap;
 const applyRevengeTarget = systems.applyRevengeTarget;
@@ -285,7 +285,10 @@ pub const seekYawStep = ai_steer.seekYawStep;
 const AiCtx = struct {
     w: *World,
     dt: f32,
-    players: []const PlayerSnap,
+    /// This tick's player snapshot. Read-only for every worker: `slice()` for
+    /// the AoS gates, the packed x/z columns for the vectorized distance
+    /// prefilter in `nearestPlayerSnap`.
+    scan: *const PlayerScan,
     /// Tick-start copy of `w.transform`. A worker owns only its own entries in
     /// `slots`, so every cross-slot position read (fear scan, revenge target)
     /// must come from here: reading `w.transform[other]` races the worker writing it.
@@ -340,7 +343,7 @@ const AiCtx = struct {
                 const ar = ctx.w.rules.ai;
                 const sr = @sqrt(senseDistSq(ctx.w, s)); // sightRangeBase
                 var near = false;
-                for (ctx.players) |pl| {
+                for (ctx.scan.slice()) |pl| {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
                     const dist = @sqrt(dx * dx + dz * dz);
@@ -435,7 +438,7 @@ const AiCtx = struct {
 
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
-            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.players, s, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
+            var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.scan, s, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
             // Host-side bot as a secondary target (ADR 0026): with no player
             // sensed (and no revenge latched), a zombie senses the nearest
             // live bot within its own sight range and chases it. Bots are not
@@ -1588,8 +1591,8 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // Dropped-item distraction broadcast runs before task selection so a
     // zombie can react to a fresh decoy on the same tick it lands.
     tickItemDistractions(w);
-    var snaps: [64]PlayerSnap = undefined;
-    const pn = snapshotPlayers(w, &snaps, true);
+    var scan: PlayerScan = .{};
+    _ = snapshotPlayers(w, &scan, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     var dmg_attacker: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
@@ -1604,7 +1607,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     const ctx = AiCtx{
         .w = w,
         .dt = dt,
-        .players = snaps[0..pn],
+        .scan = &scan,
         .pos = &pos_snap,
         .slots = ai_slots[0..ai_n],
         .dmg_fp = dmg_fp[0..],
