@@ -281,6 +281,12 @@ fn toolTextSnapshot(w: *Wbuf, snap: []const u8, snap_len: usize, tool: usize) bo
 // params.arguments.verb (already validated when present).
 fn runTool(tool: usize, verb: []const u8, w: *Wbuf) bool {
     if (tool == tool_admin_command) {
+        // Length before policy: an over-long verb is malformed input, and the
+        // caller needs that error, not an allowlist verdict it can never match.
+        if (verb.len > query_req_len - 1) {
+            w.puts("\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"verb too long\"}]");
+            return !w.overflow;
+        }
         // Allowlist: host policy via zdtd.query "mcp.allowlist"; one verb per line.
         // Missing query surface or absent verb -> deny (fail closed).
         var req: [query_req_len]u8 = undefined;
@@ -317,22 +323,19 @@ fn runTool(tool: usize, verb: []const u8, w: *Wbuf) bool {
             return !w.overflow;
         }
         // Queue the verb as a SimCommand; the ECS drains it with full authority.
-        if (verb.len > query_req_len - 1) {
-            w.puts("\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"verb too long\"}]");
-            return !w.overflow;
-        }
         var cmd: [query_req_len]u8 = undefined;
         @memcpy(cmd[0..verb.len], verb);
         cmd[verb.len] = 0;
         const queued = common.queue(@intCast(@intFromPtr(&cmd)), @intCast(verb.len));
-        w.puts("\"content\":[{\"type\":\"text\",\"text\":");
-        w.putc('"');
         if (queued != 0) {
-            w.puts("queue rejected");
-        } else {
-            w.jsonStrN(cmd[0..verb.len]);
-            w.puts(" queued");
+            // Same shape as every other tool failure: a client that keys on
+            // `isError` must see a dropped command as a failure, not a success.
+            w.puts("\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"queue rejected\"}]");
+            return !w.overflow;
         }
+        w.puts("\"content\":[{\"type\":\"text\",\"text\":");
+        w.jsonStrN(cmd[0..verb.len]);
+        w.puts(" queued");
         w.puts("\"}]");
         return !w.overflow;
     }

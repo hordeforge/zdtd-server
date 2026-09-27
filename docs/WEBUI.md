@@ -120,8 +120,8 @@ panel from it; tab selection is client state in the URL hash.
 |---|---|---|
 | `GET /` | Dashboard shell: document, CSS, the Preact bundle and the app mount point | committed page |
 | `GET /api/state.json` | The whole dashboard state: `tick` (Snapshot scalars), `players`, `modules`, `modlets`, `console`, `csrf`, `apm` | snapshot + wasm roster + ops ring |
-| `POST /api/cmd` | Run one admin command; JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise | inline → admin parser (same request) |
-| `POST /api/modlet` | Enable/disable a modlet; JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise (errors use the same Accept negotiation as `/api/cmd`) | modlet state file |
+| `POST /api/cmd` | Run one admin command (400 bad `line`, 403 CSRF, 415 non-form, 429 console queue full, 503 console down); JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise | inline → admin parser (same request) |
+| `POST /api/modlet` | Enable/disable a modlet (400 bad `name`/`action`, 403 CSRF, 404 unknown modlet, 415 non-form, 500 state file unwritable); JSON when `Accept: application/json`, plain text for `Accept: text/plain`, HTML fragment otherwise (errors use the same Accept negotiation as `/api/cmd`) | modlet state file |
 | `GET /partials/*` | Retired by ADR 0040: **404** (the dashboard reads `/api/state.json`) | - |
 | `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools); feeds the dashboard latency chart series | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
@@ -134,27 +134,23 @@ panel from it; tab selection is client state in the URL hash.
 
 Status notes: auth runs before routing, so unauthenticated requests get **401**
 even on unknown paths or wrong methods. Authenticated: wrong method on a known
-path returns **405** with `Allow` (not 404); unknown paths return **404**. Unauthenticated `/api/*`
-returns plain `401 unauthorized` plus `WWW-Authenticate: Bearer realm="zdtd-webui"`
-(HTML login form is for browser routes). `/readyz` returns **503** with
-`Retry-After: 1` until the first live tick snapshot. All GET-only routes
-(`/`, `/api/state.json`, `/api/apm.json`) also accept `HEAD` (same status and
-headers, empty body), matching `/healthz` and `/readyz`; their `405` responses
-advertise `Allow: GET, HEAD`.
+path returns **405** with `Allow` (not 404); unknown paths return **404**.
+Unauthenticated `/api/*` returns plain `401 unauthorized` plus
+`WWW-Authenticate: Bearer realm="zdtd-webui"`; browser routes get the HTML login
+form instead. `/readyz` returns **503** with `Retry-After: 1` until the first
+live tick snapshot. All GET-only routes (`/`, `/api/state.json`,
+`/api/apm.json`) also accept `HEAD` (same status and headers, empty body),
+matching `/healthz` and `/readyz`; their `405` responses advertise
+`Allow: GET, HEAD`.
+
+A command that ran and reported a failure is still **200** with `"ok":false` in
+the negotiated body: the console answered, the command did not succeed.
 
 The porting/provenance report is **not** a served route: it is a standalone
-HTML document ([`provenance.html`](provenance.html)) kept with the scorecard
-docs it summarizes (`docs/GAP_ANALYSIS.md` scorecard + `docs/PROVENANCE.md`
-buckets) and opened directly from the repo. The shell dashboard's live ops
-sections (status, apm, players, console) are rendered client-side by the Preact
-app from `/api/state.json`.
-
-Optional later:
-
-| Route | Purpose |
-|---|---|
-| `GET /api/bans` | ban list CRUD (future; not implemented) |
-| `GET /api/config` | effective serverconfig with restart badges (future; not implemented) |
+HTML document ([`provenance.html`](provenance.html)) summarizing
+`docs/GAP_ANALYSIS.md` and `docs/PROVENANCE.md`, opened from the repo. The shell
+dashboard's live ops sections (status, apm, players, console) are rendered
+client-side by the Preact app from `/api/state.json`.
 
 ## UI sketch (dashboard)
 

@@ -1765,6 +1765,23 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
         try std.testing.expect(rep != null);
         try std.testing.expect(std.mem.find(u8, rep.?, "verb not in allowlist") != null);
     }
+    // An over-long verb is a length error, not an allowlist verdict: the
+    // policy match is unreachable for it, so the caller gets the error it can
+    // act on (128 chars: the longest string the frame reader hands over).
+    {
+        const long_verb: [128]u8 = @splat('a');
+        var frame: [256]u8 = undefined;
+        const f = try std.fmt.bufPrint(
+            &frame,
+            "{{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{{\"name\":\"admin_command\",\"arguments\":{{\"verb\":\"{s}\"}}}}}}",
+            .{long_verb[0..]},
+        );
+        const rep = p.callMcpFrame(f, &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "verb too long") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "verb not in allowlist") == null);
+        try std.testing.expectEqual(@as(usize, 1), Cap.queued_n);
+    }
     // admin_command without a verb is Invalid Params.
     {
         const rep = p.callMcpFrame(
