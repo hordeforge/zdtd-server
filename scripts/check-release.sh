@@ -161,10 +161,18 @@ if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; th
   latest_product_tag=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null | grep -vx 'v3\.1\.0' | head -n1 || true)
   if [[ -n "$latest_product_tag" ]]; then
     # Soft-wrapped prose may split the sentence across lines; match on
-    # collapsed whitespace.
+    # collapsed whitespace. What the gate protects is that the doc still names
+    # the newest product tag as the current one, so accept any phrasing that
+    # puts the tag within the same sentence as "the latest release" rather than
+    # one exact sentence shape (the prose was reworded 2026-09-27 to
+    # "... is the development line and `v0.7.0` the latest release"). Cutting a
+    # tag without updating the doc still fails: the tag named in the prose is
+    # then the previous one, which no longer matches the tag being checked.
     releases_prose=$(tr '\n' ' ' < docs/RELEASES.md)
-    if [[ "$releases_prose" != *"\`${latest_product_tag}\` is the latest release"* ]]; then
-      echo "release-check: docs/RELEASES.md must say \`${latest_product_tag}\` is the latest release" >&2
+    latest_tag_re=${latest_product_tag//./\\.}
+    latest_claim="\`${latest_tag_re}\`[^\.]*(the latest|current) release"
+    if [[ ! "$releases_prose" =~ $latest_claim ]]; then
+      echo "release-check: docs/RELEASES.md must name \`${latest_product_tag}\` as the latest release" >&2
       exit 1
     fi
     if [[ "$releases_prose" != *"Product tags:"*"\`${latest_product_tag}\`"* ]]; then
