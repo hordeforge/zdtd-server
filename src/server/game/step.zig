@@ -523,8 +523,17 @@ pub fn step(self: *Game) !void {
     }
 
     try self.replicate();
-    if (self.tick_n % self.save_interval_ticks == 0 or self.save_pending) {
-        self.save_pending = false;
+    const save_interval_due = self.tick_n % self.save_interval_ticks == 0;
+    // A drain continues on a cadence, not every tick: the pass scans the chunk
+    // map for the dirty set, and paying that scan per tick is a cost a burst
+    // drain should not create.
+    const save_drain_due = self.save_pending_at != 0 and
+        self.tick_n -% self.save_pending_at >= game_mod.save_continue_interval_ticks;
+    if (save_interval_due or save_drain_due) {
+        // A continuation tick only finishes the chunk drain; the other stores
+        // ride the interval tick, so a long drain does not rewrite them every
+        // tick on top of the chunk work.
+        self.save_pending_at = 0;
         const ss = apm.profiler.scope(&self.harness.prof, .save_io);
         defer ss.end();
         {
@@ -532,31 +541,35 @@ pub fn step(self: *Game) !void {
             defer es.end();
             // Budgeted: a join burst leaves hundreds of chunks dirty and
             // encoding them all in one tick stalls every peer (APM `save_io`
-            // 3.9 s max). `save_pending` brings the next tick back until the
-            // set drains; shutdown and admin saves stay unbounded.
-            self.save_pending = self.world.saveAllBudget(game_mod.save_chunks_per_tick) catch |e| blk: {
+            // 3.9 s max, 0.95 s after this). `save_pending_at` brings a later
+            // tick back until the set drains; shutdown and admin saves stay
+            // unbounded.
+            const more = self.world.saveAllBudget(game_mod.save_chunks_per_tick) catch |e| blk: {
                 game_mod.logPersistErr(self, "save world", e);
                 break :blk false;
             };
+            if (more) self.save_pending_at = self.tick_n;
         }
-        self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
-        self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
-        self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
-        self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
-        self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
-        self.saveEntities() catch |e| game_mod.logPersistErr(self, "save entities", e);
-        // Same order as persist.saveAllStores: traders and sleeper markers
-        // must ride the periodic tick, not only admin `.save` / `.saveworld`.
-        self.saveTraders() catch |e| game_mod.logPersistErr(self, "save traders", e);
-        self.sleepers.saveCleared(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-cleared", e);
-        self.sleepers.saveTriggered(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-triggered", e);
-        self.allies.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save allies", e);
-        self.saveBlockMeta() catch |e| game_mod.logPersistErr(self, "save block meta", e);
-        self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);
-        self.saveClock() catch |e| game_mod.logPersistErr(self, "save clock", e);
-        if (self.players_dirty) {
-            self.players_dirty = false;
-            self.savePlayers() catch |e| game_mod.logPersistErr(self, "save players", e);
+        if (save_interval_due) {
+            self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
+            self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
+            self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
+            self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
+            self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
+            self.saveEntities() catch |e| game_mod.logPersistErr(self, "save entities", e);
+            // Same order as persist.saveAllStores: traders and sleeper markers
+            // must ride the periodic tick, not only admin `.save` / `.saveworld`.
+            self.saveTraders() catch |e| game_mod.logPersistErr(self, "save traders", e);
+            self.sleepers.saveCleared(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-cleared", e);
+            self.sleepers.saveTriggered(self.allocator, self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save sleepers-triggered", e);
+            self.allies.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save allies", e);
+            self.saveBlockMeta() catch |e| game_mod.logPersistErr(self, "save block meta", e);
+            self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);
+            self.saveClock() catch |e| game_mod.logPersistErr(self, "save clock", e);
+            if (self.players_dirty) {
+                self.players_dirty = false;
+                self.savePlayers() catch |e| game_mod.logPersistErr(self, "save players", e);
+            }
         }
     }
     self.sampleFlushCounters();

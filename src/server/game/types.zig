@@ -127,6 +127,11 @@ pub const default_save_interval_ticks: u64 = 100;
 /// back on the next tick while any remain. Shutdown and admin saves are
 /// unbounded.
 pub const save_chunks_per_tick: usize = 32;
+/// Ticks between chunk-drain continuations. The drain pass scans the chunk map
+/// to find the dirty set, so a continuation that ran every tick would pay that
+/// scan per tick while a burst drains; every few ticks still clears a few
+/// hundred chunks per second.
+pub const save_continue_interval_ticks: u64 = 10;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 /// Cap on a claimed sound's `volumeScale` (the client multiplies the clip's

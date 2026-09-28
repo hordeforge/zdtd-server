@@ -4674,14 +4674,17 @@ a finer server encoding.
   (the synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over
   84 saves, 3.4 s of it `save_encode`, both on the tick thread), while
   `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
-  the ECS sim stays under 6 ms. `World.saveAll` already writes only the dirty
-  set, so the save cost after a join is the freshly generated chunks, not
-  re-encoding. **Save side mitigated 2026-09-28**: `saveAllBudget` caps the
+  the ECS sim under 6 ms. `World.saveAll` writes only the dirty set, so the save
+  cost after a join is the freshly generated chunks, not re-encoding. **Save side mitigated 2026-09-28**: `saveAllBudget` caps the
   periodic tick at `save_chunks_per_tick` (32), reports whether work remains
   and the tick comes back next tick while it does (shutdown and admin saves
-  stay unbounded), pinned by `a budgeted save drains across calls and loses
-  nothing`. Pending: re-measuring `save_io`, and pacing the generation/stream
-  path the way `join_drain` paces the drain. The
+  stay unbounded; a continuation repeats only that drain, every
+  `save_continue_interval_ticks` so the dirty-set scan is not paid per tick, not
+  the other stores), pinned by `a budgeted save drains across calls and loses
+  nothing`.
+  Re-measured on the same bench: `save_io` max **3.9 s -> 0.95 s**, `save_encode`
+  max 3.4 s -> 0.51 s, `join_ok` 5 `join_fail` 0. Pending: pacing the
+  generation/stream path, which is what the remaining `join` max 7.6 s is. The
   join burst was fully synchronous: `sendSpawnArea`
   queued the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
