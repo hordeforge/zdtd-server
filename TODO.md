@@ -113,34 +113,39 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
-### BLOCKER: a live LiteNet join is broken, and the evidence points at the client (2026-09-28)
+### BLOCKER (root-caused 2026-09-28): the loadgen client links LiteNetLib 2.x
 
-Every loadgen join fails the same way on every map: `STAGE LiteNetStarted` then
+Every loadgen join fails on every map: `STAGE LiteNetStarted` then
 `Disconnected: ConnectionFailed` after 5.8 s with `recv=0 sent=0
 everJoined=False`, `join_ok 0`, on stock Navezgane and Pregen06k01 alike, while
-`zig build test` and `zig build fuzz` stay green. The server is healthy through
-it: it binds `port+2` UDP, ticks at 20 Hz (max tick 151 ms), and logs no panic
-and no peer. Loopback UDP through the 127.0.30.0/24 range the client binds
-round-trips fine from python.
+`zig build test` and `zig build fuzz` stay green. **Not a zdtd defect.** The
+server binds `port+2`, ticks at 20 Hz (max 151 ms), logs no panic and no peer,
+and loopback UDP round-trips fine from python.
 
-**Not a zdtd regression, on the evidence.** Reverting the round-30 join-phase
-apm sections and rebuilding reproduces the failure exactly. More usefully, the
-timeline says the client moved underneath us: the last passing bench (a
-three-client Pregen06k01 run, `join_ok 3`) finished at 10:56, the sibling
-`7dtd-loadgen` binary was rebuilt at **13:48:01** and released as 0.5.0 then
-0.6.0 at 13:45 and 13:48, and every failure since then is on that rebuilt
-client. Not proven by rebuilding the old client: this box has no dotnet SDK
-(`sdk-not-found`), so the old binary could not be produced for an A/B.
+The cause is in the sibling client, and it is a wire mismatch, not a build
+accident of ours. `7dtd-loadgen`'s csproj has two LiteNetLib branches: the
+game's 1.x `LiteNetLib.dll` (protocol-compatible with the dedicated server), or,
+when that path is not visible at build time, NuGet `LiteNetLib [2.1.4]`. Its own
+comment says 2.x "changes wire/API behavior and would diverge from the protocol
+the bots emulate". The binary on disk was rebuilt at 13:48:01 and its
+`LiteNetLib.dll` is 2.1.4 (126,464 bytes), not the game's 1.x (117,248 bytes) -
+so that build ran where the game DLL was invisible, took the fallback branch, and
+every join since has been a 2.x client talking to a 1.x server. Timeline agrees:
+the last passing bench (`join_ok 3`) finished at 10:56, the rebuild landed 13:48.
 
-Next: get an A/B on the client - run the pre-13:48 `7dtd-loadgen` against
-current zdtd, or ask the owning lane what changed in the client's transport
-path between those releases. Only if that A/B comes back clean should zdtd
-bisect its own tree, starting from `38984e1f`.
+Proof, not inference: swapping the game's 1.x DLL next to the client does not
+rescue it - the binary aborts with `File not found: 'LiteNetLib,
+Version=2.1.4.0'` because it is *compiled against* 2.1.4. (That swap was
+reverted; the sibling repo's build output is back as its build produced it.)
 
-Two lessons that outlive this incident: a live LiteNet handshake is not covered
-by `zig build test` / `zig build fuzz`, so persistence and join-path changes
-need a stock-map smoke; and when a cross-repo client is in the loop, check
-whether it was rebuilt before blaming the server.
+**Fix, owned by the other repo:** rebuild the client with the game install
+visible (`-p:GameDir="$HOME/.local/share/Steam/steamapps/common/7 Days to Die
+Dedicated Server"`, or the Makefile's `GAME_DIR=`), and make the 2.x fallback
+fail the build instead of silently diverging. Rebuilding here is not possible:
+this box has no dotnet SDK (`sdk-not-found`).
+
+Until that lands, no live smoke in this repo can pass, so do not read a red
+smoke as a zdtd regression and do not bisect this tree for it.
 
 ### Remaining parity items (2026-09-28 session handoff)
 
