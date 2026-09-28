@@ -123,6 +123,7 @@ never silently truncate a report.
 | `survival` | Per-player passive-effects VM + survival stats pass (P4b; `survival_players` / `vm_recomputes`) |
 | `join` | Join-phase C2S handling on the tick (login/enter/spawn handlers: spawn-area core + join bundle + respawn logic) |
 | `join_drain` | Paced spawn-area drain pass: one pass = the shared per-tick drain budget of chunk bodies + per-chunk ACK yields |
+| `join_deco` | Join-time deco burst: generate + mirror + stream `NetPackageDecoUpdate` over the client's deco window, one scope per join |
 
 `save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan` and
 `chunk_gen`

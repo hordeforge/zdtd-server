@@ -4668,11 +4668,10 @@ a finer server encoding.
   APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
   net_poll 1.9 s. Re-measured 2026-09-28 on the current build, stock
   Pregen06k01 with **three** clients joining at once: p50 tick 0.39 ms, p99
-  402 ms, max tick 9.6 s, max net_poll 9.4 s, `join_ok` 6 `join_fail` 0 (the
-  stall is boot/stream work, not a refused join), so the residual stands. Its
-  section breakdown names two offenders and clears the rest: `join` max 8.8 s
-  (the synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over
-  84 saves, 3.4 s of it `save_encode`, both on the tick thread), while
+  402 ms, max tick 9.6 s, `join_ok` 6 `join_fail` 0, so the residual stands. Its
+  breakdown named two offenders and cleared the rest: `join` max 8.8 s (the
+  synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over 84
+  saves, both on the tick thread), while
   `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
   the ECS sim under 6 ms. `World.saveAll` writes only the dirty set, so the save
   cost after a join is the freshly generated chunks, not re-encoding. **Save side mitigated 2026-09-28**: `saveAllBudget` caps the
@@ -4683,16 +4682,21 @@ a finer server encoding.
   the other stores), pinned by `a budgeted save drains across calls and loses
   nothing`.
   Re-measured on the same bench: `save_io` max **3.9 s -> 0.95 s**, `save_encode`
-  max 3.4 s -> 0.51 s, `join_ok` 5 `join_fail` 0. Pending: pacing the
-  generation/stream path, which is what the remaining `join` max 7.6 s is. The
+  max 3.4 s -> 0.51 s, `join_ok` 5 `join_fail` 0. The join-time deco burst was
+  the other unpaced block inside `join`, so it now has a `join_deco` section and
+  a per-chunk ACK yield: measured **0.08 ms mean over three joins**, which
+  retires it as the cost. The `join` max is high-variance across identical runs
+  (7.6 s and 23.5 s measured, both `join_fail` 0), so one run does not attribute
+  it, and every covered section (drain, chunk gen, TE scan, save, ECS) is small.
+  Pending: finer sections inside `join` before changing behaviour. The
   join burst was fully synchronous: `sendSpawnArea`
   queued the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
   the deco burst mirrors up to `deco_objects_per_join` (8192) trees. One
   poll drained it all, so a second concurrent client's critical packages
   (PackageIds retransmit) starve behind the reliable-window flood and its
-  join times out at ChallengeReplied (`join_ok=14, join_fail=0` server-side
-  - the server accepted everything; the client starved).
+  join times out at ChallengeReplied (`join_fail=0`: the server accepted
+  everything; the client starved).
   `(2026-08-29)` mitigations landed: `sendSpawnArea` yields ~500 us per
   chunk (loopback RTT ~100 us) so the reliable window drains continuously -
   a live double join now PASSES repeatedly on BOTH clients (26 passes in

@@ -21,13 +21,13 @@ Only imports of another package directory are counted; single-file imports
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
 | `plugin` | `util` | 6 |
-| `server` | `apm` | 10 |
+| `server` | `apm` | 11 |
 | `server` | `assets` | 186 |
 | `server` | `ecs` | 154 |
 | `server` | `litenet` | 76 |
 | `server` | `plugin` | 16 |
 | `server` | `server/game` | 33 |
-| `server` | `util` | 165 |
+| `server` | `util` | 166 |
 | `server` | `wire` | 137 |
 | `server` | `world` | 90 |
 | `wire` | `assets` | 10 |

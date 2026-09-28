@@ -25,6 +25,13 @@ const deco_mirror = @import("../../world/deco_mirror.zig");
 const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");
 const log = @import("../../util/log.zig");
+const clock = @import("../../util/clock.zig");
+const apm = @import("../../apm/root.zig");
+
+/// ACK-drain yield for the join-time deco burst, one per deco chunk: the
+/// spawn-area chunk loops use 500 us on loopback for the same reason, and the
+/// burst ships thousands of `NetPackageDecoUpdate` bodies back to back.
+const join_deco_yield_ns: u64 = 500_000;
 const interest = @import("../../ecs/interest.zig");
 const assets_items = @import("../../assets/items.zig");
 const io_fs = @import("../../util/io_fs.zig");
@@ -377,6 +384,10 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
     if (!first_join) try self.sendWeather(peer);
 }
 pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
+    // Own section: the burst is the one block in the join phase with no pacing
+    // and no attribution, so its cost used to land inside `join`'s max.
+    const ds = apm.profiler.scope(&self.harness.prof, .join_deco);
+    defer ds.end();
     if (!game_deco.decoAvailable(self)) {
         // Empty firstPackage is still required: the `isDecorated` marking loop
         // sits inside the `loadedDecos != null` branch, so without it the
@@ -424,6 +435,11 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
     while (dcz <= dcz_end and !capped) : (dcz += 1) {
         var dcx = deco.worldToDecoChunk(window.x0);
         while (dcx <= dcx_end and !capped) : (dcx += 1) {
+            // Yield per deco chunk, the same ACK-drain the spawn-area chunk
+            // loop does: a burst of thousands of deco objects in one pass
+            // overflows the reliable window and starves other peers.
+            self.pollNetOnce();
+            clock.sleepNs(join_deco_yield_ns);
             const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, seed, window, sampler);
             for (chunk_objs[0..n]) |o| {
                 if (total >= self.deco_objects_per_join) {

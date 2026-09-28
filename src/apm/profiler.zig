@@ -37,6 +37,11 @@ pub const Section = enum(u8) {
     /// Paced spawn-area drain pass (replicate): one pass = the shared
     /// per-tick drain budget of chunk bodies + per-chunk ACK yields.
     join_drain,
+    /// Join-time deco burst (join.zig `sendDecoForJoin`): generate + mirror +
+    /// stream `NetPackageDecoUpdate` for the client's deco window. It is the
+    /// one block left in the `join` section with no pacing and no section of
+    /// its own, so it was unattributed cost inside that section's max.
+    join_deco,
     /// Non-exhaustive marker (Zig `_`), not a switch catch-all: `scope` must
     /// stay inert for an unnamed/unknown id (`@enumFromInt(200)` in the test),
     /// so the enum deliberately has a tag space wider than its named members.
