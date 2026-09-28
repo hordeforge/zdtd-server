@@ -174,7 +174,12 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   `other` catch-all that `SetItemMetaFloat` currently lands in. Closing the 50
   gates therefore means a new `TriggeredAction` member plus its
   `parseTriggeredAction`/`evaluateTriggered` arms, the value carried on the sim
-  item, then `CompareItemMetaFloat` in the requirement vocabulary. Landed so far:
+  item, then `CompareItemMetaFloat` in the requirement vocabulary. Both are now
+  landed: the gate resolves the 50 charge rows (ade9f889) and the value rides the
+  wire into `InvSlot.meta_charge`, so the vocabulary census over the whole stock
+  config set is down to **two names / four rows** - `CatapultStrainAmount` 3 and
+  `RoundsInMagazine` 1, each needing a ctx input zdtd has no source for (a
+  catapult strain cvar, an ammo-stack quality). Landed so far:
   the wire half, `StockSlot.meta_charge` read and written and round-trip tested
   (cbf185d1), which the encoder tail makes byte-compatible for items with no
   charge. Rounds 51-52 also answered where the action writes: the sim item is

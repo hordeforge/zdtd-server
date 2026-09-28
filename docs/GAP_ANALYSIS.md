@@ -3990,12 +3990,13 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     modded bodies. Count: **130 tracked rows, 43 gated** (the per-kind split is superseded by the census below).
     Re-censused 2026-09-28 by **name** against stock 3.2.0 and
     `require_parse.kindOf`: the vocabulary tail is nearly closed - buffs.xml
-    resolves 1381/1381; three names remain, 54 rows: `CompareItemMetaFloat` 50,
-    `CatapultStrainAmount` 3, `RoundsInMagazine` 1. The 50 are one item and one
-    key: `CompareItemMetaFloat key="charge"` on
-    `meleeWpnBatonT2StunBaton`, a five-tier charge ladder - so the tail needs
-    one value from the held item's ItemValue blob, and **the layout is now
-    RE'd**: `ItemValue::Read` IL=14 dispatches to `ReadData`, whose tail reads a
+    resolves 1381/1381; two names remain, **4 rows**:
+    `CatapultStrainAmount` 3 and `RoundsInMagazine` 1. The 50 that were the
+    bulk are now resolved (2026-09-28): the `charge` value rides the ItemValue
+    typed-metadata blob into `InvSlot.meta_charge`
+    (`src/wire/stock_inv.zig`, `stock_inv.toEcs`) and `CompareItemMetaFloat`
+    evaluates against it through `Ctx.item_meta_charge`, wired at the hit trigger
+    and the equip paths. The blob's layout is RE'd: `ItemValue::Read` IL=14 dispatches to `ReadData`, whose tail reads a
     `byte` count then, per entry, a length-prefixed key string and a
     `TypedMetadataValue` (`ReadData` IL_00CE-00F9). That value is an `i32
     typeTag` then, on `tag - 1`, a `Single` / `Int32` / string payload
