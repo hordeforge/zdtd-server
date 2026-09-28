@@ -174,8 +174,12 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   `other` catch-all that `SetItemMetaFloat` currently lands in. Closing the 50
   gates therefore means a new `TriggeredAction` member plus its
   `parseTriggeredAction`/`evaluateTriggered` arms, typed-metadata state per slot,
-  then `CompareItemMetaFloat` in the requirement vocabulary. The other two names
-  still need a catapult strain cvar and an ammo-stack quality input.
+  then `CompareItemMetaFloat` in the requirement vocabulary. Both ItemValue
+  writers hardcode a zero metadata count (`src/wire/stock_inv.zig:130` and
+  `:176`), so the encoder needs the tail too, or a server sync clears the value
+  it just read - the same echo-changes-the-item failure the `<stats>` comment
+  beside it already records. The other two names still need a catapult strain
+  cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
   already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing
