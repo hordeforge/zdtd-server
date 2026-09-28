@@ -51,8 +51,11 @@ pub fn info(comptime fmt: []const u8, args: anytype) void {
     if (quiet.load(.acquire)) return;
     if (min_level.load(.acquire) >= 1) return;
     var w: std.Io.Writer = .fixed(&line_buf);
-    w.print(fmt, args) catch {};
-    write(w.buffered());
+    var complete = true;
+    w.print(fmt, args) catch {
+        complete = false;
+    };
+    finish(&w, complete);
 }
 
 /// Runtime warning line. Suppressed by `loglevel >= 2` (never hidden by
@@ -111,14 +114,38 @@ fn emit(comptime tag: []const u8, comptime fmt: []const u8, args: anytype) void 
     var ts: [19]u8 = undefined;
     const stamp = clock.wallStamp(&ts);
     var w: std.Io.Writer = .fixed(&line_buf);
-    w.print("zdtd: {s} [" ++ tag ++ "] " ++ fmt, .{stamp} ++ args) catch {};
-    write(w.buffered());
+    var complete = true;
+    w.print("zdtd: {s} [" ++ tag ++ "] " ++ fmt, .{stamp} ++ args) catch {
+        complete = false;
+    };
+    finish(&w, complete);
+}
+
+/// Write a formatted line. A line the fixed writer could not fit keeps only
+/// its whole lines and is followed by `trunc_marker`; a half-written tail would
+/// otherwise be glued to the next entry and hide both in a line parser.
+fn finish(w: *std.Io.Writer, complete: bool) void {
+    const bytes = w.buffered();
+    if (complete) {
+        write(bytes);
+        return;
+    }
+    if (std.mem.lastIndexOfScalar(u8, bytes, '\n')) |nl| write(bytes[0 .. nl + 1]);
+    write(trunc_marker);
 }
 
 /// Scratch a line is formatted into before it reaches the sink. A log line
 /// past this size is truncated at a line boundary, never silently dropped.
-var line_buf: [line_cap]u8 = undefined;
+/// Per thread, not shared: the tick thread, the webui poll thread and the
+/// async chunk-flush writer all emit through these functions, so one process
+/// wide buffer interleaved their bytes and merged unrelated entries into a
+/// line no parser can attribute.
+threadlocal var line_buf: [line_cap]u8 = undefined;
 const line_cap = 1024;
+
+/// Marker appended to a line that did not fit `line_cap`, so a truncated entry
+/// is visibly one entry instead of silently running into the next one.
+const trunc_marker = " [truncated]\n";
 
 fn write(bytes: []const u8) void {
     const dest = capture orelse {
@@ -237,6 +264,25 @@ test "loglevel clamps to the stock Off value and gates by severity" {
     const out = captured();
     try std.testing.expect(std.mem.indexOf(u8, out, "below level") == null);
     try std.testing.expect(std.mem.endsWith(u8, out, "[ERROR] at level\n"));
+}
+
+test "an oversized line is marked instead of merged into the next entry" {
+    defer clock.disableVirtual();
+    clock.enableVirtual(86_400_000_000_000);
+
+    var buf: [4096]u8 = undefined;
+    defer stopCapture();
+    startCapture(&buf);
+
+    var pad: [line_cap * 2]u8 = undefined;
+    @memset(&pad, 'x');
+    // The payload has no newline, so nothing of the entry survives: the marker
+    // alone stands in for it and the next line still starts on its own row.
+    warn("flood from local_id=7 body={s}\n", .{&pad});
+    warn("next line\n", .{});
+    const out = captured();
+    try std.testing.expect(std.mem.indexOf(u8, out, trunc_marker) != null);
+    try std.testing.expect(std.mem.endsWith(u8, out, "[WARN] next line\n"));
 }
 
 test "level gates are race-free against a concurrent setLevel" {

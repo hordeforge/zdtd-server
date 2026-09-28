@@ -91,6 +91,45 @@ pub fn closeFd(fd: Handle) void {
     _ = posix.system.close(fd);
 }
 
+/// Host-order IPv4 of the connected peer, or 0 when the socket has none
+/// (closed, or an address family this server does not serve). Callers log
+/// their auth events with it: an operator chasing a failed sign-in or a
+/// command needs the source that presented the credential.
+pub fn peerHostBe(fd: Handle) u32 {
+    if (fd < 0) return 0;
+    var storage: posix.sockaddr.storage = undefined;
+    var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+    posix.getpeername(fd, @ptrCast(&storage), &len) catch return 0;
+    const sa: *const posix.sockaddr = @ptrCast(&storage);
+    if (sa.family == posix.AF.INET) {
+        const v4: *const posix.sockaddr.in = @ptrCast(&storage);
+        // sin_addr is network byte order; read it big-endian into a host value.
+        return std.mem.readInt(u32, std.mem.asBytes(&v4.addr), .big);
+    }
+    if (sa.family == posix.AF.INET6) {
+        // Only the IPv4-mapped form (::ffff:a.b.c.d) has an IPv4 answer; a
+        // real IPv6 peer reports 0 and the line says `peer=?` instead of
+        // naming a host that does not exist.
+        const v6: *const posix.sockaddr.in6 = @ptrCast(&storage);
+        const a = v6.addr;
+        if (!std.mem.allEqual(u8, a[0..10], 0) or a[10] != 0xff or a[11] != 0xff) return 0;
+        return std.mem.readInt(u32, a[12..16], .big);
+    }
+    return 0;
+}
+
+/// Dotted-quad rendering of a host-order IPv4 into a caller buffer (needs 16
+/// bytes). The inverse of the parse in `server/webui.zig`, so a logged peer is
+/// the same shape as a configured bind host.
+pub fn formatIpv4(host_be: u32, buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
+        (host_be >> 24) & 0xff,
+        (host_be >> 16) & 0xff,
+        (host_be >> 8) & 0xff,
+        host_be & 0xff,
+    }) catch "?";
+}
+
 /// Non-blocking read. Returns 0 on EOF; error.WouldBlock if empty.
 pub fn read(fd: Handle, buf: []u8) !usize {
     return posix.read(fd, buf) catch |err| switch (err) {
@@ -147,6 +186,8 @@ test "Listener loopback accept empty" {
     try std.testing.expectEqual(@as(u32, 0x7f000001), try boundHostBe(&L));
     const h = try L.accept();
     try std.testing.expect(h == null);
+    // No connection, no peer: the auth lines render `peer=?` rather than 0.0.0.0.
+    try std.testing.expectEqual(@as(u32, 0), peerHostBe(-1));
 }
 
 test "Listener ANY bind is not loopback" {
@@ -156,4 +197,11 @@ test "Listener ANY bind is not loopback" {
     try std.testing.expect(L.enabled());
     // 0.0.0.0 is distinct from 127.0.0.1 (admin/webui host selection relies on this).
     try std.testing.expectEqual(@as(u32, 0), try boundHostBe(&L));
+}
+
+test "formatIpv4 renders a host-order address and the unknown-peer case" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("127.0.0.1", formatIpv4(0x7f000001, &buf));
+    try std.testing.expectEqualStrings("10.0.0.7", formatIpv4(0x0a000007, &buf));
+    try std.testing.expectEqualStrings("0.0.0.0", formatIpv4(0, &buf));
 }

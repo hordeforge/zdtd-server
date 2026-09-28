@@ -216,6 +216,10 @@ pub const Server = struct {
     /// replayed by a non-browser client after that client-side deadline.
     session_expires_ns: u64 = 0,
     client_fd: tcp.Handle = -1,
+    /// Host-order IPv4 of the client holding `client_fd` (0 when unknown). It
+    /// is the correlation id on every auth line: a rejected sign-in is only
+    /// actionable with the source that presented the credential.
+    client_host_be: u32 = 0,
     /// Polls since accept; a client that never completes a request would hold
     /// the single slot forever (half-open TCP reads EAGAIN, never EOF).
     client_polls: u32 = 0,
@@ -420,12 +424,12 @@ pub const Server = struct {
         return @intCast((remain_ns + std.time.ns_per_s - 1) / std.time.ns_per_s);
     }
 
-    fn noteLoginFailure(self: *Server) void {
+    fn noteLoginFailure(self: *Server, peer_buf: []u8) void {
         self.login_fails +|= 1;
         if (self.login_fails >= login_fail_limit) {
             self.login_lock_until_ns = clock.monoNs() +% login_lockout_ns;
             self.login_fails = 0;
-            util_log.warn("webui login lockout ({d} s)\n", .{login_lockout_ns / std.time.ns_per_s});
+            util_log.warn("webui login lockout peer={s} ({d} s)\n", .{ self.peerText(peer_buf), login_lockout_ns / std.time.ns_per_s });
         }
     }
 
@@ -475,6 +479,7 @@ pub const Server = struct {
         if (self.client_fd >= 0) return;
         const cfd = self.listener.accept() catch return orelse return;
         self.client_fd = cfd;
+        self.client_host_be = tcp.peerHostBe(cfd);
         self.client_polls = 0;
         self.recv_len = 0;
     }
@@ -482,14 +487,24 @@ pub const Server = struct {
     fn closeClient(self: *Server) void {
         if (self.client_fd >= 0) tcp.closeFd(self.client_fd);
         self.client_fd = -1;
+        self.client_host_be = 0;
         self.client_polls = 0;
         self.recv_len = 0;
         self.set_cookie = false;
     }
 
+    /// `peer=127.0.0.1` for an auth log line; `peer=?` when the address could
+    /// not be read, so a missing correlation id is visible rather than silent.
+    fn peerText(self: *const Server, buf: []u8) []const u8 {
+        if (self.client_host_be == 0) return "?";
+        return tcp.formatIpv4(self.client_host_be, buf);
+    }
+
     fn readAndServe(self: *Server) void {
         const fd = self.client_fd;
         if (fd < 0) return;
+        // Scratch the failure line renders the peer address into.
+        var peer_buf: [16]u8 = undefined;
         if (self.recv_len >= max_req) {
             self.closeClient();
             return;
@@ -537,7 +552,8 @@ pub const Server = struct {
         if (self.recv_len < need) return;
 
         self.serveHttp() catch |err| {
-            util_log.err("webui request failed: {s}\n", .{@errorName(err)});
+            const req_line = std.mem.trimEnd(u8, std.mem.sliceTo(self.recv_buf[0..self.recv_len], '\n'), "\r");
+            util_log.err("webui request failed peer={s} target={s}: {s}\n", .{ self.peerText(&peer_buf), req_line[0..@min(req_line.len, 200)], @errorName(err) });
             self.rawRespond(500, "text/plain; charset=utf-8", "internal error\n");
         };
         self.closeClient();
@@ -545,6 +561,8 @@ pub const Server = struct {
 
     /// Parse and respond with `std.http.Server` over the buffered request bytes.
     fn serveHttp(self: *Server) !void {
+        // Scratch every auth and failure line renders its peer address into.
+        var peer_buf: [16]u8 = undefined;
         var in_r: std.Io.Reader = .fixed(self.recv_buf[0..self.recv_len]);
         // The out buffer must hold the largest response body (the rendered
         // shell dashboard, up to max_shell_html) plus header headroom; 49 KiB
@@ -737,13 +755,13 @@ pub const Server = struct {
                     // Successes are as load-bearing as failures for an audit
                     // trail: /api/cmd runs privileged console lines under this
                     // session, and only this line dates the sign-in.
-                    util_log.infoTagged("webui login ok\n", .{});
+                    util_log.infoTagged("webui login ok peer={s}\n", .{self.peerText(&peer_buf)});
                     // 303 See Other: POST → GET dashboard (PRG; matches /logout).
                     try self.httpRedirect(&req, "/");
                     return;
                 }
-                self.noteLoginFailure();
-                util_log.warn("webui login rejected (bad token)\n", .{});
+                self.noteLoginFailure(&peer_buf);
+                util_log.warn("webui login rejected peer={s} fails={d} (bad token)\n", .{ self.peerText(&peer_buf), self.login_fails });
                 var login_buf: [max_login_html]u8 = undefined;
                 try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                 return;
@@ -766,8 +784,8 @@ pub const Server = struct {
                     });
                     return;
                 }
-                self.noteLoginFailure();
-                util_log.warn("webui auth rejected (bad credential)\n", .{});
+                self.noteLoginFailure(&peer_buf);
+                util_log.warn("webui auth rejected peer={s} fails={d} path={s} (bad credential)\n", .{ self.peerText(&peer_buf), self.login_fails, path[0..@min(path.len, 128)] });
             }
             if (std.mem.startsWith(u8, path, "/api/")) {
                 // Machine clients: Bearer challenge + plain body (no HTML login form).

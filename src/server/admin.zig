@@ -4,6 +4,7 @@
 const std = @import("std");
 const tcp = @import("../util/tcp_listen.zig");
 const clock = @import("../util/clock.zig");
+const util_log = @import("../util/log.zig");
 const secret = @import("../util/secret.zig");
 
 pub const max_cmd: usize = 256;
@@ -176,11 +177,22 @@ pub const Server = struct {
     /// blind spot (the webui logs every rejected login; the telnet console must
     /// too). The password bytes stay out of the log; only the session and
     /// attempt count.
+    /// `peer=127.0.0.1` for a login line, `peer=?` when the session socket has
+    /// no address left: a console that can shut the server down must be
+    /// attributable to a source, exactly as the webui sign-in is.
+    fn peerText(self: *const Server, i: usize, buf: []u8) []const u8 {
+        const fd = self.sessions[i];
+        if (fd < 0) return "?";
+        const host = tcp.peerHostBe(fd);
+        if (host == 0) return "?";
+        return tcp.formatIpv4(host, buf);
+    }
+
     fn authenticate(self: *Server, i: usize, line: []const u8) bool {
+        var peer_buf: [16]u8 = undefined;
         self.active = i;
         if (self.loginLocked()) {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} admin login lockout session={d}\n", .{ clock.wallStamp(&ts), i });
+            util_log.warn("admin login lockout peer={s} session={d}\n", .{ self.peerText(i, &peer_buf), i });
             self.reply("Too many failed login attempts!\n");
             self.closeActive();
             return false;
@@ -193,8 +205,7 @@ pub const Server = struct {
             // Log the success too: "who held a console session when X happened"
             // is unanswerable from failures alone, and the `audit source=admin`
             // command lines below have no session to attribute them to.
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} admin login ok session={d}\n", .{ clock.wallStamp(&ts), i });
+            util_log.infoTagged("admin login ok peer={s} session={d}\n", .{ self.peerText(i, &peer_buf), i });
             self.reply("Logon successful.\n\n\n\n");
             self.writeGreeting();
             return true;
@@ -209,17 +220,12 @@ pub const Server = struct {
             }
             // Start the next window clean; the lockout above is the throttle.
             self.fails_total = 0;
-            var ts: [19]u8 = undefined;
-            std.debug.print(
-                "zdtd: {s} admin login failed session={d} attempts={d} closed block_min={d}\n",
-                .{ clock.wallStamp(&ts), i, self.fails[i], block_m },
-            );
+            util_log.warn("admin login failed peer={s} session={d} attempts={d} closed block_min={d}\n", .{ self.peerText(i, &peer_buf), i, self.fails[i], block_m });
             self.reply("Too many failed login attempts!\n");
             self.closeActive();
             return false;
         }
-        var ts: [19]u8 = undefined;
-        std.debug.print("zdtd: {s} admin login failed session={d} attempts={d}\n", .{ clock.wallStamp(&ts), i, self.fails[i] });
+        util_log.warn("admin login failed peer={s} session={d} attempts={d}\n", .{ self.peerText(i, &peer_buf), i, self.fails[i] });
         self.reply("Password incorrect, please enter password:\n");
         return true;
     }
