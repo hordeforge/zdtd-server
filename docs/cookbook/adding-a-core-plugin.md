@@ -85,7 +85,7 @@ is a bounded append buffer with `put`, `putInt`, `logLine` and `send`
 (`mods/plugin_common.zig:45-83`), and `Config` parses the `key = value` subset
 of the module's own `config.toml` (`mods/plugin_common.zig:116-160`). Every Zig
 guest built on this module also declares its contract version through
-`_zdtd_api` (`mods/plugin_common.zig:21-27`).
+`_zdtd_api` (`mods/plugin_common.zig:21`).
 
 ## 4. No build wrapper per plugin
 
@@ -153,7 +153,7 @@ range (`plugins/core_pricegate/core_pricegate.zig:29-33`). Policy belongs in
 ## 7. Budgets and fuel
 
 Every guest call runs under a per-instance fuel budget and a linear-memory cap
-(`src/plugin/wasm.zig:77-80`):
+(`src/plugin/wasm.zig:77`):
 
 ```zig
 pub const Budget = struct {
@@ -167,7 +167,7 @@ lifetime budget for the instance. At 20 Hz a module spending 10 000 fuel per
 tick exhausts the default in roughly eight minutes
 (`docs/PLUGIN_DEV.md:239-247`). Keep `on_tick` genuinely small, or do the work
 on an event hook. The operator raises `fuel` or `max_pages` under `[plugin]` in
-`zdtd.toml` (`src/server/zdtd_config.zig:210-216`).
+`zdtd.toml` (`src/server/zdtd_config.zig:205-211`).
 
 Exhausting either budget ends the call, disables that module and logs which
 module and hook, so a runaway guest costs one tick, not the server. Because
@@ -177,21 +177,21 @@ before the next drain (`docs/PLUGIN_DEV.md:167-174`).
 ## 8. Register the module in the build
 
 `scripts/build-plugins.sh` carries an explicit list of core modules
-(`scripts/build-plugins.sh:45-48`). Add the new directory name to that list. A
+(`scripts/build-plugins.sh:49-51`). Add the new directory name to that list. A
 module missing from the list is never built into the mirror, so the freshness
 gate never compares it.
 
 Then add the module path to the shipped-set list in the host contract test
 (`src/plugin/wasm_tests.zig:611-624`), which loads every shipped module and asserts
-each one declares the host contract version (`src/plugin/wasm_tests.zig:607`). The
-host table holds 32 modules (`src/plugin/wasm.zig:954`), and the test asserts
+each one declares the host contract version (`src/plugin/wasm_tests.zig:577`). The
+host table holds 32 modules (`src/plugin/wasm.zig:1009`), and the test asserts
 the shipped set fits.
 
 Discovery scans `mods/` and `plugins/` at boot and merges the manifests
-(`src/main.zig:766-770`), so no configuration is needed once the manifest is in
+(`src/main.zig:855-859`), so no configuration is needed once the manifest is in
 place. A manifest-loaded module logs `zdtd: mod '<name>' [<tier>] loaded` at
-boot (`src/plugin/wasm.zig:1091`), and the admin verb `plugin list` prints each
-slot with its tier and enabled state (`src/server/game/wasm_host.zig:526-543`).
+boot (`src/plugin/wasm.zig:1156`), and the admin verb `plugin list` prints each
+slot with its tier and enabled state (`src/server/game/wasm_host.zig:646`).
 
 ## 9. Rebuild and gate the committed binary
 
@@ -204,7 +204,7 @@ bash scripts/lint-plugins.sh
 (`Makefile:81-82`). The committed `.wasm` is a build output checked in so
 operators need no toolchain, so commit source and binary together
 (`mods/BUILDING.md`). `make lint` runs the freshness gate
-(`Makefile:221`, `scripts/lint-plugins.sh:40-74`): it rebuilds every artifact
+(`Makefile:223`, `scripts/lint-plugins.sh:40-74`): it rebuilds every artifact
 into a scratch mirror under `zig-out` and byte-compares it against what is
 committed, failing with `is stale (its source changed without a rebuild)`. Use
 `scripts/build-plugins.sh --dest DIR` to produce the mirror without touching the
@@ -219,7 +219,7 @@ reclaimed), reloads the module into the same slot and runs `on_enable`
 
 Verdict and observer behavior belongs in an integration scenario that loads the
 committed `.wasm` and drives the hook through the production path. Copy the
-load shape from `src/server/scenarios.zig:10701`, which loads one module into
+load shape from `src/server/scenarios.zig:11833`, which loads one module into
 `g.wasm_plugins` before driving the event. See
 [`adding-a-scenario.md`](adding-a-scenario.md) for the construction and
 assertion shape.
