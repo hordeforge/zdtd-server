@@ -113,6 +113,100 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Verified stock-parity gaps (audit 2026-09-29)
+
+Ranked by client-visible impact. Each row was read in code against a stock IL
+or RE anchor and is NOT a documented divergence or a scored WORKS row, so
+nothing here is already waived. The four gaps the same audit closed are in
+[docs/STATUS.md](docs/STATUS.md).
+
+- [ ] **Player interest has no per-type distance table** - stock
+      `NetEntityDistribution..ctor` (network.md:277-291) tracks EntityEnemy 80,
+      EntityItem 64, EntityTurret 60, EntitySupplyCrate 1200, EntityPlayer and
+      EntityVehicle int.Max; zdtd uses one `view_radius` for every kind
+      (`src/server/game/replicate.zig:92`). A parked vehicle is unloaded past
+      the radius where stock never unloads it, and items stream 3.5x too far.
+- [ ] **Destroyed vehicles and turrets are never removed from observers** -
+      `src/server/c2s/misc_damage.zig:337-342` is comment only, and the
+      interest-exit sweep skips a dead slot (`replicate.zig:120`), so every
+      client keeps a ghost GameObject and the slot's `known_entities` bit stays
+      set, hiding the next entity that reuses the slot.
+- [ ] **Entity tier system absent** - stock `CalculateEntityTier` /
+      `GetEntityClassWithinMaxTier` / `PreviousTier` (spawning.md:749-752,
+      771-787) apply on every create and every group pick; neither name appears
+      anywhere in `src/`. A tier-capped server still spawns radiated and feral
+      from every group, and an out-of-tier class is never degraded.
+- [ ] **Blood moon does not suspend biome enemy spawning** - stock
+      spawning.md:126-128, 1276-1278; `src/ecs/aidirector.zig:598` keeps the
+      night drip running with a shorter cooldown and a 1.9x cap.
+- [ ] **Auto turret ammo never refills** - stock `DecrementAmmo` returns to
+      Armed on reload (tile-entities-power.md:1102-1117); `src/ecs/world.zig:1808`
+      seeds the lifetime counter from blocks.xml `BurstRoundCount` (rounds per
+      burst, not a magazine) and `src/ecs/turrets.zig:46` gates at 0 with no
+      refill path. A placed turret is inert after about 2.3 s.
+- [ ] **Turrets shoot through walls** - stock `canHitEntity` raycasts and gates
+      yaw and pitch (vehicles-drones-turrets.md:1063-1094); `turrets.zig:57-79`
+      picks the nearest zombie by 2D distance and applies damage unconditionally.
+- [ ] **Mob-vs-mob targeting absent** - stock entityclasses.xml gives bear,
+      wolf, mountain lion, boar and Grace `EntityZombie` in `class=`, and
+      `EAIApproachAndAttackTarget.CanExecute` (entity-ai.md:1791-1794) refuses a
+      class not listed; `sensing.zig:422-473` scans the player group only.
+- [ ] **`AttackTimeoutDay` / `AttackTimeoutNight` not read** - stock
+      entity-ai.md:566-567 (zombies 1.5 s day / 1.1 s night); `ai_tasks.zig:1186`
+      uses one `rules.combat.attack_cooldown_s` of 1.2 for every class and hour.
+- [ ] **Chewed covers fall 2-3.6x too fast** - stock EAIBreakBlock delay is
+      1.0-1.8 s plus a +0.2/zombie ally boost (entity-ai.md:1817-1825); the
+      second path `src/server/game/world_tick.zig:136-248` runs every 10 ticks
+      with no per-zombie delay, no `CanBreakBlocks` gate and no ally boost.
+- [ ] **Per-class `SightRange` capped at 48 m for players** -
+      `src/ecs/sensing.zig:367` rejects on `rules.ai.sense_dist_sq` before the
+      per-class value is consulted; stock ships 70 (animalZombieVulture) and 100
+      (animalChickenHostile). The host-bot path already uses the per-class value.
+- [ ] **Player-placed multi-block groups occupy one cell** - stock adds children
+      on `OnBlockAdded` and redirects child damage to the parent
+      (world/blocks.md:246-249, 463-465); `src/server/c2s/blocks_setblock.zig:265-285`
+      writes one cell, so three of a forge's four cells are air and group damage
+      lands on one cell. `multiBlockDim` is parsed but only used for deco.
+- [ ] **Chopped decorations come back** - no per-position deco record; the
+      seed-derived generator is re-mirrored over the block plane on every join
+      burst and chunk stream (`src/world/deco_mirror.zig:132-137`), so a restart
+      or any client streaming into that 128x128 deco chunk restores the tree.
+- [ ] **No block ticker** - `Block.UpdateTick` / `WorldBlockTicker` is absent
+      (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
+      never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
+      never fire (world/blocks.md:262-263, 774-786).
+- [ ] **No collision or hazard block damage** - stock `BlockDamage.OnEntityCollidedWithBlock`
+      drives spikes, barbed wire (meta 15 self-destruct), cactus, hay and the
+      pipe fire hazards (blocks.md:520-534, block-behaviors.md:32); zdtd clears
+      the movement bit and has no collision arm, so POI traps are inert.
+- [ ] **Composite TE features never stream** - the chunk body writes `teCount 0`
+      (`src/wire/stock_chunk.zig:672-675`), so `TEFeatureLockable`,
+      `LockPickable`, `Explodable` and `Door` never reach a client
+      (inventories/te-features.md:12-26): POI vault doors and locked lockers
+      open for anyone and a lockpick does nothing.
+- [ ] **`CanPlaceBlockAt` gates and the world-edge band are absent** - stock
+      rejects y > 253, trader placing protection within 2 blocks, submerged
+      placement and `InBoundsForPlayersPercent < 0.5` (blocks.md:618-651); both
+      zdtd place arms check the claim only.
+- [ ] **Junk drone placement spawns a wired auto turret** - stock branches on
+      the item `drone` tag into DroneManager (vehicles-drones-turrets.md:1200-1204);
+      `src/server/c2s/misc_turret.zig:57-62` sees no drone kind, and the same
+      file auto-connects every placed turret to the first generator node.
+- [ ] **`NetPackageChunkRemoveAll` and `NetPackageEventPrefab` have no send
+      site** - registered and parsed, never emitted; check the stock sender in
+      the IL before acting (medium confidence, receivers only in the docs).
+- [ ] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** -
+      `src/server/c2s/join_spawn.zig:25-28` clamps `chunkViewDim` to 8 with no
+      server pref and no stock lower clamp of 4.
+- [ ] **Disconnect reason and `PersistentPlayerState` reason 2** -
+      `session_drop.zig:63` sends `EntityRemove(Despawned)` where stock sends
+      `Unloaded(1)`, and the disconnect `PersistentPlayerState` row is never
+      broadcast (`buildPersistentPlayerState` has no reason parameter).
+- [ ] **Blood-moon scout tier uses the server-wide gamestage** - stock uses
+      `CalcGameStageAround` of the closest player within 120 m
+      (aidirector.md:394-397); `aidirector.zig:883-886` reads the party
+      high-water mark.
+
 ### BLOCKER (root-caused 2026-09-28): the loadgen client links LiteNetLib 2.x
 
 Every loadgen join fails on every map: `STAGE LiteNetStarted` then
