@@ -113,25 +113,34 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
-### BLOCKER: a live LiteNet join is broken on the current build (2026-09-28)
+### BLOCKER: a live LiteNet join is broken, and the evidence points at the client (2026-09-28)
 
-Every loadgen join now fails the same way on every map, and the unit and fuzz
-gates stayed green through it, so this is the one item to fix before any
-parity work: `STAGE LiteNetStarted` then `Disconnected: ConnectionFailed` after
-5.8 s with `recv=0 sent=0 everJoined=False`, `join_ok 0`, on stock Navezgane and
-on Pregen06k01 alike. Reproduced on `a740ee52` and on its parent with the
-join-phase apm sections reverted, so those sections are ruled out.
+Every loadgen join fails the same way on every map: `STAGE LiteNetStarted` then
+`Disconnected: ConnectionFailed` after 5.8 s with `recv=0 sent=0
+everJoined=False`, `join_ok 0`, on stock Navezgane and Pregen06k01 alike, while
+`zig build test` and `zig build fuzz` stay green. The server is healthy through
+it: it binds `port+2` UDP, ticks at 20 Hz (max tick 151 ms), and logs no panic
+and no peer. Loopback UDP through the 127.0.30.0/24 range the client binds
+round-trips fine from python.
 
-Known-good points, newest first: the round-27 three-client Pregen06k01 bench
-(`join_ok 3`) and the round-15/16 Navezgane smoke (2/2 pass). Bisect from
-`38984e1f` (the last commit before the persistence work) forward with a
-one-client stock-map smoke per step; the suspect range is the budgeted periodic
-save (`6156cbba`, `014ae972`) and the join-time deco pacing (`f2b9d9b9`).
+**Not a zdtd regression, on the evidence.** Reverting the round-30 join-phase
+apm sections and rebuilding reproduces the failure exactly. More usefully, the
+timeline says the client moved underneath us: the last passing bench (a
+three-client Pregen06k01 run, `join_ok 3`) finished at 10:56, the sibling
+`7dtd-loadgen` binary was rebuilt at **13:48:01** and released as 0.5.0 then
+0.6.0 at 13:45 and 13:48, and every failure since then is on that rebuilt
+client. Not proven by rebuilding the old client: this box has no dotnet SDK
+(`sdk-not-found`), so the old binary could not be produced for an A/B.
 
-Two lessons to carry into the fix: a live LiteNet handshake is not covered by
-`zig build test` / `zig build fuzz`, so the smoke has to gate those changes; and
-a bench that fails with `recv=0` is an environment-or-binary signal, not a tick
-budget signal, so read the counters before touching APM sections.
+Next: get an A/B on the client - run the pre-13:48 `7dtd-loadgen` against
+current zdtd, or ask the owning lane what changed in the client's transport
+path between those releases. Only if that A/B comes back clean should zdtd
+bisect its own tree, starting from `38984e1f`.
+
+Two lessons that outlive this incident: a live LiteNet handshake is not covered
+by `zig build test` / `zig build fuzz`, so persistence and join-path changes
+need a stock-map smoke; and when a cross-repo client is in the loop, check
+whether it was rebuilt before blaming the server.
 
 ### Remaining parity items (2026-09-28 session handoff)
 
