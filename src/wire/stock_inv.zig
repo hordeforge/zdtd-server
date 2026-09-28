@@ -933,6 +933,7 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         .use_times = s.use_times,
         .seed = s.seed,
         .flags = s.flags,
+        .meta_charge = s.meta_charge,
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);

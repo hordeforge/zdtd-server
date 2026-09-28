@@ -849,6 +849,12 @@ pub const InvSlot = struct {
     /// so the same planted seed grows the same way (meta is durability/flags,
     /// not the seed).
     seed: u16 = 0,
+    /// The item's `charge` metadata (stock `SetItemMetaFloat key="charge"`,
+    /// read back by `CompareItemMetaFloat`). Derived state, not persisted: the
+    /// client re-sends an item's metadata in every inventory transaction, so
+    /// the server's copy is rebuilt on the next sync and the fixed persist
+    /// stride needs no version bump.
+    meta_charge: f32 = 0,
     /// Stock ItemValue.Flags (V3.2.0 bitfield). Bit 0 = Activated
     /// (`get_Activated`); used by `IsItemActive`. Persisted since ZPV17.
     flags: u8 = 0,

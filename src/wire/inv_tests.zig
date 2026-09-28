@@ -297,6 +297,11 @@ test "item value charge metadata round-trips through the typed tail" {
     var r: binary.Reader = .{ .data = b };
     const slot = try readItemValue(&r);
     try std.testing.expectEqual(@as(f32, 4.0), slot.meta_charge);
+    // The C2S ingest conversion carries it onto the sim item, which is where
+    // the SetItemMetaFloat action will write it.
+    const sim_slot = toEcs(slot, null, null);
+    try std.testing.expect(sim_slot.item_id != 0);
+    try std.testing.expectEqual(@as(f32, 4.0), sim_slot.meta_charge);
 
     // A slot with no charge keeps the empty tail, so the bytes are unchanged.
     var buf2: [64]u8 = undefined;
