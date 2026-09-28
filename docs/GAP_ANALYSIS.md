@@ -4662,79 +4662,38 @@ a finer server encoding.
   *Anchors:* `src/server/zdtd_config.zig` max_streamed_chunks_cap,
   `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
-- **Join-burst tick budget under concurrent load** `PARTIAL` `(2026-08-29, pacing 2026-08-30)`
-  Measured with a live 7dtd-loadgen double join against the infinite
-  world (config-only mod `mods/infinite_world`, formerly `--mode infinite`;
-  APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
-  net_poll 1.9 s. Re-measured 2026-09-28 on the current build, stock
-  Pregen06k01 with **three** clients joining at once: p50 tick 0.39 ms, p99
-  402 ms, max tick 9.6 s, `join_ok` 6 `join_fail` 0, so the residual stands. Its
-  breakdown named two offenders and cleared the rest: `join` max 8.8 s (the
-  synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over 84
-  saves, both on the tick thread), while
-  `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
-  the ECS sim under 6 ms. `World.saveAll` writes only the dirty set, so the save
-  cost after a join is the freshly generated chunks, not re-encoding. **Save side mitigated 2026-09-28**: `saveAllBudget` caps the
-  periodic tick at `save_chunks_per_tick` (32), reports whether work remains
-  and the tick comes back next tick while it does (shutdown and admin saves
-  stay unbounded; a continuation repeats only that drain, every
-  `save_continue_interval_ticks` so the dirty-set scan is not paid per tick, not
-  the other stores), pinned by `a budgeted save drains across calls and loses
-  nothing`.
-  Re-measured on the same bench: `save_io` max **3.9 s -> 0.95 s**, `save_encode`
-  max 3.4 s -> 0.51 s, `join_ok` 5 `join_fail` 0. The join-time deco burst was
-  the other unpaced block inside `join`, so it now has a `join_deco` section and
-  a per-chunk ACK yield: measured **0.08 ms mean over three joins**, which
-  retires it as the cost. The `join` max is high-variance across identical runs
-  (7.6 s and 23.5 s measured, both `join_fail` 0), so one run does not attribute
-  it, and every covered section (drain, chunk gen, TE scan, save, ECS) is small.
-  Pending: finer sections inside `join` before changing behaviour. The
-  join burst was fully synchronous: `sendSpawnArea`
-  queued the whole 17x17 view (289 chunks), each proc chunk costs
-  generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
-  the deco burst mirrors up to `deco_objects_per_join` (8192) trees. One
-  poll drained it all, so a second concurrent client's critical packages
-  (PackageIds retransmit) starve behind the reliable-window flood and its
-  join times out at ChallengeReplied (`join_fail=0`: the server accepted
-  everything; the client starved).
-  `(2026-08-29)` mitigations landed: `sendSpawnArea` yields ~500 us per
-  chunk (loopback RTT ~100 us) so the reliable window drains continuously -
-  a live double join now PASSES repeatedly on BOTH clients (26 passes in
-  one window; the pre-fix run had client 1 never passing); the storage-TE
-  scan is skipped for clean proc chunks (te_scan_cells 19.7 M -> 262 K at
-  join, 75x); and the full-stock config bundle (deflated blocks.xml ~0.5-1
-  MB) got a 1 s critical retry budget after 250 ms exhausted it under a
-  concurrent join.
-  `(2026-08-30)` **spawn-area pacing landed**: `sendSpawnArea` now sends
-  only the collision-mesh core (rings 0..1 = the spawn chunk + its 8
-  neighbours, which the client needs meshed before `World.IsPositionAvailable`)
-  synchronously and arms a per-client pending area; `drainSpawnArea`
-  (replicate, every tick) delivers the outer rings at
-  `chunk_adds_per_stream_tick` per tick, center-out, so a join cannot stall
-  the tick with a 289-chunk synchronous burst. Idempotent across the two
-  join-phase call sites (DynamicClientArrive + RequestToSpawnPlayer +
-  sendJoinBundle re-send). Re-measured with a sustained loadgen double-join
-  cycle against the infinite world (62 joins): **join_fail=0** - the
-  concurrent-client starvation is gone - and the chunk stream section is
-  bounded at 50 ms (`chunk_stream` max 50.6 ms). `(2026-08-30)` follow-on:
-  the drain gained a **shared per-tick budget** (concurrent joins split
-  `chunk_adds_per_stream_tick`) and per-chunk ACK-yields (a bursted drain
-  batch overflowed the reliable window - measured 257 drops), and the join
-  path gained apm sections (`.join` = the C2S join handler, `.join_drain` =
-  the paced drain pass) so the residual is attributed instead of guessed.
-  **ReleaseFast** (the production binary) re-measured under the same
-  double-join cycle: max tick 140 ms / p99 50.3 ms (the 50 ms budget), drain
-  pass mean 4.6 ms / max 66.6 ms, join handler max 66.8 ms, 0 window drops,
-  36/36 joins pass - vs the pre-pacing ReleaseFast max 262 ms (GAP item 26
-  soak). The Debug-build residual (max tick ~0.5-1 s) is the documented
-  Debug amplification (~1.7 ms/chunk vs ~126 µs ReleaseFast); the deeper fix
-  stays tracked: W2b async chunk gen (moves proc gen + te_scan off the join
+- **Join-burst tick budget under concurrent load** `PARTIAL` `(measured 2026-09-28)`
+  A join must not spend seconds on the tick. The spawn-area send is paced
+  (`sendSpawnArea` sends the collision-mesh core synchronously and arms a
+  per-client area; `drainSpawnArea` delivers the outer rings at
+  `chunk_adds_per_stream_tick` per tick with a shared per-tick budget and
+  per-chunk ACK yields), the storage-TE scan is skipped for clean proc chunks
+  (te_scan_cells 19.7 M -> 262 K at join), and the periodic save is budgeted the
+  same way (`saveAllBudget` + `save_pending_at`). Joins are not refused: a
+  62-join loadgen double-join cycle runs `join_fail=0`, and a 36-join ReleaseFast
+  cycle held max tick 140 ms (p99 50.3 ms) with 0 window drops, against 262 ms
+  before pacing.
+
+  **Residual, measured 2026-09-28 on stock Pregen06k01 with three clients
+  joining at once (Debug):** p50 tick 0.39 ms but p99 402 ms and a max of
+  9.6 s, with `join_ok` 6 / `join_fail` 0, so the stall is boot and stream work
+  rather than a refused join. The section breakdown names what it can and
+  clears the rest: the save path was the one measured offender and is now capped
+  at `save_chunks_per_tick` per tick (`save_io` max **3.9 s -> 0.95 s**,
+  `save_encode` 3.4 s -> 0.51 s, pinned by `a budgeted save drains across calls
+  and loses nothing`), while `join_drain` 320 ms, `chunk_stream` 78 ms,
+  `te_scan` 0.5 ms and the ECS under 6 ms. The join-time deco burst, the last
+  unpaced block in the phase, has a `join_deco` section and a per-chunk yield and
+  measures **0.08 ms** over three joins, which retires it as the cause. What
+  remains is unattributed inside the `join` handler and is high-variance run to
+  run (7.6 s and 23.5 s on identical benches, both `join_fail` 0), so the next
+  step is finer sections inside `join` before any behaviour change, not a guess.
+  The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
-  *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns,
-  chunk_stream bounded 50 ms; `.join` / `.join_drain` sections), loadgen
-  62-join cycle `join_fail=0`, ReleaseFast 36-join cycle (max tick 140 ms,
-  p99 50 ms, 0 drops), scenario "join spawn area paces through the stream
-  budget".
+  *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
+  `.join_deco`, `.save_io`), the three-client Pregen06k01 bench, the 62-join
+  `join_fail=0` cycle, the ReleaseFast 36-join cycle, and the scenario "join
+  spawn area paces through the stream budget".
 
 - **Chunk pointer stability across re-entrant store access** `WORKS` `(2026-08-30)`
   The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)
