@@ -183,7 +183,15 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   (`src/wire/stock_inv.zig:924`) called from the C2S transaction
   (`src/server/c2s/inv_txn.zig:114`). So what remains is `InvSlot.meta_charge`
   plus that one conversion line, the action member, and the requirement - a
-  contained change, not a scattered one. Persistence is the one risk to settle
+  contained change, not a scattered one. Two semantics to get right in the
+  action, from the 18 stock rows: `SetItemMetaFloat` appears in both modes -
+  `relative="false"` (set the value: change 0, 1, 3, 4) and `relative="true"`
+  (add: change 0, 1, 2) - and the stun baton's five-tier ladder uses the
+  absolute form with `CompareItemMetaFloat` gates, so an implementation that
+  only adds would walk it wrong. The result flows out of `evaluateRows` as a
+  `TriggeredResult` field (the evaluator never mutates the world) and the Game
+  side writes it to the triggering slot's `InvSlot`. Persistence is the one
+  risk to settle
   before adding the field: `InvSlot` serializes into a fixed stride and
   `readPersist` is length-tolerant, so `meta_charge` can stay **non-persisted**
   and cost no ZPV bump - the client re-sends the value in every inventory
