@@ -59,12 +59,19 @@ produce a binary (`scripts/check-release.sh:66`). `make repro` (`Makefile:291`)
 rebuilds twice and requires byte-identical output; it is deliberately outside
 `make check`.
 
-The loadgen scripts are invoked directly; only `smoke-modlet` has a Makefile
-target. `scripts/smoke-navezgane.sh:63` fails the run when the stock DTM did not
+Loadgen scripts run directly; only `smoke-modlet` has a Makefile target. `scripts/smoke-navezgane.sh:63` fails the run when the stock DTM did not
 load, and `scripts/smoke-navezgane.sh:77` then requires every bot join to pass.
 `scripts/ab-join-smoke.sh:1` runs the same
 loadgen against the stock dedi and zdtd on one game dir and prints both stage
-lines, which is the closest thing to a client-side A/B that runs unattended.
+lines, the closest unattended client-side A/B.
+
+**The loadgen must link the game's 1.x LiteNetLib.** Built where the game
+install is invisible it falls back to NuGet 2.x, not wire-compatible with a 1.x
+server: every join fails as `Disconnected: ConnectionFailed` with `recv=0`
+while this repo's gates stay green. Read that as a client-build problem, and
+check the `LiteNetLib.dll` beside the binary (game 117,248 bytes; 2.1.4
+126,464). No gate here catches it: test and fuzz open no socket (TODO
+"BLOCKER (root-caused 2026-09-28)").
 
 ## The scenario harness
 
