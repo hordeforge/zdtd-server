@@ -42,6 +42,13 @@ pub const Section = enum(u8) {
     /// one block left in the `join` section with no pacing and no section of
     /// its own, so it was unattributed cost inside that section's max.
     join_deco,
+    /// The four C2S join phases inside `join` (c2s/join.zig), one section each.
+    /// They were a single opaque `join` scope, so a multi-second max could not
+    /// say which phase paid for it; these four settle it on the next bench.
+    join_login,
+    join_enter,
+    join_worldinfo,
+    join_spawn,
     /// Non-exhaustive marker (Zig `_`), not a switch catch-all: `scope` must
     /// stay inert for an unnamed/unknown id (`@enumFromInt(200)` in the test),
     /// so the enum deliberately has a tag space wider than its named members.

@@ -124,6 +124,10 @@ never silently truncate a report.
 | `join` | Join-phase C2S handling on the tick (login/enter/spawn handlers: spawn-area core + join bundle + respawn logic) |
 | `join_drain` | Paced spawn-area drain pass: one pass = the shared per-tick drain budget of chunk bodies + per-chunk ACK yields |
 | `join_deco` | Join-time deco burst: generate + mirror + stream `NetPackageDecoUpdate` over the client's deco window, one scope per join |
+| `join_login` | C2S join phase: login/validate, nested in `join` |
+| `join_enter` | C2S join phase: enter-game, nested in `join` |
+| `join_worldinfo` | C2S join phase: world info, nested in `join` |
+| `join_spawn` | C2S join phase: spawn player (spawn-area core, join bundle, respawn), nested in `join` |
 
 `save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan` and
 `chunk_gen`

@@ -38,9 +38,27 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     // from the paced chunk drain (.replicate) and the rest of net_poll.
     const sc = apm.profiler.scope(&self.harness.prof, .join);
     defer sc.end();
-    if (try join_login.handleLogin(self, c, peer, name, body)) return true;
-    if (try join_enter.handleEnter(self, c, peer, name, body)) return true;
-    if (try join_worldinfo.handleWorldInfo(self, c, peer, name, body)) return true;
-    if (try join_spawn.handleSpawnPlayer(self, c, peer, name, body)) return true;
+    // One section per phase, nested in `join`: the phase that pays for a
+    // multi-second join is the one that shows up, instead of `join` alone.
+    {
+        const ph = apm.profiler.scope(&self.harness.prof, .join_login);
+        defer ph.end();
+        if (try join_login.handleLogin(self, c, peer, name, body)) return true;
+    }
+    {
+        const ph = apm.profiler.scope(&self.harness.prof, .join_enter);
+        defer ph.end();
+        if (try join_enter.handleEnter(self, c, peer, name, body)) return true;
+    }
+    {
+        const ph = apm.profiler.scope(&self.harness.prof, .join_worldinfo);
+        defer ph.end();
+        if (try join_worldinfo.handleWorldInfo(self, c, peer, name, body)) return true;
+    }
+    {
+        const ph = apm.profiler.scope(&self.harness.prof, .join_spawn);
+        defer ph.end();
+        if (try join_spawn.handleSpawnPlayer(self, c, peer, name, body)) return true;
+    }
     return false;
 }
