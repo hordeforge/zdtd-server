@@ -349,7 +349,7 @@ test, so a retune cannot land silently).
 | `enemy_spawn_ring_min` / `enemy_spawn_ring_max` | 28.0 / 54.0 | Enemy spawn ring around players. Stock `cEnemyMin/MaxDistance` (spawning.md); was 18..28 (on-camera) before the R4 alignment |
 | `animal_spawn_ring_min` / `animal_spawn_ring_max` | 48.0 / 70.0 | Animal spawn ring. Stock `cAnimalMin/MaxDistance` (spawning.md); was 20..45 before the R4 alignment |
 | `initial_population_frac` | 0.25 | Starter population: one-time fill toward this fraction of the alive cap near players at boot (stock fills loaded regions toward their spawning.xml maxcounts as they load; the drip alone leaves a fresh world near-empty until the first night). 0 disables |
-| `horde_drip_cd` / `bloodmoon_horde_drip_cd` | 45.0 / 8.0 | Night horde drip cadence (zdtd population mechanic; stock has no periodic drip, GAP 2011-2017) |
+| `horde_drip_cd` | 45.0 | Night horde drip cadence (zdtd population mechanic; stock has no periodic drip, GAP 2011-2017). Suspended while a blood moon is active, where stock demotes the biome enemy request to animals-only and the horde party owns the budget (spawning.md 126-128) |
 | `scout_drip_cd` | 120.0 | Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat events only, GAP 1407) |
 | `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |
 | `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |

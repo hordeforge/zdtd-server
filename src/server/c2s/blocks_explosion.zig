@@ -172,6 +172,7 @@ pub fn handleExplosion(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []con
                     self.broadcastNear("NetPackageDamageEntity", db, t.x, t.z, self.interest_range) catch {};
                 } else |_| {}
             }
+            if (dmg.destroyed_slot) |ds| self.announceDestroyedEntity(ds, nid);
             if (dmg.killed and !self.sim.mask[es].player) {
                 // Victim position for ClearSleepers POI gating (es is the
                 // victim's sim slot).

@@ -218,6 +218,20 @@ pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs
     }
 }
 
+/// Announce an entity that `World.damageFrom` DESTROYED rather than turned
+/// into a corpse (a vehicle, turret, crate or bag; `DamageResult.destroyed_slot`
+/// names it). Stock's entity distribution sends a removal for every entity it
+/// tracked, and a destroyed slot never reaches the interest-exit sweep, so
+/// without this the client keeps the GameObject until it disconnects. Send it
+/// before the tick's known-set reconcile, which is where the slot's tracking
+/// bits are dropped without a word.
+pub fn announceDestroyedEntity(self: *Game, slot: ecs.Slot, net_id: i32) void {
+    if (net_id <= 0) return;
+    var rb: [16]u8 = undefined;
+    const rm = packages.buildRemoveBody(&rb, net_id) catch return;
+    self.broadcastKnown("NetPackageEntityRemove", rm, slot) catch {};
+}
+
 /// `broadcastNear` that also skips one client slot. Stock's audio relay
 /// rebuilds the package per in-range peer and never echoes it to the sender,
 /// who already played the sound locally.

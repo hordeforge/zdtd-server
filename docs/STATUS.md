@@ -22,6 +22,27 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Horde night and destroyed-wreck parity 2026-09-28**: two more client-visible
+departures closed. A blood moon now suspends the ordinary night enemy drip: stock
+demotes the biome enemy request to animals-only while
+`AIDirectorBloodMoonComponent.BloodMoonActive` and lets the horde party own the
+budget (`spawning.md` 126-128, 1274-1278), while the drip kept running with a
+*shorter* cooldown and a 1.9x cap, so a horde night spawned the party on top of
+the ordinary night population. The `bloodmoon_horde_drip_cd` tunable existed only
+to make that divergence configurable and is gone; animals keep their own cadence.
+A due wandering horde waits the night out as well: stock's
+`get_OtherHordesAreActive` is `SkyManager.IsBloodMoonVisible() ||
+ChunkEventComponent.HasAnySpawns()` and a due wave whose test passes pushes
+`nextTime` instead of spawning (`aidirector.md` 711-712, 723-727). Gated by
+`blood moon suspends the ordinary night enemy drip` (day 1 night drips,
+the same clock on the schedule's own `next_bm` does not, the next ordinary night
+drips again) and `a wandering horde waits out a blood moon`. A vehicle, turret or crate
+destroyed by damage is now announced: `World.damageFrom` destroys those victims
+outright rather than leaving a corpse for the dwell sweep, and a freed slot never
+reaches the interest-exit sweep, so every client rendered the wreck until it
+disconnected (`DamageResult.destroyed_slot` reports it, the C2S damage and
+explosion paths call `announceDestroyedEntity`). Gated by `scenario a destroyed
+turret is removed on the clients that tracked it`.
 **Four stock-parity departures closed 2026-09-28**: each is a client-visible
 difference with a stock IL or RE anchor, not an internal tidying.
 The join shipped a 12-row `items` `NetPackageIdMapping` where stock ships the

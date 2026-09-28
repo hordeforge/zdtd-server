@@ -610,6 +610,49 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
     try std.testing.expect(w.zombie_ai[hs].state == .chase);
 }
 
+test "a wandering horde waits out a blood moon" {
+    // Stock `get_OtherHordesAreActive` is `SkyManager.IsBloodMoonVisible()
+    // || ChunkEventComponent.HasAnySpawns()`, and a due wave whose test passes
+    // pushes nextTime instead of spawning (aidirector.md:711-712, 723-727).
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var d: Director = .{ .clock = .{ .day = 1, .hours = 12.0, .time_of_day_inc_per_sec = 1000 }, .max_alive = 64 };
+    d.initial_population_done = true;
+    d.bloodmoon_cd = 1e9; // hold the party spawner off
+    // One tick at night arms both schedules; the horde night is the
+    // schedule's own `next_bm` (CalcNextDay jitters it, so it is not
+    // necessarily the plain frequency multiple).
+    d.clock.hours = 23.0;
+    _ = d.tick(&w, 0.05);
+    const bm_day = d.clock.next_bm;
+    try std.testing.expect(bm_day > 1);
+    d.clock.day = bm_day;
+    d.clock.hours = 23.0;
+    d.wandering_next = d.clock.worldTimeBits() + 1;
+    // Stay inside the one night (50 world-time bits per tick, 1000 per hour):
+    // 60 ticks is 3 in-game hours, so the clock does not cross dawn and hand
+    // the wave an ordinary morning.
+    for (0..60) |_| _ = d.tick(&w, 0.05);
+    var horde: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 0), horde);
+    try std.testing.expect(d.wandering_next <= d.clock.worldTimeBits()); // still due
+    // The next ordinary night lets it fire.
+    d.clock.day = bm_day + 1;
+    d.clock.hours = 23.0;
+    _ = d.tick(&w, 0.05);
+    horde = 0;
+    s = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde += 1;
+    }
+    try std.testing.expectEqual(@as(u32, wandering_horde_size), horde);
+}
+
 test "wandering horde size and distance follow [rules.director]" {
     var w: ecs_world.World = .{};
     defer w.deinit();
@@ -918,6 +961,39 @@ test "blood moon spawns past the ordinary world budget (1.9x CanSpawn)" {
     // ceiling by its own size (stock CanSpawn behaves the same); the count
     // stays well under the 64 stock MaxSpawnedZombies default.
     try std.testing.expect(w.countKind(.zombie) <= 64);
+}
+
+test "blood moon suspends the ordinary night enemy drip" {
+    // Stock demotes the biome enemy request to animals-only while
+    // `AIDirectorBloodMoonComponent.BloodMoonActive` and lets the party horde
+    // own the budget (spawning.md:126-128, 1274-1278). The drip is zdtd's
+    // stand-in for that biome loop, so a horde night must not also run it.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var d: Director = .{ .clock = .{ .day = 1, .hours = 23.0 }, .max_alive = 64 };
+    d.initial_population_done = true; // isolate the drip from the boot fill
+    // Day 1 is not a horde night (BloodMoonFrequency default 7): the night
+    // drip runs, which is the control arm.
+    var r = d.tick(&w, 0.05);
+    try std.testing.expect(r.spawned >= 1);
+    // A horde night with the party spawner held off (so nothing else can
+    // account for a spawn): the drip must stay quiet all night.
+    const before = w.countKind(.zombie);
+    d.clock.day = 7;
+    d.clock.hours = 23.0;
+    d.bloodmoon_cd = 1e9;
+    d.horde_cd = 0;
+    for (0..400) |_| _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(before, w.countKind(.zombie));
+    // The drip resumes once the horde night is over (day 8 is not a horde
+    // night for the default frequency 7). `bloodmoon_active` is derived from
+    // the clock every tick, so the day is what has to move.
+    d.clock.day = 8;
+    d.clock.hours = 23.0;
+    d.horde_cd = 0;
+    r = d.tick(&w, 0.05);
+    try std.testing.expect(r.spawned >= 1);
 }
 
 test "blood moon row duration converts to world time units" {

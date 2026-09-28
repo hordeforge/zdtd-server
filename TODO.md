@@ -126,19 +126,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       EntityVehicle int.Max; zdtd uses one `view_radius` for every kind
       (`src/server/game/replicate.zig:92`). A parked vehicle is unloaded past
       the radius where stock never unloads it, and items stream 3.5x too far.
-- [ ] **Destroyed vehicles and turrets are never removed from observers** -
-      `src/server/c2s/misc_damage.zig:337-342` is comment only, and the
-      interest-exit sweep skips a dead slot (`replicate.zig:120`), so every
-      client keeps a ghost GameObject and the slot's `known_entities` bit stays
-      set, hiding the next entity that reuses the slot.
+- [x] **Destroyed vehicles and turrets are never removed from observers** -
+      closed 2026-09-28: `DamageResult.destroyed_slot` reports the victims
+      `World.damageFrom` destroys outright and the damage and explosion paths
+      call `announceDestroyedEntity`. (The stale `known_entities` bit was not
+      real: `clearDeadKnownEntities` reconciles it every tick.)
 - [ ] **Entity tier system absent** - stock `CalculateEntityTier` /
       `GetEntityClassWithinMaxTier` / `PreviousTier` (spawning.md:749-752,
       771-787) apply on every create and every group pick; neither name appears
       anywhere in `src/`. A tier-capped server still spawns radiated and feral
       from every group, and an out-of-tier class is never degraded.
-- [ ] **Blood moon does not suspend biome enemy spawning** - stock
-      spawning.md:126-128, 1276-1278; `src/ecs/aidirector.zig:598` keeps the
-      night drip running with a shorter cooldown and a 1.9x cap.
+- [x] **Blood moon does not suspend biome enemy spawning** - closed
+      2026-09-28: the night drip is gated on `!bloodmoon_active`
+      (`src/ecs/aidirector.zig:598`) and `bloodmoon_horde_drip_cd` is gone.
 - [ ] **Auto turret ammo never refills** - stock `DecrementAmmo` returns to
       Armed on reload (tile-entities-power.md:1102-1117); `src/ecs/world.zig:1808`
       seeds the lifetime counter from blocks.xml `BurstRoundCount` (rounds per
@@ -202,6 +202,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       `session_drop.zig:63` sends `EntityRemove(Despawned)` where stock sends
       `Unloaded(1)`, and the disconnect `PersistentPlayerState` row is never
       broadcast (`buildPersistentPlayerState` has no reason parameter).
+- [x] **Wandering hordes land on horde nights** - closed 2026-09-28: a due
+      wave waits while `bloodmoon_active` (stock `get_OtherHordesAreActive`,
+      aidirector.md:711-712). The scout-horde half of that test has no zdtd
+      equivalent yet.
 - [ ] **Blood-moon scout tier uses the server-wide gamestage** - stock uses
       `CalcGameStageAround` of the closest player within 120 m
       (aidirector.md:394-397); `aidirector.zig:883-886` reads the party

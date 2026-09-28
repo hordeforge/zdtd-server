@@ -327,6 +327,11 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             }
         }
         if (dmg.killed) {
+            // A victim `damageFrom` destroyed outright (vehicle, turret, bag)
+            // owes its observers a removal: it leaves no corpse for the sweep
+            // to expire, and a freed slot is dropped from the known set
+            // without a word, so the client would render the wreck forever.
+            if (dmg.destroyed_slot) |ds| self.announceDestroyedEntity(ds, d.entity_id);
             // The crate is destroyed inside damageFrom, so its marker teardown
             // runs here on the captured flag (a killed non-Alive entity never
             // reaches the corpse sweep).

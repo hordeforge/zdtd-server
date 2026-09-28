@@ -748,9 +748,9 @@ pub const Director = struct {
     /// first night drip). 0 disables the starter fill.
     initial_population_frac: f32 = 0.25,
     /// Night horde drip cadence (zdtd population mechanic; stock has no
-    /// periodic drip, GAP 2011-2017). 45 s normal, 8 s during a blood moon.
+    /// periodic drip, GAP 2011-2017). Suspended during a blood moon, where
+    /// the party horde owns the spawn budget.
     horde_drip_cd: f32 = 45.0,
-    bloodmoon_horde_drip_cd: f32 = 8.0,
     /// Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat
     /// events only, GAP 1407).
     scout_drip_cd: f32 = 120.0,
@@ -1065,7 +1065,6 @@ pub const DirectorOverlay = struct {
     animal_spawn_ring_max: ?f32 = null,
     initial_population_frac: ?f32 = null,
     horde_drip_cd: ?f32 = null,
-    bloodmoon_horde_drip_cd: ?f32 = null,
     scout_drip_cd: ?f32 = null,
     animal_drip_cd: ?f32 = null,
     bloodmoon_wave_cd: ?f32 = null,

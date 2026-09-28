@@ -595,9 +595,14 @@ pub const Director = struct {
         }
 
         if (w.rules.systems.director) {
-            if (spawn_z and self.clock.isNight() and self.horde_cd <= 0) {
+            // Stock suspends ordinary biome enemy spawning during a blood moon:
+            // the enemy request is demoted to animals-only and the horde party
+            // owns the budget (spawning.md:126-128, 1274-1278). The drip is
+            // zdtd's stand-in for that biome loop, so it stops for the night
+            // too; animals keep their own cadence below.
+            if (spawn_z and !self.bloodmoon_active and self.clock.isNight() and self.horde_cd <= 0) {
                 spawned += self.spawnNearPlayers(w, 2, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
-                self.horde_cd = if (self.bloodmoon_active) w.rules.director.bloodmoon_horde_drip_cd else w.rules.director.horde_drip_cd;
+                self.horde_cd = w.rules.director.horde_drip_cd;
             }
             if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
                 // Freeze the party gamestage at dusk (InitParty): the ladder and
@@ -686,7 +691,13 @@ pub const Director = struct {
             if (self.wandering_next == 0) {
                 if (wt > w.rules.director.wander_start_after) self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
             } else if (wt >= self.wandering_next) {
-                if (spawn_z) {
+                // Stock `get_OtherHordesAreActive` is `SkyManager.IsBloodMoonVisible()
+                // || ChunkEventComponent.HasAnySpawns()`, and a due wave whose
+                // other-horde test passes pushes `nextTime` instead of spawning
+                // (aidirector.md:711-712, 723-727). A wandering pack must not
+                // land on top of the horde night; it stays due and fires once
+                // the night ends.
+                if (spawn_z and !self.bloodmoon_active) {
                     if (anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
                     self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
                 }

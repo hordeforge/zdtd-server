@@ -1833,6 +1833,12 @@ pub const World = struct {
         /// `EntityAlive.ProcessDamageResponse` carries the applied hit, not the
         /// attacker's claim.
         applied: f32 = 0,
+        /// Slot of a victim this call DESTROYED (a vehicle, turret, crate or
+        /// bag: everything that is neither a player nor a corpse-dwell mob).
+        /// Such a slot never reaches the interest-exit sweep, so the caller
+        /// owes every client that tracked it a NetPackageEntityRemove; without
+        /// one the client keeps the GameObject for the rest of the session.
+        destroyed_slot: ?Slot = null,
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
@@ -1946,7 +1952,7 @@ pub const World = struct {
                 return .{ .killed = true, .applied = applied };
             }
             self.destroy(s);
-            return .{ .killed = true, .applied = applied };
+            return .{ .killed = true, .applied = applied, .destroyed_slot = s };
         }
         // Non-fatal zombie/animal hit: knock the victim away from the attacker
         // (melee/gun shove). Players are the client's own body (the client

@@ -1593,6 +1593,52 @@ test "scenario replicate sends TurretSync on target change" {
     std.debug.print("PASS turretspawn: stock float body places at the requested position\n", .{});
 }
 
+test "scenario a destroyed turret is removed on the clients that tracked it" {
+    // A turret is not an EntityAlive: `World.damageFrom` destroys it outright
+    // instead of leaving a corpse for the dwell sweep, and a freed slot never
+    // reaches the interest-exit sweep, so without an explicit removal every
+    // client renders the wreck for the rest of the session. Stock's entity
+    // distribution announces a removal for every entity it tracked.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_turret_rm");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turret_rm", 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    const t = g.sim.spawnTurret(g.sim.transform[ps].x + 2, g.sim.transform[ps].y, g.sim.transform[ps].z).?;
+    const ts = g.sim.slotOfNetId(t) orelse return error.TestUnexpectedResult;
+    // The spawn path sets this bit on every observer that was told about the
+    // entity; model that here so the removal has somewhere to land.
+    for (&g.clients) |*cl| {
+        if (cl.joined) cl.known_entities.set(ts);
+    }
+    cap_a.clear();
+    cap_b.clear();
+
+    var dmg_body: [256]u8 = undefined;
+    const body = try packages.buildDamageBody(&dmg_body, t, 0, 3, 10_000, true, ca.entity_id);
+    var fb: [256]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageDamageEntity", body));
+
+    // Destroyed, not a corpse: the slot is free at once and no dwell runs.
+    try std.testing.expect(g.sim.slotOfNetId(t) == null);
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+    // Every client that tracked it hears the removal, the attacker included:
+    // stock's distribution fans the removal to `trackedPlayers`.
+    try std.testing.expect(cap_a.findPkgId(rm_id) != null);
+    try std.testing.expect(cap_b.findPkgId(rm_id) != null);
+    std.debug.print("PASS destroy-remove: a destroyed turret is announced to its observers\n", .{});
+}
+
 test "scenario backpack marker broadcasts on drop and clears on collect" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_bp");
