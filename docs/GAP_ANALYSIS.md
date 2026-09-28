@@ -4002,9 +4002,16 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     (`TypedMetadataValue::Read` IL=27, `Write` IL=33), and `SetMetadata` keys it.
     So `charge` is one tagged scalar. The corpus's
     `ItemValue.il.txt` is accessor-only and lacks `ReadData`, so the citation is
-    the dump (`DumpType.exe` + `DumpMethod.exe`), not that file. A resolved name
-    is a lower bound: the larger tail is rows whose kind exists but whose input
-    is never written, or whose foreign target the hit path omits:
+    the dump (`DumpType.exe` + `DumpMethod.exe`). **The read is the small half
+    (2026-09-28):** no `charge` literal exists in the managed assembly (7,451
+    types, 53,418 method bodies), so IL never writes it - the item's own
+    `triggered_effect` rows do, via `action="SetItemMetaFloat" key="charge"`
+    (18 uses in stock `items.xml`; `onSelfPrimaryActionRayHit` with `change="3"`
+    gated `LTE 3` walks the ladder). zdtd implements no `SetItemMetaFloat`, so
+    nothing would ever move the value: closing these 50 needs that action and
+    the state it writes, not only the read. A resolved name is a lower bound: the
+    larger tail is rows whose kind exists but whose input is never written, or
+    whose foreign target the hit path omits:
     - resolve: `HasBuff`/`!HasBuff` (10 rows: coffees, storm-stage buffs),
       `HoldingItemHasTags` 4 (the held item's `Tags`, read each tick from the
       toolbelt slot, `has_all_tags` supported), `SandboxOptionBool` 4 (the

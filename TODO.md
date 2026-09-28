@@ -165,10 +165,12 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   Re-censused 2026-09-28 against `require_parse.kindOf`; GAP section 10 carries
   the counts and the ItemValue metadata layout (RE'd via the dumpers: a `byte`
   count, then key string + `TypedMetadataValue` = `i32 typeTag` + Single/Int32/
-  string). Closing the 50 charge gates means reading that `charge` scalar off the
-  held item's blob, adding `CompareItemMetaFloat` to the requirement vocabulary
-  and wiring the ctx input. The other two names still need a catapult strain
-  cvar and an ammo-stack quality input.
+  string). Round 44 found the real shape: no `charge` literal exists in the
+  managed assembly, so the item's own `triggered_effect` rows write it via
+  `SetItemMetaFloat` (18 stock uses), which zdtd does not implement. Closing the
+  50 gates therefore means typed-metadata state per slot, then that action, then
+  `CompareItemMetaFloat` in the requirement vocabulary. The other two names
+  still need a catapult strain cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
   already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing
