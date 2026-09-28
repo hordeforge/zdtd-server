@@ -2307,7 +2307,10 @@ test "dropped decoy registers as pending within 25 m (tickDistraction)" {
 test "approach_distraction walks a decoy across decision re-evals" {
     var w: World = .{};
     defer w.deinit();
-    const bag = seedDecoy(&w, 4, 0, 10);
+    // Far enough that the walk outlasts a decision window: the body moves at
+    // its class speed now (the LOD band no longer scales movement), so a decoy
+    // four blocks away would be reached before the re-eval under test.
+    const bag = seedDecoy(&w, 30, 0, 10);
     const z = w.spawnZombie(0, 70, 0, 40).?;
     const zs = w.slotOfNetId(z).?;
     // Pre-latch the broadcast result so the task selection is deterministic
