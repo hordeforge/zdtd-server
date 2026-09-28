@@ -270,6 +270,43 @@ test "item stack empty is count zero only" {
     try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, w.written()[0..2], .little));
 }
 
+test "item value charge metadata round-trips through the typed tail" {
+    // ItemValue::ReadData IL_00CE-00F9: a byte count, then per entry the key
+    // string and a TypedMetadataValue (i32 typeTag, then Single/Int32/string).
+    // `charge` is the key stock's SetItemMetaFloat writes and
+    // CompareItemMetaFloat reads, so it must survive our own encode/decode or a
+    // server sync would clear the value it just accepted.
+    var buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try writeItemValue(&w, .{
+        .type_id = items_start_here + 8,
+        .count = 1,
+        .quality = 1,
+        .meta_charge = 4.0,
+    });
+    const b = w.written();
+    // Version 9 writes version, flags, type, use_times, quality, meta, then the
+    // metadata count at @12, which is now 1 with the charge entry after it.
+    try std.testing.expectEqual(@as(u8, 1), b[12]);
+    try std.testing.expectEqual(@as(u8, 6), b[13]); // "charge" length prefix
+    try std.testing.expectEqualStrings("charge", b[14..20]);
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, b[20..24], .little)); // typeTag Single
+    const charge_bits: u32 = std.mem.readInt(u32, b[24..28], .little);
+    try std.testing.expectEqual(@as(f32, 4.0), @as(f32, @bitCast(charge_bits)));
+
+    var r: binary.Reader = .{ .data = b };
+    const slot = try readItemValue(&r);
+    try std.testing.expectEqual(@as(f32, 4.0), slot.meta_charge);
+
+    // A slot with no charge keeps the empty tail, so the bytes are unchanged.
+    var buf2: [64]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &buf2 };
+    try writeItemValue(&w2, .{ .type_id = items_start_here + 8, .count = 1, .quality = 1 });
+    try std.testing.expectEqual(@as(u8, 0), w2.written()[12]);
+    var r2: binary.Reader = .{ .data = w2.written() };
+    try std.testing.expectEqual(@as(f32, 0.0), (try readItemValue(&r2)).meta_charge);
+}
+
 test "item value v9 minimal shape" {
     var buf: [64]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };

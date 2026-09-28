@@ -18,6 +18,13 @@ pub const items_start_here: i32 = @import("../assets/items.zig").items_start_her
 
 /// ItemValue.CurrentSaveVersion (unchanged through V3.1.0 b14).
 pub const item_value_save_version: u8 = 9;
+/// Longest metadata key we compare against. A longer key truncates and simply
+/// does not match, so a bounded stack buffer is enough for the decode path.
+const metadata_key_max: usize = 32;
+const metadata_key_charge = "charge";
+/// `TypedMetadataValue.typeTag` values (TypedMetadataValue::Read IL=27): 1 is a
+/// `Single`, 2 an `Int32`, 3 a string.
+const metadata_tag_single: i32 = 1;
 
 /// Inventory.PUBLIC_SLOTS_PLAYMODE.
 pub const toolbelt_slots: usize = 10;
@@ -55,6 +62,11 @@ pub const StockSlot = struct {
     /// Activated (the old byte field), bit 1 = WasCombined. Same wire
     /// position/width, so the byte plumbing is unchanged.
     flags: u8 = 0,
+    /// The item's `charge` metadata (ItemValue typed metadata, the value stock's
+    /// `SetItemMetaFloat key="charge"` rows write and `CompareItemMetaFloat`
+    /// reads). 0 = absent: the metadata tail stays empty and the encoding is
+    /// byte-identical to a slot that never carried one.
+    meta_charge: f32 = 0,
     ammo_index: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
     mods: [4]u16 = .{0} ** 4,
@@ -127,7 +139,18 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
     try w.writeF32(s.use_times);
     try w.writeU16(s.quality);
     try w.writeU16(s.meta);
-    try w.writeByte(0); // metadata count
+    // Typed metadata tail (ItemValue::ReadData IL_00CE-00F9): a byte count,
+    // then per entry the key string and an i32 tag plus its payload. Only
+    // `charge` is carried, so a slot without one still writes the 0 count and
+    // the bytes are unchanged.
+    if (s.meta_charge != 0) {
+        try w.writeByte(1);
+        try w.writeString(metadata_key_charge);
+        try w.writeI32(metadata_tag_single);
+        try w.writeF32(s.meta_charge);
+    } else {
+        try w.writeByte(0); // metadata count
+    }
     // ItemValue stats (stock ItemValue.Write IL=323: flag bit 2, then a u8
     // count and one `type u8 | slotA i16 | slotB i16` per entry, written
     // before the mod arrays). Dropping them stripped the passive deltas a
@@ -629,12 +652,27 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     // ItemClass quality clamp skipped (no ItemClass table)
     const meta = try r.readU16();
 
+    var meta_charge: f32 = 0;
     if (version > 6) {
+        // TypedMetadataValue.Read IL_00CE-00F9: a byte count, then per entry
+        // the key string and the tagged value. `charge` is the one key the
+        // server needs (`SetItemMetaFloat` / `CompareItemMetaFloat`); the rest
+        // are still skipped.
         const meta_count = try r.readByte();
         var mi: u8 = 0;
         while (mi < meta_count) : (mi += 1) {
-            try r.skipString();
-            try skipTypedMetadata(r);
+            var key_buf: [metadata_key_max]u8 = undefined;
+            const key = try r.readStringTruncating(&key_buf);
+            const tag = try r.readI32();
+            switch (tag) {
+                metadata_tag_single => {
+                    const v = try r.readF32();
+                    if (std.mem.eql(u8, key, metadata_key_charge)) meta_charge = v;
+                },
+                2 => _ = try r.readI32(),
+                3 => try r.skipString(),
+                else => {},
+            }
         }
     }
 
@@ -705,6 +743,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         .seed = seed,
         .flags = item_flags,
         .ammo_index = ammo,
+        .meta_charge = meta_charge,
     };
     if (!is_modifier) {
         out2.mods = out.mods;
