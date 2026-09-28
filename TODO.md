@@ -113,6 +113,26 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### BLOCKER: a live LiteNet join is broken on the current build (2026-09-28)
+
+Every loadgen join now fails the same way on every map, and the unit and fuzz
+gates stayed green through it, so this is the one item to fix before any
+parity work: `STAGE LiteNetStarted` then `Disconnected: ConnectionFailed` after
+5.8 s with `recv=0 sent=0 everJoined=False`, `join_ok 0`, on stock Navezgane and
+on Pregen06k01 alike. Reproduced on `a740ee52` and on its parent with the
+join-phase apm sections reverted, so those sections are ruled out.
+
+Known-good points, newest first: the round-27 three-client Pregen06k01 bench
+(`join_ok 3`) and the round-15/16 Navezgane smoke (2/2 pass). Bisect from
+`38984e1f` (the last commit before the persistence work) forward with a
+one-client stock-map smoke per step; the suspect range is the budgeted periodic
+save (`6156cbba`, `014ae972`) and the join-time deco pacing (`f2b9d9b9`).
+
+Two lessons to carry into the fix: a live LiteNet handshake is not covered by
+`zig build test` / `zig build fuzz`, so the smoke has to gate those changes; and
+a bench that fails with `recv=0` is an environment-or-binary signal, not a tick
+budget signal, so read the counters before touching APM sections.
+
 ### Remaining parity items (2026-09-28 session handoff)
 
 Four items stand between the current tree and a defensible 100%. Each is
