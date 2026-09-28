@@ -398,17 +398,6 @@ pub fn zpvRecordSpan(data: []const u8, off: usize, version: u8) error{CorruptPla
     return .{ .len = p - off };
 }
 
-/// Max bytes the ZPV15 identity section occupies on top of its marker byte:
-/// `primary_platform_len:u8 | primary_id_len:u8 | native_platform_len:u8 |
-/// native_id_len:u8` plus the four strings at their caps. A present identity is
-/// written as two of them (`primary`, `native`), each its own present byte, so
-/// the section is `id_present | primary_present | plat_len | id_len | ... |
-/// native_present | ...`. Sized from the wire caps so a writer buffer and a
-/// reader bound cannot disagree.
-pub const max_zpv_identity_len: usize =
-    1 + 1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len) +
-    1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len);
-
 /// Advance past one identity (`present:u8 | plat_len:u8 | plat | id_len:u8 |
 /// id`); a zero present byte is the whole field, so an absent identity costs
 /// one byte.

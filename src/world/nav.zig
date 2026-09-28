@@ -18,7 +18,6 @@ const body_height = store.body_height;
 const max_step_up = store.max_step_up;
 
 pub const cell_size: i32 = 4; // blocks per nav cell
-pub const cells_per_chunk: i32 = chunk_size / cell_size; // 4
 /// Search region cap: 64x64 cells around the bounding box (4096 cells).
 pub const max_region = 64;
 pub const max_cells = max_region * max_region;

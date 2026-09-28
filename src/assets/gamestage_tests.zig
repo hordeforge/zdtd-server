@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const gamestages = @import("gamestages.zig");
-const GamestageTable = gamestages.Table;
 const parseCount = gamestages.parseCount;
 const loadFromPath = gamestages.loadFromPath;
 const loadFromSlice = gamestages.loadFromSlice;

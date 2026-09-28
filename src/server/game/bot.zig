@@ -76,15 +76,7 @@ pub const bot_weapon_auto: BotWeapon = .{ .damage = 9, .range = 22, .pellets = 6
 pub const bot_weapon_ak: BotWeapon = .{ .damage = 16, .range = 55, .pellets = 1, .tag = .{ 'a', 'k', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .tag_len = 2 };
 pub const bot_weapon_sniper: BotWeapon = .{ .damage = 42, .range = 90, .pellets = 1, .tag = .{ 's', 'n', 'i', 'p', 'e', 'r', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
 pub const bot_weapon_smg: BotWeapon = .{ .damage = 9, .range = 35, .pellets = 1, .tag = .{ 's', 'm', 'g', 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .tag_len = 3 };
-pub const bot_weapon_magnum: BotWeapon = .{ .damage = 34, .range = 45, .pellets = 1, .tag = .{ 'm', 'a', 'g', 'n', 'u', 'm', 0, 0, 0, 0, 0, 0 }, .tag_len = 6 };
 pub const bot_loadout_pool: [6]BotWeapon = .{ bot_weapon_pistol, bot_weapon_shotgun, bot_weapon_ak, bot_weapon_sniper, bot_weapon_auto, bot_weapon_smg };
-
-/// Flat XZ spawn spread used by `bot count` / `bot spawn` fallback so the
-/// floor bots do not stack on one cell. Config: `[bots] spawn_spread`.
-const bot_spawn_spread: f32 = bot_host_defaults.spawn_spread;
-/// Default bot spawn Y when the verb carries only [name] [x z] (flat ground).
-/// Config: `[bots] spawn_y`.
-const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
 /// Sense record byte size (RFC 0001 §3; ADR 0037 sense v4): one fixed
 /// 40-byte record per entity. Layout: net_id i32, kind u8, self u8, alive u8,

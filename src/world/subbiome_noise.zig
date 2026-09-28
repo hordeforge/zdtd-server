@@ -24,6 +24,7 @@
 //! a `../7dtd-engine-research` task; the residual is recorded in GAP_ANALYSIS 18.
 
 const std = @import("std");
+const game_random = @import("../util/game_random.zig");
 
 /// Unity `Extensions::GetStableHashCode` (djb2 variant). Operates on UTF-16
 /// chars in stock; world names are ASCII, so bytes == chars.
@@ -39,71 +40,6 @@ pub fn stableHash(s: []const u8) i32 {
     }
     return h1 +% (h2 *% 0x5d588b65);
 }
-
-/// `.NET Framework Random` (GameRandom uses exactly this: MBIG=0x7FFFFFFF,
-/// MSEED=0x09A4EC86, 56-entry SeedArray, Knuth subtraction shuffle; the
-/// constants match the GameRandom class dump at asm.il 1010929, and the
-/// research pins the class + strict max-exclusivity in
-/// dedicated-misc-systems.md GameRandom).
-pub const DotNetRandom = struct {
-    const mbig: i32 = std.math.maxInt(i32);
-    const mseed: i32 = 0x09A4EC86;
-    seed_array: [56]i32 = undefined,
-    inext: u8 = 0,
-    inextp: u8 = 21,
-
-    pub fn init(seed: i32) DotNetRandom {
-        var r: DotNetRandom = .{};
-        r.internalSetSeed(seed);
-        return r;
-    }
-
-    fn internalSetSeed(self: *DotNetRandom, seed: i32) void {
-        // The .NET Framework implementation is `unchecked`: the intermediate
-        // values intentionally wrap (e.g. mj can go far below i32 min before
-        // the +MBIG correction). Wrapping ops below match that exactly.
-        const subtraction: i32 = if (seed == std.math.minInt(i32)) std.math.maxInt(i32) else @intCast(@abs(@as(i64, seed)));
-        var mj: i32 = mseed -% subtraction;
-        self.seed_array[55] = mj;
-        var mk: i32 = 1;
-        var i: usize = 1;
-        while (i < 55) : (i += 1) {
-            const ii: usize = (21 * i) % 55;
-            self.seed_array[ii] = mk;
-            mk = mj -% mk;
-            if (mk < 0) mk +%= mbig;
-            mj = self.seed_array[ii];
-        }
-        var k: usize = 1;
-        while (k < 5) : (k += 1) {
-            i = 1;
-            while (i < 56) : (i += 1) {
-                self.seed_array[i] -%= self.seed_array[1 + (i + 30) % 55];
-                if (self.seed_array[i] < 0) self.seed_array[i] +%= mbig;
-            }
-        }
-        self.inext = 0;
-        self.inextp = 21;
-    }
-
-    fn internalSample(self: *DotNetRandom) i32 {
-        var inext: usize = self.inext + 1;
-        if (inext >= 56) inext = 1;
-        var inextp: usize = self.inextp + 1;
-        if (inextp >= 56) inextp = 1;
-        var ret = self.seed_array[inext] -% self.seed_array[inextp];
-        if (ret == mbig) ret -%= 1;
-        if (ret < 0) ret +%= mbig;
-        self.seed_array[inext] = ret;
-        self.inext = @intCast(inext);
-        self.inextp = @intCast(inextp);
-        return ret;
-    }
-
-    pub fn nextDouble(self: *DotNetRandom) f64 {
-        return @as(f64, @floatFromInt(self.internalSample())) * (1.0 / @as(f64, @floatFromInt(mbig)));
-    }
-};
 
 /// Classic Ken Perlin permutation table (public domain). See the file-level
 /// fidelity note for why this replaces the stock literal.
@@ -134,7 +70,7 @@ pub const PerlinNoise = struct {
 
     pub fn init(seed: i32) PerlinNoise {
         var p: PerlinNoise = .{};
-        var rand = DotNetRandom.init(seed);
+        var rand = game_random.GameRandom.init(seed);
         var i: usize = 0;
         while (i < 256) : (i += 1) {
             const u = rand.nextDouble();
@@ -254,19 +190,6 @@ test "stableHash matches the Unity djb2 structure" {
     // The 0xe1 lattice quirk must not crash on negative world coords.
     var p = PerlinNoise.init(1234);
     _ = p.noise(-100.5, -50.25);
-}
-
-test "DotNetRandom is deterministic and stable across instances" {
-    var a = DotNetRandom.init(42);
-    var b = DotNetRandom.init(42);
-    var c = DotNetRandom.init(43);
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        const da = a.nextDouble();
-        try std.testing.expectEqual(da, b.nextDouble());
-        try std.testing.expect(da >= 0 and da < 1);
-        if (i == 0) try std.testing.expect(da != c.nextDouble());
-    }
 }
 
 test "PerlinNoise is smooth, bounded and seed-dependent" {

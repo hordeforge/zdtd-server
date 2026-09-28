@@ -97,9 +97,6 @@ pub const StatEntry = struct {
 /// ItemValue.Flags bit 0: Activated (get_Activated = Flags & 1; the old
 /// `Activated` byte field, V3.2.0 changelog-3.2.0 §3.4).
 pub const flags_activated: u8 = 1;
-/// ItemValue.Flags bit 1: WasCombined (get_WasCombined = Flags & 2; the
-/// Combine Station rework marks combined items).
-pub const flags_was_combined: u8 = 2;
 
 /// ItemValue.Write/ReadData v>=8 encoding-flags bit 0: type is relative
 /// (add `items_start_here` on read). Distinct from `flags_activated`.
@@ -796,17 +793,6 @@ pub fn parseBagBody(body: []const u8, out: []StockSlot) (binary.ReadError || err
     if (blob_end > body.len) return error.EndOfStream; // truncated blob, fail closed
     const n = try parseBagSlots(body[6..blob_end], out);
     return .{ .entity_id = entity_id, .n = n };
-}
-
-fn skipTypedMetadata(r: *binary.Reader) binary.ReadError!void {
-    // TypedMetadataValue.Read: i32 typeTag, then payload
-    const tag = try r.readI32();
-    switch (tag) {
-        1 => _ = try r.readF32(),
-        2 => _ = try r.readI32(),
-        3 => try r.skipString(),
-        else => {},
-    }
 }
 
 pub fn readItemStack(r: *binary.Reader) binary.ReadError!StockSlot {

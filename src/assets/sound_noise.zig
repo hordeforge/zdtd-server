@@ -36,8 +36,6 @@ pub const Noise = struct {
 /// is a claim, and no stock sound group comes near this.
 pub const max_clip_name: usize = 64;
 
-pub const max_noise_entries: usize = 2048;
-
 pub const Entry = struct {
     /// SoundDataNode name (the relayed clip key).
     name: []const u8,

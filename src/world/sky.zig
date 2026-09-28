@@ -120,7 +120,6 @@ test "sky: ambientLuma applies the GetLightLevel ambient shaping" {
 /// index 0 = full moon, not modeled here), then `moonBright =
 /// sMoonBrights[index]`. Slice 2 of the light model: the previously zero
 /// moon term.
-pub const moon_phases = [_]f32{ 0.05, 0.35, 0.55, 0.70, 1.40, 1.63, 1.82 };
 pub const moon_brights = [_]f32{ 1.0, 0.65, 0.45, 0.25, 0.40, 0.60, 0.90 };
 
 pub fn moonBrightness(day: u64) f32 {

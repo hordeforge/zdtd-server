@@ -562,9 +562,6 @@ pub const BotDef = struct {
     target_id: i32 = -1,
 };
 
-/// Default BotDef used by BotManager.spawn (a Rules floor; per-bot overrides win).
-pub const BotDefDefault = BotDef{};
-
 /// Placed-turret combat stats from the block (blocks.xml autoTurret family:
 /// MaxDistance, EntityDamage, BurstFireRate, BurstRoundCount). Zero fields
 /// stay unset - callers fall back to the component defaults. Pure shape

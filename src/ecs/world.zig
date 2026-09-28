@@ -45,7 +45,6 @@ pub const BotSnap = struct {
     d2: f32 = 0,
 };
 pub const CommandBuffer = command.Buffer;
-pub const CommandOp = command.Op;
 pub const TickLocals = locals_mod.TickLocals;
 const world_bits = @import("world_bits.zig");
 pub const AtomicBits = world_bits.AtomicBits;

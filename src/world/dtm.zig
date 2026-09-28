@@ -77,12 +77,6 @@ pub const SpawnPoint = struct {
     z: i32,
 };
 
-pub const MapMeta = struct {
-    width: i32 = 0,
-    height: i32 = 0,
-    name: []const u8 = "",
-};
-
 /// Minimal parse of map_info.xml for HeightMapSize="W,H".
 pub fn parseMapInfoSize(xml: []const u8) !struct { w: i32, h: i32 } {
     // Look for HeightMapSize" value=" or HeightMapSize"value="

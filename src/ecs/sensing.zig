@@ -60,16 +60,6 @@ pub const PlayerScan = struct {
     }
 };
 
-/// Scalar reference for `anyWithin`. Tests only.
-pub fn anyWithinRef(scan: *const PlayerScan, x: f32, z: f32, d2: f32) bool {
-    for (0..scan.n) |i| {
-        const dx = scan.xs[i] - x;
-        const dz = scan.zs[i] - z;
-        if (dx * dx + dz * dz < d2) return true;
-    }
-    return false;
-}
-
 /// Indices of the first `n` entries of the packed columns lying within
 /// `r2` (inclusive) of (x, z), written to `out` in ascending order. The
 /// combat-noise fan-out walks a whole mob group per event, so the radius test
