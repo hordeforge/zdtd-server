@@ -3991,7 +3991,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     Re-censused 2026-09-28 by **name** against stock 3.2.0 and
     `require_parse.kindOf`: the vocabulary tail is nearly closed - buffs.xml
     resolves 1381/1381; two names remain, **4 rows**:
-    `CatapultStrainAmount` 3 and `RoundsInMagazine` 1. The 50 that were the
+    `CatapultStrainAmount` 3 and `RoundsInMagazine` 1 (2026-09-28). What
+    they gate: three catapult rows drive a stock item's strain-scaled procs, and
+    the one `RoundsInMagazine` row is a **live** perk effect - `perkEnforcerPunks`
+    gives +1% `EntityDamage` only while the held magazine is empty - so it needs
+    the weapon's magazine contents, not just a ctx field. Both are per-item
+    state the sim does not carry. The 50 that were the
     bulk are now resolved (2026-09-28): the `charge` value rides the ItemValue
     typed-metadata blob into `InvSlot.meta_charge`
     (`src/wire/stock_inv.zig`, `stock_inv.toEcs`) and `CompareItemMetaFloat`
@@ -4001,9 +4006,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `TypedMetadataValue` (`ReadData` IL_00CE-00F9). That value is an `i32
     typeTag` then, on `tag - 1`, a `Single` / `Int32` / string payload
     (`TypedMetadataValue::Read` IL=27, `Write` IL=33), and `SetMetadata` keys it.
-    So `charge` is one tagged scalar. The corpus's
-    `ItemValue.il.txt` is accessor-only and lacks `ReadData`, so the citation is
-    the dump (`DumpType.exe` + `DumpMethod.exe`). **The read is the small half
+    So `charge` is one tagged scalar. The corpus's `ItemValue.il.txt` lacks
+    `ReadData`, so the citation is the dump (`DumpType.exe` + `DumpMethod.exe`). **The read is the small half
     (2026-09-28):** no `charge` literal exists in the managed assembly (7,451
     types, 53,418 method bodies), so IL never writes it - the item's own
     `triggered_effect` rows do, via `action="SetItemMetaFloat" key="charge"`
