@@ -4666,7 +4666,10 @@ a finer server encoding.
   Measured with a live 7dtd-loadgen double join against the infinite
   world (config-only mod `mods/infinite_world`, formerly `--mode infinite`;
   APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
-  net_poll 1.9 s. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
+  net_poll 1.9 s. Re-measured 2026-09-28 on the current build, stock
+  Pregen06k01 with **three** clients joining at once: p50 tick 0.39 ms, p99
+  402 ms, max tick 9.6 s, max net_poll 9.4 s, `join_ok` 6 `join_fail` 0 (the
+  stall is boot/stream work, not a refused join), so the residual stands. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
   same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
   p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
   join burst was fully synchronous: `sendSpawnArea`
