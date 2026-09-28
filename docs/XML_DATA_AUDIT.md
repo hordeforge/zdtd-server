@@ -113,7 +113,8 @@ values to a connected stock client:
   builtin defs, so the effective offline value is stock.
 - Stock-name selection keys resolved through a loaded table (never values):
   `buffInjuryBleeding` (`hooks.zig`), `bloodMoon` (`weather.zig`), `Scouts*`
-  (`aidirector.zig`), `autoTurret` (`game.zig`), `airDrop` (`tick.zig`),
+  (`aidirector.zig`), `animalZombieVultureRadiated` (`aidirector.zig` mounted
+  target swap), `autoTurret` (`game.zig`), `airDrop` (`tick.zig`),
   `supply_drop` (nav class), `keystoneBlock` (land claim), `cntWoodenChestClosed`
   (`replicate_te.zig`), the `bedroll*` set (`game.zig` isBedroll - stock defines
   no is-bedroll property, the name list resolves through AssignIds), the

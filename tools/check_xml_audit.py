@@ -72,6 +72,7 @@ ALLOWLIST = {
     "cntWoodenChestClosed",  # replicate_te.zig seed-chest idByName (+ pin)
     "foodCanChili",  # init_assets.zig items-load smoke probe (byStockName)
     "ZombiesAll",  # init_assets.zig director default entitygroup
+    "animalZombieVultureRadiated",  # aidirector.zig blood-moon mounted target swap (stock SpawnZombie IL_0031-0061)
     # Bedroll respawn blocks: stock defines no "is-bedroll" property, so the
     # name list resolves through AssignIds at runtime (game.zig isBedroll).
     "bedroll", "bedrollRed", "bedrollOrange", "bedrollYellow",

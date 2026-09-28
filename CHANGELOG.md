@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-28
+
 ### Added
 
 - **An item's `charge` metadata survives the inventory codec.** Stock's
@@ -21,6 +23,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   stun-baton tier row gated every copy of the item. The held item's charge now
   resolves through the same compare the other scalar gates use, on the equip and
   mod-equip paths. A row naming any other metadata key still refuses.
+- **Auth and failure log lines name the peer address.** Admin commands, failed
+  sign-ins and rejected permissions log lines now carry `peer=<ip>` so operators
+  can attribute requests. Oversized log entries are marked `[truncated]` instead
+  of corrupting the start of the next line.
 
 ### Fixed
 
@@ -55,6 +61,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   out when auto-refresh is off, destructive verbs are confirmed for access and
   data verbs as well, and the plugin/modlet wording matches what the server
   actually loads.
+- **A client-chosen display name cannot resolve composite admin rows.**
+  Name-keyed whitelist and admin lookups reject names containing the composite
+  separator (`:`), preventing a player with no platform id from adopting an
+  identity like `EOS:...` to inherit an admin role.
+- **Mutating WebUI endpoints use uniform CSRF and error envelopes.** The
+  `/api/modlet`, `/api/plugin`, and `/api/rules` routes require the `csrf` body
+  field consistent with the dashboard and return
+  `{"ok":false,"error":...,"reply":""}` on failure when JSON is requested.
+- **The release smoke target honours `RELEASE_TARGET`.** The smoke test script
+  checks the built target against the configured `RELEASE_TARGET` rather than
+  hardcoding `x86_64-linux-gnu`.
 
 ### Changed
 

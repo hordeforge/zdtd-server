@@ -10,82 +10,82 @@ permission semantics live on [subsystems/admin.md](../subsystems/admin.md).
 
 | Variant | Payload | Line | Summary |
 |---|---|---|---|
-| `help` | `?[]const u8` | 390 | `help` with no topic prints the index; `help <topic>` prints that command's usage/description. The topic is a slice of the input line. |
-| `status` | `-` | 391 | - |
-| `guardstats` | `-` | 393 | Dump C2S authority reject counters (phase/ownership/bounds/movement/decode). |
-| `guardclear` | `usize` | 396 | Clear guard quarantine bits + any armed policy kick on a peer slot (operator escape hatch for a false positive). |
-| `evidence` | `?[]const u8` | 399 | `evidence` prints the ring inline; `evidence dump [path]` writes the JSONL lines to a file (default `<world>/evidence.jsonl`). |
-| `plugin` | `[]const u8` | 402 | zdtd wasm plugin ops: `plugin list` / `plugin reload <name>` (paper: hot module replacement - dispose the old fiber, reinstantiate). |
-| `apm` | `-` | 404 | Dump zdtd-native APM counters + section latency (same text as --ticks exit). |
-| `save` | `-` | 405 | - |
-| `kick` | `struct { target: Target, reason: []const u8 }` | 407 | Stock `kick <name / entity id / user id> [reason]` (ConsoleCmdKick, asm.il 229326). |
-| `kickall` | `[]const u8` | 409 | Stock `kickall [reason]` (ConsoleCmdKickAll, asm.il 229473). |
-| `ban` | `BanSub` | 411 | Stock `ban add\|remove\|list ...` (ConsoleCmdBan, asm.il 209578). |
-| `unban` | `u32` | 413 | zdtd-only: drop a raw IPv4 ban recorded by `ban add` on a connected peer. |
-| `admin` | `AdminSub` | 416 | Stock `admin add\|remove\|list` (ConsoleCmdAdmin, asm.il 204593). zdtd has no Steam group concept, so addgroup/removegroup are deliberately absent. |
-| `whitelist` | `WhitelistSub` | 418 | Stock `whitelist add\|remove\|list` (ConsoleCmdWhitelist, asm.il 265358). |
-| `listplayerids` | `-` | 420 | Stock `listplayerids` / `lpi` (asm.il 231089). |
-| `getgamepref` | `[]const u8` | 422 | Stock `getgamepref` / `gg [filter]` (asm.il 220877). |
-| `getgamestat` | `[]const u8` | 425 | Stock `getgamestat` / `ggs [filter]` (ConsoleCmdGetGameStats, asm.il 224074): the GameStats the sim tracks, as `GameStat.X = value`. |
-| `setgamepref` | `struct { name: []const u8, value: []const u8 }` | 427 | Stock `setgamepref` / `sg <name> <value>` (asm.il 251176). |
-| `chunkcache` | `-` | 429 | Stock `chunkcache` / `cc` (asm.il 213107). |
-| `mem` | `-` | 431 | Stock `mem` (asm.il 234965). |
-| `list` | `-` | 432 | - |
-| `tele` | `struct { peer: usize, x: f32, y: f32, z: f32 }` | 440 | - |
-| `say` | `[]const u8` | 441 | - |
-| `kill` | `i32` | 443 | Force-kill entity by net id (EntityRemove + loot path). |
-| `inv` | `usize` | 445 | Dump a joined peer's inventory slots (debug/parity probe). |
-| `gettime` | `-` | 447 | Stock `gettime` (day + HH:MM). |
-| `settime` | `u64` | 451 | Stock `settime day\|night\|<worldtime>\|<day> <hour> <minute>`, already reduced to the world time stock computes (ConsoleCmdSetTime, asm.il 251838; GameUtils::DayTimeToWorldTime, asm.il 1926175). |
-| `spawnentity` | `struct { peer: usize, name_off: usize, name_len: usize }` | 453 | Stock `spawnentity <peerSlot> <entityClassName>` (near player). |
-| `gamestage` | `?usize` | 455 | Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player. |
-| `listents` | `-` | 457 | Stock `listents` (alive entity table). |
-| `listplayers` | `-` | 459 | Stock `listplayers` / `lp` (joined peers with entity ids). |
-| `killall` | `-` | 461 | Stock `killall` (non-player AI). |
-| `storm` | `-` | 463 | zdtd-only: force every storm-capable biome into an active storm. |
-| `clearweather` | `-` | 465 | zdtd-only: end any active storm (`clearweather` / `stormoff`). |
-| `spawnairdrop` | `-` | 467 | zdtd-only: trigger an air drop immediately. |
-| `saveworld` | `-` | 469 | Stock `saveworld`. |
-| `shutdown` | `-` | 471 | Stock `shutdown` (graceful stop). |
-| `version` | `-` | 473 | Stock `version`. |
-| `getoptions` | `-` | 475 | Stock `getoptions`: dump the known option names and current values. |
-| `exportcurrentconfigs` | `-` | 477 | Stock `exportcurrentconfigs`: write the effective options to disk. |
-| `loglevel` | `?[]const u8` | 480 | Stock `loglevel [n]`: read (no arg) or set the runtime log level. Arg is a slice of the input line. |
-| `listthreads` | `-` | 482 | Stock `listthreads` / `lt`: summary of the server's logical threads. |
-| `guardreport` | `-` | 486 | zdtd-only `guardreport`: the anti-cheat dry-run diff - per peer, which detector would trip the kick ladder (or already did), the window counts, and the enforcement rung state (T23). |
-| `commandpermission` | `struct { level: ?u8, verb: []const u8 }` | 491 | Stock `commandpermission` / `cp`: per-command required permission level. `cp <command>` reports; `cp <level> <command>` sets (levels run 0 = highest .. 255; the caller must be at least as privileged). `verb` is a slice of the input line. |
-| `wipeplayer` | `[]const u8` | 494 | Erase a player record from players.zsv by login name (operator right-to-erasure). Name is a slice into the original command line (must outlive the Command). |
-| `bad_args` | `[]const u8` | 498 | Known verb, missing or malformed arguments (slice of the input line). zdtd-only verbs use this; stock verbs use `err_text` / `wrong_args` so the reply matches what stock prints. |
-| `err_text` | `struct { prefix: []const u8, token: []const u8 = "", suffix: []const u8 = "" }` | 501 | Verbatim stock console error, printed as `{prefix}{token}{suffix}`. The literals come from the IL; `token` is a slice of the input line. |
-| `wrong_args` | `struct { expected: []const u8, found: usize }` | 504 | Stock "Wrong number of arguments, expected {expected}, found {found}." `expected` is one of the literal shapes stock uses ("at least 1", "1 or 3", ...). |
-| `unknown` | `-` | 505 | - |
+| `help` | `?[]const u8` | 396 | `help` with no topic prints the index; `help <topic>` prints that command's usage/description. The topic is a slice of the input line. |
+| `status` | `-` | 397 | - |
+| `guardstats` | `-` | 399 | Dump C2S authority reject counters (phase/ownership/bounds/movement/decode). |
+| `guardclear` | `usize` | 402 | Clear guard quarantine bits + any armed policy kick on a peer slot (operator escape hatch for a false positive). |
+| `evidence` | `?[]const u8` | 405 | `evidence` prints the ring inline; `evidence dump [path]` writes the JSONL lines to a file (default `<world>/evidence.jsonl`). |
+| `plugin` | `[]const u8` | 408 | zdtd wasm plugin ops: `plugin list` / `plugin reload <name>` (paper: hot module replacement - dispose the old fiber, reinstantiate). |
+| `apm` | `-` | 410 | Dump zdtd-native APM counters + section latency (same text as --ticks exit). |
+| `save` | `-` | 411 | - |
+| `kick` | `struct { target: Target, reason: []const u8 }` | 413 | Stock `kick <name / entity id / user id> [reason]` (ConsoleCmdKick, asm.il 229326). |
+| `kickall` | `[]const u8` | 415 | Stock `kickall [reason]` (ConsoleCmdKickAll, asm.il 229473). |
+| `ban` | `BanSub` | 417 | Stock `ban add\|remove\|list ...` (ConsoleCmdBan, asm.il 209578). |
+| `unban` | `u32` | 419 | zdtd-only: drop a raw IPv4 ban recorded by `ban add` on a connected peer. |
+| `admin` | `AdminSub` | 422 | Stock `admin add\|remove\|list` (ConsoleCmdAdmin, asm.il 204593). zdtd has no Steam group concept, so addgroup/removegroup are deliberately absent. |
+| `whitelist` | `WhitelistSub` | 424 | Stock `whitelist add\|remove\|list` (ConsoleCmdWhitelist, asm.il 265358). |
+| `listplayerids` | `-` | 426 | Stock `listplayerids` / `lpi` (asm.il 231089). |
+| `getgamepref` | `[]const u8` | 428 | Stock `getgamepref` / `gg [filter]` (asm.il 220877). |
+| `getgamestat` | `[]const u8` | 431 | Stock `getgamestat` / `ggs [filter]` (ConsoleCmdGetGameStats, asm.il 224074): the GameStats the sim tracks, as `GameStat.X = value`. |
+| `setgamepref` | `struct { name: []const u8, value: []const u8 }` | 433 | Stock `setgamepref` / `sg <name> <value>` (asm.il 251176). |
+| `chunkcache` | `-` | 435 | Stock `chunkcache` / `cc` (asm.il 213107). |
+| `mem` | `-` | 437 | Stock `mem` (asm.il 234965). |
+| `list` | `-` | 438 | - |
+| `tele` | `struct { peer: usize, x: f32, y: f32, z: f32 }` | 446 | - |
+| `say` | `[]const u8` | 447 | - |
+| `kill` | `i32` | 449 | Force-kill entity by net id (EntityRemove + loot path). |
+| `inv` | `usize` | 451 | Dump a joined peer's inventory slots (debug/parity probe). |
+| `gettime` | `-` | 453 | Stock `gettime` (day + HH:MM). |
+| `settime` | `u64` | 457 | Stock `settime day\|night\|<worldtime>\|<day> <hour> <minute>`, already reduced to the world time stock computes (ConsoleCmdSetTime, asm.il 251838; GameUtils::DayTimeToWorldTime, asm.il 1926175). |
+| `spawnentity` | `struct { peer: usize, name_off: usize, name_len: usize }` | 459 | Stock `spawnentity <peerSlot> <entityClassName>` (near player). |
+| `gamestage` | `?usize` | 461 | Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player. |
+| `listents` | `-` | 463 | Stock `listents` (alive entity table). |
+| `listplayers` | `-` | 465 | Stock `listplayers` / `lp` (joined peers with entity ids). |
+| `killall` | `-` | 467 | Stock `killall` (non-player AI). |
+| `storm` | `-` | 469 | zdtd-only: force every storm-capable biome into an active storm. |
+| `clearweather` | `-` | 471 | zdtd-only: end any active storm (`clearweather` / `stormoff`). |
+| `spawnairdrop` | `-` | 473 | zdtd-only: trigger an air drop immediately. |
+| `saveworld` | `-` | 475 | Stock `saveworld`. |
+| `shutdown` | `-` | 477 | Stock `shutdown` (graceful stop). |
+| `version` | `-` | 479 | Stock `version`. |
+| `getoptions` | `-` | 481 | Stock `getoptions`: dump the known option names and current values. |
+| `exportcurrentconfigs` | `-` | 483 | Stock `exportcurrentconfigs`: write the effective options to disk. |
+| `loglevel` | `?[]const u8` | 486 | Stock `loglevel [n]`: read (no arg) or set the runtime log level. Arg is a slice of the input line. |
+| `listthreads` | `-` | 488 | Stock `listthreads` / `lt`: summary of the server's logical threads. |
+| `guardreport` | `-` | 492 | zdtd-only `guardreport`: the anti-cheat dry-run diff - per peer, which detector would trip the kick ladder (or already did), the window counts, and the enforcement rung state (T23). |
+| `commandpermission` | `struct { level: ?u8, verb: []const u8 }` | 497 | Stock `commandpermission` / `cp`: per-command required permission level. `cp <command>` reports; `cp <level> <command>` sets (levels run 0 = highest .. 255; the caller must be at least as privileged). `verb` is a slice of the input line. |
+| `wipeplayer` | `[]const u8` | 500 | Erase a player record from players.zsv by login name (operator right-to-erasure). Name is a slice into the original command line (must outlive the Command). |
+| `bad_args` | `[]const u8` | 504 | Known verb, missing or malformed arguments (slice of the input line). zdtd-only verbs use this; stock verbs use `err_text` / `wrong_args` so the reply matches what stock prints. |
+| `err_text` | `struct { prefix: []const u8, token: []const u8 = "", suffix: []const u8 = "" }` | 507 | Verbatim stock console error, printed as `{prefix}{token}{suffix}`. The literals come from the IL; `token` is a slice of the input line. |
+| `wrong_args` | `struct { expected: []const u8, found: usize }` | 510 | Stock "Wrong number of arguments, expected {expected}, found {found}." `expected` is one of the literal shapes stock uses ("at least 1", "1 or 3", ...). |
+| `unknown` | `-` | 511 | - |
 
 
 ## `BanSub` (`src/server/admin.zig`)
 
 | Variant | Payload | Line | Summary |
 |---|---|---|---|
-| `add` | `struct { target: Target, seconds: i64, reason: []const u8 }` | 370 | - |
-| `remove` | `Target` | 371 | - |
-| `list` | `-` | 372 | - |
+| `add` | `struct { target: Target, seconds: i64, reason: []const u8 }` | 376 | - |
+| `remove` | `Target` | 377 | - |
+| `list` | `-` | 378 | - |
 
 
 ## `AdminSub` (`src/server/admin.zig`)
 
 | Variant | Payload | Line | Summary |
 |---|---|---|---|
-| `add` | `struct { target: Target, level: u8 }` | 376 | - |
-| `remove` | `Target` | 377 | - |
-| `list` | `-` | 378 | - |
+| `add` | `struct { target: Target, level: u8 }` | 382 | - |
+| `remove` | `Target` | 383 | - |
+| `list` | `-` | 384 | - |
 
 
 ## `WhitelistSub` (`src/server/admin.zig`)
 
 | Variant | Payload | Line | Summary |
 |---|---|---|---|
-| `add` | `Target` | 382 | - |
-| `remove` | `Target` | 383 | - |
-| `list` | `-` | 384 | - |
+| `add` | `Target` | 388 | - |
+| `remove` | `Target` | 389 | - |
+| `list` | `-` | 390 | - |
 
 
 ## Console verbs dispatched in process (`src/server/admin_console.zig`)

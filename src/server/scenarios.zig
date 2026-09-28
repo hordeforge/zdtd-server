@@ -1581,6 +1581,7 @@ test "scenario replicate sends TurretSync on target change" {
         var placed = false;
         for (g.sim.kind_groups.slice(.turret)) |slot| {
             if (!g.sim.alive[slot]) continue;
+            if (g.sim.network_id[slot].id == t) continue;
             const tt = g.sim.transform[slot];
             if (@abs(tt.x - tx) < 1.5 and @abs(tt.z - tz) < 1.5) {
                 placed = true;

@@ -4,12 +4,12 @@
 > **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
 
 zdtd is pre-1.0 research software. `0.11.0` (src/version.zig + build.zig.zon,
-drift-checked by `make check`) is the development line and `v0.10.0` the latest
+drift-checked by `make check`) is the development line and `v0.11.0` the latest
 release. A minor bump may land at any time.
 Product tags: `v0.1.0`, `v0.1.1`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`,
-`v0.7.0`, `v0.8.0`, `v0.10.0`.
+`v0.7.0`, `v0.8.0`, `v0.10.0`, `v0.11.0`.
 
-Two tags predate this policy: `v0.1.1` and `v3.1.0` point at one commit
+Two tags predate this policy: `v0.1.1` and `v3.1.0` point to one commit
 declaring `0.2.0`, so read it as the 0.2.0 tree, not a patch over `v0.1.0`.
 `v3.1.0` names a stock wire version, not a product release. `0.2.0` and `0.9.0`
 are development lines no release carried: no tag, no dated section, no

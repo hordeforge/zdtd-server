@@ -1608,10 +1608,10 @@ test "a login name shaped like a composite id does not inherit that admin row" {
         g.deinit();
         std.testing.allocator.destroy(g);
     }
-    try std.testing.expect(g.admin_list.add("EOS:0123456789abcdef", 0));
-    try std.testing.expect(g.whitelist.add("EOS:0123456789abcdef", 0));
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(g.admin_list.add("EOS:0123456789abcdef", 0));
+    try std.testing.expect(g.whitelist.add("EOS:0123456789abcdef", 0));
     @memcpy(c.name[0..20], "EOS:0123456789abcdef");
     c.name_len = 20;
     try std.testing.expectEqual(@as(u16, 1000), g.permLevelOf(c));
