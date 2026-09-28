@@ -4669,7 +4669,13 @@ a finer server encoding.
   net_poll 1.9 s. Re-measured 2026-09-28 on the current build, stock
   Pregen06k01 with **three** clients joining at once: p50 tick 0.39 ms, p99
   402 ms, max tick 9.6 s, max net_poll 9.4 s, `join_ok` 6 `join_fail` 0 (the
-  stall is boot/stream work, not a refused join), so the residual stands. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
+  stall is boot/stream work, not a refused join), so the residual stands. Its
+  section breakdown names two offenders and clears the rest: `join` max 8.8 s
+  (the synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over
+  84 periodic saves, `save_encode` 3.4 s of it, both on the tick thread), while
+  `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
+  the ECS sim stays under 6 ms. Next pass: pace the periodic save per tick as
+  `join_drain` paces the drain. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
   same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
   p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
   join burst was fully synchronous: `sendSpawnArea`
