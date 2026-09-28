@@ -3995,8 +3995,10 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     they gate: three catapult rows drive a stock item's strain-scaled procs, and
     the one `RoundsInMagazine` row is a **live** perk effect - `perkEnforcerPunks`
     gives +1% `EntityDamage` only while the held magazine is empty - so it needs
-    the weapon's magazine contents, not just a ctx field. Both are per-item
-    state the sim does not carry. The 50 that were the
+    the weapon's magazine contents, not just a ctx field: loaded rounds live in
+    the gun's ammo modifications as per-mod counts, and zdtd decodes mods as ids
+    and qualities without counts, so that is a data-model addition rather than a
+    ctx field. The catapult rows need a strain value per item, likewise unheld. The 50 that were the
     bulk are now resolved (2026-09-28): the `charge` value rides the ItemValue
     typed-metadata blob into `InvSlot.meta_charge`
     (`src/wire/stock_inv.zig`, `stock_inv.toEcs`) and `CompareItemMetaFloat`
