@@ -162,14 +162,10 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   `CVarCompare` rows whose write actions zdtd does not drive, and the
   `RandomRoll` seed. Anchors: `src/assets/requirements.zig`,
   `src/assets/buffs.zig` folds, `src/server/game/tick.zig` VM queries.
-  Before touching the tail, know what a re-measure needs: the row's resolve
-  counts are inherited and no tool computes the split. The blocker is the
-  requirement **name** to `Kind` mapping in `requirements.zig` (62 enum members,
-  but the XML spellings are not a plain field list), so a row-by-row census
-  needs that table extracted, or a small tool added that walks the stock files
-  through it. Measured shape of the stock 3.2.0 data meanwhile: distinct
-  requirement names in use are 29 in buffs.xml, 19 in items.xml and 22 in
-  progression.xml, `CVarCompare` and `ProgressionLevel` dominating each.
+  Re-censused 2026-09-28 against `require_parse.kindOf` (the name-to-Kind table
+  lives in `require_parse.zig`, not in the enum); GAP section 10 carries the
+  counts. The three unresolved names need, respectively, typed item metadata, a
+  catapult strain cvar and an ammo-stack quality input on the ctx.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
   already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing

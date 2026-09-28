@@ -3963,9 +3963,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`
     is `hasMatchingTag` (IL=53) with the stock defaults (`MatchAnyTags` is true
     from the ctor and no shipped row sets `match_all_tags`/`invert_tag_check`),
-    and `Ctx.tags` carries the tag set the caller's `GetValue` query passes, so
-    an untagged row matches every query and a tagged row never matches an empty
-    one. The tick now runs two queries like stock: the untagged max-stat/OT fold
+    and `Ctx.tags` carries the caller's query tag set, so an untagged row matches
+    every query and a tagged row never matches an empty one. The tick now runs two queries like stock: the untagged max-stat/OT fold
     and the `coredamageresist` armor fold
     (`Equipment::GetTotalPhysicalArmorRating` IL=887 ORs that tag into its
     passive-41 query, and `god` shows why the split matters: its untagged
@@ -3976,11 +3975,10 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     no longer inflate the **idle** regen total. Sprint leg closed 2026-09-17:
     `tickSurvival` queries `running` (buff+perk+item fold) and applies that OT
     against the Rules drain floor (`stamina_drain_per_second - stamina_ot_running`);
-    stage-3 hunger/thirst OT still replaces the floor and the running OT still
-    joins. Walk leg closed 2026-09-17: non-sprint `move_tag=.walking` queries
-    `walking` via the same `taggedStaminaOt` fold and joins the Rules regen
-    total (`stamina_regen_per_second + stamina_ot_bonus + walking OT`); idle
-    keeps ignoring tagged rows. Still open on tags: the attacking item's
+    stage-3 hunger/thirst OT still replaces the floor. Walk leg closed the same
+    day: non-sprint `move_tag=.walking` queries `walking` via the same
+    `taggedStaminaOt` fold and joins the Rules regen total; idle keeps ignoring
+    tagged rows. Still open on tags: the attacking item's
     `physicalDamageTypes` stay with the per-hit `armorMitigation` leg rather
     than the per-tick cache.
   - **buffs.xml is the larger half of the same gap and is now wired too
@@ -3989,29 +3987,34 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `buffs.zig` now shares `requirements.elementEnd`/`scanRequirements` and
     walks one `<effect_group>` level (stock keeps all 881 passive rows in
     groups and never nests one) plus a top-level fallback for hand-built or
-    modded bodies. Authoritative count: **130 applied tracked rows, 43 gated**,
-    of which **24 resolve and 19 refuse** (10/33 in round 14, 18/25 in round 15,
-    24/19 in round 16):
+    modded bodies. Count: **130 applied tracked rows, 43 gated, 24 resolve /
+    19 refuse**. Re-censused 2026-09-28 by requirement
+    **name** against the stock 3.2.0 config set and `require_parse.kindOf`: the
+    vocabulary tail is nearly closed - buffs.xml resolves 1381/1381 gated rows
+    and the tree leaves three names, 54 rows (`CompareItemMetaFloat` 50, plus
+    `CatapultStrainAmount` 3 and `RoundsInMagazine` 1), each needing an input
+    the ctx lacks. A resolved name is a lower bound: the larger tail is rows
+    whose kind exists but whose input is never written, or whose foreign target
+    the per-hit path does not supply - the row-action legs below:
     - resolve: `HasBuff`/`!HasBuff` (10 rows: buffCoffee, buffBeer,
-      buffBlackStrapCoffee, buffDesert_Storm_Stage01, buffSnow_Storm_Stage01),
+      buffBlackStrapCoffee, the two storm-stage buffs),
       `HoldingItemHasTags` 4 (round 15: the held item's `Tags` property, read
       each tick from the toolbelt slot, with `has_all_tags` supported),
       `SandboxOptionBool` 4 (round 15: the decoded sandbox code's option value,
       i.e. the `serverconfig` `SandboxCode`, falling back to the option default
       when the code does not carry it) and `ArmorGroupLowestQuality` 6 (round 16:
       items.xml `ArmorGroup` plus the lowest worn quality per group, exactly
-      `Equipment::ResetArmorGroups` IL=51 / `GetArmorGroupLowestQuality`).
+      `Equipment::ResetArmorGroups` IL=51).
     - refuse (fail closed, counted): `EntityTagCompare` 8 + `!EntityTagCompare`
-      3 (the attacker's tags: per-hit, not per-tick), `CVarCompare` 7,
-      `StatComparePercCurrentToModMax` 1. Ten of the originally-refused rows
-      carry `@cvar` values that fold 0 regardless, so the living behaviour delta
-      is smaller than the row count suggests.
+      3 (attacker tags: per-hit, not per-tick), `CVarCompare` 7,
+      `StatComparePercCurrentToModMax` 1. Ten carry `@cvar` values that fold 0
+      regardless, so the living delta is smaller than the count.
     Fixed by it: `buffCoffee` folded 0.2 **and** 0.1 StaminaChangeOT together
     (0.3) because its two rows are gated `!HasBuff buffHealWaterMax` and
     `HasBuff buffHealWaterMax`; `buffBikerSetBonus` summed all six
-    ArmorGroupLowestQuality tiers (1+2+3+4+5+6 = 21 physical resist) because
-    every tier row folded (round 16: two worn biker pieces at quality 5 and 3
-    now fold only the `Equals 3` row, so the set reads 3 instead of 21);
+    ArmorGroupLowestQuality tiers because every tier row folded (two worn
+    biker pieces at quality 5 and 3 now fold only the `Equals 3` row, so the
+    set reads 3 instead of 21);
     `buffHoldBreathAiming01` summed four rows (0.75)
     where stock picks the one matching the held weapon's perk and that perk's
     level (round 15: a hunting rifle plus perkDeadEye 5 folds only the
@@ -4031,12 +4034,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     constant, and `buffDrowning03`/`buffRadiation03`/`buffRingOfFireEffect` ramp
     the same way; `buffHoldBreathAiming01`'s two duration rows are mutually
     exclusive instead of summing.
-    Residual for the next pass: `StatComparePercCurrentToMax` landed in round
-    18 for Health/Stamina/Food/Water (the ctx carries the fractions and maxes,
-    and the stage rows plus the armor-status rows read them); and
-    `CVarCompare` landed in round 20 with the per-entity store, the
-    `@cvar` passive values and the `ModifyCVar`/`RemoveCVar` actions, so what is
-    left of that leg is the driving: most of the 2915 write rows hang off item
+    Left of that leg is the driving: most of the 2915 write rows hang off item
     and buff lifecycle events zdtd does not fire yet.
   - **`EntityTagCompare` + the StatCompare max family + `IsNight` (round 21,
     2026-09-12).** The entity's own class `Tags` (`entityclasses.xml`, resolved
