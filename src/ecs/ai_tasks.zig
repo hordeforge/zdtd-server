@@ -446,6 +446,10 @@ const AiCtx = struct {
             if (np.id < 0) {
                 np = nearestBotSnap(ctx.w, ctx.w.transform[s].x, ctx.w.transform[s].z, senseDistSq(ctx.w, s), -1);
             }
+            // Distance LOD throttles the *decision cadence* only
+            // (decision_cd -= dt * active_scale). Movement runs at the class
+            // speed: stock has no distance ramp, EntityAlive moves at its
+            // class speed whenever it is simulated (GAP section 8).
             ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else ctx.w.rules.ai.no_target_scale;
 
             // Ultra-far sleep: player exists but beyond `sleep_dist_mult` x full
@@ -1002,7 +1006,7 @@ fn runawayUpdate(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: 
     ai.path_goal_x = fx;
     ai.path_goal_z = fz;
     ai.has_path = true;
-    chaseAlongPath(w, s, ai, fx, fz, cspd * ai.active_scale, dt);
+    chaseAlongPath(w, s, ai, fx, fz, cspd, dt);
 }
 
 /// EAITerritorial::CanExecute: has home and outside leash; yields to sensed player.
@@ -1040,7 +1044,7 @@ fn territorialUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) vo
     ai.path_goal_x = ai.home_x;
     ai.path_goal_z = ai.home_z;
     ai.has_path = true;
-    chaseAlongPath(w, s, ai, ai.home_x, ai.home_z, cspd * ai.active_scale, dt);
+    chaseAlongPath(w, s, ai, ai.home_x, ai.home_z, cspd, dt);
 }
 
 /// EAIBase::Start hook. Wander picks a fresh destination and zeroes its run
@@ -1194,7 +1198,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
         }
     } else {
         ai.state = .chase;
-        chaseAlongPath(ctx.w, s, ai, np.px, np.pz, cspd * ai.active_scale, ctx.dt);
+        chaseAlongPath(ctx.w, s, ai, np.px, np.pz, cspd, ctx.dt);
     }
 }
 
@@ -1435,7 +1439,7 @@ fn approachSpotUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt: f32) v
         ai.state = .idle;
         return;
     }
-    chaseAlongPath(w, s, ai, ai.spot_x, ai.spot_z, cspd * ai.active_scale, dt);
+    chaseAlongPath(w, s, ai, ai.spot_x, ai.spot_z, cspd, dt);
 }
 
 /// EAIApproachDistraction::Update (asm.il:423700): walk to the dropped item the
@@ -1484,7 +1488,7 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
     ai.path_goal_x = w.transform[bs].x;
     ai.path_goal_z = w.transform[bs].z;
     ai.has_path = true;
-    chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd * ai.active_scale, dt);
+    chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd, dt);
     // EAIApproachDistraction::updatePath recalculates on its own cadence
     // (pathRecalculateTicks = 20 + rand(20), asm.il updatePath IL_0019/IL_001C),
     // not the generic chase throttle. Re-arm the cooldown after the shared
@@ -1517,7 +1521,7 @@ pub fn wanderUpdate(w: *World, s: Slot, ai: *c.ZombieAi, wspd: f32, dt: f32) voi
     // A* chase machinery (replan + waypoint follow, step_fn-gated), so a
     // wanderer detours around obstacles instead of sliding straight into
     // them. Without a step hook chaseAlongPath degenerates to the direct line.
-    chaseAlongPath(w, s, ai, ai.wander_tx, ai.wander_tz, wspd * ai.active_scale, dt);
+    chaseAlongPath(w, s, ai, ai.wander_tx, ai.wander_tz, wspd, dt);
 }
 
 /// EntityItem.tickDistraction (asm.il EntityItem:1341): dropped items carrying
@@ -2464,11 +2468,15 @@ test "system zombie wanders when no player sensed" {
     const x0 = w.transform[zs].x;
     const z0 = w.transform[zs].z;
     var t: f32 = 0;
+    var saw_wander = false;
     while (t < 3.0) : (t += 0.05) {
         _ = systemZombieAi(&w, 0.05);
+        // Movement runs at the class speed (no distance ramp), so a short
+        // destination can be reached and the task released inside the window;
+        // the wander is what matters, not that it is still active at 3 s.
+        if (w.zombie_ai[zs].active_task == .wander) saw_wander = true;
     }
-    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
-    try std.testing.expectEqual(c.AiState.wander, w.zombie_ai[zs].state);
+    try std.testing.expect(saw_wander);
     try std.testing.expect(!w.zombie_ai[zs].alert);
     // Drifted somewhere (xorshift destination is off-origin).
     const moved = @abs(w.transform[zs].x - x0) + @abs(w.transform[zs].z - z0);
@@ -2588,8 +2596,12 @@ test "configured wander floor never beats the entityclasses MoveSpeed" {
     const x0 = w.transform[zs].x;
     const z0 = w.transform[zs].z;
     var t: f32 = 0;
-    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
-    try std.testing.expectEqual(c.TaskId.wander, w.zombie_ai[zs].active_task);
+    var saw_wander = false;
+    while (t < 3.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].active_task == .wander) saw_wander = true;
+    }
+    try std.testing.expect(saw_wander);
     const moved = @abs(w.transform[zs].x - x0) + @abs(w.transform[zs].z - z0);
     // Class 0.2 -> 2.0 blocks/s with look pauses; a 50 floor would be 500/s.
     try std.testing.expect(moved > 0.1);
@@ -2608,7 +2620,6 @@ test "spawn zombie loot_list comes from class_table not scrap" {
     try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[zs2].loot_list);
 }
 test "system zombie approaches spot and clears on arrive" {
-    // No player → active_scale 0.1; short spot so arrive fits the budget.
     var w: World = .{};
     defer w.deinit();
     const z = w.spawnZombie(0, 70, 0, 40).?;
@@ -2618,10 +2629,14 @@ test "system zombie approaches spot and clears on arrive" {
     w.zombie_ai[zs].spot_z = 0;
     const x0 = w.transform[zs].x;
     var t: f32 = 0;
-    while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
-    try std.testing.expectEqual(c.TaskId.approach_spot, w.zombie_ai[zs].active_task);
+    var saw_approach = false;
+    while (t < 2.0) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].active_task == .approach_spot) saw_approach = true;
+    }
+    try std.testing.expect(saw_approach);
     try std.testing.expect(w.transform[zs].x > x0 + 0.2);
-    // ~2.5 m at chase*0.1 ≈ 0.22 m/s → clear within ~20 s.
+    // ~2.5 m at the class speed (no distance ramp) → clear within a few seconds.
     t = 0;
     while (t < 25.0 and w.zombie_ai[zs].has_spot) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.zombie_ai[zs].has_spot);
@@ -3134,4 +3149,27 @@ test "a flying zombie dives onto its target and lands the bite" {
     // The bite landed through the deferred accumulator.
     try std.testing.expect(w.health[ps].hp < hp0);
     try std.testing.expectEqual(c.AiState.attack, w.zombie_ai[zs].state);
+}
+
+test "chase movement is not scaled by the distance LOD band" {
+    // The LOD band scales `decision_cd` only. It used to scale the `speed`
+    // argument too, so a zombie that sensed a player between 15 and 64 blocks
+    // closed at 30% of its class speed; stock has no distance ramp
+    // (GAP section 8).
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    var moved: [2]f32 = undefined;
+    for ([_]f32{ 1.0, 0.3 }, 0..) |scale, i| {
+        w.transform[zs].x = 0;
+        w.zombie_ai[zs].active_scale = scale;
+        w.zombie_ai[zs].has_path = false;
+        w.zombie_ai[zs].clearPath();
+        chaseAlongPath(&w, zs, &w.zombie_ai[zs], 10, 0, 2.0, 0.5);
+        moved[i] = w.transform[zs].x;
+    }
+    // Half a second at 2 blocks/s either way: the band must not change it.
+    try std.testing.expectApproxEqAbs(moved[0], moved[1], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), moved[0], 0.2);
 }
