@@ -3987,30 +3987,28 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `buffs.zig` now shares `requirements.elementEnd`/`scanRequirements` and
     walks one `<effect_group>` level (stock keeps all 881 passive rows in
     groups and never nests one) plus a top-level fallback for hand-built or
-    modded bodies. Count: **130 tracked rows, 43 gated, 24 resolve / 19 refuse**.
-    Re-censused 2026-09-28 by requirement **name** against stock 3.2.0 and
+    modded bodies. Count: **130 tracked rows, 43 gated** (the per-kind split is superseded by the census below).
+    Re-censused 2026-09-28 by **name** against stock 3.2.0 and
     `require_parse.kindOf`: the vocabulary tail is nearly closed - buffs.xml
-    resolves 1381/1381, three names remain, 54 rows
-    (`CompareItemMetaFloat` 50, `CatapultStrainAmount` 3 and
-    `RoundsInMagazine` 1), each needing an input the ctx lacks. The 50 are one
-    item and one key - every row is `CompareItemMetaFloat key="charge"` on
-    `meleeWpnBatonT2StunBaton` against 1..5 - so the tail needs that one value,
-    laid out in the item-value codec, not the accessor IL. A resolved
-    name is a lower bound: the larger tail is rows whose kind exists but whose
-    input is never written, or whose foreign target the per-hit path omits:
-    - resolve: `HasBuff`/`!HasBuff` (10 rows: buffCoffee, buffBeer,
-      buffBlackStrapCoffee, the two storm-stage buffs),
-      `HoldingItemHasTags` 4 (round 15: the held item's `Tags` property, read
-      each tick from the toolbelt slot, with `has_all_tags` supported),
-      `SandboxOptionBool` 4 (round 15: the decoded sandbox code's option value,
-      i.e. the `serverconfig` `SandboxCode`, falling back to the option default
-      when the code does not carry it) and `ArmorGroupLowestQuality` 6 (round 16:
-      items.xml `ArmorGroup` plus the lowest worn quality per group, exactly
-      `Equipment::ResetArmorGroups` IL=51).
+    resolves 1381/1381; three names remain, 54 rows: `CompareItemMetaFloat` 50,
+    `CatapultStrainAmount` 3, `RoundsInMagazine` 1. The 50 are one
+    item and one key: `CompareItemMetaFloat key="charge"` on
+    `meleeWpnBatonT2StunBaton`, a five-tier charge ladder - so the tail needs
+    that one value, from the held item's ItemValue blob. The corpus cannot say where yet:
+    `ItemValue.il.txt` is accessor-only and no dump holds the writer, so the next step is a fuller dump. A
+    resolved name is a lower bound: the larger tail is rows whose kind exists
+    but whose input is never written, or whose foreign target the hit path
+    omits:
+    - resolve: `HasBuff`/`!HasBuff` (10 rows: the coffees and storm-stage buffs),
+      `HoldingItemHasTags` 4 (the held item's `Tags`, read each tick from the
+      toolbelt slot, `has_all_tags` supported), `SandboxOptionBool` 4 (the
+      decoded `serverconfig` `SandboxCode` option value, defaulting when the code
+      carries none) and `ArmorGroupLowestQuality` 6 (items.xml `ArmorGroup` plus
+      the lowest worn quality per group, `Equipment::ResetArmorGroups` IL=51).
     - refuse (fail closed, counted): `EntityTagCompare` 8 + `!EntityTagCompare`
-      3 (attacker tags: per-hit), `CVarCompare` 7, `StatComparePercCurrentToModMax`
-      1; ten carry `@cvar` values that fold 0 regardless, so the living delta is
-      under the count.
+      3 (attacker tags, per-hit), `CVarCompare` 7,
+      `StatComparePercCurrentToModMax` 1; ten carry `@cvar` values that fold 0
+      regardless, so the living delta is under the count.
     Fixed by it: `buffCoffee` folded 0.2 **and** 0.1 StaminaChangeOT together
     (0.3) because its two rows are gated `!HasBuff buffHealWaterMax` and
     `HasBuff buffHealWaterMax`; `buffBikerSetBonus` summed all six
