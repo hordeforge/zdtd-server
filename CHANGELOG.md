@@ -5,7 +5,41 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
-- Nothing yet.
+## [0.10.0] - 2026-09-28
+
+### Added
+
+- **Flying classes hold a cruise altitude.** A class whose row is an
+  `EntityFlying` shape, or carries the vulture tag, patrols at `fly_cruise_h`
+  above the terrain instead of walking it. The two new `[rules.ai]` fields are
+  documented in GAME_OPTIONS.
+- **A flying body dives at the target it chases.** The melee gate measures x/z
+  only, so a flyer inside reach used to bite from altitude. It now descends
+  onto the chase target, clamped above the terrain, and climbs back to cruise
+  when the chase ends.
+- **The director forces the radiated vulture on a mounted blood-moon target.**
+  Stock rolls a 50% swap when the targeted player rides a vehicle and does not
+  advance the bonus-loot counter; zdtd now does the same from a deterministic
+  draw.
+
+### Fixed
+
+- **The distance LOD band no longer scales movement speed.** It was passed as
+  the `speed` argument at every movement site, so a zombie sensing a player
+  between 15 and 64 blocks closed at 30% of its class speed and a body with no
+  target at 10%. Stock has no distance ramp. The band now throttles only
+  `decision_cd`.
+
+### Changed
+
+- **The periodic save is budgeted over ticks** at `save_chunks_per_tick`, and
+  the chunk drain is rate-limited instead of repeating on every continuation
+  tick. On the three-client Pregen06k01 bench `save_io` max fell from 3.9 s to
+  0.95 s and `save_encode` max from 3.4 s to 0.51 s.
+- **The join-time deco burst is paced and carries a `join_deco` APM section.**
+  The section showed the burst was never the cost (0.08 ms mean over three
+  joins); the remaining join stall is still unattributed and named as such in
+  the gap row.
 
 ## [0.8.0] - 2026-09-28
 
