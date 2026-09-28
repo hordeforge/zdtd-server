@@ -3,16 +3,17 @@
 > **What this is:** the version and compatibility policy - what SemVer means here, what is covered by compat promises (stock client, Zig, config, saves, wire), and the gate for tagging a release.
 > **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
 
-zdtd is pre-1.0 research software. `0.10.0` (src/version.zig + build.zig.zon,
+zdtd is pre-1.0 research software. `0.11.0` (src/version.zig + build.zig.zon,
 drift-checked by `make check`) is the development line and `v0.10.0` the latest
-release. A minor bump may land any time, with no API commitment.
+release. A minor bump may land at any time.
 Product tags: `v0.1.0`, `v0.1.1`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0`,
 `v0.7.0`, `v0.8.0`, `v0.10.0`.
 
-Two tags predate this policy. `v0.1.1` and `v3.1.0` point at one commit whose
-`src/version.zig` declares `0.2.0`, so read that commit as the 0.2.0 tree, not
-as a patch over `v0.1.0`. `v3.1.0` names a stock wire version, not a product
-release. `0.2.0` was never tagged, so its CHANGELOG entries shipped in `0.3.0`.
+Two tags predate this policy: `v0.1.1` and `v3.1.0` point at one commit
+declaring `0.2.0`, so read it as the 0.2.0 tree, not a patch over `v0.1.0`.
+`v3.1.0` names a stock wire version, not a product release. `0.2.0` and `0.9.0`
+are development lines no release carried: no tag, no dated section, no
+artifact; their entries shipped in `0.3.0` and `0.10.0`.
 
 ## Version policy
 
@@ -26,12 +27,12 @@ zdtd uses Semantic Versioning for the operator-facing server contract:
 - The Zig module facades under `src/*/root.zig` are development interfaces until
   1.0, and symbols described as proposed, experimental or internal are not
   stable. The plugin host is experimental (plugins are Wasm-only per
-  [ADR 0020](adr/0020-wasm-only-plugin-api.md)); there is no supported
-  out-of-tree plugin packaging or stable plugin ABI yet.
+  [ADR 0020](adr/0020-wasm-only-plugin-api.md)); no out-of-tree plugin
+  packaging or plugin ABI is supported yet.
 
-The product version and stock wire version are separate. `src/version.zig`
-contains both. `build.zig.zon` repeats the product version because Zig package
-metadata requires a literal; `make check` rejects drift between them.
+The product version and stock wire version are separate. `build.zig.zon`
+repeats the product version because Zig package metadata requires a literal;
+`make check` rejects drift between them.
 
 ## Compatibility contract
 
@@ -60,9 +61,9 @@ metadata requires a literal; `make check` rejects drift between them.
 - **Wire and saved data:** format changes are consumer-facing even when no Zig
   function signature changes. They must be listed under Breaking changes.
 
-Only the newest development release is supported during 0.x. There is no
-security backport branch or EOL schedule yet. Security fixes are disclosed in
-the changelog without exploit detail until operators have an upgrade.
+Only the newest development release is supported during 0.x, with no security
+backport branch or EOL schedule yet. Security fixes are disclosed in the
+changelog without exploit detail until operators have an upgrade.
 Reporting posture: [../SECURITY.md](../SECURITY.md). Attack-surface map:
 [THREAT_MODEL.md](THREAT_MODEL.md).
 

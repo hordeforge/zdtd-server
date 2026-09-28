@@ -5,6 +5,65 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Added
+
+- **An item's `charge` metadata survives the inventory codec.** Stock's
+  `SetItemMetaFloat key="charge"` rows maintain a value the ItemValue decoder
+  read off the client's stack and discarded, and both writers hardcoded a zero
+  metadata count, so the server's next equipment sync cleared it. The decode now
+  keeps the `charge` entry and the writer emits it, and the value rides the C2S
+  ingest onto the sim item. A slot with no charge still writes the empty tail,
+  so the bytes for an item that never carried one are unchanged. The value stays
+  derived, not persisted: the client re-sends an item's metadata in every
+  inventory transaction, so no save format version changes.
+- **Requirements can compare an item's `charge`.** `CompareItemMetaFloat`
+  (IL=57) parsed to a kind with no evaluator and always refused, so a stock
+  stun-baton tier row gated every copy of the item. The held item's charge now
+  resolves through the same compare the other scalar gates use, on the equip and
+  mod-equip paths. A row naming any other metadata key still refuses.
+
+### Fixed
+
+- **A failed ack send no longer loses the client's package for good.** The
+  LiteNet ack flag was cleared before the datagram left the process, so a send
+  that failed mid-way permanently acknowledged the sequence and the client's
+  retransmit hit the already-seen branch. The flag clears only after the
+  datagram is out.
+- **A failed player save no longer strands the session state.** `players_dirty`
+  cleared before `savePlayers`, so a failed write left the session inventory and
+  journal unwritten until the next mutation happened to set the flag again. It
+  now clears only on success.
+- **A file that cannot be read is named instead of skipped.** A mod config, a
+  mod `Localization.csv` and a sleeper prefab XML were all skipped on a read
+  fault, which is indistinguishable from the file being absent: the guest ran on
+  defaults, the client's cells fell back to base strings, or every sleeper
+  volume in the prefab vanished. Each names the path and the error. An oversized
+  mod config over the manifest's cap says so too, and the admin export buffer
+  answers the console when it cannot grow rather than looking like a hung
+  command.
+- **A full plugin command buffer is not dropped silently.** A guest whose
+  command could not be queued believes the effect happened; the near-capacity
+  warning is one-shot and may already be spent. The drop gets its own line with
+  the verb, the slot and the fill count. LiteNet drain faults are likewise
+  counted and rate-limited instead of passing unnoticed.
+- **The admin console keeps focus, history and failure copy straight.** The
+  command input and the refresh button were refocused after every await, which
+  stole focus from whatever the operator had moved on to; refocus is now scoped
+  to the control's own tab panel. Console history sticks to the bottom only
+  while the operator is already there, the APM window is fed on every snapshot
+  rather than only while its tab is visible, the failure banner names the way
+  out when auto-refresh is off, destructive verbs are confirmed for access and
+  data verbs as well, and the plugin/modlet wording matches what the server
+  actually loads.
+
+### Changed
+
+- **Unused public declarations are gone from the module facades.** The
+  `src/*/root.zig` interfaces are development interfaces until 1.0; the
+  duplicates and constants nothing referenced were removed, including the
+  second copy of the .NET `Random` in `subbiome_noise`, which now seeds from the
+  shared `GameRandom` so the RNG contract lives in one place.
+
 ## [0.10.0] - 2026-09-28
 
 ### Added
