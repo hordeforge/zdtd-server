@@ -4009,7 +4009,11 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     (18 uses in stock `items.xml`; `onSelfPrimaryActionRayHit` with `change="3"`
     gated `LTE 3` walks the ladder). zdtd implements no `SetItemMetaFloat`, so
     nothing would ever move the value: closing these 50 needs that action and
-    the state it writes, not only the read. A resolved name is a lower bound: the
+    the state it writes, not only the read. The action table is `TriggeredAction`
+    (`src/assets/triggered.zig:146`) - nine implemented actions plus an `other`
+    catch-all this one lands in - so the work is a new member with its
+    `parseTriggeredAction` / `evaluateTriggered` arms, per-slot metadata state,
+    then the requirement. A resolved name is a lower bound: the
     larger tail is rows whose kind exists but whose input is never written, or
     whose foreign target the hit path omits:
     - resolve: `HasBuff`/`!HasBuff` (10 rows: coffees, storm-stage buffs),

@@ -167,9 +167,14 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   count, then key string + `TypedMetadataValue` = `i32 typeTag` + Single/Int32/
   string). Round 44 found the real shape: no `charge` literal exists in the
   managed assembly, so the item's own `triggered_effect` rows write it via
-  `SetItemMetaFloat` (18 stock uses), which zdtd does not implement. Closing the
-  50 gates therefore means typed-metadata state per slot, then that action, then
-  `CompareItemMetaFloat` in the requirement vocabulary. The other two names
+  `SetItemMetaFloat` (18 stock uses), which zdtd does not implement. The action
+  table is `TriggeredAction` (`src/assets/triggered.zig:146`): modify_stats,
+  add/remove/add_or_remove_buff, modify_cvar, remove_cvar,
+  remove_all_negative, reset_progression, call_game_event, give_exp, and an
+  `other` catch-all that `SetItemMetaFloat` currently lands in. Closing the 50
+  gates therefore means a new `TriggeredAction` member plus its
+  `parseTriggeredAction`/`evaluateTriggered` arms, typed-metadata state per slot,
+  then `CompareItemMetaFloat` in the requirement vocabulary. The other two names
   still need a catapult strain cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
