@@ -456,15 +456,18 @@ pub fn countJoined(self: *const Game) u16 {
 /// only. A client-supplied display name must not mint admin rights when
 /// the peer already presented a platform id (same class of hole ADR 0038
 /// closed for player saves). Name-keyed list entries apply only to
-/// no-platform sessions (loadgen / legacy).
+/// no-platform sessions (loadgen / legacy), and only when the name cannot be
+/// read as a composite `platform:id` key: both key shapes live in one string
+/// namespace, so a login name of `EOS:0123` would otherwise resolve the
+/// composite row and inherit its level (admin_cmds.nameKeyIsListKey).
 pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
     if (c.puid_primary.get()) |pid| {
         var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
+        const key = std.fmt.bufPrint(&key_buf, "{s}{c}{s}", .{ pid.platform, admin_cmds.composite_id_sep, pid.id }) catch return 1000;
         if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;
         return 1000;
     }
-    if (c.name_len != 0) {
+    if (c.name_len != 0 and admin_cmds.nameKeyIsListKey(c.name[0..c.name_len])) {
         if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
     }
     return 1000;
@@ -472,15 +475,18 @@ pub fn permLevelOf(self: *const Game, c: *const Client) u16 {
 
 /// True when `c` hits `list` the way stock AdminUsers/Whitelist do:
 /// platform composite when the client presented one; name only for
-/// no-platform sessions. Used by the whitelist gate and ClientInfo admin
-/// flag so those surfaces cannot drift from `permLevelOf`.
+/// no-platform sessions, and never for a name that reads as a composite key
+/// (same namespace rule as `permLevelOf`). Used by the whitelist gate and
+/// ClientInfo admin flag so those surfaces cannot drift from `permLevelOf`.
 pub fn permissionListHit(self: *const Game, list: *const admin_cmds.PermissionList, c: *const Client) bool {
     _ = self;
     if (c.puid_primary.get()) |pid| {
         var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return false;
+        const key = std.fmt.bufPrint(&key_buf, "{s}{c}{s}", .{ pid.platform, admin_cmds.composite_id_sep, pid.id }) catch return false;
         return list.find(key) != null;
     }
-    if (c.name_len != 0) return list.find(c.name[0..c.name_len]) != null;
+    if (c.name_len != 0 and admin_cmds.nameKeyIsListKey(c.name[0..c.name_len])) {
+        return list.find(c.name[0..c.name_len]) != null;
+    }
     return false;
 }

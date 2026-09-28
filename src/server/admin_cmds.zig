@@ -186,6 +186,17 @@ pub const max_id: usize = 64;
 /// gate that overflow used to fail OPEN (the bufPrint catch skipped the
 /// gate). Sized from the wire lengths so the two can never drift.
 pub const max_composite_id: usize = @import("../wire/platform_user.zig").max_platform_len + 1 + max_id;
+/// Separator between platform and id in a composite list key (`EOS:0123`).
+pub const composite_id_sep: u8 = ':';
+
+/// True when `name` may be used as a name-keyed list lookup. A composite key
+/// and a display name share one string namespace, and a client picks its own
+/// display name (and can present no platform identity at all, since zdtd
+/// validates nothing platform-side), so a name that reads as a composite id
+/// would mint the level of whoever the composite row belongs to.
+pub fn nameKeyIsListKey(name: []const u8) bool {
+    return std.mem.indexOfScalar(u8, name, composite_id_sep) == null;
+}
 pub const max_reason: usize = 96;
 /// Player names (Client.name is 32 bytes; keep one byte of slack).
 pub const max_name: usize = 32;

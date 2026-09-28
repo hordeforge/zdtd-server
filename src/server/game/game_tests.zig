@@ -1595,6 +1595,30 @@ test "name-keyed whitelist entry does not admit a platform peer with that name" 
     _ = try g.attachJoinedClient(&cap);
 }
 
+test "a login name shaped like a composite id does not inherit that admin row" {
+    // Deny side, both list surfaces: a composite row (`EOS:0123`) and a
+    // display name share one key namespace, and a client chooses its own name
+    // while presenting no platform identity at all, so the name fallback must
+    // not resolve a composite row (admin_cmds.nameKeyIsListKey).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{});
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(g.admin_list.add("EOS:0123456789abcdef", 0));
+    try std.testing.expect(g.whitelist.add("EOS:0123456789abcdef", 0));
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    @memcpy(c.name[0..20], "EOS:0123456789abcdef");
+    c.name_len = 20;
+    try std.testing.expectEqual(@as(u16, 1000), g.permLevelOf(c));
+    try std.testing.expect(!g.permissionListHit(&g.admin_list, c));
+    try std.testing.expect(!g.permissionListHit(&g.whitelist, c));
+}
+
 test "admin add from player console cannot grant a more privileged level" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
