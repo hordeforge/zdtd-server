@@ -42,6 +42,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "HoldingItemBroken")) return .holding_item_broken;
     if (std.mem.eql(u8, name, "ItemHasTags")) return .item_has_tags;
     if (std.mem.eql(u8, name, "RequirementItemTier")) return .requirement_item_tier;
+    if (std.mem.eql(u8, name, "CompareItemMetaFloat")) return .compare_item_meta_float;
     if (std.mem.eql(u8, name, "RequirementItemModTier")) return .requirement_item_mod_tier;
     if (std.mem.eql(u8, name, "SandboxOptionBool")) return .sandbox_option_bool;
     if (std.mem.eql(u8, name, "GameStatBool")) return .game_stat_bool;

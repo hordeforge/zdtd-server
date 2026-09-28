@@ -115,6 +115,7 @@ pub fn syncEquipSlot(
                 sctx.item_active = (slot.flags & 1) != 0;
                 sctx.item_tags = new_def.tags;
                 sctx.item_quality = slot.quality;
+                sctx.item_meta_charge = slot.meta_charge;
                 // Item-parent curves index valueList by quality tier
                 // (minevents.md Execute IL=154).
                 sctx.item_level = slot.quality;
@@ -203,6 +204,7 @@ pub fn fireModEquipRows(
         .item_tags = def.tags,
         .item_quality = slot.quality,
         .item_level = slot.quality,
+        .item_meta_charge = slot.meta_charge,
         .cvars = &c.cvars,
     };
     var mod_buf: [4]requirements.NameLevel = undefined;

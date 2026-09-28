@@ -97,6 +97,15 @@ fn evalItemHasTags(r: Requirement, ctx: Ctx) Verdict {
 /// `RequirementItemTier::IsValid` (IL=36): compares `params.ItemValue.Quality`
 /// with the row's op/value. Null ItemValue refuses (no item fold in scope);
 /// a present quality of 0 still evaluates (IL compares the uint as float).
+/// `CompareItemMetaFloat` (IL=57): the held item's `charge` metadata against
+/// the row's value. The key is `charge` in every stock row, so the ctx carries
+/// that one value; a row naming another key is not stock-shaped and refuses.
+fn evalCompareItemMetaFloat(r: Requirement, ctx: Ctx) Verdict {
+    if (r.arg.len > 0) return .unsupported;
+    const charge = ctx.item_meta_charge orelse return .unsupported;
+    return verdict(compare(charge, r.op, operand(ctx, r)), r.negated);
+}
+
 fn evalRequirementItemTier(r: Requirement, ctx: Ctx) Verdict {
     const q = ctx.item_quality orelse return .unsupported;
     return verdict(compare(@floatFromInt(q), r.op, operand(ctx, r)), r.negated);
@@ -791,6 +800,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .holding_item_broken => return evalHoldingItemBroken(r, ctx),
         .item_has_tags => return evalItemHasTags(r, ctx),
         .requirement_item_tier => return evalRequirementItemTier(r, ctx),
+        .compare_item_meta_float => return evalCompareItemMetaFloat(r, ctx),
         .requirement_item_mod_tier => return evalRequirementItemModTier(r, ctx),
         .hit_location => return evalHitLocation(r, ctx),
         .sandbox_option_bool => return evalSandboxOptionBool(r, ctx),

@@ -147,6 +147,9 @@ pub const Kind = enum(u8) {
     is_secondary_attack,
     in_biome,
     holding_item_has_tags,
+    /// `CompareItemMetaFloat` (IL=57): the held ItemValue's `charge` metadata
+    /// against the row's value. Null = no ItemValue in scope, which refuses.
+    compare_item_meta_float,
     /// `TriggerHasTags`: the event's tag set (a damaged block's tags; the
     /// church-bell spawn row gates on it). Supplied by the block-damage path.
     trigger_has_tags,
@@ -388,6 +391,10 @@ pub const Ctx = struct {
     /// ItemValue in scope (buff/perk fold), which refuses; 0 is a valid quality
     /// and still evaluates (IL compares the uint as float).
     item_quality: ?u8 = null,
+    /// The held item's `charge` metadata (stock ItemValue typed metadata, the
+    /// value `SetItemMetaFloat key="charge"` writes). Null = no held ItemValue
+    /// in scope, which refuses; 0 is a valid value and still evaluates.
+    item_meta_charge: ?f32 = null,
     /// Installed mods for `RequirementItemModTier` (IL=84): each entry's
     /// `name` is the mod ItemClass name and `level` is its Quality. Null =
     /// no ItemValue in scope (buff/perk fold), which refuses; empty = ItemValue
@@ -1913,4 +1920,30 @@ test "_notAlerted projection answers for zombie victims" {
     try std.testing.expectEqual(Verdict.fail, evaluate(&.{row}, .{ .other_not_alerted = false }, &counts));
     // No projection and no store: refuses like any unscoped foreign read.
     try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{row}, .{}, &counts));
+}
+
+test "CompareItemMetaFloat reads the held item's charge metadata" {
+    // Stock stun-baton tier rows: `CompareItemMetaFloat key="charge"`, compared
+    // against 1..5 with Equals/GTE/LTE. The ctx carries the one key stock uses.
+    const r_gte = Requirement{ .kind = .compare_item_meta_float, .op = .ge, .value = 4 };
+    const r_eq5 = Requirement{ .kind = .compare_item_meta_float, .op = .eq, .value = 5 };
+    const r_lte3 = Requirement{ .kind = .compare_item_meta_float, .op = .le, .value = 3 };
+    var counts = Counts{};
+    // No held ItemValue in scope: refuse, never pass.
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{r_gte}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    // A reported charge resolves through the same compare the other scalar
+    // gates use.
+    const at3 = Ctx{ .item_meta_charge = 3 };
+    try testing.expectEqual(Verdict.fail, evaluate(&.{r_gte}, at3, &counts));
+    try testing.expectEqual(Verdict.pass, evaluate(&.{r_lte3}, at3, &counts));
+    const at5 = Ctx{ .item_meta_charge = 5 };
+    try testing.expectEqual(Verdict.pass, evaluate(&.{r_gte}, at5, &counts));
+    try testing.expectEqual(Verdict.pass, evaluate(&.{r_eq5}, at5, &counts));
+    // 0 is a real value, not "absent".
+    const at0 = Ctx{ .item_meta_charge = 0 };
+    try testing.expectEqual(Verdict.pass, evaluate(&.{r_lte3}, at0, &counts));
+    // A row naming another key is not stock-shaped, so it refuses.
+    const other_key = Requirement{ .kind = .compare_item_meta_float, .arg = "durability", .op = .le, .value = 1 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{other_key}, at5, &counts));
 }

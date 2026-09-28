@@ -850,6 +850,9 @@ pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part:
         const held = self.sim.inventory[ps].heldItem();
         if (held.count > 0) {
             if (self.items.byId(held.item_id)) |def| ctx.item_tags = def.tags;
+            // CompareItemMetaFloat reads the held item's `charge` metadata
+            // (the stun-baton tier rows).
+            ctx.item_meta_charge = held.meta_charge;
         }
     }
     // ProgressionLevel target=other reads the victim's perk ledger.
