@@ -194,7 +194,12 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   guarded by `inv.holding < inv_toolbelt` (the same access
   `heldWeaponIsRanged` uses, `src/server/game/buff_events.zig:1052`). So the
   action is the enum member, the parse arm, the result field, the
-  `evaluateRows` arm and that one write, and the gate after it. Persistence is the one
+  `evaluateRows` arm and that one write. The gate need not wait for those:
+  `charge` now survives ingest onto `InvSlot.meta_charge`, and stock's holder
+  resolves these item passives against the charge its own client carries, so
+  evaluating the 50 rows against the client-reported value is already closer than
+  refusing the gate - the action then keeps the server's copy current. So the
+  smaller gate piece can land first, alone. Persistence is the one
   risk to settle
   before adding the field: `InvSlot` serializes into a fixed stride and
   `readPersist` is length-tolerant, so `meta_charge` can stay **non-persisted**
