@@ -183,7 +183,13 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   (`src/wire/stock_inv.zig:924`) called from the C2S transaction
   (`src/server/c2s/inv_txn.zig:114`). So what remains is `InvSlot.meta_charge`
   plus that one conversion line, the action member, and the requirement - a
-  contained change, not a scattered one. The other two names still need a
+  contained change, not a scattered one. Persistence is the one risk to settle
+  before adding the field: `InvSlot` serializes into a fixed stride and
+  `readPersist` is length-tolerant, so `meta_charge` can stay **non-persisted**
+  and cost no ZPV bump - the client re-sends the value in every inventory
+  transaction, which makes the server's copy derived state rather than something
+  to restore across a restart. Challenge that reasoning if you think the charge
+  ladder must survive a restart on the server's own authority. The other two names still need a
   catapult strain cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
