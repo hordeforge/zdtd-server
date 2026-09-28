@@ -275,7 +275,7 @@ check-xml-audit: need-python3
 
 # Operator-binary smoke (CI after `make release`; also local release verification).
 smoke: release
-	bash scripts/smoke-release.sh
+	RELEASE_TARGET="$(RELEASE_TARGET)" bash scripts/smoke-release.sh
 
 # Modlet smoke: boot on a scratch game-dir with the fixture modlet, verify the
 # modlet scan + patched-config S2C cache, then the loadgen join when available.

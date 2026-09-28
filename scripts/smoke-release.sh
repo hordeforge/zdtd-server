@@ -7,6 +7,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Must match the default in scripts/release-build.sh and Makefile, so an
+# operator building for another arch is not failed by a stale x86_64 literal.
+release_target="${RELEASE_TARGET:-x86_64-linux-gnu}"
+
 bin=zig-out/bin/zdtd
 test -f "$bin" || { echo "smoke-release: missing $bin (run make release first)" >&2; exit 1; }
 test -x "$bin" || { echo "smoke-release: $bin is not executable" >&2; exit 1; }
@@ -73,8 +77,8 @@ if ! grep -q "binary_sha256=$sidecar_hash" zig-out/bin/buildinfo.txt; then
   echo "smoke-release: buildinfo.txt does not record binary_sha256=$sidecar_hash" >&2
   exit 1
 fi
-if ! grep -qx 'target=x86_64-linux-gnu' zig-out/bin/buildinfo.txt; then
-  echo "smoke-release: buildinfo.txt does not identify target=x86_64-linux-gnu" >&2
+if ! grep -qx "target=$release_target" zig-out/bin/buildinfo.txt; then
+  echo "smoke-release: buildinfo.txt does not identify target=$release_target" >&2
   exit 1
 fi
 
