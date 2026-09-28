@@ -173,13 +173,18 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   remove_all_negative, reset_progression, call_game_event, give_exp, and an
   `other` catch-all that `SetItemMetaFloat` currently lands in. Closing the 50
   gates therefore means a new `TriggeredAction` member plus its
-  `parseTriggeredAction`/`evaluateTriggered` arms, typed-metadata state per slot,
-  then `CompareItemMetaFloat` in the requirement vocabulary. Both ItemValue
-  writers hardcode a zero metadata count (`src/wire/stock_inv.zig:130` and
-  `:176`), so the encoder needs the tail too, or a server sync clears the value
-  it just read - the same echo-changes-the-item failure the `<stats>` comment
-  beside it already records. The other two names still need a catapult strain
-  cvar and an ammo-stack quality input.
+  `parseTriggeredAction`/`evaluateTriggered` arms, the value carried on the sim
+  item, then `CompareItemMetaFloat` in the requirement vocabulary. Landed so far:
+  the wire half, `StockSlot.meta_charge` read and written and round-trip tested
+  (cbf185d1), which the encoder tail makes byte-compatible for items with no
+  charge. Rounds 51-52 also answered where the action writes: the sim item is
+  `InvSlot` (`src/ecs/components.zig:838`), not the wire struct, and a client's
+  stacks reach it through the single conversion `stock_inv.toEcs`
+  (`src/wire/stock_inv.zig:924`) called from the C2S transaction
+  (`src/server/c2s/inv_txn.zig:114`). So what remains is `InvSlot.meta_charge`
+  plus that one conversion line, the action member, and the requirement - a
+  contained change, not a scattered one. The other two names still need a
+  catapult strain cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
   already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing
