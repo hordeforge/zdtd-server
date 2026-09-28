@@ -190,7 +190,11 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   absolute form with `CompareItemMetaFloat` gates, so an implementation that
   only adds would walk it wrong. The result flows out of `evaluateRows` as a
   `TriggeredResult` field (the evaluator never mutates the world) and the Game
-  side writes it to the triggering slot's `InvSlot`. Persistence is the one
+  side writes it to the held item - `self.sim.inventory[ps].slots[inv.holding]`,
+  guarded by `inv.holding < inv_toolbelt` (the same access
+  `heldWeaponIsRanged` uses, `src/server/game/buff_events.zig:1052`). So the
+  action is the enum member, the parse arm, the result field, the
+  `evaluateRows` arm and that one write, and the gate after it. Persistence is the one
   risk to settle
   before adding the field: `InvSlot` serializes into a fixed stride and
   `readPersist` is length-tolerant, so `meta_charge` can stay **non-persisted**
