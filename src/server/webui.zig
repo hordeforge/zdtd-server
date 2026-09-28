@@ -813,8 +813,9 @@ pub const Server = struct {
                 return;
             }
             // CSRF: session token for cookie sessions; shared secret only with
-            // header auth (machine clients). Same gate as /api/cmd.
-            const csrf = formField(body, "csrf") orelse {
+            // header auth (machine clients). Same gate and same field names as
+            // /api/cmd and /api/modlet.
+            const csrf = formField(body, "csrf") orelse formField(body, "token") orelse {
                 try self.httpRespond(&req, .forbidden, "text/plain; charset=utf-8", "sign-out request expired; return to the dashboard and try again\n", &.{});
                 return;
             };
@@ -880,7 +881,10 @@ pub const Server = struct {
                 // Fail closed (AGENTS rule 24): a page too small to hold the
                 // document omits it with a 500 instead of shipping cut JSON.
                 const js = renderStateJson(&body_buf, self) catch {
-                    try self.httpRespond(&req, .internal_server_error, "application/json; charset=utf-8", "{\"error\":\"state body too large\"}\n", &.{});
+                    // Same {ok,error,reply} envelope /api/cmd and /api/modlet
+                    // answer with, so one JSON reader handles every error body
+                    // on the /api/* surface.
+                    try self.httpRespond(&req, .internal_server_error, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"state body too large\",\"reply\":\"\"}\n", &.{});
                     return;
                 };
                 try self.httpRespond(&req, .ok, "application/json; charset=utf-8", js, &.{});
@@ -2049,11 +2053,12 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
     try self.httpRespond(req, .ok, "text/html; charset=utf-8", w.buffered(), &.{});
 }
 
-/// Refuse POST /api/modlet with a JSON error object (dashboard path).
+/// `{"ok":false,"error":...,"reply":""}` for a refused POST /api/modlet, the
+/// same shape `writeCmdError` writes for POST /api/cmd.
 fn writeModletError(w: *std.Io.Writer, msg: []const u8) !void {
     try w.writeAll("{\"ok\":false,\"error\":\"");
     try jsonEscapeWrite(w, std.mem.trim(u8, msg, " \t\r\n"));
-    try w.writeAll("\"}\n");
+    try w.writeAll("\",\"reply\":\"\"}\n");
 }
 
 /// `{"ok":true,"line":...,"reply":...}` for POST /api/cmd.
@@ -2520,6 +2525,38 @@ test "browser session rejects revoked and renewed cookies" {
     try std.testing.expect(!s.sessionValid());
 }
 
+test "logout accepts the token alias the other mutating routes take" {
+    // csrf, then token: both are the session token under the names
+    // /api/cmd and /api/modlet already accept, so one client helper signs out
+    // on all three routes.
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const login = "POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 12\r\n\r\ntoken=s3cr3t";
+    var req_buf: [256]u8 = undefined;
+
+    try testServeHttp(&s, login);
+    const token_a = s.session_token;
+    const by_csrf = try std.fmt.bufPrint(&req_buf, "POST /logout HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 37\r\n\r\ncsrf={s}", .{ token_a, token_a });
+    try testServeHttp(&s, by_csrf);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") != null);
+
+    try testServeHttp(&s, login);
+    const token_b = s.session_token;
+    const by_token = try std.fmt.bufPrint(&req_buf, "POST /logout HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 38\r\n\r\ntoken={s}", .{ token_b, token_b });
+    try testServeHttp(&s, by_token);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 303 ") != null);
+
+    // A wrong token is still refused: the alias is a name, not a bypass.
+    try testServeHttp(&s, login);
+    const token_c = s.session_token;
+    const wrong = try std.fmt.bufPrint(&req_buf, "POST /logout HTTP/1.1\r\nCookie: zdtd_webui={s}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 9\r\n\r\ntoken=nope", .{token_c});
+    try testServeHttp(&s, wrong);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
+    try std.testing.expect(s.sessionValid());
+    s.session_expires_ns = 0;
+}
+
 test "cookie session rejects shared secret as CSRF" {
     // A leaked --webui-secret must not forge POSTs against an operator's
     // browser cookie; only the per-session CSRF (or header auth) may.
@@ -2655,13 +2692,13 @@ test "POST /api/modlet toggles a modlet and answers JSON to the dashboard" {
     const req2 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ bad_csrf.len, bad_csrf });
     try testServeHttp(&s, req2);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"session expired or invalid; reload the dashboard and try again\"}") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"session expired or invalid; reload the dashboard and try again\",\"reply\":\"\"}") != null);
     try std.testing.expect(mst.isDisabled("UiMod"));
     const unknown = "csrf=s3cr3t&name=NoSuchMod&action=enable";
     const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ unknown.len, unknown });
     try testServeHttp(&s, req3);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 404 ") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"no such modlet\"}") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "{\"ok\":false,\"error\":\"no such modlet\",\"reply\":\"\"}") != null);
     // Callers without the JSON Accept keep the plain and HTML replies.
     const plain_body = "csrf=s3cr3t&name=UiMod&action=enable";
     const req4 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nAccept: text/plain\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ plain_body.len, plain_body });
