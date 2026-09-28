@@ -229,6 +229,22 @@ function flashChanges(region: HTMLElement): void {
     prevSignatures.set(region, next);
 }
 
+/** Return focus to a control after an await, unless the operator moved on while
+ * it ran: the scope is the control's tab panel, or its parent outside one, and
+ * a hidden panel is left alone so focus never lands on a control nobody can see. */
+function refocus(el: HTMLElement): void {
+    const panel = el.closest<HTMLElement>("[role=tabpanel]");
+    if (panel?.hidden === true) {
+        return;
+    }
+    const scope = panel ?? el.parentElement ?? el;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && !scope.contains(active)) {
+        return;
+    }
+    el.focus();
+}
+
 async function fetchState(): Promise<StateJson | null> {
     try {
         const res = await fetchWithTimeout(STATE_URL, {
@@ -294,7 +310,7 @@ async function postModlet(csrf: string, name: string, action: string): Promise<M
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: /api/modlet answers the documented {ok,reply,error} body (handleModletPost in webui.zig); only those fields are read
         const reply = (await res.json()) as ModletReply;
         if (!res.ok || reply.ok !== true) {
-            return { kind: "failed", note: `Modlet action failed (${reply.error ?? `HTTP ${res.status}`}; no change was applied. Retry.)` };
+            return { kind: "failed", note: `Modlet action failed (${reply.error ?? `HTTP ${res.status}`}; its outcome is unknown. Reload before retrying.)` };
         }
         return { kind: "ok" };
         // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: the failure is rendered inline in the modules pane as role=alert text
@@ -632,9 +648,12 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
         };
     }, []);
 
+    // Samples are fed on every snapshot, visible or not: the window stays
+    // continuous when the operator returns, instead of restarting from a
+    // two-minute-old trace that still reads as live.
     useEffect(() => {
+        showLatestApm(apm);
         if (visible) {
-            showLatestApm(apm);
             redrawChart();
         }
     }, [apm, visible]);
@@ -796,7 +815,9 @@ function ModuleTable({ modules }: { modules: Array<ModuleEntry> }): ComponentChi
                 {modules.length === 0 ? (
                     <TableRow>
                         <TableEmpty colSpan={3}>
-                            No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.
+                            No plugins loaded. A plugin is an add-on the operator installs and names in the console with
+                            {" "}
+                            <code className="font-mono text-num">plugin list</code>.
                         </TableEmpty>
                     </TableRow>
                 ) : (
@@ -845,7 +866,7 @@ function ModletTable({
                         <TableNumber data-label="#">{String(index + 1)}</TableNumber>
                         <TableRowHeader data-label="Modlet">
                             {modlet.name}
-                            {modlet.has_code ? <span className="text-muted-foreground font-sans text-body2"> (code mod: XML only)</span> : null}
+                            {modlet.has_code ? <span className="text-muted-foreground font-sans text-body2"> (ships a DLL, which this server does not load; its XML applies)</span> : null}
                         </TableRowHeader>
                         <TableNumber data-label="Version">{modlet.version}</TableNumber>
                         <TableCell data-label="State">
@@ -863,7 +884,7 @@ function ModletTable({
                                 <input type="hidden" name="csrf" value={csrf} />
                                 <input type="hidden" name="name" value={modlet.name} />
                                 <input type="hidden" name="action" value={modlet.disabled ? "enable" : "disable"} />
-                                <Button type="submit" variant="outline" size="lg" disabled={pending === modlet.name} aria-busy={pending === modlet.name}>
+                                <Button type="submit" variant="outline" size="lg" disabled={pending !== null} aria-busy={pending === modlet.name}>
                                     {modlet.disabled ? "Enable" : "Disable"}
                                     <span className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]"> {modlet.name}</span>
                                 </Button>
@@ -998,7 +1019,25 @@ const QUICK_COMMANDS: ReadonlyArray<{ line: string; label: string }> = [
     { line: "settime night", label: "set night" },
 ];
 
-const DESTRUCTIVE_VERBS = new Set(["shutdown", "killall", "ka", "kick", "kickall", "ban", "wipeplayer"]);
+// Verbs from admin.zig `usageFor` that interrupt a player, drop saved data, or
+// change access. Each is confirmed before it is sent.
+const DESTRUCTIVE_VERBS = new Set([
+    "shutdown",
+    "killall",
+    "ka",
+    "kill",
+    "kick",
+    "kickall",
+    "ban",
+    "unban",
+    "admin",
+    "whitelist",
+    "wipeplayer",
+    "setgamepref",
+    "sg",
+    "saveworld",
+    "sa",
+]);
 const UNREACHABLE_REPLY = "The command response was not received, so its outcome is unknown. Check the command history below before running it again.";
 
 function confirmDestructive(line: string): boolean {
@@ -1007,7 +1046,7 @@ function confirmDestructive(line: string): boolean {
         return true;
     }
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
-    return globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`);
+    return globalThis.confirm(`Run "${line}"?\n\nThis can interrupt players, change access, or erase saved data.`);
 }
 
 const DECLINED_REPLY = "Not run: the confirmation was declined or blocked by the browser, so nothing was sent. Run it again to be asked again.";
@@ -1036,6 +1075,9 @@ function validatedLine(input: HTMLInputElement, raw: string): LineDecision {
 // The input hint names real commands (help, status, settime day), not filler.
 // Only the placement is the page's: Input owns the field's own shape.
 const CMD_INPUT_CLASS = "flex-1 max-md:basis-full max-md:min-w-0";
+// One shape for the result block in every state, so the console panel does not
+// jump when a pending line is replaced by its output.
+const CMD_OUTPUT_CLASS = "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term max-h-60 whitespace-pre-wrap break-words";
 
 function QuickRow({ pending, onRun }: { pending: boolean; onRun: (line: string) => void }): ComponentChildren {
     return (
@@ -1085,8 +1127,9 @@ function CommandForm({
                     aria-describedby="cmd-help-inline"
                     autocomplete="off"
                     spellcheck={false}
+                    autocapitalize="none"
+                    autocorrect="off"
                     maxlength={MAX_CMD_LINE}
-                    required
                     readOnly={pending}
                     aria-busy={pending}
                 />
@@ -1099,13 +1142,13 @@ function CommandForm({
 
 function CommandOutput({ pending, outcome }: { pending: boolean; outcome: CommandOutcome | null }): ComponentChildren {
     if (pending) {
-        return <pre className="text-muted-foreground font-sans text-body2">Running command…</pre>;
+        return <pre className={`${CMD_OUTPUT_CLASS} text-term-faint`} tabindex={0}>Running command…</pre>;
     }
     if (outcome === null) {
         return null;
     }
     return (
-        <pre className={outcome.failed ? "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-bad max-h-60 whitespace-pre-wrap break-words" : "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words"} tabindex={0} data-command-error={outcome.failed ? "true" : undefined}>
+        <pre className={`${CMD_OUTPUT_CLASS} ${outcome.failed ? "text-term-bad" : "text-term-text"}`} tabindex={0} data-command-error={outcome.failed ? "true" : undefined}>
             <span className="text-term-faint">&gt; {outcome.line}</span>
             {"\n"}
             {outcome.text}
@@ -1129,10 +1172,27 @@ function CommandResult({ pending, outcome }: { pending: boolean; outcome: Comman
     );
 }
 
-function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren {
+const HISTORY_STICK_THRESHOLD_PX = 24;
+
+function ConsoleHistory({ lines, visible }: { lines: Array<string>; visible: boolean }): ComponentChildren {
+    const preRef = useRef<HTMLPreElement>(null);
+
+    // A new line belongs where a terminal puts it: at the bottom. Scrolling is
+    // left alone when the operator has scrolled up to read older output.
+    useEffect(() => {
+        const pre = preRef.current;
+        if (pre === null) {
+            return;
+        }
+        const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight <= HISTORY_STICK_THRESHOLD_PX;
+        if (atBottom) {
+            pre.scrollTop = pre.scrollHeight;
+        }
+    }, [lines, visible]);
+
     return (
         <div id="console-log" aria-label="Recent commands" role="region" tabindex={-1}>
-            <pre className="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabindex={0}>
+            <pre className="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabindex={0} ref={preRef}>
                 {lines.length === 0 ? (
                     <span className="text-term-faint font-sans text-body2">No commands run yet. Enter a command above and choose Run.</span>
                 ) : (
@@ -1144,9 +1204,10 @@ function ConsoleHistory({ lines }: { lines: Array<string> }): ComponentChildren 
 }
 
 /** The admin deck: stdout header, the command form, its result, the history. */
-function ConsoleDeck({ csrf, lines, pending, outcome, inputRef, onRun }: {
+function ConsoleDeck({ csrf, lines, visible, pending, outcome, inputRef, onRun }: {
     csrf: string;
     lines: Array<string>;
+    visible: boolean;
     pending: boolean;
     outcome: CommandOutcome | null;
     inputRef: RefObject<HTMLInputElement>;
@@ -1161,7 +1222,7 @@ function ConsoleDeck({ csrf, lines, pending, outcome, inputRef, onRun }: {
             <div className="px-5 py-4 max-md:p-3">
                 <CommandForm csrf={csrf} pending={pending} inputRef={inputRef} onRun={onRun} />
                 <CommandResult pending={pending} outcome={outcome} />
-                <ConsoleHistory lines={lines} />
+                <ConsoleHistory lines={lines} visible={visible} />
             </div>
         </Card>
     );
@@ -1181,7 +1242,7 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
         if (decision.kind !== "run") {
             if (decision.kind === "declined") {
                 setOutcome({ line: decision.line, text: DECLINED_REPLY, failed: true });
-                input.focus();
+                refocus(input);
             }
             return;
         }
@@ -1194,14 +1255,14 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
         }
         if (post.kind === "unreachable") {
             setOutcome({ line: decision.line, text: UNREACHABLE_REPLY, failed: true });
-            input.focus();
+            refocus(input);
             return;
         }
         setOutcome(post.outcome);
         if (!post.outcome.failed) {
             input.value = "";
         }
-        input.focus();
+        refocus(input);
         void reload();
     };
 
@@ -1215,6 +1276,7 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
                 <ConsoleDeck
                     csrf={csrf}
                     lines={lines}
+                    visible={visible}
                     pending={pending}
                     outcome={outcome}
                     inputRef={inputRef}
@@ -1458,6 +1520,20 @@ function useAutoRefresh() {
     return { autoEnabled, pageHidden, refreshNote, setRefreshNote };
 }
 
+/** Names the way out of a failed poll, so the operator is never promised a retry
+ * that only happens while auto-refresh is on. */
+function FailureBanner({ autoEnabled }: { autoEnabled: boolean }): ComponentChildren {
+    return (
+        <Alert variant="destructive" className="m-0">
+            <AlertDescription>
+                {autoEnabled
+                    ? "Live data is unavailable. Check the connection; retrying automatically."
+                    : "Live data is unavailable, and auto-refresh is off, so nothing will retry on its own. Press Refresh to try again."}
+            </AlertDescription>
+        </Alert>
+    );
+}
+
 function App(): ComponentChildren {
     const activeTab = useTabRouting();
     const { autoEnabled, pageHidden, refreshNote, setRefreshNote } = useAutoRefresh();
@@ -1492,7 +1568,7 @@ function App(): ComponentChildren {
         setRefreshNote("Refreshing…");
         const ok = await reload();
         refreshNowEl.disabled = false;
-        refreshNowEl.focus();
+        refocus(refreshNowEl);
         if (!ok) {
             setRefreshNote("Refresh failed - check the connection");
             return;
@@ -1507,11 +1583,7 @@ function App(): ComponentChildren {
         });
     }, [runRefresh]);
 
-    const banner = failed ? (
-        <Alert variant="destructive" className="m-0">
-            <AlertDescription>Live data is unavailable. Check the connection; retrying automatically.</AlertDescription>
-        </Alert>
-    ) : null;
+    const banner = failed ? <FailureBanner autoEnabled={autoEnabled} /> : null;
     let body: ComponentChildren;
     if (state !== null) {
         body = <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />;
