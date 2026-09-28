@@ -328,6 +328,46 @@ test "stock chat round-trips channel, sender, message and recipients" {
     try std.testing.expectEqual(@as(i32, 30), ch.recipients[1]);
 }
 
+/// `EnumGameMessages` (RE chat.md §3, dump of the enum in
+/// `il/full-v3.1.0/_global`): the message kind in the `NetPackageGameMessage`
+/// body. The server generates JoinedGame on `PlayerSpawnedInWorld`
+/// (EnterMultiplayer/JoinMultiplayer) and LeftGame on disconnect
+/// (server-lifecycle.md:343, `ConnectionManager.DisconnectClient`).
+pub const GameMessage = enum(u8) {
+    plain_text_local = 0,
+    entity_was_killed = 1,
+    joined_game = 2,
+    left_game = 3,
+    changed_team = 4,
+    chat = 5,
+    blocked_player_alert = 6,
+};
+
+/// NetPackageGameMessage body (RE protocol-packages.md §5.8, write IL=17):
+/// `msgType` u8 (EnumGameMessages) | `mainEntityId` i32 |
+/// `secondaryEntityId` i32. Nine bytes; the client resolves both ids to names
+/// itself, so the server rebuild is id-only. `FinishGameMessageServer` (IL=69)
+/// fans the body out unfiltered, sender included.
+pub fn buildGameMessageBody(buf: []u8, msg_type: GameMessage, main_entity_id: i32, secondary_entity_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeByte(@intFromEnum(msg_type));
+    try w.writeI32(main_entity_id);
+    try w.writeI32(secondary_entity_id);
+    return w.written();
+}
+
+test "game message body is the stock 9 byte id-only form" {
+    var buf: [16]u8 = undefined;
+    const joined = try buildGameMessageBody(&buf, .joined_game, 4711, -1);
+    try std.testing.expectEqual(@as(usize, 9), joined.len);
+    try std.testing.expectEqual(@as(u8, 2), joined[0]);
+    try std.testing.expectEqual(@as(i32, 4711), std.mem.readInt(i32, joined[1..5], .little));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, joined[5..9], .little));
+    // Stock's disconnect path is `ldc.i4.3` = LeftGame (chat.md §3).
+    const left = try buildGameMessageBody(&buf, .left_game, 4711, -1);
+    try std.testing.expectEqual(@as(u8, 3), left[0]);
+}
+
 test "stock chat global has no recipients and rejects a forged oversized list" {
     var buf: [128]u8 = undefined;
     const body = try buildStockChat(&buf, 0, 10, "global", &.{});

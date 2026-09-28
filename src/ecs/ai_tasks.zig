@@ -580,9 +580,15 @@ const AiCtx = struct {
 /// the floor for a class with no SightRange, or when no entityclasses.xml
 /// loaded (ADR 0021 decision 5).
 ///
-/// Note the search bound in `nearestPlayerSnap` stays on the Rules value: it is
-/// an outer bound over every entity, not a per-entity gate, and every stock
-/// SightRange sits under it.
+/// Note the search bound in `nearestPlayerSnap` currently stays on the Rules
+/// value instead of this one, which caps acquisition at 48 m. That is a real
+/// shortfall, not a safe outer bound: stock ships `SightRange` 70 on
+/// `animalZombieVulture` and 100 on `animalChickenHostile` (entityclasses.xml),
+/// so those two classes acquire a host bot at their own range
+/// (`nearestBotSnap` passes this value) but a real player only at 48 m.
+/// Closing it means using this value for the player scan too, which also has to
+/// keep the wider hearing radius alive (hearing passes walls and is not clamped
+/// by sight range), so it is tracked rather than half-applied here.
 pub fn senseDistSq(w: *const World, s: Slot) f32 {
     // A35 per-entity layer first: the def spawns carry SightRange onto the
     // entity, so a class outside the fixed class_table senses as itself too.

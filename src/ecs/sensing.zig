@@ -218,12 +218,14 @@ pub fn anyWithin(scan: *const PlayerScan, x: f32, z: f32, d2: f32) bool {
     return false;
 }
 
-/// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
-/// set, players who died during the active blood moon are excluded (stock
+/// Player positions for AI targeting / despawn. `for_ai_targets` drops every
+/// player a zombie may NOT acquire: the dead (stock `EAITarget.check` IL=71
+/// returns false for a dead entity, so a corpse is never a target) and the
+/// players who died during the active blood moon (stock
 /// EAISetNearestEntityAsTarget skips IsBloodMoonDead players, so the horde
-/// hunts the living); the despawn pass keeps them so a corpse still pins
-/// distant zombies.
-pub fn snapshotPlayers(w: *const World, out: *PlayerScan, skip_blood_moon_dead: bool) usize {
+/// hunts the living). The despawn pass passes false and keeps corpses, so a
+/// body still pins distant zombies.
+pub fn snapshotPlayers(w: *const World, out: *PlayerScan, for_ai_targets: bool) usize {
     var n: usize = 0;
     // Cached player group instead of a 512-slot scan; it is slot-ascending, so
     // the first 64 entries are the same 64 in the same order (nearest-player
@@ -231,7 +233,7 @@ pub fn snapshotPlayers(w: *const World, out: *PlayerScan, skip_blood_moon_dead: 
     for (query.groupSlice(w, .player)) |j| {
         if (n >= out.snaps.len) break;
         if (!w.mask[j].player or !w.mask[j].transform) continue;
-        if (skip_blood_moon_dead and w.player[j].is_blood_moon_dead) continue;
+        if (for_ai_targets and w.health[j].hp <= 0) continue;
         out.xs[n] = w.transform[j].x;
         out.zs[n] = w.transform[j].z;
         out.snaps[n] = .{
@@ -754,18 +756,22 @@ pub fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) voi
     }
 }
 
-test "blood-moon-dead players are skipped as AI targets but kept for despawn" {
+test "dead and blood-moon-dead players are skipped as AI targets but kept for despawn" {
     var w: World = .{};
     defer w.deinit();
     // spawnPlayer(x, y, z, peer_slot): second player must use peer 1, not peer 0
     // (peer 0 would replace the first body under the one-entity-per-peer rule).
-    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const live_id = w.spawnPlayer(0, 70, 0, 0).?;
     _ = w.spawnPlayer(1, 70, 5, 1).?;
-    const ps = w.playerByPeer(1).?;
-    w.player[ps].is_blood_moon_dead = true; // died during the horde
+    const dead = w.playerByPeer(1).?;
+    w.player[dead].is_blood_moon_dead = true; // died during the horde
     var scan: PlayerScan = .{};
+    // A plain death (not on a blood-moon night) still leaves hp 0 and the slot
+    // occupied, and stock never acquires a dead entity (EAITarget.check IL=71).
+    w.health[dead].hp = 0;
     const ai_n = snapshotPlayers(&w, &scan, true);
     try std.testing.expectEqual(@as(usize, 1), ai_n);
+    try std.testing.expectEqual(live_id, scan.snaps[0].id);
     const des_n = snapshotPlayers(&w, &scan, false);
     try std.testing.expectEqual(@as(usize, 2), des_n);
 }

@@ -283,6 +283,10 @@ pub const Game = struct {
     deflate_window: [wire_frame.DeflateFramer.window_len]u8 = undefined,
     /// Duplicate-id bitset for the same mapping (one bit per Block.MAX_BLOCKS id).
     nameid_seen: [packages.stock_nameid.max_blocks / 8]u8 = undefined,
+    /// Raw NameIdMapping scratch for the "items" NetPackageIdMapping row
+    /// (`config_files.sendItemIdMapping`). Sized by the cap, not the catalog;
+    /// an over-cap catalog skips the send rather than shipping a partial map.
+    item_idmap_buf: [game_config_files.max_item_idmap_len]u8 = undefined,
     /// Stable copy of the C2S payload under dispatch. Package.body slices alias
     /// this (or the original when oversized) for the whole handlePackage loop;
     /// mid-handler ACK drains must not overwrite the live body storage.
@@ -2483,7 +2487,7 @@ pub const Game = struct {
     }
 
     pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
-        return game_join.sendItemIdMapping(self, peer);
+        return game_config_files.sendItemIdMapping(self, peer);
     }
 
     /// Holding-only S2C (valid direction for stock clients).

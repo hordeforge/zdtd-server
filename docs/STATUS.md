@@ -22,6 +22,33 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Four stock-parity departures closed 2026-09-28**: each is a client-visible
+difference with a stock IL or RE anchor, not an internal tidying.
+The join shipped a 12-row `items` `NetPackageIdMapping` where stock ships the
+whole catalog (`ItemClass::createFullMappingForClients`, `ItemClass.il.txt`
+IL=31), and `GameManager::IdMappingReceived` (IL=0049-0065) **replaces** the
+client's `ItemClass::nameIdMapping` with whatever arrives rather than merging
+it; `sendItemIdMapping` now streams the full map from the loaded catalog through
+the same `DeflateFramer` slot the blocks map uses, sent directly after the
+blocks map where stock sends it (`RequestToEnterGame` IL_01E3-0216) instead of
+after GameStats. Dead players were valid AI targets: `EAITarget.check` (IL=71)
+refuses a dead entity, while `World.markPlayerDead` keeps `alive[]` true (it is
+slot occupancy) and the AI scan had no health gate, so every zombie in range
+walked to a fresh corpse; `snapshotPlayers` now drops `hp <= 0` players for the
+AI-targeting use while the despawn pass still sees them. Player-to-player
+replication ran only inside the join bundle and was gated on `view_radius`,
+where stock tracks `EntityPlayer` at `int.Max` for every player
+(`NetEntityDistribution..ctor`, `../7dtd-engine-research/docs/network/network.md:277`), so two players who joined
+apart stayed invisible to each other until one reconnected; the gate is gone in
+both directions. The server also never generated `NetPackageGameMessage`, so a
+joiner's `JoinedGame` (`PlayerSpawnedInWorld` step 3, `../7dtd-engine-research/docs/admin/server-lifecycle.md:343`)
+and a disconnect's `LeftGame` (`ConnectionManager.DisconnectClient`) reached no
+client; `packages.buildGameMessageBody` builds the stock 9-byte id-only body and
+`LeftGame` goes out before the `EntityRemove`, the order stock uses so the
+client can still resolve the name it prints. Gated by `game message body is the
+stock 9 byte id-only form`, `dead and blood-moon-dead players are skipped as AI
+targets but kept for despawn`, the extended items NameIdMapping assertions, and
+the `spawn-holding` scenario's far-peer assertion.
 **A placeable vehicle item spawns an owned vehicle 2026-09-28**: the stock
 `NetPackageVehicleSpawn` body is served authoritatively (placer ownership, the
 claimed class must be the vehicle that item places, reach, finite pose), so

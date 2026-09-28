@@ -402,7 +402,7 @@ so the stock client never sends them to us.
 
 | Package | Why |
 |---|---|
-| `NetPackageDynamicMesh` | Client-side destroyed-block geometry; no server source |
+| `NetPackageDynamicMesh` | Waived non-goal (`GAP_ANALYSIS` §2a.6), not a package without a source: `DynamicMeshServer.Update` (IL=452) does run on the dedicated server under `ConnectionManager.IsServer` and drives the chunk-destroyed geometry to clients on channel 1 (`../7dtd-engine-research/docs/world/dynamic-mesh.md` §5). zdtd generates no such mesh, so it has nothing to send; the earlier "no server source" wording was wrong and would hide a real work item |
 | `NetPackageEmitSmell` | Client-supplied AI stimulus; accepting it re-opens 1.3 |
 | `NetPackageAudio` | **Relayed since 2026-09-08** (was wrongly listed as a client-local sound cue). A client's `Audio.Manager::BroadcastPlay` falls through to `SendToServer` when it holds no `ServerAudio` (`Audio/Manager.il.txt:758-790`), and the dedicated server's `ProcessPackage` routes into `Audio.Server::Play`, which signals AI and relays a fresh package to every in-range player (`Audio/Server.il.txt:13-83` via `Audio.Client::Play`, `Client.il.txt:16`). 59 `BroadcastPlay` call sites include doors, storage, switches and locks, so dropping it left every other player in silence. zdtd now re-encodes and relays within interest range, excluding the sender; `signalOnly` bodies are the AI-stimulus form and are correctly not relayed (`Server.il.txt:29`) |
 | `NetPackageBossEvent` | Client-side boss HUD banner |

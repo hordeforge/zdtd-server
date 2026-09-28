@@ -42,6 +42,9 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
         // 2014542), and stock sends the mapping at this same point.
         try self.sendBlockIdMapping(peer);
+        // Stock order is blocks then items, back to back, before the
+        // localization and the xmls (`RequestToEnterGame` IL_01E3-0216).
+        try self.sendItemIdMapping(peer);
         // Stock order: NetPackageLocalization (IL_0222) before
         // SendXmlsToClient (IL_0242), so the client has the modlet names before
         // it renders anything from the catalogs.
@@ -103,6 +106,22 @@ pub fn handleEnter(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             return true;
         };
         if (self.rejectIfNotSender(c, peer.local_id, rep.entity_id, .none)) return true;
+        // Stock `PlayerSpawnedInWorld` step 3: an EnterMultiplayer /
+        // JoinMultiplayer respawn broadcasts `JoinedGame` to every client
+        // (server-lifecycle.md:343, `DisplayGameMessage(JoinedGame, entityId,
+        // -1, true)`), which is what prints "X has joined the game". Died /
+        // Teleport / Unknown reasons do not.
+        const enter_or_join = rep.reason == @intFromEnum(packages.RespawnType.enter_multiplayer) or
+            rep.reason == @intFromEnum(packages.RespawnType.join_multiplayer);
+        // Rate-gated like the verbatim relays: a spam loop of spawn confirms
+        // would otherwise turn one 20-byte C2S packet into an unfiltered
+        // reliable broadcast per client.
+        if (enter_or_join and c.entity_id > 0 and self.takeInvToken(c)) {
+            var gmb: [16]u8 = undefined;
+            if (packages.buildGameMessageBody(&gmb, .joined_game, c.entity_id, -1)) |gb| {
+                self.broadcast("NetPackageGameMessage", gb) catch {};
+            } else |_| {}
+        }
         for (&self.clients) |*cl| {
             if (cl.slot == c.slot or !cl.joined) continue;
             const op = cl.peer orelse continue;

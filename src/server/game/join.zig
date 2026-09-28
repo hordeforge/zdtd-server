@@ -279,7 +279,6 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
                 try self.broadcast("NetPackagePersistentPlayerState", pps);
             } else |_| {}
         }
-        try self.sendItemIdMapping(peer);
         try self.sendQuestNavObjects(peer, c.slot, eid);
         // Stock re-registers the live crates per joining player
         // (RefreshCrates, join step 11); the crate marker is a server push,
@@ -303,7 +302,7 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
         try self.sendStockEntitySpawns(peer, c, sx, sz);
         // Multiplayer bodies: every other player in view spawns to this
         // peer, and this peer's body spawns to every client that sees it.
-        try sendPlayerSpawns(self, peer, c, sx, sz);
+        try sendPlayerSpawns(self, peer, c);
         // Buffs already on the other players (their AddRemoveBuff relays
         // predate this peer).
         try self.sendBuffSync(peer, c);
@@ -836,17 +835,20 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
 /// Spawn connected players to each other (stock EntitySpawn with the player
 /// class + PlayerSpawnInfo). Without this, multiplayer stock clients never
 /// see each other's bodies: the mob spawn burst and the tick replicate path
-/// both skip players. The joiner receives every other player in its view;
-/// the joiner's own body goes to every client whose view covers it.
-pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {
-    const radius: i32 = if (c.view_radius < 1) self.view_radius else c.view_radius;
-    const pfx: f32 = @floatFromInt(px);
-    const pfz: f32 = @floatFromInt(pz);
+/// both skip players.
+///
+/// No distance gate, because stock has none: `NetEntityDistribution`'s config
+/// table gives `EntityPlayer` tracking distance `int.Max` (network.md:277-291),
+/// and `Add(entity)` runs `updatePlayerEntity` on every existing entry when the
+/// entity is a player, so every player is a tracked entity for every other
+/// player regardless of where they stand. Gating on `view_radius` here left two
+/// players who joined apart permanently invisible to each other - nothing
+/// re-runs this bundle until one of them reconnects.
+pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
     for (ecs.groupSlice(&self.sim, .player)) |i| {
         if (!self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
         const nid = self.sim.network_id[i].id;
         if (nid == c.entity_id or nid <= 0) continue;
-        if (!interest.inRange(pfx, pfz, self.sim.transform[i].x, self.sim.transform[i].z, radius)) continue;
         const owner_slot = self.sim.player[i].peer_slot;
         if (owner_slot < 0 or @as(usize, @intCast(owner_slot)) >= self.clients.len) continue;
         const owner = &self.clients[@intCast(owner_slot)];
@@ -909,14 +911,8 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         const opeer = cl.peer orelse continue;
         const os = self.sim.playerByPeer(ci) orelse continue;
         if (!self.sim.mask[os].transform) continue;
-        const oradius: i32 = if (cl.view_radius < 1) self.view_radius else cl.view_radius;
-        if (!interest.inRange(
-            self.sim.transform[os].x,
-            self.sim.transform[os].z,
-            self.sim.transform[js].x,
-            self.sim.transform[js].z,
-            oradius,
-        )) continue;
+        // No distance gate: see the doc comment above (stock tracks every
+        // player for every player at int.Max distance).
         // An existing peer's full window must not abort the joiner's bundle:
         // skip the announce and leave its known_entities unset, so the
         // replicate pass re-sends the spawn once that window drains (the same
@@ -996,29 +992,6 @@ pub fn sendPlayerVitals(self: *Game, peer: *ln_peer.Peer, c: *Client) !void {
         );
         try self.sendGame(peer, "NetPackageEntityStatChanged", body);
     }
-}
-
-pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
-    // Compact NameIdMapping: only ECS builtins that resolved to stock types (fits 8 KiB body).
-    // Full items.xml map is ~30–50 KiB uncompressed; stock client already has matching AssignIds
-    // from the same Config when game-dir is shared.
-    var rows: [12]packages.IdMappingEntry = undefined;
-    var n: usize = 0;
-    var id: u16 = 1;
-    while (id <= 12) : (id += 1) {
-        const st = self.items.stockTypeFor(id);
-        if (st == 0) continue;
-        const name = assets_items.builtinStockName(id) orelse continue;
-        rows[n] = .{ .id = st, .name = name };
-        n += 1;
-    }
-    if (n == 0) return;
-    var map_buf: [2048]u8 = undefined;
-    const payload = try packages.buildNameIdMappingPayload(&map_buf, rows[0..n]);
-    // Critical join package: a silent `catch return` here reported success to
-    // the join SM while the client never received the item id map.
-    const body = try packages.buildIdMappingBody(&self.body_buf, "items", payload);
-    try self.sendGameCritical(peer, "NetPackageIdMapping", body);
 }
 
 /// Holding-only S2C (valid direction for stock clients).

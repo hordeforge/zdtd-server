@@ -516,6 +516,17 @@ test "load stock items.xml when present" {
     const map = try t.writeNameIdMapping(&buf);
     try std.testing.expect(map.len > 16);
     try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, map[0..4], .little));
+    // The client REPLACES its whole `ItemClass::nameIdMapping` with this blob
+    // (GameManager::IdMappingReceived IL_0049-0065), so it has to carry every
+    // loaded item, not a sample: count matches the catalog and the rows land
+    // in item id space (Block.ItemsStartHere + 1 and up).
+    try std.testing.expectEqual(@as(i32, @intCast(t.stock_names.len)), std.mem.readInt(i32, map[4..8], .little));
+    try std.testing.expect(t.stock_names.len > 1000);
+    try std.testing.expectEqual(@as(i32, 65537), std.mem.readInt(i32, map[8..12], .little));
+    // Every stock name is far under 128 bytes, so the 7-bit length is one byte.
+    const name_len: usize = map[12];
+    try std.testing.expect(name_len < 0x80);
+    try std.testing.expectEqualStrings(t.stock_names[0], map[13 .. 13 + name_len]);
 }
 
 test "stock items.xml Stacknumber default and Extends resolution" {

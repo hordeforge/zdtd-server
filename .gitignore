@@ -43,6 +43,8 @@ assets/fixtures/assignids_v314.txt
 .ruff_cache/
 .opencode/
 .zdtd_agent_cache/
+# Build cache for a tree where a concurrent `make clean` owns .zig-cache
+.zcache/
 
 # Editor / agent scratch
 .claude.bak/

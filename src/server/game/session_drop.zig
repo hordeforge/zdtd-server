@@ -59,6 +59,15 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     if (self.sim.playerByPeer(slot)) |ps| {
         const nid = self.sim.network_id[ps].id;
         if (nid > 0) {
+            // Stock `ConnectionManager.DisconnectClient` broadcasts
+            // `EnumGameMessages.LeftGame` for the leaving entity BEFORE it
+            // removes the entity (IL_0184 vs IL_01C1 in
+            // `il/full-v3.1.0/_global/ConnectionManager.il.txt`), so the client
+            // can still resolve the name it prints. Same order here.
+            var gmb: [16]u8 = undefined;
+            if (packages.buildGameMessageBody(&gmb, .left_game, nid, -1)) |gb| {
+                self.broadcast("NetPackageGameMessage", gb) catch {};
+            } else |_| {}
             var rb: [16]u8 = undefined;
             const rm_body: ?[]const u8 = packages.buildRemoveBodyReason(&rb, nid, .despawned) catch null;
             if (rm_body) |rm| {

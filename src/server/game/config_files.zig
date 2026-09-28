@@ -39,6 +39,16 @@ const s2c_names = [_][]const u8{
     "XUi_InGame/templates", "XUi_InGame/windows", "XUi_InGame/xui",  "biomes",            "worldglobal",          "sandbox_overrides",
 };
 
+/// NetPackageIdMapping row name for the item id space (stock `ldstr items`,
+/// `RequestToEnterGame` IL_0207). One byte as a 7-bit length.
+const map_items_name = "items";
+
+/// Cap on the raw item NameIdMapping blob. The stock catalog lands near 40 KB;
+/// the cap only exists so a catalog that somehow explodes skips the send (the
+/// client then keeps the map it built from items.xml) instead of shipping a
+/// mapping the client reads as complete.
+pub const max_item_idmap_len: usize = 128 * 1024;
+
 /// One cached S2C row: raw-Deflate(patched xml). Empty = send name-only (-1).
 const Blob = struct {
     data: []u8 = &.{},
@@ -254,6 +264,52 @@ pub fn sendBlockIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
         "zdtd: blocks IdMapping objs={d} raw={d} wire={d}\n",
         .{ summary.count, summary.bytes, framed.len },
     );
+}
+
+/// Stock `ItemClass::createFullMappingForClients` (ItemClass.il.txt:4530,
+/// `nameToItem` -> `ItemData.Id` for every loaded item) ships the WHOLE item
+/// id space to the joining client, and `GameManager::IdMappingReceived`
+/// (GameManager.il.txt:9862 IL_0049-0065) REPLACES `ItemClass::nameIdMapping`
+/// wholesale with the blob that arrives - it is not merged into whatever the
+/// client parsed from items.xml. The old 12-row ECS-builtin stub therefore
+/// handed the client a mapping with 12 of ~1400 ids in it; the client recovers
+/// lazily (`ItemValue` IL_0309 re-adds an id it meets), so it mostly showed up
+/// as id drift on a modded catalog.
+pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
+    if (self.items.stock_names.len == 0) {
+        // No items.xml (offline/builtin catalogs): there is no full map to send
+        // and a header-only blob would leave the client with an EMPTY id space.
+        return;
+    }
+    const payload = self.items.writeNameIdMapping(self.item_idmap_buf[0..max_item_idmap_len]) catch |err| {
+        std.debug.print("zdtd: items IdMapping does not fit {d} bytes ({s}); skipping (the client keeps its local map)\n", .{ max_item_idmap_len, @errorName(err) });
+        return;
+    };
+    // NetPackageIdMapping body: name | i32 len | blob (asm.il 822416-822438).
+    // Stock's `get_Compress` is true (IL=2), so the row rides the DeflateFramer
+    // like the blocks mapping.
+    const body_len = 1 + map_items_name.len + 4 + payload.len;
+    var fr: wire_frame.DeflateFramer = undefined;
+    fr.begin(&self.body_buf, &self.deflate_window, 0, packages.idOf("NetPackageIdMapping").?, body_len) catch |err| {
+        std.debug.print("zdtd: items IdMapping frame init failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    const w = fr.writer();
+    w.writeByte(@intCast(map_items_name.len)) catch return error.Overflow;
+    w.writeAll(map_items_name) catch return error.Overflow;
+    w.writeInt(i32, @intCast(payload.len), .little) catch return error.Overflow;
+    w.writeAll(payload) catch return error.Overflow;
+    const framed = fr.finish() catch |err| {
+        std.debug.print("zdtd: items IdMapping deflate failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    self.sendFramedReliable(peer, "NetPackageIdMapping", framed, game_mod.critical_retry_budget_ns, true) catch |err| {
+        std.debug.print("zdtd: items IdMapping send failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    std.debug.print("zdtd: items IdMapping objs={d} raw={d} wire={d}\n", .{
+        self.items.stock_names.len, payload.len, framed.len,
+    });
 }
 
 test "deflateBlob rejects a blob past the cap instead of shipping it" {

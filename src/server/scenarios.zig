@@ -4738,13 +4738,24 @@ test "scenario a joiner sees what other players are holding" {
         g,
         cc.peer orelse return error.TestUnexpectedResult,
         cc,
-        @trunc(g.sim.transform[ps_c].x),
-        @trunc(g.sim.transform[ps_c].z),
     );
     const d_body = cap_a.findPkgIdEntity(spawn_id, cc.entity_id) orelse
         return error.TestUnexpectedResult;
     const d_held = playerSpawnHoldingType(d_body) orelse return error.TestUnexpectedResult;
     try std.testing.expect(d_held != 0);
+
+    // Distance must not suppress the announce. Stock's NetEntityDistribution
+    // config table tracks EntityPlayer at `int.Max` (network.md:277-291), so
+    // every player is a tracked entity for every other player wherever they
+    // stand; a view_radius gate here left two players who joined far apart
+    // permanently invisible to each other, since nothing re-runs this bundle
+    // until one of them reconnects.
+    const keep_x = g.sim.transform[ps_a].x;
+    g.sim.transform[ps_a].x = keep_x + 100000;
+    cap_a.clear();
+    try game_join.sendPlayerSpawns(g, cc.peer orelse return error.TestUnexpectedResult, cc);
+    try std.testing.expect(cap_a.findPkgIdEntity(spawn_id, cc.entity_id) != null);
+    g.sim.transform[ps_a].x = keep_x;
 
     // Player spawns are a first-join-only bundle: sendJoinBundle gates
     // sendPlayerSpawns on `first_join = !c.entered`, so a respawn does not
