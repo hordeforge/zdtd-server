@@ -270,6 +270,9 @@ pub const InitOptions = struct {
     /// `{}` = historic defaults.
     bot_config: @import("bot.zig").BotHostConfig = .{},
     view_radius: i32 = default_view_radius,
+    /// `ServerMaxAllowedViewDistance` (GamePrefs 190): the ceiling on a joining
+    /// client's requested chunk view, stock-clamped into 4..12.
+    server_max_view_distance: i32 = 12,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
     /// non-empty enables the stock login and the INADDR_ANY bind.

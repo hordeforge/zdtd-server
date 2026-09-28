@@ -22,6 +22,19 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**The client's chunk view distance is now the stock clamp 2026-09-28**: stock
+reads `ServerMaxAllowedViewDistance` (GamePrefs 190), clamps that pref into 4..12,
+then clamps the joining client's requested `chunkViewDim` into `[4, pref]`
+(`GameManager::RequestToSpawnPlayer`, GameManager.il.txt IL_0006-002A, so the IL
+outranks the narrative `[max(4,pref), min(12,pref)]` reading in protocol.md). zdtd
+applied neither: it capped every request at a hardcoded 8 and never read the pref
+at all, so a stock client asking for 10 or 12 had its mesh window silently shrunk
+and an operator's `ServerMaxAllowedViewDistance=4` did nothing. The clamp lives in
+`clampSpawnChunkViewDim` and the pref is a parsed serverconfig key. Gated by
+`spawn chunk view clamp follows the stock pref, not a hardcoded 8` and `parse
+ServerMaxAllowedViewDistance into the stock 4..12 range`. The wider window also
+widens zdtd's entity interest radius, which shares the one number; stock bounds
+that per entity type, recorded in the backlog.
 **Horde night and destroyed-wreck parity 2026-09-28**: two more client-visible
 departures closed. A blood moon now suspends the ordinary night enemy drip: stock
 demotes the biome enemy request to animals-only while

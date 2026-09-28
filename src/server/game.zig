@@ -494,6 +494,9 @@ pub const Game = struct {
     /// re-broadcasts when the target/on state changes, so turrets aim live).
     turret_sync_sent: [ecs.max_entities]TurretSyncSent = [_]TurretSyncSent{.{}} ** ecs.max_entities,
     view_radius: i32 = default_view_radius,
+    /// `ServerMaxAllowedViewDistance` (GamePrefs 190), the ceiling stock clamps
+    /// a joining client's requested `chunkViewDim` to.
+    server_max_view_distance: i32 = 12,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
     /// Effective server config (loaded file or struct defaults) for late
@@ -669,6 +672,7 @@ pub const Game = struct {
             .world = try world_store.World.init(allocator, world_dir),
             .stock_catalogs_requested = opts.game_dir != null or opts.config_dir != null,
             .view_radius = opts.view_radius,
+            .server_max_view_distance = opts.server_max_view_distance,
             .effective_config = opts.effective_config,
             .max_players = max_pl,
             .reserved_slots = opts.reserved_slots,

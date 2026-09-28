@@ -121,6 +121,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `ServerMaxPlayerCount` | 8 | 1..64 | GSI max + soft join cap |
 | `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
 | `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
+| `ServerMaxAllowedViewDistance` | 12 | 4..12 | GamePrefs 190: ceiling on a joining client's requested `chunkViewDim`; stock clamps the pref into 4..12 and then the request into `[4, pref]` (`GameManager::RequestToSpawnPlayer` IL_0006-002A, GameManager.il.txt) |
 | `ServerReservedSlots` | 0 | 0..64 | slots at the cap reserved for players with permission ≤ `ServerReservedSlotsPermission` (PlayerSlotsAuthorizer IL=174); 0 = disabled |
 | `ServerReservedSlotsPermission` | 0 | 0..255 | permission level qualifying for a reserved slot |
 | `ServerAdminSlots` | 0 | 0..64 | extra headroom for players with permission ≤ `ServerAdminSlotsPermission`; 0 = disabled |

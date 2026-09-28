@@ -66,6 +66,12 @@ pub const Config = struct {
     telnet_failed_logins_blocktime: u16 = 10,
     /// Align with Game/InitOptions default and chunk_stream_radius_min (7).
     view_radius: i32 = 7,
+    /// `ServerMaxAllowedViewDistance` = GamePrefs index 190, the ceiling stock
+    /// clamps a joining client's requested `chunkViewDim` to
+    /// (`GameManager::RequestToSpawnPlayer` IL_0006-0029 clamps the pref itself
+    /// into 4..12, then clamps the request into [4, pref]). Stock's own
+    /// serverconfig default is 12.
+    server_max_view_distance: i32 = 12,
     /// PlayerSlotsAuthorizer (IL=174): ServerReservedSlots(155) - slots at the
     /// cap reserved for players with permission <= ServerReservedSlotsPermission
     /// (156); ServerAdminSlots(157) - extra headroom for players with
@@ -231,6 +237,7 @@ pub const known_serverconfig_names = [_][]const u8{
     "TelnetFailedLoginLimit",
     "TelnetFailedLoginsBlocktime",
     "ViewRadius",
+    "ServerMaxAllowedViewDistance",
     "ServerReservedSlots",
     "ServerReservedSlotsPermission",
     "ServerAdminSlots",
@@ -519,6 +526,10 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "TelnetFailedLoginsBlocktime")) |v|
         cfg.telnet_failed_logins_blocktime = clampRangeNamed("TelnetFailedLoginsBlocktime", v, 0, 1440, cfg.telnet_failed_logins_blocktime);
     if (prop(raw, "ViewRadius")) |v| cfg.view_radius = @intCast(clampRangeNamed("ViewRadius", v, 1, 16, @intCast(cfg.view_radius)));
+    // GamePrefs 190: stock clamps the pref itself into 4..12 before using it as
+    // the ceiling on a client's requested chunk view (IL_0011-0020).
+    if (prop(raw, "ServerMaxAllowedViewDistance")) |v|
+        cfg.server_max_view_distance = @intCast(clampRangeNamed("ServerMaxAllowedViewDistance", v, 4, 12, @intCast(cfg.server_max_view_distance)));
     // PlayerSlotsAuthorizer tiers (0 = disabled).
     if (prop(raw, "ServerReservedSlots")) |v| cfg.reserved_slots = clampU8Named("ServerReservedSlots", v, 0, 64, cfg.reserved_slots);
     if (prop(raw, "ServerReservedSlotsPermission")) |v| cfg.reserved_slots_permission = clampU8Named("ServerReservedSlotsPermission", v, 0, 255, cfg.reserved_slots_permission);
@@ -1043,6 +1054,7 @@ test "known_serverconfig_names covers every applied prop key" {
         "TelnetFailedLoginLimit",
         "TelnetFailedLoginsBlocktime",
         "ViewRadius",
+        "ServerMaxAllowedViewDistance",
         "ServerReservedSlots",
         "ServerReservedSlotsPermission",
         "ServerAdminSlots",
@@ -1133,4 +1145,32 @@ test "BuildCreate and CameraRestrictionMode come from serverconfig" {
     try std.testing.expect(cfg2.air_drop_marker);
     try std.testing.expectEqual(@as(u8, 0), cfg2.drop_on_quit);
     try std.testing.expect(cfg2.biome_progression);
+}
+
+test "parse ServerMaxAllowedViewDistance into the stock 4..12 range" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="ServerMaxAllowedViewDistance" value="9"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(i32, 9), cfg.server_max_view_distance);
+
+    const low_src =
+        \\<ServerSettings>
+        \\  <property name="ServerMaxAllowedViewDistance" value="1"/>
+        \\</ServerSettings>
+    ;
+    try io_fs.writeFile(path, low_src);
+    var low = try loadFromPath(std.testing.allocator, path);
+    defer low.deinit();
+    // Stock clamps the pref itself into 4..12 before using it (IL_0011-0020).
+    try std.testing.expectEqual(@as(i32, 4), low.server_max_view_distance);
 }

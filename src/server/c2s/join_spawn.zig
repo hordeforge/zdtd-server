@@ -13,19 +13,33 @@ const ecs = @import("../../ecs/root.zig");
 const clock = @import("../../util/clock.zig");
 const game_player = @import("../game/player.zig");
 
-/// Upper bound on C2S RequestToSpawnPlayer.chunkViewDim (viewDist 8 mesh core).
-pub const max_spawn_chunk_view_dim: i32 = 8;
+/// Stock `GameManager::RequestToSpawnPlayer` floor for the client's requested
+/// `chunkViewDim` (`Mathf.Clamp(_chunkViewDim, 4, pref190)`, GameManager.il.txt
+/// IL_0021-002A). The ceiling is `ServerMaxAllowedViewDistance` (GamePrefs 190),
+/// itself clamped into 4..12 at IL_0011-0020.
+pub const min_spawn_chunk_view_dim: i32 = 4;
+
+/// Stock's clamp for a joining client's requested chunk view:
+/// `Mathf.Clamp(_chunkViewDim, 4, pref190)` with pref190 already clamped into
+/// 4..12 (`GameManager::RequestToSpawnPlayer`, GameManager.il.txt
+/// IL_0006-002A). `requested < 1` is not a stock form; zdtd reads it as "use
+/// the server's own radius", which is why it is resolved before the clamp.
+pub fn clampSpawnChunkViewDim(requested: i32, server_max: i32, server_view_radius: i32) i32 {
+    const ceiling = @max(min_spawn_chunk_view_dim, server_max);
+    const dim = if (requested < 1) server_view_radius else requested;
+    return @max(min_spawn_chunk_view_dim, @min(dim, ceiling));
+}
 
 /// True when `name` is a spawn-player package and was handled.
 pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     const sp = self.world.primarySpawn();
     if (std.mem.eql(u8, name, "NetPackageRequestToSpawnPlayer")) {
         if (packages.parseRequestToSpawnPlayer(body)) |req| {
-            // chunkViewDim is in chunks; clamp for reliable window (join uses ≤2).
-            var dim: i32 = req.chunk_view_dim;
-            if (dim < 1) dim = self.view_radius;
-            dim = @min(dim, max_spawn_chunk_view_dim);
-            c.view_radius = dim;
+            // chunkViewDim is in chunks. Stock clamps the client's request into
+            // [4, ServerMaxAllowedViewDistance] (GameManager.il.txt
+            // IL_0021-002A); the old hardcoded cap of 8 silently shrank a stock
+            // client asking for 10 or 12 and ignored the operator's pref.
+            c.view_radius = clampSpawnChunkViewDim(req.chunk_view_dim, self.server_max_view_distance, self.view_radius);
         } else |_| {
             c.view_radius = self.view_radius;
         }
@@ -191,4 +205,18 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
         return true;
     }
     return false;
+}
+
+test "spawn chunk view clamp follows the stock pref, not a hardcoded 8" {
+    // IL: pref190 (ServerMaxAllowedViewDistance) is clamped into 4..12, then the
+    // client's chunkViewDim is clamped into [4, pref190].
+    try std.testing.expectEqual(@as(i32, 12), clampSpawnChunkViewDim(12, 12, 7));
+    try std.testing.expectEqual(@as(i32, 10), clampSpawnChunkViewDim(10, 12, 7));
+    try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(1, 12, 7)); // floor
+    try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(9, 4, 7)); // operator ceiling
+    // A request below 1 is zdtd's "server default" form, then clamped.
+    try std.testing.expectEqual(@as(i32, 7), clampSpawnChunkViewDim(0, 12, 7));
+    try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(0, 4, 7));
+    // A pref outside the stock range cannot widen the clamp.
+    try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(9, 0, 7));
 }

@@ -126,6 +126,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       EntityVehicle int.Max; zdtd uses one `view_radius` for every kind
       (`src/server/game/replicate.zig:92`). A parked vehicle is unloaded past
       the radius where stock never unloads it, and items stream 3.5x too far.
+      Closing it means splitting one number into two: `view_radius` now carries
+      the client's own `chunkViewDim` (stock's chunk streaming window, clamped
+      into 4..12 by `ServerMaxAllowedViewDistance` since 2026-09-28) and the
+      entity interest radius, which stock bounds per entity type.
 - [x] **Destroyed vehicles and turrets are never removed from observers** -
       closed 2026-09-28: `DamageResult.destroyed_slot` reports the victims
       `World.damageFrom` destroys outright and the damage and explosion paths

@@ -751,6 +751,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .language = cfg.language,
         .play_group = cfg.play_group,
         .view_radius = cfg.view_radius,
+        .server_max_view_distance = cfg.server_max_view_distance,
         .max_players = cfg.max_players,
         .reserved_slots = cfg.reserved_slots,
         .reserved_slots_permission = cfg.reserved_slots_permission,
