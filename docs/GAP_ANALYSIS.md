@@ -3991,19 +3991,22 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     Re-censused 2026-09-28 by **name** against stock 3.2.0 and
     `require_parse.kindOf`: the vocabulary tail is nearly closed - buffs.xml
     resolves 1381/1381; three names remain, 54 rows: `CompareItemMetaFloat` 50,
-    `CatapultStrainAmount` 3, `RoundsInMagazine` 1. The 50 are one
-    item and one key: `CompareItemMetaFloat key="charge"` on
+    `CatapultStrainAmount` 3, `RoundsInMagazine` 1. The 50 are one item and one
+    key: `CompareItemMetaFloat key="charge"` on
     `meleeWpnBatonT2StunBaton`, a five-tier charge ladder - so the tail needs
-    that one value, from the held item's ItemValue blob. The corpus cannot say where yet:
-    `ItemValue.il.txt` is accessor-only and no dump holds the writer, so the next step is a fuller dump. A
-    resolved name is a lower bound: the larger tail is rows whose kind exists
-    but whose input is never written, or whose foreign target the hit path
-    omits:
-    - resolve: `HasBuff`/`!HasBuff` (10 rows: the coffees and storm-stage buffs),
+    one value, from the held item's ItemValue blob. The corpus cannot yet
+    say where: the research `ItemValue.Write` entry delegates recursively, the
+    IL dump is accessor-only, and no file in `il/full-v3.2.0/_global` holds the
+    metadata writer, so closing these 50 needs a fuller ItemValue dump, not a
+    guessed layout.
+    A
+    resolved name is a lower bound: the larger tail is rows whose kind exists but
+    whose input is never written, or whose foreign target the hit path omits:
+    - resolve: `HasBuff`/`!HasBuff` (10 rows: coffees, storm-stage buffs),
       `HoldingItemHasTags` 4 (the held item's `Tags`, read each tick from the
       toolbelt slot, `has_all_tags` supported), `SandboxOptionBool` 4 (the
-      decoded `serverconfig` `SandboxCode` option value, defaulting when the code
-      carries none) and `ArmorGroupLowestQuality` 6 (items.xml `ArmorGroup` plus
+      decoded `serverconfig` `SandboxCode` value, defaulting when absent) and
+      `ArmorGroupLowestQuality` 6 (items.xml `ArmorGroup` plus
       the lowest worn quality per group, `Equipment::ResetArmorGroups` IL=51).
     - refuse (fail closed, counted): `EntityTagCompare` 8 + `!EntityTagCompare`
       3 (attacker tags, per-hit), `CVarCompare` 7,
