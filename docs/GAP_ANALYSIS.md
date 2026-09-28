@@ -4672,9 +4672,9 @@ a finer server encoding.
   stall is boot/stream work, not a refused join), so the residual stands. Its
   section breakdown names two offenders and clears the rest: `join` max 8.8 s
   (the synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over
-  84 periodic saves, `save_encode` 3.4 s of it, both on the tick thread), while
+  84 saves, 3.4 s of it `save_encode`, both on the tick thread), while
   `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
-  the ECS sim stays under 6 ms. Next pass: pace the periodic save per tick as
+  the ECS sim stays under 6 ms. Next pass: pace the periodic save as
   `join_drain` paces the drain. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
   same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
   p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
