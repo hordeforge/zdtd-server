@@ -163,8 +163,7 @@ def extract_stock_names(config_dir):
 def strip_zig_line(line):
     """Remove string literals and comments so brace counting is accurate."""
     line = re.sub(r'"(?:[^"\\]|\\.)*"', '""', line)
-    line = re.sub(r"//.*$", "", line)
-    return line
+    return re.sub(r"//.*$", "", line)
 
 
 def production_literals(path):
@@ -208,14 +207,14 @@ def audit_coverage(game_dir, audit_path):
     with open(audit_path, "r", errors="replace") as fh:
         doc = fh.read()
     section = doc.split("## Per-file coverage", 1)[1].split("\n## ", 1)[0]
-    doc_files = set(
+    doc_files = {
         m.group(1)
         for m in re.finditer(r"^\|\s*`?([A-Za-z0-9_.]+\.xml)`?\s*\|", section, re.M)
-    )
-    disk_files = set(
+    }
+    disk_files = {
         f for f in os.listdir(game_dir)
         if f.endswith(".xml") and os.path.isfile(os.path.join(game_dir, f))
-    )
+    }
     missing_in_doc = disk_files - doc_files
     stale_in_doc = doc_files - disk_files
     ok = True

@@ -122,7 +122,7 @@ pub const Bot = struct {
 
 One read-only snapshot is the whole read path. The guest calls `zdtd_sense(ptr, len, token)` and the host writes a flat little-endian buffer capped at `host_sense_max` = 2048 bytes (mods/fps_bot/fps_bot.c:53; src/plugin/wasm.zig:88). The `token` argument is unused; the server installs `wasmSense` as the context's `sense_fn` once at construction (src/plugin/wasm.zig:122; src/server/game.zig:772).
 
-The payload contract, verbatim (src/server/game/bot.zig:91):
+The payload contract, verbatim (src/server/game/bot.zig:85):
 
 ```zig
 pub const sense_record_len: usize = 40;

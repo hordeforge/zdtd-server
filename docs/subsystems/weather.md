@@ -107,10 +107,9 @@ pub const ticks_per_hour: u64 = 1000;
 
 `timeOfDay` reproduces `SkyManager.TimeOfDay` as `(timeOfDay % 24000) / 1000` (`src/world/sky.zig:23`). `sunMoonTarget` maps day hours into `[0, 0.5]` and night hours through the `24 - dusk` window into `[0.5, 1]`, reaching 0 at dawn, 0.5 at dusk and 1.0 at the next dawn (`src/world/sky.zig:36`). It is used directly with no per-tick state, which the comments record as a deliberate deviation from stock's `Lerp(0.05)` smoothing, worth about two minutes of lag and invisible to the day curve because both sides of the dawn discontinuity are 0.5 (`src/world/sky.zig:32`). `dayPercent` is the stock `CalcDayPercent` curve over that target: 0.5 at dawn and dusk, 1.0 at 13:00, 0.0 around 01:00 (`src/world/sky.zig:52`). `ambientLuma` applies the stock `GetLightLevel` ambient shaping `AmbientTotal^0.6 * 0.5` to that day percent (`src/world/sky.zig:67`). The client-only `isAllTimeNight` setting is not modeled (`src/world/sky.zig:51`).
 
-The moon fold is slice 2, driven by the pinned seven-phase tables (`src/world/sky.zig:123`):
+The moon fold is slice 2, driven by the pinned seven-phase brightness table (`src/world/sky.zig:123`):
 
 ```zig
-pub const moon_phases = [_]f32{ 0.05, 0.35, 0.55, 0.70, 1.40, 1.63, 1.82 };
 pub const moon_brights = [_]f32{ 1.0, 0.65, 0.45, 0.25, 0.40, 0.60, 0.90 };
 ```
 

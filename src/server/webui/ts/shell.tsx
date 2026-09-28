@@ -208,7 +208,7 @@ function flashChanges(region: HTMLElement): void {
     const changed: Array<HTMLElement> = [];
     let index = 0;
     for (const node of nodes) {
-        next.set(String(index), node.textContent ?? "");
+        next.set(String(index), node.textContent);
         if (prev !== undefined && prev.size > 0 && prev.get(String(index)) !== next.get(String(index))) {
             changed.push(node);
         }

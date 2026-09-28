@@ -29,4 +29,27 @@ select = [
     "LOG", # flake8-logging
     "G",   # flake8-logging-format
     "PGH", # pygrep-hooks
+    "C4",  # comprehensions
+    "SIM", # flake8-simplify: SIM115 caught 16 leaked file handles in the gate scripts
+    "RET", # return-flow (the assignments a bare `return` made redundant)
+    "TID", # tidy-imports: no parent-relative imports, so a gate module stays importable
+    "ICN", # conventional import aliases
+    "Q",   # quotes: the tree is double-quoted throughout
+    "RSE", # unused parens
+    "SLF", # private member access
+    "FBT", # boolean trap
+    "ASYNC",
+    "S",   # bandit: the security category, previously off entirely
 ]
+
+[lint.per-file-ignores]
+# wire_order_mutants.py:376 branches on args.file to pick the target list, and
+# SIM108's one-line ternary for it is longer and less readable than the block.
+# It also shells out to `git` / `zig` on purpose, with a literal argument list
+# (no shell=True, nothing interpolated from a scanned file). S603 asks for that
+# argument list to be re-read by hand; S607 wants an absolute interpreter path,
+# which would break on any machine where the toolchain is not at a fixed
+# location. Every other S rule stays on for both files.
+"tools/wire_order_mutants.py" = ["SIM108", "S603", "S607"]
+# Same subprocess rationale as above, for the `git ls-files` call.
+"tools/provenance_scan.py" = ["S603", "S607"]

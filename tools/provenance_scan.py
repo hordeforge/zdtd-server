@@ -21,6 +21,7 @@ import argparse
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +29,12 @@ SRC = os.path.join(ROOT, "src")
 LEDGER = os.path.join(ROOT, "docs", "PROVENANCE.md")
 
 BUCKETS = {"A", "R", "Z"}
+def read_text(path, errors="strict"):
+    """Whole-file read that always closes the handle (SIM115)."""
+    with open(path, encoding="utf-8", errors=errors) as handle:
+        return handle.read()
+
+
 FILE_ROW = re.compile(r"^\|\s*`([^`]+\.zig)`\s*\|\s*([ARZ])\s*\|\s*(.+?)\s*\|")
 # The anchor cell is prose with backticks in it ("`ecs/rules.zig` `Power.x`",
 # "`ecs/world.zig` sleeper wake roll defaults (`a`, `b`)"), so it must not stop
@@ -43,7 +50,6 @@ def src_files():
     is defined over committed code. Untracked in-progress files (e.g. a
     concurrent agent's scratch) must not flake the gate locally."""
     try:
-        import subprocess
         listed = subprocess.run(
             ["git", "-C", ROOT, "ls-files", "src/**/*.zig", "src/*.zig"],
             capture_output=True, text=True, check=True,
@@ -51,8 +57,10 @@ def src_files():
         if listed:
             # Working-tree deletions are gone even while git still lists them.
             return sorted({p for p in listed if os.path.isfile(os.path.join(ROOT, p))})
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # No git, or it refused: fall through to the walk below, which reads
+        # more (untracked) files, so the gate still runs instead of dying.
+        print(f"provenance_scan: git ls-files unavailable ({exc}); walking src/", file=sys.stderr)
     out = set()
     for dirpath, _dirs, names in os.walk(SRC):
         for n in names:
@@ -64,7 +72,7 @@ def src_files():
 def ledger_rows():
     if not os.path.isfile(LEDGER):
         return None
-    text = open(LEDGER, encoding="utf-8").read()
+    text = read_text(LEDGER)
     file_rows = {}
     const_rows = []
     in_file_map = False
@@ -281,7 +289,7 @@ def main():
         if os.path.basename(rel) in EXCLUDE_FILES:
             continue
         path = os.path.join(ROOT, rel)
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        lines = read_text(path, errors="replace").splitlines()
         for i, line in enumerate(lines):
             m = CONST_RE.match(line)
             if not m:
@@ -311,7 +319,7 @@ def main():
     # 4. AUDIT LINKAGE: every finding id the (removed) live audit named at its
     #    final pass must appear in the ledger.
     import re as _re
-    ledger_text = open(LEDGER, encoding="utf-8").read()
+    ledger_text = read_text(LEDGER)
     covered = set(_re.findall(r"\b[AB]\d{2}\b", ledger_text))
     # expand ledger ranges like "A01-A12" (or "B14-B21") into ids
     for pre, lo, _pre2, hi in _re.findall(r"\b([AB])(\d{2})\s*-\s*([AB])(\d{2})\b", ledger_text):
@@ -389,8 +397,8 @@ def main():
     # 6. CONSTANT COVERAGE: every non-structural file-scope constant must be
     #    ledgered (behavioral constants without a row fail; structural ones
     #    are excluded by STRUCTURAL_CONSTANTS).
-    ledger_text = open(LEDGER, encoding="utf-8").read()
-    ledgered = set(m.split(".")[-1] for m in re.findall(r"`([A-Za-z_][A-Za-z0-9_.]*)`", ledger_text))
+    ledger_text = read_text(LEDGER)
+    ledgered = {m.split(".")[-1] for m in re.findall(r"`([A-Za-z_][A-Za-z0-9_.]*)`", ledger_text)}
     unledgered = [(rel, ln, n) for rel, ln, n in src_constants(SRC) if n not in STRUCTURAL_CONSTANTS and n not in ledgered]
     if unledgered:
         failures.append("behavioral constants not in the ledger: " + "; ".join(f"{rel}:{ln} {n}" for rel, ln, n in unledgered[:8]))
@@ -411,9 +419,7 @@ def main():
     for wire_name in sorted(os.listdir(os.path.join(ROOT, "src/wire"))):
         if not wire_name.endswith(".zig"):
             continue
-        builder_src = open(
-            os.path.join(ROOT, "src/wire", wire_name), encoding="utf-8"
-        ).read()
+        builder_src = read_text(os.path.join(ROOT, "src/wire", wire_name))
         cited_builders = set()
         for m in re.finditer(
             r"((?:^///[^\n]*\n)+)pub fn (build\w+)\(", builder_src, re.M
@@ -450,7 +456,7 @@ def main():
     for wire_name in sorted(os.listdir(os.path.join(ROOT, "src/wire"))):
         if not wire_name.endswith(".zig"):
             continue
-        psrc = open(os.path.join(ROOT, "src/wire", wire_name), encoding="utf-8").read()
+        psrc = read_text(os.path.join(ROOT, "src/wire", wire_name))
         cited_p = set()
         for m in re.finditer(r"((?:^///[^\n]*\n)+)pub fn (parse\w+)\(", psrc, re.M):
             doc = m.group(1)
@@ -478,7 +484,7 @@ def main():
     #    must match stock either way), but it has to be a recorded decision
     #    rather than an oversight: a wire package we silently never send is the
     #    exact shape of gap this project keeps finding. See DIVERGENCES 3b.
-    pkg_src = open(os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8").read()
+    pkg_src = read_text(os.path.join(ROOT, "src/wire/packages.zig"))
     registered = sorted(set(re.findall(r'"(NetPackage\w+)"', pkg_src)))
     # 7a. The advertised map size is a load-bearing number (the client uses
     #     server-advertised ids), and the docs quoted a stale 189 against a file
@@ -488,7 +494,7 @@ def main():
     )
     if mapping_m:
         n_mapped = len(re.findall(r'"(NetPackage\w+)"', mapping_m.group(1)))
-        gap = open(os.path.join(ROOT, "docs/GAP_ANALYSIS.md"), encoding="utf-8").read()
+        gap = read_text(os.path.join(ROOT, "docs/GAP_ANALYSIS.md"))
         if not re.search(rf"PackageIds name table \({n_mapped} stock names", gap):
             failures.append(
                 f"default_mappings has {n_mapped} names but the GAP_ANALYSIS "
@@ -500,17 +506,17 @@ def main():
         for n in names:
             if not n.endswith(".zig"):
                 continue
-            text = open(os.path.join(dirpath, n), encoding="utf-8", errors="replace").read()
+            text = read_text(os.path.join(dirpath, n), errors="replace")
             referenced.update(re.findall(r'"(NetPackage\w+)"', text))
     doc_text = ""
     for doc in ("docs/GAP_ANALYSIS.md", "docs/DIVERGENCES.md"):
-        doc_text += open(os.path.join(ROOT, doc), encoding="utf-8", errors="replace").read()
+        doc_text += read_text(os.path.join(ROOT, doc), errors="replace")
     # Checks 7d and 7i ask for a divergence-register row specifically, so they
     # read this file alone: a passing mention in the 6k-line GAP_ANALYSIS is
     # not the artifact either failure text is asking the author to write.
-    divergences_text = open(
-        os.path.join(ROOT, "docs/DIVERGENCES.md"), encoding="utf-8", errors="replace"
-    ).read()
+    divergences_text = read_text(
+        os.path.join(ROOT, "docs/DIVERGENCES.md"), errors="replace"
+    )
     never_sent = [n for n in registered if n not in referenced]
     undocumented = []
     for name in never_sent:
@@ -537,7 +543,7 @@ def main():
     for fname in sorted(os.listdir(c2s_dir)):
         if not fname.endswith(".zig"):
             continue
-        text = open(os.path.join(c2s_dir, fname), encoding="utf-8", errors="replace").read()
+        text = read_text(os.path.join(c2s_dir, fname), errors="replace")
         for m in re.finditer(
             r'if \(std\.mem\.eql\(u8, name, "(NetPackage\w+)"\)\)(.*?)'
             r'(?=\n    if \(std\.mem\.eql|\Z)',
@@ -581,7 +587,7 @@ def main():
     div_path = os.path.join(ROOT, "docs", "DIVERGENCES.md")
     zero_field_violations = []
     if os.path.isfile(div_path):
-        div_text = open(div_path, encoding="utf-8", errors="replace").read()
+        div_text = read_text(div_path, errors="replace")
         sec = re.search(
             r"^## 2\. Fields with no truthful server-side value(.*?)^## ",
             div_text,
@@ -600,7 +606,7 @@ def main():
             claimed = set(re.findall(r"`(\w+)`", body_text)) - excluded
             # Only names that are actually written somewhere in src/wire.
             xp_path = os.path.join(ROOT, "src/wire/stock_xp.zig")
-            xp_text = open(xp_path, encoding="utf-8", errors="replace").read()
+            xp_text = read_text(xp_path, errors="replace")
             for field in sorted(claimed):
                 # The write line carries the field name as a trailing comment.
                 m = re.search(
@@ -664,7 +670,7 @@ def main():
                 if not n.endswith(".zig"):
                     continue
                 path = os.path.join(dirpath, n)
-                lines = open(path, encoding="utf-8", errors="replace").readlines()
+                lines = read_text(path, errors="replace").splitlines()
                 in_test = False
                 for i, line in enumerate(lines):
                     if line.startswith("test "):
@@ -898,11 +904,9 @@ def main():
                 if fname.endswith(".zig"):
                     emitted_names.update(
                         emit_re.findall(
-                            open(
-                                os.path.join(dirpath, fname),
-                                encoding="utf-8",
-                                errors="replace",
-                            ).read()
+                            read_text(
+                                os.path.join(dirpath, fname), errors="replace"
+                            )
                         )
                     )
         unsent = sorted(

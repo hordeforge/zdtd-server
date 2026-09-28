@@ -15,7 +15,7 @@ Only imports of another package directory are counted; single-file imports
 |---|---|---|
 | `apm` | `util` | 2 |
 | `assets` | `ecs` | 14 |
-| `assets` | `util` | 115 |
+| `assets` | `util` | 116 |
 | `ecs` | `assets` | 1 |
 | `ecs` | `util` | 9 |
 | `litenet` | `util` | 3 |
@@ -36,7 +36,7 @@ Only imports of another package directory are counted; single-file imports
 | `wire` | `world` | 4 |
 | `world` | `assets` | 23 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 36 |
+| `world` | `util` | 38 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)

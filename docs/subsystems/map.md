@@ -178,10 +178,9 @@ pub fn cellSurfaceY(w: *const World, wx: i32, wz: i32) ?i32 {
 
 `findPath` is BFS over 4-neighbours with fixed stack arrays, so the query path allocates nothing (`src/world/nav.zig:46`, `src/world/nav.zig:46`). The grid is exposed to Wasm plugins as the `path` host verb, which converts world coordinates to cells and formats the waypoint list (`src/server/game/wasm_host.zig:496`, `src/server/game/wasm_host.zig:496`). The decisions stay in the guest, per ADR 0026; this module only answers.
 
-Sky is pure functions of world time for the clone-side light model: `day_ticks = 24000`, `ticks_per_hour = 1000`, `timeOfDay`, `sunMoonTarget`, `dayPercent`, and `ambientLuma` (`src/world/sky.zig:19`, `src/world/sky.zig:23`, `src/world/sky.zig:52`). The moon fold uses the stock 7-phase tables (`src/world/sky.zig:123`):
+Sky is pure functions of world time for the clone-side light model: `day_ticks = 24000`, `ticks_per_hour = 1000`, `timeOfDay`, `sunMoonTarget`, `dayPercent`, and `ambientLuma` (`src/world/sky.zig:19`, `src/world/sky.zig:23`, `src/world/sky.zig:52`). The moon fold uses the stock 7-phase brightness table (`src/world/sky.zig:123`):
 
 ```zig
-pub const moon_phases = [_]f32{ 0.05, 0.35, 0.55, 0.70, 1.40, 1.63, 1.82 };
 pub const moon_brights = [_]f32{ 1.0, 0.65, 0.45, 0.25, 0.40, 0.60, 0.90 };
 ```
 

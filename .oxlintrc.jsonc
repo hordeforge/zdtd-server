@@ -33,9 +33,8 @@
   //     max-params (4), max-depth (4), no-negated-condition, no-magic-numbers,
   //     max-nested-callbacks (3 vs the baseline's 4), no-implicit-coercion
   //     with only `!!` allowed.
-  //   * categories nursery + perf on (verified 2026-09-21); typescript/no-
-  //     unnecessary-condition off under nursery (false positive on DOM
-  //     textContent ?? ""). Pedantic / restriction / style stay off (bulk).
+  //   * categories nursery + perf on (verified 2026-09-21). Pedantic /
+  //     restriction / style stay off (bulk).
   // Baseline entries intentionally absent (not applicable here):
   //   * strict-runtime: node/no-process-env, node/no-path-concat,
   //     node/handle-callback-err (browser env, no node runtime).
@@ -314,8 +313,5 @@
     "no-underscore-dangle": ["error", { "allow": ["__ZDTD_RETRY_S__"] }],
     "no-void": "off", // typescript/no-floating-promises (enforced above) requires the void operator to mark fire-and-forget promises; eslint/no-void would ban it
     "no-implicit-globals": "off", // classic-script pages: top-level functions are the page contract, not accidental globals
-    // DOM Node.textContent is string|null; tsgolint still flags `?? ""` as an
-    // unnecessary nursery condition (shell.tsx flashSignatures). Keep coalesce.
-    "typescript/no-unnecessary-condition": "off",
   }
 }

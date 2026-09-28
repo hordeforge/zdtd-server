@@ -10,7 +10,7 @@ Sources: [`src/main.zig`](../../src/main.zig), [`src/server/game.zig`](../../src
 
 The rate is one constant, shared by the wire challenge block, the sim step delta, and the pacer. There is no second definition of the tick length anywhere in the loop.
 
-The tick rate (`src/protocol.zig:19`):
+The tick rate (`src/protocol.zig:14`):
 
 ```zig
 /// Stock GameTimer target (research closed-gaps / loop)
