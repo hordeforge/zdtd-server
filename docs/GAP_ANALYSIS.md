@@ -2906,7 +2906,7 @@ gamestage, no wandering hordes, and no screamers.
   `EntityDef.flying` reads the class row's `Class`/tags, rides into
   `ClassId.flying`, and `applyGravity` holds `groundY + fly_cruise_h` at
   `fly_vert_rate`: a picked vulture flies, and one chasing a target inside
-  `fly_dive_dist_sq` descends onto it (clamped) then climbs back.
+  `fly_dive_dist_sq` descends onto it then climbs back.
   The forced arm ships too: a blood-moon spawn aimed
   at a riding player swaps in `animalZombieVultureRadiated` on a deterministic
   50% draw and skips the bonus-loot counter (IL_0031-0061). The bite lands after
@@ -4674,8 +4674,11 @@ a finer server encoding.
   (the synchronous spawn-area burst) and `save_io` max 3.9 s (534 ms mean over
   84 saves, 3.4 s of it `save_encode`, both on the tick thread), while
   `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
-  the ECS sim stays under 6 ms. Next pass: pace the periodic save as
-  `join_drain` paces the drain. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
+  the ECS sim stays under 6 ms. `World.saveAll` already writes only the dirty
+  set, so the save cost after a join is the freshly generated chunks: pacing
+  belongs on generation/streaming and on that set's save, not on skipping
+  unchanged chunks. Next pass: pace the periodic save as `join_drain` paces
+  the drain. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
   same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
   p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
   join burst was fully synchronous: `sendSpawnArea`
