@@ -162,10 +162,13 @@ recorded in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) (the scorecard is
   `CVarCompare` rows whose write actions zdtd does not drive, and the
   `RandomRoll` seed. Anchors: `src/assets/requirements.zig`,
   `src/assets/buffs.zig` folds, `src/server/game/tick.zig` VM queries.
-  Re-censused 2026-09-28 against `require_parse.kindOf` (the name-to-Kind table
-  lives in `require_parse.zig`, not in the enum); GAP section 10 carries the
-  counts. The three unresolved names need, respectively, typed item metadata, a
-  catapult strain cvar and an ammo-stack quality input on the ctx.
+  Re-censused 2026-09-28 against `require_parse.kindOf`; GAP section 10 carries
+  the counts and the ItemValue metadata layout (RE'd via the dumpers: a `byte`
+  count, then key string + `TypedMetadataValue` = `i32 typeTag` + Single/Int32/
+  string). Closing the 50 charge gates means reading that `charge` scalar off the
+  held item's blob, adding `CompareItemMetaFloat` to the requirement vocabulary
+  and wiring the ctx input. The other two names still need a catapult strain
+  cvar and an ammo-stack quality input.
 - **Turret and vehicle source `ItemValue`** from the C2S spawn bodies
   (DIVERGENCES "NetPackageTurretSpawn"/"NetPackageVehicleSpawn"). Vehicle HP
   already comes from data (`assets/vehicles.zig resolveMaxHp`); what is missing

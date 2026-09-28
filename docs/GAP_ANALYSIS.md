@@ -3994,14 +3994,17 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `CatapultStrainAmount` 3, `RoundsInMagazine` 1. The 50 are one item and one
     key: `CompareItemMetaFloat key="charge"` on
     `meleeWpnBatonT2StunBaton`, a five-tier charge ladder - so the tail needs
-    one value, from the held item's ItemValue blob. The corpus cannot yet
-    say where: the research `ItemValue.Write` entry delegates recursively, the
-    IL dump is accessor-only, and no file in `il/full-v3.2.0/_global` holds the
-    metadata writer, so closing these 50 needs a fuller ItemValue dump, not a
-    guessed layout.
-    A
-    resolved name is a lower bound: the larger tail is rows whose kind exists but
-    whose input is never written, or whose foreign target the hit path omits:
+    one value from the held item's ItemValue blob, and **the layout is now
+    RE'd**: `ItemValue::Read` IL=14 dispatches to `ReadData`, whose tail reads a
+    `byte` count then, per entry, a length-prefixed key string and a
+    `TypedMetadataValue` (`ReadData` IL_00CE-00F9). That value is an `i32
+    typeTag` then, on `tag - 1`, a `Single` / `Int32` / string payload
+    (`TypedMetadataValue::Read` IL=27, `Write` IL=33), and `SetMetadata` keys it.
+    So `charge` is one tagged scalar. The corpus's
+    `ItemValue.il.txt` is accessor-only and lacks `ReadData`, so the citation is
+    the dump (`DumpType.exe` + `DumpMethod.exe`), not that file. A resolved name
+    is a lower bound: the larger tail is rows whose kind exists but whose input
+    is never written, or whose foreign target the hit path omits:
     - resolve: `HasBuff`/`!HasBuff` (10 rows: coffees, storm-stage buffs),
       `HoldingItemHasTags` 4 (the held item's `Tags`, read each tick from the
       toolbelt slot, `has_all_tags` supported), `SandboxOptionBool` 4 (the
