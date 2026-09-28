@@ -523,13 +523,21 @@ pub fn step(self: *Game) !void {
     }
 
     try self.replicate();
-    if (self.tick_n % self.save_interval_ticks == 0) {
+    if (self.tick_n % self.save_interval_ticks == 0 or self.save_pending) {
+        self.save_pending = false;
         const ss = apm.profiler.scope(&self.harness.prof, .save_io);
         defer ss.end();
         {
             const es = apm.profiler.scope(&self.harness.prof, .save_encode);
             defer es.end();
-            self.world.saveAll() catch |e| game_mod.logPersistErr(self, "save world", e);
+            // Budgeted: a join burst leaves hundreds of chunks dirty and
+            // encoding them all in one tick stalls every peer (APM `save_io`
+            // 3.9 s max). `save_pending` brings the next tick back until the
+            // set drains; shutdown and admin saves stay unbounded.
+            self.save_pending = self.world.saveAllBudget(game_mod.save_chunks_per_tick) catch |e| blk: {
+                game_mod.logPersistErr(self, "save world", e);
+                break :blk false;
+            };
         }
         self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
         self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);

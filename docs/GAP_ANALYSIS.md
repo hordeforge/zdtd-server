@@ -4675,12 +4675,13 @@ a finer server encoding.
   84 saves, 3.4 s of it `save_encode`, both on the tick thread), while
   `join_drain` caps at 320 ms, `chunk_stream` at 78 ms, `te_scan` at 0.5 ms and
   the ECS sim stays under 6 ms. `World.saveAll` already writes only the dirty
-  set, so the save cost after a join is the freshly generated chunks: pacing
-  belongs on generation/streaming and on that set's save, not on skipping
-  unchanged chunks. Next pass: pace the periodic save as `join_drain` paces
-  the drain. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
-  same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
-  p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
+  set, so the save cost after a join is the freshly generated chunks, not
+  re-encoding. **Save side mitigated 2026-09-28**: `saveAllBudget` caps the
+  periodic tick at `save_chunks_per_tick` (32), reports whether work remains
+  and the tick comes back next tick while it does (shutdown and admin saves
+  stay unbounded), pinned by `a budgeted save drains across calls and loses
+  nothing`. Pending: re-measuring `save_io`, and pacing the generation/stream
+  path the way `join_drain` paces the drain. The
   join burst was fully synchronous: `sendSpawnArea`
   queued the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and

@@ -1084,3 +1084,39 @@ test "nextNonAir matches a scalar walk" {
     try std.testing.expectEqual(@as(?usize, 255), store.nextNonAir(&air, 0));
     try std.testing.expectEqual(@as(?usize, null), store.nextNonAir(&.{}, 0));
 }
+
+test "a budgeted save drains across calls and loses nothing" {
+    // The periodic tick save is budgeted so a join burst (hundreds of dirty
+    // chunks) cannot stall one tick: `saveAllBudget` returns true while work
+    // remains and the caller comes back next tick. The unbounded `saveAll`
+    // stays the shutdown/admin form, and every edit must still reach disk.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(1);
+    // Four edited chunks, all dirty.
+    for ([_]ChunkPos{ .{ .x = 0, .z = 0 }, .{ .x = 1, .z = 0 }, .{ .x = 0, .z = 1 }, .{ .x = 2, .z = 2 } }) |p| {
+        _ = try w.getOrCreate(p);
+        try w.setBlockWorld(p.x * 16 + 5, 10, p.z * 16 + 5, block_stone);
+    }
+    var calls: usize = 0;
+    while (try w.saveAllBudget(1)) : (calls += 1) {
+        try std.testing.expect(calls < 64);
+    }
+    calls += 1; // the final call that reported no work left
+    try std.testing.expect(calls >= 4);
+    // Every edited chunk is on disk and loads back with the edit intact.
+    var path_buf: [512]u8 = undefined;
+    for ([_]ChunkPos{ .{ .x = 0, .z = 0 }, .{ .x = 1, .z = 0 }, .{ .x = 0, .z = 1 }, .{ .x = 2, .z = 2 } }) |p| {
+        try std.testing.expect(io_fs.fileExists(try w.chunkPath(p, &path_buf)));
+    }
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    w2.enableProc(1);
+    const c = try w2.getOrCreate(.{ .x = 2, .z = 2 });
+    try std.testing.expectEqual(block_stone, c.blockAt(5, 10, 5));
+    // A budgeted call on a clean world reports no work.
+    try std.testing.expect(!try w2.saveAllBudget(1));
+}

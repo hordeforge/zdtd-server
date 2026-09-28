@@ -121,6 +121,12 @@ pub const default_vehicle_pos_send_ticks: u64 = 5;
 pub const default_sleeper_tick_ticks: u64 = 10;
 pub const default_turret_sync_ticks: u64 = 10;
 pub const default_save_interval_ticks: u64 = 100;
+/// Dirty chunks the periodic save may encode and write in one tick. A join
+/// burst leaves hundreds dirty; writing them all at once stalls every peer for
+/// seconds (APM `save_io` max 3.9 s), so the tick saves in slices and comes
+/// back on the next tick while any remain. Shutdown and admin saves are
+/// unbounded.
+pub const save_chunks_per_tick: usize = 32;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
 /// Cap on a claimed sound's `volumeScale` (the client multiplies the clip's

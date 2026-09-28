@@ -1718,17 +1718,30 @@ pub const World = struct {
         c.dirty = false;
     }
 
+    /// Persist every dirty chunk. Thin wrapper over `saveAllBudget(0)`, which
+    /// is the unbounded form every non-tick caller wants (shutdown, admin
+    /// `.save`, world save on disconnect).
     pub fn saveAll(self: *World) !void {
+        _ = try self.saveAllBudget(0);
+    }
+
+    /// Persist dirty chunks with a per-call budget, returning true when dirty
+    /// chunks remain. The periodic tick uses this so a freshly generated set
+    /// (a join burst leaves hundreds of chunks dirty) cannot stall one tick on
+    /// encode plus write: the survivors stay dirty and the next call continues.
+    /// Budget 0 means no cap (the shutdown/admin path). Disk order stays the
+    /// sorted-key order either way.
+    pub fn saveAllBudget(self: *World, budget: usize) !bool {
         // Sort dirty keys so disk write order is independent of HashMap walk
         // (insert history / capacity). Needed for deterministic fault injection
         // and mid-save crash replay.
-        if (self.chunks.count() == 0) return;
+        if (self.chunks.count() == 0) return false;
         var dirty_n: usize = 0;
         var count_it = self.chunks.iterator();
         while (count_it.next()) |e| {
             if (e.value_ptr.*.dirty) dirty_n += 1;
         }
-        if (dirty_n == 0) return;
+        if (dirty_n == 0) return false;
 
         // Loaded terrain can be much larger than the mutation set. Size this
         // temporary to the dirty set so autosave cost follows pending writes,
@@ -1747,17 +1760,29 @@ pub const World = struct {
 
         var list: [512]*Chunk = undefined;
         var n: usize = 0;
+        var written: usize = 0;
         for (keys[0..kn]) |k| {
             const c = self.chunks.get(k) orelse continue;
             if (!c.dirty) continue;
-            if (n >= list.len) {
-                try self.saveChunkSlice(list[0..n]);
-                n = 0;
-            }
+            if (budget != 0 and written + n >= budget) break;
             list[n] = c;
             n += 1;
+            if (n == list.len) {
+                try self.saveChunkSlice(list[0..n]);
+                written += n;
+                n = 0;
+            }
         }
-        try self.saveChunkSlice(list[0..n]);
+        if (n > 0) {
+            try self.saveChunkSlice(list[0..n]);
+            written += n;
+        }
+        // Anything still dirty was left by the budget; the caller comes back.
+        var it2 = self.chunks.iterator();
+        while (it2.next()) |e| {
+            if (e.value_ptr.*.dirty) return true;
+        }
+        return false;
     }
 
     fn saveChunkSlice(self: *World, chunks: []const *Chunk) !void {

@@ -176,18 +176,28 @@ pub const ZpvIdentity = struct {
 
 ## Save triggers
 
-The periodic save is a modulo on the tick counter and is the primary writer of every store (`src/server/game/step.zig:522`):
+The periodic save is a modulo on the tick counter and is the primary writer of every store (`src/server/game/step.zig:526`):
 
 ```zig
-    if (self.tick_n % self.save_interval_ticks == 0) {
+    if (self.tick_n % self.save_interval_ticks == 0 or self.save_pending) {
+        self.save_pending = false;
         const ss = apm.profiler.scope(&self.harness.prof, .save_io);
         defer ss.end();
         {
             const es = apm.profiler.scope(&self.harness.prof, .save_encode);
             defer es.end();
-            self.world.saveAll() catch |e| game_mod.logPersistErr(self, "save world", e);
+            // Budgeted: a join burst leaves hundreds of chunks dirty and
+            // encoding them all in one tick stalls every peer (APM `save_io`
+            // 3.9 s max). `save_pending` brings the next tick back until the
+            // set drains; shutdown and admin saves stay unbounded.
+            self.save_pending = self.world.saveAllBudget(game_mod.save_chunks_per_tick) catch |e| blk: {
+                game_mod.logPersistErr(self, "save world", e);
+                break :blk false;
+            };
         }
 ```
+
+The chunk write is budgeted at `save_chunks_per_tick` (32) and reports whether dirty chunks remain, so the next tick comes back for them instead of one tick encoding a join burst's whole set; the unbounded `saveAll` stays the shutdown and admin form, and survivors stay dirty so nothing is lost (`src/world/store_tests.zig`).
 
 `save_interval_ticks` defaults to 100 ticks (`src/server/game/types.zig:123`) and is a bound field, so `[stream] save_interval_ticks` in `zdtd.toml` overrides it without a parse arm (`src/server/game/types.zig:123`). At 20 TPS that is a 5 s RPO for store files on a healthy disk; crash or kill -9 can still lose the open interval. The player save inside that block is gated on `players_dirty`, which is set by the character-sheet update path (`src/server/c2s/misc_wire.zig:36`) and cleared when the save runs (`src/server/game/step.zig:547`). The block is instrumented with the `save_io` and `save_encode` apm sections because it runs on the tick.
 

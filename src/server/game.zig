@@ -159,6 +159,9 @@ pub const default_vehicle_pos_send_ticks = game_types.default_vehicle_pos_send_t
 pub const default_sleeper_tick_ticks = game_types.default_sleeper_tick_ticks;
 pub const default_turret_sync_ticks = game_types.default_turret_sync_ticks;
 pub const default_save_interval_ticks = game_types.default_save_interval_ticks;
+/// Dirty chunks the periodic save may write in one tick (the rest stay dirty
+/// and the next tick comes back for them).
+pub const save_chunks_per_tick = game_types.save_chunks_per_tick;
 pub const default_spawn_area_radius_max = game_types.default_spawn_area_radius_max;
 pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
@@ -255,6 +258,9 @@ pub const Game = struct {
     /// `tick_n < shed_until_tick`. Armed only by the real-time run() overrun branch.
     shed_until_tick: u64 = 0,
     tick_n: u64 = 0,
+    /// Set while a budgeted periodic save still has dirty chunks left, so the
+    /// next tick comes back for them instead of waiting a full save interval.
+    save_pending: bool = false,
     running: bool = true,
     /// Mono instant of Game init; base for stock `mem` uptime (process elapsed).
     /// CLOCK_MONOTONIC is boot-relative on Linux, so raw monoNs would report
