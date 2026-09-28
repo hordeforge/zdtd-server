@@ -567,8 +567,13 @@ pub fn step(self: *Game) !void {
             self.saveWeather() catch |e| game_mod.logPersistErr(self, "save weather", e);
             self.saveClock() catch |e| game_mod.logPersistErr(self, "save clock", e);
             if (self.players_dirty) {
-                self.players_dirty = false;
-                self.savePlayers() catch |e| game_mod.logPersistErr(self, "save players", e);
+                // Clear only on success: the flag is the sole retry signal
+                // (nothing else re-arms it until the next PlayerData), so
+                // dropping it on a failed write strands the session's
+                // inventory and journal until the next mutation.
+                if (self.savePlayers()) |_| {
+                    self.players_dirty = false;
+                } else |e| game_mod.logPersistErr(self, "save players", e);
             }
         }
     }

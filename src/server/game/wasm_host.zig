@@ -195,7 +195,17 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
         std.debug.print("zdtd wasm: unknown queued command '{s}'\n", .{vb[0..vn]});
         return;
     };
-    _ = g.sim.commands.pushSrc(src, op);
+    if (!g.sim.commands.pushSrc(src, op)) {
+        // The buffer is at its cap, so the queued effect never runs. The
+        // near-capacity warning is one-shot and may already be spent, so the
+        // dropped effect needs its own line: the guest believes it happened.
+        const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
+        var vb: [64]u8 = undefined;
+        const vn = c2s_text.sanitizePlayerName(&vb, cmd[0..verb_end]);
+        util_log.warn("zdtd wasm: command '{s}' from plugin {d} dropped, command buffer full ({d}/{d})\n", .{
+            vb[0..vn], src, g.sim.commands.len(), ecs.command.max_commands,
+        });
+    }
 }
 
 /// The effective queued-verb policy for `src` (`Plugin.denied`, computed as

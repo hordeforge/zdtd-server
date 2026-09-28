@@ -1993,9 +1993,11 @@ fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_b
         try self.modletClientError(req, plain, json, .internal_server_error, "could not save the modlet state\n", "<pre class=\"err\">Could not save the modlet state.</pre>\n");
         return;
     };
-    const known = mst.setDisabled(self.allocator, name, disable) catch {
-        // Do not echo @errorName to the client: operators get a fixed message;
-        // the concrete failure stays in the process log if the caller adds one.
+    const known = mst.setDisabled(self.allocator, name, disable) catch |err| {
+        // Do not echo @errorName to the client: operators get a fixed message.
+        // The concrete failure goes to the process log, since the in-memory
+        // state has already flipped and will revert on the next restart.
+        util_log.warn("webui: modlet '{s}' {s} state save failed: {s}\n", .{ name, if (disable) "disable" else "enable", @errorName(err) });
         try self.modletClientError(req, plain, json, .internal_server_error, "could not save the modlet state\n", "<pre class=\"err\">Could not save the modlet state.</pre>\n");
         return;
     };

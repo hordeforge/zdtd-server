@@ -3,6 +3,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
+const log = @import("../util/log.zig");
 const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
@@ -446,7 +447,13 @@ pub fn loadFromPrefabs(
                 if (need >= path_buf.len) continue;
                 const p = std.fmt.bufPrint(&path_buf, "{s}/{s}/{s}.xml", .{ prefabs_root, sub, d.name }) catch continue;
                 if (!io_fs.fileExists(p)) continue;
-                const raw = io_fs.readFileAll(allocator, p) catch continue;
+                // fileExists just confirmed it, so this is a read fault, not a
+                // missing prefab. Skipping it silently would drop every
+                // sleeper volume inside that prefab with no trace.
+                const raw = io_fs.readFileAll(allocator, p) catch |err| {
+                    log.warn("sleeper prefab '{s}' unreadable: {s}; no sleeper volumes\n", .{ p, @errorName(err) });
+                    continue;
+                };
                 defer allocator.free(raw);
                 // Stock prefab XML often has UTF-8 BOM.
                 const raw_nb = if (raw.len >= 3 and raw[0] == 0xEF and raw[1] == 0xBB and raw[2] == 0xBF)

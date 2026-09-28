@@ -1130,11 +1130,25 @@ pub const WasmHost = struct {
                     if (cfg_path) |cp| {
                         defer allocator.free(cp);
                         if (io_fs.fileExists(cp)) {
-                            const cfg = io_fs.readFileAll(allocator, cp) catch null;
-                            if (cfg) |c| {
-                                if (c.len <= manifest.max_config_bytes)
-                                    self.slots[self.n].config_bytes = allocator.dupe(u8, c) catch "";
-                                allocator.free(c);
+                            // Fail closed to no config on an unreadable or
+                            // oversized file, but say so: a permission or I/O
+                            // fault otherwise looks exactly like a module that
+                            // ships no config, and the guest runs on defaults.
+                            if (io_fs.readFileAll(allocator, cp)) |cfg| {
+                                defer allocator.free(cfg);
+                                if (cfg.len <= manifest.max_config_bytes) {
+                                    self.slots[self.n].config_bytes = allocator.dupe(u8, cfg) catch "";
+                                } else {
+                                    std.debug.print(
+                                        "zdtd: mod '{s}' config '{s}' is {d} bytes, over the {d} cap; no config\n",
+                                        .{ rm.manifest.name.?, cp, cfg.len, manifest.max_config_bytes },
+                                    );
+                                }
+                            } else |err| {
+                                std.debug.print(
+                                    "zdtd: mod '{s}' config '{s}' unreadable: {s}; no config\n",
+                                    .{ rm.manifest.name.?, cp, @errorName(err) },
+                                );
                             }
                         }
                     }

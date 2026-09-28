@@ -8,11 +8,17 @@ const clock = @import("../util/clock.zig");
 
 pub const max_peers = 64;
 
+/// Print window for repeated drain faults (first, then every Nth).
+const drain_error_every: u32 = 64;
+
 pub const Server = struct {
     sock: udp.Socket = .{},
     port: u16 = 0,
     peers: [max_peers]peer_mod.Peer = [_]peer_mod.Peer{.{}} ** max_peers,
     next_local_id: i32 = 1,
+    /// Socket faults seen by `drainControl` (the mid-send ack drain). It
+    /// returns void, so this is the only place the fault is recorded.
+    drain_errors: u32 = 0,
     /// Stock ServerPassword: compared to LiteNet Connect key (NetDataWriter string in request Data).
     server_password: []const u8 = "",
     /// Stock ConnectionRateLimitMilliseconds (0x1F4 = 500): minimum ms between
@@ -215,7 +221,13 @@ pub const Server = struct {
             // Leaving it in the socket buffer costs nothing: the next poll reads it.
             if (self.anyExtraFull()) break;
             var src: udp.IpAddress = undefined;
-            const n = self.sock.recvFrom(buf, &src) catch break;
+            const n = self.sock.recvFrom(buf, &src) catch |err| {
+                // WouldBlock is the normal end of the drain; anything else is a
+                // socket fault that would otherwise leave this mid-send drain
+                // silently dead, stalling the reliable window it exists to feed.
+                if (err != error.WouldBlock) self.noteDrainError("recv", @errorName(err));
+                break;
+            };
             if (n == 0) break;
             const raw = buf[0..n];
             const prop = packet.propertyOf(raw[0]);
@@ -223,9 +235,31 @@ pub const Server = struct {
             const p = self.findPeer(&src) orelse continue;
             // handlePacket applies ACKs (frees reliable window) and may return a
             // user slice into `buf`; copy it before the next recv overwrites.
-            if (p.handlePacket(&self.sock, raw) catch null) |user| {
-                p.pushExtra(user);
-            }
+            // handlePacket only fails on a socket send (the ack, the pong, the
+            // MTU echo). flushAcks keeps `must_ack` set until the datagram is
+            // out, so the ack is retried and a client retransmit is delivered
+            // rather than dropped as already-seen.
+            const handled = p.handlePacket(&self.sock, raw) catch |err| blk: {
+                self.noteDrainError("handlePacket", @errorName(err));
+                break :blk null;
+            };
+            if (handled) |user| p.pushExtra(user);
+        }
+    }
+
+    /// Count a drain fault and print the first one plus every `drain_error_every`
+    /// after, so a persistently broken socket cannot flood stderr per tick.
+    /// `drain_errors` is read by the net harness snapshot alongside the other
+    /// poll counters: a silent drain is otherwise indistinguishable from an
+    /// idle one at the client.
+    fn noteDrainError(self: *Server, op: []const u8, err: []const u8) void {
+        self.drain_errors +%= 1;
+        const n = self.drain_errors;
+        if (n == 1 or n % drain_error_every == 0) {
+            std.debug.print(
+                "zdtd: litenet drain {s} failed: {s} (n={d})\n",
+                .{ op, err, n },
+            );
         }
     }
 

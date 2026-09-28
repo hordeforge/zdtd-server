@@ -926,7 +926,12 @@ fn replyExportConfigs(self: *Game) void {
     for (config_mod.known_serverconfig_names) |name| {
         const val = optionValue(self, &v, name, &line) orelse "(n/a)";
         const s = std.fmt.bufPrint(&line, "{s} = {s}\n", .{ name, val }) catch continue;
-        file.appendSlice(self.allocator, s) catch return;
+        // OOM only (a 512-byte line into a growing list). Answer the console
+        // anyway: a silent return here looks exactly like a hung command.
+        file.appendSlice(self.allocator, s) catch {
+            self.adminReply("export failed; see server log\n");
+            return;
+        };
     }
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/exported_config.txt", .{self.world.world_dir}) catch return;

@@ -20,6 +20,7 @@ const std = @import("std");
 const test_tmp = @import("../util/test_tmp.zig");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
+const log = @import("../util/log.zig");
 const mods = @import("modlets.zig");
 const paths = @import("paths.zig");
 
@@ -180,7 +181,13 @@ pub fn tryLoadWithMods(
     for (mod_dirs) |md| {
         var mbuf: [2048]u8 = undefined;
         const mpath = std.fmt.bufPrint(&mbuf, "{s}/Localization.csv", .{md.config_dir}) catch continue;
-        const text = io_fs.readFileAll(allocator, mpath) catch continue;
+        // A mod's Localization.csv that cannot be read drops its translated
+        // cells from the join payload, and the client falls back to base
+        // strings with no other trace. Say which mod lost them.
+        const text = io_fs.readFileAll(allocator, mpath) catch |err| {
+            log.warn("localization: mod '{s}' unreadable: {s}; its cells are omitted\n", .{ md.config_dir, @errorName(err) });
+            continue;
+        };
         defer allocator.free(text);
         try mergeFile(allocator, arena, &t, text, &entries);
     }

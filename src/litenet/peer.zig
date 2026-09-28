@@ -739,7 +739,6 @@ pub const Peer = struct {
 
     pub fn flushAcks(self: *Peer, sock: *udp.Socket) !void {
         if (!self.must_ack) return;
-        self.must_ack = false;
         var buf: [64]u8 = undefined;
         const total = packet.channeled_header_size + ack_bitmap_bytes;
         if (buf.len < total) return error.Overflow;
@@ -751,6 +750,11 @@ pub const Peer = struct {
         const copy_n = @min(self.ack_bits.len, ack_bitmap_bytes);
         @memcpy(buf[packet.channeled_header_size..][0..copy_n], self.ack_bits[0..copy_n]);
         try self.sendRaw(sock, buf[0..total]);
+        // Clear only once the datagram is out. Clearing first would make a
+        // failed send permanently acknowledge the sequence: the client sees an
+        // ack for a package it never got a response to, and a retransmit hits
+        // the already-seen branch, so the C2S package is lost for good.
+        self.must_ack = false;
     }
 };
 
