@@ -566,6 +566,26 @@ pub fn nearestMobSnap(w: *const World, zslot: Slot, zx: f32, zy: f32, zz: f32, z
     return best;
 }
 
+/// `EAIApproachAndAttackTarget` chase budget in seconds for the target this
+/// entity holds (`Start` IL_0040-005B): 90 s for a sleeper whatever the list
+/// says, else the `chaseTimeMax` of the matched target class from the
+/// `Type,chaseTimeMax` list. 0 = no home, so the chase never times out.
+/// A player target matches by TYPE, not by hash (a player entity carries the
+/// client class hash), which is what `target_chase_max_players` records.
+pub fn chaseTimeoutFor(w: *const World, s: Slot, target_is_player: bool, target_hash: i32) f32 {
+    if (w.mask[s].sleeper) return 90.0;
+    const cid = &w.class_id[s];
+    if (target_is_player) return cid.target_chase_max_players;
+    const n = @min(cid.target_class_n, cid.target_class_hashes.len);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (cid.target_class_hashes[i] != 0 and cid.target_class_hashes[i] == target_hash) {
+            return cid.target_chase_max[i];
+        }
+    }
+    return 0;
+}
+
 /// A target snap whose `slot` is the sentinel `max_entities` is a host-side
 /// bot (ADR 0026): bots are not ECS entities, so the zombie AI reaches them
 /// through the World's `bot_snap_fn` / `bot_damage_fn` hooks instead of a slot.

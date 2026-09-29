@@ -433,6 +433,7 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .previous_tier = d.previous_tier,
         .target_class_hashes = d.target_class_hashes,
         .target_chase_max = d.target_chase_max,
+        .target_chase_max_players = d.target_chase_max_players,
         .target_class_n = d.target_class_n,
         .entity_flags = d.entity_flags,
         .flee_flags = d.flee.flags,

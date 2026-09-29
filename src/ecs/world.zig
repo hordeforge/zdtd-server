@@ -105,6 +105,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.hash = def.hash;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
+    cid.target_chase_max_players = def.target_chase_max_players;
     cid.target_class_n = def.target_class_n;
     cid.entity_flags = def.entity_flags;
     cid.flee_flags = def.flee_flags;
@@ -263,6 +264,7 @@ pub const EntityClass = struct {
     /// its length; 0 = no list, keep the legacy player-only acquisition.
     target_class_hashes: [c.max_target_classes]i32 = .{0} ** c.max_target_classes,
     target_chase_max: [c.max_target_classes]f32 = .{0} ** c.max_target_classes,
+    target_chase_max_players: f32 = 0,
     target_class_n: u8 = 0,
     entity_flags: u32 = 0,
     flee_flags: u32 = 0,

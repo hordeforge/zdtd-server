@@ -15,6 +15,7 @@ const PlayerScan = systems.PlayerScan;
 const snapshotPlayers = systems.snapshotPlayers;
 const nearestPlayerSnap = systems.nearestPlayerSnap;
 const nearestMobSnap = @import("sensing.zig").nearestMobSnap;
+const chaseTimeoutFor = @import("sensing.zig").chaseTimeoutFor;
 const rayClear = @import("sensing.zig").rayClear;
 const applyRevengeTarget = systems.applyRevengeTarget;
 const stealthLightAttackPercent = systems.stealthLightAttackPercent;
@@ -512,6 +513,43 @@ const AiCtx = struct {
             else
                 (if (pcsd > 0) pcsd * 1.6 else if (ct.chase_speed_day > 0) ct.chase_speed_day * 1.6 else ctx.w.rules.ai.chase_speed)) * sscale;
 
+            // Give-up walk home (`EAIApproachAndAttackTarget` Update IL_0021-0128
+            // with `isGoingHome`): path back to the latched return position at
+            // 0.8x aggro speed and clear the latch on arrival. Stock's
+            // `Continue()` returns false once the target is null and the
+            // return position is set, which is why no task runs until it lands.
+            ai_body: {
+                if (ai.going_home) {
+                    // A fresh sensed target cancels the walk home: stock's
+                    // `Continue()` returns false as soon as `GetAttackTarget()`
+                    // is non-null again, which resets the task and re-runs
+                    // `Start` (clearing `isGoingHome`).
+                    if (np.id >= 0 and np.d2 < senseDistSq(ctx.w, s)) {
+                        ai.going_home = false;
+                        ai.chase_target_id = -1;
+                    } else {
+                    ai.alert = false;
+                    ai.target_id = -1;
+                    const dx = ctx.w.transform[s].x - ai.chase_home_x;
+                    const dz = ctx.w.transform[s].z - ai.chase_home_z;
+                    const sa = ctx.w.rules.ai.spot_arrive;
+                    if (dx * dx + dz * dz <= sa * sa) {
+                        ai.going_home = false;
+                        ai.has_path = false;
+                        ai.clearPath();
+                        ai.state = .idle;
+                        ai.active_task = .none;
+                        break :ai_body;
+                    }
+                    ai.state = .wander;
+                    ai.path_goal_x = ai.chase_home_x;
+                    ai.path_goal_z = ai.chase_home_z;
+                    ai.has_path = true;
+                    ai.active_task = .none;
+                    chaseAlongPath(ctx.w, s, ai, ai.chase_home_x, ai.chase_home_z, cspd * 0.8, ctx.dt);
+                    break :ai_body;
+                    }
+                }
             // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
             // executing task when it is no longer best or its Continue() fails.
             if (ai.active_task != .none) {
@@ -569,6 +607,7 @@ const AiCtx = struct {
                     ai.alert = false;
                     ai.path_blocked = false;
                 },
+            }
             }
 
             if (ai.alert or ai.state == .chase or ai.state == .attack) {
@@ -1265,11 +1304,42 @@ fn lookUpdate(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
 /// in range else .chase. Aggro persists with no fresh target (np.id<0).
 fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f32, ct: *const EntityClass) void {
     ai.alert = true;
+    // Chase clock (`EAIApproachAndAttackTarget` Start IL_0040-005B arms
+    // `homeTimeout`; Update IL_012E-01B9 drains 0.05 s a tick and gives up).
+    // A new target re-arms from the matched class's `chaseTimeMax` (90 s for a
+    // sleeper) and latches the return position, which is where the chase began.
+    const target_hash: i32 = if (targetExternal(np) or ctx.w.mask[np.slot].player)
+        0
+    else
+        ctx.w.class_id[np.slot].hash;
+    const target_is_player = targetExternal(np) or ctx.w.mask[np.slot].player;
+    if (np.id >= 0 and ai.chase_target_id != np.id) {
+        ai.chase_target_id = np.id;
+        ai.chase_home_x = ctx.w.transform[s].x;
+        ai.chase_home_z = ctx.w.transform[s].z;
+        ai.chase_time_left = chaseTimeoutFor(ctx.w, s, target_is_player, target_hash);
+        ai.going_home = false;
+    }
     if (np.id < 0) {
         // Director-seeded aggro / target briefly out of sense range: hold the
         // chase state (replication + despawn stay correct); no goal to path to.
         ai.state = .chase;
         return;
+    }
+    if (ai.chase_time_left > 0) {
+        ai.chase_time_left -= ctx.dt;
+        if (ai.chase_time_left <= 0) {
+            // Give up (`SetAttackTarget(null)` + `isGoingHome = true`,
+            // IL_0188-01B9): drop the target and let the walk-home branch take
+            // the entity back to where the chase started.
+            ai.target_id = -1;
+            ai.alert = false;
+            ai.going_home = true;
+            ai.has_path = false;
+            ai.clearPath();
+            ai.state = .wander;
+            return;
+        }
     }
     ai.target_id = np.id;
     ai.path_goal_x = np.px;
@@ -3401,4 +3471,50 @@ test "RunawayFromEntity fears only the flagged kinds, not a neighbour" {
     t = 0;
     while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.zombie_ai[ts].fear_target >= 0);
+}
+
+test "a chase past chaseTimeMax gives up and walks home" {
+    // EAIApproachAndAttackTarget Start (IL_0040-005B) arms `homeTimeout` from
+    // the matched target class's `chaseTimeMax`; Update (IL_012E-01B9) drains
+    // it and, at zero, clears the target and walks back to the latched return
+    // position at 0.8x aggro speed.
+    var w: World = .{};
+    defer w.deinit();
+    const target_hash: i32 = 0x6201;
+    const z = w.spawnZombie(0, 70, 0, 100).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].target_class_n = 1;
+    w.class_id[zs].target_class_hashes[0] = target_hash;
+    w.class_id[zs].target_chase_max[0] = 0.3; // seconds
+    w.class_id[zs].ai_attack = true;
+    const prey = w.spawnZombie(0, 70, 8, 100).?;
+    const ps = w.slotOfNetId(prey).?;
+    w.class_id[ps].hash = target_hash;
+    w.class_id[ps].entity_flags = c.entity_flag_zombie;
+    var t: f32 = 0;
+    var gave_up = false;
+    while (t < 1.0 and !gave_up) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+        if (w.zombie_ai[zs].going_home) gave_up = true;
+    }
+    try std.testing.expect(gave_up);
+    // With the prey gone (no fresh sense to cancel the walk), it returns to
+    // where the chase started.
+    _ = w.destroy(ps);
+    t = 0;
+    while (t < 3.0 and w.zombie_ai[zs].going_home) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].going_home);
+    try std.testing.expect(@abs(w.transform[zs].x) < 3.0);
+    // Armed from the list, the clock resets per target: a class with no list
+    // entry for the target never gives up.
+    const z2 = w.spawnZombie(0, 70, 0, 100).?;
+    const zs2 = w.slotOfNetId(z2).?;
+    w.class_id[zs2].ai_attack = true;
+    w.zombie_ai[zs2].chase_time_left = 0;
+    w.zombie_ai[zs2].chase_target_id = -1;
+    const prey2 = w.spawnZombie(0, 70, 6, 100).?;
+    _ = w.slotOfNetId(prey2).?;
+    t = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs2].going_home);
 }

@@ -206,6 +206,11 @@ pub const ClassId = struct {
     /// Per-entry `chaseTimeMax` from the same `Type,chaseTime` pairs (see
     /// EntityDef.target_chase_max).
     target_chase_max: [max_target_classes]f32 = .{0} ** max_target_classes,
+    /// `chaseTimeMax` of the `EntityPlayer` entry specifically: a player target
+    /// carries the client class hash, not the `EntityPlayer` type name, so the
+    /// list lookup cannot find it by hash (`EAIApproachAndAttackTarget` matches
+    /// the assignable TYPE, which is what this field stands in for).
+    target_chase_max_players: f32 = 0,
     target_class_n: u8 = 0,
     /// entityclasses `EntityFlags` (see EntityDef.entity_flags): the bit set a
     /// flee scan matches a threat against.
@@ -425,6 +430,16 @@ pub const ZombieAi = struct {
     home_z: f32 = 0,
     has_home: bool = false,
     alert: bool = false,
+    /// `EAIApproachAndAttackTarget` chase clock (`Start` IL_0040-005B,
+    /// `Update` IL_012E-01B9): seconds left before the entity gives up, walks
+    /// back to `chase_home_*` at 0.8x aggro speed and drops the target. Armed
+    /// on target change from the matched target class's `chaseTimeMax` (90 s
+    /// for a sleeper); 0 = no home, so the chase never times out.
+    chase_time_left: f32 = 0,
+    chase_target_id: i32 = -1,
+    chase_home_x: f32 = 0,
+    chase_home_z: f32 = 0,
+    going_home: bool = false,
     /// Blood-moon horde zombie (stock EntityAlive.IsHordeZombie): teleported
     /// back to the party focus when it drifts past cTeleportDist, cleared at dawn.
     is_horde: bool = false,
