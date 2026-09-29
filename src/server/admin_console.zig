@@ -482,10 +482,16 @@ pub fn consoleSpawnEntity(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIter
     const sy = self.spawnYNearPlayer(t.x, t.y, t.z);
     // A35: spawn the full resolved class so speeds/damage/is_enemy reach the
     // sim even for classes outside the fixed class_table.
+    // Sandbox 43 `MaxEnemyTier`: stock clamps every create, an admin spawn
+    // included. A ladder that cannot satisfy the cap refuses the spawn.
+    const spawn_class = self.clampSpawnClass(def) orelse {
+        out.linef("class '{s}' is above sandbox MaxEnemyTier {d} and has no lower PreviousTier", .{ nm, self.sim.director.max_enemy_tier });
+        return;
+    };
     const nid = if (def.kind == .animal)
-        self.sim.spawnAnimalDef(t.x + 3, sy, t.z + 3, self.entityClassOf(def))
+        self.sim.spawnAnimalDef(t.x + 3, sy, t.z + 3, spawn_class)
     else
-        self.sim.spawnZombieDef(t.x + 3, sy, t.z + 3, def.max_hp, self.entityClassOf(def));
+        self.sim.spawnZombieDef(t.x + 3, sy, t.z + 3, def.max_hp, spawn_class);
     if (nid) |eid| {
         if (self.sim.slotOfNetId(eid)) |es| {
             for (&self.clients) |*cl| {
@@ -1757,10 +1763,11 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 if (def.kind == .trader) {
                     break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm), self.trader_wallet_dukes);
                 }
+                // Sandbox 43 `MaxEnemyTier` on the explicit-coordinate form too.
                 if (def.kind == .animal) {
-                    break :blk self.sim.spawnAnimalDef(sx, sy, sz, self.entityClassOf(def));
+                    break :blk self.sim.spawnAnimalDef(sx, sy, sz, self.clampSpawnClass(def) orelse break :blk null);
                 }
-                break :blk self.sim.spawnZombieDef(sx, sy, sz, def.max_hp, self.entityClassOf(def));
+                break :blk self.sim.spawnZombieDef(sx, sy, sz, def.max_hp, self.clampSpawnClass(def) orelse break :blk null);
             };
             if (nid) |eid| {
                 // Force clients to treat entity as unknown so next interest pass

@@ -54,6 +54,7 @@ const game_guard = @import("game/guard.zig");
 const game_session_drop = @import("game/session_drop.zig");
 const game_init_assets = @import("game/init_assets.zig");
 const game_init_world = @import("game/init_world.zig");
+const ecs_aidirector = @import("../ecs/aidirector.zig");
 const game_lifecycle = @import("game/lifecycle.zig");
 const persist = @import("persist.zig");
 const admin_console = @import("admin_console.zig");
@@ -2556,6 +2557,23 @@ pub const Game = struct {
     }
     pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.EntityClass {
         return game_init_world.entityClassOf(self, d);
+    }
+
+    /// `EntityFactory::GetEntityClassWithinMaxTier` (IL=30) for the spawn paths
+    /// that do not go through the director (admin `spawnentity`, quest entity
+    /// spawn, sleeper volumes): a class above sandbox 43 `MaxEnemyTier` degrades
+    /// down its entityclasses `PreviousTier` ladder, and a ladder that cannot
+    /// satisfy the cap returns null, which the caller must treat as "do not
+    /// spawn" (stock logs the max-tier warning and the create fails). The
+    /// director has its own copy of the walk over its class table; both call the
+    /// same `previousTierPick`.
+    pub fn clampSpawnClass(self: *Game, d: assets_entities.EntityDef) ?ecs.world.EntityClass {
+        const max = self.sim.director.max_enemy_tier;
+        if (d.entity_tier <= max) return self.entityClassOf(d);
+        const seed: u64 = self.sim.director.total_spawned;
+        const name = ecs_aidirector.Director.previousTierPick(d.previous_tier, seed) orelse return null;
+        const next = self.entities.byName(name) orelse return null;
+        return self.clampSpawnClass(next);
     }
 
     pub fn resolveSpawnClass(ctx: ?*anyopaque, class_name: []const u8) ?ecs.world.EntityClass {

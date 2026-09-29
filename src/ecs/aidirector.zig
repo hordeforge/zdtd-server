@@ -1230,6 +1230,31 @@ pub const Director = struct {
     /// (AIDirectorBloodMoonParty::SpawnZombie IL_0031-0061). `class_override`
     /// is that class name; it resolves through the same class table/XML path
     /// the group picker uses.
+    /// One entry of a `PreviousTier` ladder, picked the way stock's
+    /// `GetPreviousTierEntity` (IL=73) does: the single entry when the list has
+    /// one, otherwise a pick seeded by the caller (stock uses the world
+    /// GameRandom; zdtd seeds off the spawn counter so a run stays
+    /// reproducible). Null when the ladder names nothing.
+    pub fn previousTierPick(previous: []const u8, seed: u64) ?[]const u8 {
+        if (previous.len == 0) return null;
+        var count: u32 = 0;
+        var it = std.mem.splitScalar(u8, previous, ',');
+        while (it.next()) |raw| {
+            if (std.mem.trim(u8, raw, " \t").len > 0) count += 1;
+        }
+        if (count == 0) return null;
+        const want: u32 = if (count == 1) 0 else @intCast((seed *% 2654435761) % count);
+        var seen: u32 = 0;
+        var it2 = std.mem.splitScalar(u8, previous, ',');
+        while (it2.next()) |raw| {
+            const name = std.mem.trim(u8, raw, " \t");
+            if (name.len == 0) continue;
+            if (seen == want) return name;
+            seen += 1;
+        }
+        return null;
+    }
+
     /// `EntityFactory::GetEntityClassWithinMaxTier` (IL=30): a class at or
     /// below `max_enemy_tier` passes through; otherwise walk its
     /// `PreviousTier` names (comma list, one class or a random pick) until one
@@ -1237,33 +1262,12 @@ pub const Director = struct {
     /// must skip the spawn.
     fn clampEntityTier(self: *const Director, w: *const ecs_world.World, ct: ecs_world.EntityClass) ?ecs_world.EntityClass {
         if (ct.entity_tier <= self.max_enemy_tier) return ct;
-        if (ct.previous_tier.len == 0) return null;
-        // One or more names; stock picks the first entry when there is one and
-        // a random entry otherwise. The pick is seeded off the spawn counter so
-        // a given run stays reproducible.
-        var count: u32 = 0;
-        var it = std.mem.splitScalar(u8, ct.previous_tier, ',');
-        while (it.next()) |raw| {
-            if (std.mem.trim(u8, raw, " \t").len > 0) count += 1;
+        const name = previousTierPick(ct.previous_tier, self.total_spawned) orelse return null;
+        for (w.class_table) |row| {
+            if (std.mem.eql(u8, row.name, name)) return self.clampEntityTier(w, row);
         }
-        if (count == 0) return null;
-        const pick_i: u32 = if (count == 1) 0 else @intCast((@as(u64, self.total_spawned) *% 2654435761) % count);
-        var seen: u32 = 0;
-        var it2 = std.mem.splitScalar(u8, ct.previous_tier, ',');
-        while (it2.next()) |raw| {
-            const name = std.mem.trim(u8, raw, " \t");
-            if (name.len == 0) continue;
-            if (seen != pick_i) {
-                seen += 1;
-                continue;
-            }
-            for (w.class_table) |row| {
-                if (std.mem.eql(u8, row.name, name)) return self.clampEntityTier(w, row);
-            }
-            if (self.class_resolve_fn) |f| {
-                if (f(self.class_resolve_ctx, name)) |row| return self.clampEntityTier(w, row);
-            }
-            return null;
+        if (self.class_resolve_fn) |f| {
+            if (f(self.class_resolve_ctx, name)) |row| return self.clampEntityTier(w, row);
         }
         return null;
     }

@@ -40,7 +40,10 @@ pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         }
         const t = self.sim.transform[ps];
         const zdef = self.entities.defaultZombie();
-        const zclass = self.entityClassOf(zdef);
+        // Sandbox 43 `MaxEnemyTier` applies on every stock create, quest
+        // summons included: a class above the cap degrades or the spawn is
+        // skipped.
+        const zclass = self.clampSpawnClass(zdef) orelse return true;
         // A35: spawn the full resolved class so the quest summon carries stats.
         _ = self.sim.spawnZombieDef(t.x + 6, t.y, t.z, zdef.max_hp, zclass);
         return true;

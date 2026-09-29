@@ -176,11 +176,14 @@ fn triggerVolume(self: *Game, vi: usize) void {
         var n: usize = 0;
         while (n < cap) : (n += 1) {
             const sp = vol.spawns[n];
+            // Sandbox 43 `MaxEnemyTier` (stock clamps every create): a sleeper
+            // class above the cap degrades down its PreviousTier ladder, and a
+            // ladder that cannot satisfy the cap skips the spawn.
             _ = self.sim.spawnSleeperDef(
                 @floatFromInt(sp.x),
                 @floatFromInt(sp.y),
                 @floatFromInt(sp.z),
-                self.entityClassOf(def),
+                self.clampSpawnClass(def) orelse continue,
                 @intCast(vi + 1),
             );
         }
@@ -196,7 +199,7 @@ fn triggerVolume(self: *Game, vi: usize) void {
     while (n < count and n < alive_cap and n < 8) : (n += 1) {
         const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
         const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
-        _ = self.sim.spawnSleeperDef(ox, cy, oz, self.entityClassOf(def), @intCast(vi + 1));
+        _ = self.sim.spawnSleeperDef(ox, cy, oz, self.clampSpawnClass(def) orelse return, @intCast(vi + 1));
     }
     vol.spawned_alive = n;
 }

@@ -18962,6 +18962,43 @@ test "scenario a placement above the ceiling or at the map edge is refused" {
     std.debug.print("PASS place-bounds: ceiling and map-edge placements refused\n", .{});
 }
 
+test "scenario the tier cap also clamps the paths outside the director" {
+    // Stock clamps `EntityFactory.MaxEntityTier` on EVERY create
+    // (GetEntityClassWithinMaxTier, IL=30), so the admin spawn, the quest
+    // entity spawn and the sleeper volumes must degrade too. zdtd only clamped
+    // the director path at first.
+    freshScenarioDir("worlds/zdtd_sc_tierpaths");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_tierpaths", 0);
+    defer g.destroy();
+    var edefs = [_]assets_entities.EntityDef{
+        .{ .name = "pHurt", .kind = .zombie, .hash = 0x51, .max_hp = 100 },
+        .{
+            .name = "pFeral",
+            .kind = .zombie,
+            .hash = 0x52,
+            .max_hp = 200,
+            .entity_tier = 3,
+            .previous_tier = "pHurt",
+        },
+        .{ .name = "pLone", .kind = .zombie, .hash = 0x53, .max_hp = 50, .entity_tier = 4 },
+    };
+    g.entities = .{ .defs = &edefs };
+    // Capped to Normal: the feral degrades down its ladder.
+    g.sim.director.max_enemy_tier = 0;
+    try std.testing.expectEqual(@as(i32, 0x51), (g.clampSpawnClass(edefs[1]) orelse return error.TestUnexpectedResult).hash);
+    // A class whose ladder cannot satisfy the cap: no class at all, which is
+    // what makes the caller skip the spawn.
+    try std.testing.expect(g.clampSpawnClass(edefs[2]) == null);
+    // Cap lifted: the class itself comes back.
+    g.sim.director.max_enemy_tier = 5;
+    try std.testing.expectEqual(@as(i32, 0x52), (g.clampSpawnClass(edefs[1]) orelse return error.TestUnexpectedResult).hash);
+    try std.testing.expectEqual(@as(i32, 0x53), (g.clampSpawnClass(edefs[2]) orelse return error.TestUnexpectedResult).hash);
+    std.debug.print("PASS tier-paths: the cap reaches every spawn path\n", .{});
+}
+
 test "scenario an entity announced on interest enter is described in the same tick" {
     // Stock's interest-enter burst is `EntitySpawn` + `EntityAliveFlags`
     // (+ speeds) together (network.md 302-315). zdtd sent the ECD on the tick

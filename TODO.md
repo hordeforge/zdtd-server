@@ -150,10 +150,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       `PreviousTier` parses per class through Extends, and sandbox 43
       `MaxEnemyTier` resolves at init into `Director.max_enemy_tier`, which
       `clampEntityTier` applies to every director spawn (degrade down the
-      ladder; refuse when the ladder cannot satisfy the cap). The remaining
-      difference: stock clamps on EVERY create, including non-director paths
-      (admin spawnentity, quest entity spawn, sleepers); zdtd clamps the
-      director path only.
+      ladder; refuse when the ladder cannot satisfy the cap), and
+      `Game.clampSpawnClass` applies the same walk to the non-director create
+      paths (admin `spawnentity` both forms, quest entity summon, quest sleeper
+      ambush, sleeper volumes), which is stock's "every create".
 - [x] **Blood moon does not suspend biome enemy spawning** - closed
       2026-09-28: the night drip is gated on `!bloodmoon_active`
       (`src/ecs/aidirector.zig:598`) and `bloodmoon_horde_drip_cd` is gone.

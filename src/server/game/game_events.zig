@@ -191,7 +191,7 @@ fn spawnEventGroup(self: *Game, ps: ecs.Slot, a: assets_gameevents.Action) void 
         const ox = px + @cos(ang) * dist;
         const oz = pz + @sin(ang) * dist;
         const oy = self.sim.groundY(ox, oz) orelse py;
-        const nid = self.sim.spawnZombieDef(ox, oy, oz, def.max_hp, self.entityClassOf(def)) orelse continue;
+        const nid = self.sim.spawnZombieDef(ox, oy, oz, def.max_hp, self.clampSpawnClass(def) orelse continue) orelse continue;
         if (!a.aggressive) continue;
         if (self.sim.slotOfNetId(nid)) |zs| {
             if (self.sim.mask[zs].zombie_ai) {
