@@ -241,6 +241,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       resolved once at init and gates both dig legs.
 - [x] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** - closed
       2026-09-28 (round 4): parsed and applied as the stock `[4, pref]` clamp.
+- [x] **Vehicles and turrets streamed without EntityAliveFlags** - closed
+      2026-09-28: the replicate pass now emits the flags leg for every alive
+      kind, not just zombies and animals.
+- [ ] **Sandbox `EntityIncomingDamage` (42) is client-side by design** - NOT a
+      gap: stock's client applies the multiplier to the damage it claims and
+      the server trusts the claimed strength (sandbox-options.md 274-292), which
+      is what `Director.damageScale` documents. Recording it so the audit does
+      not re-open it. Option 17 (`IncomingDamage`, the AI-to-player leg) IS
+      server-side and already has its sandbox override.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols`, `ServerMaxWorldTransferSpeedKiBs`,

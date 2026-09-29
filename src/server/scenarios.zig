@@ -19338,3 +19338,50 @@ test "scenario a RestrictSubmergedPlacement block cannot be placed in water" {
     try std.testing.expectEqual(stone, try g.world.blockWorld(px + 3, cy, pz));
     std.debug.print("PASS submerged-gate: a restricted block cannot enter water\n", .{});
 }
+
+test "scenario a vehicle and a turret entering interest also carry alive flags" {
+    // Stock's interest-enter burst sends `NetPackageEntityAliveFlags` for every
+    // tracked `EntityAlive` (network.md 302-315), and `EntityVehicle` and
+    // `EntityTurret` are EntityAlive subclasses. zdtd sent the flags only for
+    // the zombie/animal kinds, so a streamed-in vehicle or turret never carried
+    // the spawned flag.
+    freshScenarioDir("worlds/zdtd_sc_alive_flags");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_alive_flags", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+    const v = g.sim.spawnVehicle(.minibike, px + 10, g.sim.transform[ps].y, pz) orelse
+        return error.TestUnexpectedResult;
+    const vs = g.sim.slotOfNetId(v).?;
+    g.sim.mask[vs].class_id = true;
+    g.sim.class_id[vs].hash = 0x7e1c1e;
+    g.sim.vehicle[vs].owner_slot = @intCast(c.slot);
+    // A turret the demo world seeds is taken as the second subject.
+    var ts: ?ecs.Slot = null;
+    for (ecs_query.groupSlice(&g.sim, .turret)) |s| ts = s;
+    const tslot = ts orelse return error.TestUnexpectedResult;
+    const tid = g.sim.network_id[tslot].id;
+    // Put it in range and give it a resolved class so its ECD is built at all.
+    g.sim.transform[tslot].x = px + 12;
+    g.sim.transform[tslot].z = pz;
+    g.sim.mask[tslot].class_id = true;
+    g.sim.class_id[tslot].hash = 0x7e7e;
+
+    g.tick_n = 2;
+    cap.clear();
+    try g.replicate();
+    const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
+    const flags_id = packages.idOf("NetPackageEntityAliveFlags") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, v) != null);
+    try std.testing.expect(cap.findPkgIdEntity(flags_id, v) != null);
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, tid) != null);
+    try std.testing.expect(cap.findPkgIdEntity(flags_id, tid) != null);
+    std.debug.print("PASS alive-flags: vehicle and turret carry EntityAliveFlags\n", .{});
+}

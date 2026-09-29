@@ -309,9 +309,24 @@ pub fn replicate(self: *Game) !void {
 
         var speeds_framed: ?[]const u8 = null;
         var flags_framed: ?[]const u8 = null;
+        // Stock's interest-enter burst sends `NetPackageEntityAliveFlags` for
+        // ANY tracked `EntityAlive` (network.md 302-315), and `EntityVehicle`
+        // and `EntityTurret` are both EntityAlive subclasses: their clients get
+        // the spawn bit too, and only the mob kinds additionally carry AI state
+        // and speeds.
+        const alive_kind = self.sim.mask[i].kind and
+            (self.sim.kind[i] == .vehicle or self.sim.kind[i] == .turret);
         var vel_framed: ?[]const u8 = null;
         var turret_framed: ?[]const u8 = null;
         var anim_framed: ?[]const u8 = null;
+        if (alive_kind) {
+            if (packages.buildAliveFlagsBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 16], nid, packages.cF_spawned)) |fb| {
+                if (packages.framed(&flags_frame_buf, "NetPackageEntityAliveFlags", fb)) |ff| {
+                    flags_framed = ff;
+                    self.harness.counters.inc(.packages_encoded);
+                } else |_| {}
+            } else |_| {}
+        }
         if (self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal)) {
             var fwd: f32 = 0.2;
             var state: u8 = 1;
