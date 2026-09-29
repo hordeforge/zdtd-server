@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-29
+
 ### Added
 
 - **Per-class melee cadence.** `AttackTimeoutDay` and `AttackTimeoutNight`
@@ -37,6 +39,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - **Horde night stops the ordinary spawns.** The night drip and the wandering
   horde are suspended while a blood moon is active; the wandering horde fires
   after the night. The `bloodmoon_horde_drip_cd` rule is removed.
+- **Heat-map scouts match the players near the hot spot.** Their tier came from
+  the server-wide party high-water mark, so a level-1 player drew radiated
+  scouts whenever a high-level player was anywhere on the map. The tier now
+  comes from the gamestage around the hot chunk, as stock does.
+- **Zombies chew through cover at the stock rate.** Every pressed zombie chewed
+  on each AI wake, so a wooden frame fell in about a third of stock's time. A
+  per-zombie 1.0 to 1.8 s delay now gates each bite, and each nearby zombie
+  adds 20% to the damage, so a horde breaks a wall faster than a lone zombie.
+- **The server browser shows the login text and honours visibility.**
+  `ServerLoginConfirmationText` and `ServerVisibility` are parsed and sent in
+  the server info; a hidden server no longer advertises itself as public.
+- **A junk drone no longer spawns an auto turret.** zdtd has no drone
+  subsystem, and a turret-spawn body naming a resolved non-turret class went
+  down the turret path. It is refused and counted in `c2s_rejects`.
+- **A leaving player's map marker clears on other clients.** The disconnect
+  path sent no `PersistentPlayerState` row; it now broadcasts the stock reason 2
+  row with entity id -1 before the teardown.
 - **A destroyed vehicle, turret or crate disappears on clients.** No entity
   removal was sent for an entity destroyed by damage, so every client kept
   rendering the wreck.
