@@ -262,6 +262,16 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                     _ = invsys.degradeUse(&self.sim, c.slot, self.sim.inventory[editor].holding, 1.0);
                 }
             } else {
+                // Stock gates a PLACEMENT, not a break or a damage claim:
+                // `Block.CanPlaceBlockAt` refuses y > 253 and
+                // `World.CanPlaceBlockAt` step 2 refuses outside
+                // `InBoundsForPlayersPercent >= 0.5` (blocks.md 618-623,
+                // world-chunks.md 827-830). This branch is the one that
+                // introduces a block, so the gate lives here.
+                if (!self.placeBoundsOk(b.x, b.y, b.z)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    continue;
+                }
                 place_id = b.block_id;
                 out_dmg = 0;
                 if (cur_id != 0 and b.block_id != cur_id) {

@@ -22,6 +22,20 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**The disconnect removal carries stock's reason 2026-09-28**: `dropClientSlot` sent `EntityRemove(Despawned)` where `ConnectionManager.DisconnectClient` calls `RemoveEntity(entityId, ldc.i4.1)` = Unloaded (IL_01C1-01C8; the enum is Undef/Unloaded/Killed/Despawned/Captured). The reason byte is what the client branches its teardown on, so the drop now sends Unloaded, pinned by the multiplayer-bodies scenario.
+**Placement respects the height ceiling and the map edge 2026-09-28**: stock
+gates a placement twice, and zdtd did neither. `Block.CanPlaceBlockAt` refuses
+`pos.y > 253` (blocks.md 618-623) and `World.CanPlaceBlockAt` step 2 refuses
+where `InBoundsForPlayersPercent < 0.5` (IL=129), that percent being the smaller
+of the x/z ramps from the edge: 50 m hard margin, 80 m fade, and 1 for a world
+narrower than 1024 blocks (world-chunks.md 827-830). A client could therefore
+plant blocks at the world ceiling and in the outer band a dedi refuses.
+`guard.placeBoundsOk` now carries both, applied where a placement is committed:
+the SetBlock place branch (not the break or damage arms), the InvTx place route
+(which refunds the consumed unit, as on the claim path) and `placeAllowed` for
+turrets. Gated by `scenario a placement above the ceiling or at the map edge is
+refused`. Still open from the same RE block: trader placing protection,
+`bRestrictSubmergedPlacement` with `IsUnderwater`, and `overlapsWithOtherBlock`.
 **The dig sandbox switch is honoured 2026-09-28**: stock pushes sandbox option
 40 `AllowZombieDigging` into `EntityMoveHelper.AllowZombieDigging`, and with it
 off a zombie attacks a player but never breaks the cover in between. zdtd

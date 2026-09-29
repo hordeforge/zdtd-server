@@ -195,14 +195,50 @@ pub fn noteBlockBreak(self: *Game, c: *Client) void {
     );
 }
 
-/// Reach + land-claim gate for a block edit requested by `c` (ADR 0004).
-/// Shared by every C2S path that mutates world blocks or plants entities.
+/// Reach + land-claim + world-bounds gate for a block edit requested by `c`
+/// (ADR 0004). Shared by every C2S path that mutates world blocks or plants
+/// entities.
 pub fn placeAllowed(self: *Game, c: *const Client, x: i32, y: i32, z: i32) bool {
     const ps = self.sim.playerByPeer(c.slot) orelse return false;
     const p = self.sim.transform[ps];
     if (!self.withinEditReach(p.x, p.y, p.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
+    if (!self.placeBoundsOk(x, y, z)) return false;
     if (self.claimCovering(x, z)) |claim| {
         if (claim.owner_entity != self.sim.network_id[ps].id) return false;
     }
     return true;
+}
+
+/// Stock `Block.CanPlaceBlockAt` world-height ceiling (blocks.md 618-623): a
+/// placement above y 253 is refused, whatever the chunk store would accept.
+pub const world_placement_ceiling: i32 = 253;
+
+/// `World` edge bands (asm.il, RE world-chunks.md 827-830): a 50 m hard margin
+/// plus an 80 m fade, and a world narrower than 1024 blocks always passes.
+pub const edge_hard_margin: f32 = 50.0;
+pub const edge_soft_fade: f32 = 80.0;
+pub const edge_min_world_size: f32 = 1024.0;
+
+/// Stock `World::InBoundsForPlayersPercent` (IL=100): 1 deep inside the map,
+/// 0 at the edge, the smaller of the x/z ramps in between. zdtd's world
+/// coordinates run 0..width, so the stock centre-relative distance is
+/// `|coord - width/2|`.
+pub fn inBoundsForPlayersPercent(self: *const Game, x: i32, z: i32) f32 {
+    const width: f32 = @floatFromInt(self.worldSize());
+    if (width < edge_min_world_size) return 1.0;
+    const half = width / 2.0;
+    const dx = @abs(@as(f32, @floatFromInt(x)) - half);
+    const dz = @abs(@as(f32, @floatFromInt(z)) - half);
+    const tx = std.math.clamp((half - dx - edge_hard_margin) / edge_soft_fade, 0.0, 1.0);
+    const tz = std.math.clamp((half - dz - edge_hard_margin) / edge_soft_fade, 0.0, 1.0);
+    return @min(tx, tz);
+}
+
+/// Stock's placement gate for a position that is about to receive a block:
+/// the height ceiling (the `Block` virtual) and `World.CanPlaceBlockAt` step 2
+/// (`InBoundsForPlayersPercent >= 0.5`, IL=129). Reach, claims and the trader
+/// area stay with their own callers.
+pub fn placeBoundsOk(self: *const Game, x: i32, y: i32, z: i32) bool {
+    if (y > world_placement_ceiling) return false;
+    return self.inBoundsForPlayersPercent(x, z) >= 0.5;
 }

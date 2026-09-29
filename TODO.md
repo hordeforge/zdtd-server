@@ -192,10 +192,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       `LockPickable`, `Explodable` and `Door` never reach a client
       (inventories/te-features.md:12-26): POI vault doors and locked lockers
       open for anyone and a lockpick does nothing.
-- [ ] **`CanPlaceBlockAt` gates and the world-edge band are absent** - stock
-      rejects y > 253, trader placing protection within 2 blocks, submerged
-      placement and `InBoundsForPlayersPercent < 0.5` (blocks.md:618-651); both
-      zdtd place arms check the claim only.
+- [x] **`CanPlaceBlockAt` height ceiling and the world-edge band** - closed
+      2026-09-28: `guard.placeBoundsOk` applies stock's `pos.y > 253` reject and
+      `World.CanPlaceBlockAt`'s `InBoundsForPlayersPercent >= 0.5` gate (50 m
+      hard margin, 80 m fade, min 1024-wide world) to the SetBlock place branch,
+      the InvTx place arm and `placeAllowed`. Still open from the same RE block:
+      the trader placing protection (2 blocks), `bRestrictSubmergedPlacement`
+      plus `IsUnderwater`, and `overlapsWithOtherBlock`.
 - [x] **Junk drone placement spawns a wired auto turret** - closed
       2026-09-28 for the wrong-entity half: a body claiming a resolved
       non-turret class is refused instead of spawning a 15 W trap. Still open:
@@ -221,10 +224,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       `PersistentPlayerProfiles`, `SaveDataLimit`, `IgnoreEOSSanctions`,
       `HideCommandExecutionLog`. Each needs a decision (honour, or document as
       out of scope) before the key list is honest.
-- [ ] **Disconnect `EntityRemove` reason** - `session_drop.zig` sends
-      `EntityRemove(Despawned)` where stock's `DisconnectClient` sends
-      `Unloaded(1)` (`ldc.i4.1` at IL_01C1-01C8). The companion item, the
-      disconnect `PersistentPlayerState` reason-2 row, closed 2026-09-28.
+- [x] **Disconnect `EntityRemove` reason** - closed 2026-09-28: the drop path
+      sends `Unloaded(1)`, the value stock's `ConnectionManager.DisconnectClient`
+      passes (`ldc.i4.1` at IL_01C1-01C8). The companion item, the disconnect
+      `PersistentPlayerState` reason-2 row, closed the same day.
 - [x] **Wandering hordes land on horde nights** - closed 2026-09-28: a due
       wave waits while `bloodmoon_active` (stock `get_OtherHordesAreActive`,
       aidirector.md:711-712). The scout-horde half of that test has no zdtd

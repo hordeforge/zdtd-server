@@ -2321,6 +2321,16 @@ pub const Game = struct {
         return game_guard.placeAllowed(self, c, x, y, z);
     }
 
+    /// Stock `Block.CanPlaceBlockAt` height ceiling plus
+    /// `World.CanPlaceBlockAt`'s `InBoundsForPlayersPercent >= 0.5` edge gate.
+    pub fn placeBoundsOk(self: *const Game, x: i32, y: i32, z: i32) bool {
+        return game_guard.placeBoundsOk(self, x, y, z);
+    }
+
+    pub fn inBoundsForPlayersPercent(self: *const Game, x: i32, z: i32) f32 {
+        return game_guard.inBoundsForPlayersPercent(self, x, z);
+    }
+
     /// World Y for spawning mobs next to a player (surface band, not void/float).
     pub fn spawnYNearPlayer(self: *Game, tr_x: f32, tr_y: f32, tr_z: f32) f32 {
         return game_world.spawnYNearPlayer(self, tr_x, tr_y, tr_z);

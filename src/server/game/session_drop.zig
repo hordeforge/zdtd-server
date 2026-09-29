@@ -76,8 +76,13 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
             if (packages.buildGameMessageBody(&gmb, .left_game, nid, -1)) |gb| {
                 self.broadcast("NetPackageGameMessage", gb) catch {};
             } else |_| {}
+            // Stock `ConnectionManager.DisconnectClient` calls
+            // `WorldBase.RemoveEntity(entityId, ldc.i4.1)` = Unloaded
+            // (IL_01C1-01C8; the enum is Undef/Unloaded/Killed/Despawned/
+            // Captured), not Despawned. The reason byte is what the client
+            // branches its teardown on, so send what stock sends.
             var rb: [16]u8 = undefined;
-            const rm_body: ?[]const u8 = packages.buildRemoveBodyReason(&rb, nid, .despawned) catch null;
+            const rm_body: ?[]const u8 = packages.buildRemoveBodyReason(&rb, nid, .unloaded) catch null;
             if (rm_body) |rm| {
                 for (&self.clients) |*cl| {
                     if (!cl.joined or cl.peer == null or cl.entity_id == nid) continue;

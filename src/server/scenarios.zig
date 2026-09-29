@@ -431,8 +431,10 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     const lvl2 = try pr2.readI32();
     try std.testing.expectEqual(@as(i32, @intCast(ca.level)), lvl2); // snapshot carries the new level
 
-    // Dropping A broadcasts EntityRemove(Despawned) to B. The drop zeroes
-    // A's client struct, so snapshot the entity id before it.
+    // Dropping A broadcasts EntityRemove(Unloaded) to B, the reason stock's
+    // `ConnectionManager.DisconnectClient` passes (`RemoveEntity(id, 1)`,
+    // IL_01C1-01C8). The drop zeroes A's client struct, so snapshot the entity
+    // id before it.
     const a_eid = ca.entity_id;
     cap_b.clear();
     g.dropClientSlot(ca.slot, "scenario drop");
@@ -440,14 +442,14 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     const rmb = cap_b.findPkgIdEntity(rm_id, a_eid) orelse return error.TestUnexpectedResult;
     var rr = binary.Reader{ .data = rmb };
     try std.testing.expectEqual(a_eid, try rr.readI32());
-    try std.testing.expectEqual(@as(u8, @intFromEnum(packages.RemoveEntityReason.despawned)), try rr.readByte());
+    try std.testing.expectEqual(@as(u8, @intFromEnum(packages.RemoveEntityReason.unloaded)), try rr.readByte());
     // The drop destroys the sim player entity: no ghost player lingers for
     // this peer slot (listents/mem phantom, spawn-on-approach for late
     // joiners) until the slot is reused.
     try std.testing.expect(g.sim.playerByPeer(ca.slot) == null);
 
     std.debug.print(
-        "PASS multiplayer-bodies: B saw A id={d}, A saw B id={d}, drop sent Remove(despawned)\n",
+        "PASS multiplayer-bodies: B saw A id={d}, A saw B id={d}, drop sent Remove(unloaded)\n",
         .{ a_eid, cb.entity_id },
     );
 }
@@ -1636,6 +1638,7 @@ test "scenario a disconnect broadcasts PersistentPlayerState reason 2" {
     const cb = try g.attachJoinedClient(&cap_b);
     g.clients[cb.slot].entered = true;
     cap_b.clear();
+    const a_entity = ca.entity_id; // dropClientSlot resets the slot record
     g.dropClientSlot(ca.slot, "scenario pps disconnect");
     const pps_id = packages.idOf("NetPackagePersistentPlayerState") orelse return error.TestUnexpectedResult;
     const body = cap_b.findPkgId(pps_id) orelse return error.NoPersistentStateOnDisconnect;
@@ -1661,6 +1664,13 @@ test "scenario a disconnect broadcasts PersistentPlayerState reason 2" {
     _ = try r.readI32();
     _ = try r.readI32();
     try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // entity_id
+    // The companion EntityRemove carries stock's reason: `DisconnectClient`
+    // calls RemoveEntity(entityId, 1) = Unloaded, not Despawned.
+    const rm_id = packages.idOf("NetPackageEntityRemove") orelse return error.TestUnexpectedResult;
+    const rm = cap_b.findPkgId(rm_id) orelse return error.NoEntityRemoveOnDisconnect;
+    var rr = binary.Reader{ .data = rm };
+    try std.testing.expectEqual(a_entity, try rr.readI32());
+    try std.testing.expectEqual(@as(u8, @intFromEnum(packages.RemoveEntityReason.unloaded)), try rr.readByte());
     std.debug.print("PASS pps-disconnect: reason 2 with entity id -1\n", .{});
 }
 
@@ -5054,17 +5064,23 @@ test "scenario inventory move drop place equip" {
         }
         break :blk 1;
     };
+    // Interior cell: the world-edge band is now refused like stock's
+    // `InBoundsForPlayersPercent`, and chunk-space x=10 sits inside the 50 m
+    // hard margin of a 6144-wide world.
+    // Body is (op, a=slot, b=y, qty=z, entityId=x), so the cell is
+    // (250, 80, 250): interior x/z (the world-edge band is refused like
+    // stock's `InBoundsForPlayersPercent`) and above the flat ground.
     const place_req = try packages.buildInvTxRequest(
         &txb,
         @intFromEnum(inv.Op.place),
         wood_slot,
-        @bitCast(@as(i16, 70)),
-        @bitCast(@as(i16, 10)),
-        10, // x
+        @bitCast(@as(i16, 80)),
+        @bitCast(@as(i16, 250)),
+        250,
     );
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
     // resourceWood places frameShapes:cube (AssignIds), not bedrock(4).
-    try std.testing.expectEqual(inv.place_wood_block_id, try g.world.blockWorld(10, 70, 10));
+    try std.testing.expectEqual(inv.place_wood_block_id, try g.world.blockWorld(250, 80, 250));
 
     // equip armor
     const armor_slot: u16 = blk: {
@@ -18896,4 +18912,51 @@ test "scenario a placed turret and vehicle are announced to the stock client" {
         try std.testing.expect(cap_b.findPkgIdEntity(rem_id, our_vehicle) != null);
     }
     std.debug.print("PASS announce: placed turret and vehicle reach the other client as ECDs\n", .{});
+}
+
+test "scenario a placement above the ceiling or at the map edge is refused" {
+    // Stock `Block.CanPlaceBlockAt` refuses `pos.y > 253` and
+    // `World.CanPlaceBlockAt` (IL=129) refuses where
+    // `InBoundsForPlayersPercent < 0.5` (a 50 m hard margin plus an 80 m fade
+    // on a world at least 1024 wide, world-chunks.md 827-830). zdtd checked
+    // neither, so a client could plant blocks at the world ceiling and in the
+    // outer band a dedi refuses.
+    freshScenarioDir("worlds/zdtd_sc_bounds");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bounds", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const block_id = g.maxdamage.idByName("terrDirt") orelse return error.SkipZigTest;
+
+    const place = struct {
+        fn at(gg: *game_mod.Game, cc: *game_mod.Client, pslot: ecs.Slot, id: u16, x: i32, y: i32, z: i32) !bool {
+            gg.sim.transform[pslot].x = @floatFromInt(x);
+            gg.sim.transform[pslot].y = @floatFromInt(y);
+            gg.sim.transform[pslot].z = @floatFromInt(z);
+            var sb: [64]u8 = undefined;
+            var fb: [128]u8 = undefined;
+            try gg.injectFramed(cc, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, x, y, z, id)));
+            return (try gg.world.blockWorld(x, y, z)) == id;
+        }
+    }.at;
+
+    // Interior, below the ceiling: accepted (the flat world spans 0..6144, so
+    // the stock centre-relative coordinate is x - 3072).
+    try std.testing.expect(try place(g, c, ps, block_id, 256, 70, 256));
+    // Above the ceiling: refused.
+    try std.testing.expect(!try place(g, c, ps, block_id, 256, 254, 257));
+    // Inside the 50 m hard margin: refused. The percent itself reads 1 deep
+    // inside, 0 within 50 m of the edge, and 0.5 at the 90 m boundary
+    // (50 m hard + 40 m into the 80 m fade).
+    try std.testing.expectEqual(@as(f32, 1.0), g.inBoundsForPlayersPercent(256, 256));
+    try std.testing.expectEqual(@as(f32, 0.0), g.inBoundsForPlayersPercent(30, 256));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.inBoundsForPlayersPercent(90, 256), 0.001);
+    try std.testing.expect(!try place(g, c, ps, block_id, 30, 70, 30));
+    // At the boundary the gate opens (percent >= 0.5).
+    try std.testing.expect(try place(g, c, ps, block_id, 90, 70, 90));
+    std.debug.print("PASS place-bounds: ceiling and map-edge placements refused\n", .{});
 }

@@ -228,13 +228,21 @@ pub fn handleTxn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8,
         }
         if (r.ok and r.place_block != 0) {
             // Land claim is authoritative on every apply path (ADR 0004); the
-            // InvTx place route must not be a way around it. Refund the unit the
-            // transaction already consumed (mirrors the refuel path).
-            if (self.claimCovering(r.place_x, r.place_z)) |claim| {
-                if (claim.owner_entity != c.entity_id) {
-                    if (place_item_id != 0) _ = invsys.give(&self.sim, c.slot, place_item_id, 1);
-                    r.ok = false;
+            // InvTx place route must not be a way around it. The world bounds
+            // are the other half of the same gate (stock
+            // `Block.CanPlaceBlockAt` height ceiling +
+            // `World.CanPlaceBlockAt`'s map-edge percent). Refund the unit the
+            // transaction already consumed either way (mirrors the refuel path).
+            const denied = blk: {
+                if (!self.placeBoundsOk(r.place_x, r.place_y, r.place_z)) break :blk true;
+                if (self.claimCovering(r.place_x, r.place_z)) |claim| {
+                    if (claim.owner_entity != c.entity_id) break :blk true;
                 }
+                break :blk false;
+            };
+            if (denied) {
+                if (place_item_id != 0) _ = invsys.give(&self.sim, c.slot, place_item_id, 1);
+                r.ok = false;
             }
         }
         if (r.ok and r.place_block != 0) {
