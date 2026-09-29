@@ -135,6 +135,9 @@ pub fn tickAirDrop(self: *Game) void {
 /// BlockDamageAI / AIBM: attacking zombies chew through a solid block between
 /// them and their target. Scaled by BlockDamageAI (BlockDamageAIBM on blood moon).
 pub fn tickZombieBlockDamage(self: *Game) void {
+    // Sandbox `AllowZombieDigging` (stock `EntityMoveHelper.AllowZombieDigging`):
+    // off means a zombie attacks but never breaks cover.
+    if (!self.allow_zombie_digging) return;
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
     // Per-class chew: the hand item's DamageBlock (zombie 8, feral 24) when
@@ -359,6 +362,13 @@ pub fn clearDeadKnownEntities(self: *Game) void {
 /// request damages the sim-marked block with the chew's bite damage; a broken
 /// block ends the dig so the zombie walks on.
 pub fn drainDigRequests(self: *Game) void {
+    // Sandbox `AllowZombieDigging`: the MoveHelper dig leg is gated by the same
+    // switch as the chew pass, and its queued requests are dropped rather than
+    // held for the tick the option comes back.
+    if (!self.allow_zombie_digging) {
+        self.sim.dig_n = 0;
+        return;
+    }
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
     // Per-class chew floor: hand-item DamageBlock beats the flat Rules value.

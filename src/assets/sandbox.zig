@@ -107,6 +107,35 @@ pub fn valueB(o: *const Option, index: u8) bool {
     return o.default_i != 0;
 }
 
+/// Boolean option resolved from a decoded sandbox code: the group's index when
+/// the code carries it, else the stock default. One entry point so a caller
+/// cannot invent its own truthiness (see `valueB`).
+pub fn boolFromCode(code: []const u8, name: []const u8) ?bool {
+    const o = optionByName(name) orelse return null;
+    var groups: [max_groups]Group = undefined;
+    const n = decode(code, &groups);
+    for (groups[0..n]) |g| {
+        if (g.option_id != o.id) continue;
+        return valueB(o, g.index);
+    }
+    return o.default_i != 0;
+}
+
+test "boolFromCode resolves a missing option to its stock default" {
+    // Option 40 `AllowZombieDigging`, YesNo, stock default Yes: a code that
+    // does not carry the group keeps the default, and an unknown name is the
+    // caller's problem rather than a silent false.
+    try std.testing.expectEqual(@as(?bool, true), boolFromCode("A", "AllowZombieDigging"));
+    try std.testing.expectEqual(@as(?bool, null), boolFromCode("A", "NoSuchOptionName"));
+    const o = optionByName("AllowZombieDigging").?;
+    try std.testing.expectEqual(@as(u16, 40), o.id);
+    try std.testing.expectEqual(@as(i32, 1), o.default_i);
+    // The valueB contract the resolver leans on: index 0 is No even when the
+    // option's own default is Yes.
+    try std.testing.expect(!valueB(o, 0));
+    try std.testing.expect(valueB(o, 1));
+}
+
 test "decode rejects wrong version char" {
     var groups: [max_groups]Group = undefined;
     try std.testing.expectEqual(@as(usize, 0), decode("B", &groups));

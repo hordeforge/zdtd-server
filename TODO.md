@@ -203,9 +203,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       node, which stands in for wire-action application (zdtd only relays
       `NetPackageWireActions`, so removing it would leave every placed trap
       unpowered).
-- [ ] **`NetPackageChunkRemoveAll` and `NetPackageEventPrefab` have no send
-      site** - registered and parsed, never emitted; check the stock sender in
-      the IL before acting (medium confidence, receivers only in the docs).
+- [x] **`NetPackageChunkRemoveAll` has no send site** - closed 2026-09-28 as
+      NOT a gap: the only stock sender is
+      `ChunkManager::RemoveAllChunksOnAllClients` (IL=99), called solely from
+      `PrefabEditModeManager`, the client prefab editor a dedi never enters.
+- [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
+      (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
+      the dynamic event-prefab subsystem, not the package: zdtd places no event
+      prefabs and therefore has nothing to send.
+- [x] **`AllowZombieDigging` sandbox option ignored** - closed 2026-09-28:
+      resolved once at init and gates both dig legs.
 - [x] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** - closed
       2026-09-28 (round 4): parsed and applied as the stock `[4, pref]` clamp.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
@@ -214,10 +221,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       `PersistentPlayerProfiles`, `SaveDataLimit`, `IgnoreEOSSanctions`,
       `HideCommandExecutionLog`. Each needs a decision (honour, or document as
       out of scope) before the key list is honest.
-- [ ] **Disconnect reason and `PersistentPlayerState` reason 2** -
-      `session_drop.zig:63` sends `EntityRemove(Despawned)` where stock sends
-      `Unloaded(1)`, and the disconnect `PersistentPlayerState` row is never
-      broadcast (`buildPersistentPlayerState` has no reason parameter).
+- [ ] **Disconnect `EntityRemove` reason** - `session_drop.zig` sends
+      `EntityRemove(Despawned)` where stock's `DisconnectClient` sends
+      `Unloaded(1)` (`ldc.i4.1` at IL_01C1-01C8). The companion item, the
+      disconnect `PersistentPlayerState` reason-2 row, closed 2026-09-28.
 - [x] **Wandering hordes land on horde nights** - closed 2026-09-28: a due
       wave waits while `bloodmoon_active` (stock `get_OtherHordesAreActive`,
       aidirector.md:711-712). The scout-horde half of that test has no zdtd

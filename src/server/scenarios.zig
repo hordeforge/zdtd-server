@@ -2668,6 +2668,13 @@ test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck
     // Stock marks the change damage-only (bChangeDamage, no bUpdateLight), so
     // the client drops it if the cell was replaced before it arrived.
     try std.testing.expectEqual(@as(u8, 0x03), got[20]);
+    // Sandbox `AllowZombieDigging` off: stock pushes it into
+    // `EntityMoveHelper.AllowZombieDigging`, so the same pressed zombie chews
+    // nothing at all.
+    g.allow_zombie_digging = false;
+    const hp_gate = g.getBlockHp(6, 71, 5);
+    g.tickZombieBlockDamage();
+    try std.testing.expectEqual(hp_gate, g.getBlockHp(6, 71, 5));
     std.debug.print("PASS zombie-lowwall: feet-level wall chewed (hp {d} -> {d}) and echoed to the other client\n", .{ hp_before, hp_after });
 }
 

@@ -501,6 +501,11 @@ pub const Game = struct {
     /// (GameInfoString 11) and the visibility int (GameInfoInt 43).
     server_login_confirmation_text: []const u8 = "",
     server_visibility: u8 = 0,
+    /// Sandbox `AllowZombieDigging` (option 40, default on): stock pushes it
+    /// into `EntityMoveHelper.AllowZombieDigging`, and with it off a zombie
+    /// attacks but never breaks cover. Resolved once from the sandbox code at
+    /// init, like every other option the stock fan-out pushes into a static.
+    allow_zombie_digging: bool = true,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
     /// Effective server config (loaded file or struct defaults) for late

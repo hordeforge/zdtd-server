@@ -22,6 +22,20 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**The dig sandbox switch is honoured 2026-09-28**: stock pushes sandbox option
+40 `AllowZombieDigging` into `EntityMoveHelper.AllowZombieDigging`, and with it
+off a zombie attacks a player but never breaks the cover in between. zdtd
+decoded the option with the rest of the 165 and then never read it, so an
+operator who turned digging off still watched zombies eat walls. It is resolved
+once at init (`assets/sandbox.boolFromCode`, the same one-pass model as the
+`StackSizeMultiplier` fan-out) and gates both block-breaking legs: the chew pass
+and the drained MoveHelper dig requests. Gated by the `AllowZombieDigging` arm
+of the feet-level chew scenario and the resolver's own test. Two package
+questions also closed without code: `NetPackageChunkRemoveAll`'s only stock
+sender is `ChunkManager::RemoveAllChunksOnAllClients`, called from
+`PrefabEditModeManager` alone, so a dedi never sends it; and
+`NetPackageEventPrefab` does have a real sender (`EventPrefabs.TryPlaceAt`),
+which makes the gap the missing event-prefab subsystem rather than the package.
 **Zombies chew cover at the stock rate, and a pack chews faster 2026-09-28**:
 the block-chew pass ran on every 10-tick wake for every pressed zombie, so a
 wooden frame or sheet-metal wall between a zombie and a player melted in about a

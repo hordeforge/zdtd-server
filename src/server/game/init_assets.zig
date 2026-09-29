@@ -372,6 +372,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.items.setStackSizeModifier(mult);
         if (mult != 1) util_log.info("zdtd: sandbox MaxStackSize multiplier={d:.2}\n", .{mult});
     }
+    // Sandbox `AllowZombieDigging` (option 40, `EntityMoveHelper.
+    // AllowZombieDigging`): with it off a zombie still attacks but never
+    // breaks cover. Resolved once here, with the other fan-out options.
+    self.allow_zombie_digging = assets_sandbox.boolFromCode(self.sandbox_code, "AllowZombieDigging") orelse true;
+    if (!self.allow_zombie_digging) util_log.info("zdtd: sandbox AllowZombieDigging=off; zombies will not break blocks\n", .{});
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
         self.signs = sc;
