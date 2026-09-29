@@ -376,6 +376,17 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // AllowZombieDigging`): with it off a zombie still attacks but never
     // breaks cover. Resolved once here, with the other fan-out options.
     self.allow_zombie_digging = assets_sandbox.boolFromCode(self.sandbox_code, "AllowZombieDigging") orelse true;
+    // Sandbox 43 `MaxEnemyTier`: stock pushes it into
+    // `EntityFactory.MaxEntityTier` (cctor default 5 = Elite), and
+    // `GetEntityClassWithinMaxTier` then degrades any class above the cap down
+    // its `PreviousTier` ladder. Resolved once here with the other fan-out
+    // options.
+    if (assets_sandbox.intFromCode(self.sandbox_code, "MaxEnemyTier")) |tier| {
+        self.sim.director.max_enemy_tier = @intCast(std.math.clamp(tier, 0, 5));
+        if (self.sim.director.max_enemy_tier < 5) {
+            util_log.info("zdtd: sandbox MaxEnemyTier={d}; classes above it degrade to their PreviousTier\n", .{self.sim.director.max_enemy_tier});
+        }
+    }
     if (!self.allow_zombie_digging) util_log.info("zdtd: sandbox AllowZombieDigging=off; zombies will not break blocks\n", .{});
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
@@ -441,6 +452,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .time_stay = zdef.time_stay,
             .sight_range = zdef.sight_range,
             .attack_timeout_day = zdef.attack_timeout_day,
+            .entity_tier = zdef.entity_tier,
+            .previous_tier = zdef.previous_tier,
             .attack_timeout_night = zdef.attack_timeout_night,
             .hurt_target_classes = zdef.hurt_target_classes,
             .block_if_alert_only = zdef.block_if_alert_only,
@@ -494,6 +507,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .time_stay = adef.time_stay,
             .sight_range = adef.sight_range,
             .attack_timeout_day = adef.attack_timeout_day,
+            .entity_tier = adef.entity_tier,
+            .previous_tier = adef.previous_tier,
             .attack_timeout_night = adef.attack_timeout_night,
             .hurt_target_classes = adef.hurt_target_classes,
             .block_if_alert_only = adef.block_if_alert_only,
@@ -587,6 +602,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .time_stay = def.time_stay,
                 .sight_range = def.sight_range,
                 .attack_timeout_day = def.attack_timeout_day,
+                .entity_tier = def.entity_tier,
+                .previous_tier = def.previous_tier,
                 .attack_timeout_night = def.attack_timeout_night,
                 .hurt_target_classes = def.hurt_target_classes,
                 .block_if_alert_only = def.block_if_alert_only,

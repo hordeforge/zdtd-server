@@ -109,6 +109,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | sandbox `AirDropMarker` | true | bool | crate marker on the map; rides GameStats[53] |
 | sandbox `BiomeProgression` | true | bool | biome gamestage/lootstage progression; rides GameStats[66] |
 | sandbox `AllowZombieDigging` | true | bool | option 40 (`EntityMoveHelper.AllowZombieDigging`): off means a zombie attacks but never breaks blocks, gating both the chew pass and the MoveHelper dig leg |
+| sandbox `MaxEnemyTier` | 5 | 0..5 | option 43 (`EntityFactory.MaxEntityTier`): a spawn whose class tier (Tags: strong 1, special 2, feral 3, radiated 4, elite 5) is above the cap degrades down its entityclasses `PreviousTier` ladder, and a class whose ladder cannot satisfy the cap is not spawned |
 | `LandClaimSize` | 41 | 1..255 (odd) | keystone protection area; even values forced odd |
 | `LandClaimOnlineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner online |
 | `LandClaimOfflineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner offline |

@@ -56,6 +56,13 @@ pub const EntityDef = struct {
     /// UserSpawnType != None (Menu/Console).
     spawnable: bool = false,
     is_enemy: bool = true,
+    /// `CalculateEntityTier` (IL=49): derived purely from Tags, elite 5 >
+    /// radiated 4 > feral 3 > special 2 > strong 1, else Normal 0.
+    entity_tier: u8 = 0,
+    /// `PreviousTier` (comma-separated class names): the ladder
+    /// `GetPreviousTierEntity` walks when `EntityFactory.MaxEntityTier` caps a
+    /// class below its own tier. Empty = no configured downgrade.
+    previous_tier: []const u8 = "",
     /// Inherited AITask-* list contains an attack task (see resolvedAiAttacks):
     /// false only for classes whose task list exists without one (timid
     /// animals), true otherwise so brainless classes keep the zombie default.
@@ -849,6 +856,28 @@ fn defaultHp(kind: components.Kind) f32 {
     };
 }
 
+/// True when the comma-separated `Tags` string names `want` (stock FastTags
+/// members are exact names; whitespace around an entry is trimmed).
+pub fn tagPresent(tags: []const u8, want: []const u8) bool {
+    if (tags.len == 0 or want.len == 0) return false;
+    var it = std.mem.splitScalar(u8, tags, ',');
+    while (it.next()) |t| {
+        if (std.mem.eql(u8, std.mem.trim(u8, t, " \t"), want)) return true;
+    }
+    return false;
+}
+
+/// `EntityClass.CalculateEntityTier` (IL=49): the tier comes from Tags alone,
+/// in this order (elite beats radiated beats feral beats special beats strong).
+pub fn tierFromTags(tags: []const u8) u8 {
+    if (tagPresent(tags, "elite")) return 5;
+    if (tagPresent(tags, "radiated")) return 4;
+    if (tagPresent(tags, "feral")) return 3;
+    if (tagPresent(tags, "special")) return 2;
+    if (tagPresent(tags, "strong")) return 1;
+    return 0;
+}
+
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -1035,6 +1064,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
     while (it.next()) |e| {
         const name = e.key_ptr.*;
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
+        const prev_tier = resolveProp(&classes, name, "PreviousTier", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
         var ranged_params: RangedParams = .{};
@@ -1313,6 +1343,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .name = name,
             .hash = unity_hash.getStableHashCode(name),
             .tags = if (tags.len > 0) try arena.dupe(u8, tags) else "",
+            .entity_tier = tierFromTags(tags),
+            .previous_tier = if (prev_tier.len > 0) try arena.dupe(u8, prev_tier) else "",
             .max_hp = max_hp,
             .kind = kind,
             .flying = flying,

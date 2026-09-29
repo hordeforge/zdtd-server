@@ -1345,3 +1345,40 @@ test "heat scouts take their tier from the gamestage around the hot spot" {
     try std.testing.expectEqualStrings("ScoutsFeral", Hooks.asked[0..Hooks.asked_len]);
     try std.testing.expectEqualStrings("ScoutsRadiated", scoutSpawnerName(d.party_stage));
 }
+
+test "MaxEnemyTier degrades a class down its PreviousTier ladder" {
+    // EntityFactory.GetEntityClassWithinMaxTier (IL=30): a class above the cap
+    // is replaced by its PreviousTier ladder, and a class whose ladder cannot
+    // satisfy the cap is not spawned at all. Sandbox 43 MaxEnemyTier is the
+    // value behind the cap (cctor default 5, so this only bites when an
+    // operator lowers it).
+    const Hooks = struct {
+        var name: []const u8 = "zFeral";
+        fn pick(_: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            return name;
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    w.class_table[1] = .{ .name = "zBase", .kind = .zombie, .hash = 0x11, .max_hp = 100 };
+    w.class_table[2] = .{ .name = "zFeral", .kind = .zombie, .hash = 0x22, .max_hp = 200, .entity_tier = 3, .previous_tier = "zBase" };
+    w.class_table[3] = .{ .name = "zLone", .kind = .zombie, .hash = 0x33, .max_hp = 50, .entity_tier = 4 };
+    var d: Director = .{
+        .clock = .{ .day = 1, .hours = 12.0 },
+        .group_pick_ctx = undefined,
+        .group_pick_fn = &Hooks.pick,
+        .max_enemy_tier = 0,
+    };
+    // Capped to Normal: the feral pick degrades to its PreviousTier row.
+    const s1 = d.spawnOneZombie(&w, 30, 70, 30, "ZombiesAll", 1, false) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 0x11), w.class_id[s1].hash);
+    // Cap lifted: the feral row is used as picked.
+    d.max_enemy_tier = 5;
+    const s2 = d.spawnOneZombie(&w, 34, 70, 34, "ZombiesAll", 2, false) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 0x22), w.class_id[s2].hash);
+    // A class with no PreviousTier at all: refused, not silently spawned.
+    d.max_enemy_tier = 0;
+    Hooks.name = "zLone";
+    try std.testing.expect(d.spawnOneZombie(&w, 38, 70, 38, "ZombiesAll", 3, false) == null);
+}

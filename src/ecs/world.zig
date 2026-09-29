@@ -247,6 +247,10 @@ pub const EntityClass = struct {
     /// 0 = unset, which uses the other arm then the Rules floor.
     attack_timeout_day: f32 = 0,
     attack_timeout_night: f32 = 0,
+    /// `CalculateEntityTier` from Tags (elite 5 .. normal 0) and the
+    /// `PreviousTier` ladder the max-tier clamp walks.
+    entity_tier: u8 = 0,
+    previous_tier: []const u8 = "",
     /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
     /// 0 = unset (the sense path falls back to sight_range). Negative stock
     /// values (never target) stay negative so the gate keeps them denied.

@@ -107,6 +107,20 @@ pub fn valueB(o: *const Option, index: u8) bool {
     return o.default_i != 0;
 }
 
+/// Int option resolved from a decoded sandbox code: the group's value when the
+/// code carries it, else the stock default.
+pub fn intFromCode(code: []const u8, name: []const u8) ?i32 {
+    const o = optionByName(name) orelse return null;
+    var groups: [max_groups]Group = undefined;
+    const n = decode(code, &groups);
+    for (groups[0..n]) |g| {
+        if (g.option_id != o.id) continue;
+        if (findSet(o.set_name)) |set| return valueI(o, set, g.index);
+        return o.default_i;
+    }
+    return o.default_i;
+}
+
 /// Boolean option resolved from a decoded sandbox code: the group's index when
 /// the code carries it, else the stock default. One entry point so a caller
 /// cannot invent its own truthiness (see `valueB`).

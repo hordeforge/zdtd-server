@@ -626,3 +626,48 @@ test "AttackTimeoutDay/Night parse per class and through Extends" {
     const junk = t.byName("Junk") orelse return error.TestUnexpectedResult;
     try std.testing.expectApproxEqAbs(@as(f32, 0), junk.attack_timeout_day, 0.001);
 }
+
+test "entity tier comes from Tags and PreviousTier parses through Extends" {
+    // EntityClass.CalculateEntityTier (IL=49): elite 5 > radiated 4 > feral 3 >
+    // special 2 > strong 1 > normal 0, from the Tags string alone.
+    try std.testing.expectEqual(@as(u8, 0), entities.tierFromTags(""));
+    try std.testing.expectEqual(@as(u8, 1), entities.tierFromTags("strong,human"));
+    try std.testing.expectEqual(@as(u8, 2), entities.tierFromTags("special"));
+    try std.testing.expectEqual(@as(u8, 3), entities.tierFromTags("zombie,feral"));
+    try std.testing.expectEqual(@as(u8, 4), entities.tierFromTags("radiated"));
+    try std.testing.expectEqual(@as(u8, 5), entities.tierFromTags("elite,radiated"));
+    // Exact names only: "feralZombie" is not the `feral` tag.
+    try std.testing.expectEqual(@as(u8, 0), entities.tierFromTags("feralZombie"));
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/tier.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="zBase">
+        \\    <property name="Tags" value="zombie"/>
+        \\  </entity_class>
+        \\  <entity_class name="zFeral" extends="zBase">
+        \\    <property name="Tags" value="zombie,feral"/>
+        \\    <property name="PreviousTier" value="zBase"/>
+        \\  </entity_class>
+        \\  <entity_class name="zRadiated" extends="zFeral">
+        \\    <property name="Tags" value="zombie,radiated"/>
+        \\    <property name="PreviousTier" value="zFeral,zBase"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const base = t.byName("zBase") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), base.entity_tier);
+    try std.testing.expectEqualStrings("", base.previous_tier);
+    const feral = t.byName("zFeral") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 3), feral.entity_tier);
+    try std.testing.expectEqualStrings("zBase", feral.previous_tier);
+    const rad = t.byName("zRadiated") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 4), rad.entity_tier);
+    try std.testing.expectEqualStrings("zFeral,zBase", rad.previous_tier);
+}

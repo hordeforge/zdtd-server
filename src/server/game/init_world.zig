@@ -429,6 +429,8 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .time_stay = d.time_stay,
         .sight_range = d.sight_range,
         .attack_timeout_day = d.attack_timeout_day,
+        .entity_tier = d.entity_tier,
+        .previous_tier = d.previous_tier,
         .attack_timeout_night = d.attack_timeout_night,
         .hurt_target_classes = d.hurt_target_classes,
         .block_if_alert_only = d.block_if_alert_only,

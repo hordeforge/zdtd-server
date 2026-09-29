@@ -355,6 +355,12 @@ pub const Director = struct {
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
     party_stage: i32 = 0,
+    /// Sandbox 43 `MaxEnemyTier` (the value behind `EntityFactory.MaxEntityTier`,
+    /// cctor default 5 = Elite). A spawn whose class sits above this is replaced
+    /// by the first class at or below it on its `PreviousTier` ladder; a class
+    /// with no configured ladder is refused, exactly like stock's
+    /// `GetEntityClassWithinMaxTier` (IL=30) returning null.
+    max_enemy_tier: u8 = 5,
     /// Weighted party level (`GameStageDefinition::CalcPartyLevel` over the
     /// party members), pushed by the Game each tick. The blood moon freezes
     /// this rather than `party_stage`, because stock's
@@ -1224,6 +1230,44 @@ pub const Director = struct {
     /// (AIDirectorBloodMoonParty::SpawnZombie IL_0031-0061). `class_override`
     /// is that class name; it resolves through the same class table/XML path
     /// the group picker uses.
+    /// `EntityFactory::GetEntityClassWithinMaxTier` (IL=30): a class at or
+    /// below `max_enemy_tier` passes through; otherwise walk its
+    /// `PreviousTier` names (comma list, one class or a random pick) until one
+    /// fits. Null means the ladder could not satisfy the cap, and the caller
+    /// must skip the spawn.
+    fn clampEntityTier(self: *const Director, w: *const ecs_world.World, ct: ecs_world.EntityClass) ?ecs_world.EntityClass {
+        if (ct.entity_tier <= self.max_enemy_tier) return ct;
+        if (ct.previous_tier.len == 0) return null;
+        // One or more names; stock picks the first entry when there is one and
+        // a random entry otherwise. The pick is seeded off the spawn counter so
+        // a given run stays reproducible.
+        var count: u32 = 0;
+        var it = std.mem.splitScalar(u8, ct.previous_tier, ',');
+        while (it.next()) |raw| {
+            if (std.mem.trim(u8, raw, " \t").len > 0) count += 1;
+        }
+        if (count == 0) return null;
+        const pick_i: u32 = if (count == 1) 0 else @intCast((@as(u64, self.total_spawned) *% 2654435761) % count);
+        var seen: u32 = 0;
+        var it2 = std.mem.splitScalar(u8, ct.previous_tier, ',');
+        while (it2.next()) |raw| {
+            const name = std.mem.trim(u8, raw, " \t");
+            if (name.len == 0) continue;
+            if (seen != pick_i) {
+                seen += 1;
+                continue;
+            }
+            for (w.class_table) |row| {
+                if (std.mem.eql(u8, row.name, name)) return self.clampEntityTier(w, row);
+            }
+            if (self.class_resolve_fn) |f| {
+                if (f(self.class_resolve_ctx, name)) |row| return self.clampEntityTier(w, row);
+            }
+            return null;
+        }
+        return null;
+    }
+
     pub fn spawnOneZombieClass(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind, class_override: ?[]const u8) ?ecs_world.Slot {
         // Stock `Chunk::CanMobsSpawnAtPos` ground gate: the cell under the
         // spawn must carry CanMobsSpawnOn and be movement-solid, so a
@@ -1279,6 +1323,17 @@ pub const Director = struct {
             if (w.class_table[csel].hash != 0 and w.class_table[csel].kind == .zombie) {
                 ct = w.class_table[csel];
             }
+        }
+        // `EntityFactory.MaxEntityTier` (sandbox 43): a class above the cap is
+        // replaced by its `PreviousTier` ladder, and a class whose ladder
+        // cannot satisfy the cap is not spawned at all (stock returns null and
+        // logs). Applied to both the group pick and the forced blood-moon
+        // override, which is what `LoadAssets` does on every create.
+        if (resolved) |row| {
+            resolved = self.clampEntityTier(w, row) orelse return null;
+            ct = resolved.?;
+        } else if (ct.hash != 0) {
+            ct = self.clampEntityTier(w, ct) orelse return null;
         }
         // Stock has no flat blood-moon HP multiplier: blood-moon difficulty
         // comes from the gamestage ladder picking feral/radiated classes with

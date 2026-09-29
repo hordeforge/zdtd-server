@@ -145,11 +145,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       `World.damageFrom` destroys outright and the damage and explosion paths
       call `announceDestroyedEntity`. (The stale `known_entities` bit was not
       real: `clearDeadKnownEntities` reconciles it every tick.)
-- [ ] **Entity tier system absent** - stock `CalculateEntityTier` /
-      `GetEntityClassWithinMaxTier` / `PreviousTier` (spawning.md:749-752,
-      771-787) apply on every create and every group pick; neither name appears
-      anywhere in `src/`. A tier-capped server still spawns radiated and feral
-      from every group, and an out-of-tier class is never degraded.
+- [x] **Entity tier system absent** - closed 2026-09-28: `CalculateEntityTier`
+      is `entities.tierFromTags` (Tags-derived, elite 5 .. normal 0),
+      `PreviousTier` parses per class through Extends, and sandbox 43
+      `MaxEnemyTier` resolves at init into `Director.max_enemy_tier`, which
+      `clampEntityTier` applies to every director spawn (degrade down the
+      ladder; refuse when the ladder cannot satisfy the cap). The remaining
+      difference: stock clamps on EVERY create, including non-director paths
+      (admin spawnentity, quest entity spawn, sleepers); zdtd clamps the
+      director path only.
 - [x] **Blood moon does not suspend biome enemy spawning** - closed
       2026-09-28: the night drip is gated on `!bloodmoon_active`
       (`src/ecs/aidirector.zig:598`) and `bloodmoon_horde_drip_cd` is gone.
