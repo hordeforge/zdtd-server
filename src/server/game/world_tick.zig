@@ -12,6 +12,7 @@ const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
+const systems = @import("../../ecs/systems.zig");
 const clock = @import("../../util/clock.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const io_fs = @import("../../util/io_fs.zig");
@@ -144,6 +145,11 @@ pub fn tickZombieBlockDamage(self: *Game) void {
     for (ecs.groupSlice(&self.sim, .zombie)) |s| {
         const ai = self.sim.zombie_ai[s];
         if (ai.state != .attack and ai.state != .chase) continue;
+        // `EAIBreakBlock.Update` counts a per-zombie `attackDelay` down before
+        // `AttackBlock` strikes again (1.0-1.8 s, entity-ai.md:1817-1825). The
+        // pass runs every 10 ticks, so without this gate one zombie chewed the
+        // same cover 2-3x stock's rate.
+        if (ai.block_attack_cd > 0) continue;
         const tgt = self.sim.slotOfNetId(ai.target_id) orelse continue;
         const zt = self.sim.transform[s];
         const tt = self.sim.transform[tgt];
@@ -205,7 +211,12 @@ pub fn tickZombieBlockDamage(self: *Game) void {
             @trunc(self.sim.class_id[s].block_chew)
         else
             base_bite;
-        const dmg: u16 = @intCast(@min(chew * mult / 100, 65535));
+        // Ally boost: each other zombie within the stock +-(1.7,1.5,1.7) box
+        // adds 20% (`damageBoostPercent += 0.2`, EAIBreakBlock.AttackBlock
+        // IL=118), which is what makes a pack break a wall faster than one.
+        const allies = systems.ai_tasks.blockAttackAllyCount(&self.sim, s);
+        const dmg_u32 = chew * mult * (100 + 20 * allies) / 10_000;
+        const dmg: u16 = @intCast(@min(dmg_u32, 65535));
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(bx, by, bz, dmg) catch continue;
         if (total >= max_hp) {
@@ -242,6 +253,10 @@ pub fn tickZombieBlockDamage(self: *Game) void {
             // block crack instead of a pristine cell until it breaks.
             self.echoBlockDamage(bx, by, bz, id, total);
         }
+        // Arm the next strike (`EAIBreakBlock.AttackBlock` installs the rolled
+        // delay after a successful hit). `continue` above skipped the door-open
+        // arm, which is not a strike and must not consume one.
+        self.sim.zombie_ai[s].block_attack_cd = systems.ai_tasks.rollBlockAttackDelay(&self.sim, s);
     }
 }
 

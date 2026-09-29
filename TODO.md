@@ -159,10 +159,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       2026-09-28: both parse per class (through Extends) and `attackTimeoutS`
       picks by `World.IsDark`, with the Rules floor retuned to stock's 1 s cctor
       default. Four stock templates carry the pair.
-- [ ] **Chewed covers fall 2-3.6x too fast** - stock EAIBreakBlock delay is
-      1.0-1.8 s plus a +0.2/zombie ally boost (entity-ai.md:1817-1825); the
-      second path `src/server/game/world_tick.zig:136-248` runs every 10 ticks
-      with no per-zombie delay, no `CanBreakBlocks` gate and no ally boost.
+- [x] **Chewed covers fall 2-3.6x too fast** - closed 2026-09-28 for the
+      cadence and the pack boost: the chew pass gates on a per-zombie
+      `block_attack_cd` armed from the stock `(0.25 + rnd*0.8 + 0.75)` seconds,
+      and each ally inside +-(1.7, 1.5, 1.7) adds 20% (`entity-ai.md:1817-1825`).
+      Still open: the `CanBreakBlocks` gate and the `unreachableAbove` half of
+      the delay formula, neither of which has an input in zdtd yet.
 - [x] **Per-class `SightRange` capped at 48 m for players** - closed
       2026-09-28: `nearestPlayerSnap` and `canSensePlayer` now use the
       per-entity see distance, widened by the class's hear distance, and a

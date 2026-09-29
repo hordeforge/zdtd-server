@@ -22,6 +22,19 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Zombies chew cover at the stock rate, and a pack chews faster 2026-09-28**:
+the block-chew pass ran on every 10-tick wake for every pressed zombie, so a
+wooden frame or sheet-metal wall between a zombie and a player melted in about a
+third of stock's time. `EAIBreakBlock.Update` counts a per-zombie `attackDelay`
+down and `AttackBlock` re-arms it from `(0.25 + RandomFloat * 0.8 + 0.75)`
+seconds, 1.0 to 1.8 s (`../7dtd-engine-research/docs/entities/entity-ai.md:1817`).
+The pass now gates on a per-entity `block_attack_cd` armed from that formula on
+the entity's own random stream, and applies the pack boost the same method
+carries: every other zombie inside the `center +- (1.7, 1.5, 1.7)` bounds adds
+20%, which is what makes a horde break a wall faster than a lone zombie. The
+`* 0.5` unreachable-above arm and the `CanBreakBlocks` gate are not modelled and
+are recorded in the backlog. Gated by `block chew delay follows the
+EAIBreakBlock formula and ally box` plus the existing chew scenario.
 **Scout tiers and the browser block follow the operator 2026-09-28**: two
 surface fixes. Heat-map scouts now take their tier from the gamestage around the
 hot spot: stock `SpawnScouts` finds the closest player within 120 m of the hot

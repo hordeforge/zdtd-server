@@ -335,6 +335,11 @@ pub const ZombieAi = struct {
     /// Winning task from the last selection pass (EAITaskList executing set).
     active_task: TaskId = .none,
     attack_cd: f32 = 0,
+    /// Seconds until the next block-chew strike. `EAIBreakBlock.Update`
+    /// counts `attackDelay` down and `AttackBlock` re-arms it from the stock
+    /// formula (entity-ai.md:1817-1825); 0 = strike as soon as pressed against
+    /// cover.
+    block_attack_cd: f32 = 0,
     /// The landed strike (or a vomit telegraph/burst) wants one stock
     /// NetPackageEntityAnimationData flush: the Attack int value, or -1 for
     /// none. Melee sends 0 (StartAnimationAttack, blend+trigger), the ranged

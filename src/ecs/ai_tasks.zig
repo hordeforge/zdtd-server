@@ -393,6 +393,7 @@ const AiCtx = struct {
                 ctx.w.pushSleeperWake(s);
             }
             if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
+            if (ai.block_attack_cd > 0) ai.block_attack_cd -= ctx.dt;
 
             // Demolition (RE entity-ai.md EntityZombieCop.OnUpdateEntity):
             // when health drops below max*explode_threshold the cop primes,
@@ -840,6 +841,41 @@ fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
     ai.wander_rng = rng_util.xorshift32Step(ai.wander_rng);
     return @as(f32, @floatFromInt(ai.wander_rng % 10000)) / 10000.0;
 }
+
+/// `EAIBreakBlock.AttackBlock` strike delay in seconds: `(0.25 +
+/// RandomFloat * 0.8 + 0.75)`, i.e. 1.0..1.8 s (entity-ai.md:1817-1825). The
+/// `* 0.5` unreachable-above arm is not modelled: zdtd's chew path only runs
+/// when the zombie is pressed against cover, which is the reachable case.
+/// Draws the entity's shared stream, like stock's one GameRandom per entity.
+pub fn rollBlockAttackDelay(w: *World, s: Slot) f32 {
+    const r = rngFrac(&w.zombie_ai[s], w.network_id[s].id);
+    return 0.25 + r * 0.8 + 0.75;
+}
+
+/// `EAIBreakBlock.AttackBlock` ally boost: every other zombie inside the
+/// bounds `center +- (1.7, 1.5, 1.7)` adds `damageBoostPercent += 0.2`, so a
+/// pack breaks cover faster than one zombie (entity-ai.md:1817-1825). Counted
+/// over the cached zombie group; the caller scales its bite by
+/// `100 + 20 * allies` percent.
+pub fn blockAttackAllyCount(w: *const World, s: Slot) u32 {
+    const zt = w.transform[s];
+    var n: u32 = 0;
+    for (query.groupSlice(w, .zombie)) |other| {
+        if (other == s) continue;
+        if (!w.alive[other] or !w.mask[other].transform) continue;
+        const t = w.transform[other];
+        if (@abs(t.x - zt.x) > company_half_x) continue;
+        if (@abs(t.y - zt.y) > company_half_y) continue;
+        if (@abs(t.z - zt.z) > company_half_z) continue;
+        n += 1;
+    }
+    return n;
+}
+
+/// Stock `EAIBreakBlock.AttackBlock` ally bounds: center +- (1.7, 1.5, 1.7).
+pub const company_half_x: f32 = 1.7;
+pub const company_half_y: f32 = 1.5;
+pub const company_half_z: f32 = 1.7;
 
 /// Per-class melee reach, squared: the hand item's items.xml Range (zombie
 /// hand 1.6) or passive MaxRange (club/axe 2.4); 0 → the combat floor.
@@ -3234,4 +3270,32 @@ test "attack cadence follows the class's day and night AttackTimeout" {
     // Nothing declared: the Rules floor, the stock EntityClass cctor default 1 s.
     w.class_id[0] = .{ .id = 2 };
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), attackTimeoutS(&w, 0), 0.0001);
+}
+
+test "block chew delay follows the EAIBreakBlock formula and ally box" {
+    // EAIBreakBlock.AttackBlock (IL=118, entity-ai.md:1817-1825): the strike
+    // delay is (0.25 + RandomFloat*0.8 + 0.75) seconds, and every other zombie
+    // inside center +- (1.7, 1.5, 1.7) adds damageBoostPercent += 0.2.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    const d0 = rollBlockAttackDelay(&w, zs);
+    try std.testing.expect(d0 >= 1.0 and d0 <= 1.8);
+    // Deterministic per entity stream, still inside the band.
+    const d1 = rollBlockAttackDelay(&w, zs);
+    try std.testing.expect(d1 >= 1.0 and d1 <= 1.8);
+    try std.testing.expectEqual(@as(u32, 0), blockAttackAllyCount(&w, zs));
+    // Inside the box.
+    _ = w.spawnZombie(1.0, 70, 1.0, 40).?;
+    try std.testing.expectEqual(@as(u32, 1), blockAttackAllyCount(&w, zs));
+    // Outside on x.
+    _ = w.spawnZombie(5.0, 70, 0, 40).?;
+    try std.testing.expectEqual(@as(u32, 1), blockAttackAllyCount(&w, zs));
+    // Inside on xz but 4 m above: out of the 1.5-half box.
+    _ = w.spawnZombie(1.0, 74, 1.0, 40).?;
+    try std.testing.expectEqual(@as(u32, 1), blockAttackAllyCount(&w, zs));
+    // Just inside on every axis.
+    _ = w.spawnZombie(-1.6, 71.4, -1.6, 40).?;
+    try std.testing.expectEqual(@as(u32, 2), blockAttackAllyCount(&w, zs));
 }
