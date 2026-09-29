@@ -7,6 +7,7 @@ const packages = @import("../../wire/packages.zig");
 const persist = @import("../persist.zig");
 const plugin_compose = @import("plugin_compose.zig");
 const log = @import("../../util/log.zig");
+const game_player = @import("player.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     log.infoTagged("player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -25,6 +26,13 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // caller cannot forget. Pre-join peers have no entity and nothing to save.
     if (self.clients[slot].entity_id > 0) {
         self.savePlayers() catch |e| persist.logPersistErr(self, "save players on drop", e);
+        // Stock `GameManager.PlayerDisconnected` sets `LastLogin = now`,
+        // `EntityId = -1` and broadcasts PersistentPlayerState with reason 2
+        // before the teardown (server-lifecycle.md 6.1 step 3). Without it the
+        // other clients keep the leaver's row with a live entity id, so their
+        // map marker never clears. The entity is still resolvable here, which
+        // is what the row's position needs.
+        game_player.sendPersistentPlayerState(self, &self.clients[slot], -1, packages.stock_inv.persistent_reason_disconnect) catch {};
     }
     if (self.clients[slot].peer) |p| p.alive = false;
     self.unseatRider(self.clients[slot].entity_id) catch |err| {

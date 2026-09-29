@@ -23,6 +23,7 @@ const max_vending_positions_on_wire = stock_inv.max_vending_positions_on_wire;
 const parseBagSlots = stock_inv.parseBagSlots;
 const persistent_player_state_max_len = stock_inv.persistent_player_state_max_len;
 const persistent_reason_login = stock_inv.persistent_reason_login;
+const persistent_reason_disconnect = stock_inv.persistent_reason_disconnect;
 const readDropItemsContainer = stock_inv.readDropItemsContainer;
 const readHoldingItem = stock_inv.readHoldingItem;
 const readItemValue = stock_inv.readItemValue;
@@ -42,7 +43,7 @@ test "persistent player state body layout" {
     const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
     const lp = [_][3]i32{ .{ 10, 64, -20 }, .{ 300, 70, 512 } };
     const vm = [_][3]i32{.{ -44, 68, 91 }};
-    const body = try buildPersistentPlayerState(&buf, 107, "Alice", primary, native, -273, 61, 449, &lp, &vm);
+    const body = try buildPersistentPlayerState(&buf, 0, 107, "Alice", primary, native, -273, 61, 449, &lp, &vm);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
@@ -102,7 +103,7 @@ test "persistent player state body layout" {
 test "persistent player state with no claims writes an empty lpBlocks list" {
     var buf: [512]u8 = undefined;
     const primary: platform_user.Id = .{ .platform = "EOS", .id = "abc" };
-    const body = try buildPersistentPlayerState(&buf, 7, "solo", primary, primary, 0, 0, 0, &.{}, &.{});
+    const body = try buildPersistentPlayerState(&buf, 0, 7, "solo", primary, primary, 0, 0, 0, &.{}, &.{});
     // Walk to the count: the empty list must still write a 0, not vanish.
     var r: binary.Reader = .{ .data = body };
     _ = try r.readByte(); // reason
@@ -141,6 +142,7 @@ test "persistent player state fits a full claim list at max identity length" {
     for (&vm, 0..) |*p, i| p.* = .{ @intCast(i), 68, @intCast(i) };
     const body = try buildPersistentPlayerState(
         &buf,
+        0,
         107,
         "0123456789abcdef0123456789abcdef", // 32 = the join name cap
         primary,
@@ -674,4 +676,36 @@ test "ItemValue stats survive a parse and a re-write" {
     const parsed3 = try readItemValue(&r3);
     try std.testing.expectEqualDeep(plain, parsed3);
     try std.testing.expectEqual(@as(usize, 0), r3.remaining());
+}
+
+test "persistent player state carries the disconnect reason and a -1 entity id" {
+    // GameManager.PlayerDisconnected broadcasts Setup(data, reason 2) with
+    // EntityId = -1 (server-lifecycle.md 6.1 step 3): that is what clears the
+    // leaver's map marker on every other client.
+    var buf: [512]u8 = undefined;
+    const primary: platform_user.Id = .{ .platform = "EOS", .id = "abc" };
+    const body = try buildPersistentPlayerState(&buf, persistent_reason_disconnect, -1, "Bob", primary, primary, 4, 70, 8, &.{}, &.{});
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(u8, 2), try r.readByte());
+    var sbuf: [64]u8 = undefined;
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // PUID present
+    _ = try r.readByte(); // version
+    try std.testing.expectEqualStrings("EOS", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("abc", try r.readString(&sbuf));
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // native PUID
+    _ = try r.readByte();
+    try std.testing.expectEqualStrings("EOS", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("abc", try r.readString(&sbuf));
+    try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // playGroup
+    try std.testing.expectEqual(true, try r.readBool()); // AuthoredText present
+    try std.testing.expectEqualStrings("Bob", try r.readString(&sbuf));
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // author PUID
+    _ = try r.readByte();
+    try std.testing.expectEqualStrings("EOS", try r.readString(&sbuf));
+    try std.testing.expectEqualStrings("abc", try r.readString(&sbuf));
+    _ = try r.readI64(); // lastLogin
+    try std.testing.expectEqual(@as(i32, 4), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 8), try r.readI32());
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // entity_id
 }

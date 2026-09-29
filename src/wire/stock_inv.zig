@@ -1026,8 +1026,11 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 // PUID.ToStream (asm.il 31206): see wire/platform_user.zig.
 // AuthoredText.ToStream: bool present | text string | author PUID.
 
-/// Stock PersistentPlayerList entry reason enum: Login = 0 (RE: save-persistence.md).
+/// Stock PersistentPlayerList entry reason enum: Login = 0 (RE:
+/// save-persistence.md) and Disconnect = 2 (`GameManager.PlayerDisconnected`
+/// broadcasts `Setup(data, 2)`, server-lifecycle.md 6.1 step 3).
 pub const persistent_reason_login: u8 = 0;
+pub const persistent_reason_disconnect: u8 = 2;
 
 /// Longest name the join path keeps (`Client.name` is a fixed 32-byte field),
 /// so the largest name this body can ever carry.
@@ -1074,6 +1077,8 @@ pub const persistent_player_state_max_len: usize = blk: {
 /// player is labelled EOS rather than mislabelled Steam.
 pub fn buildPersistentPlayerState(
     buf: []u8,
+    /// `EnumPersistentPlayerDataReason`: login 0, disconnect 2.
+    reason: u8,
     entity_id: i32,
     name: []const u8,
     primary_id: platform_user.Id,
@@ -1095,7 +1100,7 @@ pub fn buildPersistentPlayerState(
     vending_positions: []const [3]i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(persistent_reason_login);
+    try w.writeByte(reason);
     try platform_user.write(&w, primary_id);
     try platform_user.write(&w, native_id);
     try w.writeByte(0); // playGroup Standard

@@ -194,10 +194,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       rejects y > 253, trader placing protection within 2 blocks, submerged
       placement and `InBoundsForPlayersPercent < 0.5` (blocks.md:618-651); both
       zdtd place arms check the claim only.
-- [ ] **Junk drone placement spawns a wired auto turret** - stock branches on
-      the item `drone` tag into DroneManager (vehicles-drones-turrets.md:1200-1204);
-      `src/server/c2s/misc_turret.zig:57-62` sees no drone kind, and the same
-      file auto-connects every placed turret to the first generator node.
+- [x] **Junk drone placement spawns a wired auto turret** - closed
+      2026-09-28 for the wrong-entity half: a body claiming a resolved
+      non-turret class is refused instead of spawning a 15 W trap. Still open:
+      the drone subsystem itself, and the auto-connect to the first generator
+      node, which stands in for wire-action application (zdtd only relays
+      `NetPackageWireActions`, so removing it would leave every placed trap
+      unpowered).
 - [ ] **`NetPackageChunkRemoveAll` and `NetPackageEventPrefab` have no send
       site** - registered and parsed, never emitted; check the stock sender in
       the IL before acting (medium confidence, receivers only in the docs).

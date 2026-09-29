@@ -22,6 +22,24 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Drone claims are refused and a disconnect clears the row 2026-09-28**: two
+more surface fixes. Stock branches `NetPackageTurretSpawn` on the placed item's
+tag: a ranged or melee trap takes the turret path, a junk drone goes to
+DroneManager (`vehicles-drones-turrets.md` 1200-1204). zdtd has no drone
+subsystem, and because `inferKind` has no drone arm the claim resolved to a
+non-turret class that the handler ignored, so placing a junk drone spawned a
+15 W auto turret. A body naming a resolved non-turret class is now refused
+(fail closed: missing beats a fabricated entity); an unresolved hash keeps the
+legacy path for a client that predates the catalog load. Second, the
+disconnect path never sent the stock `PersistentPlayerState` row:
+`GameManager.PlayerDisconnected` sets `LastLogin = now`, `EntityId = -1` and
+broadcasts reason 2 (`server-lifecycle.md` 6.1 step 3), which is what clears the
+leaver's map marker on every other client. Building that row moved out of the
+join bundle into `game/player.sendPersistentPlayerState` and both the join
+(reason 0) and drop (reason 2, entity id -1) paths call it. Gated by `scenario
+a disconnect broadcasts PersistentPlayerState reason 2`, `persistent player
+state carries the disconnect reason and a -1 entity id`, and the turret-spawn
+scenario's non-turret refusal arm.
 **Melee cadence is per class and per hour 2026-09-28**: stock's
 `EntityAlive::GetAttackTimeoutTicks` (IL=10) reads `attackTimeoutDay` when the
 world is light and `attackTimeoutNight` when it is dark, both copied from

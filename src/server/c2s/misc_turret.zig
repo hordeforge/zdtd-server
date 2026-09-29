@@ -60,6 +60,22 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             if (e.kind != .turret) break :blk null;
             break :blk et;
         } else null;
+        // Stock branches on the item's tag: a `drone` item goes to
+        // DroneManager, a ranged/melee trap to the turret path
+        // (RE vehicles-drones-turrets.md 1200-1204). zdtd has no drone
+        // subsystem, so a body claiming a resolved NON-turret class is refused
+        // outright: without this a junk drone spawned a 15 W auto turret, which
+        // is a fabricated entity, not a missing one. An unresolved hash keeps
+        // the legacy path, because the client may predate a catalog load.
+        if (stock) {
+            const et = std.mem.readInt(i32, body[0..4], .little);
+            if (self.entities.byHash(et)) |e| {
+                if (e.kind != .turret) {
+                    self.harness.counters.inc(.c2s_rejects);
+                    return true;
+                }
+            }
+        }
         const stock_yaw: f32 = if (stock and body.len >= 28) blk: {
             const ry: f32 = @bitCast(std.mem.readInt(u32, body[20..24], .little));
             if (!std.math.isFinite(ry)) return true;

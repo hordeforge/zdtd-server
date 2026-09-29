@@ -18,6 +18,7 @@ const platform_user = packages.platform_user;
 const stock_quest = packages.stock_quest;
 const max_quest_position_data = game_mod.max_quest_position_data;
 const max_lp_blocks_on_wire = game_mod.max_lp_blocks_on_wire;
+const game_player = @import("player.zig");
 const world_store = @import("../../world/store.zig");
 const max_spawn_ground_scan = game_mod.max_spawn_ground_scan;
 const game_stability = @import("stability.zig");
@@ -221,64 +222,9 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
         try self.sendGameCritical(peer, "NetPackagePlayerId", pid);
         // PersistentPlayerState(Login): entityId → name mapping. Without it the
         // client shows GMSG "Player '' joined" and party UI has no names.
-        {
-            // Stock builds PersistentPlayerData with PrimaryId =
-            // ClientInfo.InternalId and NativeId = ClientInfo.PlatformId
-            // (asm.il 1885235). A client that sent no identity still needs a
-            // PPD or its name never reaches other clients, so fall back to a
-            // stable per-entity id rather than dropping the package.
-            var sid_buf: [24]u8 = undefined;
-            const fallback: platform_user.Id = .{
-                .platform = "Steam",
-                .id = std.fmt.bufPrint(&sid_buf, "7656119{d:0>10}", .{@as(u32, @intCast(eid))}) catch "76561190000000000",
-            };
-            const primary_id = c.puid_primary.get() orelse fallback;
-            const native_id = c.puid_native.get() orelse primary_id;
-            // lpBlocks: this player's own land-protection blocks (stock
-            // PersistentPlayerData.Write lpBlockCount + Vector3i list, RE
-            // server-lifecycle.md 6.1). owner_entity is re-mapped to the
-            // login entity id by reclaimForName, so match on it. Capped at
-            // the buffer's list budget; a player past it keeps the claims,
-            // only the overlay tail is dropped.
-            var lp_buf: [max_lp_blocks_on_wire][3]i32 = undefined;
-            var lp_n: usize = 0;
-            for (self.land_claims[0..self.land_claims_n]) |*claim| {
-                if (claim.owner_entity != eid) continue;
-                if (lp_n >= lp_buf.len) break;
-                lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
-                lp_n += 1;
-            }
-            // OwnedVendingMachinePositions: the machines this player still
-            // rents, so the client re-draws their map markers on rejoin
-            // (RE save-region.md, PPD.Write fields 25-28). An expired
-            // rental is not owned any more, so the day check here matches
-            // the one the rent path applies before it clears a machine.
-            var vm_buf: [packages.stock_inv.max_vending_positions_on_wire][3]i32 = undefined;
-            var vm_n: usize = 0;
-            const today: i32 = @intCast(self.sim.director.clock.day);
-            for (&self.vending.items, self.vending.used) |*vm, used| {
-                if (!used or vm.rental_end_day <= 0) continue;
-                if (today > vm.rental_end_day) continue;
-                if (!vm.owner.matches(primary_id)) continue;
-                if (vm_n >= vm_buf.len) break;
-                vm_buf[vm_n] = .{ vm.pos.x, vm.pos.y, vm.pos.z };
-                vm_n += 1;
-            }
-            if (packages.stock_inv.buildPersistentPlayerState(
-                self.body_buf[9728..][0..packages.stock_inv.persistent_player_state_max_len],
-                eid,
-                c.name[0..c.name_len],
-                primary_id,
-                native_id,
-                sx2,
-                sy2,
-                sz2,
-                lp_buf[0..lp_n],
-                vm_buf[0..vm_n],
-            )) |pps| {
-                try self.broadcast("NetPackagePersistentPlayerState", pps);
-            } else |_| {}
-        }
+        // Shared with the disconnect row (reason 2), which is the same body
+        // with entityId -1.
+        try game_player.sendPersistentPlayerState(self, c, eid, packages.stock_inv.persistent_reason_login);
         try self.sendQuestNavObjects(peer, c.slot, eid);
         // Stock re-registers the live crates per joining player
         // (RefreshCrates, join step 11); the crate marker is a server push,

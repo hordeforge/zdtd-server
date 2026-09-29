@@ -48,6 +48,8 @@ assets/fixtures/assignids_v314.txt
 
 # Editor / agent scratch
 .claude.bak/
+# Browser-tool scratch written by agent sessions
+.playwright-mcp/
 
 # Agent runtime state (locks, session)
 .claude/

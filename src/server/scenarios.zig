@@ -1590,7 +1590,78 @@ test "scenario replicate sends TurretSync on target change" {
         }
         try std.testing.expect(placed);
     }
+    // A body claiming a resolved NON-turret class must not spawn a turret:
+    // stock sends a junk drone to DroneManager on the item tag
+    // (vehicles-drones-turrets.md 1200-1204), and zdtd has no drone subsystem,
+    // so the honest answer is to refuse rather than fabricate a 15 W trap that
+    // behaves like neither.
+    {
+        const zb = g.entities.byName("zombieBoe") orelse return error.TestUnexpectedResult;
+        const before = g.sim.countKind(.turret);
+        const p = g.sim.transform[ps];
+        var sb: [64]u8 = @splat(0);
+        var w: binary.Writer = .{ .buf = &sb };
+        try w.writeI32(zb.hash); // entityType: a zombie, not a turret
+        try w.writeF32(p.x + 2);
+        try w.writeF32(p.y);
+        try w.writeF32(p.z);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeByte(0);
+        try w.writeI32(c.entity_id);
+        var sfb: [128]u8 = undefined;
+        try g.injectFramed(c, try packages.framed(&sfb, "NetPackageTurretSpawn", w.written()));
+        try std.testing.expectEqual(before, g.sim.countKind(.turret));
+    }
     std.debug.print("PASS turretspawn: stock float body places at the requested position\n", .{});
+}
+
+test "scenario a disconnect broadcasts PersistentPlayerState reason 2" {
+    // Stock GameManager.PlayerDisconnected sets LastLogin = now, EntityId = -1
+    // and broadcasts NetPackagePersistentPlayerState with reason 2 before the
+    // teardown (server-lifecycle.md 6.1 step 3). Without it every other client
+    // keeps the leaver's row with a live entity id, so the map marker stays.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_pps_drop");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pps_drop", 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+    cap_b.clear();
+    g.dropClientSlot(ca.slot, "scenario pps disconnect");
+    const pps_id = packages.idOf("NetPackagePersistentPlayerState") orelse return error.TestUnexpectedResult;
+    const body = cap_b.findPkgId(pps_id) orelse return error.NoPersistentStateOnDisconnect;
+    var r = binary.Reader{ .data = body };
+    try std.testing.expectEqual(packages.stock_inv.persistent_reason_disconnect, try r.readByte());
+    // Walk to entity_id: two PUIDs, playGroup, AuthoredText, lastLogin, pos.
+    var sbuf: [64]u8 = undefined;
+    for (0..2) |_| {
+        try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // PUID present
+        _ = try r.readByte(); // version
+        _ = try r.readString(&sbuf);
+        _ = try r.readString(&sbuf);
+    }
+    _ = try r.readByte(); // playGroup
+    try std.testing.expectEqual(true, try r.readBool()); // AuthoredText present
+    _ = try r.readString(&sbuf);
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // author PUID
+    _ = try r.readByte();
+    _ = try r.readString(&sbuf);
+    _ = try r.readString(&sbuf);
+    _ = try r.readI64(); // lastLogin
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readI32();
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // entity_id
+    std.debug.print("PASS pps-disconnect: reason 2 with entity id -1\n", .{});
 }
 
 test "scenario a destroyed turret is removed on the clients that tracked it" {

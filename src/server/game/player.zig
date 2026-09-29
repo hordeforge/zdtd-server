@@ -19,6 +19,7 @@ const hooks = @import("hooks.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
 const log = @import("../../util/log.zig");
+const platform_user = @import("../../wire/platform_user.zig");
 
 const max_clients = game_mod.max_clients;
 
@@ -1658,4 +1659,71 @@ pub fn playerBloodMoonMusic(self: *const Game, c: *const Client) bool {
         if (dx * dx + dz * dz <= j2sq) return true;
     }
     return false;
+}
+
+/// Broadcast the stock `NetPackagePersistentPlayerState` row for `c` (RE
+/// server-lifecycle.md 6.1, `PersistentPlayerData.Write`): the login form on
+/// join (reason 0, the player's live entity id) and the disconnect form on drop
+/// (reason 2, `entityId = -1`, which is what clears the peer's map marker and
+/// refreshes `LastLogin` on every other client; `GameManager.PlayerDisconnected`
+/// broadcasts exactly that). Errors are the caller's: the join path lets them
+/// reach the enter bundle, the drop path swallows them because the session is
+/// already gone.
+pub fn sendPersistentPlayerState(self: *Game, c: *const Client, eid: i32, reason: u8) !void {
+    // Stock builds PersistentPlayerData with PrimaryId = ClientInfo.InternalId
+    // and NativeId = ClientInfo.PlatformId (asm.il 1885235). A client that sent
+    // no identity still needs a PPD or its name never reaches other clients, so
+    // fall back to a stable per-entity id rather than dropping the package.
+    var sid_buf: [24]u8 = undefined;
+    const fallback: platform_user.Id = .{
+        .platform = "Steam",
+        .id = std.fmt.bufPrint(&sid_buf, "7656119{d:0>10}", .{@as(u32, @intCast(@max(eid, 0)))}) catch "76561190000000000",
+    };
+    const primary_id = c.puid_primary.get() orelse fallback;
+    const native_id = c.puid_native.get() orelse primary_id;
+    // lpBlocks: this player's own land-protection blocks (stock
+    // PersistentPlayerData.Write lpBlockCount + Vector3i list, RE
+    // server-lifecycle.md 6.1). owner_entity is re-mapped to the login entity
+    // id by reclaimForName, so match on it. Capped at the buffer's list
+    // budget; a player past it keeps the claims, only the overlay tail drops.
+    var lp_buf: [packages.stock_inv.max_lp_blocks_on_wire][3]i32 = undefined;
+    var lp_n: usize = 0;
+    for (self.land_claims[0..self.land_claims_n]) |*claim| {
+        if (claim.owner_entity != eid) continue;
+        if (lp_n >= lp_buf.len) break;
+        lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
+        lp_n += 1;
+    }
+    // OwnedVendingMachinePositions: the machines this player still rents, so
+    // the client re-draws their map markers (RE save-region.md, PPD.Write
+    // fields 25-28). An expired rental is not owned any more, so the day check
+    // here matches the one the rent path applies before it clears a machine.
+    var vm_buf: [packages.stock_inv.max_vending_positions_on_wire][3]i32 = undefined;
+    var vm_n: usize = 0;
+    const today: i32 = @intCast(self.sim.director.clock.day);
+    for (&self.vending.items, self.vending.used) |*vm, used| {
+        if (!used or vm.rental_end_day <= 0) continue;
+        if (today > vm.rental_end_day) continue;
+        if (!vm.owner.matches(primary_id)) continue;
+        if (vm_n >= vm_buf.len) break;
+        vm_buf[vm_n] = .{ vm.pos.x, vm.pos.y, vm.pos.z };
+        vm_n += 1;
+    }
+    const px: i32 = if (self.sim.playerByPeer(c.slot)) |ps| @trunc(self.sim.transform[ps].x) else 0;
+    const py: i32 = if (self.sim.playerByPeer(c.slot)) |ps| @trunc(self.sim.transform[ps].y) else 0;
+    const pz: i32 = if (self.sim.playerByPeer(c.slot)) |ps| @trunc(self.sim.transform[ps].z) else 0;
+    const pps = packages.stock_inv.buildPersistentPlayerState(
+        self.body_buf[9728..][0..packages.stock_inv.persistent_player_state_max_len],
+        reason,
+        eid,
+        c.name[0..c.name_len],
+        primary_id,
+        native_id,
+        px,
+        py,
+        pz,
+        lp_buf[0..lp_n],
+        vm_buf[0..vm_n],
+    ) catch return;
+    try self.broadcast("NetPackagePersistentPlayerState", pps);
 }
