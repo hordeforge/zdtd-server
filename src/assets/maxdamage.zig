@@ -169,6 +169,10 @@ pub const Table = struct {
     material_ground_cover: std.StringHashMapUnmanaged(bool) = .empty,
     /// blocks.xml CanBlocksReplace per block name (true rows only).
     can_blocks_replace: std.StringHashMapUnmanaged(void) = .empty,
+    /// blocks.xml RestrictSubmergedPlacement per block name (true rows only):
+    /// `Block.CanPlaceBlockAt` refuses such a block when `IsUnderwater`
+    /// (Block.il IL_00B2-00C6, BlocksFromXml IL_08D8).
+    restrict_submerged: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml movement_factor per material id (7 stock rows).
     material_movement_factor: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml lightopacity per material id (18 stock rows).
@@ -204,6 +208,7 @@ pub const Table = struct {
         self.material_can_destroy = .{};
         self.material_ground_cover = .{};
         self.can_blocks_replace = .{};
+        self.restrict_submerged = .{};
         self.material_movement_factor = .{};
         self.material_light_opacity = .{};
         self.stage2_health = .{};
@@ -419,6 +424,20 @@ pub const Table = struct {
         if (block_id == 0) return true; // air is always replaceable
         const name = self.idName(block_id) orelse return false;
         return self.canReplaceNamed(name);
+    }
+
+    /// `Block.CanPlaceBlockAt`'s submerged gate: the block declares blocks.xml
+    /// `RestrictSubmergedPlacement` (BlocksFromXml IL_08D8). The caller pairs
+    /// it with the `IsUnderwater` test (Block.il IL_00B2-00C6), which is the
+    /// target cell itself holding water for a single-block footprint.
+    pub fn restrictsSubmergedFor(self: *const Table, block_id: u16) bool {
+        if (block_id == 0) return false;
+        const name = self.idName(block_id) orelse return false;
+        return self.restrict_submerged.contains(name);
+    }
+
+    pub fn restrictsSubmergedNamed(self: *const Table, name: []const u8) bool {
+        return self.restrict_submerged.contains(name);
     }
 
     /// The name-keyed half of `canReplaceFor`.
@@ -1036,6 +1055,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     // child can appear before its parent in the file.
     var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .empty;
     var cbr_own: std.StringHashMapUnmanaged(bool) = .empty;
+    var rs_own: std.StringHashMapUnmanaged(bool) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
@@ -1171,6 +1191,11 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "CanBlocksReplace")) |cbr| {
             if (parseBool(cbr)) |b| try cbr_own.put(arena, kn, b);
         }
+        // RestrictSubmergedPlacement (BlocksFromXml PropRestrictSubmergedPlacement
+        // ldstr at IL_08D8) shares the Extends/param1 inheritance path.
+        if (xml.propertyValue(body, "RestrictSubmergedPlacement")) |rsp| {
+            if (parseBool(rsp)) |b| try rs_own.put(arena, kn, b);
+        }
         try own_facts.put(arena, kn, facts);
         i = body_end;
     }
@@ -1178,6 +1203,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var distant_deco: std.StringHashMapUnmanaged(void) = .empty;
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .empty;
     var can_blocks_replace: std.StringHashMapUnmanaged(void) = .empty;
+    var restrict_submerged: std.StringHashMapUnmanaged(void) = .empty;
     var non_support: std.StringHashMapUnmanaged(void) = .empty;
     var stability_explicit: std.StringHashMapUnmanaged(void) = .empty;
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -1263,6 +1289,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (resolveInherited(bool, &cbr_own, &own_facts, e.key_ptr.*, "CanBlocksReplace", "") orelse false) {
             try can_blocks_replace.put(arena, e.key_ptr.*, {});
         }
+        if (resolveInherited(bool, &rs_own, &own_facts, e.key_ptr.*, "RestrictSubmergedPlacement", "") orelse false) {
+            try restrict_submerged.put(arena, e.key_ptr.*, {});
+        }
         if (r.stability_support) |sv| {
             try stability_explicit.put(arena, e.key_ptr.*, {});
             if (!sv) try non_support.put(arena, e.key_ptr.*, {});
@@ -1312,6 +1341,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
         .can_blocks_replace = can_blocks_replace,
+        .restrict_submerged = restrict_submerged,
         .non_support = non_support,
         .stability_explicit = stability_explicit,
         .stability_ignore_names = stability_ignore_names,
@@ -1991,4 +2021,37 @@ test "blocks.xml CanBlocksReplace and materials.xml IsGroundCover gate replaceme
     // Nothing declared, nothing ground cover: fail closed.
     try std.testing.expect(!t.canReplaceNamed("woodFrame"));
     try std.testing.expect(!t.canReplaceNamed("noSuchBlock"));
+}
+
+test "blocks.xml RestrictSubmergedPlacement inherits through Extends" {
+    // BlocksFromXml ldstr RestrictSubmergedPlacement (IL_08D8) -> Block field
+    // `bRestrictSubmergedPlacement`, read by `Block.CanPlaceBlockAt`'s
+    // `IsUnderwater` arm (Block.il IL_00B2-00C6).
+    const xml_src =
+        \\<blocks>
+        \\<block name="waterBlock">
+        \\  <property name="RestrictSubmergedPlacement" value="true" />
+        \\</block>
+        \\<block name="waterBlockChild">
+        \\  <property name="Extends" value="waterBlock" />
+        \\</block>
+        \\<block name="waterBlockOptOut">
+        \\  <property name="Extends" value="waterBlock" param1="RestrictSubmergedPlacement" />
+        \\</block>
+        \\<block name="dryBlock" />
+        \\</blocks>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_submerged.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.restrictsSubmergedNamed("waterBlock"));
+    try std.testing.expect(t.restrictsSubmergedNamed("waterBlockChild"));
+    try std.testing.expect(!t.restrictsSubmergedNamed("waterBlockOptOut"));
+    try std.testing.expect(!t.restrictsSubmergedNamed("dryBlock"));
+    try std.testing.expect(!t.restrictsSubmergedNamed("noSuchBlock"));
 }

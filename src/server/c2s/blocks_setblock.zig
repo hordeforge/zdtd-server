@@ -274,6 +274,18 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 }
                 place_id = b.block_id;
                 out_dmg = 0;
+                // Stock `Block.CanPlaceBlockAt` submerged gate (Block.il
+                // IL_00A6-00C6): a block declaring `RestrictSubmergedPlacement`
+                // cannot be placed where the cell itself is water
+                // (`IsUnderwater` = `World.IsWater(pos)` for a single-block
+                // footprint). The stock client refuses to predict it, so a
+                // request that does is forged or from a modded client.
+                if (cur_id != 0 and self.world.isWaterId(cur_id) and
+                    self.maxdamage.restrictsSubmergedFor(place_id))
+                {
+                    self.harness.counters.inc(.c2s_rejects);
+                    continue;
+                }
                 if (cur_id != 0 and b.block_id != cur_id and !self.maxdamage.canReplaceFor(cur_id)) {
                     // Stock hammer upgrade / wrench downgrade (Block.UpgradeBlock
                     // / DowngradeBlock, blocks.xml data): accept only the

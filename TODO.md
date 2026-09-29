@@ -218,9 +218,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       the InvTx place arm and `placeAllowed`. `overlapsWithOtherBlock` closed
       2026-09-28: the swap gate now allows replacing a block whose
       `CanBlocksReplaceOrGroundCover` (IL=9) is true, which is exactly when
-      stock's IL=66 does not refuse. Still open from the same RE block: the
-      trader placing protection (2 blocks) and `bRestrictSubmergedPlacement`
-      plus `IsUnderwater`.
+      stock's IL=66 does not refuse. `RestrictSubmergedPlacement` closed too:
+      a block declaring it is refused where the cell itself is water
+      (`IsUnderwater`, Block.il IL=00A6-00C6). Still open from the same RE
+      block: the trader placing protection (2 blocks).
 - [x] **Junk drone placement spawns a wired auto turret** - closed
       2026-09-28 for the wrong-entity half: a body claiming a resolved
       non-turret class is refused instead of spawning a 15 W trap. Still open:

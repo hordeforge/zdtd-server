@@ -19270,3 +19270,71 @@ test "scenario a placement replaces a CanBlocksReplace or ground-cover cell" {
     try std.testing.expectEqual(world_store.block_stone, try g.world.blockWorld(px + 3, cy, pz));
     std.debug.print("PASS replace-gate: flag and ground cover replace, stone does not\n", .{});
 }
+
+test "scenario a RestrictSubmergedPlacement block cannot be placed in water" {
+    // Stock `Block.CanPlaceBlockAt` refuses a block declaring blocks.xml
+    // `RestrictSubmergedPlacement` where `IsUnderwater` holds (Block.il
+    // IL_00A6-00C6), and `IsUnderwater` is `World.IsWater(pos)` for a
+    // single-block footprint (IL=55). zdtd placed it anyway, so a client could
+    // drop a claim block or a workbench inside a lake.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_submerged_gate.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="keystoneBlock">
+        \\  <property name="RestrictSubmergedPlacement" value="true" />
+        \\</block>
+        \\<block name="terrStone" />
+        \\<block name="water">
+        \\  <property name="CanBlocksReplace" value="true" />
+        \\</block>
+        \\</blocks>
+    );
+    g.maxdamage.deinit();
+    g.maxdamage = try assets_maxdamage.loadFromBlocksXml(gpa, bx);
+    g.maxdamage.tryMergeBundledAssignIds(gpa);
+    if (g.maxdamage.id_by_name.count() == 0) return error.SkipZigTest;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const keystone = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
+    const stone = world_store.block_stone;
+    const px: i32 = 256;
+    const pz: i32 = 256;
+    const cy: i32 = 72;
+    g.sim.transform[ps].x = @floatFromInt(px);
+    g.sim.transform[ps].y = @floatFromInt(cy);
+    g.sim.transform[ps].z = @floatFromInt(pz);
+
+    // Dry cell: the restricted block is placed.
+    try g.world.setBlockWorld(px + 1, cy, pz, 0);
+    var sb: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 1, cy, pz, keystone)));
+    try std.testing.expectEqual(keystone, try g.world.blockWorld(px + 1, cy, pz));
+
+    // Water cell: refused, and the water stays. The water block is declared
+    // replaceable here on purpose, so the ONLY gate that can refuse this
+    // placement is the submerged one under test.
+    try g.world.setBlockWorld(px + 2, cy, pz, world_store.block_water);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 2, cy, pz, keystone)));
+    try std.testing.expectEqual(world_store.block_water, try g.world.blockWorld(px + 2, cy, pz));
+
+    // The same replaceable water cell accepts a block WITHOUT the flag: the
+    // gate is the block's own RestrictSubmergedPlacement, not water itself.
+    try g.world.setBlockWorld(px + 3, cy, pz, world_store.block_water);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 3, cy, pz, stone)));
+    try std.testing.expectEqual(stone, try g.world.blockWorld(px + 3, cy, pz));
+    std.debug.print("PASS submerged-gate: a restricted block cannot enter water\n", .{});
+}
