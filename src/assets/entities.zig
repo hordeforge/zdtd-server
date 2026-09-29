@@ -114,6 +114,13 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// entityclasses `AttackTimeoutDay` / `AttackTimeoutNight` seconds: the
+    /// delay between melee strikes, day and dark (`GetAttackTimeoutTicks`
+    /// IL=10 picks by `World.IsDark`; the EntityClass cctor default is 1 s).
+    /// 0 = unset, which leaves the sim on the class_table row then the Rules
+    /// floor.
+    attack_timeout_day: f32 = 0,
+    attack_timeout_night: f32 = 0,
     /// `SetNearestEntityAsTarget class=` player entry (type, hearDistMax,
     /// seeDistMax triples; `EAISetNearestEntityAsTarget` targetClasses parse
     /// IL). hear 0 reads 50 stock-side; see 0 = unset here (the sense path
@@ -1157,6 +1164,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (f > 0 and f <= 256) sight = f;
             }
         }
+        // Attack cadence: seconds between melee strikes, day and dark.
+        // Bounded: a crafted value must not turn one zombie into a blender
+        // (stock tops out at 1.5 s) or freeze it forever.
+        var atk_day: f32 = 0;
+        if (resolveProp(&classes, name, "AttackTimeoutDay", 0)) |at| {
+            if (xml.parseF32(at)) |f| {
+                if (f >= 0.05 and f <= 60.0) atk_day = f;
+            }
+        }
+        var atk_night: f32 = 0;
+        if (resolveProp(&classes, name, "AttackTimeoutNight", 0)) |at| {
+            if (xml.parseF32(at)) |f| {
+                if (f >= 0.05 and f <= 60.0) atk_night = f;
+            }
+        }
         // SightLightThreshold "min,max" (RE entity-ai.md + CanSeeStealth IL:
         // "how well lit you have to be for the zombie to see you at min,max
         // range" - the stock XML comment on zombieTemplateMale "-2,150"; the
@@ -1321,6 +1343,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .jump_max_max = jump_max_max,
             .time_stay = time_stay,
             .sight_range = sight,
+            .attack_timeout_day = atk_day,
+            .attack_timeout_night = atk_night,
             .sight_light_min = sight_light_min,
             .sight_light_max = sight_light_max,
             .sleeper_wake_near_min = sw_near_min,

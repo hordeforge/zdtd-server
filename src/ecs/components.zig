@@ -154,6 +154,10 @@ pub const ClassId = struct {
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,
+    /// entityclasses AttackTimeoutDay / AttackTimeoutNight seconds; 0 =
+    /// class_table[id] then the Rules floor (see `attackTimeoutS`).
+    attack_timeout_day: f32 = 0,
+    attack_timeout_night: f32 = 0,
     /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres
     /// (stock `EAISetNearestEntityAsTarget` targetClasses); 0 = unset, and
     /// the sense path falls back to sight_range. A negative stock value

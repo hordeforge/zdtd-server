@@ -22,6 +22,18 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Melee cadence is per class and per hour 2026-09-28**: stock's
+`EntityAlive::GetAttackTimeoutTicks` (IL=10) reads `attackTimeoutDay` when the
+world is light and `attackTimeoutNight` when it is dark, both copied from
+entityclasses (the EntityClass cctor default is 1 s; `zombieTemplateMale` and
+`animalSnake` ship 1.5/1.1, `animalTemplateHostile` 1.5/1.4,
+`npcSurvivorRanged` 0.5/0.5). zdtd never read either field and gave every class
+the same flat `rules.combat.attack_cooldown_s` of 1.2 s day and night, so the
+stock night speed-up never happened. Both props now parse per class through the
+Extends chain, `attackTimeoutS` resolves per entity then class row then the Rules
+floor, and that floor is retuned from 1.2 to the stock cctor default of 1 s.
+Gated by `attack cadence follows the class's day and night AttackTimeout` and
+`AttackTimeoutDay/Night parse per class and through Extends`.
 **The acquisition radius is the class's own sight range 2026-09-28**: stock
 acquires a player through `EAITarget.check` -> `GetSeeDistance()` (per entity)
 and hears through the same `AITarget` row's hear distance, which passes walls.

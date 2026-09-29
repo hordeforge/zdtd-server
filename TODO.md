@@ -155,9 +155,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       wolf, mountain lion, boar and Grace `EntityZombie` in `class=`, and
       `EAIApproachAndAttackTarget.CanExecute` (entity-ai.md:1791-1794) refuses a
       class not listed; `sensing.zig:422-473` scans the player group only.
-- [ ] **`AttackTimeoutDay` / `AttackTimeoutNight` not read** - stock
-      entity-ai.md:566-567 (zombies 1.5 s day / 1.1 s night); `ai_tasks.zig:1186`
-      uses one `rules.combat.attack_cooldown_s` of 1.2 for every class and hour.
+- [x] **`AttackTimeoutDay` / `AttackTimeoutNight` not read** - closed
+      2026-09-28: both parse per class (through Extends) and `attackTimeoutS`
+      picks by `World.IsDark`, with the Rules floor retuned to stock's 1 s cctor
+      default. Four stock templates carry the pair.
 - [ ] **Chewed covers fall 2-3.6x too fast** - stock EAIBreakBlock delay is
       1.0-1.8 s plus a +0.2/zombie ally boost (entity-ai.md:1817-1825); the
       second path `src/server/game/world_tick.zig:136-248` runs every 10 ticks

@@ -63,9 +63,11 @@ pub const Combat = struct {
     /// wins per class when non-zero (systems.meleeRangeSq); this floor is
     /// the fallback for hand items without one.
     attack_range_sq: f32 = 2.0 * 2.0,
-    /// Strike cadence in seconds. Policy: "No entityclasses field; always this
-    /// cadence (stock melee interval approx)" (pre-move comment).
-    attack_cooldown_s: f32 = 1.2,
+    /// Strike cadence in seconds. **Floor**: entityclasses
+    /// `AttackTimeoutDay`/`AttackTimeoutNight` win per class
+    /// (`GetAttackTimeoutTicks` IL=10 picks by `World.IsDark`); this value is
+    /// the EntityClass cctor default of 1 s, for a class that declares neither.
+    attack_cooldown_s: f32 = 1.0,
     /// Flat armor mitigation per worn armor piece and its cap (zdtd
     /// approximation; R3). Stock mitigation is the passive-effects
     /// damage/armor modifier chain (items.md ModifyValue IL=304, ItemClassArmor
@@ -1207,7 +1209,7 @@ test "mergeOverlay applies non-null subset in precedence order" {
     // Untouched defaults survive both overlays.
     try std.testing.expectEqual(@as(u32, 8), r.bloodmoon.max_parties);
     try std.testing.expectEqual(@as(u32, 30), r.bloodmoon.party_enemy_max);
-    try std.testing.expectEqual(@as(f32, 1.2), r.combat.attack_cooldown_s);
+    try std.testing.expectEqual(@as(f32, 1.0), r.combat.attack_cooldown_s);
 }
 
 // Pin every default to the pre-move constant literal, so a later accidental
@@ -1216,7 +1218,7 @@ test "Rules defaults pin pre-move constants" {
     const r: Rules = .{};
     try std.testing.expectEqual(@as(f32, 8.0), r.combat.attack_damage);
     try std.testing.expectEqual(@as(f32, 2.0 * 2.0), r.combat.attack_range_sq);
-    try std.testing.expectEqual(@as(f32, 1.2), r.combat.attack_cooldown_s);
+    try std.testing.expectEqual(@as(f32, 1.0), r.combat.attack_cooldown_s);
     try std.testing.expectEqual(@as(f32, 64.0 * 64.0), r.ai.full_dist_sq);
     try std.testing.expectEqual(@as(f32, 225.0), r.ai.mid_dist_sq);
     try std.testing.expectEqual(@as(f32, 48.0 * 48.0), r.ai.sense_dist_sq);

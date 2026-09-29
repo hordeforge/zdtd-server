@@ -590,3 +590,39 @@ test "RangedAttackTarget SetData params parse with stock ctor defaults" {
     try std.testing.expectEqual(@as(f32, 4), plain.ranged_min_dist);
     try std.testing.expectEqual(@as(f32, 25), plain.ranged_max_dist);
 }
+
+test "AttackTimeoutDay/Night parse per class and through Extends" {
+    // GetAttackTimeoutTicks IL=10 reads exactly these two floats, in seconds
+    // (EntityClass cctor default 1); stock zombieTemplateMale ships 1.5 / 1.1.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/at.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="Base">
+        \\    <property name="AttackTimeoutDay" value="1.5"/>
+        \\    <property name="AttackTimeoutNight" value="1.1"/>
+        \\  </entity_class>
+        \\  <entity_class name="Child" extends="Base">
+        \\    <property name="AttackTimeoutNight" value="0.8"/>
+        \\  </entity_class>
+        \\  <entity_class name="Junk">
+        \\    <property name="AttackTimeoutDay" value="900"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const base = t.byName("Base") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), base.attack_timeout_day, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), base.attack_timeout_night, 0.001);
+    // Extends inherits the day arm and overrides the night one.
+    const child = t.byName("Child") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), child.attack_timeout_day, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), child.attack_timeout_night, 0.001);
+    // Out-of-range values are refused, not clamped into a blender.
+    const junk = t.byName("Junk") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), junk.attack_timeout_day, 0.001);
+}

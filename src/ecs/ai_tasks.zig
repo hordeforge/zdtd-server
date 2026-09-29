@@ -849,6 +849,26 @@ fn meleeRangeSq(w: *const World, s: Slot) f32 {
     return w.rules.combat.attack_range_sq;
 }
 
+/// Seconds between melee strikes for one entity: entityclasses
+/// `AttackTimeoutDay` when the world is light and `AttackTimeoutNight` when it
+/// is dark (`EntityAlive::GetAttackTimeoutTicks` IL=10 reads exactly those two
+/// fields; the EntityClass cctor default is 1 s). Per-entity layer first, then
+/// the class_table row, then the Rules floor. A class declaring only one of
+/// the pair uses it for both, so the dark arm never falls back to an unrelated
+/// cadence.
+fn attackTimeoutS(w: *const World, s: Slot) f32 {
+    const pe = w.class_id[s];
+    const ct = w.class_table[pe.id];
+    const day = if (pe.attack_timeout_day > 0) pe.attack_timeout_day else ct.attack_timeout_day;
+    const night = if (pe.attack_timeout_night > 0) pe.attack_timeout_night else ct.attack_timeout_night;
+    const v = if (w.director.clock.isNight())
+        (if (night > 0) night else day)
+    else
+        (if (day > 0) day else night);
+    if (v > 0) return v;
+    return w.rules.combat.attack_cooldown_s;
+}
+
 /// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
 /// and a solid cell directly toward the goal (set by chaseAlongPath).
 fn breakBlockCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
@@ -1190,7 +1210,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
                 @atomicStore(u16, &ctx.dmg_attacker[np.slot], s, .monotonic);
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
-            ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
+            ai.attack_cd = attackTimeoutS(ctx.w, s);
             // Stock AvatarZombieController::StartAnimationAttack fires on the
             // landed strike; replicate flushes it as NetPackageEntityAnimationData
             // (entity-ai.md 2026-09-22). Zombie avatars only: the animal
@@ -3140,6 +3160,12 @@ test "a flying zombie dives onto its target and lands the bite" {
 
     const p = w.spawnPlayer(6, 64, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
+    // This test is about the dive and the melee gate, not survivability: the
+    // stock cadence (1 s floor; 1.5 s on `zombieTemplateMale`) lands eight
+    // 20-damage bites in the 8 s window below, which kills a 100 hp player, and
+    // a dead player stops being a target (`EAITarget.check`).
+    w.health[ps].max_hp = 1000;
+    w.health[ps].hp = 1000;
     const z = w.spawnZombie(0, 70, 0, 200).?;
     const zs = w.slotOfNetId(z).?;
     w.mask[zs].class_id = true;
@@ -3182,4 +3208,30 @@ test "chase movement is not scaled by the distance LOD band" {
     // Half a second at 2 blocks/s either way: the band must not change it.
     try std.testing.expectApproxEqAbs(moved[0], moved[1], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), moved[0], 0.2);
+}
+
+test "attack cadence follows the class's day and night AttackTimeout" {
+    // EntityAlive::GetAttackTimeoutTicks (IL=10): attackTimeoutDay when the
+    // world is not dark, attackTimeoutNight when it is. Stock zombieTemplateMale
+    // ships 1.5 / 1.1; the old flat Rules cadence gave every class the same
+    // 1.2 s day and night.
+    var w: World = .{};
+    w.director.clock.hours = 12.0;
+    w.class_table[1].attack_timeout_day = 1.5;
+    w.class_table[1].attack_timeout_night = 1.1;
+    w.class_id[0] = .{ .id = 1 };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), attackTimeoutS(&w, 0), 0.0001);
+    w.director.clock.hours = 23.0;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), attackTimeoutS(&w, 0), 0.0001);
+    // The per-entity layer (A35 def spawns) beats the class_table row.
+    w.class_id[0] = .{ .id = 1, .attack_timeout_day = 2.0, .attack_timeout_night = 0.5 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), attackTimeoutS(&w, 0), 0.0001);
+    w.director.clock.hours = 12.0;
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), attackTimeoutS(&w, 0), 0.0001);
+    // A class declaring only one arm uses it for both.
+    w.class_id[0] = .{ .id = 1, .attack_timeout_day = 1.4 };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.4), attackTimeoutS(&w, 0), 0.0001);
+    // Nothing declared: the Rules floor, the stock EntityClass cctor default 1 s.
+    w.class_id[0] = .{ .id = 2 };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), attackTimeoutS(&w, 0), 0.0001);
 }

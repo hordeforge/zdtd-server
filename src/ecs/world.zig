@@ -132,6 +132,8 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.block_chew = def.block_chew;
     cid.melee_range = def.melee_range;
     cid.sight_range = def.sight_range;
+    cid.attack_timeout_day = def.attack_timeout_day;
+    cid.attack_timeout_night = def.attack_timeout_night;
     cid.hurt_target_classes = def.hurt_target_classes;
     cid.block_if_alert_only = def.block_if_alert_only;
     cid.target_player_see = def.target_player_see;
@@ -240,6 +242,11 @@ pub const EntityClass = struct {
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
     sight_range: f32 = 0,
+    /// entityclasses AttackTimeoutDay / AttackTimeoutNight seconds: the melee
+    /// strike cadence for light and dark (`GetAttackTimeoutTicks` IL=10);
+    /// 0 = unset, which uses the other arm then the Rules floor.
+    attack_timeout_day: f32 = 0,
+    attack_timeout_night: f32 = 0,
     /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
     /// 0 = unset (the sense path falls back to sight_range). Negative stock
     /// values (never target) stay negative so the gate keeps them denied.
