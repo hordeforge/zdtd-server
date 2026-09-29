@@ -17,9 +17,9 @@
 # OXLINT_TSGOLINT_VERSION. The repo deliberately does not track
 # package.json/node_modules (.gitignore: "opencode tooling only"), so the
 # versions live here as the single source of truth.
-# Override locally: TSC_VERSION=5.9.3 OXLINT_VERSION=1.85.0 \
-#   OXLINT_TSGOLINT_VERSION=7.0.2001 OXLINT_STANDARDS_VERSION=0.8.1 \
-#   SHADCN_LINT_VERSION=0.1.5 ANTI_SLOP_SHA=... ANTI_SLOP_SHA256=... \
+# Override locally: TSC_VERSION=5.9.3 OXLINT_VERSION=1.86.0 \
+#   OXLINT_TSGOLINT_VERSION=7.0.2003 OXLINT_STANDARDS_VERSION=0.8.1 \
+#   SHADCN_LINT_VERSION=0.2.0 ANTI_SLOP_SHA=... ANTI_SLOP_SHA256=... \
 #   bash scripts/lint-webui.sh
 #
 # Requires: bun (bunx), python3, sha256sum (already a make check requirement).
@@ -31,16 +31,15 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   echo "zdtd: lint-webui: missing required tool: sha256sum (GNU coreutils)" >&2
   exit 127
 fi
-oxlint_version="${OXLINT_VERSION:-1.85.0}"
+oxlint_version="${OXLINT_VERSION:-1.86.0}"
 oxlint_standards_version="${OXLINT_STANDARDS_VERSION:-0.8.1}"
-oxlint_tsgolint_version="${OXLINT_TSGOLINT_VERSION:-7.0.2001}"
-oxlint_plugins_version="${OXLINT_PLUGINS_VERSION:-1.85.0}"
-shadcn_lint_version="${SHADCN_LINT_VERSION:-0.1.5}"
-anti_slop_sha="${ANTI_SLOP_SHA:-6d538555cb151d4121ed51a27db81890eacf8ae9}"
+oxlint_tsgolint_version="${OXLINT_TSGOLINT_VERSION:-7.0.2003}"
+shadcn_lint_version="${SHADCN_LINT_VERSION:-0.2.0}"
+anti_slop_sha="${ANTI_SLOP_SHA:-c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b}"
 # Content hash of the GitHub archive for ANTI_SLOP_SHA (commit pin alone is not
 # enough: GitHub can regenerate archive bytes for the same commit). Override
 # only together with ANTI_SLOP_SHA when deliberately bumping the plugin.
-anti_slop_sha256="${ANTI_SLOP_SHA256:-a720663fd2562e22e3da670769faa88dc34c9a761fdd9a7d285e20d92871848e}"
+anti_slop_sha256="${ANTI_SLOP_SHA256:-afc6aaeb4561561835c51e0a919ac86a1ebd1474667a3bd311e5a0a775f3d3d9}"
 tsc_version="${TSC_VERSION:-5.9.3}"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdtd/oxlint-standards"
 
@@ -63,9 +62,14 @@ bunx --bun -p "typescript@$tsc_version" tsc -p "$webui_ts_project/tsconfig.json"
 #    there each run. The pinned packages are installed with one additive
 #    `bun add` invocation: it merges the pins into the cache manifest and
 #    never prunes what a sibling script installed. @oxlint/plugins is the
-#    plugin API the anti-slop source imports; without it the plugin cannot load.
+#    plugin API the anti-slop source imports; without it the plugin cannot load,
+#    and upstream requires it at exactly the oxlint version, so one pin covers
+#    both. The source unpacks into a directory keyed by ANTI_SLOP_SHA, so a pin
+#    bump fetches fresh source instead of reusing the previous one;
+#    anti-slop-src is a symlink to the pinned directory.
 mkdir -p "$cache_dir"
-if [ ! -d "$cache_dir/anti-slop-src" ]; then
+anti_slop_dir="$cache_dir/anti-slop-$anti_slop_sha"
+if [ ! -d "$anti_slop_dir" ]; then
   # --retry: cold CI without a warm ~/.cache/zdtd hits GitHub over the
   # network; a transient blip must not fail make lint the way bun_add below
   # already guards registry installs.
@@ -78,9 +82,12 @@ if [ ! -d "$cache_dir/anti-slop-src" ]; then
     echo "zdtd: lint-webui: anti-slop archive sha256 mismatch (got $got_sha256, want $anti_slop_sha256)" >&2
     exit 1
   fi
-  mkdir -p "$cache_dir/anti-slop-src"
-  tar xzf "$cache_dir/anti-slop.tar.gz" -C "$cache_dir/anti-slop-src" --strip-components=2 "anti-slop-$anti_slop_sha/src"
+  mkdir -p "$anti_slop_dir.part"
+  tar xzf "$cache_dir/anti-slop.tar.gz" -C "$anti_slop_dir.part" --strip-components=2 "anti-slop-$anti_slop_sha/src"
+  mv "$anti_slop_dir.part" "$anti_slop_dir"
 fi
+rm -rf "$cache_dir/anti-slop-src"
+ln -sfn "$anti_slop_dir" "$cache_dir/anti-slop-src"
 # type module: the vendored anti-slop plugin source is ESM; without the field
 # node reparses it with a MODULE_TYPELESS_PACKAGE_JSON warning.
 [ -f "$cache_dir/package.json" ] || printf '{"type":"module"}\n' > "$cache_dir/package.json"
@@ -113,7 +120,7 @@ bun_add() {
   ( cd "$cache_dir" && bun add --silent \
       "@rikalabs/oxlint-standards@$oxlint_standards_version" \
       "oxlint-tsgolint@$oxlint_tsgolint_version" \
-      "@oxlint/plugins@$oxlint_plugins_version" \
+      "@oxlint/plugins@$oxlint_version" \
       "@shadcn/lint@$shadcn_lint_version" ) >/dev/null 2>&1
 }
 if ! bun_add; then
@@ -125,11 +132,20 @@ if ! bun_add; then
       [ -d "$cache_dir/node_modules/@shadcn/lint" ]; then
       echo "zdtd: lint-webui: registry unreachable; using the pinned cache in $cache_dir" >&2
     else
-      echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_plugins_version + @shadcn/lint@$shadcn_lint_version into $cache_dir (offline?)" >&2
+      echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_version + @shadcn/lint@$shadcn_lint_version into $cache_dir (offline?)" >&2
       exit 1
     fi
   fi
 fi
+# The strict preset chain, flattened: the upstream presets name a few builtin
+# rules this oxlint does not implement, and oxlint refuses to load a config
+# whose extends chain names an unknown rule. The flattener drops those (listed
+# on stderr) and keeps everything else; .oxlintrc.jsonc extends the result.
+presets="$cache_dir/node_modules/@rikalabs/oxlint-standards/presets"
+( cd "$cache_dir" && bunx --bun "oxlint@$oxlint_version" --rules -f json ) > "$cache_dir/oxlint-rules.json"
+python3 "$root/scripts/oxlint-flatten-presets.py" "$cache_dir/oxlint-rules.json" \
+  "$cache_dir/strict-resolved.json" \
+  "$presets/strict.json" "$presets/strict-web.json"
 cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 # Run from the staged project so the package.json that declares preact is the
 # one oxlint's unlisted-external-imports rule reads, while --config points at

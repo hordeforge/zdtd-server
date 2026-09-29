@@ -35,7 +35,9 @@ export const buttonVariants = cva(
     },
 );
 
-export type ButtonProps = JSX.IntrinsicElements["button"] & VariantProps<typeof buttonVariants>;
+// A button defaults to type="button": the registry leaves it untyped, and an
+// untyped button inside a form submits by accident. No reset buttons here.
+export type ButtonProps = Omit<JSX.IntrinsicElements["button"], "type"> & VariantProps<typeof buttonVariants> & { type?: "button" | "submit" };
 
 function Button({ className, variant, size, type, ...props }: ButtonProps) {
     return (
@@ -44,9 +46,7 @@ function Button({ className, variant, size, type, ...props }: ButtonProps) {
             data-variant={variant ?? "default"}
             data-size={size ?? "default"}
             className={cn(buttonVariants({ variant, size }), className)}
-            // shadcn renders a plain <button>; this one is used inside forms,
-            // where an untyped button would submit by accident.
-            type={type ?? "button"}
+            type={type === "submit" ? "submit" : "button"}
             {...props}
         />
     );

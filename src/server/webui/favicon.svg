@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="zdtd">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="BloodWire">
   <rect width="32" height="32" rx="7" fill="#0f5c37"/>
-  <path d="M9.5 10.5h13l-8.5 11h8.5" fill="none" stroke="#f7f5f0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(4 4)" fill="none" stroke="#f7f5f0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 5h12L9.5 12H15l-9 7h12"/>
+  </g>
 </svg>

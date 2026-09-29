@@ -106,7 +106,9 @@ for html_path in sorted(html_dir.glob("*.html")):
             if not asset.is_file() or asset.read_text(encoding="utf-8") != body:
                 asset.write_text(body, encoding="utf-8")
                 changed.append(asset.name)
-            return f'/* zdtd-ts:{name} */\n<script src="{EXTERNAL_JS[name]}" defer></script>\n/* /zdtd-ts:{name} */'
+            # The page wraps this region in its own <script src> element, so
+            # the markers stay inside it instead of rendering as body text.
+            return f"/* zdtd-ts:{name} */\n/* /zdtd-ts:{name} */"
         return f"/* zdtd-ts:{name} */\n{body}\n/* /zdtd-ts:{name} */"
 
     page_css_file = PAGE_CSS.get(html_path.name)

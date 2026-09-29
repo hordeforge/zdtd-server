@@ -20,6 +20,7 @@ zdtd links or evaluates third-party code through its Zig package manager
 | [class-variance-authority](https://github.com/joe-bell/cva) | 0.7.1 | Apache-2.0 | 2023 Joe Bell | Variant class maps for the shadcn primitives; bundled into the embedded pages. Pinned by `CVA_VERSION`. |
 | [tailwindcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | 2017-present Tailwind Labs Inc. | Utility compiler; its output CSS is spliced into the pages embedded in the binary. Pinned by `TAILWIND_VERSION`. |
 | [@tailwindcss/cli](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | 2017-present Tailwind Labs Inc. | Command-line wrapper that drives the pinned compiler above. Pinned by `TAILWIND_VERSION`. |
+| [lucide](https://github.com/lucide-icons/lucide) | 1.48.0 | ISC | 2026 Lucide Icons and Contributors | Path data of the six tab icons inlined in `shell.html`, taken from the HordeForge icon library (`hordeforge/.github` `brand/icons`, which vendors the license). |
 
 Apache-2.0 section 4 requires that recipients of derivative works receive a
 copy of the license. The full Apache-2.0 text is reproduced below.

@@ -158,6 +158,11 @@ says so rather than filling the space.
 - State is a word in a pill; colour is confirmation, never the message.
 - Gutters and hairlines instead of boxes and shadows: the layout is a ruled table.
 - Numbers are monospaced and tabular; labels are small, uppercase, and letter-spaced.
+- The product identity is the HordeForge **BloodWire** tile (signal-green 32px
+  tile, radius 7, the wire-kinked Z in paper) from the org brand guide
+  (`hordeforge/.github` `brand/`): favicon, header mark, and sign-in mark. The
+  header names the product BloodWire; `zdtd` stays the binary and the mono
+  version line.
 - The standalone provenance scorecard (`docs/provenance.html`, via
   `scripts/gen_provenance.py`) shares the same paper tokens and signal green;
   it never introduces a second accent or a full-page dark shell.
@@ -265,7 +270,7 @@ Gently rounded and rectilinear. Cards 10px, controls and fields 9px, tabs 8px, i
 - **Error / Disabled:** error border plus a soft error ring, and the outline turns error-coloured while focused, so a focused invalid field is not mistaken for a normal one.
 
 ### Navigation
-Tabs are text buttons on paper with a number prefix (`01 Status`). Selected tabs take Signal Wash, Signal Deep text, an underline, and heavier weight; unselected tabs are Ink Muted. Keyboard behaviour follows the tabs pattern: one tab stop, arrow keys on both axes, Home and End, `aria-selected` and `aria-controls` kept in sync. The tablist lives inside a `nav` landmark, because `role="tablist"` on the `nav` itself would replace the landmark role. On mobile the rail scrolls horizontally with a mask fade.
+Tabs are text buttons on paper, each led by its 20px icon from the HordeForge icon library (Lucide geometry: `layout-dashboard`, `activity`, `users`, `terminal`, `sliders-horizontal`, `package`), inlined as `aria-hidden` SVG in `currentColor`. Selected tabs take Signal Wash, Signal Deep text, an underline, and heavier weight; unselected tabs are Ink Muted. Keyboard behaviour follows the tabs pattern: one tab stop, arrow keys on both axes, Home and End, `aria-selected` and `aria-controls` kept in sync. The tablist lives inside a `nav` landmark, because `role="tablist"` on the `nav` itself would replace the landmark role. On mobile the rail scrolls horizontally with a mask fade.
 
 ### Terminal surfaces (signature)
 The tick chart and the console log: Terminal ground, Terminal Rule hairline, mono text, Terminal Text for output, Terminal Faint for meta and prompts, Terminal OK / Terminal Bad for command outcomes, Terminal Key for the 50 ms budget line on the chart. The chart's palette is read from these tokens at runtime and re-read when forced-colors changes, so high-contrast mode does not leave a hand-picked green behind.

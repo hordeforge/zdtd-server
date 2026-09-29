@@ -4,45 +4,58 @@
 //! successful modlet action refetches the state. Compiled by
 //! scripts/build-webui-ts.sh into the `zdtd-ts:shell` marker of shell.html.
 
-import { Fragment, render } from "preact";
-import type { ComponentChildren, RefObject } from "preact";
+import { render, type ComponentChildren, type RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { attachChart, CHART_HISTORY_OPTIONS, detachChart, redrawChart, setChartCompressed, setChartHistory, setChartStale, showLatestApm } from "./chart";
-import type { ApmJson } from "./chart";
+import { attachChart, CHART_HISTORY_OPTIONS, detachChart, redrawChart, setChartCompressed, setChartHistory, setChartStale, showLatestApm, type ApmJson } from "./chart";
 // The shadcn primitives (ts/components/ui) own every repeated presentation on
 // this page: the card chrome, the state pill, the buttons, the ledgers and the
 // notices. `className` (not Preact's `class`) is the merge prop throughout so
 // @shadcn/lint can compare a call site against its component.
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge, toneToVariant } from "@/components/ui/badge";
-import type { BadgeTone } from "@/components/ui/badge";
+import { Badge, toneToVariant, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCaption, TableCell, TableEmpty, TableHead, TableHeader, TableNumber, TableRow, TableRowHeader } from "@/components/ui/table";
 
 const STATE_URL = "/api/state.json";
+
 const CMD_URL = "/api/cmd";
+
 const MODLET_URL = "/api/modlet";
+
 const FETCH_TIMEOUT_MS = 8000;
+
 const HTTP_UNAUTHORIZED = 401;
+
 // The retired per-region poller refreshed status/performance/players every
 // second and console/settings/modules every five; the single state poll keeps
 // that cadence by active tab.
 const POLL_FAST_MS = 1000;
+
 const POLL_SLOW_MS = 5000;
+
 const FLASH_MS = 1200;
+
 const TICK_BUDGET_MS = 50;
+
 const PERCENT_MAX = 100;
+
 const NS_PER_MS = 1_000_000;
+
 const NS_PER_US = 1000;
+
 const SECONDS_PER_MINUTE = 60;
+
 const SECONDS_PER_HOUR = 3600;
+
 const MINUTES_PER_HOUR = 60;
+
 const JSON_ACCEPT = "application/json";
+
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
+
 const MAX_CMD_LINE = 256;
 
 /** Snapshot scalar fields the dashboard reads (Snapshot in webui.zig). */
@@ -162,25 +175,34 @@ type StateJson = {
 };
 
 type CommandReply = { ok: boolean; line?: string; reply?: string; error?: string };
+
+const NO_MODLETS: ReadonlyArray<ModletEntry> = [];
+
 type ModletReply = { ok: boolean; reply?: string; error?: string };
 
 /** A rendered command result: the echoed line and the reply text. */
 type CommandOutcome = { line: string; text: string; failed: boolean };
 
 /** One stat cell of a grid: label under the value, optional tone class. */
-type Stat = { label: string; body: ComponentChildren; tone?: string };
+type StatTone = "default" | "warning" | "destructive";
+
+/** `word` marks a machine word (`correct`, `on`): set in mono, not as a gauge number. */
+type Stat = { label: string; body: ComponentChildren; tone?: StatTone; word?: boolean };
 
 function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
     return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
 }
 
 function queryEl<T extends HTMLElement>(selector: string, kind: new () => T): T {
     const el = document.querySelector(selector);
+
     if (!(el instanceof kind)) {
         throw new Error(`webui: missing element ${selector}`);
     }
+
     return el;
 }
 
@@ -188,13 +210,14 @@ function queryEl<T extends HTMLElement>(selector: string, kind: new () => T): T 
 // since the previous poll so updates register in peripheral vision. Signatures
 // are keyed by position, so a reorder flashes too, which is honest.
 const appRoot = queryEl("#app", HTMLElement);
+
 const prevSignatures = new WeakMap<HTMLElement, Map<string, string>>();
+
 let reduceMotion: MediaQueryList | null = null;
 
 function prefersReducedMotion(): boolean {
-    if (reduceMotion === null) {
-        reduceMotion = globalThis.matchMedia("(prefers-reduced-motion: reduce)");
-    }
+    reduceMotion ??= globalThis.matchMedia("(prefers-reduced-motion: reduce)");
+
     return reduceMotion.matches;
 }
 
@@ -202,30 +225,38 @@ function flashChanges(region: HTMLElement): void {
     if (prefersReducedMotion()) {
         return;
     }
+
     const nodes = region.querySelectorAll<HTMLElement>("[data-flash], tbody tr");
     const prev = prevSignatures.get(region);
     const next = new Map<string, string>();
     const changed: Array<HTMLElement> = [];
     let index = 0;
+
     for (const node of nodes) {
         next.set(String(index), node.textContent);
+
         if (prev !== undefined && prev.size > 0 && prev.get(String(index)) !== next.get(String(index))) {
             changed.push(node);
         }
+
         index += 1;
     }
+
     // Clear, then flush layout once, then re-add: one forced reflow restarts
     // every animation at once instead of one reflow per changed node.
     for (const node of changed) {
         node.classList.remove("flash-once");
     }
+
     if (changed.length > 0) {
         void region.offsetWidth;
+
         for (const node of changed) {
             node.classList.add("flash-once");
             globalThis.setTimeout(() => node.classList.remove("flash-once"), FLASH_MS);
         }
     }
+
     prevSignatures.set(region, next);
 }
 
@@ -234,14 +265,18 @@ function flashChanges(region: HTMLElement): void {
  * a hidden panel is left alone so focus never lands on a control nobody can see. */
 function refocus(el: HTMLElement): void {
     const panel = el.closest<HTMLElement>("[role=tabpanel]");
+
     if (panel?.hidden === true) {
         return;
     }
+
     const scope = panel ?? el.parentElement ?? el;
     const active = document.activeElement;
+
     if (active !== null && active !== document.body && !scope.contains(active)) {
         return;
     }
+
     el.focus();
 }
 
@@ -251,13 +286,17 @@ async function fetchState(): Promise<StateJson | null> {
             credentials: "same-origin",
             headers: { Accept: JSON_ACCEPT },
         });
+
         if (res.status === HTTP_UNAUTHORIZED) {
             globalThis.location.assign("/login");
+
             return null;
         }
+
         if (!res.ok) {
             return null;
         }
+
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: /api/state.json is this server's own fixed schema (the Snapshot/PlayerRow/ModuleRow JSON in webui.zig); the fields read are declared in StateJson
         return (await res.json()) as StateJson;
         // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: a failed poll raises the error banner and the next interval retries; rethrowing would only produce an unhandled rejection inside the timer callback
@@ -277,14 +316,18 @@ async function postCommand(csrf: string, line: string): Promise<CommandPost> {
             headers: { "Content-Type": FORM_CONTENT_TYPE, Accept: JSON_ACCEPT },
             body: new URLSearchParams({ csrf, line }),
         });
+
         if (res.status === HTTP_UNAUTHORIZED) {
             globalThis.location.assign("/login");
+
             return { kind: "redirect" };
         }
+
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: /api/cmd answers the documented {ok,line,reply,error} body (handleCmdPost in webui.zig); only those fields are read
         const reply = (await res.json()) as CommandReply;
         const failed = !res.ok || reply.ok !== true;
         const text = reply.ok === true ? reply.reply ?? "" : reply.error ?? reply.reply ?? "";
+
         return { kind: "reply", outcome: { line: reply.line ?? line, text, failed } };
         // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: the failure is rendered in #cmd-out as a role=alert pre; rethrowing would only produce an unhandled rejection in the submit listener
     } catch {
@@ -303,15 +346,20 @@ async function postModlet(csrf: string, name: string, action: string): Promise<M
             headers: { "Content-Type": FORM_CONTENT_TYPE, Accept: JSON_ACCEPT },
             body: new URLSearchParams({ csrf, name, action }),
         });
+
         if (res.status === HTTP_UNAUTHORIZED) {
             globalThis.location.assign("/login");
+
             return { kind: "redirect" };
         }
+
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: /api/modlet answers the documented {ok,reply,error} body (handleModletPost in webui.zig); only those fields are read
         const reply = (await res.json()) as ModletReply;
+
         if (!res.ok || reply.ok !== true) {
             return { kind: "failed", note: `Modlet action failed (${reply.error ?? `HTTP ${res.status}`}; its outcome is unknown. Reload before retrying.)` };
         }
+
         return { kind: "ok" };
         // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: the failure is rendered inline in the modules pane as role=alert text
     } catch {
@@ -321,26 +369,42 @@ async function postModlet(csrf: string, name: string, action: string): Promise<M
 
 // ---- Shared presentations -------------------------------------------------------
 
-function toneFor(count: number, severe: boolean): string {
+function toneFor(count: number, severe: boolean): StatTone {
     if (count === 0) {
-        return "font-mono text-num tabular-nums";
+        return "default";
     }
-    return severe ? "font-mono text-num tabular-nums text-destructive" : "font-mono text-num tabular-nums text-warning";
+
+    return severe ? "destructive" : "warning";
+}
+
+const STAT_TONE_CLASS = {
+    default: "text-foreground",
+    warning: "text-warning",
+    destructive: "text-destructive",
+} as const;
+
+function statValueClass(stat: Stat): string {
+    const face = stat.word === true ? "font-mono text-num font-semibold" : "font-sans text-stat font-bold leading-tight2 tracking-tight1";
+
+    return `block ${face} tabular-nums break-words ${STAT_TONE_CLASS[stat.tone ?? "default"]}`;
 }
 
 function StatGrid({ heading, stats }: { heading?: string; stats: Array<Stat> }): ComponentChildren {
     return (
-        <Fragment>
+        <>
             {heading === undefined ? null : <h3 className="m-0 px-5 pt-4 pb-1 font-sans text-h3 font-semibold text-foreground">{heading}</h3>}
-            <ul className="list-none m-0 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] border-t border-border bg-transparent p-0">
+            {/* Each cell draws its right and bottom rule; -mr-px tucks the last
+                column's rule under the card edge, so a short last row keeps
+                clean edges instead of orphan borders. */}
+            <ul className="list-none m-0 -mr-px grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] border-t border-border bg-transparent p-0">
                 {stats.map((stat) => (
-                    <li className="min-w-0 border-l border-b border-border bg-transparent px-4 py-3 first:border-l-0" data-flash key={stat.label}>
-                        <b className={stat.tone === undefined ? "block font-sans text-stat font-bold leading-tight2 tracking-tight1 text-foreground tabular-nums break-words" : `block ${stat.tone}`} data-flash-value>{stat.body}</b>
+                    <li className="min-w-0 border-r border-b border-border bg-transparent px-4 py-3" data-flash key={stat.label}>
+                        <b className={statValueClass(stat)} data-flash-value>{stat.body}</b>
                         <span className="block text-muted-foreground font-sans text-hud tracking-label leading-stat uppercase font-semibold">{stat.label}</span>
                     </li>
                 ))}
             </ul>
-        </Fragment>
+        </>
     );
 }
 
@@ -355,14 +419,17 @@ function pad2(part: number): string {
 function worldTimeText(tick: TickState): string {
     const hh = Math.floor(tick.hours);
     const mm = Math.floor((tick.hours - hh) * MINUTES_PER_HOUR);
+
     return `d${tick.day} ${pad2(hh)}:${pad2(mm)}`;
 }
 
 function worldName(tick: TickState): ComponentChildren {
     const name = tick.world_name ?? "";
+
     if (name === "") {
         return <span className="text-muted-foreground font-sans text-body2">(unnamed)</span>;
     }
+
     return name;
 }
 
@@ -380,6 +447,7 @@ function usText(ns: number): number {
 
 function statusCells(tick: TickState): Array<Stat> {
     const blood = tick.bloodmoon_active;
+
     return [
         { label: "server tick", body: String(tick.tick_n) },
         { label: "world time", body: worldTimeText(tick) },
@@ -406,7 +474,7 @@ function entityCells(tick: TickState): Array<Stat> {
 
 function serverCells(tick: TickState): Array<Stat> {
     return [
-        { label: "world", body: worldName(tick), tone: "font-mono text-num tabular-nums" },
+        { label: "world", body: worldName(tick), word: true },
         { label: "info port", body: String(tick.info_port) },
         { label: "game port", body: String(tick.info_port + 2) },
         { label: "webui port", body: String(tick.webui_port) },
@@ -414,9 +482,9 @@ function serverCells(tick: TickState): Array<Stat> {
         { label: "max streamed chunks", body: String(tick.max_streamed_chunks) },
         { label: "interest range (m)", body: String(Math.round(tick.interest_range)) },
         { label: "edit range (m)", body: String(Math.round(tick.max_edit_range)) },
-        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "font-mono text-num tabular-nums" : "font-mono text-num tabular-nums text-warning" },
-        { label: "password", body: tick.password_set ? "set" : "not set", tone: "font-mono text-num tabular-nums" },
-        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "font-mono text-num tabular-nums" },
+        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", word: true, tone: tick.authority_correct ? "default" : "warning" },
+        { label: "password", body: tick.password_set ? "set" : "not set", word: true },
+        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", word: true },
     ];
 }
 
@@ -424,6 +492,7 @@ function hostCells(tick: TickState): Array<Stat> {
     const upH = Math.floor(tick.os_uptime_s / SECONDS_PER_HOUR);
     const upM = Math.floor((tick.os_uptime_s % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
     const loads = `${tick.os_load_1.toFixed(2)} / ${tick.os_load_5.toFixed(2)} / ${tick.os_load_15.toFixed(2)}`;
+
     return [
         { label: "load 1 / 5 / 15 min", body: loads },
         { label: "ram free+buf / total", body: `${tick.os_mem_avail_mb} / ${tick.os_mem_total_mb} MiB` },
@@ -436,10 +505,11 @@ function hostCells(tick: TickState): Array<Stat> {
 
 function latencyCells(tick: TickState): Array<Stat> {
     const budgetNs = TICK_BUDGET_MS * NS_PER_MS;
+
     return [
         { label: "tick mean", body: `${msText(tick.tick_mean_ns)} ms` },
-        { label: "tick p50 / p99", body: `${msText(tick.tick_p50_ns)} / ${msText(tick.tick_p99_ns)} ms`, tone: tick.tick_p99_ns > budgetNs ? "font-mono text-num tabular-nums text-warning" : "font-mono text-num tabular-nums" },
-        { label: "tick max", body: `${msText(tick.tick_max_ns)} ms`, tone: tick.tick_max_ns > budgetNs ? "font-mono text-num tabular-nums text-warning" : "font-mono text-num tabular-nums" },
+        { label: "tick p50 / p99", body: `${msText(tick.tick_p50_ns)} / ${msText(tick.tick_p99_ns)} ms`, tone: tick.tick_p99_ns > budgetNs ? "warning" : "default" },
+        { label: "tick max", body: `${msText(tick.tick_max_ns)} ms`, tone: tick.tick_max_ns > budgetNs ? "warning" : "default" },
         { label: "net mean / p99", body: `${usText(tick.net_mean_ns)} / ${usText(tick.net_p99_ns)} µs` },
         { label: "sim mean / p99", body: `${usText(tick.sim_mean_ns)} / ${usText(tick.sim_p99_ns)} µs` },
         { label: "repl mean / p99", body: `${usText(tick.repl_mean_ns)} / ${usText(tick.repl_p99_ns)} µs` },
@@ -477,10 +547,13 @@ function errorCells(tick: TickState): Array<Stat> {
         { label: "movement rejects", count: tick.movement_rejects, severe: false },
         { label: "decode rejects", count: tick.decode_rejects, severe: false },
     ];
+
     const cells: Array<Stat> = [{ label: "join ok / fail", body: `${tick.join_ok}/${tick.join_fail}`, tone: toneFor(tick.join_fail, true) }];
+
     for (const counter of counters) {
         cells.push({ label: counter.label, body: String(counter.count), tone: toneFor(counter.count, counter.severe) });
     }
+
     return cells;
 }
 
@@ -498,7 +571,7 @@ function guardCells(tick: TickState): Array<Stat> {
 
 function settingsCells(tick: TickState): Array<Stat> {
     return [
-        { label: "world", body: worldName(tick), tone: "font-mono text-num tabular-nums" },
+        { label: "world", body: worldName(tick), word: true },
         { label: "max players", body: String(tick.max_players) },
         { label: "info port", body: String(tick.info_port) },
         { label: "game port", body: String(tick.info_port + 2) },
@@ -509,9 +582,9 @@ function settingsCells(tick: TickState): Array<Stat> {
         { label: "interest range (m)", body: String(Math.round(tick.interest_range)) },
         { label: "edit range (m)", body: String(Math.round(tick.max_edit_range)) },
         { label: "max spawned zombies", body: String(tick.max_spawned_zombies) },
-        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", tone: tick.authority_correct ? "font-mono text-num tabular-nums" : "font-mono text-num tabular-nums text-warning" },
-        { label: "password", body: tick.password_set ? "set" : "not set", tone: "font-mono text-num tabular-nums" },
-        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", tone: "font-mono text-num tabular-nums" },
+        { label: "authority mode", body: tick.authority_correct ? "correct" : "observe", word: true, tone: tick.authority_correct ? "default" : "warning" },
+        { label: "password", body: tick.password_set ? "set" : "not set", word: true },
+        { label: "chunk streaming", body: tick.wire_chunks ? "on" : "off", word: true },
     ];
 }
 
@@ -525,6 +598,7 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
     const glanceValue = "block font-sans text-glance font-bold leading-tight2 tracking-tight2 text-foreground tabular-nums break-words";
     const glanceLabel = "text-muted-foreground font-sans text-hud tracking-eyebrow uppercase font-semibold";
     const cell = "min-w-0 border-l border-border px-4 py-3.5 first:border-l-0 max-md:[&:nth-child(3)]:border-l-0";
+
     return (
         <Card className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] max-md:grid-cols-2" role="region" aria-label="Server health at a glance">
             <div className={cell}>
@@ -557,6 +631,7 @@ function GlanceBand({ apm }: { apm: ApmJson }): ComponentChildren {
 
 function onCompressChange(event: Event): void {
     const target = event.currentTarget;
+
     if (target instanceof HTMLInputElement) {
         setChartCompressed(target.checked);
     }
@@ -564,6 +639,7 @@ function onCompressChange(event: Event): void {
 
 function onHistoryChange(event: Event): void {
     const target = event.currentTarget;
+
     if (target instanceof HTMLSelectElement) {
         setChartHistory(Number(target.value));
     }
@@ -572,15 +648,17 @@ function onHistoryChange(event: Event): void {
 function ChartToolbar({ historyRef }: { historyRef: RefObject<HTMLSelectElement> }): ComponentChildren {
     return (
         <span className="inline-flex flex-wrap items-center gap-2.5 max-md:w-full max-md:justify-start">
-            <Label for="chart-history">history</Label>
-            <select id="chart-history" className="min-h-[44px] rounded-ctl border border-term-faint bg-term2 px-2 py-1 font-mono text-body2 text-term-text" aria-label="History window" ref={historyRef} onChange={onHistoryChange}>
+            {/* Terminal HUD labels, not the paper Label primitive: this toolbar
+                sits on the dark chart surface. */}
+            <label htmlFor="chart-history" className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-mono text-hud tracking-caption text-term-faint uppercase select-none">history</label>
+            <select id="chart-history" className="min-h-[44px] rounded-ctl border border-term-line bg-term2 px-2 py-1 font-mono text-body2 text-term-text" aria-label="History window" ref={historyRef} onChange={onHistoryChange}>
                 {CHART_HISTORY_OPTIONS.map((option) => (
                     <option value={String(option.value)} key={option.value}>{option.label}</option>
                 ))}
             </select>
-            <Label for="chart-compress">
-                <input type="checkbox" id="chart-compress" checked onChange={onCompressChange} /> Compress history
-            </Label>
+            <label htmlFor="chart-compress" className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 font-mono text-hud tracking-caption text-term-faint uppercase select-none">
+                <input type="checkbox" id="chart-compress" className="accent-term-ok" checked onChange={onCompressChange} /> compress
+            </label>
         </span>
     );
 }
@@ -595,7 +673,7 @@ function ChartCanvas({ canvasRef }: { canvasRef: RefObject<HTMLCanvasElement> })
                 width={600}
                 height={150}
                 role="img"
-                tabindex={0}
+                tabIndex={0}
                 aria-label="Live tick latency and section means."
                 aria-describedby="apm-chart-data apm-chart-live apm-chart-keys"
             >
@@ -607,12 +685,12 @@ function ChartCanvas({ canvasRef }: { canvasRef: RefObject<HTMLCanvasElement> })
 
 function ChartReadout({ liveRef, tableRef }: { liveRef: RefObject<HTMLParagraphElement>; tableRef: RefObject<HTMLTableSectionElement> }): ComponentChildren {
     return (
-        <Fragment>
-            <p id="apm-chart-live" className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]" role="status" ref={liveRef}>collecting samples…</p>
-            <p id="apm-chart-keys" className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">
+        <>
+            <p id="apm-chart-live" className="sr-only" role="status" ref={liveRef}>collecting samples…</p>
+            <p id="apm-chart-keys" className="sr-only">
                 Focus and use left and right arrows to inspect past samples, Escape for live. Drag across the chart to inspect.
             </p>
-            <table id="apm-chart-data" className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">
+            <table id="apm-chart-data" className="sr-only">
                 <caption>Newest tick section means, milliseconds</caption>
                 <thead>
                     <tr>
@@ -620,9 +698,9 @@ function ChartReadout({ liveRef, tableRef }: { liveRef: RefObject<HTMLParagraphE
                         <th scope="col">Mean</th>
                     </tr>
                 </thead>
-                <tbody ref={tableRef}></tbody>
+                <tbody ref={tableRef} />
             </table>
-        </Fragment>
+        </>
     );
 }
 
@@ -639,10 +717,13 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
         const live = liveRef.current;
         const tableBody = tableRef.current;
         const historySelect = historyRef.current;
+
         if (canvas === null || caption === null || live === null || tableBody === null || historySelect === null) {
             return undefined;
         }
+
         attachChart({ canvas, caption, live, tableBody, historySelect });
+
         return () => {
             detachChart();
         };
@@ -653,6 +734,7 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
     // two-minute-old trace that still reads as live.
     useEffect(() => {
         showLatestApm(apm);
+
         if (visible) {
             redrawChart();
         }
@@ -679,8 +761,9 @@ function ChartDeck({ apm, visible, stale }: { apm: ApmJson; visible: boolean; st
 
 function StatusPanel({ state, visible, stale }: { state: StateJson; visible: boolean; stale: boolean }): ComponentChildren {
     const { tick } = state;
+
     return (
-        <Card id="status-section" role="tabpanel" tabindex={0} aria-labelledby="tab-status" hidden={!visible}>
+        <Card id="status-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-status" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="status-heading">Tick tape</CardTitle>
                 <CardDescription>Live latency on the terminal. Numbers beside every signal; exact values in Performance.</CardDescription>
@@ -701,7 +784,7 @@ function StatusPanel({ state, visible, stale }: { state: StateJson; visible: boo
 
 function ApmPanel({ tick, visible }: { tick: TickState; visible: boolean }): ComponentChildren {
     return (
-        <Card id="apm-section" role="tabpanel" tabindex={0} aria-labelledby="tab-apm" hidden={!visible}>
+        <Card id="apm-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-apm" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="apm-heading">Performance and counters</CardTitle>
             </CardHeader>
@@ -721,9 +804,11 @@ function playerStateLabel(player: PlayerEntry): string {
     if (player.entered) {
         return "in world";
     }
+
     if (player.joined) {
         return "joined";
     }
+
     return "connecting";
 }
 
@@ -731,20 +816,22 @@ function playerStateTone(player: PlayerEntry): BadgeTone {
     if (player.entered) {
         return "ok";
     }
+
     if (player.joined) {
         return "warn";
     }
+
     return "";
 }
 
 function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visible: boolean }): ComponentChildren {
     return (
-        <Card id="players-section" role="tabpanel" tabindex={0} aria-labelledby="tab-players" hidden={!visible}>
+        <Card id="players-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-players" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="players-heading">Players</CardTitle>
             </CardHeader>
             <CardContent>
-                <div id="players" className="overflow-auto" role="region" aria-label="Connected players table" tabindex={0}>
+                <section id="players" className="overflow-auto" aria-label="Connected players table" tabIndex={0}>
                     <Table>
                         <TableCaption>Connected players</TableCaption>
                         <TableHeader>
@@ -776,7 +863,7 @@ function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visib
                             )}
                         </TableBody>
                     </Table>
-                </div>
+                </section>
             </CardContent>
         </Card>
     );
@@ -784,7 +871,7 @@ function PlayersPanel({ players, visible }: { players: Array<PlayerEntry>; visib
 
 function SettingsPanel({ tick, visible }: { tick: TickState; visible: boolean }): ComponentChildren {
     return (
-        <Card id="settings-section" role="tabpanel" tabindex={0} aria-labelledby="tab-settings" hidden={!visible}>
+        <Card id="settings-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-settings" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="settings-heading">Settings</CardTitle>
                 <CardDescription>
@@ -843,7 +930,7 @@ function ModletTable({
     pending,
     onAction,
 }: {
-    modlets: Array<ModletEntry>;
+    modlets: ReadonlyArray<ModletEntry>;
     csrf: string;
     pending: string | null;
     onAction: (name: string, action: string) => void;
@@ -886,7 +973,7 @@ function ModletTable({
                                 <input type="hidden" name="action" value={modlet.disabled ? "enable" : "disable"} />
                                 <Button type="submit" variant="outline" size="lg" disabled={pending !== null} aria-busy={pending === modlet.name}>
                                     {modlet.disabled ? "Enable" : "Disable"}
-                                    <span className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]"> {modlet.name}</span>
+                                    <span className="sr-only"> {modlet.name}</span>
                                 </Button>
                             </form>
                         </TableCell>
@@ -904,12 +991,13 @@ function confirmModletDisable(name: string): boolean {
 
 function modletSavedNote(name: string, action: string): string {
     const verb = action === "disable" ? "Disabled" : "Enabled";
+
     return `${verb} ${name}. Restart the server for the change to take effect.`;
 }
 
 function ModletFeedback({ failure, success }: { failure: string | null; success: string | null }): ComponentChildren {
     return (
-        <Fragment>
+        <>
             {failure === null ? null : (
                 <Alert variant="destructive" className="mx-5 mb-3">
                     <AlertDescription>{failure}</AlertDescription>
@@ -920,7 +1008,7 @@ function ModletFeedback({ failure, success }: { failure: string | null; success:
                     <AlertDescription>{success}</AlertDescription>
                 </Alert>
             )}
-        </Fragment>
+        </>
     );
 }
 
@@ -938,7 +1026,8 @@ function ModletSection({
     success: string | null;
     onAction: (name: string, action: string) => void;
 }): ComponentChildren {
-    const modlets = state.modlets ?? [];
+    const modlets = state.modlets ?? NO_MODLETS;
+
     return (
         <>
             <h3 className="m-0 px-5 pt-4 pb-1 font-sans text-ui font-semibold text-foreground">Game modlets</h3>
@@ -959,41 +1048,49 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
     const [pending, setPending] = useState<string | null>(null);
     const [failure, setFailure] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
-    const csrf = state.csrf;
+    const { csrf } = state;
 
     const runAction = async (name: string, action: string): Promise<void> => {
         if (pending !== null) {
             return;
         }
+
         if (action === "disable" && !confirmModletDisable(name)) {
             return;
         }
+
         setPending(name);
         setFailure(null);
         setSuccess(null);
         const post = await postModlet(csrf, name, action);
         setPending(null);
+
         if (post.kind === "redirect") {
             return;
         }
+
         if (post.kind === "failed") {
             setFailure(post.note);
+
             return;
         }
+
         if (!(await reload())) {
             setFailure("Modlet change was saved, but the dashboard could not refresh. Reload the page to confirm the new state.");
+
             return;
         }
+
         setSuccess(modletSavedNote(name, action));
     };
 
     return (
-        <Card id="modules-section" role="tabpanel" tabindex={0} aria-labelledby="tab-modules" hidden={!visible}>
+        <Card id="modules-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-modules" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="modules-heading">Modules</CardTitle>
             </CardHeader>
             <CardContent>
-                <div id="modules" className="overflow-auto" role="region" aria-label="Loaded module list" tabindex={0}>
+                <section id="modules" className="overflow-auto" aria-label="Loaded module list" tabIndex={0}>
                     <ModuleTable modules={state.modules} />
                     <ModletSection
                         state={state}
@@ -1004,7 +1101,7 @@ function ModulesPanel({ state, visible, reload }: { state: StateJson; visible: b
                             void runAction(name, action);
                         }}
                     />
-                </div>
+                </section>
             </CardContent>
         </Card>
     );
@@ -1038,13 +1135,16 @@ const DESTRUCTIVE_VERBS = new Set([
     "saveworld",
     "sa",
 ]);
+
 const UNREACHABLE_REPLY = "The command response was not received, so its outcome is unknown. Check the command history below before running it again.";
 
 function confirmDestructive(line: string): boolean {
     const verb = line.split(/\s+/u, 1)[0].toLowerCase();
+
     if (!DESTRUCTIVE_VERBS.has(verb)) {
         return true;
     }
+
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
     return globalThis.confirm(`Run "${line}"?\n\nThis can interrupt players, change access, or erase saved data.`);
 }
@@ -1057,17 +1157,22 @@ type LineDecision = { kind: "run"; line: string } | { kind: "empty" } | { kind: 
 /** Trim and confirm the line. */
 function validatedLine(input: HTMLInputElement, raw: string): LineDecision {
     const line = raw.trim();
+
     if (line === "") {
         input.setCustomValidity("Enter a command.");
         input.reportValidity();
+
         return { kind: "empty" };
     }
+
     input.setCustomValidity("");
+
     // A cancelled dialog and a browser-suppressed one both answer false; the
     // caller reports the refusal rather than dropping the command silently.
     if (!confirmDestructive(line)) {
         return { kind: "declined", line };
     }
+
     return { kind: "run", line };
 }
 
@@ -1075,13 +1180,14 @@ function validatedLine(input: HTMLInputElement, raw: string): LineDecision {
 // The input hint names real commands (help, status, settime day), not filler.
 // Only the placement is the page's: Input owns the field's own shape.
 const CMD_INPUT_CLASS = "flex-1 max-md:basis-full max-md:min-w-0";
+
 // One shape for the result block in every state, so the console panel does not
 // jump when a pending line is replaced by its output.
 const CMD_OUTPUT_CLASS = "m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term max-h-60 whitespace-pre-wrap break-words";
 
 function QuickRow({ pending, onRun }: { pending: boolean; onRun: (line: string) => void }): ComponentChildren {
     return (
-        <div className="flex flex-wrap gap-2 px-5 py-3 border-t border-border bg-transparent" id="quick-commands" role="group" aria-label="Quick commands">
+        <fieldset className="flex flex-wrap gap-2 px-5 py-3 border-t border-border bg-transparent" id="quick-commands" aria-label="Quick commands">
             {QUICK_COMMANDS.map((quick) => (
                 <Button variant="outline" size="sm" key={quick.line} data-cmd={quick.line} disabled={pending} onClick={() => {
                     onRun(quick.line);
@@ -1089,7 +1195,7 @@ function QuickRow({ pending, onRun }: { pending: boolean; onRun: (line: string) 
                     {quick.label}
                 </Button>
             ))}
-        </div>
+        </fieldset>
     );
 }
 
@@ -1105,7 +1211,7 @@ function CommandForm({
     onRun: (line: string) => void;
 }): ComponentChildren {
     return (
-        <Fragment>
+        <>
             <form
                 id="cmd-form"
                 className="cmd-hint flex items-center gap-2 bg-card px-5 py-3.5 border-b border-border max-md:flex-wrap max-md:p-3"
@@ -1117,7 +1223,7 @@ function CommandForm({
                 }}
             >
                 <input type="hidden" name="csrf" value={csrf} />
-                <label for="cmd-line" className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]">Admin command</label>
+                <label htmlFor="cmd-line" className="sr-only">Admin command</label>
                 <Input
                     name="line"
                     id="cmd-line"
@@ -1136,19 +1242,21 @@ function CommandForm({
                 <Button type="submit" size="lg" disabled={pending}>{pending ? "Running…" : "Run"}</Button>
             </form>
             <QuickRow pending={pending} onRun={onRun} />
-        </Fragment>
+        </>
     );
 }
 
 function CommandOutput({ pending, outcome }: { pending: boolean; outcome: CommandOutcome | null }): ComponentChildren {
     if (pending) {
-        return <pre className={`${CMD_OUTPUT_CLASS} text-term-faint`} tabindex={0}>Running command…</pre>;
+        return <pre className={`${CMD_OUTPUT_CLASS} text-term-faint`} tabIndex={0}>Running command…</pre>;
     }
+
     if (outcome === null) {
         return null;
     }
+
     return (
-        <pre className={`${CMD_OUTPUT_CLASS} ${outcome.failed ? "text-term-bad" : "text-term-text"}`} tabindex={0} data-command-error={outcome.failed ? "true" : undefined}>
+        <pre className={`${CMD_OUTPUT_CLASS} ${outcome.failed ? "text-term-bad" : "text-term-text"}`} tabIndex={0} data-command-error={outcome.failed ? "true" : undefined}>
             <span className="text-term-faint">&gt; {outcome.line}</span>
             {"\n"}
             {outcome.text}
@@ -1161,14 +1269,14 @@ function CommandOutput({ pending, outcome }: { pending: boolean; outcome: Comman
  * and alert is unreliably announced, so the alert text has its own node. */
 function CommandResult({ pending, outcome }: { pending: boolean; outcome: CommandOutcome | null }): ComponentChildren {
     return (
-        <Fragment>
+        <>
             <div id="cmd-out" aria-live="polite" aria-atomic="true" role="status" aria-busy={pending}>
                 <CommandOutput pending={pending} outcome={outcome} />
             </div>
-            <p className="sr-only absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0 -m-px [clip:rect(0,0,0,0)]" role="alert">
+            <p className="sr-only" role="alert">
                 {outcome !== null && outcome.failed ? `${outcome.line}: ${outcome.text}` : ""}
             </p>
-        </Fragment>
+        </>
     );
 }
 
@@ -1181,25 +1289,28 @@ function ConsoleHistory({ lines, visible }: { lines: Array<string>; visible: boo
     // left alone when the operator has scrolled up to read older output.
     useEffect(() => {
         const pre = preRef.current;
+
         if (pre === null) {
             return;
         }
+
         const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight <= HISTORY_STICK_THRESHOLD_PX;
+
         if (atBottom) {
             pre.scrollTop = pre.scrollHeight;
         }
     }, [lines, visible]);
 
     return (
-        <div id="console-log" aria-label="Recent commands" role="region" tabindex={-1}>
-            <pre className="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabindex={0} ref={preRef}>
+        <section id="console-log" aria-label="Recent commands" tabIndex={-1}>
+            <pre className="m-[0_1.25rem_1.1rem] overflow-auto rounded-card border border-term-line bg-term p-3.5 font-mono text-num leading-term text-term-text max-h-60 whitespace-pre-wrap break-words" tabIndex={0} ref={preRef}>
                 {lines.length === 0 ? (
                     <span className="text-term-faint font-sans text-body2">No commands run yet. Enter a command above and choose Run.</span>
                 ) : (
                     lines.join("\n")
                 )}
             </pre>
-        </div>
+        </section>
     );
 }
 
@@ -1235,39 +1346,50 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
 
     const runLine = async (raw: string): Promise<void> => {
         const input = inputRef.current;
+
         if (input === null || pending) {
             return;
         }
+
         const decision = validatedLine(input, raw);
+
         if (decision.kind !== "run") {
             if (decision.kind === "declined") {
                 setOutcome({ line: decision.line, text: DECLINED_REPLY, failed: true });
                 refocus(input);
             }
+
             return;
         }
+
         setPending(true);
         setOutcome(null);
         const post = await postCommand(csrf, decision.line);
         setPending(false);
+
         if (post.kind === "redirect") {
             return;
         }
+
         if (post.kind === "unreachable") {
             setOutcome({ line: decision.line, text: UNREACHABLE_REPLY, failed: true });
             refocus(input);
+
             return;
         }
+
         setOutcome(post.outcome);
+
         if (!post.outcome.failed) {
             input.value = "";
         }
+
         refocus(input);
         void reload();
     };
 
     return (
-        <Card id="console-section" role="tabpanel" tabindex={0} aria-labelledby="tab-console" hidden={!visible}>
+        <Card id="console-section" role="tabpanel" tabIndex={0} aria-labelledby="tab-console" hidden={!visible}>
             <CardHeader>
                 <CardTitle id="console-heading">Console</CardTitle>
                 <CardDescription>Same commands as the admin telnet console. Destructive verbs ask first.</CardDescription>
@@ -1292,13 +1414,22 @@ function ConsolePanel({ csrf, lines, visible, reload }: { csrf: string; lines: A
 // ---- App ------------------------------------------------------------------------
 
 const TAB_SLUGS = ["status", "apm", "players", "console", "settings", "modules"] as const;
+
 type TabSlug = (typeof TAB_SLUGS)[number];
+
 const FAST_TABS: ReadonlySet<TabSlug> = new Set<TabSlug>(["status", "apm", "players"]);
 
 function slugFromHash(): TabSlug | null {
     const raw = globalThis.location.hash.replace(/^#/u, "");
+
     return TAB_SLUGS.find((slug) => slug === raw) ?? null;
 }
+
+// The static nav in shell.html is found by its ARIA roles, which the markup
+// must carry anyway; utility classes change with every restyle.
+const TABLIST_SELECTOR = '[role="tablist"]';
+
+const TAB_SELECTOR = '[role="tablist"] [role="tab"]';
 
 function tabSlug(button: HTMLButtonElement): string {
     return button.id.replace(/^tab-/u, "");
@@ -1308,12 +1439,15 @@ function nextTabIndex(key: string, index: number, last: number): number {
     if (key === "ArrowRight" || key === "ArrowDown") {
         return index + 1 > last ? 0 : index + 1;
     }
+
     if (key === "ArrowLeft" || key === "ArrowUp") {
         return index - 1 < 0 ? last : index - 1;
     }
+
     if (key === "Home") {
         return 0;
     }
+
     return last;
 }
 
@@ -1333,19 +1467,23 @@ function useTabHash(select: SelectTab): void {
 // the active tab here instead of being rendered.
 function useTabSelection(activeTab: TabSlug): void {
     useEffect(() => {
-        const buttons = document.querySelectorAll<HTMLButtonElement>(".page-nav .tab");
+        const buttons = document.querySelectorAll<HTMLButtonElement>(TAB_SELECTOR);
+
         for (const button of buttons) {
             const on = tabSlug(button) === activeTab;
             button.setAttribute("aria-selected", String(on));
+
             if (on) {
                 button.removeAttribute("tabindex");
             } else {
                 button.tabIndex = -1;
             }
         }
+
         const hash = activeTab === "status" ? "" : `#${activeTab}`;
         const url = `${globalThis.location.pathname}${globalThis.location.search}${hash}`;
         const current = `${globalThis.location.pathname}${globalThis.location.search}${globalThis.location.hash}`;
+
         if (current !== url) {
             globalThis.history.replaceState(null, "", url);
         }
@@ -1354,41 +1492,57 @@ function useTabSelection(activeTab: TabSlug): void {
 
 function useTabNav(select: SelectTab): void {
     useEffect(() => {
-        const nav = document.querySelector<HTMLElement>(".page-nav");
+        const nav = document.querySelector<HTMLElement>(TABLIST_SELECTOR);
+
         if (nav === null) {
             return undefined;
         }
-        const buttons = [...nav.querySelectorAll<HTMLButtonElement>(".tab")];
+
+        const buttons = [...nav.querySelectorAll<HTMLButtonElement>(TAB_SELECTOR)];
+
         const onClick = (event: Event): void => {
-            const target = event.target;
+            const {target} = event;
+
             if (!(target instanceof HTMLButtonElement)) {
                 return;
             }
+
             const slug = TAB_SLUGS.find((candidate) => candidate === tabSlug(target));
+
             if (slug !== undefined) {
                 select(slug);
             }
         };
+
         // Both axes plus Home/End move per the APG tabs pattern.
         const onKeyDown = (event: KeyboardEvent): void => {
             const keys = new Set(["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Home", "End"]);
+
             if (!keys.has(event.key)) {
                 return;
             }
-            const index = buttons.findIndex((button) => button === document.activeElement);
-            if (index < 0) {
+
+            const focused = document.activeElement;
+            const index = focused instanceof HTMLButtonElement ? buttons.indexOf(focused) : -1;
+
+            if (index === -1) {
                 return;
             }
+
             event.preventDefault();
             const target = buttons[nextTabIndex(event.key, index, buttons.length - 1)];
             const slug = TAB_SLUGS.find((candidate) => candidate === tabSlug(target));
+
             if (slug !== undefined) {
                 select(slug);
             }
+
             target.focus();
         };
+
         nav.addEventListener("click", onClick);
         nav.addEventListener("keydown", onKeyDown);
+
         return () => {
             nav.removeEventListener("click", onClick);
             nav.removeEventListener("keydown", onKeyDown);
@@ -1401,6 +1555,7 @@ function useTabRouting(): TabSlug {
     useTabHash(setActiveTab);
     useTabSelection(activeTab);
     useTabNav(setActiveTab);
+
     return activeTab;
 }
 
@@ -1413,20 +1568,20 @@ function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: numb
 
     /** Returns true when a fresh snapshot was applied. */
     const reload = useCallback(async (): Promise<boolean> => {
-        let next: StateJson | null;
-        if (initialFetchPromise === null) {
-            next = await fetchState();
-        } else {
-            const p = initialFetchPromise;
-            initialFetchPromise = null;
-            next = await p;
-        }
+        // The first reload consumes the fetch the page started before render.
+        const initial = initialFetchPromise;
+        initialFetchPromise = null;
+        const next = await (initial ?? fetchState());
+
         if (next === null) {
             setFailed(true);
+
             return false;
         }
+
         setFailed(false);
         setState(next);
+
         return true;
     }, []);
 
@@ -1438,9 +1593,11 @@ function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: numb
         if (!autoEnabled || pageHidden) {
             return undefined;
         }
+
         const timer = setInterval(() => {
             void reload();
         }, cadenceMs);
+
         return () => {
             clearInterval(timer);
         };
@@ -1450,9 +1607,13 @@ function useDashboard(autoEnabled: boolean, pageHidden: boolean, cadenceMs: numb
 }
 
 const autoRefreshEl = queryEl("#auto-refresh", HTMLInputElement);
+
 const refreshNowEl = queryEl("#refresh-now", HTMLButtonElement);
+
 const refreshStateEl = queryEl("#refresh-state", HTMLElement);
+
 const glanceLampEl = queryEl("#glance-lamp", HTMLElement);
+
 const glanceWordEl = queryEl("#glance-word", HTMLElement);
 
 /** The header word for the derived connection state. */
@@ -1460,9 +1621,11 @@ function glanceWord(failed: boolean, state: StateJson | null, over: boolean): st
     if (failed) {
         return "no contact";
     }
+
     if (state === null) {
         return "connecting";
     }
+
     return over ? "over budget" : "operational";
 }
 
@@ -1470,9 +1633,11 @@ function autoRefreshLabel(autoEnabled: boolean, pageHidden: boolean): string {
     if (!autoEnabled) {
         return "Auto-refresh paused";
     }
+
     if (pageHidden) {
         return "Auto-refresh paused while tab is hidden";
     }
+
     return "Auto-refresh on";
 }
 
@@ -1483,7 +1648,7 @@ function Panels({ state, activeTab, failed, reload }: {
     reload: () => Promise<boolean>;
 }): ComponentChildren {
     return (
-        <Fragment>
+        <>
             <GlanceBand apm={state.apm} />
             <StatusPanel state={state} visible={activeTab === "status"} stale={failed} />
             <ApmPanel tick={state.tick} visible={activeTab === "apm"} />
@@ -1491,7 +1656,7 @@ function Panels({ state, activeTab, failed, reload }: {
             <ConsolePanel csrf={state.csrf} lines={state.console} visible={activeTab === "console"} reload={reload} />
             <SettingsPanel tick={state.tick} visible={activeTab === "settings"} />
             <ModulesPanel state={state} visible={activeTab === "modules"} reload={reload} />
-        </Fragment>
+        </>
     );
 }
 
@@ -1506,17 +1671,21 @@ function useAutoRefresh() {
             setAutoEnabled(autoRefreshEl.checked);
             setRefreshNote(null);
         };
+
         const onVisibility = (): void => {
             setPageHidden(document.hidden);
             setRefreshNote(null);
         };
+
         autoRefreshEl.addEventListener("change", onToggle);
         document.addEventListener("visibilitychange", onVisibility);
+
         return () => {
             autoRefreshEl.removeEventListener("change", onToggle);
             document.removeEventListener("visibilitychange", onVisibility);
         };
     }, []);
+
     return { autoEnabled, pageHidden, refreshNote, setRefreshNote };
 }
 
@@ -1569,12 +1738,15 @@ function App(): ComponentChildren {
         const ok = await reload();
         refreshNowEl.disabled = false;
         refocus(refreshNowEl);
+
         if (!ok) {
             setRefreshNote("Refresh failed - check the connection");
+
             return;
         }
+
         setRefreshNote(autoRefreshEl.checked ? "Refreshed (auto-refresh on)" : "Refreshed (auto-refresh paused)");
-    }, [reload]);
+    }, [reload, setRefreshNote]);
 
     // Registered once: runRefresh identity is stable (reload is a stable callback).
     useEffect(() => {
@@ -1584,19 +1756,16 @@ function App(): ComponentChildren {
     }, [runRefresh]);
 
     const banner = failed ? <FailureBanner autoEnabled={autoEnabled} /> : null;
-    let body: ComponentChildren;
-    if (state !== null) {
-        body = <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />;
-    } else if (failed) {
-        body = <p className="text-muted-foreground font-sans text-body2" role="status">Waiting for the server…</p>;
-    } else {
-        body = <p className="text-muted-foreground font-sans text-body2" role="status" aria-live="polite">Loading dashboard…</p>;
-    }
+
+    const body = state === null
+        ? <p className="text-muted-foreground font-sans text-body2" role="status" aria-live="polite">{failed ? "Waiting for the server…" : "Loading dashboard…"}</p>
+        : <Panels state={state} activeTab={activeTab} failed={failed} reload={reload} />;
+
     return (
-        <Fragment>
+        <>
             {banner}
             {body}
-        </Fragment>
+        </>
     );
 }
 

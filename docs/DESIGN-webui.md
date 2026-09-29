@@ -26,8 +26,7 @@ job-file record. The console is one section down, not one tab away.
 - **Paper by day, no dark mode.** The scene is daylight ops on a laptop
   next to the game client; the pinned direction chose paper ground with
   the chart as the single terminal. `forced-colors` remaps everything.
-  The provenance scorecard shares the token contract itself (ADR 0041), so
-  there is no second palette to drift (no dark shell, no second accent).
+  The provenance scorecard shares the tokens (ADR 0041).
 - **Sans reads, mono is the machine.** Headings, labels, buttons, stats,
   table cells are sans; ids, source, listings, key names are mono.
   Tabular numerals on every comparable number.
@@ -45,6 +44,9 @@ job-file record. The console is one section down, not one tab away.
   micro-label system is deliberate); the `Progress` meter snaps to each
   poll instead of easing, which is what a 1s reading cadence wants and
   what `prefers-reduced-motion` already required.
+
+- **Brand from the org guide** (`hordeforge/.github` `brand/`): the
+  BloodWire tile and the tab icons.
 
 ## Contract
 

@@ -9,7 +9,7 @@
 ![languages](https://img.shields.io/github/languages/count/hordeforge/zdtd-server)
 ![top language](https://img.shields.io/github/languages/top/hordeforge/zdtd-server)
 
-**Zeven Days to Die** (or **ZDTD**): a zero-allocation, high-throughput dedicated server written from scratch in Zig, targeting the stock 7 Days to Die **client wire** (EAC off).
+**Zeven Days to Die** (or **ZDTD**): a dedicated server written from scratch in Zig for the stock 7 Days to Die **client wire** (EAC off), with no heap allocation on the tick path.
 
 ```text
 7 Days to Die  →  ZDTD  →  Zeven Days to Die
@@ -19,6 +19,10 @@
 Not a Harmony mod. Not RealEarth. Not EfficientServer. Not a drop-in host for
 existing mods. Sibling of this workspace only for **RE docs** and **loadgen**
 wire tests.
+
+![The BloodWire operator console: glance band, live tick chart against the 50 ms budget, and the server ledger](docs/dashboard.png)
+
+*The operator console (`--webui-port`, [docs/WEBUI.md](docs/WEBUI.md)): whole-server health in the first viewport, the live tick trace against the 50 ms budget, and the job-file ledger.*
 
 **Profiling:** built-in harness under `src/apm/` ([docs/APM.md](docs/APM.md)).
 

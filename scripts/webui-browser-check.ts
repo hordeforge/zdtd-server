@@ -82,8 +82,20 @@ const tabIds = await page
   .locator("[role=tab]")
   .evaluateAll((els) => els.map((e) => (e as HTMLElement).id));
 
+// Switching tabs is the nav's whole job: a click must select the tab and
+// swap the visible panel (the hooks find the static nav by ARIA role).
+await page.click("#tab-players");
+await page.waitForTimeout(300);
+const tabSwitch = await page.evaluate(() => ({
+  selected: document.querySelector("#tab-players")?.getAttribute("aria-selected") === "true",
+  playersShown: document.querySelector("#players-section")?.checkVisibility() ?? false,
+  statusHidden: !(document.querySelector("#status-section")?.checkVisibility() ?? true),
+}));
+const tabsWork = tabSwitch.selected && tabSwitch.playersShown && tabSwitch.statusHidden;
+
 const result = {
   nodes,
+  tabSwitch,
   painted,
   tabs: tabIds,
   scrubMoved,
@@ -98,6 +110,7 @@ const ok =
   painted.found &&
   painted.opaquePixels > 1000 &&
   tabIds.length >= 4 &&
+  tabsWork &&
   scrubMoved &&
   badResponses.length === 0 &&
   errors.length === 0;

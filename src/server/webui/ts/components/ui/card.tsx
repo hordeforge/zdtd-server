@@ -19,8 +19,12 @@ function CardHeader({ className, ...props }: JSX.IntrinsicElements["div"]) {
     return <div data-slot="card-header" className={cn("grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-5 pt-4 pb-1", className)} {...props} />;
 }
 
-function CardTitle({ className, ...props }: JSX.IntrinsicElements["h2"]) {
-    return <h2 data-slot="card-title" className={cn("m-0 font-sans text-h3 font-semibold tracking-tight1 text-foreground", className)} {...props} />;
+function CardTitle({ className, children, ...props }: JSX.IntrinsicElements["h2"]) {
+    return (
+        <h2 data-slot="card-title" className={cn("m-0 font-sans text-h3 font-semibold tracking-tight1 text-foreground", className)} {...props}>
+            {children}
+        </h2>
+    );
 }
 
 function CardDescription({ className, ...props }: JSX.IntrinsicElements["p"]) {

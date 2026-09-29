@@ -1,69 +1,25 @@
 {
   // oxlint config for the webui TypeScript sources (src/server/webui/ts,
-  // scripts/lint-webui.sh, `make lint`).
+  // scripts/lint-webui.sh, `make lint`). Warnings fail too (--deny-warnings).
   //
-  // Target: the .ts sources in src/server/webui/ts/, compiled by
-  // scripts/build-webui-ts.sh (tsc --strict, pinned TSC_VERSION) into classic
-  // non-module browser scripts that are spliced into the @embedFile'd pages,
-  // hence env browser + es2024. The rule set is deliberately "anti-slop": it
-  // catches AI-generation tells (debug leftovers, dead code, loose equality,
-  // magic numbers, `var`, string concatenation, nested ternaries, runaway
-  // complexity). Warnings and errors are both enforced because lint-webui.sh
-  // runs with --deny-warnings.
+  // Three rule sources, each taken whole:
+  //   * @rikalabs/oxlint-standards `strict` + `strict-web` (the pages are
+  //     Preact JSX): every oxlint category at error (correctness, suspicious,
+  //     pedantic, perf, style, restriction, nursery) plus the @rikalabs/*
+  //     plugin rules. lint-webui.sh flattens the chain into
+  //     strict-resolved.json beside this file, dropping only the builtin
+  //     rules the pinned oxlint does not implement (it names them on stderr).
+  //   * dmmulroy/anti-slop: every generic rule (the Effect group needs Effect,
+  //     which these pages do not use). Vendored source at a pinned SHA.
+  //   * @shadcn/lint: every rule, against the contract in components.json and
+  //     webui.css and the primitives in ts/components/ui.
   //
-  // Provenance: rules added 2026-08-22 from Rika-Labs/oxlint-standards v0.8.1,
-  // the strict baseline chain strict -> strict-ts -> {strict-core, anti-slop,
-  // naming-discipline, promise-safety, imports-hygiene}, restricted to the
-  // subset applicable to browser classic scripts. The @rikalabs/* custom rules
-  // come from that package's plugin via jsPlugins; scripts/lint-webui.sh
-  // installs it into a cache dir (version pinned there) and runs oxlint
-  // against a copy of this config sitting next to the plugin, because oxlint
-  // resolves jsPlugins relative to the config file's directory.
-  //
-  // Type-aware: options.typeAware enables the typescript/* rules that need
-  // real type info (no-floating-promises, no-misused-promises,
-  // no-unsafe-type-assertion, prefer-includes, ...). oxlint runs those through
-  // the separate `oxlint-tsgolint` binary, which lint-webui.sh installs
-  // alongside the plugin (version pinned there) and puts on PATH. The tsconfig
-  // must be parseable by tsgolint: module "es2022", not "none" (see the
-  // tsconfig.json comment).
-  //
-  // Deliberate deviations from the baseline (kept, each with reason):
-  //   * stricter thresholds the baseline leaves off: complexity (max 15),
-  //     max-params (4), max-depth (4), no-negated-condition, no-magic-numbers,
-  //     max-nested-callbacks (3 vs the baseline's 4), no-implicit-coercion
-  //     with only `!!` allowed.
-  //   * categories nursery + perf on (verified 2026-09-21). Pedantic /
-  //     restriction / style stay off (bulk).
-  // Baseline entries intentionally absent (not applicable here):
-  //   * strict-runtime: node/no-process-env, node/no-path-concat,
-  //     node/handle-callback-err (browser env, no node runtime).
-  //   * strict-tests: vitest/*, jsdoc/*, @rikalabs/no-placeholder-tests,
-  //     @rikalabs/no-mock-only-tests (no tests under src/server/webui/ts).
-  //   * strict-ts offs are moot because they are never enabled here:
-  //     typescript/explicit-function-return-type, explicit-module-boundary-
-  //     types, eslint/no-void, unicorn/no-useless-undefined (all off in the
-  //     baseline; source code declares return types anyway).
-  //   * strict-core offs never enabled by these categories and therefore not
-  //     repeated: eslint/no-await-in-loop, no-continue, no-ternary, id-length,
-  //     max-statements, new-cap, prefer-object-spread, oxc/no-optional-
-  //     chaining, no-rest-spread-properties, no-map-spread.
-  //   * oxlint 1.85.0 does not implement import/no-reexport,
-  //     import/no-extraneous-dependencies, import/no-unresolved (baseline
-  //     entries; the import plugin is loaded for the rest of imports-hygiene).
-  //   * Framework presets (strict-drizzle/-web/-effect/-zustand/-bun) do not
-  //     apply to these pages.
+  // `rules` below adds thresholds stricter than the baseline and turns off
+  // the few baseline rules that do not apply here, each with its reason.
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "extends": ["./strict-resolved.json"],
   "options": { "typeAware": true },
   "env": { "browser": true, "es2024": true },
-  // @rikalabs/oxlint-standards plugin (anti-slop custom rules). Loaded by
-  // lint-webui.sh from a cached install; see the provenance note above. The
-  // dmmulroy/anti-slop plugin is vendored source at a pinned SHA (same cache),
-  // and @oxlint/plugins is its plugin-API dependency, installed in the same
-  // npm invocation. @shadcn/lint is the Tailwind design-system plugin: it
-  // reads the contract (components.json + webui.css) and the primitives in
-  // src/server/webui/ts/components/ui, so it checks the pages against the
-  // design system, not only against a raw utility grammar.
   "jsPlugins": [
     "@rikalabs/oxlint-standards/plugin",
     { "name": "anti-slop", "specifier": "./anti-slop-src/index.js" },
@@ -74,186 +30,49 @@
       "note": "zdtd webui: the shadcn token contract lives in src/server/webui/webui.css (:root plus @theme inline) and the primitives in src/server/webui/ts/components/ui. Restyle a component in its own file, not at the call site.",
       "ui": "@/components/ui",
       "componentImports": ["^preact(/|$)"]
-    }
+    },
+    "react": { "version": "19.0.0" }
   },
-  // Two overrides, both with a reason.
   "overrides": [
     {
-      // The primitives own their own classes; a page may pass layout classes
-      // and nothing else. Same shape the shadcn lint README uses for a shared
-      // component library.
+      // The primitives own their classes and forward className by design.
       "files": ["**/components/ui/**"],
+      "rules": { "shadcn/no-restyle": "off" }
+    },
+    {
+      // Import-free page scripts, bundled as IIFEs (build-webui-ts.sh), so
+      // their top-level declarations are never globals.
+      "files": ["**/login.ts", "**/lockout.ts"],
       "rules": {
-        "shadcn/no-restyle": "off"
+        "import/unambiguous": "off",
+        "no-implicit-globals": "off"
       }
     },
     {
-      // lib/utils.ts is the shadcn contract's own path: components.json names
-      // it as aliases.utils, and every registry component imports cn() from
-      // it. Renaming it would break `shadcn add` and the contract, so the
-      // generic-name rule stands down for this one file.
+      // lib/utils.ts is the path components.json names as aliases.utils and
+      // every registry component imports cn() from; renaming breaks the
+      // shadcn contract.
       "files": ["**/lib/utils.ts"],
-      "rules": {
-        "@rikalabs/no-generic-module-names": "off"
-      }
+      "rules": { "@rikalabs/no-generic-module-names": "off" }
     }
   ],
-  // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
-  // the rules below reference (same list as the baseline's strict-core preset);
-  // import + promise are the two that would otherwise not be loaded.
-  "plugins": ["typescript", "import", "promise", "unicorn", "oxc", "eslint"],
-  "categories": {
-    "correctness": "error",
-    "suspicious": "error",
-    // Nursery + perf: verified clean against the tree (2026-09-21) aside from
-    // typescript/no-unnecessary-condition (off below). Pedantic / restriction /
-    // style stay off: they fail in bulk and would force a mass rewrite.
-    "nursery": "error",
-    "perf": "error"
-  },
   "rules": {
-    // ---- dead / debug code ----
-    "no-debugger": "error",
-    "no-console": "error", // browser dashboard: console is debug leftover, never intended output
-    "no-unused-vars": "error",
-    "no-empty": "error",
-    "no-empty-function": "error",
-    "no-unreachable": "error",
-    "no-useless-catch": "error",
-    "no-self-compare": "error",
-    "no-constant-condition": "error",
-    "no-sequences": "error", // comma-operator chains
-    "no-alert": "error", // shell.tsx's destructive-cmd confirm is a documented inline exception
-    // ---- correctness of intent ----
-    "eqeqeq": ["error", "always"], // no loose ==
-    "no-cond-assign": "error",
-    "no-fallthrough": "error",
-    "no-implicit-coercion": ["error", { "allow": ["!!"] }],
-    "radix": "error",
-    "no-eval": "error",
-    "no-new-func": "error",
-    "no-new-wrappers": "error",
-    "no-script-url": "error",
-    "no-throw-literal": "error",
-    "no-param-reassign": "error",
-    "no-async-promise-executor": "error",
-    "no-promise-executor-return": "error",
-    "no-undef": "error",
-    // ---- magic numbers: name them ----
-    "no-magic-numbers": ["error", { "ignore": [0, 1, 2], "ignoreDefaultValues": true, "ignoreArrayIndexes": true }],
-    // ---- idiomatic modern JS ----
-    "no-var": "error",
-    "prefer-const": "error",
-    "prefer-template": "error",
-    "no-useless-concat": "error",
-    "object-shorthand": "error",
-    // ---- complexity (slop soup): keep functions small and flat ----
+    // ---- stricter than the baseline ----
     "complexity": ["error", { "max": 15 }],
     "max-depth": ["error", { "max": 4 }],
     "max-nested-callbacks": ["error", { "max": 3 }],
     "max-params": ["error", { "max": 4 }],
-    // Baseline cap (strict-core default is 60, not the previous 120).
-    "max-lines-per-function": ["error", { "max": 60, "skipBlankLines": true, "skipComments": true }],
-    "no-nested-ternary": "error",
-    "no-lonely-if": "error",
     "no-negated-condition": "error",
-    "no-else-return": "error",
-    "no-useless-return": "error",
-    "default-case": "error",
-    // ---- oxlint-standards v0.8.1 native rules: strict-core subset applicable to browser JS ----
-    "no-warning-comments": "error", // TODO/FIXME/XXX residue; pairs with @rikalabs/no-todo-without-issue
-    "no-shadow": ["error", { "hoist": "functions" }],
-    "no-return-assign": "error",
-    "no-loop-func": "error",
-    "no-constructor-return": "error",
-    "curly": ["error", "all"], // brace every block; no dangling-else / accidental multi-statement
-    "no-multi-assign": "error",
-    "no-template-curly-in-string": "error",
-    "no-labels": "error",
-    "no-lone-blocks": "error",
-    "prefer-object-has-own": "error",
-    "no-implied-eval": "error", // setTimeout/setInterval with string code
-    "prefer-promise-reject-errors": "error", // reject(new Error(...)), never bare reject()
-    "max-classes-per-file": ["error", 1],
-    "max-lines": ["error", { "max": 1500, "skipBlankLines": true, "skipComments": true }],
-    "array-callback-return": "error",
-    "no-use-before-define": "error", // hoisting-dependent calls are ordered defs-first in shell.tsx
-    "require-unicode-regexp": "error", // /u flag on every regex literal
-    // ---- strict-core baseline offs that these categories would otherwise auto-enable ----
-    "promise/always-return": "off", // baseline: off (each then() returning a value is noise here)
-    "typescript/no-unnecessary-boolean-literal-compare": "off", // baseline: off
-    "require-yield": "off", // baseline: off
-    // ---- strict-core typescript/* (type-aware entries need options.typeAware + tsgolint) ----
-    "typescript/consistent-type-imports": "error",
-    "typescript/no-misused-promises": "error",
-    "typescript/use-unknown-in-catch-callback-variable": "error",
-    "typescript/no-unsafe-type-assertion": "error",
-    "typescript/no-redundant-type-constituents": "error",
-    "typescript/no-deprecated": "error",
-    "typescript/ban-ts-comment": [
-      "error",
-      {
-        "ts-ignore": true,
-        "ts-nocheck": true,
-        "ts-expect-error": { "descriptionFormat": "^: .+" }
-      }
-    ],
-    "typescript/restrict-plus-operands": "error",
-    "typescript/no-confusing-void-expression": ["error", { "ignoreArrowShorthand": true }],
-    "typescript/no-confusing-non-null-assertion": "error",
-    "typescript/no-unnecessary-type-arguments": "error",
-    "typescript/no-unnecessary-type-constraint": "error",
-    "typescript/prefer-for-of": "error",
-    "typescript/prefer-includes": "error",
-    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "as" }],
-    "typescript/no-empty-object-type": "error",
-    "typescript/no-require-imports": "error",
-    "typescript/no-namespace": "error",
-    "typescript/array-type": ["error", { "default": "generic" }],
-    "typescript/no-explicit-any": "error",
-    "typescript/no-non-null-assertion": "error",
-    "typescript/no-unnecessary-type-assertion": "error",
-    "typescript/consistent-type-definitions": ["error", "type"], // type aliases over interfaces
-    "unicorn/no-static-only-class": "error",
-    "unicorn/no-useless-promise-resolve-reject": "error",
-    // ---- unicorn DOM/data rules the webui sources pass (2026-08-22) ----
-    "unicorn/prefer-query-selector": "error", // querySelector over getElementById
-    "unicorn/prefer-dom-node-dataset": "error", // el.dataset over data-* attribute API
-    "unicorn/prefer-global-this": "error", // globalThis over window
-    "unicorn/no-array-for-each": "error", // for...of over forEach
-    "unicorn/no-array-callback-reference": "error", // no bare function refs in callbacks
-    // ---- strict-core @rikalabs/* runtime/fallback heuristics ----
-    "@rikalabs/no-silent-catch-fallback": "error", // shell.tsx command forms catch with an inline directive; see the source
-    "@rikalabs/no-runtime-compat-fallbacks": "error",
-    "@rikalabs/no-catch-return-error-object": "error",
-    "@rikalabs/no-unlisted-external-imports": "error",
-    "@rikalabs/no-double-type-assertion": "error", // shell.tsx boundary parses carry an inline safety-comment directive
-    "@rikalabs/no-json-parse-default-fallback": "error",
-    "@rikalabs/no-json-stringify-default-fallback": "error",
-    // ---- promise-safety (promise plugin) ----
-    "typescript/no-floating-promises": "error",
-    "promise/no-nesting": "error",
-    "promise/no-new-statics": "error",
-    "promise/param-names": "error",
-    "promise/valid-params": "error",
-    "promise/catch-or-return": "error",
-    "promise/no-return-wrap": "error",
-    // ---- imports-hygiene (import plugin; classic scripts have no imports, so
-    //      these are guards against regressing to imports/require) ----
-    "import/first": "error",
-    "import/no-absolute-path": "error",
-    "import/no-mutable-exports": "error",
-    "import/no-commonjs": "error",
-    "import/no-dynamic-require": "error",
-    "import/max-dependencies": ["error", { "max": 35 }],
-    "import/no-anonymous-default-export": "error",
-    "@rikalabs/no-import-then-reexport": "error",
-    // ---- dmmulroy/anti-slop plugin rules (vendored source at pinned SHA,
-    //      fetched by lint-webui.sh). All error; no-runtime-typeof is off
-    //      because the FormData/URLSearchParams boundary parses with typeof
-    //      (shell.ts cmd-form), the same sanctioned boundary-parse pattern the
-    //      rule's own allowInTypeGuards exists for but cannot recognize
-    //      outside TSTypePredicate functions ----
+    "no-implicit-coercion": ["error", { "allow": ["!!"] }],
+    // -1 is the last-index (`.at(-1)`) and not-found sentinel.
+    "no-magic-numbers": ["error", { "ignore": [-1, 0, 1, 2], "ignoreDefaultValues": true, "ignoreArrayIndexes": true }],
+    // A wrapped comment continues its sentence; only its first line is
+    // capitalized.
+    "capitalized-comments": ["error", "always", { "ignoreConsecutiveComments": true }],
+
+    // ---- anti-slop: every generic rule ----
+    "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-reduce-accumulator-copy": "error",
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",
@@ -261,57 +80,51 @@
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-reflect-apply": "error",
     "anti-slop/no-reflect-get": "error",
-    "anti-slop/no-runtime-typeof": "off", // FormData.get() returns string|File|null; the typeof narrow at the cmd-form boundary is the parse (see header)
+    "anti-slop/no-runtime-typeof": "error",
     "anti-slop/no-shape-in-symbol-names": "error",
     "anti-slop/no-unknown-parameters": "error",
     "anti-slop/no-unknown-returns": "error",
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-readable-spacing": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
-    // ---- oxlint-standards v0.8.1 custom plugin (@rikalabs/*): anti-slop heuristics ----
-    "@rikalabs/no-commented-out-code": "error",
-    "@rikalabs/no-identical-branches": "error",
-    "@rikalabs/no-tutorial-comments": "error",
-    "@rikalabs/no-ai-debt-comments": "error",
-    "@rikalabs/no-placeholder-implementation": "error",
-    "@rikalabs/no-disable-without-rationale": "error",
-    "@rikalabs/no-todo-without-issue": "error",
-    "@rikalabs/no-low-signal-variable-names": "error",
-    "@rikalabs/no-low-signal-public-names": "error",
-    "@rikalabs/no-generic-module-names": "error",
-    "@rikalabs/no-vague-verbs": "error",
-    "@rikalabs/no-bare-wrapper-functions": "error",
-    "@rikalabs/no-trivial-property-helpers": "error",
-    "@rikalabs/no-pass-through-intermediate-vars": "error",
-    "@rikalabs/no-redundant-const-assertion": "error",
-    "@rikalabs/no-as-never": "error",
-    "@rikalabs/no-anemic-errors": "error",
-    "@rikalabs/no-standalone-classes": "error",
-    "@rikalabs/no-duplicate-context": "error",
-    "@rikalabs/no-is-record-helpers": "error",
-    "@rikalabs/no-trivial-runtime-guard-helpers": "error",
-    "@rikalabs/no-copy-paste-exports": "error",
-    "@rikalabs/no-debug-residue-filenames": "error",
-    "@rikalabs/no-hardcoded-secrets": "error",
-    "@rikalabs/no-sql-string-concat": "error",
-    // ---- @shadcn/lint (Tailwind design system; contract in webui.css,
-    //      primitives in ts/components/ui; see settings.shadcn above) ----
-    // Layout at a call site is the page's business (placement, width, grid);
-    // padding, color, shape and typography belong to the component. The
-    // components/ override above exempts the primitives themselves.
+
+    // ---- @shadcn/lint: every rule ----
+    // Layout at a call site (placement, width, grid) is the page's business;
+    // padding, color, shape and typography belong to the component.
     "shadcn/no-restyle": ["error", { "allow": ["layout"] }],
     "shadcn/no-raw-colors": "error",
     "shadcn/no-arbitrary-values": ["error", { "allow": ["layout"] }],
     "shadcn/no-inline-styles": ["error", { "allow": ["transform"] }],
     "shadcn/no-unknown-classes": "error",
     "shadcn/require-static-classes": "error",
-    // ---- off, with reason ----
-    // Narrow exception instead of the rule off: the lockout page's only
-    // double-underscore name is the server-injected global, so allow that one
-    // identifier rather than hiding every dangling underscore in the tree.
+
+    "jsx-a11y/label-has-associated-control": ["error", { "assert": "htmlFor" }],
+    // A scrollable region or log must take keyboard focus to be scrolled
+    // without a pointer (WCAG 2.1.1).
+    "jsx-a11y/no-noninteractive-tabindex": ["error", { "tags": ["section", "pre"] }],
+
+    // ---- baseline rules that do not apply, each with its reason ----
+    // The lockout page's server-injected global is the only dunder name.
     "no-underscore-dangle": ["error", { "allow": ["__ZDTD_RETRY_S__"] }],
-    "no-void": "off", // typescript/no-floating-promises (enforced above) requires the void operator to mark fire-and-forget promises; eslint/no-void would ban it
-    "no-implicit-globals": "off", // classic-script pages: top-level functions are the page contract, not accidental globals
+    // Vitest rules match any top-level call; there are no tests in ts/.
+    "vitest/require-hook": "off",
+    // Fast-refresh boundary rule; the pages are bundled once, no HMR.
+    "react/only-export-components": "off",
+    // i18n extraction rule; the dashboard is operator-facing English only.
+    "react/jsx-no-literals": "off",
+    // Merges declarations into `let a, b`; per-declaration lines keep each
+    // type annotation and blame line separate.
+    "one-var": "off",
+    // Its remaining suggestions are <output> for role="status" live regions,
+    // which screen readers do not reliably announce, and <img> for a <canvas>.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // className is the shadcn merge prop (ADR 0041); shadcn/no-restyle above
+    // decides which classes a call site may pass.
+    "react/forbid-component-props": "off",
+    // Components and helpers are function declarations, the shape the shadcn
+    // registry primitives use and `shadcn add` emits.
+    "func-style": "off"
   }
 }

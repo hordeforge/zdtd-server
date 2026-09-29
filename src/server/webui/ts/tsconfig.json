@@ -46,7 +46,6 @@
     "components/ui/button.tsx",
     "components/ui/card.tsx",
     "components/ui/input.tsx",
-    "components/ui/label.tsx",
     "components/ui/progress.tsx",
     "components/ui/table.tsx"
   ]

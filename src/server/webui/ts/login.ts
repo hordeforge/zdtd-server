@@ -5,15 +5,18 @@
 //! Compiled by scripts/build-webui-ts.sh.
 
 const token = document.querySelector<HTMLInputElement>('#login-token');
+
 if (token === null) {
     throw new Error('webui: missing element #login-token');
 }
+
 const toggle = document.querySelector<HTMLButtonElement>('#toggle-secret');
+
 if (toggle === null) {
     throw new Error('webui: missing element #toggle-secret');
 }
 
-// data-invalid carries the server's verdict; ARIA has to agree with it.
+// Data-invalid carries the server's verdict; ARIA has to agree with it.
 token.setAttribute('aria-invalid', token.dataset.invalid === 'true' ? 'true' : 'false');
 
 toggle.addEventListener('click', () => {
@@ -27,13 +30,16 @@ toggle.addEventListener('click', () => {
 // Prevent a second submit while the browser is posting: double-clicks on a
 // slow link would otherwise send two tokens and burn lockout attempts.
 const form = token.closest('form');
+
 if (form !== null) {
     form.addEventListener('submit', () => {
         const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+
         if (submit !== null) {
             submit.disabled = true;
             submit.textContent = 'Signing in…';
         }
+
         token.readOnly = true;
     });
 }

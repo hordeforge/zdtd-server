@@ -130,7 +130,7 @@ panel from it; tab selection is client state in the URL hash.
 | `GET`/`HEAD` `/healthz` | Unauthenticated process liveness | static |
 | `GET`/`HEAD` `/favicon.svg` | Unauthenticated brand mark linked by all three pages | embedded SVG (`src/server/webui/favicon.svg`) |
 | `GET`/`HEAD` `/readyz` | Unauthenticated readiness; 503 until first live tick snapshot | snapshot |
-| `GET`/`HEAD` `/shell.js` | Unauthenticated Preact bundle, `@embedFile`d and gzipped once per process (no session or operator data); `ETag` + `must-revalidate` so a reload costs a 304. CSS stays inline (ADR 0040) | - |
+| `GET`/`HEAD` `/shell.js` | Unauthenticated Preact bundle, `@embedFile`d and gzipped once per process (no session or operator data); `ETag` + `must-revalidate` so a reload costs a 304. Requested as `/shell.js?v=<hash>`, so no cached older bundle runs. CSS stays inline (ADR 0040) | - |
 
 Status notes: except for the unauthenticated routes in the table and
 `/login`, auth runs before routing, so unauthenticated requests get **401** even
@@ -350,7 +350,7 @@ plus the flash keyframe.
 **Components.** `src/server/webui/ts/components/ui/` is the shadcn/ui
 component layer, vendored: the registry source (new-york, v4) restyled to the
 paper cockpit, each file carrying `data-slot` attributes and `cva` variants
-(`button.tsx`, `card.tsx`, `badge.tsx`, `alert.tsx`, `input.tsx`, `label.tsx`,
+(`button.tsx`, `card.tsx`, `badge.tsx`, `alert.tsx`, `input.tsx`,
 `table.tsx`, `progress.tsx`). They are Preact, not React, and they are ours,
 not a dependency.
 They already diverge from the registry on purpose: no `asChild` and no radix,
@@ -400,10 +400,10 @@ rather than served.
 cached `@tailwindcss/cli` (pinned `TAILWIND_VERSION`, staged by
 `scripts/webui-ts-project.sh`; no `package.json`/`node_modules` in the tree)
 and splices the output into each committed page between the
-`/* zdtd-css:<region> */` markers. There is no hand-written page stylesheet: every page's CSS is the compiled form of `webui.css`. Page JS is bundled by the same script with
-`bun build` between the `/* zdtd-ts:<page> */` markers, and spliced inline
-except for the shell, whose bundle is written to `shell.js` and referenced as
-`<script src="/shell.js" defer>` inside the marker. `zig build` runs
+`/* zdtd-css:<region> */` markers. Every page's CSS is compiled from `webui.css`. Page JS is bundled by the same script with
+`bun build` between the `/* zdtd-ts:<page> */` markers and spliced inline,
+except the shell's bundle: it goes to `shell.js`, and the markers sit empty
+inside the page's `<script src="/shell.js?v=…" defer>`. `zig build` runs
 neither, so the Zig build stays pure and offline.
 
 `scripts/webui-ts-project.sh` stages the sources plus `components.json` into a

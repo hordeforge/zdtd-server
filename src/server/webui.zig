@@ -369,7 +369,7 @@ pub const Server = struct {
     }
 
     /// ETag of the dashboard bundle, computed on first use and then reused.
-    fn shellJsEtag(self: *Server) []const u8 {
+    fn shellJsEtag(self: *Server) *const [18:0]u8 {
         if (!self.shell_js_etag_set) {
             self.shell_js_etag = etagOf(shell_js);
             self.shell_js_etag_set = true;
@@ -862,7 +862,7 @@ pub const Server = struct {
                 return;
             }
             if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
-                const plain = try renderShell(&body_buf, self.sessionTok());
+                const plain = try renderShell(&body_buf, self.sessionTok(), shellJsVersion(self.shellJsEtag()));
                 // Prefer the session-scoped gzip cache when the client asks for
                 // it: one compress per session instead of one per load.
                 if (plain.len >= gzip_min_bytes and acceptsGzip(req.head_buffer)) {
@@ -1819,6 +1819,13 @@ const shell_js = embedTrimmed("webui/shell.js");
 /// re-checks the ETag on every load.
 const shell_js_cache = "public, max-age=300, must-revalidate";
 
+/// The bundle's content hash for the `?v=` on shell.html's script URL: the
+/// ETag without its quotes. A rebuilt bundle gets a new URL, so a browser
+/// never runs a cached bundle against a newer page and stylesheet.
+fn shellJsVersion(etag: *const [18:0]u8) []const u8 {
+    return etag[1..17];
+}
+
 /// Strong ETag over an embedded asset's bytes, as an 18-byte `"<16 hex>"`.
 fn etagOf(content: []const u8) [18:0]u8 {
     return blk: {
@@ -1918,7 +1925,7 @@ fn renderTemplate(buf: []u8, src: []const u8, subs: []const Subst) ![]const u8 {
 
 test "shell template substitutes every placeholder" {
     var buf: [max_shell_html]u8 = undefined;
-    const out = try renderShell(&buf, "deadbeef");
+    const out = try renderShell(&buf, "deadbeef", "0123456789abcdef");
     // A missed placeholder would ship "__ZDTD_CSRF__" to the browser and break
     // the logout form, which no other test would notice.
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_") == null);
@@ -1926,9 +1933,20 @@ test "shell template substitutes every placeholder" {
     try std.testing.expect(std.mem.find(u8, out, version.product) != null);
 }
 
+test "shell script URL carries the bundle's content hash" {
+    // A fixed /shell.js URL let a browser run its cached bundle against a
+    // newer page for the whole max-age after an upgrade.
+    var buf: [max_shell_html]u8 = undefined;
+    const etag = etagOf(shell_js);
+    const out = try renderShell(&buf, "deadbeef", shellJsVersion(&etag));
+    var want: [32]u8 = undefined;
+    const src = try std.fmt.bufPrint(&want, "/shell.js?v={s}\"", .{etag[1..17]});
+    try std.testing.expect(std.mem.find(u8, out, src) != null);
+}
+
 test "renderTemplate reports a buffer too small instead of truncating" {
     var small: [8]u8 = undefined;
-    try std.testing.expectError(error.NoSpaceLeft, renderShell(&small, "x"));
+    try std.testing.expectError(error.NoSpaceLeft, renderShell(&small, "x", "v"));
 }
 
 test "renderTemplate leaves an unknown placeholder in place" {
@@ -1968,12 +1986,14 @@ test "lockoutRemainingS counts down and clamps at zero" {
     try std.testing.expectEqual(@as(u32, 0), s.lockoutRemainingS());
 }
 
-/// `csrf_token` must be the HMAC session token (not the shared secret).
-fn renderShell(buf: []u8, csrf_token: []const u8) ![]const u8 {
+/// `csrf_token` must be the HMAC session token (not the shared secret);
+/// `js_version` is `shellJsVersion` of the bundle's ETag.
+fn renderShell(buf: []u8, csrf_token: []const u8, js_version: []const u8) ![]const u8 {
     return renderTemplate(buf, shell_html, &.{
         .{ .key = "__ZDTD_PRODUCT__", .val = version.product },
         .{ .key = "__ZDTD_STOCK_WIRE__", .val = version.stock_wire },
         .{ .key = "__ZDTD_CSRF__", .val = csrf_token },
+        .{ .key = "__ZDTD_SHELL_JS_VERSION__", .val = js_version },
     });
 }
 
@@ -2766,7 +2786,7 @@ test "dashboard bundle is a precompressed, revalidating asset off the critical p
     // document has to stay small enough to arrive inside the initial
     // congestion window, and the parse must not stand between the browser and
     // the first paint.
-    try std.testing.expect(std.mem.indexOf(u8, shell_html, "<script src=\"/shell.js\" defer></script>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_html, "<script src=\"/shell.js?v=__ZDTD_SHELL_JS_VERSION__\" defer>") != null);
     // Inlining it again would put ~90 KiB of script back between the browser
     // and the first paint, and re-send it on every load.
     try std.testing.expect(shell_html.len < 64 * 1024);
@@ -2783,8 +2803,8 @@ test "dashboard bundle is a precompressed, revalidating asset off the critical p
     try std.testing.expect(std.mem.find(u8, resp, "Content-Encoding: gzip") != null);
     try std.testing.expect(std.mem.find(u8, resp, "Vary: Accept-Encoding") != null);
     try std.testing.expect(std.mem.find(u8, resp, etag_hdr) != null);
-    // A fixed URL, so revalidate rather than `immutable`: a rebuild has to be
-    // able to replace the bytes.
+    // The unversioned URL still answers, so revalidate rather than
+    // `immutable`: a rebuild has to be able to replace the bytes.
     try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: " ++ shell_js_cache) != null);
     try std.testing.expect(std.mem.find(u8, resp, "Cache-Control: no-store") == null);
 
@@ -2801,6 +2821,10 @@ test "dashboard bundle is a precompressed, revalidating asset off the critical p
     try std.testing.expect(std.mem.find(u8, plain_resp, "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, plain_resp, "Content-Encoding") == null);
     try std.testing.expect(std.mem.find(u8, plain_resp, etag_hdr) != null);
+
+    // The page asks for the versioned URL; the query does not change routing.
+    try testServeHttp(&s, "GET /shell.js?v=0123456789abcdef HTTP/1.1\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
 
     try testServeHttp(&s, "HEAD /shell.js HTTP/1.1\r\n\r\n");
     const head_resp = s.testResp();
@@ -3435,7 +3459,7 @@ test "renderShell serves the app mount point and the JSON poll" {
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x33} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
-    const html = try renderShell(&buf, sess[0..]);
+    const html = try renderShell(&buf, sess[0..], "0123456789abcdef");
     // App mount point and the state endpoint the bundle polls.
     try std.testing.expect(std.mem.find(u8, html, "id=\"app\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "/api/state.json") != null);

@@ -37,12 +37,15 @@ export function toneToVariant(tone: BadgeTone): NonNullable<BadgeProps["variant"
     if (tone === "ok") {
         return "success";
     }
+
     if (tone === "warn") {
         return "warning";
     }
+
     if (tone === "bad") {
         return "destructive";
     }
+
     return "secondary";
 }
 

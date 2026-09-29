@@ -5,6 +5,63 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Per-class melee cadence.** `AttackTimeoutDay` and `AttackTimeoutNight`
+  parse per entity class through the Extends chain, and an attacker uses the
+  night value while the world is dark, as stock does. Every class used to share
+  `rules.combat.attack_cooldown_s`; that floor moves from 1.2 s to the stock
+  default of 1 s.
+- **Join and leave notices.** The server sends the stock `NetPackageGameMessage`
+  for a player joining (after spawn) and leaving (before the entity removal), so
+  clients print the join and leave lines.
+- **`ServerMaxAllowedViewDistance` is honoured.** The serverconfig key is parsed
+  (stock default 12, clamped to 4..12) and a joining client's requested chunk
+  view is clamped to it, instead of to a hardcoded 8.
+
+### Fixed
+
+- **The full items id map reaches the client.** The join sent a 12-row items
+  mapping, and the client replaces its whole table with what it receives, so it
+  kept 12 of about 1400 ids. The loaded catalog is sent deflated, right after
+  the blocks map. An over-cap catalog skips the send rather than shipping a
+  partial map.
+- **Zombies acquire players at their class's own sight range**, widened by its
+  hear range, instead of at a flat 48 m cap. A negative `target_player_see` now
+  denies targeting instead of meaning a 1 m radius.
+- **Dead players are no longer AI targets**, so zombies stop walking to a fresh
+  corpse. The despawn pass still counts the body.
+- **Players who joined far apart see each other.** Player replication was gated
+  on view radius and ran only in the join bundle; stock tracks players at any
+  distance.
+- **Horde night stops the ordinary spawns.** The night drip and the wandering
+  horde are suspended while a blood moon is active; the wandering horde fires
+  after the night. The `bloodmoon_horde_drip_cd` rule is removed.
+- **A destroyed vehicle, turret or crate disappears on clients.** No entity
+  removal was sent for an entity destroyed by damage, so every client kept
+  rendering the wreck.
+- **Webui tabs work again.** Since the Tailwind restyle the tab hooks looked for
+  class names the markup no longer had: clicks, arrow keys and `aria-selected`
+  did nothing. They now find the tabs by ARIA role, and the manual browser check
+  (`scripts/webui-browser-check.ts`) clicks a tab and asserts the panel swap.
+- **The dashboard no longer prints its build marker.** The
+  `/* zdtd-ts:shell */` markers rendered as text at the page bottom; they now
+  sit inside the script element.
+- **An upgraded server never runs a cached old dashboard bundle.** The page
+  requests `/shell.js?v=<bundle hash>`, so a browser that cached the previous
+  bundle fetches the new one instead of running it against the new page for up
+  to five minutes.
+
+### Changed
+
+- **Webui identity follows the HordeForge brand guide.** The favicon, header and
+  sign-in carry the BloodWire tile and name, the tabs lead with icons from the
+  org icon library, and the chart toolbar uses terminal labels.
+- **The webui lint gate runs the full rule sets.** oxlint 1.86 with the whole
+  `@rikalabs/oxlint-standards` `strict` and `strict-web` presets, every generic
+  `dmmulroy/anti-slop` rule, and every `@shadcn/lint` rule; each rule that stays
+  off carries its reason in `.oxlintrc.jsonc`.
+
 ## [0.11.0] - 2026-09-28
 
 ### Added
