@@ -129,14 +129,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       replicate pass now always tracks `.vehicle` (announce at any distance,
       never unload). Gated by `scenario a parked vehicle is replicated at any
       distance and never unloaded`.
-- [ ] **Player interest still has no full per-type distance table** - the rest
-      of `NetEntityDistribution..ctor` (network.md:277-291): EntityEnemy 80,
-      EntityNPC 80, EntityItem 64, EntityTurret 60, EntityFallingBlock 120,
-      EntitySupplyCrate/Plane 1200. zdtd keeps one `view_radius` for those
-      kinds, so items, turrets and falling blocks stream up to 3.5x too far
-      (over-replication, not a visible gap) and enemies stay replicated to the
-      view radius where stock drops them at 80. Closing it means a per-kind
-      radius test in the hot candidate loop.
+- [x] **Per-type entity interest distances** - closed 2026-09-28:
+      `interest.trackingBlocksFor` holds stock's whole table (enemy/npc/stag 80,
+      item 64, turret 60, falling block 120, supply crate 1200, player/vehicle
+      int.Max) and the replicate pass tests every active client with
+      `observerMaskBlocks`. One nuance stays recorded: zdtd resolves the animal
+      split at the kind level (stag 80), so `EntityAnimalRabbit` streams at 80
+      instead of 64.
       Closing it means splitting one number into two: `view_radius` now carries
       the client's own `chunkViewDim` (stock's chunk streaming window, clamped
       into 4..12 by `ServerMaxAllowedViewDistance` since 2026-09-28) and the

@@ -121,7 +121,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 
 | `ServerMaxPlayerCount` | 8 | 1..64 | GSI max + soft join cap |
 | `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
-| `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
+| `ViewRadius` | 7 | 1..16 | chunk-stream radius in cells (32 blocks each), and the fallback when a client asks for none. Entity interest is per type, not this value: stock's `NetEntityDistribution` table gives 80 blocks to enemies/npcs, 64 to items, 60 to turrets, 120 to falling blocks and `int.Max` to players/vehicles (network.md 277-291) |
 | `ServerMaxAllowedViewDistance` | 12 | 4..12 | GamePrefs 190: ceiling on a joining client's requested `chunkViewDim`; stock clamps the pref into 4..12 and then the request into `[4, pref]` (`GameManager::RequestToSpawnPlayer` IL_0006-002A, GameManager.il.txt) |
 | `ServerReservedSlots` | 0 | 0..64 | slots at the cap reserved for players with permission ≤ `ServerReservedSlotsPermission` (PlayerSlotsAuthorizer IL=174); 0 = disabled |
 | `ServerReservedSlotsPermission` | 0 | 0..255 | permission level qualifying for a reserved slot |

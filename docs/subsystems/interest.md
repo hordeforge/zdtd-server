@@ -20,6 +20,20 @@ layer is the top of the stack and may import every package
 
 Sources: [`src/ecs/interest.zig`](../../src/ecs/interest.zig), [`src/ecs/entity.zig`](../../src/ecs/entity.zig), [`src/ecs/world.zig`](../../src/ecs/world.zig), [`src/ecs/components.zig`](../../src/ecs/components.zig), [`src/server/game/replicate.zig`](../../src/server/game/replicate.zig), [`src/server/game/replicate_te.zig`](../../src/server/game/replicate_te.zig), [`src/server/game/replicate_health.zig`](../../src/server/game/replicate_health.zig), [`src/server/game/step.zig`](../../src/server/game/step.zig), [`src/server/game/chunk_stream.zig`](../../src/server/game/chunk_stream.zig)
 
+## Entity types carry their own distance
+Entity interest is per entity TYPE, not per client. Stock's
+`NetEntityDistribution..ctor` table (`../7dtd-engine-research/docs/network/network.md:277`)
+gives `EntityPlayer` and `EntityVehicle` `int.Max` (never unloaded),
+`EntityEnemy`/`EntityNPC`/`EntityAnimalStag` 80 blocks, `EntityItem` and
+`EntityAnimalRabbit` 64, `EntityTurret` 60, `EntityFallingBlock` 120 and
+`EntitySupplyCrate`/`Plane` 1200. `interest.trackingBlocksFor` holds that table
+(`src/ecs/interest.zig`); the replicate pass resolves it per candidate and tests
+every active client with `observerMaskBlocks` (planar x/z, like stock's
+`distSq`), while `always_tracked` and the 1200-block crate resolve to every
+active client. The client's `view_radius` is the chunk-STREAM window, so the
+cell mask below is what the bot pass and the streaming paths use; an entity's
+interest no longer depends on it.
+
 ## Geometry and the observer mask
 Interest is a uniform grid, not a spatial index. A cell is the position
 floor-divided by `cell_size`, which is 32 blocks (`src/ecs/interest.zig:9`).

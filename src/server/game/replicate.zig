@@ -84,6 +84,10 @@ pub fn replicate(self: *Game) !void {
     var obs_cx: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_cz: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
     var obs_r: [game_mod.max_clients]i32 = .{0} ** game_mod.max_clients;
+    // World positions for the per-kind block radii (stock's table is in
+    // blocks; `obs_r` is the chunk-view cell radius the streaming path uses).
+    var obs_wx: [game_mod.max_clients]f32 = .{0} ** game_mod.max_clients;
+    var obs_wz: [game_mod.max_clients]f32 = .{0} ** game_mod.max_clients;
     var active: game_mod.ObsMask = 0;
     // Present: joined+entered+peer with a resolved entity cell. Range-remove
     // walks present ∩ ~in_range instead of re-testing cellsInRange per client.
@@ -96,6 +100,8 @@ pub fn replicate(self: *Game) !void {
             const oc = interest.cellOf(self.sim.transform[si].x, self.sim.transform[si].z);
             obs_cx[ci] = oc.cx;
             obs_cz[ci] = oc.cz;
+            obs_wx[ci] = self.sim.transform[si].x;
+            obs_wz[ci] = self.sim.transform[si].z;
             if (cl.entered) present |= game_mod.bitOf(ci);
         }
     }
@@ -120,16 +126,29 @@ pub fn replicate(self: *Game) !void {
         if (!self.sim.alive[i] or !self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
         self.harness.counters.inc(.replicate_candidates);
         const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
-        // Stock's `NetEntityDistribution` config table tracks `EntityPlayer`
-        // and `EntityVehicle` at `int.Max` (network.md 277-291): those two are
-        // never unloaded by distance, so a parked vehicle must reach a client
-        // that is nowhere near it and must not be removed when everyone walks
-        // away. Every other kind still uses the per-client view radius.
-        const always_tracked = self.sim.mask[i].kind and self.sim.kind[i] == .vehicle;
-        const in_range = if (always_tracked)
+        _ = ecell;
+        // Stock's `NetEntityDistribution` config table tracks each entity TYPE
+        // at a fixed BLOCK distance (network.md 277-291): EntityPlayer and
+        // EntityVehicle at `int.Max`, Enemy/NPC 80, Item 64, Turret 60,
+        // FallingBlock 120, SupplyCrate 1200. The client's `view_radius` is the
+        // chunk-streaming window, not the entity interest radius, so this pass
+        // uses the per-type distance.
+        const supply_crate = self.sim.mask[i].loot_bag and self.sim.loot_bag[i].supply_crate;
+        const track_blocks = interest.trackingBlocksFor(if (self.sim.mask[i].kind) self.sim.kind[i] else null, supply_crate);
+        const in_range = if (track_blocks == interest.always_tracked or track_blocks >= 1024)
+            // EntityPlayer/Vehicle at int.Max, EntitySupplyCrate at 1200: both
+            // are past any map, so every active client tracks them.
             active
         else
-            interest.observerMask(game_mod.max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
+            interest.observerMaskBlocks(
+                game_mod.max_clients,
+                &obs_wx,
+                &obs_wz,
+                active,
+                self.sim.transform[i].x,
+                self.sim.transform[i].z,
+                track_blocks,
+            );
 
         const is_falling = self.sim.mask[i].kind and self.sim.kind[i] == .falling_block;
         const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or

@@ -19007,6 +19007,36 @@ test "scenario an entity announced on interest enter is described in the same ti
     std.debug.print("PASS enter-burst: spawn + flags + speeds in the announce tick\n", .{});
 }
 
+test "scenario a zombie outside the stock 80-block type distance is not announced" {
+    // `NetEntityDistribution` tracks EntityEnemy at 80 blocks (network.md
+    // 277-291), not at the client's chunk-view radius: a zombie 100 blocks out
+    // used to be streamed to a client with a 7-cell view (224 blocks), which
+    // stock does not do.
+    freshScenarioDir("worlds/zdtd_sc_enemy80");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_enemy80", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+    const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
+    // Just outside the 80-block type distance.
+    const far = g.sim.spawnZombie(px + 100, 70, pz, 40) orelse return error.TestUnexpectedResult;
+    // Just inside it.
+    const near = g.sim.spawnZombie(px + 40, 70, pz + 40, 40) orelse return error.TestUnexpectedResult;
+    g.tick_n = 2;
+    cap.clear();
+    try g.replicate();
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, far) == null);
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, near) != null);
+    std.debug.print("PASS enemy-distance: 80 blocks, not the view radius\n", .{});
+}
+
 test "scenario a parked vehicle is replicated at any distance and never unloaded" {
     // Stock's `NetEntityDistribution` table tracks `EntityVehicle` at
     // `int.Max` (network.md 277-291): a parked car stays on every client's

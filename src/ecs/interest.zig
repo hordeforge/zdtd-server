@@ -3,7 +3,8 @@
 //! Decision: docs/adr/0008-serialize-once-interest.md.
 
 const std = @import("std");
-const Dirty = @import("components.zig").Dirty;
+const components = @import("components.zig");
+const Dirty = components.Dirty;
 
 /// Spatial interest grid cell, 32 blocks (zdtd M11 interest; engineering).
 pub const cell_size: f32 = 32.0;
@@ -33,6 +34,59 @@ pub fn inRange(px: f32, pz: f32, ex: f32, ez: f32, radius_cells: i32) bool {
     const a = cellOf(px, pz);
     const b = cellOf(ex, ez);
     return cellsInRange(a.cx, a.cz, b.cx, b.cz, radius_cells);
+}
+
+/// Sentinel for the two types stock tracks at `int.Max`: never unloaded by
+/// distance, and announced to every player wherever they are.
+pub const always_tracked: i32 = 0;
+
+/// Stock `NetEntityDistribution..ctor` tracking distance in BLOCKS, per entity
+/// type (RE network.md 277-291). The table is per type, not per client: a
+/// client's `view_radius` governs chunk streaming, not entity interest.
+///   EntityPlayer / EntityVehicle      int.Max
+///   EntityEnemy / EntityNPC / EntityAnimalStag   80
+///   EntityItem / EntityAnimalRabbit  64
+///   EntityTurret                     60
+///   EntityFallingBlock / Tree        120
+///   EntitySupplyCrate / Plane        1200
+/// zdtd resolves the animal split at the kind level (stag 80) because the
+/// class row does not carry the stock type name; a rabbit therefore streams a
+/// little further than stock, which is over-replication, not a missing entity.
+pub fn trackingBlocksFor(kind: ?components.Kind, supply_crate: bool) i32 {
+    const k = kind orelse return 80;
+    return switch (k) {
+        .player, .vehicle => always_tracked,
+        .zombie, .trader, .animal => 80,
+        .turret => 60,
+        .falling_block => 120,
+        .loot_bag => if (supply_crate) 1200 else 64,
+    };
+}
+
+/// Which of `lanes` observers are within `blocks` of the entity, as one word.
+/// The scalar form of `observerMask` for the per-type radii above; Y is ignored
+/// exactly like stock's planar `distSq` test.
+pub fn observerMaskBlocks(
+    comptime lanes: comptime_int,
+    wx: *const [lanes]f32,
+    wz: *const [lanes]f32,
+    active: ObserverMask(lanes),
+    ex: f32,
+    ez: f32,
+    blocks: i32,
+) ObserverMask(lanes) {
+    if (active == 0) return 0;
+    const limit: f32 = @floatFromInt(blocks);
+    const limit2 = limit * limit;
+    var out: ObserverMask(lanes) = 0;
+    var m = active;
+    while (m != 0) : (m &= m - 1) {
+        const ci = @ctz(m);
+        const dx = ex - wx[ci];
+        const dz = ez - wz[ci];
+        if (dx * dx + dz * dz <= limit2) out |= @as(ObserverMask(lanes), 1) << @intCast(ci);
+    }
+    return out;
 }
 
 /// Whether this entity should emit PosAndRot this motion pass. Dirty pos/rot
@@ -204,4 +258,34 @@ test "clearAfterReplicate clears the motion bits and keeps hp" {
     try std.testing.expect(!d.rot);
     try std.testing.expect(!d.flags);
     try std.testing.expect(d.hp);
+}
+
+test "stock per-type tracking distances" {
+    // RE network.md 277-291 (`NetEntityDistribution..ctor`).
+    const K = components.Kind;
+    try std.testing.expectEqual(always_tracked, trackingBlocksFor(.player, false));
+    try std.testing.expectEqual(always_tracked, trackingBlocksFor(.vehicle, false));
+    try std.testing.expectEqual(@as(i32, 80), trackingBlocksFor(.zombie, false));
+    try std.testing.expectEqual(@as(i32, 80), trackingBlocksFor(.trader, false));
+    try std.testing.expectEqual(@as(i32, 80), trackingBlocksFor(.animal, false));
+    try std.testing.expectEqual(@as(i32, 60), trackingBlocksFor(.turret, false));
+    try std.testing.expectEqual(@as(i32, 120), trackingBlocksFor(.falling_block, false));
+    // EntityItem 64, EntitySupplyCrate 1200: same kind, different flag.
+    try std.testing.expectEqual(@as(i32, 64), trackingBlocksFor(.loot_bag, false));
+    try std.testing.expectEqual(@as(i32, 1200), trackingBlocksFor(.loot_bag, true));
+    _ = K;
+}
+
+test "observerMaskBlocks matches the plain distance test" {
+    var wx: [4]f32 = .{ 0, 100, 0, 50 };
+    var wz: [4]f32 = .{ 0, 0, 100, 200 };
+    const active: ObserverMask(4) = 0b1111;
+    // 80 blocks: (0,0) and (50,200)? no; (0,100) is exactly 100 away.
+    const m = observerMaskBlocks(4, &wx, &wz, active, 0, 0, 80);
+    try std.testing.expectEqual(@as(ObserverMask(4), 0b0001), m);
+    // 64 blocks excludes the 100-away lane but the 50-away? none on x/z pairs
+    // below 64: (0,0) only.
+    try std.testing.expectEqual(@as(ObserverMask(4), 0b0001), observerMaskBlocks(4, &wx, &wz, active, 0, 0, 64));
+    // Lanes without a peer are ignored.
+    try std.testing.expectEqual(@as(ObserverMask(4), 0), observerMaskBlocks(4, &wx, &wz, 0, 0, 0, 500));
 }
