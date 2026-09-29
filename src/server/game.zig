@@ -497,6 +497,10 @@ pub const Game = struct {
     /// `ServerMaxAllowedViewDistance` (GamePrefs 190), the ceiling stock clamps
     /// a joining client's requested `chunkViewDim` to.
     server_max_view_distance: i32 = 12,
+    /// ServerInfo string fields (browser surface): the confirmation line
+    /// (GameInfoString 11) and the visibility int (GameInfoInt 43).
+    server_login_confirmation_text: []const u8 = "",
+    server_visibility: u8 = 0,
     /// Advertised + soft join cap (ServerMaxPlayerCount); ≤ max_clients.
     max_players: u16 = default_max_players,
     /// Effective server config (loaded file or struct defaults) for late
@@ -673,6 +677,8 @@ pub const Game = struct {
             .stock_catalogs_requested = opts.game_dir != null or opts.config_dir != null,
             .view_radius = opts.view_radius,
             .server_max_view_distance = opts.server_max_view_distance,
+            .server_login_confirmation_text = opts.server_login_confirmation_text,
+            .server_visibility = opts.server_visibility,
             .effective_config = opts.effective_config,
             .max_players = max_pl,
             .reserved_slots = opts.reserved_slots,

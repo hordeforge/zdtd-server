@@ -129,6 +129,8 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `GameName` / `GameWorld` | zdtd / empty | string | world identity / stock map folder under `--game-dir` |
 | `ServerDescription` | empty | string | GSI server-browser description (GameInfoString 3); empty = client default |
 | `ServerWebsiteURL` | empty | string | GSI server-browser website (GameInfoString 4); empty = client default |
+| `ServerLoginConfirmationText` | empty | string | GSI confirmation line (GameInfoString 11) the browser shows beside the join dialog; empty omits the key |
+| `ServerVisibility` | 0 | 0..2 | GSI `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public, 1 friends-only, 2 hidden |
 | `Region` | empty | string | GSI server-browser region; empty = client default |
 | `Language` | empty | string | GSI server-browser language; empty = client default |
 | `ServerMatchmakingGroup` | empty | string | GSI play group (GameInfoString 17); empty = client default |

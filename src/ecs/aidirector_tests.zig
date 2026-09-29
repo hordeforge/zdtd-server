@@ -1293,3 +1293,55 @@ test "a blood-moon spawn swaps in the radiated vulture for a riding target" {
     try std.testing.expect(!w.class_id[slot].bonus_loot);
     try std.testing.expectEqual(before_bonus, dir.bm_bonus_count);
 }
+
+test "heat scouts take their tier from the gamestage around the hot spot" {
+    // Stock SpawnScouts finds the closest player within 120 m of the hot chunk
+    // and reads CalcGameStageAround (aidirector.md:394-397). zdtd read the
+    // server-wide party high-water mark, so a solo level-1 player drew
+    // `ScoutsRadiated` whenever a level-125 player was anywhere on the server.
+    const Hooks = struct {
+        var asked: [64]u8 = undefined;
+        var asked_len: usize = 0;
+        var around_stage: i32 = 90;
+        var around_calls: u32 = 0;
+        fn spawnerGroup(_: ?*anyopaque, name: []const u8) ?[]const u8 {
+            asked_len = @min(name.len, asked.len);
+            @memcpy(asked[0..asked_len], name[0..asked_len]);
+            return "ZombieScoutsFeral";
+        }
+        fn pick(_: ?*anyopaque, group: []const u8, _: u32) ?[]const u8 {
+            if (std.mem.eql(u8, group, "ZombieScoutsFeral")) return "zombieJoe";
+            return null;
+        }
+        fn around(_: ?*anyopaque, _: f32, _: f32, _: f32) i32 {
+            around_calls += 1;
+            return around_stage;
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    w.rules.director.heat_spawn_chance = 1;
+    var d: Director = .{
+        .spawner_group_ctx = undefined,
+        .spawner_group_fn = &Hooks.spawnerGroup,
+        .group_pick_ctx = undefined,
+        .group_pick_fn = &Hooks.pick,
+        .stage_around_ctx = undefined,
+        .stage_around_fn = &Hooks.around,
+        // A server-wide stage at the top tier, which the heat path must ignore.
+        .party_stage = 125,
+    };
+    var t: u32 = 0;
+    while (t < 30) : (t += 1) {
+        d.notifyActivity(0, 0, 6, 720);
+        _ = d.tick(&w, 0.05);
+    }
+    var warm: u32 = 0;
+    while (warm < 110) : (warm += 1) _ = d.tick(&w, 0.05);
+    try std.testing.expect(Hooks.around_calls > 0);
+    // 90 is the ScoutsFeral band; the server-wide party stage 125 would have
+    // selected ScoutsRadiated, so the hook is what the tier came from.
+    try std.testing.expectEqualStrings("ScoutsFeral", Hooks.asked[0..Hooks.asked_len]);
+    try std.testing.expectEqualStrings("ScoutsRadiated", scoutSpawnerName(d.party_stage));
+}

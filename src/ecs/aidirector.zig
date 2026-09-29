@@ -892,15 +892,35 @@ pub const Director = struct {
     /// Daytime scout entity group for the current party stage; empty when the
     /// spawning.xml entityspawner table is unavailable.
     fn scoutGroup(self: *const Director) []const u8 {
+        return self.scoutGroupFor(self.party_stage);
+    }
+
+    /// Scout entity group for a gamestage: stock `SpawnScouts` picks the tier
+    /// from `CalcGameStageAround` at the hot spot, not from a server-wide
+    /// high-water mark (aidirector.md:394-397), so the heat path anchors here.
+    fn scoutGroupAt(self: *const Director, wx: f32, wz: f32) []const u8 {
+        return self.scoutGroupFor(self.stageAround(wx, wz));
+    }
+
+    fn scoutGroupFor(self: *const Director, stage: i32) []const u8 {
         const f = self.spawner_group_fn orelse return "";
-        return f(self.spawner_group_ctx, scoutSpawnerName(self.party_stage)) orelse "";
+        return f(self.spawner_group_ctx, scoutSpawnerName(stage)) orelse "";
     }
 
     /// The tier's `TotalPerWave` from spawning.xml, falling back to `dflt`
     /// when no table is wired (offline tests) or the property is absent.
     pub fn scoutWaveSize(self: *const Director, dflt: u32) u32 {
+        return self.scoutWaveSizeFor(self.party_stage, dflt);
+    }
+
+    /// Wave size for the position-anchored heat path.
+    pub fn scoutWaveSizeAt(self: *const Director, wx: f32, wz: f32, dflt: u32) u32 {
+        return self.scoutWaveSizeFor(self.stageAround(wx, wz), dflt);
+    }
+
+    pub fn scoutWaveSizeFor(self: *const Director, stage: i32, dflt: u32) u32 {
         const f = self.spawner_wave_fn orelse return dflt;
-        const r = f(self.spawner_wave_ctx, scoutSpawnerName(self.party_stage));
+        const r = f(self.spawner_wave_ctx, scoutSpawnerName(stage));
         if (r.min == 0) return dflt;
         const hi = @max(r.min, r.max);
         if (hi == r.min) return r.min;
@@ -1515,12 +1535,16 @@ pub const Director = struct {
     /// nearest player (SetInvestigatePosition, 2400 ticks).
     fn spawnHeatScouts(self: *Director, w: *ecs_world.World, key: i64) void {
         const center = heatRegionCenter(key);
-        const group = self.scoutGroup();
+        // Anchor the tier at the hot spot: stock `SpawnScouts` finds the
+        // closest player within 120 m of it and takes `CalcGameStageAround`
+        // (aidirector.md:394-397), so a solo level-1 player does not draw
+        // `ScoutsRadiated` because someone else on the map is level 125.
+        const group = self.scoutGroupAt(center.x, center.z);
         var n: u32 = 0;
         var i: u32 = 0;
         // Stock sizes the heat wave from the tier's TotalPerWave; the rule is
         // the fallback when no spawning.xml table is wired.
-        const wave = self.scoutWaveSize(w.rules.director.heat_scout_count);
+        const wave = self.scoutWaveSizeAt(center.x, center.z, w.rules.director.heat_scout_count);
         while (i < wave) : (i += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
             const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;

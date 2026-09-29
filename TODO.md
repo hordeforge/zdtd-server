@@ -204,9 +204,14 @@ nothing here is already waived. The four gaps the same audit closed are in
 - [ ] **`NetPackageChunkRemoveAll` and `NetPackageEventPrefab` have no send
       site** - registered and parsed, never emitted; check the stock sender in
       the IL before acting (medium confidence, receivers only in the docs).
-- [ ] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** -
-      `src/server/c2s/join_spawn.zig:25-28` clamps `chunkViewDim` to 8 with no
-      server pref and no stock lower clamp of 4.
+- [x] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** - closed
+      2026-09-28 (round 4): parsed and applied as the stock `[4, pref]` clamp.
+- [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
+      (would advertise a capability crossplay needs EOS for),
+      `ServerDisabledNetworkProtocols`, `ServerMaxWorldTransferSpeedKiBs`,
+      `PersistentPlayerProfiles`, `SaveDataLimit`, `IgnoreEOSSanctions`,
+      `HideCommandExecutionLog`. Each needs a decision (honour, or document as
+      out of scope) before the key list is honest.
 - [ ] **Disconnect reason and `PersistentPlayerState` reason 2** -
       `session_drop.zig:63` sends `EntityRemove(Despawned)` where stock sends
       `Unloaded(1)`, and the disconnect `PersistentPlayerState` row is never

@@ -273,6 +273,10 @@ pub const InitOptions = struct {
     /// `ServerMaxAllowedViewDistance` (GamePrefs 190): the ceiling on a joining
     /// client's requested chunk view, stock-clamped into 4..12.
     server_max_view_distance: i32 = 12,
+    /// `ServerLoginConfirmationText` (GameInfoString 11) and `ServerVisibility`
+    /// (GameInfoInt 43) for the TCP server-info string.
+    server_login_confirmation_text: []const u8 = "",
+    server_visibility: u8 = 0,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
     /// non-empty enables the stock login and the INADDR_ANY bind.

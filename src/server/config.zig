@@ -72,6 +72,12 @@ pub const Config = struct {
     /// into 4..12, then clamps the request into [4, pref]). Stock's own
     /// serverconfig default is 12.
     server_max_view_distance: i32 = 12,
+    /// `ServerLoginConfirmationText` (GameInfoString 11): shown in the server
+    /// browser as the confirmation line. Empty omits the key, like stock.
+    server_login_confirmation_text: []const u8 = "",
+    /// `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public,
+    /// 1 friends-only, 2 hidden.
+    server_visibility: u8 = 0,
     /// PlayerSlotsAuthorizer (IL=174): ServerReservedSlots(155) - slots at the
     /// cap reserved for players with permission <= ServerReservedSlotsPermission
     /// (156); ServerAdminSlots(157) - extra headroom for players with
@@ -238,6 +244,8 @@ pub const known_serverconfig_names = [_][]const u8{
     "TelnetFailedLoginsBlocktime",
     "ViewRadius",
     "ServerMaxAllowedViewDistance",
+    "ServerLoginConfirmationText",
+    "ServerVisibility",
     "ServerReservedSlots",
     "ServerReservedSlotsPermission",
     "ServerAdminSlots",
@@ -530,6 +538,13 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     // the ceiling on a client's requested chunk view (IL_0011-0020).
     if (prop(raw, "ServerMaxAllowedViewDistance")) |v|
         cfg.server_max_view_distance = @intCast(clampRangeNamed("ServerMaxAllowedViewDistance", v, 4, 12, @intCast(cfg.server_max_view_distance)));
+    // GameInfoString 11: the browser shows this next to the join dialog, and
+    // stock copies it verbatim (server-browser-prefabs.md 1.1 "Identity").
+    if (prop(raw, "ServerLoginConfirmationText")) |v| cfg.server_login_confirmation_text = try decodeAttr(arena, v);
+    // GameInfoInt 43 = pref 169 `ServerVisibility` (0 public, 1 friends,
+    // 2 hidden).
+    if (prop(raw, "ServerVisibility")) |v|
+        cfg.server_visibility = clampU8Named("ServerVisibility", v, 0, 2, cfg.server_visibility);
     // PlayerSlotsAuthorizer tiers (0 = disabled).
     if (prop(raw, "ServerReservedSlots")) |v| cfg.reserved_slots = clampU8Named("ServerReservedSlots", v, 0, 64, cfg.reserved_slots);
     if (prop(raw, "ServerReservedSlotsPermission")) |v| cfg.reserved_slots_permission = clampU8Named("ServerReservedSlotsPermission", v, 0, 255, cfg.reserved_slots_permission);
@@ -1055,6 +1070,8 @@ test "known_serverconfig_names covers every applied prop key" {
         "TelnetFailedLoginsBlocktime",
         "ViewRadius",
         "ServerMaxAllowedViewDistance",
+        "ServerLoginConfirmationText",
+        "ServerVisibility",
         "ServerReservedSlots",
         "ServerReservedSlotsPermission",
         "ServerAdminSlots",
@@ -1173,4 +1190,34 @@ test "parse ServerMaxAllowedViewDistance into the stock 4..12 range" {
     defer low.deinit();
     // Stock clamps the pref itself into 4..12 before using it (IL_0011-0020).
     try std.testing.expectEqual(@as(i32, 4), low.server_max_view_distance);
+}
+
+test "parse ServerLoginConfirmationText and ServerVisibility" {
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="ServerLoginConfirmationText" value="Accept the rules"/>
+        \\  <property name="ServerVisibility" value="2"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqualStrings("Accept the rules", cfg.server_login_confirmation_text);
+    try std.testing.expectEqual(@as(u8, 2), cfg.server_visibility);
+
+    const high =
+        \\<ServerSettings>
+        \\  <property name="ServerVisibility" value="9"/>
+        \\</ServerSettings>
+    ;
+    try io_fs.writeFile(path, high);
+    var clamped = try loadFromPath(std.testing.allocator, path);
+    defer clamped.deinit();
+    // 0 public / 1 friends / 2 hidden is the stock range (pref 169).
+    try std.testing.expectEqual(@as(u8, 2), clamped.server_visibility);
 }

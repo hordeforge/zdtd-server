@@ -1128,6 +1128,8 @@ pub fn buildLoginGsiText(self: *Game, buf: []u8) ![]const u8 {
         .region = self.region,
         .language = self.language,
         .play_group = self.play_group,
+        .login_confirmation_text = self.server_login_confirmation_text,
+        .visibility = self.server_visibility,
     };
     return try @import("../serverinfo_tcp.zig").buildInfoText(buf, info);
 }

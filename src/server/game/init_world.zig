@@ -147,6 +147,8 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .region = self.region,
             .language = self.language,
             .play_group = self.play_group,
+            .login_confirmation_text = self.server_login_confirmation_text,
+            .visibility = self.server_visibility,
         }) catch |err| {
             var ts: [19]u8 = undefined;
             std.debug.print("zdtd: {s} warning: TCP server-info on {d} failed: {}\n", .{ clock.wallStamp(&ts), port, err });

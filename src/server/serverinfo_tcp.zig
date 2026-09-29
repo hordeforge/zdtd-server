@@ -37,6 +37,12 @@ pub const ServerInfo = struct {
     region: []const u8 = "",
     language: []const u8 = "",
     play_group: []const u8 = "",
+    /// GameInfoString 11 `ServerLoginConfirmationText`: the line the browser
+    /// shows beside the join dialog. Empty omits the key.
+    login_confirmation_text: []const u8 = "",
+    /// GameInfoInt 43 `ServerVisibility` (pref 169): 0 public, 1 friends,
+    /// 2 hidden. Stock always emits the int.
+    visibility: u8 = 0,
 };
 
 /// Encode a GSI value the way stock does, so the client decodes it back to the
@@ -136,6 +142,16 @@ pub fn buildInfoText(buf: []u8, info: ServerInfo) ![]const u8 {
     if (info.play_group.len > 0) {
         var pg: [64]u8 = undefined;
         const s = try std.fmt.bufPrint(buf[w..], "PlayGroup:{s};\r\n", .{gsiSafe(info.play_group, &pg)});
+        w += s.len;
+    }
+    if (info.login_confirmation_text.len > 0) {
+        var lc: [256]u8 = undefined;
+        const s = try std.fmt.bufPrint(buf[w..], "ServerLoginConfirmationText:{s};\r\n", .{gsiSafe(info.login_confirmation_text, &lc)});
+        w += s.len;
+    }
+    // GameInfoInt 43 (pref 169 `ServerVisibility`): stock always emits it.
+    {
+        const s = try std.fmt.bufPrint(buf[w..], "ServerVisibility:{d};\r\n", .{info.visibility});
         w += s.len;
     }
     if (w + 2 > buf.len) return error.NoSpaceLeft;
@@ -329,6 +345,8 @@ test "info text emits the operator browser fields when set (GameInfoString 3/4/1
         .region = "EU",
         .language = "English",
         .play_group = "Default",
+        .login_confirmation_text = "By joining you accept the rules; really",
+        .visibility = 2,
     });
     // Both separators are encoded, so the client decodes the operator's text
     // back verbatim: the `;` rides as `*`, and the URL's `:` as `^`
@@ -338,6 +356,12 @@ test "info text emits the operator browser fields when set (GameInfoString 3/4/1
     try std.testing.expect(std.mem.find(u8, t, "Region:EU;") != null);
     try std.testing.expect(std.mem.find(u8, t, "Language:English;") != null);
     try std.testing.expect(std.mem.find(u8, t, "PlayGroup:Default;") != null);
+    // GameInfoString 11 and GameInfoInt 43: the browser confirmation line (its
+    // own `;` escaped) and the visibility the operator set. Neither key was
+    // emitted at all before, so a hidden server still advertised IsPublic:True
+    // and the operator's confirmation text never reached the browser.
+    try std.testing.expect(std.mem.find(u8, t, "ServerLoginConfirmationText:By joining you accept the rules* really;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "ServerVisibility:2;") != null);
     // Unset fields stay omitted (client default).
     var buf2: [1024]u8 = undefined;
     const t2 = try buildInfoText(&buf2, .{

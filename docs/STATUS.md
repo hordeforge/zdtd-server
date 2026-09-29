@@ -22,6 +22,22 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**Scout tiers and the browser block follow the operator 2026-09-28**: two
+surface fixes. Heat-map scouts now take their tier from the gamestage around the
+hot spot: stock `SpawnScouts` finds the closest player within 120 m of the hot
+chunk and reads `CalcGameStageAround` (`../7dtd-engine-research/docs/entities/aidirector.md:394`), while zdtd read
+the server-wide party high-water mark, so a solo level-1 player drew
+`ScoutsRadiated` whenever a level-125 player was anywhere on the map. The heat
+path anchors through the wired `stage_around_fn`; the zdtd-only daytime scout
+drip keeps the party stage. Gated by `heat scouts take their tier from the
+gamestage around the hot spot`. Second, the TCP server-info string omitted two
+operator keys entirely: `ServerLoginConfirmationText` (GameInfoString 11, the
+line the browser shows beside the join dialog) and `ServerVisibility`
+(GameInfoInt 43, pref 169: 0 public, 1 friends, 2 hidden). Both now parse from
+serverconfig and are emitted, the confirmation text through the same `gsiSafe`
+escaping as the other strings. Gated by the extended `info text emits the
+operator browser fields when set` and `parse ServerLoginConfirmationText and
+ServerVisibility`.
 **Drone claims are refused and a disconnect clears the row 2026-09-28**: two
 more surface fixes. Stock branches `NetPackageTurretSpawn` on the placed item's
 tag: a ranged or melee trap takes the turret path, a junk drone goes to
