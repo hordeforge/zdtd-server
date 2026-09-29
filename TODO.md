@@ -170,6 +170,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       modelled. Original entry: stock `canHitEntity` raycasts and gates
       yaw and pitch (vehicles-drones-turrets.md:1063-1094); `turrets.zig:57-79`
       picks the nearest zombie by 2D distance and applies damage unconditionally.
+- [ ] **`chaseTimeMax` is parsed but unused** - stock's
+      `EAIApproachAndAttackTarget` sets `homeTimeout = chaseTimeMax` from the
+      target class it matched (90 s for sleepers) and walks home once the chase
+      runs past it (IL_004F, IL_0838), so a zombie gives up and returns to its
+      spawn. zdtd parses the per-class value
+      (`EntityDef.target_chase_max`) but never times a chase, so a zombie
+      follows a player until the despawn rules end it.
 - [x] **Timid animals fled everything** - closed 2026-09-28: V3.2.0 replaced
       `EAIRunawayFromEntity`'s V3.1 `class` list with an `EntityFlags` match
       (`flags`/`safeFlags` + `safeDistance`/`dangerDistance`, IL=136); zdtd

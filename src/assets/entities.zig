@@ -148,6 +148,9 @@ pub const EntityDef = struct {
     /// wolf listing EntityZombie/EntityAnimalStag. `target_class_n` 0 = no list
     /// parsed, which keeps the legacy player-only behaviour (fail closed).
     target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    /// Per-entry `chaseTimeMax` from the same `Type,chaseTime` pair list
+    /// (`EAIApproachAndAttackTarget.SetData` IL=34 steps the split by 2).
+    target_chase_max: [max_target_classes]f32 = .{0} ** max_target_classes,
     target_class_n: u8 = 0,
     /// entityclasses `EntityFlags` (EntityClass.ParseEntityFlags IL=49): the
     /// bit set `EAIRunawayFromEntity` matches a threat against.
@@ -720,19 +723,34 @@ fn parseHurtTargetClasses(entry: []const u8) ?u8 {
 /// `SetNearestEntityAsTarget` carrying a `class=` filter. The data tail after
 /// the names carries numeric `SetData` params, so the list stops at the first
 /// token that is not a plausible class name.
-fn parseNearestTargetClasses(entry: []const u8, out: *[max_target_classes]i32) ?u8 {
+fn parseNearestTargetClasses(entry: []const u8, out: *[max_target_classes]i32, chase: *[max_target_classes]f32) ?u8 {
     const name, const data = splitTaskEntry(entry);
     if (!std.mem.eql(u8, name, "SetNearestEntityAsTarget")) return null;
     const marker = "class=";
     const ci = std.mem.find(u8, data, marker) orelse return null;
+    // Stock splits `class` on comma and steps by TWO (`EAIApproachAndAttackTarget
+    // SetData` IL=34): each entry is `Type,chaseTimeMax`. The type token is a
+    // class name; the odd token is the chase time, which is not a class name
+    // even though it can look numeric or empty.
     var n: u8 = 0;
+    var idx: usize = 0;
     var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
-    while (it.next()) |raw| {
+    while (it.next()) |raw| : (idx += 1) {
+        if (idx % 2 == 1) {
+            // chaseTimeMax for the entry just read (0 when absent/unparsable).
+            if (n > 0) {
+                if (xml.parseF32(std.mem.trim(u8, raw, " \t"))) |f| chase[n - 1] = f;
+            }
+            continue;
+        }
         const c = std.mem.trim(u8, raw, " \t");
-        // The trailing params are bare numbers once the class names end.
-        if (c.len == 0 or c[0] < 'A' or c[0] > 'Z') break;
+        if (c.len == 0) continue;
         if (n >= out.len) break;
-        out[n] = unity_hash.getStableHashCode(c);
+        // Stock aliases EntityEnemyAnimal to EntityAnimalSnake in this list
+        // (`stfld TargetClass::type` at IL_009D after the EntityEnemyAnimal
+        // test), so hurt-target filtering and acquisition agree.
+        const cls = if (std.mem.eql(u8, c, "EntityEnemyAnimal")) "EntityAnimalSnake" else c;
+        out[n] = unity_hash.getStableHashCode(cls);
         n += 1;
     }
     return if (n > 0) n else null;
@@ -744,6 +762,7 @@ fn resolvedNearestTargetClasses(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
     out: *[max_target_classes]i32,
+    chase: *[max_target_classes]f32,
 ) u8 {
     var cur: ?[]const u8 = name;
     var depth: u8 = 0;
@@ -761,8 +780,10 @@ fn resolvedNearestTargetClasses(
             while (rest.len > 0) {
                 const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
                 var scratch: [max_target_classes]i32 = .{0} ** max_target_classes;
-                if (parseNearestTargetClasses(std.mem.trim(u8, rest[0..cut], " \t\r\n"), &scratch)) |n| {
+                var scratch_chase: [max_target_classes]f32 = .{0} ** max_target_classes;
+                if (parseNearestTargetClasses(std.mem.trim(u8, rest[0..cut], " \t\r\n"), &scratch, &scratch_chase)) |n| {
                     out.* = scratch;
+                    chase.* = scratch_chase;
                     if (is_pipe) return n;
                     if (numbered == null) numbered = n;
                 }
@@ -1208,7 +1229,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
         var target_hashes: [max_target_classes]i32 = .{0} ** max_target_classes;
-        const target_n = resolvedNearestTargetClasses(&classes, name, &target_hashes);
+        var target_chase: [max_target_classes]f32 = .{0} ** max_target_classes;
+        const target_n = resolvedNearestTargetClasses(&classes, name, &target_hashes, &target_chase);
         const block_if = resolvedBlockIfAlert(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         // Stock EntityFlying (the vulture): `Class="EntityVulture"`. Read from
@@ -1502,6 +1524,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .target_player_see = if (target_sense) |s| s.see else 0,
             .hurt_target_classes = hurt_classes,
             .target_class_hashes = target_hashes,
+            .target_chase_max = target_chase,
             .target_class_n = target_n,
             .entity_flags = parseEntityFlags(resolveProp(&classes, name, "EntityFlags", 0) orelse ""),
             .flee = flee_params,

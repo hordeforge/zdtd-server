@@ -203,6 +203,9 @@ pub const ClassId = struct {
     /// EntityDef.target_class_hashes) and its length. 0 = no list parsed, so
     /// acquisition stays player-only (fail closed without stock data).
     target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    /// Per-entry `chaseTimeMax` from the same `Type,chaseTime` pairs (see
+    /// EntityDef.target_chase_max).
+    target_chase_max: [max_target_classes]f32 = .{0} ** max_target_classes,
     target_class_n: u8 = 0,
     /// entityclasses `EntityFlags` (see EntityDef.entity_flags): the bit set a
     /// flee scan matches a threat against.

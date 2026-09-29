@@ -684,7 +684,7 @@ test "AITarget SetNearestEntityAsTarget class list parses to Unity name hashes" 
     try io_fs.writeFile(path,
         \\<entity_classes>
         \\  <entity_class name="animalWolf">
-        \\    <property name="AITarget-1" value="SetNearestEntityAsTarget" data="class=EntityZombie,EntityAnimalStag,1,1"/>
+        \\    <property name="AITarget-1" value="SetNearestEntityAsTarget" data="class=EntityZombie,30,EntityEnemyAnimal,12"/>
         \\  </entity_class>
         \\  <entity_class name="animalStag">
         \\    <property name="AITarget-1" value="SetAsTargetIfHurt" data="class=EntityPlayer"/>
@@ -697,10 +697,13 @@ test "AITarget SetNearestEntityAsTarget class list parses to Unity name hashes" 
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
     const wolf = t.byName("animalWolf") orelse return error.TestUnexpectedResult;
+    // `class` is a `Type,chaseTimeMax` list stepped by TWO (SetData IL=34).
     try std.testing.expectEqual(@as(u8, 2), wolf.target_class_n);
     try std.testing.expectEqual(unity_hash.getStableHashCode("EntityZombie"), wolf.target_class_hashes[0]);
-    try std.testing.expectEqual(unity_hash.getStableHashCode("EntityAnimalStag"), wolf.target_class_hashes[1]);
-    // The trailing numeric params are not class names.
+    try std.testing.expectEqual(@as(f32, 30), wolf.target_chase_max[0]);
+    // Stock aliases EntityEnemyAnimal to EntityAnimalSnake in this list.
+    try std.testing.expectEqual(unity_hash.getStableHashCode("EntityAnimalSnake"), wolf.target_class_hashes[1]);
+    try std.testing.expectEqual(@as(f32, 12), wolf.target_chase_max[1]);
     try std.testing.expectEqual(@as(i32, 0), wolf.target_class_hashes[2]);
     // A SetAsTargetIfHurt entry is the other parser's business: no list here.
     const stag = t.byName("animalStag") orelse return error.TestUnexpectedResult;
