@@ -215,9 +215,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       2026-09-28: `guard.placeBoundsOk` applies stock's `pos.y > 253` reject and
       `World.CanPlaceBlockAt`'s `InBoundsForPlayersPercent >= 0.5` gate (50 m
       hard margin, 80 m fade, min 1024-wide world) to the SetBlock place branch,
-      the InvTx place arm and `placeAllowed`. Still open from the same RE block:
-      the trader placing protection (2 blocks), `bRestrictSubmergedPlacement`
-      plus `IsUnderwater`, and `overlapsWithOtherBlock`.
+      the InvTx place arm and `placeAllowed`. `overlapsWithOtherBlock` closed
+      2026-09-28: the swap gate now allows replacing a block whose
+      `CanBlocksReplaceOrGroundCover` (IL=9) is true, which is exactly when
+      stock's IL=66 does not refuse. Still open from the same RE block: the
+      trader placing protection (2 blocks) and `bRestrictSubmergedPlacement`
+      plus `IsUnderwater`.
 - [x] **Junk drone placement spawns a wired auto turret** - closed
       2026-09-28 for the wrong-entity half: a body claiming a resolved
       non-turret class is refused instead of spawning a 15 W trap. Still open:

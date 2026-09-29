@@ -274,11 +274,15 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 }
                 place_id = b.block_id;
                 out_dmg = 0;
-                if (cur_id != 0 and b.block_id != cur_id) {
+                if (cur_id != 0 and b.block_id != cur_id and !self.maxdamage.canReplaceFor(cur_id)) {
                     // Stock hammer upgrade / wrench downgrade (Block.UpgradeBlock
                     // / DowngradeBlock, blocks.xml data): accept only the
                     // resolved upgrade OR downgrade target for the current
-                    // block, never an arbitrary swap.
+                    // block, never an arbitrary swap. The gate is stock's
+                    // `overlapsWithOtherBlock` (IL=66): a block whose
+                    // `CanBlocksReplaceOrGroundCover` (IL=9) is true - grass,
+                    // snow, plants, ground cover - is replaced outright, so
+                    // refusing it would bounce a placement stock accepts.
                     const cur_name = self.maxdamage.idName(cur_id) orelse continue;
                     const up_id: u16 = if (self.maxdamage.upgradeTarget(cur_name)) |u|
                         (self.maxdamage.idByName(u) orelse 0)

@@ -24,6 +24,7 @@ const sleepers_mod = @import("../world/sleepers.zig");
 const quest_mod = @import("../ecs/quest.zig");
 const quest_mod_components = @import("../ecs/components.zig");
 const systems = @import("../ecs/systems.zig");
+const assets_maxdamage = @import("../assets/maxdamage.zig");
 const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
@@ -19187,4 +19188,85 @@ test "scenario a turret does not acquire a target through a wall" {
     _ = systems.systemTurrets(&g.sim, 0.05);
     try std.testing.expectEqual(@as(i32, -1), g.sim.turret[tslot].target_id);
     std.debug.print("PASS turret-los: a walled zombie is not acquired\n", .{});
+}
+
+test "scenario a placement replaces a CanBlocksReplace or ground-cover cell" {
+    // Stock's `Block.overlapsWithOtherBlock` (IL=66) refuses a placement at an
+    // occupied cell only when the block there answers false to
+    // `CanBlocksReplaceOrGroundCover` (IL=9). zdtd demanded an upgrade or
+    // downgrade target for every swap, so a placement over grass or snow -
+    // which the stock client predicts and sends - was refused and bounced.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // Swap the Game's block table for one that declares the stock names
+    // (AssignIds resolves the ids) with the flags under test.
+    var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&cwd_buf, "{s}/blocks_replace_gate.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="terrSnow">
+        \\  <property name="CanBlocksReplace" value="true" />
+        \\</block>
+        \\<block name="terrDirt">
+        \\  <property name="Material" value="Mdirt" />
+        \\</block>
+        \\</blocks>
+    );
+    var mx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const mx = try std.fmt.bufPrint(&mx_buf, "{s}/materials_replace_gate.xml", .{dir});
+    try io_fs.writeFile(mx,
+        \\<materials>
+        \\<material id="Mdirt">
+        \\  <property name="IsGroundCover" value="true" />
+        \\</material>
+        \\</materials>
+    );
+    g.maxdamage.deinit();
+    g.maxdamage = try assets_maxdamage.loadFromBlocksXml(gpa, bx);
+    // The id map comes from the bundled AssignIds dump, which the Game's own
+    // loader merges; a freshly loaded table has only the XML rows.
+    g.maxdamage.tryMergeBundledAssignIds(gpa);
+    if (g.maxdamage.id_by_name.count() == 0) return error.SkipZigTest;
+    try g.maxdamage.mergeMaterialsXml(gpa, mx);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    try std.testing.expect(c.authed_challenge);
+    const frame_id = g.maxdamage.idByName("frameShapes:cube") orelse return error.TestUnexpectedResult;
+    const snow_id = g.maxdamage.idByName("terrSnow") orelse return error.TestUnexpectedResult;
+    const dirt_id = g.maxdamage.idByName("terrDirt") orelse return error.TestUnexpectedResult;
+    const px: i32 = 256;
+    const pz: i32 = 256;
+    const cy: i32 = 72;
+    g.sim.transform[ps].x = @floatFromInt(px);
+    g.sim.transform[ps].y = @floatFromInt(cy);
+    g.sim.transform[ps].z = @floatFromInt(pz);
+
+    // Replaceable (flag on the block): the frame lands.
+    try g.world.setBlockWorld(px + 1, cy, pz, snow_id);
+    try std.testing.expectEqual(snow_id, try g.world.blockWorld(px + 1, cy, pz));
+    var sb: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 1, cy, pz, frame_id)));
+    try std.testing.expectEqual(frame_id, try g.world.blockWorld(px + 1, cy, pz));
+
+    // Ground cover through the material (Mdirt), no flag on the block: lands.
+    try g.world.setBlockWorld(px + 2, cy, pz, dirt_id);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 2, cy, pz, frame_id)));
+    try std.testing.expectEqual(frame_id, try g.world.blockWorld(px + 2, cy, pz));
+
+    // Neither: still refused as an arbitrary swap.
+    try g.world.setBlockWorld(px + 3, cy, pz, world_store.block_stone);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px + 3, cy, pz, frame_id)));
+    try std.testing.expectEqual(world_store.block_stone, try g.world.blockWorld(px + 3, cy, pz));
+    std.debug.print("PASS replace-gate: flag and ground cover replace, stone does not\n", .{});
 }

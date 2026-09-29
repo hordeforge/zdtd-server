@@ -164,6 +164,11 @@ pub const Table = struct {
     /// consults it in `ItemActionAttack::Hit` IL_028A-029D, where it zeroes the
     /// block-damage scalar; `MaterialBlock::.ctor` defaults it true.
     material_can_destroy: std.StringHashMapUnmanaged(bool) = .empty,
+    /// materials.xml IsGroundCover per material id (`MaterialBlock.IsGroundCover`,
+    /// the second half of `CanBlocksReplaceOrGroundCover`, IL=9).
+    material_ground_cover: std.StringHashMapUnmanaged(bool) = .empty,
+    /// blocks.xml CanBlocksReplace per block name (true rows only).
+    can_blocks_replace: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml movement_factor per material id (7 stock rows).
     material_movement_factor: std.StringHashMapUnmanaged(f32) = .empty,
     /// materials.xml lightopacity per material id (18 stock rows).
@@ -197,6 +202,8 @@ pub const Table = struct {
         self.material_explosion_resist = .{};
         self.material_collidable = .{};
         self.material_can_destroy = .{};
+        self.material_ground_cover = .{};
+        self.can_blocks_replace = .{};
         self.material_movement_factor = .{};
         self.material_light_opacity = .{};
         self.stage2_health = .{};
@@ -403,6 +410,24 @@ pub const Table = struct {
     /// applies a forged NetPackageSetBlock verbatim) and matches what a stock
     /// client can produce, since `ItemActionAttack::Hit`
     /// (IL_028A-029D) zeroes the damage scalar first.
+    /// Stock `Block.CanBlocksReplaceOrGroundCover` (IL=9) for a wire block id:
+    /// true when the block declares blocks.xml CanBlocksReplace, or its
+    /// materials.xml material is ground cover. `Block.overlapsWithOtherBlock`
+    /// (IL=66) refuses a placement only when this is false, so a false answer
+    /// here is the fail-closed default for a block with no data.
+    pub fn canReplaceFor(self: *const Table, block_id: u16) bool {
+        if (block_id == 0) return true; // air is always replaceable
+        const name = self.idName(block_id) orelse return false;
+        return self.canReplaceNamed(name);
+    }
+
+    /// The name-keyed half of `canReplaceFor`.
+    pub fn canReplaceNamed(self: *const Table, name: []const u8) bool {
+        if (self.can_blocks_replace.contains(name)) return true;
+        const mat = self.block_material.get(name) orelse return false;
+        return self.material_ground_cover.get(mat) orelse false;
+    }
+
     pub fn canDestroyFor(self: *const Table, block_id: u16) bool {
         if (block_id == 0) return true;
         const name = self.idName(block_id) orelse return true;
@@ -627,6 +652,14 @@ pub const Table = struct {
                 if (parseBool(cd)) |b| {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_can_destroy.put(arena, kn, b);
+                }
+            }
+            // MaterialBlock.IsGroundCover (the second half of stock's
+            // CanBlocksReplaceOrGroundCover, IL=9).
+            if (xml.propertyValue(body, "IsGroundCover")) |gc| {
+                if (parseBool(gc)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_ground_cover.put(arena, kn, b);
                 }
             }
             if (xml.propertyValue(body, "movement_factor")) |mf| {
@@ -1002,6 +1035,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     // Own facts first; Extends chains are resolved in a second pass because a
     // child can appear before its parent in the file.
     var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .empty;
+    var cbr_own: std.StringHashMapUnmanaged(bool) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
@@ -1131,12 +1165,19 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "DowngradeBlock")) |db| {
             facts.downgrade_to = try arena.dupe(u8, db);
         }
+        // CanBlocksReplace (Block.PropCanBlocksReplace, IL_0092) is inherited
+        // with Extends param1 semantics, so it goes through `resolveInherited`
+        // like MaxDamage rather than the deco-fact walk.
+        if (xml.propertyValue(body, "CanBlocksReplace")) |cbr| {
+            if (parseBool(cbr)) |b| try cbr_own.put(arena, kn, b);
+        }
         try own_facts.put(arena, kn, facts);
         i = body_end;
     }
 
     var distant_deco: std.StringHashMapUnmanaged(void) = .empty;
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .empty;
+    var can_blocks_replace: std.StringHashMapUnmanaged(void) = .empty;
     var non_support: std.StringHashMapUnmanaged(void) = .empty;
     var stability_explicit: std.StringHashMapUnmanaged(void) = .empty;
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -1219,6 +1260,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.dim) |d| {
             if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
         }
+        if (resolveInherited(bool, &cbr_own, &own_facts, e.key_ptr.*, "CanBlocksReplace", "") orelse false) {
+            try can_blocks_replace.put(arena, e.key_ptr.*, {});
+        }
         if (r.stability_support) |sv| {
             try stability_explicit.put(arena, e.key_ptr.*, {});
             if (!sv) try non_support.put(arena, e.key_ptr.*, {});
@@ -1267,6 +1311,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .stage2_health = stage2_map,
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
+        .can_blocks_replace = can_blocks_replace,
         .non_support = non_support,
         .stability_explicit = stability_explicit,
         .stability_ignore_names = stability_ignore_names,
@@ -1882,4 +1927,68 @@ test "stock materials.xml only bedrock refuses destruction" {
     try std.testing.expect(t.canDestroyFor(stone));
     const chest = t.idByName("cntWoodenChestClosed") orelse return error.TestUnexpectedResult;
     try std.testing.expect(t.canDestroyFor(chest));
+}
+
+test "blocks.xml CanBlocksReplace and materials.xml IsGroundCover gate replacement" {
+    // Stock `Block.overlapsWithOtherBlock` (IL=66) refuses a placement at a
+    // cell holding a block only when `CanBlocksReplaceOrGroundCover` (IL=9) is
+    // false: `CanBlocksReplace || material.IsGroundCover`. Without this a
+    // placement over grass/snow (which the stock client predicts and sends)
+    // bounced.
+    const blocks_src =
+        \\<blocks>
+        \\<block name="treeMaster">
+        \\  <property name="CanBlocksReplace" value="true" />
+        \\  <property name="Material" value="Mplants" />
+        \\</block>
+        \\<block name="tallgrass">
+        \\  <property name="Extends" value="treeMaster" />
+        \\</block>
+        \\<block name="snowGround">
+        \\  <property name="Material" value="MgroundCover" />
+        \\</block>
+        \\<block name="woodFrame">
+        \\  <property name="Material" value="Mwood" />
+        \\</block>
+        \\<block name="snowNoInherit">
+        \\  <property name="Extends" value="treeMaster" param1="CanBlocksReplace" />
+        \\</block>
+        \\</blocks>
+    ;
+    const materials_src =
+        \\<materials>
+        \\<material id="MgroundCover">
+        \\  <property name="IsGroundCover" value="true" />
+        \\</material>
+        \\<material id="Mplants">
+        \\  <property name="IsGroundCover" value="false" />
+        \\</material>
+        \\<material id="Mwood" />
+        \\</materials>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var bpath_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bpath = try std.fmt.bufPrint(&bpath_buf, "{s}/blocks_replace.xml", .{dir});
+    try io_fs.writeFile(bpath, blocks_src);
+    var mpath_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const mpath = try std.fmt.bufPrint(&mpath_buf, "{s}/materials_replace.xml", .{dir});
+    try io_fs.writeFile(mpath, materials_src);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, bpath);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mpath);
+
+    // Direct flag on the master, inherited by the child.
+    try std.testing.expect(t.canReplaceNamed("treeMaster"));
+    try std.testing.expect(t.canReplaceNamed("tallgrass"));
+    // param1 opts the child out of the parent's flag, and Mplants is not
+    // ground cover, so nothing makes this one replaceable.
+    try std.testing.expect(!t.canReplaceNamed("snowNoInherit"));
+    // Ground cover through the material, not the block flag.
+    try std.testing.expect(t.canReplaceNamed("snowGround"));
+    // Nothing declared, nothing ground cover: fail closed.
+    try std.testing.expect(!t.canReplaceNamed("woodFrame"));
+    try std.testing.expect(!t.canReplaceNamed("noSuchBlock"));
 }
