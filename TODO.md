@@ -180,6 +180,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       `EntityPlayer` type name), drains it in `approachUpdate`, and runs a
       walk-home branch that a fresh sensed target cancels, exactly as stock's
       `Continue()` re-arms. Residual: no `PlayGiveUpSound` (client audio).
+- [x] **Timid animals ignored a loud player** - closed 2026-09-28: stock's
+      `FindEnemy` fears a `noisePlayer` whose volume is at least
+      `cRunNoiseVolume` 8 before any flag match or radius test (IL_0019-003C);
+      zdtd now takes the loudest in-earshot player as the fear source ahead of
+      the EntityFlags scan. Residual: zdtd has no per-entity `noisePlayer`
+      field, so the test is "noise volume reaches this entity's hearing radius"
+      rather than the noise system having already stamped the entity.
 - [x] **Timid animals fled everything** - closed 2026-09-28: V3.2.0 replaced
       `EAIRunawayFromEntity`'s V3.1 `class` list with an `EntityFlags` match
       (`flags`/`safeFlags` + `safeDistance`/`dangerDistance`, IL=136); zdtd

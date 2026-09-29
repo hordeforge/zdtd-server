@@ -439,7 +439,7 @@ fn smellRadiusFor(w: *const World, slot: Slot) f32 {
 /// Stock carries see and hear on the same `AITarget` row
 /// (`EAISetNearestEntityAsTarget`), and hearing passes walls, so the sense
 /// search bound is the wider of the two.
-fn hearRangeFor(w: *const World, slot: Slot) f32 {
+pub fn hearRangeFor(w: *const World, slot: Slot) f32 {
     const declared = w.class_id[slot].target_player_hear;
     if (declared != 0) return declared;
     return w.rules.ai.hear_range;

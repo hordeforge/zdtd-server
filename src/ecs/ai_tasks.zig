@@ -16,6 +16,7 @@ const snapshotPlayers = systems.snapshotPlayers;
 const nearestPlayerSnap = systems.nearestPlayerSnap;
 const nearestMobSnap = @import("sensing.zig").nearestMobSnap;
 const chaseTimeoutFor = @import("sensing.zig").chaseTimeoutFor;
+const hearRangeFor = @import("sensing.zig").hearRangeFor;
 const rayClear = @import("sensing.zig").rayClear;
 const applyRevengeTarget = systems.applyRevengeTarget;
 const stealthLightAttackPercent = systems.stealthLightAttackPercent;
@@ -631,15 +632,11 @@ const AiCtx = struct {
 /// the floor for a class with no SightRange, or when no entityclasses.xml
 /// loaded (ADR 0021 decision 5).
 ///
-/// Note the search bound in `nearestPlayerSnap` currently stays on the Rules
-/// value instead of this one, which caps acquisition at 48 m. That is a real
-/// shortfall, not a safe outer bound: stock ships `SightRange` 70 on
-/// `animalZombieVulture` and 100 on `animalChickenHostile` (entityclasses.xml),
-/// so those two classes acquire a host bot at their own range
-/// (`nearestBotSnap` passes this value) but a real player only at 48 m.
-/// Closing it means using this value for the player scan too, which also has to
-/// keep the wider hearing radius alive (hearing passes walls and is not clamped
-/// by sight range), so it is tracked rather than half-applied here.
+/// Every acquisition path uses this value: `nearestPlayerSnap` takes it as the
+/// search bound (widened by the class's hearing radius, which passes walls and
+/// is not clamped by sight), `nearestMobSnap` and `nearestBotSnap` likewise, so
+/// `animalZombieVulture` (SightRange 70) and `animalChickenHostile` (100)
+/// acquire at their own range rather than at the Rules floor.
 pub fn senseDistSq(w: *const World, s: Slot) f32 {
     // A35 per-entity layer first: the def spawns carry SightRange onto the
     // entity, so a class outside the fixed class_table senses as itself too.
@@ -1044,6 +1041,23 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
     // task data (`flee_flags == 0`, i.e. no stock entityclasses) the legacy
     // Rules-based scan runs unchanged, so an offline world behaves as before.
     if (cid.flee_flags != 0) {
+        // Stock's first leg (`FindEnemy` IL_0019-003C): a NOISE player that
+        // reached this entity is feared outright, before any flag match or
+        // radius test, when its volume is at least the `cRunNoiseVolume` 8.
+        // zdtd has no per-entity `noisePlayer` field, so the equivalent test is
+        // "the player's current stealth noise is loud enough to reach this
+        // entity's own hearing radius".
+        {
+            const hear = hearRangeFor(w, s);
+            for (query.groupSlice(w, .player)) |p| {
+                if (w.stealth[p].noise_volume < 8.0) continue;
+                const dx = pos[p].x - x;
+                const dz = pos[p].z - z;
+                if (dx * dx + dz * dz > hear * hear) continue;
+                ai.fear_target = w.network_id[p].id;
+                return;
+            }
+        }
         cid_view: {
             const see_d = senseDistSq(w, s);
             if (!(see_d > 0)) break :cid_view;
@@ -3464,6 +3478,26 @@ test "RunawayFromEntity fears only the flagged kinds, not a neighbour" {
     t = 0;
     while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[ts].fear_target);
+    // A loud player is feared outright, before any flag match (stock's
+    // `noisePlayer` leg, `FindEnemy` IL_0019-003C: volume >= cRunNoiseVolume 8).
+    w.class_id[ts].flee_flags = c.entity_flag_player | c.entity_flag_zombie;
+    w.class_id[ts].flee_safe_flags = 0;
+    w.class_id[zs].entity_flags = c.entity_flag_zombie;
+    const loud = w.spawnPlayer(0, 70, 6, 0).?;
+    const ls = w.playerByPeer(0) orelse return error.TestUnexpectedResult;
+    w.stealth[ls].noise_volume = 12.0;
+    w.zombie_ai[ts].fear_cd = 0;
+    t = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(w.network_id[ls].id, w.zombie_ai[ts].fear_target);
+    _ = loud;
+    // Quiet again: the flagged zombie is the threat.
+    w.stealth[ls].noise_volume = 0;
+    w.zombie_ai[ts].fear_cd = 0;
+    t = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(w.network_id[zs].id, w.zombie_ai[ts].fear_target);
+
     // No parsed task data: the legacy scan still fears the neighbour.
     w.class_id[ts].flee_flags = 0;
     w.class_id[ts].flee_safe_flags = 0;
