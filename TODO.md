@@ -124,12 +124,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       2026-09-28: the replicate pass forces the flags/speeds into the announce
       tick (stock's interest-enter burst, network.md 302-315). The per-type
       distance table below is the other half of the same RE section.
-- [ ] **Player interest has no per-type distance table** - stock
-      `NetEntityDistribution..ctor` (network.md:277-291) tracks EntityEnemy 80,
-      EntityItem 64, EntityTurret 60, EntitySupplyCrate 1200, EntityPlayer and
-      EntityVehicle int.Max; zdtd uses one `view_radius` for every kind
-      (`src/server/game/replicate.zig:92`). A parked vehicle is unloaded past
-      the radius where stock never unloads it, and items stream 3.5x too far.
+- [x] **Ordering bug: a parked vehicle was unloaded by distance** - closed
+      2026-09-28: `EntityVehicle` is int.Max in stock's table, so the
+      replicate pass now always tracks `.vehicle` (announce at any distance,
+      never unload). Gated by `scenario a parked vehicle is replicated at any
+      distance and never unloaded`.
+- [ ] **Player interest still has no full per-type distance table** - the rest
+      of `NetEntityDistribution..ctor` (network.md:277-291): EntityEnemy 80,
+      EntityNPC 80, EntityItem 64, EntityTurret 60, EntityFallingBlock 120,
+      EntitySupplyCrate/Plane 1200. zdtd keeps one `view_radius` for those
+      kinds, so items, turrets and falling blocks stream up to 3.5x too far
+      (over-replication, not a visible gap) and enemies stay replicated to the
+      view radius where stock drops them at 80. Closing it means a per-kind
+      radius test in the hot candidate loop.
       Closing it means splitting one number into two: `view_radius` now carries
       the client's own `chunkViewDim` (stock's chunk streaming window, clamped
       into 4..12 by `ServerMaxAllowedViewDistance` since 2026-09-28) and the

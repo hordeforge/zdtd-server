@@ -120,7 +120,16 @@ pub fn replicate(self: *Game) !void {
         if (!self.sim.alive[i] or !self.sim.mask[i].transform or !self.sim.mask[i].network_id) continue;
         self.harness.counters.inc(.replicate_candidates);
         const ecell = interest.cellOf(self.sim.transform[i].x, self.sim.transform[i].z);
-        const in_range = interest.observerMask(game_mod.max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
+        // Stock's `NetEntityDistribution` config table tracks `EntityPlayer`
+        // and `EntityVehicle` at `int.Max` (network.md 277-291): those two are
+        // never unloaded by distance, so a parked vehicle must reach a client
+        // that is nowhere near it and must not be removed when everyone walks
+        // away. Every other kind still uses the per-client view radius.
+        const always_tracked = self.sim.mask[i].kind and self.sim.kind[i] == .vehicle;
+        const in_range = if (always_tracked)
+            active
+        else
+            interest.observerMask(game_mod.max_clients, &obs_cx, &obs_cz, &obs_r, active, ecell.cx, ecell.cz);
 
         const is_falling = self.sim.mask[i].kind and self.sim.kind[i] == .falling_block;
         const is_mob = self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or

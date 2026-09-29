@@ -18902,14 +18902,15 @@ test "scenario a placed turret and vehicle are announced to the stock client" {
         _ = try r.readByte(); // EntityCreationData fileVersion
         try std.testing.expectEqual(vehicle_hash, try r.readI32());
 
-        // Leaving interest must unspawn it again, or the client keeps a ghost
-        // GameObject; the announce path and the unload path share the same
-        // entity set.
+        // A vehicle is NOT unloaded by distance: stock's
+        // `NetEntityDistribution` table tracks `EntityVehicle` at `int.Max`
+        // (network.md 277-291), so walking away must leave the parked car on
+        // the client. (A turret would be removed here: it is a 60-block type.)
         g.sim.transform[bps].x = 4000;
         cap_b.clear();
         try g.replicate();
         const rem_id = packages.idOf("NetPackageEntityRemove") orelse return error.TestUnexpectedResult;
-        try std.testing.expect(cap_b.findPkgIdEntity(rem_id, our_vehicle) != null);
+        try std.testing.expect(cap_b.findPkgIdEntity(rem_id, our_vehicle) == null);
     }
     std.debug.print("PASS announce: placed turret and vehicle reach the other client as ECDs\n", .{});
 }
@@ -19004,4 +19005,49 @@ test "scenario an entity announced on interest enter is described in the same ti
     const speeds_id = packages.idOf("NetPackageEntitySpeeds") orelse return error.TestUnexpectedResult;
     try std.testing.expect(cap.findPkgIdEntity(speeds_id, z) != null);
     std.debug.print("PASS enter-burst: spawn + flags + speeds in the announce tick\n", .{});
+}
+
+test "scenario a parked vehicle is replicated at any distance and never unloaded" {
+    // Stock's `NetEntityDistribution` table tracks `EntityVehicle` at
+    // `int.Max` (network.md 277-291): a parked car stays on every client's
+    // screen wherever they are, and a client that joins later is told about it
+    // even from across the map. zdtd unloaded it with everything else when it
+    // left the per-client view radius, so a vehicle parked at a base vanished
+    // for anyone who walked away.
+    freshScenarioDir("worlds/zdtd_sc_veh_far");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_veh_far", 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+    const ps_a = g.sim.playerByPeer(ca.slot).?;
+    const v = g.sim.spawnVehicle(.minibike, g.sim.transform[ps_a].x + 1500, 70, g.sim.transform[ps_a].z) orelse
+        return error.TestUnexpectedResult;
+    const vs = g.sim.slotOfNetId(v).?;
+    // Bound to the placer's client slot so the ECD carries the owner, and
+    // given a resolved class: the replicate pass only announces a vehicle
+    // whose class hash resolves (an unresolved one would fall back to the
+    // zombie class in the ECD).
+    g.sim.mask[vs].class_id = true;
+    g.sim.class_id[vs].hash = 0x7e1c1e;
+    g.sim.vehicle[vs].owner_slot = @intCast(ca.slot);
+    const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
+    const rm_id = packages.idOf("NetPackageEntityRemove") orelse return error.TestUnexpectedResult;
+    // B is 1500 blocks from the vehicle: far outside any view radius.
+    cap_b.clear();
+    g.tick_n = 2;
+    try g.replicate();
+    try std.testing.expect(cap_b.findPkgIdEntity(spawn_id, v) != null);
+    // And it is not unloaded when it leaves every radius.
+    cap_b.clear();
+    g.tick_n = 4;
+    try g.replicate();
+    try std.testing.expect(cap_b.findPkgIdEntity(rm_id, v) == null);
+    std.debug.print("PASS vehicle-far: a distance-independent vehicle stays replicated\n", .{});
 }
