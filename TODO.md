@@ -120,6 +120,10 @@ or RE anchor and is NOT a documented divergence or a scored WORKS row, so
 nothing here is already waived. The four gaps the same audit closed are in
 [docs/STATUS.md](docs/STATUS.md).
 
+- [x] **A mob entering interest was described one heartbeat late** - closed
+      2026-09-28: the replicate pass forces the flags/speeds into the announce
+      tick (stock's interest-enter burst, network.md 302-315). The per-type
+      distance table below is the other half of the same RE section.
 - [ ] **Player interest has no per-type distance table** - stock
       `NetEntityDistribution..ctor` (network.md:277-291) tracks EntityEnemy 80,
       EntityItem 64, EntityTurret 60, EntitySupplyCrate 1200, EntityPlayer and

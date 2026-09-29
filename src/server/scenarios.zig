@@ -18960,3 +18960,48 @@ test "scenario a placement above the ceiling or at the map edge is refused" {
     try std.testing.expect(try place(g, c, ps, block_id, 90, 70, 90));
     std.debug.print("PASS place-bounds: ceiling and map-edge placements refused\n", .{});
 }
+
+test "scenario an entity announced on interest enter is described in the same tick" {
+    // Stock's interest-enter burst is `EntitySpawn` + `EntityAliveFlags`
+    // (+ speeds) together (network.md 302-315). zdtd sent the ECD on the tick
+    // the entity entered interest and then waited for the pose heartbeat (up
+    // to 0.25 s) before the flags and speeds followed, so a zombie streamed in
+    // stood in its default state until then.
+    freshScenarioDir("worlds/zdtd_sc_enterburst");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_enterburst", 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+    const z = g.sim.spawnZombie(px + 2000, 70, pz, 40) orelse return error.TestUnexpectedResult;
+    // No pose heartbeat this tick, so only the interest-enter path can
+    // produce a description of the entity.
+    g.pos_heartbeat_period_ticks = 1000;
+    g.tick_n = 2;
+    cap.clear();
+    try g.replicate();
+    const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, z) == null); // out of interest
+
+    // Walk it into interest without dirtying it: the announce tick must carry
+    // the description.
+    const zs = g.sim.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    g.sim.transform[zs].x = px + 20;
+    g.sim.transform[zs].z = pz;
+    g.sim.dirty[zs] = .{};
+    g.tick_n = 4;
+    cap.clear();
+    try g.replicate();
+    try std.testing.expect(cap.findPkgIdEntity(spawn_id, z) != null);
+    const flags_id = packages.idOf("NetPackageEntityAliveFlags") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap.findPkgIdEntity(flags_id, z) != null);
+    const speeds_id = packages.idOf("NetPackageEntitySpeeds") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap.findPkgIdEntity(speeds_id, z) != null);
+    std.debug.print("PASS enter-burst: spawn + flags + speeds in the announce tick\n", .{});
+}

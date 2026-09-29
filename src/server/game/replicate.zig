@@ -136,6 +136,11 @@ pub fn replicate(self: *Game) !void {
             (self.sim.kind[i] == .vehicle or self.sim.kind[i] == .turret) and
             self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0;
         var spawn_mask: game_mod.ObsMask = 0;
+        // Set when the ECD below actually reached at least one client, so the
+        // pose/flags/speeds for this entity are forced into the same tick (see
+        // `just_announced`): a failed encode must not invent a description for
+        // a client that was never told the entity exists.
+        var announced = false;
         if (is_mob or is_spawnable_extra) {
             var m = in_range;
             while (m != 0) : (m &= m - 1) {
@@ -203,6 +208,7 @@ pub fn replicate(self: *Game) !void {
                     self.harness.counters.inc(.replicate_fanouts);
                 }
                 self.harness.counters.inc(.packages_encoded);
+                announced = true;
             } else |_| {
                 self.harness.counters.inc(.encode_errors);
             }
@@ -241,7 +247,13 @@ pub fn replicate(self: *Game) !void {
         // pos_heartbeat_period_ticks. With no in-range viewer the viewers==0
         // branch below leaves the edge set for the tick one appears.
         const anim_pending = self.sim.mask[i].zombie_ai and self.sim.zombie_ai[i].pending_anim_action >= 0;
-        if (!anim_pending and !interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
+        // A newly-announced entity is described in the tick it appears: stock's
+        // interest-enter burst is `EntitySpawn` + `EntityAliveFlags` (+ speeds)
+        // together (network.md 302-315), while zdtd sent the ECD here and then
+        // waited for the pose heartbeat (up to 0.25 s) before the flags and
+        // speeds followed, so a streamed-in zombie stood in its default state.
+        const just_announced = announced;
+        if (!anim_pending and !just_announced and !interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
 
         const viewers = if (self.sim.mask[i].player)
             in_range & ~game_mod.bitOfPeerSlot(self.sim.player[i].peer_slot)
