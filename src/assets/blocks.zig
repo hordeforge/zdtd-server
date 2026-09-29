@@ -100,6 +100,10 @@ pub const HarvestDrop = struct {
     tag: []const u8 = "",
 };
 
+/// `BlockDamage` subclasses that damage an entity on collision
+/// (`BlockSpikes`/`BlockBarbed` override the retract/degrade leg).
+pub const HazardKind = enum(u8) { none = 0, damage = 1, spikes = 2, barbed = 3 };
+
 pub const BlockDef = struct {
     id: u16 = 0,
     name: []const u8 = "",
@@ -111,6 +115,19 @@ pub const BlockDef = struct {
     /// Block Class property (engine class name, e.g. "VendingMachine"). 0
     /// length = not parsed / unknown.
     class: []const u8 = "",
+    /// Collision-hazard kind from the block Class: `BlockDamage` subclasses
+    /// hurt an entity that collides with the cell (`BlockDamage` ctor sets
+    /// `IsCheckCollideWithEntity = true`). `BlockSpikes` additionally retracts
+    /// (sibling swap or air) and `BlockBarbed` degrades its meta.
+    hazard: HazardKind = .none,
+    /// BlockDamage `Damage` (int, required: stock logs and uses 0 when
+    /// missing) and `Damage_received` (int, default 0), the damage dealt to
+    /// the entity and the wear the collision puts on the block.
+    hazard_damage: i32 = 0,
+    hazard_damage_received: i32 = 0,
+    /// `SiblingBlock` name: the block `BlockSpikes` swaps in when it retracts
+    /// (air when absent). Resolved by name at the hazard site.
+    hazard_sibling: []const u8 = "",
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
     /// Door block: stock tags the openables with `BlockTag="Door"`
@@ -546,6 +563,10 @@ pub fn loadFromPath(
         name: []const u8,
         class: ?[]const u8 = null,
         tags: ?[]const u8 = null,
+        hazard: HazardKind = .none,
+        hazard_damage: i32 = 0,
+        hazard_damage_received: i32 = 0,
+        hazard_sibling: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -634,6 +655,10 @@ pub fn loadFromPath(
         // Scan this block's body for Class / TraderID / Extends / IndexName /
         // HeatMapStrength.
         var class: ?[]const u8 = null;
+        var hazard_kind: HazardKind = .none;
+        var hazard_damage: i32 = 0;
+        var hazard_damage_received: i32 = 0;
+        var hazard_sibling: ?[]const u8 = null;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
@@ -740,6 +765,19 @@ pub fn loadFromPath(
             };
             if (std.mem.eql(u8, pname, "Class")) {
                 class = xml.attr(clean, pi, "value");
+                // BlockDamage subclasses: the ctor sets IsCheckCollideWithEntity
+                // and Init logs when `Damage` is absent (BlockDamage IL=53).
+                if (class) |cn| {
+                    if (std.mem.eql(u8, cn, "Spikes")) hazard_kind = .spikes;
+                    if (std.mem.eql(u8, cn, "Barbed")) hazard_kind = .barbed;
+                    if (std.mem.eql(u8, cn, "Damage")) hazard_kind = .damage;
+                }
+            } else if (std.mem.eql(u8, pname, "Damage")) {
+                if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage = v;
+            } else if (std.mem.eql(u8, pname, "Damage_received")) {
+                if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage_received = v;
+            } else if (std.mem.eql(u8, pname, "SiblingBlock")) {
+                hazard_sibling = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "Tags")) {
                 tags = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "BlockTag")) {
@@ -871,6 +909,10 @@ pub fn loadFromPath(
             .name = kn,
             .class = class,
             .tags = if (tags) |t| try arena.dupe(u8, t) else null,
+            .hazard = hazard_kind,
+            .hazard_damage = hazard_damage,
+            .hazard_damage_received = hazard_damage_received,
+            .hazard_sibling = if (hazard_sibling) |hs| try arena.dupe(u8, hs) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -926,6 +968,10 @@ pub fn loadFromPath(
         var seen_chain: [max_extends_depth]usize = undefined;
         var chain_n: usize = 0;
         var own_class = pb.class;
+        var own_hazard = pb.hazard;
+        var own_hazard_damage = pb.hazard_damage;
+        var own_hazard_damage_received = pb.hazard_damage_received;
+        var own_hazard_sibling = pb.hazard_sibling;
         var own_trader = pb.trader_id;
         var own_mesh = pb.mesh;
         var own_material = pb.material;
@@ -974,6 +1020,14 @@ pub fn loadFromPath(
             // default.
             const p1 = pb.extends_param1;
             if (own_class == null and !xml.tagListContains(p1, "Class")) own_class = base_p.class;
+            if (own_hazard == .none and !xml.tagListContains(p1, "Class")) own_hazard = base_p.hazard;
+            if (own_hazard_damage == 0 and !xml.tagListContains(p1, "Damage")) own_hazard_damage = base_p.hazard_damage;
+            if (own_hazard_damage_received == 0 and !xml.tagListContains(p1, "Damage_received")) {
+                own_hazard_damage_received = base_p.hazard_damage_received;
+            }
+            if (own_hazard_sibling == null and !xml.tagListContains(p1, "SiblingBlock")) {
+                own_hazard_sibling = base_p.hazard_sibling;
+            }
             if (own_trader < 0 and !xml.tagListContains(p1, "TraderID")) own_trader = base_p.trader_id;
             if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
             if (own_material == null and !xml.tagListContains(p1, "Material")) own_material = base_p.material;
@@ -1032,6 +1086,10 @@ pub fn loadFromPath(
             ext = base_p.extends;
         }
         pb.class = own_class;
+        pb.hazard = own_hazard;
+        pb.hazard_damage = own_hazard_damage;
+        pb.hazard_damage_received = own_hazard_damage_received;
+        pb.hazard_sibling = own_hazard_sibling;
         pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
         pb.material = own_material;
@@ -1103,6 +1161,10 @@ pub fn loadFromPath(
             .name = pb.name,
             .solid = isSolidName(pb.name),
             .class = if (pb.class) |c| try arena.dupe(u8, c) else "",
+            .hazard = pb.hazard,
+            .hazard_damage = pb.hazard_damage,
+            .hazard_damage_received = pb.hazard_damage_received,
+            .hazard_sibling = if (pb.hazard_sibling) |hs| try arena.dupe(u8, hs) else "",
             .tags = if (pb.tags) |t| try arena.dupe(u8, t) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,

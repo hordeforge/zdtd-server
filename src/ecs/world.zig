@@ -489,6 +489,10 @@ pub const World = struct {
     /// for the entities it has, not for the slot table it was sized with.
     /// Owned by spawnBase / destroy / reviveSlot; never written elsewhere.
     alive_bits: std.StaticBitSet(max_entities) = std.StaticBitSet(max_entities).initEmpty(),
+    /// Collision-hazard contact latch, one packed cell key per slot (-1 =
+    /// none): a `BlockDamage` subclass hurts an entity once per contact, since
+    /// stock's collision callback fires on the colliding pair, not every tick.
+    hazard_cell: [max_entities]i64 = [_]i64{-1} ** max_entities,
     /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
     /// per-tick replicate pass build its candidate set and clear the motion
     /// bits in O(changed) rather than O(max_entities).
@@ -1259,6 +1263,7 @@ pub const World = struct {
         const s = self.allocSlot() orelse return null;
         self.alive[s] = true;
         self.alive_bits.set(s);
+        self.hazard_cell[s] = -1;
         self.entity_count +%= 1;
         self.kind_groups.insert(kind, s);
         if (!self.entity_cap_warned and self.entity_count >= entity_warn_at) {

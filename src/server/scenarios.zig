@@ -27,6 +27,7 @@ const systems = @import("../ecs/systems.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
+const game_hazard = @import("game/hazard.zig");
 const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
@@ -19386,6 +19387,104 @@ test "scenario a vehicle and a turret entering interest also carry alive flags" 
     try std.testing.expect(cap.findPkgIdEntity(spawn_id, tid) != null);
     try std.testing.expect(cap.findPkgIdEntity(flags_id, tid) != null);
     std.debug.print("PASS alive-flags: vehicle and turret carry EntityAliveFlags\n", .{});
+}
+
+test "scenario spikes and barbed wire damage the entity that steps on them" {
+    // `BlockDamage.OnEntityCollidedWithBlock` (IL=126) hurts an alive entity
+    // for the block's `Damage`, then `BlockSpikes` retracts into its
+    // SiblingBlock (or air) and `BlockBarbed` increments the cell meta and dies
+    // at 15. zdtd had no collision pass at all, so spikes were decorative.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_hazard.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="trapSpikesWoodDmg1">
+        \\  <property name="Class" value="Spikes" />
+        \\  <property name="Damage" value="20" />
+        \\</block>
+        \\<block name="trapSpikesIronDmg1">
+        \\  <property name="Class" value="Spikes" />
+        \\  <property name="Damage" value="10" />
+        \\  <property name="SiblingBlock" value="terrStone" />
+        \\</block>
+        \\<block name="barbedWireSheet">
+        \\  <property name="Class" value="Barbed" />
+        \\  <property name="Damage" value="5" />
+        \\</block>
+        \\</blocks>
+    );
+    // The AssignIds dump holds the trap names, so resolve through the Game's own
+    // name map before swapping the table in.
+    const name_map = g.maxdamage;
+    const Ids = struct {
+        var t: *const assets_maxdamage.Table = undefined;
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            return t.idByName(name);
+        }
+    };
+    Ids.t = &name_map;
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const spikes_id = g.maxdamage.idByName("trapSpikesWoodDmg1") orelse return error.SkipZigTest;
+    const iron_id = g.maxdamage.idByName("trapSpikesIronDmg1") orelse return error.SkipZigTest;
+    const barbed_id = g.maxdamage.idByName("barbedWireSheet") orelse return error.SkipZigTest;
+    try std.testing.expect(g.blocks.byId(spikes_id).?.hazard == .spikes);
+    try std.testing.expectEqual(@as(i32, 20), g.blocks.byId(spikes_id).?.hazard_damage);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const cx: i32 = 256;
+    const cz: i32 = 256;
+    const cy: i32 = 72;
+    g.sim.transform[ps].x = @floatFromInt(cx);
+    g.sim.transform[ps].y = @floatFromInt(cy);
+    g.sim.transform[ps].z = @floatFromInt(cz);
+    const hp0 = g.sim.health[ps].hp;
+
+    // Wood spikes: 20 damage, then the cell is consumed (no sibling). The
+    // first contact goes through a whole tick, so the pass is proven wired
+    // into the step order and not only callable directly.
+    try g.world.setBlockWorld(cx, cy, cz, spikes_id);
+    g.sim.hazard_cell[ps] = -1;
+    try g.step();
+    // A whole tick also runs the survival legs, so allow their epsilon.
+    try std.testing.expect(@abs(g.sim.health[ps].hp - (hp0 - 20.0)) < 0.1);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(cx, cy, cz));
+    // Standing still is one contact, not one hit a tick.
+    g.sim.health[ps].hp = hp0;
+    game_hazard.collisionTick(g);
+    try std.testing.expectEqual(hp0, g.sim.health[ps].hp);
+
+    // Iron spikes with a sibling retract into it instead of vanishing.
+    try g.world.setBlockWorld(cx, cy, cz, iron_id);
+    g.sim.hazard_cell[ps] = -1;
+    game_hazard.collisionTick(g);
+    try std.testing.expectEqual(world_store.block_stone, try g.world.blockWorld(cx, cy, cz));
+
+    // Barbed wire increments its meta per collision and dies when it reaches
+    // 15 (BlockBarbed IL_0018-002A: the increment happens first, so the 15th
+    // contact is the one that destroys it).
+    try g.world.setBlockWorld(cx, cy, cz, barbed_id);
+    var hit: usize = 0;
+    while (hit < 14) : (hit += 1) {
+        g.sim.hazard_cell[ps] = -1;
+        game_hazard.collisionTick(g);
+        try std.testing.expectEqual(barbed_id, try g.world.blockWorld(cx, cy, cz));
+    }
+    g.sim.hazard_cell[ps] = -1;
+    game_hazard.collisionTick(g);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(cx, cy, cz));
+    std.debug.print("PASS hazard: spikes hurt and retract, barbed wire dies at 15\n", .{});
 }
 
 test "scenario a predator with a target class list hunts the mob it names" {

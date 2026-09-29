@@ -237,7 +237,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
       never fire (world/blocks.md:262-263, 774-786).
-- [ ] **No collision or hazard block damage** - stock `BlockDamage.OnEntityCollidedWithBlock`
+- [x] **No collision or hazard block damage** - closed 2026-09-28 for the
+      visible half: `server/game/hazard.zig` runs the `BlockDamage` collision
+      pass once a tick (feet cell → `Damage` once per contact via a per-slot
+      latch), `BlockSpikes` retracts into its `SiblingBlock` or air, and
+      `BlockBarbed` increments the cell meta and dies at 15. Still open from
+      the same RE: `MovementFactor` slow, `DamageType` +
+      `CalculateBlockDamage` resistance legs, `DontDamageOnTouch` and the
+      shrunk collision AABB. Original entry: stock
+      `BlockDamage.OnEntityCollidedWithBlock`
       drives spikes, barbed wire (meta 15 self-destruct), cactus, hay and the
       pipe fire hazards (blocks.md:520-534, block-behaviors.md:32); zdtd clears
       the movement bit and has no collision arm, so POI traps are inert.

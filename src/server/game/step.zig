@@ -15,6 +15,7 @@ const schedule = @import("../../ecs/schedule.zig");
 const replicate_te = @import("replicate_te.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const game_stability = @import("stability.zig");
+const game_hazard = @import("hazard.zig");
 const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
@@ -152,6 +153,10 @@ pub fn step(self: *Game) !void {
         // Sleeper re-arm (stock ClearedUpdate IL=33): recount the per-volume
         // alive sleeper zombies; a group that died sets the volume's
         // respawn_time (LootRespawnDays x 24000 ticks) for the touch re-arm.
+        // Collision hazards (`BlockDamage` subclasses: spikes, barbed wire):
+        // stock runs these from the physics collision callback, so the pass
+        // belongs right after the movement the AI/players just did.
+        game_hazard.collisionTick(self);
         self.tickSleeperRearm();
         // Movement-noise sleeper wake (stock PlayerStealth.NotifyNoise →
         // World.CheckSleeperVolumeNoise): the stealth system queued points
