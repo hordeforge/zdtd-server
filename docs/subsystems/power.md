@@ -124,6 +124,19 @@ The state struct the echo fills carries the handle, the position, the block id, 
 
 The stock wiring package is `NetPackageWireActions`, whose body is an operation byte, the child position, a child count and the child positions, with `SetParent` connecting the child to the first declared parent, `RemoveParent` dropping the child's edges, and `SendWires` accepted as a client-only visual with no topology change (`src/ecs/electric.zig:825`, `:844`). The handler takes the same block rate token as `SetBlock`, applies it to the grid, and rebroadcasts the raw package so peers get the client-side wire visual (`src/server/c2s/misc.zig:75`). A light tile entity is a separate body: the stock `TileEntityLight` network write carries a fixed version 18 and then nine fields, all of which the client always reads on that path, so the builder writes every one and nothing brackets the payload with a size marker (`src/wire/stock_te.zig:1224`). The light data itself is authored per prefab marker, and the sender uses the real world block id at the position because the client drops a tile-entity package whose block id disagrees with the block it holds (`src/server/game/replicate_te.zig:449`, `:452`). The tile-entity type bytes for the powered family are named constants in `te_types.zig`: powered 0x0F, power source 0x10, light 0x12, trigger 0x13 (`src/wire/te_types.zig:20`).
 
+## Turret target acquisition
+A powered ranged trap is an ECS turret owned by the grid (`ecs/turrets.zig`):
+the per-tick pass filters the zombie group once, resolves each turret's powered
+flag from the grid, and picks the nearest candidate inside `turret.range`
+(`src/ecs/turrets.zig:52`). The pick is line-of-sight gated the way stock's
+`AutoTurretFireController` gates it: `Voxel.Raycast` from the muzzle to the
+candidate with mask `-538750989` and a 0.05 offset, and the hit must resolve to
+that candidate (IL_0165-022E), so a nearer zombie behind a wall is skipped
+rather than shot through it. zdtd runs the same block oracle the AI sight query
+uses (`sensing.rayClear`, 0.8-block march) between the two torsos
+(`src/ecs/turrets.zig`); a missing block oracle counts as clear, which is the
+documented fallback for a world with no block data.
+
 ## Persistence
 
 The grid layout is not saved; it is rebuilt from the block plane when a chunk is first scanned, which the store records as a scan flag (`src/world/store.zig:140`). What is saved is the part a rebuild cannot recover: the wiring edges and the player-set node state, both keyed by world position because node ids are reassigned every session (`src/ecs/electric.zig:115`, `:127`). Edges are written as endpoint position pairs, live and pending in one record, because writing only the live list dropped every edge whose endpoints sat in unvisited chunks (`src/server/persist_entities.zig:181`). The node record carries the type byte, the position, the fuel or energy value, the delay and duration indices and the target mask, and only a node that differs from a fresh scan is written so an untouched world does not grow the file (`src/server/persist_entities.zig:235`, `:247`):

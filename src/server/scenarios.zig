@@ -19118,3 +19118,73 @@ test "scenario a parked vehicle is replicated at any distance and never unloaded
     try std.testing.expect(cap_b.findPkgIdEntity(rm_id, v) == null);
     std.debug.print("PASS vehicle-far: a distance-independent vehicle stays replicated\n", .{});
 }
+
+test "scenario a turret does not acquire a target through a wall" {
+    // Stock `AutoTurretFireController` acquires through a clear voxel line:
+    // `Voxel.Raycast` from the muzzle to the candidate (IL_0165, mask
+    // -538750989, 0.05 thickness) with the hit resolving to that candidate, so
+    // a nearer zombie behind a wall is skipped instead of shot through it.
+    // zdtd took the nearest zombie in range regardless of blocks.
+    freshScenarioDir("worlds/zdtd_sc_turret_los");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turret_los", 0);
+    defer g.destroy();
+    // The sight oracle needs the stock blocks table for `Collide` bits; offline
+    // the table has no rows, so state the bit the test depends on: stone blocks
+    // sight. The fallback would work too, but this exercises the production
+    // oracle rather than the movement predicate.
+    const Sight = struct {
+        fn sight(_: ?*anyopaque, id: u16) bool {
+            return id == world_store.block_stone;
+        }
+    };
+    g.world.sight_block_fn = &Sight.sight;
+    // The flat world ships one powered turret; take it over so nothing else
+    // drives its target.
+    var ts: ?ecs.Slot = null;
+    for (ecs_query.groupSlice(&g.sim, .turret)) |s| ts = s;
+    const tslot = ts orelse return error.TestUnexpectedResult;
+    const tx = g.sim.transform[tslot].x;
+    const ty = g.sim.transform[tslot].y;
+    const tz = g.sim.transform[tslot].z;
+    g.sim.turret[tslot].range = 60.0;
+    g.sim.turret[tslot].ammo = 100;
+    // The demo world seeds zombies of its own; clear them so the only
+    // candidates in range are the ones this scenario spawns.
+    var seeded: [32]i32 = undefined;
+    var sn: usize = 0;
+    for (ecs_query.groupSlice(&g.sim, .zombie)) |zs0| {
+        if (sn < seeded.len) {
+            seeded[sn] = g.sim.network_id[zs0].id;
+            sn += 1;
+        }
+    }
+    for (seeded[0..sn]) |id| {
+        if (g.sim.slotOfNetId(id)) |sl| _ = g.sim.destroy(sl);
+    }
+
+    // A zombie 6 blocks away with nothing between: acquired.
+    const z_open = g.sim.spawnZombie(tx + 6, ty, tz, 60) orelse return error.TestUnexpectedResult;
+    g.sim.director.max_enemy_tier = 5;
+    _ = systems.systemTurrets(&g.sim, 0.05);
+    try std.testing.expectEqual(g.sim.network_id[g.sim.slotOfNetId(z_open).?].id, g.sim.turret[tslot].target_id);
+
+    // Demolish that one and wall off the next: the turret must not see it.
+    _ = g.sim.destroy(g.sim.slotOfNetId(z_open).?);
+    const z_wall = g.sim.spawnZombie(tx + 6, ty, tz, 60) orelse return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(z_wall).?;
+    const zy = g.sim.transform[zs].y;
+    // Cover the whole band the torso-to-torso line crosses (the two ends can
+    // sit at different heights once the spawn snaps to the ground).
+    const lo: i32 = @as(i32, @intFromFloat(@min(ty, zy))) - 2;
+    const hi: i32 = @as(i32, @intFromFloat(@max(ty, zy))) + 3;
+    var wy: i32 = lo;
+    while (wy <= hi) : (wy += 1) {
+        g.world.setBlockWorld(@as(i32, @intFromFloat(tx + 3.0)), wy, @as(i32, @intFromFloat(tz)), world_store.block_stone) catch {};
+    }
+    _ = systems.systemTurrets(&g.sim, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), g.sim.turret[tslot].target_id);
+    std.debug.print("PASS turret-los: a walled zombie is not acquired\n", .{});
+}

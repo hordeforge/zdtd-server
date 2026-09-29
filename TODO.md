@@ -162,7 +162,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       seeds the lifetime counter from blocks.xml `BurstRoundCount` (rounds per
       burst, not a magazine) and `src/ecs/turrets.zig:46` gates at 0 with no
       refill path. A placed turret is inert after about 2.3 s.
-- [ ] **Turrets shoot through walls** - stock `canHitEntity` raycasts and gates
+- [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
+      runs `sensing.rayClear` between the turret and each nearer candidate
+      (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a
+      zombie behind a wall is skipped. The deployed junk turret's cone
+      (`trackTarget`: CenteredYaw/Pitch + yawRange/pitchRange) is still not
+      modelled. Original entry: stock `canHitEntity` raycasts and gates
       yaw and pitch (vehicles-drones-turrets.md:1063-1094); `turrets.zig:57-79`
       picks the nearest zombie by 2D distance and applies damage unconditionally.
 - [ ] **Mob-vs-mob targeting absent** - stock entityclasses.xml gives bear,

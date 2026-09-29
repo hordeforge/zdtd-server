@@ -9,10 +9,16 @@ const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
 const query = @import("query.zig");
 const parallel = @import("../util/parallel.zig");
+const sensing = @import("sensing.zig");
 const builtin = @import("builtin");
 
 /// Fixed-point damage unit (1.0 hp = 100). Mirrors systems.zig.
 const dmg_scale: u32 = 100;
+
+/// Torso height the turret line-of-sight query runs at, the same offset the AI
+/// sight query uses (`sensing.losClear`). Stock traces muzzle-to-entity
+/// transform; zdtd has no separate muzzle transform, so both ends sit at torso.
+const turret_sight_height: f32 = 1.6;
 
 fn fpDamage(fp: u32) f32 {
     return @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
@@ -54,15 +60,30 @@ const TurretCtx = struct {
             // compiler cannot prove these loads invariant across the loop.
             const tx = ctx.w.transform[s].x;
             const tz = ctx.w.transform[s].z;
+            // Stock acquires through a clear voxel line only:
+            // `AutoTurretFireController` raycasts from the muzzle to the
+            // candidate (IL_0165, mask -538750989, 0.05 thickness) and the hit
+            // must resolve to that candidate, so a nearer one behind a wall is
+            // skipped rather than shot through it. Same block oracle the AI
+            // sight uses; the 1.6 torso offset matches that query.
+            const ty = ctx.w.transform[s].y + turret_sight_height;
             for (ctx.zombies) |j| {
                 const dx = ctx.w.transform[j].x - tx;
                 const dz = ctx.w.transform[j].z - tz;
                 const d = dx * dx + dz * dz;
-                if (d < best_d) {
-                    best_d = d;
-                    best_id = ctx.w.network_id[j].id;
-                    best_slot = j;
-                }
+                if (d >= best_d) continue;
+                if (!sensing.rayClear(
+                    ctx.w,
+                    tx,
+                    ty,
+                    tz,
+                    ctx.w.transform[j].x,
+                    ctx.w.transform[j].y + turret_sight_height,
+                    ctx.w.transform[j].z,
+                )) continue;
+                best_d = d;
+                best_id = ctx.w.network_id[j].id;
+                best_slot = j;
             }
             t.target_id = best_id;
             const zi = best_slot orelse continue;

@@ -261,25 +261,34 @@ pub const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 }
 /// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
 /// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
 fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
-    // Sight uses its own oracle (stock `IsSeeThrough` reads the Collide sight
-    // bit and treats water as opaque); without one it keeps the old movement
-    // predicate, so an offline or fixture world behaves exactly as before.
+    return rayClear(w, zx, zy + 1.6, zz, px, py + 1.6, pz);
+}
+
+/// Voxel line clear between two world points: stock's `Voxel.Raycast` as used
+/// by both the AI sight query and the auto-turret target acquisition
+/// (`AutoTurretFireController` IL_0165: from the muzzle, mask -538750989,
+/// 0.05 thickness, hit must resolve to the candidate). Steps the segment in
+/// ~0.8 block increments; a solid cell anywhere between blocks the line, and
+/// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
+///
+/// Sight uses its own oracle (stock `IsSeeThrough` reads the Collide sight bit
+/// and treats water as opaque); without one it keeps the movement predicate,
+/// so an offline or fixture world behaves exactly as before.
+pub fn rayClear(w: *const World, ax: f32, ay: f32, az: f32, bx: f32, by: f32, bz: f32) bool {
     const solid_fn = w.sight_fn orelse (w.solid_fn orelse return true);
     const solid_ctx = if (w.sight_fn != null) w.sight_ctx else w.solid_ctx;
-    const zy2 = zy + 1.6;
-    const py2 = py + 1.6;
-    const dx = px - zx;
-    const dy = py2 - zy2;
-    const dz = pz - zz;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const dz = bz - az;
     const dist = @sqrt(dx * dx + dy * dy + dz * dz);
     if (dist < 0.001) return true;
     const steps: usize = @intCast(@min(@as(u32, @trunc(dist / 0.8)), 64));
     var i: usize = 1;
     while (i < steps) : (i += 1) {
         const t = @as(f32, @floatFromInt(i)) * 0.8 / dist;
-        const sx = zx + dx * t;
-        const sy = zy2 + dy * t;
-        const sz = zz + dz * t;
+        const sx = ax + dx * t;
+        const sy = ay + dy * t;
+        const sz = az + dz * t;
         if (solid_fn(solid_ctx, @floor(sx), @floor(sy), @floor(sz))) return false;
     }
     return true;
