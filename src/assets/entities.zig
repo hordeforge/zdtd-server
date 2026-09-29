@@ -142,6 +142,13 @@ pub const EntityDef = struct {
     /// always-retarget path); nonzero with bit 0 set gates revenge on the
     /// named classes.
     hurt_target_classes: u8 = 0,
+    /// `SetNearestEntityAsTarget class=` victim list (`EAIApproachAndAttackTarget`
+    /// walks the same `targetClasses`, entity-ai.md 1793/1952): the Unity name
+    /// hashes of the entity classes this class will APPROACH and attack, e.g. a
+    /// wolf listing EntityZombie/EntityAnimalStag. `target_class_n` 0 = no list
+    /// parsed, which keeps the legacy player-only behaviour (fail closed).
+    target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    target_class_n: u8 = 0,
     /// `BlockIf` target-list condition (`EAIBlockIf` SetData IL: `data=`
     /// "condition=<type> <op> <value>" triples stepped by 3, `eType` =
     /// None/Alert/Investigate, `eOp` = None/e/ne). Only the alert arm has a
@@ -540,6 +547,10 @@ fn orTaskName(mask: *u16, raw: []const u8) void {
 /// stops the walk instead of spinning; stock chains are a handful deep.
 const max_extends_depth: u8 = 24;
 
+/// `SetNearestEntityAsTarget` class lists are short (the stock rows name at
+/// most a dozen classes); a longer list is truncated rather than allocated.
+pub const max_target_classes: usize = 12;
+
 pub const TargetPlayerSense = struct {
     hear: f32 = 0,
     see: f32 = 0,
@@ -649,6 +660,69 @@ fn parseHurtTargetClasses(entry: []const u8) ?u8 {
         if (std.mem.eql(u8, c, "EntityEnemyAnimal")) bits |= 8;
     }
     return bits;
+}
+
+/// Parse one `SetNearestEntityAsTarget` entry's `class=...` list into Unity
+/// name hashes (the same `getStableHashCode` an entity's `ClassId.hash` uses,
+/// so the AI can match a live candidate by hash). Null unless the entry is a
+/// `SetNearestEntityAsTarget` carrying a `class=` filter. The data tail after
+/// the names carries numeric `SetData` params, so the list stops at the first
+/// token that is not a plausible class name.
+fn parseNearestTargetClasses(entry: []const u8, out: *[max_target_classes]i32) ?u8 {
+    const name, const data = splitTaskEntry(entry);
+    if (!std.mem.eql(u8, name, "SetNearestEntityAsTarget")) return null;
+    const marker = "class=";
+    const ci = std.mem.find(u8, data, marker) orelse return null;
+    var n: u8 = 0;
+    var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
+    while (it.next()) |raw| {
+        const c = std.mem.trim(u8, raw, " \t");
+        // The trailing params are bare numbers once the class names end.
+        if (c.len == 0 or c[0] < 'A' or c[0] > 'Z') break;
+        if (n >= out.len) break;
+        out[n] = unity_hash.getStableHashCode(c);
+        n += 1;
+    }
+    return if (n > 0) n else null;
+}
+
+/// Walk the Extends chain for the first `SetNearestEntityAsTarget class=` list
+/// (the same first-wins rule `resolvedAiTargetEntry` uses).
+fn resolvedNearestTargetClasses(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+    out: *[max_target_classes]i32,
+) u8 {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > max_extends_depth) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: ?u8 = null;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = e.value_ptr.*;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                var scratch: [max_target_classes]i32 = .{0} ** max_target_classes;
+                if (parseNearestTargetClasses(std.mem.trim(u8, rest[0..cut], " \t\r\n"), &scratch)) |n| {
+                    out.* = scratch;
+                    if (is_pipe) return n;
+                    if (numbered == null) numbered = n;
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered orelse 0;
+        }
+        if (numbered) |n| return n;
+        cur = rc.extends;
+    }
+    return 0;
 }
 
 /// Parse one `BlockIf` entry's `data=` condition list into the alert-gate
@@ -1072,6 +1146,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
+        var target_hashes: [max_target_classes]i32 = .{0} ** max_target_classes;
+        const target_n = resolvedNearestTargetClasses(&classes, name, &target_hashes);
         const block_if = resolvedBlockIfAlert(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         // Stock EntityFlying (the vulture): `Class="EntityVulture"`. Read from
@@ -1364,6 +1440,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .target_player_hear = if (target_sense) |s| s.hear else 0,
             .target_player_see = if (target_sense) |s| s.see else 0,
             .hurt_target_classes = hurt_classes,
+            .target_class_hashes = target_hashes,
+            .target_class_n = target_n,
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,

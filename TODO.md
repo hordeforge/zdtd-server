@@ -170,10 +170,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       modelled. Original entry: stock `canHitEntity` raycasts and gates
       yaw and pitch (vehicles-drones-turrets.md:1063-1094); `turrets.zig:57-79`
       picks the nearest zombie by 2D distance and applies damage unconditionally.
-- [ ] **Mob-vs-mob targeting absent** - stock entityclasses.xml gives bear,
-      wolf, mountain lion, boar and Grace `EntityZombie` in `class=`, and
-      `EAIApproachAndAttackTarget.CanExecute` (entity-ai.md:1791-1794) refuses a
-      class not listed; `sensing.zig:422-473` scans the player group only.
+- [x] **Mob-vs-mob targeting absent** - closed 2026-09-28: the AITarget
+      `SetNearestEntityAsTarget class=` list parses to Unity name hashes
+      (`EntityDef.target_class_hashes`, matched against a candidate's
+      `ClassId.hash`), `sensing.nearestMobSnap` picks the nearest listed
+      zombie/animal through the same view-cone and voxel LOS gates, the AI task
+      merges it nearest-first with the player pick, and the melee guard accepts
+      a mob victim (`applyDeferredDamage` already resolved their class resist).
+      Residual: the deployed junk turret's cone and the `chaseTimeMax` per
+      target class are still not modelled, and the class list is matched by
+      exact hash, so a modded subclass of a listed class is not inherited.
 - [x] **`AttackTimeoutDay` / `AttackTimeoutNight` not read** - closed
       2026-09-28: both parse per class (through Extends) and `attackTimeoutS`
       picks by `World.IsDark`, with the Rules floor retuned to stock's 1 s cctor

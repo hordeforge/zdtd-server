@@ -103,6 +103,8 @@ fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
 /// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
 fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void {
     cid.hash = def.hash;
+    cid.target_class_hashes = def.target_class_hashes;
+    cid.target_class_n = def.target_class_n;
     cid.loot_list = def.loot_list;
     cid.drop_prob = def.drop_prob;
     cid.time_stay = def.time_stay;
@@ -251,6 +253,10 @@ pub const EntityClass = struct {
     /// `PreviousTier` ladder the max-tier clamp walks.
     entity_tier: u8 = 0,
     previous_tier: []const u8 = "",
+    /// `SetNearestEntityAsTarget class=` victim list (Unity name hashes) and
+    /// its length; 0 = no list, keep the legacy player-only acquisition.
+    target_class_hashes: [c.max_target_classes]i32 = .{0} ** c.max_target_classes,
+    target_class_n: u8 = 0,
     /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
     /// 0 = unset (the sense path falls back to sight_range). Negative stock
     /// values (never target) stay negative so the gate keeps them denied.

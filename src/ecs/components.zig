@@ -74,6 +74,8 @@ pub const Player = struct {
     glide_src: i16 = 0,
 };
 
+pub const max_target_classes: usize = 12;
+
 pub const ClassId = struct {
     /// Index into World.class_table (fallback only when the per-entity stat
     /// fields below are 0).
@@ -169,6 +171,11 @@ pub const ClassId = struct {
     /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
     /// always-retarget path.
     hurt_target_classes: u8 = 0,
+    /// `SetNearestEntityAsTarget class=` list (Unity name hashes, see
+    /// EntityDef.target_class_hashes) and its length. 0 = no list parsed, so
+    /// acquisition stays player-only (fail closed without stock data).
+    target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
+    target_class_n: u8 = 0,
     /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only). Bit 1
     /// set = sense acquisition is blocked while the entity is unalerted.
     block_if_alert_only: u8 = 0,

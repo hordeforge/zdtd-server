@@ -512,6 +512,60 @@ pub fn nearestPlayerSnap(w: *const World, scan: *const PlayerScan, zslot: Slot, 
     return .{ .id = best_id, .slot = best_slot, .d2 = best_d, .px = px, .pz = pz };
 }
 
+/// Nearest APPROACH target among the mob kinds (zombie/animal) for an attacker
+/// whose class carries a `SetNearestEntityAsTarget class=` list
+/// (`EntityDef.target_class_hashes`): stock's `EAIApproachAndAttackTarget`
+/// walks that `targetClasses` list and refuses a class not named in it
+/// (entity-ai.md 1793), so a wolf listing EntityZombie/EntityAnimalStag hunts
+/// them instead of only players. Matching is by Unity class hash, the same
+/// value `ClassId.hash` carries, so a list naming a class that has no live
+/// entity simply does not match.
+///
+/// ponytail: linear scan over the zombie/animal groups per attacker that has a
+/// list (in stock data only predators do), not a spatial query; switch to a
+/// coarse entity grid if a many-predator scene ever shows up in an apm dump.
+pub fn nearestMobSnap(w: *const World, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
+    const cid = &w.class_id[zslot];
+    const nonesnap: TargetSnap = .{ .id = -1, .slot = 0, .d2 = 0, .px = zx, .pz = zz };
+    if (cid.target_class_n == 0) return nonesnap;
+    const sense_d2 = senseDistSq(w, zslot);
+    var best: TargetSnap = .{ .id = -1, .slot = 0, .d2 = sense_d2, .px = zx, .pz = zz };
+    const groups = [_]c.Kind{ .zombie, .animal };
+    for (groups) |g| {
+        for (query.groupSlice(w, g)) |j| {
+            if (j == zslot) continue;
+            if (!w.alive[j] or !w.mask[j].transform or !w.mask[j].class_id) continue;
+            const h = w.class_id[j].hash;
+            if (h == 0) continue;
+            var listed = false;
+            for (cid.target_class_hashes[0..@min(cid.target_class_n, cid.target_class_hashes.len)]) |th| {
+                if (th != 0 and th == h) {
+                    listed = true;
+                    break;
+                }
+            }
+            if (!listed) continue;
+            const dx = w.transform[j].x - zx;
+            const dz = w.transform[j].z - zz;
+            const d = dx * dx + dz * dz;
+            if (d >= best.d2 or d <= min_target_d2) continue;
+            // Same sense gate the player scan applies minus the player-only
+            // legs (stealth, smell, hearing): a mob target is either in the
+            // view cone with a clear voxel line, or it is not sensed.
+            const half = viewHalfDeg(w, zslot);
+            if (half < 180.0) {
+                const want = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+                var diff = @mod(want - zyaw + 540.0, 360.0) - 180.0;
+                if (diff < 0) diff = -diff;
+                if (diff > half) continue;
+            }
+            if (!losClear(w, zx, zy, zz, w.transform[j].x, w.transform[j].y, w.transform[j].z)) continue;
+            best = .{ .id = w.network_id[j].id, .slot = j, .d2 = d, .px = w.transform[j].x, .pz = w.transform[j].z };
+        }
+    }
+    return best;
+}
+
 /// A target snap whose `slot` is the sentinel `max_entities` is a host-side
 /// bot (ADR 0026): bots are not ECS entities, so the zombie AI reaches them
 /// through the World's `bot_snap_fn` / `bot_damage_fn` hooks instead of a slot.

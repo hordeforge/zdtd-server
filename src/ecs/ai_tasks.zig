@@ -14,6 +14,7 @@ const TargetSnap = systems.TargetSnap;
 const PlayerScan = systems.PlayerScan;
 const snapshotPlayers = systems.snapshotPlayers;
 const nearestPlayerSnap = systems.nearestPlayerSnap;
+const nearestMobSnap = @import("sensing.zig").nearestMobSnap;
 const applyRevengeTarget = systems.applyRevengeTarget;
 const stealthLightAttackPercent = systems.stealthLightAttackPercent;
 const targetLive = systems.targetLive;
@@ -440,6 +441,15 @@ const AiCtx = struct {
             // AITarget list before AITask list: a fresh attacker outranks the
             // nearest sensed player for the revenge window.
             var np = applyRevengeTarget(ctx.w, ctx.pos, s, ai, nearestPlayerSnap(ctx.w, ctx.scan, s, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw), ctx.dt);
+            // `SetNearestEntityAsTarget class=` list: a class whose list names
+            // the mob kinds approaches the nearest of those too when it is
+            // closer than the player pick (stock walks one targetClasses list
+            // over every EntityAlive in bounds, entity-ai.md 1793). Empty list
+            // = player-only, exactly as before.
+            if (ctx.w.class_id[s].target_class_n > 0) {
+                const mob = nearestMobSnap(ctx.w, s, ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.transform[s].yaw);
+                if (mob.id >= 0 and (np.id < 0 or mob.d2 < np.d2)) np = mob;
+            }
             // Host-side bot as a secondary target (ADR 0026): with no player
             // sensed (and no revenge latched), a zombie senses the nearest
             // live bot within its own sight range and chases it. Bots are not
@@ -1229,7 +1239,14 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
         ai.clearPath();
         const pad: f32 = ctx.w.class_id[s].attack_damage;
         const adm: f32 = if (pad > 0) pad else if (ct.attack_damage > 0) ct.attack_damage else ctx.w.rules.combat.attack_damage;
-        if (ai.attack_cd <= 0 and (targetExternal(np) or (ctx.w.alive[np.slot] and ctx.w.mask[np.slot].player))) {
+        // A mob victim (the `SetNearestEntityAsTarget class=` pick) takes the
+        // same melee hit: `applyDeferredDamage` already resolves a non-player
+        // victim's class resist, so only the guard needed widening.
+        // Short-circuit before indexing: a bot snap's slot is the
+        // `max_entities` sentinel, not a row in the SoA columns.
+        const mob_victim = !targetExternal(np) and ctx.w.mask[np.slot].kind and
+            (ctx.w.kind[np.slot] == .zombie or ctx.w.kind[np.slot] == .animal);
+        if (ai.attack_cd <= 0 and (targetExternal(np) or (ctx.w.alive[np.slot] and (ctx.w.mask[np.slot].player or mob_victim)))) {
             if (targetExternal(np)) {
                 // Host-side bot victim (ADR 0026): melee resolves through the
                 // bot damage hook so the bot records the zombie as attacker and

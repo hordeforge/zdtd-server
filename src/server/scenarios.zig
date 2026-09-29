@@ -25,6 +25,8 @@ const quest_mod = @import("../ecs/quest.zig");
 const quest_mod_components = @import("../ecs/components.zig");
 const systems = @import("../ecs/systems.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
+const sensing_mod = @import("../ecs/sensing.zig");
+const components_mod = @import("../ecs/components.zig");
 const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
@@ -19384,4 +19386,77 @@ test "scenario a vehicle and a turret entering interest also carry alive flags" 
     try std.testing.expect(cap.findPkgIdEntity(spawn_id, tid) != null);
     try std.testing.expect(cap.findPkgIdEntity(flags_id, tid) != null);
     std.debug.print("PASS alive-flags: vehicle and turret carry EntityAliveFlags\n", .{});
+}
+
+test "scenario a predator with a target class list hunts the mob it names" {
+    // Stock's `EAIApproachAndAttackTarget.CanExecute` walks the AITarget
+    // `class=` list and refuses a class not named in it (entity-ai.md 1793),
+    // and `EAISetNearestEntityAsTarget` picks the nearest EntityAlive that
+    // passes. zdtd only ever scanned players, so a wolf ignored the stag next
+    // to it. The list is matched by Unity class hash (ClassId.hash).
+    freshScenarioDir("worlds/zdtd_sc_predator");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_predator", 0);
+    defer g.destroy();
+    // The sight oracle needs the stock blocks table for `Collide` sight bits;
+    // offline only stone blocks sight (air must be transparent, or the
+    // fail-closed default would hide every target).
+    const Sight = struct {
+        fn sight(_: ?*anyopaque, id: u16) bool {
+            return id == world_store.block_stone;
+        }
+    };
+    g.world.sight_block_fn = &Sight.sight;
+    const pred_hash: i32 = 0x5101;
+    const prey_hash: i32 = 0x5102;
+    const other_hash: i32 = 0x5103;
+    // A predator whose list names only the prey class.
+    g.sim.class_table[1] = .{
+        .name = "animalWolf",
+        .hash = pred_hash,
+        .kind = .animal,
+        .max_hp = 60,
+        .target_class_n = 1,
+        .target_class_hashes = blk: {
+            var h: [components_mod.max_target_classes]i32 = .{0} ** components_mod.max_target_classes;
+            h[0] = prey_hash;
+            break :blk h;
+        },
+    };
+    // The prey is a ZOMBIE: a passive animal flees its hunter, so it would
+    // never stand in melee range long enough to prove the bite lands.
+    g.sim.class_table[2] = .{ .name = "zombieArlene", .hash = prey_hash, .kind = .zombie, .max_hp = 50 };
+    g.sim.class_table[3] = .{ .name = "animalBoar", .hash = other_hash, .kind = .animal, .max_hp = 70 };
+
+    const wolf = g.sim.spawnAnimalDef(0, 70, 0, g.sim.class_table[1]) orelse return error.TestUnexpectedResult;
+    const ws = g.sim.slotOfNetId(wolf).?;
+    // A player sensed as well, but further than the prey: the listed mob wins
+    // the nearest-first pick, which is what the AI task's merge does.
+    _ = g.sim.spawnPlayer(8.0, 70, 0, 0);
+    const stag = g.sim.spawnZombieDef(0, 70, 1.2, 50, g.sim.class_table[2]) orelse return error.TestUnexpectedResult;
+    const ss = g.sim.slotOfNetId(stag).?;
+    // Another animal kind on the map, NOT on the list: never picked.
+    _ = g.sim.spawnAnimalDef(0, 70, 2.0, g.sim.class_table[3]) orelse return error.TestUnexpectedResult;
+
+    var scan: sensing_mod.PlayerScan = .{};
+    _ = sensing_mod.snapshotPlayers(&g.sim, &scan, true);
+    const mob = sensing_mod.nearestMobSnap(&g.sim, ws, 0, 70, 0, 0);
+    try std.testing.expectEqual(g.sim.network_id[ss].id, mob.id);
+    // The merge rule in the AI task: a closer allowed mob beats the player.
+    const player = sensing_mod.nearestPlayerSnap(&g.sim, &scan, ws, 0, 70, 0, 0);
+    try std.testing.expect(player.id >= 0);
+    try std.testing.expect(mob.d2 < player.d2);
+    // End to end: the wolf closes on the stag and bites it (the melee guard
+    // used to accept only players and bots as victims).
+    const stag_hp0 = g.sim.health[ss].hp;
+    var t: f32 = 0;
+    while (t < 4.0 and g.sim.health[ss].hp >= stag_hp0) : (t += 0.05) _ = systems.systemZombieAi(&g.sim, 0.05);
+    try std.testing.expect(g.sim.health[ss].hp < stag_hp0);
+
+    // With no list the pick fails closed (legacy player-only behaviour).
+    g.sim.class_id[ws].target_class_n = 0;
+    try std.testing.expectEqual(@as(i32, -1), sensing_mod.nearestMobSnap(&g.sim, ws, 0, 70, 0, 0).id);
+    std.debug.print("PASS predator-targets: a listed mob kind is hunted and bitten\n", .{});
 }

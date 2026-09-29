@@ -671,3 +671,42 @@ test "entity tier comes from Tags and PreviousTier parses through Extends" {
     try std.testing.expectEqual(@as(u8, 4), rad.entity_tier);
     try std.testing.expectEqualStrings("zFeral,zBase", rad.previous_tier);
 }
+
+test "AITarget SetNearestEntityAsTarget class list parses to Unity name hashes" {
+    // `EAIApproachAndAttackTarget.CanExecute` walks the AITarget `class=` list
+    // and refuses a class not named in it (entity-ai.md 1793); zdtd matches a
+    // live candidate by the same stable hash `ClassId.hash` carries.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/targets.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="animalWolf">
+        \\    <property name="AITarget-1" value="SetNearestEntityAsTarget" data="class=EntityZombie,EntityAnimalStag,1,1"/>
+        \\  </entity_class>
+        \\  <entity_class name="animalStag">
+        \\    <property name="AITarget-1" value="SetAsTargetIfHurt" data="class=EntityPlayer"/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieTemplateMale">
+        \\    <property name="AITarget-1" value="SetNearestEntityAsTarget" data="class=EntityPlayer"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const wolf = t.byName("animalWolf") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), wolf.target_class_n);
+    try std.testing.expectEqual(unity_hash.getStableHashCode("EntityZombie"), wolf.target_class_hashes[0]);
+    try std.testing.expectEqual(unity_hash.getStableHashCode("EntityAnimalStag"), wolf.target_class_hashes[1]);
+    // The trailing numeric params are not class names.
+    try std.testing.expectEqual(@as(i32, 0), wolf.target_class_hashes[2]);
+    // A SetAsTargetIfHurt entry is the other parser's business: no list here.
+    const stag = t.byName("animalStag") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), stag.target_class_n);
+    // A player-only list still parses (the class means "players", which the
+    // existing player scan already covers).
+    const z = t.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), z.target_class_n);
+}
