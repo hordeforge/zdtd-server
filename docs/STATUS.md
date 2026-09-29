@@ -22,6 +22,18 @@ auto-rolls and a block without a LootList stays empty. Gated by
 untouched before the open, rolled and stamped after, player storage untouched)
 plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
 0 failed.
+**The acquisition radius is the class's own sight range 2026-09-28**: stock
+acquires a player through `EAITarget.check` -> `GetSeeDistance()` (per entity)
+and hears through the same `AITarget` row's hear distance, which passes walls.
+zdtd computed the per-class value but then gated every class on the flat
+`rules.ai.sense_dist_sq` floor of 48 m, so `animalZombieVulture` (SightRange 70)
+and `animalChickenHostile` (100) could not acquire a real player past 48 m even
+though the host-bot path already used their own radius. `nearestPlayerSnap` and
+`canSensePlayer` now use the per-entity see distance, widened by the class's hear
+distance, with hearing tested before the sight bound. A negative
+`target_player_see` ("never target this class") is denied on the raw field:
+`senseDistSq` squares it, so -1 had been arriving as a 1 m radius. Gated by `AI
+senses: acquisition uses the class's own SightRange, widened by hearing`.
 **The client's chunk view distance is now the stock clamp 2026-09-28**: stock
 reads `ServerMaxAllowedViewDistance` (GamePrefs 190), clamps that pref into 4..12,
 then clamps the joining client's requested `chunkViewDim` into `[4, pref]`

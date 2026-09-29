@@ -223,7 +223,7 @@ test, so a retune cannot land silently).
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
-| `sense_dist_sq` | 2304.0 | **Floor**: `entityclasses.xml` `SightRange` wins per class (stock ships 27, 30, 40 m) |
+| `sense_dist_sq` | 2304.0 | **Floor**: `entityclasses.xml` `SightRange` wins per class (stock ships 27, 30, 40 m for zombies, `animalZombieVulture` 70 and `animalChickenHostile` 100). The acquisition radius is the wider of this and the class's hear distance, since sound passes walls |
 | `hear_range` | 10.0 | Hearing radius: a player within it is sensed regardless of sight (sound passes walls). RE entity-ai.md PlayerStealth; exact movement-noise radius not IL-pinned |
 | `view_cone_half_deg` | 90.0 | Sight view-cone half-angle. Stock `EntityAlive.maxViewAngle` cctor default 180 (half 90 = only excludes targets strictly behind), per-class `MaxViewAngle` in entityclasses.xml halves and wins via `viewHalfDeg`; this is the floor when unset. RE entity-ai.md EntityAlive cctor |
 | `sight_light_threshold_min` / `sight_light_threshold_max` | 30.0 / 100.0 | CanSeeStealth light-threshold floor pair: `FastLerp(min, max, dist/sightRange)` vs the player's TickServer `lightLevel` (0..200). Stock `EntityClass` cctor default (30, 100); `zombieTemplateMale` overrides to `-2,150` (seen at point blank even at night). Per-class `SightLightThreshold` in entityclasses.xml wins; floor when unset. RE entity-ai.md CanSeeStealth IL=21 |

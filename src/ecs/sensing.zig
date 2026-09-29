@@ -366,8 +366,11 @@ pub fn canSensePlayer(
     const dy = py - zy;
     const dz = pz - zz;
     const d2 = dx * dx + dy * dy + dz * dz;
-    if (d2 >= w.rules.ai.sense_dist_sq) return false;
+    // Heard through walls first: hearing is its own radius and is not clamped
+    // by the see distance, so a class with a short SightRange still reacts to
+    // noise (stock checks see and hear on the same AITarget row separately).
     if (d2 < hear * hear) return true;
+    if (d2 >= senseDistSq(w, zslot)) return false;
     // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)),
     // then the CanSeeStealth light gate, then LOS.
     const half = viewHalfDeg(w, zslot) * (std.math.pi / 180.0);
@@ -421,13 +424,39 @@ fn smellRadiusFor(w: *const World, slot: Slot) f32 {
     return w.rules.ai.smell_radius;
 }
 
+/// Effective hearing radius for one entity, before the per-player crouch
+/// muffle: the AITarget row's `hearDistance` when the class declares one (a
+/// declared 0 reads as "unset", so the Rules floor applies), else `hear_range`.
+/// Stock carries see and hear on the same `AITarget` row
+/// (`EAISetNearestEntityAsTarget`), and hearing passes walls, so the sense
+/// search bound is the wider of the two.
+fn hearRangeFor(w: *const World, slot: Slot) f32 {
+    const declared = w.class_id[slot].target_player_hear;
+    if (declared != 0) return declared;
+    return w.rules.ai.hear_range;
+}
+
 pub fn nearestPlayerSnap(w: *const World, scan: *const PlayerScan, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
     // `BlockIf condition=alert e 0` (the hostile-animal template): while the
     // entity is unalerted the executing BlockIf holds MutexBits=1 over
     // SetNearestEntityAsTarget, so no fresh sense acquisition. Revenge and
     // the latched aggro below still run (SetAsTargetIfHurt is priority 1 and
     // hurt sets alert, which drops this gate). Bit 1 = alert arm parsed.
-    const sense_d2 = w.rules.ai.sense_dist_sq;
+    // The acquisition radius is the entity's OWN see distance (stock
+    // `EAITarget.check` calls `CanSeeStealth(manager.GetSeeDistance(player), ...)`
+    // and `CanEntityBeSeen` uses `GetSeeDistance()`), widened by its hearing
+    // radius because that passes walls. The old flat `sense_dist_sq` cap held
+    // every class at 48 m, so `animalZombieVulture` (SightRange 70) and
+    // `animalChickenHostile` (100) could never acquire a real player past it.
+    // A negative stock `target_player_see` means "never target this class".
+    // Deny before the squaring below loses the sign: `senseDistSq` returns
+    // `tp * tp`, so -1 came back as a 1-block radius rather than a denial.
+    if (w.class_id[zslot].target_player_see < 0) {
+        return .{ .id = -1, .slot = 0, .d2 = 0, .px = zx, .pz = zz };
+    }
+    const sight_d2 = senseDistSq(w, zslot);
+    const hear_rule = hearRangeFor(w, zslot);
+    const sense_d2 = @max(sight_d2, hear_rule * hear_rule);
     const none: TargetSnap = .{ .id = -1, .slot = 0, .d2 = sense_d2, .px = zx, .pz = zz };
     if (w.class_id[zslot].block_if_alert_only & 2 != 0 and !w.zombie_ai[zslot].alert) {
         return none;
@@ -461,8 +490,6 @@ pub fn nearestPlayerSnap(w: *const World, scan: *const PlayerScan, zslot: Slot, 
             // crouch_hear_scale. The AITarget player hear distance wins over
             // the Rules floor when set (stock `EAISetNearestEntityAsTarget`
             // hearDistMax; hear 0 reads 50 at parse, so nonzero = declared).
-            const hear_base = w.class_id[zslot].target_player_hear;
-            const hear_rule = if (hear_base != 0) hear_base else w.rules.ai.hear_range;
             const hear = if (p.crouching) hear_rule * w.rules.ai.crouch_hear_scale else hear_rule;
             if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear, p.light_level)) continue;
             best_d = d;
@@ -818,6 +845,38 @@ test "AI senses: LOS and view cone gate sight; hearing ignores walls" {
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0, 10.0, 200.0));
     // Beyond the sense range: never sensed.
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0, 10.0, 200.0));
+}
+test "AI senses: acquisition uses the class's own SightRange, widened by hearing" {
+    // Stock `EAITarget.check` sees through `GetSeeDistance()` and hears through
+    // the AITarget row's hear distance; the two are separate radii and hearing
+    // passes walls. The old flat `sense_dist_sq` cap held every class at 48 m,
+    // so a vulture (SightRange 70) never acquired a real player past it.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const pid = w.spawnPlayer(60, 70, 0, 0).?;
+    const zid = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(zid).?;
+    var scan: PlayerScan = .{};
+    _ = snapshotPlayers(&w, &scan, true);
+    // Fully lit: this test is about the radius, not the stealth light gate.
+    scan.snaps[0].light_level = 200;
+    // Stock vulture: SightRange 70, zombie yaw 90 faces +x.
+    w.class_id[zs] = .{ .id = 1, .sight_range = 70 };
+    w.class_table[1].sight_range = 70;
+    try std.testing.expectEqual(pid, nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 90).id);
+    // A 40 m class (stock zombies sit at 27-40) does not acquire at 60 m.
+    w.class_table[1].sight_range = 40;
+    w.class_id[zs] = .{ .id = 1, .sight_range = 40 };
+    try std.testing.expectEqual(@as(i32, -1), nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 90).id);
+    // Hearing is its own radius: a 30 m class with a declared 90 m hear
+    // distance still acquires that same player.
+    w.class_id[zs] = .{ .id = 1, .sight_range = 30, .target_player_hear = 90 };
+    w.class_table[1].sight_range = 30;
+    try std.testing.expectEqual(pid, nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 90).id);
+    // A stock "never target this class" negative see distance denies outright,
+    // even with a wide hear radius in the same row.
+    w.class_id[zs] = .{ .id = 1, .target_player_see = -1, .target_player_hear = 90 };
+    try std.testing.expectEqual(@as(i32, -1), nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 90).id);
 }
 test "AI senses: per-class MaxViewAngle narrows the cone" {
     // RE entity-ai.md: stock EntityAlive cctor defaults maxViewAngle to 180

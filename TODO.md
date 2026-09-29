@@ -162,10 +162,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       1.0-1.8 s plus a +0.2/zombie ally boost (entity-ai.md:1817-1825); the
       second path `src/server/game/world_tick.zig:136-248` runs every 10 ticks
       with no per-zombie delay, no `CanBreakBlocks` gate and no ally boost.
-- [ ] **Per-class `SightRange` capped at 48 m for players** -
-      `src/ecs/sensing.zig:367` rejects on `rules.ai.sense_dist_sq` before the
-      per-class value is consulted; stock ships 70 (animalZombieVulture) and 100
-      (animalChickenHostile). The host-bot path already uses the per-class value.
+- [x] **Per-class `SightRange` capped at 48 m for players** - closed
+      2026-09-28: `nearestPlayerSnap` and `canSensePlayer` now use the
+      per-entity see distance, widened by the class's hear distance, and a
+      negative `target_player_see` denies outright instead of squaring to a
+      1 m radius.
 - [ ] **Player-placed multi-block groups occupy one cell** - stock adds children
       on `OnBlockAdded` and redirects child damage to the parent
       (world/blocks.md:246-249, 463-465); `src/server/c2s/blocks_setblock.zig:265-285`

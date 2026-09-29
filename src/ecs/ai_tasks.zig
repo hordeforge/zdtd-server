@@ -595,8 +595,9 @@ pub fn senseDistSq(w: *const World, s: Slot) f32 {
     // The AITarget player see distance wins over SightRange when set (stock
     // `EAISetNearestEntityAsTarget` targetClasses): a zombie whose row says
     // see 20 senses players at 20, not at its 27-40 SightRange. A negative
-    // stock value (never target this class) yields a negative square and
-    // denies every range check below.
+    // stock value means "never target this class"; squaring it here returns 1,
+    // so the caller that needs a hard denial tests the raw field
+    // (`sensing.nearestPlayerSnap`).
     const tp = w.class_id[s].target_player_see;
     if (tp != 0) return tp * tp;
     const pe = w.class_id[s].sight_range;
