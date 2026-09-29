@@ -710,3 +710,50 @@ test "AITarget SetNearestEntityAsTarget class list parses to Unity name hashes" 
     const z = t.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(u8, 1), z.target_class_n);
 }
+
+test "EntityFlags and the RunawayFromEntity task params parse per class" {
+    // EntityClass.ParseEntityFlags (IL=49) OR-s comma-separated names; the
+    // runaway task's SetData (EAIRunawayFromEntity IL=34) reads flags,
+    // safeFlags, safeDistance and dangerDistance.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/flee.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="animalStag">
+        \\    <property name="EntityFlags" value="Animal,Timid"/>
+        \\    <property name="AITask-1" value="RunawayFromEntity" data="flags=Player,Zombie;safeFlags=Edible;safeDistance=20;dangerDistance=12"/>
+        \\  </entity_class>
+        \\  <entity_class name="animalStagChild" extends="animalStag">
+        \\  </entity_class>
+        \\  <entity_class name="zombieTemplateMale">
+        \\    <property name="EntityFlags" value="Zombie"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const stag = t.byName("animalStag") orelse return error.TestUnexpectedResult;
+    const animal_bit = entities_mod_flag("Animal");
+    const timid_bit = entities_mod_flag("Timid");
+    try std.testing.expectEqual(animal_bit | timid_bit, stag.entity_flags);
+    try std.testing.expectEqual(entities_mod_flag("Player") | entities_mod_flag("Zombie"), stag.flee.flags);
+    try std.testing.expectEqual(entities_mod_flag("Edible"), stag.flee.safe_flags);
+    try std.testing.expectEqual(@as(f32, 20), stag.flee.safe_distance);
+    try std.testing.expectEqual(@as(f32, 12), stag.flee.danger_distance);
+    // Inherited through Extends.
+    const child = t.byName("animalStagChild") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(stag.entity_flags, child.entity_flags);
+    try std.testing.expectEqual(stag.flee.flags, child.flee.flags);
+    // A class with neither: all zero, which keeps the legacy fear scan.
+    const z = t.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(entities_mod_flag("Zombie"), z.entity_flags);
+    try std.testing.expectEqual(@as(u32, 0), z.flee.flags);
+}
+
+/// Mirror of the private flag-bit mapping for the assertions above.
+fn entities_mod_flag(name: []const u8) u32 {
+    return entities.parseEntityFlags(name);
+}

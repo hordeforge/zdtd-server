@@ -105,6 +105,11 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.hash = def.hash;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_class_n = def.target_class_n;
+    cid.entity_flags = def.entity_flags;
+    cid.flee_flags = def.flee_flags;
+    cid.flee_safe_flags = def.flee_safe_flags;
+    cid.flee_safe_distance = def.flee_safe_distance;
+    cid.flee_danger_distance = def.flee_danger_distance;
     cid.loot_list = def.loot_list;
     cid.drop_prob = def.drop_prob;
     cid.time_stay = def.time_stay;
@@ -257,6 +262,11 @@ pub const EntityClass = struct {
     /// its length; 0 = no list, keep the legacy player-only acquisition.
     target_class_hashes: [c.max_target_classes]i32 = .{0} ** c.max_target_classes,
     target_class_n: u8 = 0,
+    entity_flags: u32 = 0,
+    flee_flags: u32 = 0,
+    flee_safe_flags: u32 = 0,
+    flee_safe_distance: f32 = 0,
+    flee_danger_distance: f32 = 0,
     /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
     /// 0 = unset (the sense path falls back to sight_range). Negative stock
     /// values (never target) stay negative so the gate keeps them denied.

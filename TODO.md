@@ -170,6 +170,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       modelled. Original entry: stock `canHitEntity` raycasts and gates
       yaw and pitch (vehicles-drones-turrets.md:1063-1094); `turrets.zig:57-79`
       picks the nearest zombie by 2D distance and applies damage unconditionally.
+- [x] **Timid animals fled everything** - closed 2026-09-28: V3.2.0 replaced
+      `EAIRunawayFromEntity`'s V3.1 `class` list with an `EntityFlags` match
+      (`flags`/`safeFlags` + `safeDistance`/`dangerDistance`, IL=136); zdtd
+      feared ANY player/zombie/animal within one Rules radius, so a rabbit fled
+      the rabbit beside it. Both the per-class `EntityFlags` and the task's
+      `SetData` params now parse and the scan follows the IL (threat-flag
+      intersection, safe-flag exclusion, `min(see, safeDistance) * 0.8` radius,
+      LOS for candidates past `dangerDistance`). All-zero params keep the legacy
+      scan, so an offline world is unchanged. Side fix: numbered `AITask-N`
+      properties now fold their `data=` attribute into the value like
+      `AITarget-N` always did, which numbered task params (e.g. a
+      `RangedAttackTarget` cooldown) were silently losing.
 - [x] **Mob-vs-mob targeting absent** - closed 2026-09-28: the AITarget
       `SetNearestEntityAsTarget class=` list parses to Unity name hashes
       (`EntityDef.target_class_hashes`, matched against a candidate's

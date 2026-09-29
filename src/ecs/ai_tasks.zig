@@ -15,6 +15,7 @@ const PlayerScan = systems.PlayerScan;
 const snapshotPlayers = systems.snapshotPlayers;
 const nearestPlayerSnap = systems.nearestPlayerSnap;
 const nearestMobSnap = @import("sensing.zig").nearestMobSnap;
+const rayClear = @import("sensing.zig").rayClear;
 const applyRevengeTarget = systems.applyRevengeTarget;
 const stealthLightAttackPercent = systems.stealthLightAttackPercent;
 const targetLive = systems.targetLive;
@@ -995,6 +996,46 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
     const x = w.transform[s].x;
     const z = w.transform[s].z;
     var best: i32 = -1;
+    const cid = &w.class_id[s];
+    // Stock `EAIRunawayFromEntity.FindEnemy` (il EAIRunawayFromEntity.txt
+    // IL=136): with a `flags` set, candidates must intersect it and must not
+    // carry `safeFlags`; the query radius is `min(GetSeeDistance(), safeDistance)
+    // * 0.8`, a player candidate additionally needs `CanSee` + `CanSeeStealth`,
+    // and a non-player beyond `dangerDistance` needs `CanSee`. Without parsed
+    // task data (`flee_flags == 0`, i.e. no stock entityclasses) the legacy
+    // Rules-based scan runs unchanged, so an offline world behaves as before.
+    if (cid.flee_flags != 0) {
+        cid_view: {
+            const see_d = senseDistSq(w, s);
+            if (!(see_d > 0)) break :cid_view;
+            const see = @sqrt(see_d);
+            const safe_d = if (cid.flee_safe_distance > 0) cid.flee_safe_distance else see;
+            const radius = @min(see, safe_d) * 0.8;
+            var best_d2: f32 = std.math.floatMax(f32);
+            const kinds = [_]c.Kind{ .player, .zombie, .animal };
+            for (kinds) |kind| {
+                for (query.groupSlice(w, kind)) |t| {
+                    if (t == s) continue;
+                    if (!w.alive[t] or !w.mask[t].transform) continue;
+                    if ((w.class_id[t].entity_flags & cid.flee_flags) == 0) continue;
+                    if (cid.flee_safe_flags != 0 and
+                        (w.class_id[t].entity_flags & cid.flee_safe_flags) != 0) continue;
+                    const dx = pos[t].x - x;
+                    const dz = pos[t].z - z;
+                    const d2 = dx * dx + dz * dz;
+                    if (d2 >= best_d2 or d2 > radius * radius) continue;
+                    if (d2 > cid.flee_danger_distance * cid.flee_danger_distance) {
+                        // Far candidates count only when actually seen.
+                        if (!rayClear(w, x, w.transform[s].y + 1.6, z, pos[t].x, pos[t].y + 1.6, pos[t].z)) continue;
+                    }
+                    best_d2 = d2;
+                    best = w.network_id[t].id;
+                }
+            }
+            ai.fear_target = best;
+            return;
+        }
+    }
     // V3.2.0 danger radius (changelog-3.2.0 §4.4): a threat within this
     // distance becomes the fear source.
     const flee = w.rules.ai.timid_danger_distance;
@@ -3315,4 +3356,49 @@ test "block chew delay follows the EAIBreakBlock formula and ally box" {
     // Just inside on every axis.
     _ = w.spawnZombie(-1.6, 71.4, -1.6, 40).?;
     try std.testing.expectEqual(@as(u32, 2), blockAttackAllyCount(&w, zs));
+}
+
+test "RunawayFromEntity fears only the flagged kinds, not a neighbour" {
+    // EAIRunawayFromEntity.FindEnemy (IL=136): a candidate must intersect the
+    // task's `flags` and must not carry `safeFlags`; V3.2.0 replaced the V3.1
+    // `class` list with this EntityFlags match (changelog 3.2.0 section 4.4).
+    // The legacy Rules scan feared ANY player/zombie/animal in range, so a
+    // rabbit fled the rabbit next to it.
+    var w: World = .{};
+    defer w.deinit();
+    const timid = w.spawnAnimal(0, 70, 0, 60, 0, "").?;
+    const ts = w.slotOfNetId(timid).?;
+    w.class_id[ts].is_enemy = false;
+    w.class_id[ts].ai_attack = false;
+    w.class_id[ts].entity_flags = c.entity_flag_animal | c.entity_flag_timid;
+    w.class_id[ts].flee_flags = c.entity_flag_player | c.entity_flag_zombie;
+    w.class_id[ts].flee_safe_distance = 30;
+    w.class_id[ts].flee_danger_distance = 12;
+    // A neighbour of its own kind: carries Animal, which is NOT in flee_flags.
+    const other = w.spawnAnimal(0, 70, 2, 60, 0, "").?;
+    const os = w.slotOfNetId(other).?;
+    w.class_id[os].entity_flags = c.entity_flag_animal;
+    w.class_id[os].is_enemy = false;
+    // A zombie: flagged, so it IS the threat.
+    const z = w.spawnZombie(0, 70, 6, 100).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].entity_flags = c.entity_flag_zombie;
+    var t: f32 = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(w.network_id[zs].id, w.zombie_ai[ts].fear_target);
+    // An entity whose flags are safe is excluded even when a threat flag
+    // matches elsewhere in its set.
+    w.class_id[zs].entity_flags = c.entity_flag_zombie | c.entity_flag_edible;
+    w.class_id[ts].flee_safe_flags = c.entity_flag_edible;
+    w.zombie_ai[ts].fear_cd = 0;
+    t = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[ts].fear_target);
+    // No parsed task data: the legacy scan still fears the neighbour.
+    w.class_id[ts].flee_flags = 0;
+    w.class_id[ts].flee_safe_flags = 0;
+    w.zombie_ai[ts].fear_cd = 0;
+    t = 0;
+    while (t < 0.2) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[ts].fear_target >= 0);
 }

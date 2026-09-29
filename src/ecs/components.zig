@@ -76,6 +76,34 @@ pub const Player = struct {
 
 pub const max_target_classes: usize = 12;
 
+/// `EntityFlags` bits (`EntityClass.ParseEntityFlags`, EntityClass.il IL=49,
+/// OR-s comma-separated names). Not protocol-visible: only the names matter for
+/// a threat/safe match, so they map to stable private bits. `All` is the union,
+/// which is what the real enum's combined value is.
+pub const entity_flag_player: u32 = 1 << 0;
+pub const entity_flag_zombie: u32 = 1 << 1;
+pub const entity_flag_animal: u32 = 1 << 2;
+pub const entity_flag_bandit: u32 = 1 << 3;
+pub const entity_flag_edible: u32 = 1 << 4;
+pub const entity_flag_timid: u32 = 1 << 5;
+pub const entity_flag_ai_hearing: u32 = 1 << 6;
+pub const entity_flag_ai_smelling: u32 = 1 << 7;
+pub const entity_flag_all: u32 = entity_flag_player | entity_flag_zombie | entity_flag_animal |
+    entity_flag_bandit | entity_flag_edible | entity_flag_timid | entity_flag_ai_hearing | entity_flag_ai_smelling;
+
+pub fn entityFlagBit(n: []const u8) u32 {
+    if (std.ascii.eqlIgnoreCase(n, "Player")) return entity_flag_player;
+    if (std.ascii.eqlIgnoreCase(n, "Zombie")) return entity_flag_zombie;
+    if (std.ascii.eqlIgnoreCase(n, "Animal")) return entity_flag_animal;
+    if (std.ascii.eqlIgnoreCase(n, "Bandit")) return entity_flag_bandit;
+    if (std.ascii.eqlIgnoreCase(n, "Edible")) return entity_flag_edible;
+    if (std.ascii.eqlIgnoreCase(n, "Timid")) return entity_flag_timid;
+    if (std.ascii.eqlIgnoreCase(n, "AIHearing")) return entity_flag_ai_hearing;
+    if (std.ascii.eqlIgnoreCase(n, "AISmelling")) return entity_flag_ai_smelling;
+    if (std.ascii.eqlIgnoreCase(n, "All")) return entity_flag_all;
+    return 0;
+}
+
 pub const ClassId = struct {
     /// Index into World.class_table (fallback only when the per-entity stat
     /// fields below are 0).
@@ -176,6 +204,15 @@ pub const ClassId = struct {
     /// acquisition stays player-only (fail closed without stock data).
     target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
     target_class_n: u8 = 0,
+    /// entityclasses `EntityFlags` (see EntityDef.entity_flags): the bit set a
+    /// flee scan matches a threat against.
+    entity_flags: u32 = 0,
+    /// `RunawayFromEntity` params (flags / safeFlags / radii). All zero keeps
+    /// the legacy Rules-based fear scan (fail open without stock data).
+    flee_flags: u32 = 0,
+    flee_safe_flags: u32 = 0,
+    flee_safe_distance: f32 = 0,
+    flee_danger_distance: f32 = 0,
     /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only). Bit 1
     /// set = sense acquisition is blocked while the entity is unalerted.
     block_if_alert_only: u8 = 0,

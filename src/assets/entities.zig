@@ -149,6 +149,11 @@ pub const EntityDef = struct {
     /// parsed, which keeps the legacy player-only behaviour (fail closed).
     target_class_hashes: [max_target_classes]i32 = .{0} ** max_target_classes,
     target_class_n: u8 = 0,
+    /// entityclasses `EntityFlags` (EntityClass.ParseEntityFlags IL=49): the
+    /// bit set `EAIRunawayFromEntity` matches a threat against.
+    entity_flags: u32 = 0,
+    /// `RunawayFromEntity` task params (`flags`/`safeFlags`/radii).
+    flee: FleeParams = .{},
     /// `BlockIf` target-list condition (`EAIBlockIf` SetData IL: `data=`
     /// "condition=<type> <op> <value>" triples stepped by 3, `eType` =
     /// None/Alert/Investigate, `eOp` = None/e/ne). Only the alert arm has a
@@ -551,6 +556,53 @@ const max_extends_depth: u8 = 24;
 /// most a dozen classes); a longer list is truncated rather than allocated.
 pub const max_target_classes: usize = 12;
 
+/// `EAIRunawayFromEntity` `SetData` fields (il EAIRunawayFromEntity.txt
+/// SetData IL=34): the threat flags and the safe flags with their two radii.
+/// All zero = no parsed task, which keeps the legacy Rules-based fear scan.
+pub const FleeParams = struct {
+    flags: u32 = 0,
+    safe_flags: u32 = 0,
+    safe_distance: f32 = 0,
+    danger_distance: f32 = 0,
+};
+
+/// `EntityClass.ParseEntityFlags` (IL=49): comma-separated `EntityFlags` names
+/// OR-ed together with `EnumUtils.TryParse` (an unknown name is skipped). The
+/// numeric values are not protocol-visible; the names are what a threat/safe
+/// comparison needs, so they map to stable private bits. `All` is the union,
+/// which is what the real enum's combined value is.
+pub fn parseEntityFlags(names: []const u8) u32 {
+    var out: u32 = 0;
+    var it = std.mem.splitScalar(u8, names, ',');
+    while (it.next()) |raw| {
+        const n = std.mem.trim(u8, raw, " \t\r\n");
+        if (n.len == 0) continue;
+        out |= components.entityFlagBit(n);
+    }
+    return out;
+}
+
+/// Parse one `RunawayFromEntity` AITask entry's `k=v` tail (SetData IL=34:
+/// `flags`, `safeFlags` via ParseEntityFlags, `safeDistance`, `dangerDistance`).
+fn parseRunawayTask(entry: []const u8, fp: *FleeParams) void {
+    const name, const data = splitTaskEntry(entry);
+    if (!std.mem.eql(u8, name, "RunawayFromEntity")) return;
+    var it = std.mem.splitScalar(u8, data, ';');
+    while (it.next()) |kv| {
+        const eq = std.mem.findScalar(u8, kv, '=') orelse continue;
+        const k = std.mem.trim(u8, kv[0..eq], " \t");
+        const v = std.mem.trim(u8, kv[eq + 1 ..], " \t");
+        if (std.mem.eql(u8, k, "flags")) fp.flags = parseEntityFlags(v);
+        if (std.mem.eql(u8, k, "safeFlags")) fp.safe_flags = parseEntityFlags(v);
+        if (std.mem.eql(u8, k, "safeDistance")) {
+            if (xml.parseF32(v)) |f| fp.safe_distance = f;
+        }
+        if (std.mem.eql(u8, k, "dangerDistance")) {
+            if (xml.parseF32(v)) |f| fp.danger_distance = f;
+        }
+    }
+}
+
 pub const TargetPlayerSense = struct {
     hear: f32 = 0,
     see: f32 = 0,
@@ -839,6 +891,7 @@ fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
     ranged: ?*RangedParams,
+    flee: ?*FleeParams,
 ) u16 {
     var mask: u16 = 0;
     var saw_list = false;
@@ -869,6 +922,7 @@ fn resolvedAiTasks(
                         const trimmed_entry = std.mem.trim(u8, entry, " \t\r\n");
                         const tok = if (std.mem.findScalar(u8, trimmed_entry, ' ')) |sp2| std.mem.trim(u8, trimmed_entry[0..sp2], " \t") else trimmed_entry;
                         if (std.mem.eql(u8, tok, "RangedAttackTarget")) parseRangedTaskParams(trimmed_entry, rp);
+                        if (flee) |fp| parseRunawayTask(trimmed_entry, fp);
                     }
                     if (cut >= rest.len) break;
                     rest = rest[cut + 1 ..];
@@ -878,6 +932,10 @@ fn resolvedAiTasks(
             if (!std.mem.startsWith(u8, key, "AITask-")) continue;
             numbered_n += 1;
             orTaskName(&numbered, val);
+            if (flee) |fp| {
+                const trimmed = std.mem.trim(u8, val, " \t\r\n");
+                parseRunawayTask(trimmed, fp);
+            }
         }
         if (has_pipe) {
             mask = pipe;
@@ -901,7 +959,7 @@ fn resolvedAiAttacks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
 ) bool {
-    const tasks = resolvedAiTasks(classes, name, null);
+    const tasks = resolvedAiTasks(classes, name, null, null);
     if (tasks & components.ai_task_list_set == 0) return true;
     return components.aiTaskAllowed(tasks, .approach_attack);
 }
@@ -1060,15 +1118,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (keep) {
                     // last wins
                     const kn = try arena.dupe(u8, pname);
-                    // Numbered AITarget-N props carry the task's SetData on a
-                    // separate `data=` attribute (stock
+                    // Numbered AITarget-N / AITask-N props carry the task's
+                    // SetData on a separate `data=` attribute (stock
                     // `<property name="AITarget-2" value="BlockIf"
-                    // data="condition=alert e 0"/>`); the pipe `AITarget` blob
-                    // inlines it instead. Append it so the entry resolvers see
+                    // data="condition=alert e 0"/>`, `<property name="AITask-1"
+                    // value="RunawayFromEntity" data="flags=..."/>`); the pipe
+                    // blobs inline it instead. Append it so the entry resolvers see
                     // the same "Name key=val" text either way. Other resolvers
                     // match on the entry name, so the suffix is inert for them.
                     const vv = if (!is_passive and
-                        (std.mem.eql(u8, pname, "AITarget") or std.mem.startsWith(u8, pname, "AITarget-")) and
+                        (std.mem.eql(u8, pname, "AITarget") or std.mem.startsWith(u8, pname, "AITarget-") or
+                            std.mem.eql(u8, pname, "AITask") or std.mem.startsWith(u8, pname, "AITask-")) and
                         (xml.attr(body, ptag, "data") != null))
                         try std.fmt.allocPrint(arena, "{s} {s}", .{ pval, xml.attr(body, ptag, "data").? })
                     else
@@ -1142,7 +1202,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
         var ranged_params: RangedParams = .{};
-        const ai_tasks = resolvedAiTasks(&classes, name, &ranged_params);
+        var flee_params: FleeParams = .{};
+        const ai_tasks = resolvedAiTasks(&classes, name, &ranged_params, &flee_params);
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
@@ -1442,6 +1503,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .hurt_target_classes = hurt_classes,
             .target_class_hashes = target_hashes,
             .target_class_n = target_n,
+            .entity_flags = parseEntityFlags(resolveProp(&classes, name, "EntityFlags", 0) orelse ""),
+            .flee = flee_params,
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
