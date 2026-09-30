@@ -252,7 +252,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       seed-derived generator is re-mirrored over the block plane on every join
       burst and chunk stream (`src/world/deco_mirror.zig:132-137`), so a restart
       or any client streaming into that 128x128 deco chunk restores the tree.
-- [ ] **No block ticker** - `Block.UpdateTick` / `WorldBlockTicker` is absent
+- [x] **No block ticker** - closed 2026-09-28 for the scheduler and its
+      canonical consumer: `server/game/block_ticker.zig` holds a fixed
+      scheduled-tick ring drained once a tick (`Game.block_tick_q`, drops
+      counted), every block add registers through `noteBlockAdded`, and
+      `BlockPlantGrowing` (IL=239) is implemented - alive check
+      (`CanPlantStay`: lit or open-sky, plus `CanGrowOn` soil `FertileLevel`),
+      light gate, `GrowIfAnythinOnTop`, `Next` swap with rotation/meta and the
+      optional meta bump, and the reschedule (deterministic `GrowthRate` or the
+      random jittered band). Residual: stock's block-light channel is answered
+      by sky exposure (a roofed crop reads dark), `BlockPlaceholderMap.Replace`
+      and the biome `Next` remap are not modelled, and mines/dew collectors
+      still do not tick. Original entry: `Block.UpdateTick` /
+      `WorldBlockTicker` is absent
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
       never fire (world/blocks.md:262-263, 774-786).

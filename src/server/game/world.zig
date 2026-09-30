@@ -17,6 +17,7 @@ pub const blastBlock = world_explosion.blastBlock;
 const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
+const block_ticker = @import("block_ticker.zig");
 const packages = @import("../../wire/packages.zig");
 const utf8_util = @import("../../util/utf8.zig");
 const plugin_compose = @import("plugin_compose.zig");
@@ -453,6 +454,9 @@ pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
             self.trackHeatBlock(x, y, z, new_id);
         }
     }
+    // A growing block registers its first scheduled tick here, the one place
+    // every add routes through (player placement, prefab stamping, deco).
+    block_ticker.noteAdded(self, x, y, z, new_id);
     if (self.blocks.isVending(new_id)) {
         _ = self.vending.getOrCreate(.{ .x = x, .y = y, .z = z }, new_id, self.blocks.traderId(new_id));
     }

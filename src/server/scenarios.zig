@@ -19689,3 +19689,137 @@ test "scenario a multi-block child redirects to its parent and dies with it" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(cx, cyc, cz));
     std.debug.print("PASS multi-block: child redirects and children clear with the parent\n", .{});
 }
+
+test "scenario a planted crop grows a stage per scheduled block tick" {
+    // Stock's block ticker (`WorldBlockTicker`, blocks.md section 7) fires
+    // `BlockPlantGrowing.UpdateTick`: a live, lit plant swaps in its `Next`
+    // stage and reschedules itself, and an unlit or unsupported one is removed
+    // (`BlockPlant.CheckPlantAlive`).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_plant.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="plantedYucca1">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="Next" value="plantedYucca2" />
+        \\  <property name="GrowthRate" value="1" />
+        \\  <property name="FertileLevel" value="0" />
+        \\</block>
+        \\<block name="plantedYucca2">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="Next" value="plantedYucca3Harvest" />
+        \\  <property name="GrowthRate" value="1" />
+        \\  <property name="FertileLevel" value="0" />
+        \\</block>
+        \\<block name="plantedYucca3Harvest">
+        \\  <property name="MaxDamage" value="1" />
+        \\</block>
+        \\<block name="terrDirt">
+        \\  <property name="Material" value="Mdirt" />
+        \\</block>
+        \\</blocks>
+    );
+    // AssignIds pins from the bundled dump: the plant names and their ids.
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            const pairs = [_]struct { []const u8, u16 }{
+                .{ "plantedYucca1", 24706 },
+                .{ "plantedYucca2", 24707 },
+                .{ "plantedYucca3Harvest", 24708 },
+                .{ "plantedMushroom1", 24694 },
+                .{ "plantedMushroom2", 24695 },
+                .{ "plantedMushroom3Harvest", 24696 },
+                .{ "terrDirt", 5 },
+                .{ "terrStone", 1 },
+            };
+            for (pairs) |pr| {
+                if (std.mem.eql(u8, name, pr[0])) return pr[1];
+            }
+            return null;
+        }
+    };
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const stage1 = g.blocks.byName("plantedYucca1").?.id;
+    const stage2 = g.blocks.byName("plantedYucca2").?.id;
+    const stage3 = g.blocks.byName("plantedYucca3Harvest").?.id;
+    try std.testing.expect(stage1 != 0 and stage2 != 0 and stage3 != 0);
+    try std.testing.expect(g.blocks.byId(stage1).?.plant_growing);
+    try std.testing.expectEqualStrings("plantedYucca2", g.blocks.byId(stage1).?.plant_next);
+
+    const px: i32 = 256;
+    const pz: i32 = 256;
+    const cy: i32 = 80;
+    // Bare dirt under the plant: `FertileLevel` 0 accepts anything, and the
+    // seed's own name resolves soil through the AssignIds dump.
+    try g.world.setBlockWorld(px, cy - 1, pz, world_store.block_stone);
+    g.setBlockRaw(px, cy - 1, pz, world_store.block_stone);
+
+    // Place stage 1 the way the place path does: commit + `noteBlockAdded`,
+    // which registers the first scheduled tick.
+    g.setBlockRaw(px, cy, pz, stage1);
+    try g.world.setBlockRawWorld(px, cy, pz, stage1);
+    g.noteBlockAdded(px, cy, pz, stage1);
+    try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
+
+    _ = try g.step(); // tick 1: stage 1 -> stage 2
+    try std.testing.expectEqual(stage2, try g.world.blockWorld(px, cy, pz));
+    _ = try g.step(); // tick 2: stage 2 -> harvest stage
+    try std.testing.expectEqual(stage3, try g.world.blockWorld(px, cy, pz));
+    // The chain ends: the harvest stage carries no growth class, so its own
+    // tick drains without scheduling another and the queue empties.
+    try std.testing.expect(g.block_tick_n > 0);
+    _ = try g.step();
+    try std.testing.expectEqual(@as(usize, 0), g.block_tick_n);
+    try std.testing.expectEqual(stage3, try g.world.blockWorld(px, cy, pz));
+
+    // A plant that must stay lit dies when it is roofed: `LightLevelStay` 8
+    // with a solid block above and no sky exposure.
+    const Roofed = struct {
+        fn light(_: ?*anyopaque, _: i32, _: i32, _: i32) u8 {
+            return 0; // no light anywhere under the roof
+        }
+    };
+    g.plant_light_fn = &Roofed.light;
+    // A solid roof over the cell: `IsOpenSkyAbove` is false and the light read
+    // is 0, so `CanPlantStay` fails and the plant is removed.
+    try g.world.setBlockWorld(px, cy + 1, pz, world_store.block_stone);
+    g.setBlockRaw(px, cy + 1, pz, world_store.block_stone);
+    var bx2_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx2 = try std.fmt.bufPrint(&bx2_buf, "{s}/blocks_plant2.xml", .{dir});
+    try io_fs.writeFile(bx2,
+        \\<blocks>
+        \\<block name="plantedMushroom1">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="Next" value="plantedMushroom2" />
+        \\  <property name="GrowthRate" value="1" />
+        \\  <property name="LightLevelStay" value="8" />
+        \\</block>
+        \\<block name="plantedMushroom2">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="Next" value="plantedMushroom3Harvest" />
+        \\  <property name="GrowthRate" value="1" />
+        \\</block>
+        \\<block name="plantedMushroom3Harvest" />
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx2, &Ids.id, null);
+    const shroom = g.blocks.byName("plantedMushroom1").?.id;
+    try g.world.setBlockRawWorld(px, cy, pz, shroom);
+    g.setBlockRaw(px, cy, pz, shroom);
+    g.noteBlockAdded(px, cy, pz, shroom);
+    _ = try g.step();
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, cy, pz));
+    g.plant_light_fn = null;
+    std.debug.print("PASS plant-tick: crops grow a stage per tick and unlit ones die\n", .{});
+}

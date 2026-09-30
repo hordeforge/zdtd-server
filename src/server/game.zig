@@ -51,6 +51,7 @@ const game_trader_wire = @import("game/trader_wire.zig");
 const game_send_extra = @import("game/send_extra.zig");
 const game_rescue = @import("game/rescue.zig");
 const game_guard = @import("game/guard.zig");
+const block_ticker = @import("game/block_ticker.zig");
 const game_session_drop = @import("game/session_drop.zig");
 const game_init_assets = @import("game/init_assets.zig");
 const game_init_world = @import("game/init_world.zig");
@@ -505,6 +506,15 @@ pub const Game = struct {
     /// IL_00C1-0122): 0 logs every executed command, 1 hides operator-console
     /// commands, 2 also hides remote-client ones, 3 hides all but nothing else.
     hide_command_execution_log: u8 = 0,
+    /// Scheduled block ticks (`WorldBlockTicker`): a fixed ring drained once a
+    /// tick by `block_ticker.tick`. See that module.
+    block_tick_q: [block_ticker.tick_queue_cap]block_ticker.ScheduledTick = undefined,
+    block_tick_n: usize = 0,
+    /// Plant light read (`ChunkCluster.GetLight` / `GetBlockLightValue`).
+    /// zdtd has no light channel, so the default answers from sky exposure
+    /// (see `block_ticker`); tests drive it directly.
+    plant_light_fn: ?*const fn (?*anyopaque, i32, i32, i32) u8 = null,
+    plant_light_ctx: ?*anyopaque = null,
     server_visibility: u8 = 0,
     /// Sandbox `AllowZombieDigging` (option 40, default on): stock pushes it
     /// into `EntityMoveHelper.AllowZombieDigging`, and with it off a zombie

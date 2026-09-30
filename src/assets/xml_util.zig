@@ -194,6 +194,12 @@ pub fn parseU32(s: []const u8) ?u32 {
     return std.fmt.parseInt(u32, s, 10) catch null;
 }
 
+/// `true`/`True`/`1` are true, anything else false (stock's
+/// `StringParsers.ParseBool` on an XML attribute).
+pub fn parseBool(s: []const u8) bool {
+    return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "True") or std.mem.eql(u8, s, "1");
+}
+
 pub fn parseF32(s: []const u8) ?f32 {
     return std.fmt.parseFloat(f32, s) catch null;
 }

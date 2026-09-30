@@ -128,6 +128,25 @@ pub const BlockDef = struct {
     /// `SiblingBlock` name: the block `BlockSpikes` swaps in when it retracts
     /// (air when absent). Resolved by name at the hazard site.
     hazard_sibling: []const u8 = "",
+    /// blocks.xml `Class="PlantGrowing"` (`BlockPlantGrowing`, RE blocks.md
+    /// section 7): a growth stage that reschedules itself and swaps in `Next`
+    /// when the plant is alive and lit.
+    plant_growing: bool = false,
+    /// `Next` (the following stage's block name), `GrowthRate` (scheduled tick
+    /// interval; 0 = stock's `GetTickRate` 10), `GrowthDeviation` (gaussian
+    /// jitter, ctor default 0.25), `IsRandom` (random-tick growth instead of a
+    /// deterministic schedule), `LightLevelGrow` / `LightLevelStay`,
+    /// `GrowIfAnythinOnTop`, `IsGrowOnTopEnabled` and the soil gate
+    /// `FertileLevel` (`BlockPlant.CanGrowOn` IL=24).
+    plant_next: []const u8 = "",
+    growth_rate: f32 = 0,
+    growth_deviation: f32 = 0.25,
+    growth_random: bool = false,
+    light_level_grow: i32 = 0,
+    light_level_stay: i32 = 0,
+    grow_if_anything_on_top: bool = false,
+    grow_on_top_enabled: bool = false,
+    fertile_level: i32 = 0,
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
     /// Door block: stock tags the openables with `BlockTag="Door"`
@@ -567,6 +586,16 @@ pub fn loadFromPath(
         hazard_damage: i32 = 0,
         hazard_damage_received: i32 = 0,
         hazard_sibling: ?[]const u8 = null,
+        plant_growing: bool = false,
+        plant_next: ?[]const u8 = null,
+        growth_rate: f32 = 0,
+        growth_deviation: f32 = 0.25,
+        growth_random: bool = false,
+        light_level_grow: i32 = 0,
+        light_level_stay: i32 = 0,
+        grow_if_anything_on_top: bool = false,
+        grow_on_top_enabled: bool = false,
+        fertile_level: i32 = 0,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -659,6 +688,16 @@ pub fn loadFromPath(
         var hazard_damage: i32 = 0;
         var hazard_damage_received: i32 = 0;
         var hazard_sibling: ?[]const u8 = null;
+        var plant_growing = false;
+        var plant_next: ?[]const u8 = null;
+        var growth_rate: f32 = 0;
+        var growth_deviation: f32 = 0.25;
+        var growth_random = false;
+        var light_level_grow: i32 = 0;
+        var light_level_stay: i32 = 0;
+        var grow_if_anything_on_top = false;
+        var grow_on_top_enabled = false;
+        var fertile_level: i32 = 0;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
@@ -771,6 +810,7 @@ pub fn loadFromPath(
                     if (std.mem.eql(u8, cn, "Spikes")) hazard_kind = .spikes;
                     if (std.mem.eql(u8, cn, "Barbed")) hazard_kind = .barbed;
                     if (std.mem.eql(u8, cn, "Damage")) hazard_kind = .damage;
+                    if (std.mem.eql(u8, cn, "PlantGrowing")) plant_growing = true;
                 }
             } else if (std.mem.eql(u8, pname, "Damage")) {
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage = v;
@@ -778,6 +818,24 @@ pub fn loadFromPath(
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage_received = v;
             } else if (std.mem.eql(u8, pname, "SiblingBlock")) {
                 hazard_sibling = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Next")) {
+                plant_next = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "GrowthRate")) {
+                if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| growth_rate = v;
+            } else if (std.mem.eql(u8, pname, "GrowthDeviation")) {
+                if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| growth_deviation = v;
+            } else if (std.mem.eql(u8, pname, "IsRandom")) {
+                growth_random = xml.parseBool(xml.attr(clean, pi, "value") orelse "");
+            } else if (std.mem.eql(u8, pname, "LightLevelGrow")) {
+                if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| light_level_grow = v;
+            } else if (std.mem.eql(u8, pname, "LightLevelStay")) {
+                if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| light_level_stay = v;
+            } else if (std.mem.eql(u8, pname, "GrowIfAnythinOnTop")) {
+                grow_if_anything_on_top = xml.parseBool(xml.attr(clean, pi, "value") orelse "");
+            } else if (std.mem.eql(u8, pname, "IsGrowOnTopEnabled")) {
+                grow_on_top_enabled = xml.parseBool(xml.attr(clean, pi, "value") orelse "");
+            } else if (std.mem.eql(u8, pname, "FertileLevel")) {
+                if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| fertile_level = v;
             } else if (std.mem.eql(u8, pname, "Tags")) {
                 tags = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "BlockTag")) {
@@ -913,6 +971,16 @@ pub fn loadFromPath(
             .hazard_damage = hazard_damage,
             .hazard_damage_received = hazard_damage_received,
             .hazard_sibling = if (hazard_sibling) |hs| try arena.dupe(u8, hs) else null,
+            .plant_growing = plant_growing,
+            .plant_next = if (plant_next) |pn| try arena.dupe(u8, pn) else null,
+            .growth_rate = growth_rate,
+            .growth_deviation = growth_deviation,
+            .growth_random = growth_random,
+            .light_level_grow = light_level_grow,
+            .light_level_stay = light_level_stay,
+            .grow_if_anything_on_top = grow_if_anything_on_top,
+            .grow_on_top_enabled = grow_on_top_enabled,
+            .fertile_level = fertile_level,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -972,6 +1040,16 @@ pub fn loadFromPath(
         var own_hazard_damage = pb.hazard_damage;
         var own_hazard_damage_received = pb.hazard_damage_received;
         var own_hazard_sibling = pb.hazard_sibling;
+        var own_plant_growing = pb.plant_growing;
+        var own_plant_next = pb.plant_next;
+        var own_growth_rate = pb.growth_rate;
+        var own_growth_deviation = pb.growth_deviation;
+        var own_growth_random = pb.growth_random;
+        var own_light_level_grow = pb.light_level_grow;
+        var own_light_level_stay = pb.light_level_stay;
+        var own_grow_if_anything_on_top = pb.grow_if_anything_on_top;
+        var own_grow_on_top_enabled = pb.grow_on_top_enabled;
+        var own_fertile_level = pb.fertile_level;
         var own_trader = pb.trader_id;
         var own_mesh = pb.mesh;
         var own_material = pb.material;
@@ -1028,6 +1106,23 @@ pub fn loadFromPath(
             if (own_hazard_sibling == null and !xml.tagListContains(p1, "SiblingBlock")) {
                 own_hazard_sibling = base_p.hazard_sibling;
             }
+            // A block that does not declare `Class="PlantGrowing"` takes the
+            // parent's whole plant fact set (stock copies the resolved
+            // property dictionary, so a stage that only overrides `Next` keeps
+            // the parent's rate, deviation and light gates).
+            if (!own_plant_growing and base_p.plant_growing) {
+                own_plant_growing = base_p.plant_growing;
+                if (own_plant_next == null) own_plant_next = base_p.plant_next;
+                if (own_growth_rate == 0) own_growth_rate = base_p.growth_rate;
+                if (own_growth_deviation == 0.25) own_growth_deviation = base_p.growth_deviation;
+                if (!own_growth_random) own_growth_random = base_p.growth_random;
+                if (own_light_level_grow == 0) own_light_level_grow = base_p.light_level_grow;
+                if (own_light_level_stay == 0) own_light_level_stay = base_p.light_level_stay;
+                if (!own_grow_if_anything_on_top) own_grow_if_anything_on_top = base_p.grow_if_anything_on_top;
+                if (!own_grow_on_top_enabled) own_grow_on_top_enabled = base_p.grow_on_top_enabled;
+                if (own_fertile_level == 0) own_fertile_level = base_p.fertile_level;
+            }
+            if (own_plant_growing and own_plant_next == null) own_plant_next = base_p.plant_next;
             if (own_trader < 0 and !xml.tagListContains(p1, "TraderID")) own_trader = base_p.trader_id;
             if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
             if (own_material == null and !xml.tagListContains(p1, "Material")) own_material = base_p.material;
@@ -1090,6 +1185,16 @@ pub fn loadFromPath(
         pb.hazard_damage = own_hazard_damage;
         pb.hazard_damage_received = own_hazard_damage_received;
         pb.hazard_sibling = own_hazard_sibling;
+        pb.plant_growing = own_plant_growing;
+        pb.plant_next = own_plant_next;
+        pb.growth_rate = own_growth_rate;
+        pb.growth_deviation = own_growth_deviation;
+        pb.growth_random = own_growth_random;
+        pb.light_level_grow = own_light_level_grow;
+        pb.light_level_stay = own_light_level_stay;
+        pb.grow_if_anything_on_top = own_grow_if_anything_on_top;
+        pb.grow_on_top_enabled = own_grow_on_top_enabled;
+        pb.fertile_level = own_fertile_level;
         pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
         pb.material = own_material;
@@ -1165,6 +1270,16 @@ pub fn loadFromPath(
             .hazard_damage = pb.hazard_damage,
             .hazard_damage_received = pb.hazard_damage_received,
             .hazard_sibling = if (pb.hazard_sibling) |hs| try arena.dupe(u8, hs) else "",
+            .plant_growing = pb.plant_growing,
+            .plant_next = if (pb.plant_next) |pn| try arena.dupe(u8, pn) else "",
+            .growth_rate = pb.growth_rate,
+            .growth_deviation = pb.growth_deviation,
+            .growth_random = pb.growth_random,
+            .light_level_grow = pb.light_level_grow,
+            .light_level_stay = pb.light_level_stay,
+            .grow_if_anything_on_top = pb.grow_if_anything_on_top,
+            .grow_on_top_enabled = pb.grow_on_top_enabled,
+            .fertile_level = pb.fertile_level,
             .tags = if (pb.tags) |t| try arena.dupe(u8, t) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,

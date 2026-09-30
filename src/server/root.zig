@@ -78,6 +78,7 @@ pub const game_init_world = @import("game/init_world.zig");
 pub const game_replicate_health = @import("game/replicate_health.zig");
 pub const game_step = @import("game/step.zig");
 pub const game_hazard = @import("game/hazard.zig");
+pub const game_block_ticker = @import("game/block_ticker.zig");
 pub const game_harness = @import("game/harness.zig");
 pub const game_wasm_host = @import("game/wasm_host.zig");
 pub const game_plugin_compose = @import("game/plugin_compose.zig");
@@ -207,6 +208,7 @@ test {
     _ = game_replicate_health;
     _ = game_step;
     _ = game_hazard;
+    _ = game_block_ticker;
     _ = game_harness;
     _ = game_wasm_host;
     _ = game_plugin_compose;

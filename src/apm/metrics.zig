@@ -63,6 +63,9 @@ pub const CounterId = enum(u16) {
     c2s_te_sign_echo,
     /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
     c2s_rejects,
+    /// Scheduled block ticks dropped because the ring was full (see
+    /// `server/game/block_ticker.zig`).
+    block_tick_drops,
     /// Named C2S package with no handler arm (falls off handlePackage).
     c2s_unhandled,
     /// Peer reconnects after prior join (churn signal).

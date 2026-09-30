@@ -167,6 +167,10 @@ pub const Table = struct {
     /// materials.xml IsGroundCover per material id (`MaterialBlock.IsGroundCover`,
     /// the second half of `CanBlocksReplaceOrGroundCover`, IL=9).
     material_ground_cover: std.StringHashMapUnmanaged(bool) = .empty,
+    /// materials.xml `FertileLevel` per material id (`MaterialBlock.FertileLevel`,
+    /// the soil gate `BlockPlant.CanGrowOn` IL=24 compares a plant's own
+    /// `FertileLevel` against).
+    material_fertile: std.StringHashMapUnmanaged(i32) = .empty,
     /// blocks.xml CanBlocksReplace per block name (true rows only).
     can_blocks_replace: std.StringHashMapUnmanaged(void) = .empty,
     /// blocks.xml RestrictSubmergedPlacement per block name (true rows only):
@@ -207,6 +211,7 @@ pub const Table = struct {
         self.material_collidable = .{};
         self.material_can_destroy = .{};
         self.material_ground_cover = .{};
+        self.material_fertile = .{};
         self.can_blocks_replace = .{};
         self.restrict_submerged = .{};
         self.material_movement_factor = .{};
@@ -440,6 +445,15 @@ pub const Table = struct {
         return self.restrict_submerged.contains(name);
     }
 
+    /// `MaterialBlock.FertileLevel` of the material behind a block id, or null
+    /// when either the block or the material is unknown (the caller treats that
+    /// as the 0 default).
+    pub fn materialFertileLevel(self: *const Table, block_id: u16) ?i32 {
+        const name = self.idName(block_id) orelse return null;
+        const mat = self.block_material.get(name) orelse return null;
+        return self.material_fertile.get(mat);
+    }
+
     /// The name-keyed half of `canReplaceFor`.
     pub fn canReplaceNamed(self: *const Table, name: []const u8) bool {
         if (self.can_blocks_replace.contains(name)) return true;
@@ -671,6 +685,14 @@ pub const Table = struct {
                 if (parseBool(cd)) |b| {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_can_destroy.put(arena, kn, b);
+                }
+            }
+            // MaterialBlock.FertileLevel (BlockPlant.CanGrowOn IL=24 compares a
+            // plant's own FertileLevel against its soil's material).
+            if (xml.propertyValue(body, "FertileLevel")) |fl| {
+                if (xml.parseI32Prefix(fl)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_fertile.put(arena, kn, v);
                 }
             }
             // MaterialBlock.IsGroundCover (the second half of stock's

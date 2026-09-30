@@ -16,6 +16,7 @@ const replicate_te = @import("replicate_te.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const game_stability = @import("stability.zig");
 const game_hazard = @import("hazard.zig");
+const block_ticker = @import("block_ticker.zig");
 const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
@@ -157,6 +158,9 @@ pub fn step(self: *Game) !void {
         // stock runs these from the physics collision callback, so the pass
         // belongs right after the movement the AI/players just did.
         game_hazard.collisionTick(self);
+        // Scheduled block ticks (crop growth chains, fuses): stock drives
+        // `WorldBlockTicker` from `World.OnUpdateTick`.
+        block_ticker.tick(self);
         self.tickSleeperRearm();
         // Movement-noise sleeper wake (stock PlayerStealth.NotifyNoise →
         // World.CheckSleeperVolumeNoise): the stealth system queued points
