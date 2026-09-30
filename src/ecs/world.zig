@@ -1896,6 +1896,7 @@ pub const World = struct {
                 t.yaw_range_half = ts.yaw_range_half;
                 t.pitch_range_half = ts.pitch_range_half;
                 if (ts.overshoot_time > 0) t.overshoot_time = ts.overshoot_time;
+                if (ts.find_target_delay > 0) t.find_target_delay = ts.find_target_delay;
             }
         }
         // The deployed item wins over the block-derived defaults: its Meta is

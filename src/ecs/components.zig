@@ -667,6 +667,11 @@ pub const TurretBlockStats = struct {
     /// `OvershootTime`: how long the turret keeps trying to bear on a target it
     /// cannot hit before dropping it.
     overshoot_time: f32 = 0,
+    /// `FindTargetDelay`: how often the turret searches for a target
+    /// (`MiniTurretFireController.Update`'s findTarget leg, whose timer
+    /// `AutoTurretFireController.Init` reads as `findTargetDelay`/
+    /// `findTargetDelayMax`). 0 = search every tick.
+    find_target_delay: f32 = 0,
 };
 
 pub const VehicleKind = enum(u8) {
@@ -787,6 +792,10 @@ pub const Turret = struct {
     /// cap).
     overshoot_time: f32 = 0,
     overshoot_left: f32 = 0,
+    /// `FindTargetDelay` and its countdown: the target search runs when it
+    /// reaches 0, then waits another delay.
+    find_target_delay: f32 = 0,
+    find_target_cd: f32 = 0,
     ammo: u16 = 200,
     /// The item the placer deployed (0 = none): TurretSync carries it back with
     /// `ammo` as the item's Meta, which is where a deployed turret's magazine

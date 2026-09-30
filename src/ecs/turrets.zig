@@ -48,6 +48,7 @@ const TurretCtx = struct {
             if (!ctx.w.alive[s] or !ctx.w.mask[s].turret or !ctx.w.mask[s].transform) continue;
             var t = &ctx.w.turret[s];
             if (t.fire_cd > 0) t.fire_cd -= ctx.dt;
+            if (t.find_target_cd > 0) t.find_target_cd -= ctx.dt;
             const powered = ctx.powered[s];
             if (!powered or t.ammo == 0) {
                 t.target_id = -1;
@@ -60,6 +61,11 @@ const TurretCtx = struct {
             var best_id: i32 = -1;
             var best_slot: ?Slot = null;
             var best_d: f32 = t.range * t.range;
+            // `FindTargetDelay`: the search runs once per delay window, not
+            // every tick (the `findTarget` leg `findTargetDelay` names). A
+            // turret with a live target keeps it between searches.
+            const searching = t.find_target_cd <= 0;
+            if (searching and t.find_target_delay > 0) t.find_target_cd = t.find_target_delay;
             // Hoisted: workers only write other slots' transforms, so the
             // compiler cannot prove these loads invariant across the loop.
             const tx = ctx.w.transform[s].x;
@@ -71,7 +77,17 @@ const TurretCtx = struct {
             // skipped rather than shot through it. Same block oracle the AI
             // sight uses; the 1.6 torso offset matches that query.
             const ty = ctx.w.transform[s].y + turret_sight_height;
-            for (ctx.zombies) |j| {
+            if (!searching) {
+                // Between searches: hold the target while it is still alive.
+                if (t.target_id >= 0) {
+                    if (ctx.w.slotOfNetId(t.target_id)) |j| {
+                        if (ctx.w.alive[j] and ctx.w.mask[j].transform) {
+                            best_id = t.target_id;
+                            best_slot = j;
+                        }
+                    }
+                }
+            } else for (ctx.zombies) |j| {
                 const dx = ctx.w.transform[j].x - tx;
                 const dz = ctx.w.transform[j].z - tz;
                 const d = dx * dx + dz * dz;

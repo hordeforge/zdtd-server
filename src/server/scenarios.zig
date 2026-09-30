@@ -20599,3 +20599,59 @@ test "scenario the paced localization download ships a multi-part blob" {
     try std.testing.expect(encoded_after >= encoded_before + total);
     std.debug.print("PASS localization-multipart: {d} parts paced one per window\n", .{total});
 }
+
+test "scenario a turret searches for targets on its find-target delay" {
+    // `AutoTurretFireController.Init` reads `FindTargetDelay` as the search
+    // cadence (the `findTarget` leg in the state machine flowchart): a turret
+    // does not look for a new target every tick, and a target it already holds
+    // survives between searches.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.clients[cl.slot].entered = true;
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.transform[ps].x = 496;
+    g.sim.transform[ps].z = 500;
+
+    const w = &g.sim;
+    const t = w.spawnTurretEx(500, w.transform[ps].y, 500, .{ .ammo = 100 }) orelse return error.TestUnexpectedResult;
+    const ts = w.slotOfNetId(t) orelse return error.TestUnexpectedResult;
+    w.turret[ts].find_target_delay = 1.0;
+    w.turret[ts].wake_up_time = 0;
+    const gen = w.power.addNodeAt(.generator, 500, @intFromFloat(w.transform[ts].y), 502, 100).?;
+    try std.testing.expect(w.power.connect(gen, w.turret[ts].power_node));
+    w.power.resolve();
+    try std.testing.expect(w.power.isEntityPowered(t));
+
+    // First search: no zombies yet, so the window starts empty.
+    try g.step();
+    const first_cd = w.turret[ts].find_target_cd;
+    try std.testing.expect(first_cd > 0.9);
+    try std.testing.expectEqual(@as(i32, -1), w.turret[ts].target_id);
+
+    // A zombie that appears inside the window is only found on the next search.
+    _ = w.spawnZombie(502, w.transform[ps].y, 500, 5000);
+    var quiet: u32 = 0;
+    while (quiet < 10) : (quiet += 1) {
+        try g.step();
+        try std.testing.expectEqual(@as(i32, -1), w.turret[ts].target_id);
+    }
+    var wait: u32 = 0;
+    while (wait < 30 and w.turret[ts].target_id < 0) : (wait += 1) try g.step();
+    try std.testing.expect(w.turret[ts].target_id >= 0);
+
+    // The held target survives the throttle (no re-search needed to keep it).
+    const held = w.turret[ts].target_id;
+    var k: u32 = 0;
+    while (k < 10) : (k += 1) try g.step();
+    try std.testing.expectEqual(held, w.turret[ts].target_id);
+    std.debug.print("PASS find-target-delay: the search waits its window\n", .{});
+}
