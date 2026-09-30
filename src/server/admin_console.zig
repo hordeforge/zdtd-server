@@ -300,7 +300,9 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     var ts: [19]u8 = undefined;
     var vb: [max_audit_verb_len]u8 = undefined;
     const vn = auditVerb(&vb, cmd[0..verb_end]);
-    std.debug.print("zdtd: {s} audit source=player_console slot={d} command={s}\n", .{ clock.wallStamp(&ts), c.slot, vb[0..vn] });
+    if (commandLogVisible(self, true)) {
+        std.debug.print("zdtd: {s} audit source=player_console slot={d} command={s}\n", .{ clock.wallStamp(&ts), c.slot, vb[0..vn] });
+    }
 
     var out: ConsoleOut = .{};
     var it = std.mem.tokenizeAny(u8, cmd, " ");
@@ -1185,6 +1187,19 @@ fn tryDispatchPluginAdmin(self: *Game, line: []const u8) bool {
     return false;
 }
 
+/// Stock `SdtdConsole::Execute` log gate (IL_00C1-0122): the
+/// `HideCommandExecutionLog` level hides the "executed command" line by
+/// sender. A remote client's command needs the level to reach 2; an operator
+/// console connection only 1. (Stock also has a local-game arm at 3, which a
+/// dedicated server never takes.) zdtd keeps its sanitized-verb form instead of
+/// stock's raw line so a client cannot forge whole audit lines.
+pub fn commandLogVisible(self: *const Game, remote_client: bool) bool {
+    return if (remote_client)
+        self.hide_command_execution_log < 2
+    else
+        self.hide_command_execution_log < 1;
+}
+
 pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     const trimmed = std.mem.trim(u8, line, " \t");
     const verb_end = std.mem.findAny(u8, trimmed, " \t") orelse trimmed.len;
@@ -1192,7 +1207,9 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
     var ts: [19]u8 = undefined;
     var vb: [max_audit_verb_len]u8 = undefined;
     const vn = auditVerb(&vb, trimmed[0..verb_end]);
-    std.debug.print("zdtd: {s} audit source={s} command={s}\n", .{ clock.wallStamp(&ts), source, vb[0..vn] });
+    if (commandLogVisible(self, std.mem.eql(u8, source, "player_console"))) {
+        std.debug.print("zdtd: {s} audit source={s} command={s}\n", .{ clock.wallStamp(&ts), source, vb[0..vn] });
+    }
     const cmd = admin_mod.parseCommand(line);
     switch (cmd) {
         .help => |topic| {

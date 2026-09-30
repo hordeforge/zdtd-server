@@ -753,6 +753,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .view_radius = cfg.view_radius,
         .server_max_view_distance = cfg.server_max_view_distance,
         .server_login_confirmation_text = cfg.server_login_confirmation_text,
+        .hide_command_execution_log = cfg.hide_command_execution_log,
         .server_visibility = cfg.server_visibility,
         .max_players = cfg.max_players,
         .reserved_slots = cfg.reserved_slots,

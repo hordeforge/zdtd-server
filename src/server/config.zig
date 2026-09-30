@@ -75,6 +75,12 @@ pub const Config = struct {
     /// `ServerLoginConfirmationText` (GameInfoString 11): shown in the server
     /// browser as the confirmation line. Empty omits the key, like stock.
     server_login_confirmation_text: []const u8 = "",
+    /// Stock `HideCommandExecutionLog` (GamePref 153): a LEVEL, not a bool.
+    /// `SdtdConsole::Execute` logs `Executing command '<cmd>'` when the level
+    /// is below the sender's: `hide < 1` for an operator console connection,
+    /// `hide < 2` for a remote client (`IL_00C1-0122`), `hide < 3` for the
+    /// local game. zdtd logs the sanitized verb instead of the raw line.
+    hide_command_execution_log: u8 = 0,
     /// `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public,
     /// 1 friends-only, 2 hidden.
     server_visibility: u8 = 0,
@@ -238,6 +244,7 @@ pub const known_serverconfig_names = [_][]const u8{
     "ServerPassword",
     "AdminPort",
     "TelnetEnabled",
+    "HideCommandExecutionLog",
     "TelnetPort",
     "TelnetPassword",
     "TelnetFailedLoginLimit",
@@ -541,6 +548,13 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     // GameInfoString 11: the browser shows this next to the join dialog, and
     // stock copies it verbatim (server-browser-prefabs.md 1.1 "Identity").
     if (prop(raw, "ServerLoginConfirmationText")) |v| cfg.server_login_confirmation_text = try decodeAttr(arena, v);
+    if (prop(raw, "HideCommandExecutionLog")) |v| {
+        if (xml.parseI32Prefix(v)) |n| {
+            cfg.hide_command_execution_log = @intCast(std.math.clamp(n, 0, 3));
+        } else {
+            std.debug.print("zdtd: serverconfig HideCommandExecutionLog '{s}' invalid; keeping {d}\n", .{ v, cfg.hide_command_execution_log });
+        }
+    }
     // GameInfoInt 43 = pref 169 `ServerVisibility` (0 public, 1 friends,
     // 2 hidden).
     if (prop(raw, "ServerVisibility")) |v|
@@ -1064,6 +1078,7 @@ test "known_serverconfig_names covers every applied prop key" {
         "ServerPassword",
         "AdminPort",
         "TelnetEnabled",
+        "HideCommandExecutionLog",
         "TelnetPort",
         "TelnetPassword",
         "TelnetFailedLoginLimit",
@@ -1190,6 +1205,36 @@ test "parse ServerMaxAllowedViewDistance into the stock 4..12 range" {
     defer low.deinit();
     // Stock clamps the pref itself into 4..12 before using it (IL_0011-0020).
     try std.testing.expectEqual(@as(i32, 4), low.server_max_view_distance);
+}
+
+test "parse HideCommandExecutionLog as a 0..3 level" {
+    // GamePref 153 is a level, not a bool: `SdtdConsole::Execute` logs an
+    // operator-console command below 1 and a remote client's below 2
+    // (IL_00C1-0122).
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="HideCommandExecutionLog" value="2"/>
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig_hide.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u8, 2), cfg.hide_command_execution_log);
+
+    // Out-of-range values clamp into the stock band rather than wrapping.
+    try io_fs.writeFile(path,
+        \\<ServerSettings>
+        \\  <property name="HideCommandExecutionLog" value="9"/>
+        \\</ServerSettings>
+    );
+    var high = try loadFromPath(std.testing.allocator, path);
+    defer high.deinit();
+    try std.testing.expectEqual(@as(u8, 3), high.hide_command_execution_log);
 }
 
 test "parse ServerLoginConfirmationText and ServerVisibility" {

@@ -19559,3 +19559,23 @@ test "scenario a predator with a target class list hunts the mob it names" {
     try std.testing.expectEqual(@as(i32, -1), sensing_mod.nearestMobSnap(&g.sim, ws, 0, 70, 0, 0).id);
     std.debug.print("PASS predator-targets: a listed mob kind is hunted and bitten\n", .{});
 }
+
+test "scenario HideCommandExecutionLog gates the audit line by sender" {
+    // `SdtdConsole::Execute` (IL_00C1-0122): the level hides the executed-command
+    // line per sender - a remote client needs 2, an operator console connection
+    // only 1 (stock's local-game arm at 3 never applies to a dedicated server).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var level: u8 = 0;
+    while (level <= 3) : (level += 1) {
+        const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .hide_command_execution_log = level });
+        defer g.destroy();
+        try std.testing.expectEqual(level < 1, g.commandLogVisible(false));
+        try std.testing.expectEqual(level < 2, g.commandLogVisible(true));
+    }
+    std.debug.print("PASS hide-command-log: console at 1, remote client at 2\n", .{});
+}

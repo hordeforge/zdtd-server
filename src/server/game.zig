@@ -501,6 +501,10 @@ pub const Game = struct {
     /// ServerInfo string fields (browser surface): the confirmation line
     /// (GameInfoString 11) and the visibility int (GameInfoInt 43).
     server_login_confirmation_text: []const u8 = "",
+    /// Stock `HideCommandExecutionLog` level (GamePref 153, `SdtdConsole`
+    /// IL_00C1-0122): 0 logs every executed command, 1 hides operator-console
+    /// commands, 2 also hides remote-client ones, 3 hides all but nothing else.
+    hide_command_execution_log: u8 = 0,
     server_visibility: u8 = 0,
     /// Sandbox `AllowZombieDigging` (option 40, default on): stock pushes it
     /// into `EntityMoveHelper.AllowZombieDigging`, and with it off a zombie
@@ -684,6 +688,7 @@ pub const Game = struct {
             .view_radius = opts.view_radius,
             .server_max_view_distance = opts.server_max_view_distance,
             .server_login_confirmation_text = opts.server_login_confirmation_text,
+            .hide_command_execution_log = opts.hide_command_execution_log,
             .server_visibility = opts.server_visibility,
             .effective_config = opts.effective_config,
             .max_players = max_pl,
@@ -2498,6 +2503,11 @@ pub const Game = struct {
 
     pub fn commandLevel(self: *const Game, verb: []const u8) u8 {
         return admin_console.commandLevel(self, verb);
+    }
+
+    /// See `admin_console.commandLogVisible`.
+    pub fn commandLogVisible(self: *const Game, remote_client: bool) bool {
+        return admin_console.commandLogVisible(self, remote_client);
     }
 
     pub fn setCommandLevel(self: *Game, verb: []const u8, level: u8) bool {

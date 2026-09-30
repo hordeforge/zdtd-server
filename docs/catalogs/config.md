@@ -8,71 +8,72 @@ Every operator-facing tunable, parsed from its declaration. Semantics live in
 
 ## serverconfig.xml keys
 
-`known_serverconfig_names` (src/server/config.zig:233) is the accepted key list; the
+`known_serverconfig_names` (src/server/config.zig:239) is the accepted key list; the
 destination column names the field the parser assigns.
 
 | Key | Destination field | Parsed in | Line |
 |---|---|---|---|
-| `ServerPort` | port | src/server/config.zig | 490 |
-| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 496 |
-| `GameName` | world_name | src/server/config.zig | 504 |
-| `GameWorld` | game_world | src/server/config.zig | 505 |
-| `ServerPassword` | password | src/server/config.zig | 513 |
-| `AdminPort` | admin_port | src/server/config.zig | 514 |
-| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 520 |
-| `TelnetPort` | telnet_port | src/server/config.zig | 524 |
-| `TelnetPassword` | telnet_password | src/server/config.zig | 531 |
-| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 532 |
-| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 534 |
-| `ViewRadius` | view_radius | src/server/config.zig | 536 |
-| `ServerMaxAllowedViewDistance` | server_max_view_distance | src/server/config.zig | 539 |
-| `ServerLoginConfirmationText` | server_login_confirmation_text | src/server/config.zig | 543 |
-| `ServerVisibility` | server_visibility | src/server/config.zig | 546 |
-| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 549 |
-| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 550 |
-| `ServerAdminSlots` | admin_slots | src/server/config.zig | 551 |
-| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 552 |
-| `GameDifficulty` | game_difficulty | src/server/config.zig | 553 |
-| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 554 |
-| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 555 |
-| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 556 |
-| `DayNightLength` | day_night_length | src/server/config.zig | 557 |
-| `DayLightLength` | day_light_length | src/server/config.zig | 558 |
-| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 561 |
-| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 562 |
-| `ZombieMove` | zombie_move | src/server/config.zig | 563 |
-| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 564 |
-| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 565 |
-| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 566 |
-| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 567 |
-| `LootAbundance` | loot_abundance | src/server/config.zig | 568 |
-| `XPMultiplier` | xp_multiplier | src/server/config.zig | 569 |
-| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 570 |
-| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 571 |
-| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 572 |
-| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 573 |
-| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 574 |
-| `DropOnDeath` | drop_on_death | src/server/config.zig | 575 |
-| `BuildCreate` | build_create | src/server/config.zig | 576 |
-| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 580 |
-| `DeathPenalty` | death_penalty | src/server/config.zig | 581 |
-| `LandClaimSize` | land_claim_size | src/server/config.zig | 582 |
-| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 588 |
-| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 590 |
-| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 592 |
-| `LandClaimCount` | land_claim_count | src/server/config.zig | 594 |
-| `LandClaimDeadZone` | land_claim_dead_zone | src/server/config.zig | 596 |
-| `LandClaimOfflineDelay` | land_claim_offline_delay | src/server/config.zig | 598 |
-| `LandClaimDecayMode` | land_claim_decay_mode | src/server/config.zig | 600 |
-| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 602 |
-| `SandboxPreset` | sandbox_preset | src/server/config.zig | 507 |
-| `ServerDescription` | server_description | src/server/config.zig | 508 |
-| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 509 |
-| `Region` | region | src/server/config.zig | 510 |
-| `Language` | language | src/server/config.zig | 511 |
-| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 512 |
-| `SandboxCode` | sandbox_code | src/server/config.zig | 506 |
-| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 604 |
+| `ServerPort` | port | src/server/config.zig | 497 |
+| `ServerMaxPlayerCount` | max_players | src/server/config.zig | 503 |
+| `GameName` | world_name | src/server/config.zig | 511 |
+| `GameWorld` | game_world | src/server/config.zig | 512 |
+| `ServerPassword` | password | src/server/config.zig | 520 |
+| `AdminPort` | admin_port | src/server/config.zig | 521 |
+| `TelnetEnabled` | telnet_enabled | src/server/config.zig | 527 |
+| `HideCommandExecutionLog` | hide_command_execution_log | src/server/config.zig | 551 |
+| `TelnetPort` | telnet_port | src/server/config.zig | 531 |
+| `TelnetPassword` | telnet_password | src/server/config.zig | 538 |
+| `TelnetFailedLoginLimit` | telnet_failed_login_limit | src/server/config.zig | 539 |
+| `TelnetFailedLoginsBlocktime` | telnet_failed_logins_blocktime | src/server/config.zig | 541 |
+| `ViewRadius` | view_radius | src/server/config.zig | 543 |
+| `ServerMaxAllowedViewDistance` | server_max_view_distance | src/server/config.zig | 546 |
+| `ServerLoginConfirmationText` | server_login_confirmation_text | src/server/config.zig | 550 |
+| `ServerVisibility` | server_visibility | src/server/config.zig | 560 |
+| `ServerReservedSlots` | reserved_slots | src/server/config.zig | 563 |
+| `ServerReservedSlotsPermission` | reserved_slots_permission | src/server/config.zig | 564 |
+| `ServerAdminSlots` | admin_slots | src/server/config.zig | 565 |
+| `ServerAdminSlotsPermission` | admin_slots_permission | src/server/config.zig | 566 |
+| `GameDifficulty` | game_difficulty | src/server/config.zig | 567 |
+| `BloodMoonFrequency` | blood_moon_frequency | src/server/config.zig | 568 |
+| `BloodMoonEnemyCount` | blood_moon_enemy_count | src/server/config.zig | 569 |
+| `PlayerKillingMode` | player_killing_mode | src/server/config.zig | 570 |
+| `DayNightLength` | day_night_length | src/server/config.zig | 571 |
+| `DayLightLength` | day_light_length | src/server/config.zig | 572 |
+| `MaxSpawnedZombies` | max_spawned_zombies | src/server/config.zig | 575 |
+| `BloodMoonRange` | blood_moon_range | src/server/config.zig | 576 |
+| `ZombieMove` | zombie_move | src/server/config.zig | 577 |
+| `ZombieMoveNight` | zombie_move_night | src/server/config.zig | 578 |
+| `ZombieFeralMove` | zombie_feral_move | src/server/config.zig | 579 |
+| `ZombieBMMove` | zombie_bm_move | src/server/config.zig | 580 |
+| `EnemyDifficulty` | enemy_difficulty | src/server/config.zig | 581 |
+| `LootAbundance` | loot_abundance | src/server/config.zig | 582 |
+| `XPMultiplier` | xp_multiplier | src/server/config.zig | 583 |
+| `BlockDamagePlayer` | block_damage_player | src/server/config.zig | 584 |
+| `BlockDamageAI` | block_damage_ai | src/server/config.zig | 585 |
+| `BlockDamageAIBM` | block_damage_ai_bm | src/server/config.zig | 586 |
+| `MaxSpawnedAnimals` | max_spawned_animals | src/server/config.zig | 587 |
+| `AirDropFrequency` | air_drop_frequency | src/server/config.zig | 588 |
+| `DropOnDeath` | drop_on_death | src/server/config.zig | 589 |
+| `BuildCreate` | build_create | src/server/config.zig | 590 |
+| `CameraRestrictionMode` | camera_restriction_mode | src/server/config.zig | 594 |
+| `DeathPenalty` | death_penalty | src/server/config.zig | 595 |
+| `LandClaimSize` | land_claim_size | src/server/config.zig | 596 |
+| `LandClaimOnlineDurabilityModifier` | land_claim_online_durability_modifier | src/server/config.zig | 602 |
+| `LandClaimOfflineDurabilityModifier` | land_claim_offline_durability_modifier | src/server/config.zig | 604 |
+| `LandClaimExpiryDays` | land_claim_expiry_days | src/server/config.zig | 606 |
+| `LandClaimCount` | land_claim_count | src/server/config.zig | 608 |
+| `LandClaimDeadZone` | land_claim_dead_zone | src/server/config.zig | 610 |
+| `LandClaimOfflineDelay` | land_claim_offline_delay | src/server/config.zig | 612 |
+| `LandClaimDecayMode` | land_claim_decay_mode | src/server/config.zig | 614 |
+| `LootRespawnDays` | loot_respawn_days | src/server/config.zig | 616 |
+| `SandboxPreset` | sandbox_preset | src/server/config.zig | 514 |
+| `ServerDescription` | server_description | src/server/config.zig | 515 |
+| `ServerWebsiteURL` | server_website_url | src/server/config.zig | 516 |
+| `Region` | region | src/server/config.zig | 517 |
+| `Language` | language | src/server/config.zig | 518 |
+| `ServerMatchmakingGroup` | play_group | src/server/config.zig | 519 |
+| `SandboxCode` | sandbox_code | src/server/config.zig | 513 |
+| `ZdtdAuthorityMode` | authority_mode | src/server/config.zig | 618 |
 
 
 ## zdtd.toml

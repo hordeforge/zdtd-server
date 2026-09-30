@@ -303,12 +303,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       is what `Director.damageScale` documents. Recording it so the audit does
       not re-open it. Option 17 (`IncomingDamage`, the AI-to-player leg) IS
       server-side and already has its sandbox override.
+- [x] **`HideCommandExecutionLog` had no surface** - closed 2026-09-28: the
+      level parses (0..3, stock-clamped) and gates both audit sites by sender
+      (`commandLogVisible`: remote client at 2, operator console at 1).
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
-      `ServerDisabledNetworkProtocols`, `ServerMaxWorldTransferSpeedKiBs`,
-      `PersistentPlayerProfiles`, `SaveDataLimit`, `IgnoreEOSSanctions`,
-      `HideCommandExecutionLog`. Each needs a decision (honour, or document as
-      out of scope) before the key list is honest.
+      `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
+      is what the stock client uses off EOS, so disabling it would leave no
+      server; both are out of scope until an EOS/Steam transport exists - a
+      docs decision, not code), `ServerMaxWorldTransferSpeedKiBs` (a byte-rate
+      cap on the join stream; the enter bundle paces per chunk already, so this
+      is a token bucket over those bytes), `PersistentPlayerProfiles` (needs a
+      server-side profile store; the stock client re-sends its profile each
+      join, so today true and false behave the same), `SaveDataLimit` (a cap on
+      the save directory; needs the refusal semantics from the save path).
 - [x] **Disconnect `EntityRemove` reason** - closed 2026-09-28: the drop path
       sends `Unloaded(1)`, the value stock's `ConnectionManager.DisconnectClient`
       passes (`ldc.i4.1` at IL_01C1-01C8). The companion item, the disconnect

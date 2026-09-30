@@ -276,6 +276,8 @@ pub const InitOptions = struct {
     /// `ServerLoginConfirmationText` (GameInfoString 11) and `ServerVisibility`
     /// (GameInfoInt 43) for the TCP server-info string.
     server_login_confirmation_text: []const u8 = "",
+    /// See `Game.hide_command_execution_log`.
+    hide_command_execution_log: u8 = 0,
     server_visibility: u8 = 0,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
