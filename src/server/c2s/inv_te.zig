@@ -274,6 +274,17 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                 };
             }
             while (n < col.items.len) : (n += 1) col.items[n] = .{};
+            // The fuel grid rides the same body (`fuelSlotsInternal`).
+            var f: usize = 0;
+            while (f < cs.fuel_n and f < col.fuel.len) : (f += 1) {
+                const st = cs.fuel[f];
+                col.fuel[f] = .{
+                    .type_id = st.type_id,
+                    .count = @intCast(@max(st.count, 0)),
+                    .quality = st.quality,
+                };
+            }
+            while (f < col.fuel.len) : (f += 1) col.fuel[f] = .{};
             col.dirty = true;
             try replicate_te.broadcastDirtyCollectors(self);
             try self.sendGame(peer, "NetPackageTileEntity", body);

@@ -500,8 +500,11 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
     const col = self.collectors.get(x, y, z) orelse return;
     var slots: [collectors_mod.max_output_slots]stock_inv.StockSlot = undefined;
     const n = collectorSlots(col, &slots);
+    var fuel_slots: [collectors_mod.max_fuel_slots]stock_inv.StockSlot = undefined;
+    const fuel_n = collectorFuelSlots(col, &fuel_slots);
     var world_name: [1]stock_te.CollectorWorldTime = undefined;
     var flags: [1]stock_te.CollectorFlag = undefined;
+    var empty_flags: [1]stock_te.CollectorFlag = undefined;
     const def = self.blocks.byId(col.block_id) orelse return;
     var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
     const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
@@ -512,6 +515,7 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
         worlds_n = 1;
         flags[0] = .{ .name = rows[0].name, .flag = col.isFull() };
         flags_n = 1;
+        empty_flags[0] = .{ .name = rows[0].name, .flag = col.out_of_fuel };
     }
     const body = try stock_te.buildCollectorTeBody(
         &self.body_buf,
@@ -522,8 +526,10 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
         col.block_id,
         .{
             .items = slots[0..n],
+            .fuel = fuel_slots[0..fuel_n],
             .last_world = world_name[0..worlds_n],
             .is_full = flags[0..flags_n],
+            .out_of_fuel = empty_flags[0..flags_n],
             .is_blocked = collectorBlockedForTe(self, col.x, col.y, col.z),
         },
     );
@@ -546,10 +552,13 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
         }
         var slots: [collectors_mod.max_output_slots]stock_inv.StockSlot = undefined;
         const n = collectorSlots(col, &slots);
+        var fuel_slots: [collectors_mod.max_fuel_slots]stock_inv.StockSlot = undefined;
+        const fuel_n = collectorFuelSlots(col, &fuel_slots);
         var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
         const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
         var world_name: [1]stock_te.CollectorWorldTime = undefined;
         var flags: [1]stock_te.CollectorFlag = undefined;
+        var empty_flags: [1]stock_te.CollectorFlag = undefined;
         var worlds_n: usize = 0;
         var flags_n: usize = 0;
         if (rn > 0) {
@@ -557,6 +566,7 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
             worlds_n = 1;
             flags[0] = .{ .name = rows[0].name, .flag = col.isFull() };
             flags_n = 1;
+            empty_flags[0] = .{ .name = rows[0].name, .flag = col.out_of_fuel };
         }
         const body = stock_te.buildCollectorTeBody(
             self.body_buf[0..16384],
@@ -567,8 +577,10 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
             col.block_id,
             .{
                 .items = slots[0..n],
+                .fuel = fuel_slots[0..fuel_n],
                 .last_world = world_name[0..worlds_n],
                 .is_full = flags[0..flags_n],
+                .out_of_fuel = empty_flags[0..flags_n],
                 .is_blocked = collectorBlockedForTe(self, col.x, col.y, col.z),
             },
         ) catch |err| {
@@ -596,6 +608,17 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
 fn collectorSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_output_slots]stock_inv.StockSlot) usize {
     var n: usize = 0;
     for (col.items) |s| {
+        if (s.type_id == 0 or s.count == 0) continue;
+        out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
+        n += 1;
+    }
+    return n;
+}
+
+/// The fuel slots as wire stacks, same leading-run shape as the outputs.
+fn collectorFuelSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_fuel_slots]stock_inv.StockSlot) usize {
+    var n: usize = 0;
+    for (col.fuel) |s| {
         if (s.type_id == 0 or s.count == 0) continue;
         out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
         n += 1;

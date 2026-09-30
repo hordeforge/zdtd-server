@@ -323,10 +323,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       echoes. `collectors.zcl` (ZCL1) persists the water, budget and draw state
       through `saveAllStores`, and the sandbox options are consumed
       (`DewCollectorInput` 0 disables, `DewCollectorTime` scales the budget,
-      `DewCollectorOutput` the yield). Still open: fuel and catalyst rows
-      (`FuelTypes`/`CatalystTypes` converter counts, which the apiary and coop
-      ships need), the mod slots, and the `ActivateSound`/`RunningSound`
-      broadcasts.
+      `DewCollectorOutput` the yield). Fuel rows closed too: `FuelTypes` parses in
+      the row order `BlockCollector/FuelType` gives (name then items, IL=9), the
+      fuel slots ride the same TE body both ways, `getFuelCount` sums only stacks
+      the class names, `removeFuel` drains `FuelCost` per production, `outOfFuel`
+      rides the body, and the per-type sandbox gates
+      (`DewCollectorInput`/`ApiaryInput`/`ChickenCoopInput`) disable their
+      collector. Still open: catalyst rows (`CatalystTypes`,
+      `getCurrentConvertCount` and the multiplier/requirement tables), the mod
+      slots, and the `ActivateSound`/`RunningSound` broadcasts.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

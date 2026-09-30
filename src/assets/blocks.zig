@@ -158,6 +158,51 @@ pub fn parseCollectorOutputs(value: []const u8, out: *[max_collector_outputs]Col
     return n;
 }
 
+/// `FuelTypes` rows (`BlockCollector/FuelType(String)` IL=9 splits the row on
+/// ',' with no options: element 0 is the name, the rest are the item names that
+/// burn as that fuel).
+pub const max_collector_fuel_types: usize = 4;
+
+pub const CollectorFuelRow = struct {
+    name: []const u8 = "",
+    /// Comma-joined item names from index 1 on (the `Items[]` list).
+    items: []const u8 = "",
+};
+
+/// Parse a `FuelTypes` value with the same group scanner as `OutputTypes`.
+pub fn parseCollectorFuelTypes(value: []const u8, out: *[max_collector_fuel_types]CollectorFuelRow) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < value.len and n < out.len) {
+        while (i < value.len and (value[i] == '{' or value[i] == '}' or value[i] == ';' or value[i] == ' ')) i += 1;
+        const start = i;
+        while (i < value.len and value[i] != '}' and value[i] != ';') i += 1;
+        const row = std.mem.trim(u8, value[start..i], " \t}");
+        if (row.len > 0) {
+            const comma = std.mem.indexOfScalar(u8, row, ',');
+            if (comma) |ci| {
+                out[n] = .{
+                    .name = std.mem.trim(u8, row[0..ci], " \t"),
+                    .items = std.mem.trim(u8, row[ci + 1 ..], " \t"),
+                };
+            } else {
+                out[n] = .{ .name = row };
+            }
+            n += 1;
+        }
+    }
+    return n;
+}
+
+/// Is `item_name` one of a fuel row's items (comma list)?
+pub fn collectorFuelAccepts(items: []const u8, item_name: []const u8) bool {
+    var it = std.mem.splitScalar(u8, items, ',');
+    while (it.next()) |raw| {
+        if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t"), item_name)) return true;
+    }
+    return false;
+}
+
 /// Composite tile-entity feature modules (`TileEntityComposite`).
 /// `TileEntityComposite.read` iterates ITS OWN `modulesInternalOrder` and reads
 /// one hash per module, so the wire payload must carry exactly the block's
@@ -256,6 +301,8 @@ pub const BlockDef = struct {
     collector_type: u8 = 0,
     /// Raw `OutputTypes` value; rows come from `parseCollectorOutputs`.
     collector_outputs: []const u8 = "",
+    /// Raw `FuelTypes` value; rows come from `parseCollectorFuelTypes`.
+    collector_fuel_types: []const u8 = "",
     /// blocks.xml `Class="Mine"` (`BlockMine`): a walk-triggered mine. The fuse
     /// is `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules
     /// `UpdateTick` at `TriggerDelay * 20`), and `UpdateTick` (IL=8) detonates.
@@ -732,6 +779,7 @@ pub fn loadFromPath(
         collector: bool = false,
         collector_type: u8 = 0,
         collector_outputs: ?[]const u8 = null,
+        collector_fuel_types: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -841,6 +889,7 @@ pub fn loadFromPath(
         var collector = false;
         var collector_type: u8 = 0;
         var collector_outputs: ?[]const u8 = null;
+        var collector_fuel_types: ?[]const u8 = null;
         var trigger_delay: f32 = 0;
         var explosion_radius_blocks: f32 = 1;
         var explosion_block_damage: f32 = 0;
@@ -1020,6 +1069,8 @@ pub fn loadFromPath(
                 if (std.mem.eql(u8, v, "DewCollector")) collector_type = 0 else if (std.mem.eql(u8, v, "Apiary")) collector_type = 1 else if (std.mem.eql(u8, v, "ChickenCoop")) collector_type = 2;
             } else if (std.mem.eql(u8, pname, "OutputTypes")) {
                 collector_outputs = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "FuelTypes")) {
+                collector_fuel_types = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "TriggerDelay")) {
                 if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| trigger_delay = v;
             } else if (std.mem.eql(u8, pname, "Next")) {
@@ -1196,6 +1247,7 @@ pub fn loadFromPath(
             .collector = collector,
             .collector_type = collector_type,
             .collector_outputs = if (collector_outputs) |co| try arena.dupe(u8, co) else null,
+            .collector_fuel_types = if (collector_fuel_types) |cf| try arena.dupe(u8, cf) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -1274,6 +1326,7 @@ pub fn loadFromPath(
         var own_collector = pb.collector;
         var own_collector_type = pb.collector_type;
         var own_collector_outputs = pb.collector_outputs;
+        var own_collector_fuel_types = pb.collector_fuel_types;
         var own_trigger_delay = pb.trigger_delay;
         var own_expl_radius_blocks = pb.explosion_radius_blocks;
         var own_expl_block_damage = pb.explosion_block_damage;
@@ -1362,6 +1415,7 @@ pub fn loadFromPath(
                 own_collector = base_p.collector;
                 if (own_collector_type == 0) own_collector_type = base_p.collector_type;
                 if (own_collector_outputs == null) own_collector_outputs = base_p.collector_outputs;
+                if (own_collector_fuel_types == null) own_collector_fuel_types = base_p.collector_fuel_types;
             }
             if (!own_mine) {
                     own_mine = base_p.mine;
@@ -1456,6 +1510,7 @@ pub fn loadFromPath(
         pb.collector = own_collector;
         pb.collector_type = own_collector_type;
         pb.collector_outputs = own_collector_outputs;
+        pb.collector_fuel_types = own_collector_fuel_types;
         pb.trigger_delay = own_trigger_delay;
         pb.explosion_radius_blocks = own_expl_radius_blocks;
         pb.explosion_block_damage = own_expl_block_damage;
@@ -1554,6 +1609,7 @@ pub fn loadFromPath(
             .collector = pb.collector,
             .collector_type = pb.collector_type,
             .collector_outputs = if (pb.collector_outputs) |co| try arena.dupe(u8, co) else "",
+            .collector_fuel_types = if (pb.collector_fuel_types) |cf| try arena.dupe(u8, cf) else "",
             .trigger_delay = pb.trigger_delay,
             .explosion_radius_blocks = pb.explosion_radius_blocks,
             .explosion_block_damage = pb.explosion_block_damage,

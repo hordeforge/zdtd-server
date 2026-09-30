@@ -9,6 +9,7 @@ const std = @import("std");
 const assets_blocks = @import("../../assets/blocks.zig");
 const sandbox = @import("../../assets/sandbox.zig");
 const game_tick = @import("tick.zig");
+const collectors_mod = @import("../../world/collectors.zig");
 const test_tmp = @import("../../util/test_tmp.zig");
 const ecs = @import("../../ecs/root.zig");
 const components = @import("../../ecs/components.zig");
@@ -1052,10 +1053,11 @@ pub fn tickCollectors(self: *Game) void {
     // the produced count (sandbox_data ids 105-107, all defaulting to 1).
     var sandbox_buf: [512]sandbox.Group = undefined;
     const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
-    const input_on = game_tick.sandboxFloat(sandbox_groups, "DewCollectorInput") > 0;
+    const dew_on = game_tick.sandboxFloat(sandbox_groups, "DewCollectorInput") > 0;
+    const apiary_on = game_tick.sandboxFloat(sandbox_groups, "ApiaryInput") > 0;
+    const coop_on = game_tick.sandboxFloat(sandbox_groups, "ChickenCoopInput") > 0;
     const time_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorTime");
     const out_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorOutput");
-    if (!input_on) return;
     // Ownership of the send: this pass produces and `broadcastDirtyCollectors`
     // (same tick, after it) ships what changed, so a client watches the water
     // appear without waiting for its next chunk stream.
@@ -1064,6 +1066,15 @@ pub fn tickCollectors(self: *Game) void {
         if (!used) continue;
         const def = self.blocks.byId(c.block_id) orelse continue;
         if (!def.collector) continue;
+        // Stock's `isDisabled` checks the type's sandbox input gate:
+        // `DewCollectorInput`/`ApiaryInput`/`ChickenCoopInput` at 0 turn the
+        // whole collector off (BlockCollector.il IL_001D-0047).
+        const type_on = switch (def.collector_type) {
+            1 => apiary_on,
+            2 => coop_on,
+            else => dew_on,
+        };
+        if (!type_on) continue;
         // `lastWorldTimes[name]` is stamped whenever the update runs, so time
         // spent blocked or full is not banked (stock's `resetTimeValues`).
         if (c.last_world == 0) {
@@ -1079,10 +1090,31 @@ pub fn tickCollectors(self: *Game) void {
         if (rn == 0) continue;
         const row = rows[0];
         if (row.output_item.len == 0) continue;
-        // A fuel-costed output needs the `FuelTypes` item in a fuel slot; zdtd
-        // models no fuel slots yet, so those rows stay dormant rather than
-        // producing without their fuel.
-        if (row.fuel.len > 0) continue;
+        // Fuel-costed output (`BlockCollector.getFuelCount` IL=30 sums the fuel
+        // slots holding an item the row's `FuelType` names): without enough fuel
+        // the output is disabled, which is stock's `outOfFuel` leg, and a
+        // production consumes `FuelCost` units.
+        var fuel_rows: [assets_blocks.max_collector_fuel_types]assets_blocks.CollectorFuelRow = undefined;
+        const fuel_n = assets_blocks.parseCollectorFuelTypes(def.collector_fuel_types, &fuel_rows);
+        var fuel_cost: u16 = 0;
+        var fuel_items: []const u8 = "";
+        if (row.fuel.len > 0) {
+            var matched: ?assets_blocks.CollectorFuelRow = null;
+            for (fuel_rows[0..fuel_n]) |fr| {
+                if (std.mem.eql(u8, fr.name, row.fuel)) matched = fr;
+            }
+            const ft = matched orelse {
+                c.out_of_fuel = true;
+                continue;
+            };
+            fuel_items = ft.items;
+            fuel_cost = @intCast(@max(row.fuel_cost, 1));
+            if (collectorFuelCount(self, c, fuel_items) < fuel_cost) {
+                c.out_of_fuel = true;
+                continue;
+            }
+            c.out_of_fuel = false;
+        }
         if (!c.fill_started) {
             c.fill_started = true;
             c.fill_left = c.drawFillTime(row.min_convert_time, row.max_convert_time);
@@ -1099,10 +1131,40 @@ pub fn tickCollectors(self: *Game) void {
             slot.count = @intFromFloat(@max(out_scale, 1));
             slot.quality = 0;
             c.dirty = true;
+            if (fuel_cost > 0) collectorBurnFuel(self, c, fuel_items, fuel_cost);
             c.fill_left += c.drawFillTime(row.min_convert_time, row.max_convert_time);
             if (c.fill_left <= 0) c.fill_left = 1;
         }
     }
+}
+
+/// `BlockCollector.getFuelCount` (IL=30): how many units of a fuel class the
+/// fuel slots hold (each slot's stack count when its item is in the class).
+fn collectorFuelCount(self: *Game, c: *const collectors_mod.Collector, items: []const u8) u32 {
+    var n: u32 = 0;
+    for (c.fuel) |sl| {
+        if (sl.type_id == 0 or sl.count == 0) continue;
+        const item = self.items.byId(@intCast(sl.type_id)) orelse continue;
+        if (assets_blocks.collectorFuelAccepts(items, item.name)) n += sl.count;
+    }
+    return n;
+}
+
+/// `BlockCollector.removeFuel` (IL=67): drain `cost` units from the fuel slots,
+/// skipping stacks the class does not name.
+fn collectorBurnFuel(self: *Game, c: *collectors_mod.Collector, items: []const u8, cost: u16) void {
+    var left: u16 = cost;
+    for (&c.fuel) |*sl| {
+        if (left == 0) break;
+        if (sl.type_id == 0 or sl.count == 0) continue;
+        const item = self.items.byId(@intCast(sl.type_id)) orelse continue;
+        if (!assets_blocks.collectorFuelAccepts(items, item.name)) continue;
+        const take = @min(sl.count, left);
+        sl.count -= take;
+        left -= take;
+        if (sl.count == 0) sl.* = .{};
+    }
+    c.dirty = true;
 }
 
 /// Stock `isBlocked`: a solid block over the collector stops it collecting (dew

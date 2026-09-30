@@ -20964,3 +20964,81 @@ test "scenario a collector TE streams and its water can be taken" {
     try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
     std.debug.print("PASS collector-te: streams, round-trips and empties on take\n", .{});
 }
+
+test "scenario a fuelled collector burns its fuel and stops when empty" {
+    // `BlockCollector.getFuelCount` (IL=30) sums the fuel slots holding an item
+    // the output row's `FuelType` names, `removeFuel` (IL=67) drains
+    // `FuelCost` units per production and the `outOfFuel` flag disables the
+    // output (tile-entities-power.md section 4.6). An apiary is the shipped
+    // fuelled collector: honeycomb costs honey.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "apiary")) return 1734;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_apiary.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="apiary">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="Apiary" />
+        \\  <property name="OutputTypes" value="{honeycomb,honey,1,0,0,honeycomb,honeycomb,100,100,10,20,apiary}" />
+        \\  <property name="FuelTypes" value="{honey,honey}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const apiary = g.blocks.byName("apiary") orelse return error.TestUnexpectedResult;
+    var frows: [assets_blocks.max_collector_fuel_types]assets_blocks.CollectorFuelRow = undefined;
+    const fn_ = assets_blocks.parseCollectorFuelTypes(apiary.collector_fuel_types, &frows);
+    try std.testing.expectEqual(@as(u8, 1), fn_);
+    try std.testing.expectEqualStrings("honey", frows[0].name);
+    try std.testing.expect(assets_blocks.collectorFuelAccepts(frows[0].items, "honey"));
+    try std.testing.expect(!assets_blocks.collectorFuelAccepts(frows[0].items, "water"));
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "honeycomb" },
+        .{ .id = 901, .name = "honey" },
+        .{ .id = 902, .name = "water" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const col = g.collectors.getOrCreate(60, 66, 60, apiary.id) orelse return error.TestUnexpectedResult;
+    // Water in the fuel slot is not this fuel class, so nothing burns.
+    col.fuel[0] = .{ .type_id = 902, .count = 9 };
+    col.last_world = 0;
+    g.sim.director.clock.hours += 0.6;
+    g.tickCollectors();
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 0), col.items[0].type_id);
+    try std.testing.expect(col.out_of_fuel);
+
+    // Honey burns: one unit per honeycomb, so five honey make five combs.
+    col.fuel[0] = .{ .type_id = 901, .count = 5 };
+    col.out_of_fuel = false;
+    var i: u32 = 0;
+    while (i < 12) : (i += 1) {
+        g.sim.director.clock.hours += 1.0;
+        g.tickCollectors();
+        if (col.fuel[0].count == 0) break;
+    }
+    try std.testing.expect(col.items[0].type_id == 900 or col.items[1].type_id == 900);
+    try std.testing.expectEqual(@as(u16, 0), col.fuel[0].count);
+    std.debug.print("PASS collector-fuel: honey burns into honeycomb\n", .{});
+}
