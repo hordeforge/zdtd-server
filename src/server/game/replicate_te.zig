@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const collectors_mod = @import("../../world/collectors.zig");
+const doors_mod = @import("../../world/doors.zig");
 const stock_inv = @import("../../wire/stock_inv.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
@@ -491,6 +492,36 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
             .delay = l.delay,
         },
     );
+    try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// Build the current door TE body for a stored door: declared module order,
+/// the open flag from the block meta, and the stored lock blob. Null when the
+/// block declares no usable door module set.
+pub fn buildDoorBody(self: *Game, door: *const doors_mod.Door, is_open: bool) ![]const u8 {
+    const def = self.blocks.byId(door.block_id) orelse return error.Overflow;
+    const declared = def.te_features[0..def.te_feature_n];
+    if (declared.len == 0 or declared[0] != .door) return error.Overflow;
+    const lock: ?[]const u8 = if (door.lock_len > 0) door.lock_blob[0..door.lock_len] else null;
+    return stock_te.buildDoorTeBody(
+        &self.body_buf,
+        255,
+        door.x,
+        door.y,
+        door.z,
+        door.block_id,
+        declared,
+        is_open,
+        lock,
+    );
+}
+
+/// Send a stored door's TE to one peer.
+pub fn sendDoorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
+    const door = self.doors.get(x, y, z) orelse return;
+    const raw = self.world.rawWorld(x, y, z) catch 0;
+    const is_open = ((@as(u8, @intCast((raw >> 22) & 15)) & 2) != 0);
+    const body = try buildDoorBody(self, door, is_open);
     try self.sendGame(peer, "NetPackageTileEntity", body);
 }
 

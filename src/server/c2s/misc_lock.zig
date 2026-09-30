@@ -215,6 +215,9 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                                 try replicate_te.sendStorageTe(self, peer, p[0], p[1], p[2]);
                                 try replicate_te.sendWorkstationTe(self, peer, p[0], p[1], p[2]);
                                 try replicate_te.sendVendingTe(self, peer, p[0], p[1], p[2]);
+                                // A locked door's padlock rides its own composite
+                                // body (`TEFeatureDoor` + `TEFeatureLockable`).
+                                try replicate_te.sendDoorTe(self, peer, p[0], p[1], p[2]);
                             },
                             else => {},
                         }

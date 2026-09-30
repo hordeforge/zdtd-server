@@ -18,6 +18,7 @@ const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
 const collectors_mod = @import("../../world/collectors.zig");
+const doors_mod = @import("../../world/doors.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("replicate_te.zig");
 const clock = @import("../../util/clock.zig");
@@ -78,6 +79,15 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
     // sendWorkstationTe holds the geometry gate, so a station whose real
     // array lengths are still unknown stays unsent rather than resizing the
     // client's grids.
+    // Doors with stored lock state: a joining client needs the padlock or the
+    // door reads unlocked for it.
+    var di: usize = 0;
+    while (di < doors_mod.max_doors) : (di += 1) {
+        if (!self.doors.used[di]) continue;
+        const door = &self.doors.items[di];
+        if (door.x < x0 or door.x >= x1 or door.z < z0 or door.z >= z1) continue;
+        try replicate_te.sendDoorTe(self, peer, door.x, door.y, door.z);
+    }
     // Collector producers (dew collector/apiary/coop) keep their water in a
     // classic TE, so a joining client needs the current state with the chunk or
     // it reads an empty collector until the next change.

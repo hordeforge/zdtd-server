@@ -349,6 +349,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       model (`Convert`/`Modify`/`Expand`/`Cost` and `ModTransformEnableNames`),
       the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
       `OpenSound`/`CloseSound` pair (a UI-open sound the client plays itself).
+- [x] **A locked door reached no other client** - closed 2026-09-28 for the
+      `TEFeatureDoor` + `TEFeatureLockable` pair. A composite door's ToClient
+      body is the declared module order with the door module's two bytes
+      (`isOpen`, `animateOnSync`, TEFeatureDoor.Write IL=23; the version `18`
+      goes out only on the persistent stream) and the lockable module; the open
+      flag also rides the block meta, so the lock is the part the server must
+      keep. zdtd had no door module at all, so a client's door edit matched no
+      parser and the padlock never reached anyone. `moduleHash(.door)`, a door
+      body builder/parser, a cell-keyed `world/doors.zig` store (lock blob), the
+      C2S apply with a nearby rebroadcast, the lock-grant push and the chunk
+      entry send are in. Gated by `scenario a locked door streams its padlock to
+      nearby clients` (decisive: dropping the rebroadcast leaves the other peer
+      with nothing). Residual: the door's auto-close timer, the drawbridge and
+      honk-open halves, and door persistence (a restart drops stored locks).
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

@@ -21388,3 +21388,128 @@ test "scenario a stomping entity crushes spikes instead of taking them" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, py, pz));
     std.debug.print("PASS stomps-spikes: the stomper crushes the trap, the walker bleeds\n", .{});
 }
+
+test "scenario a locked door streams its padlock to nearby clients" {
+    // A door's composite TE carries `TEFeatureDoor` (isOpen + animateOnSync, 2
+    // bytes on the network stream, TEFeatureDoor.Write IL=23) and
+    // `TEFeatureLockable`, so the client's declared-order read matches and the
+    // lock reaches every other player. The open flag itself rides the block
+    // meta, so the lock is the part the server must remember and stream.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "doorTest")) return 1738;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_door.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="doorTest">
+        \\  <property name="Class" value="Door" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property name="TEFeatureDoor" value="1" />
+        \\  <property name="TEFeatureLockable" value="1" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    // The two features are declared as classes on child elements in stock
+    // blocks.xml; the parser reads `class="TEFeature*"`.
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="doorTest">
+        \\  <property name="Class" value="Door" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property class="TEFeatureDoor" />
+        \\  <property class="TEFeatureLockable" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const door_def = g.blocks.byName("doorTest") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 2), door_def.te_feature_n);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.door, door_def.te_features[0]);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.lockable, door_def.te_features[1]);
+    try std.testing.expect(stock_te_mod.moduleHash(.door) != null);
+
+    // A body with a lock blob round-trips: the door module and the lock body
+    // both come back, and a storage body is not mistaken for a door.
+    var body_buf: [1024]u8 = undefined;
+    const lock_body = [_]u8{ 1, 0, 0, 0, 0, 0 }; // locked, no users, empty hash
+    const dbody = try stock_te_mod.buildDoorTeBody(
+        &body_buf,
+        3,
+        12,
+        70,
+        12,
+        door_def.id,
+        door_def.te_features[0..door_def.te_feature_n],
+        true,
+        &lock_body,
+    );
+    const parsed = try stock_te_mod.parseDoorTeBody(dbody);
+    try std.testing.expect(parsed.found_door);
+    try std.testing.expect(parsed.is_open);
+    try std.testing.expect(parsed.found_lock);
+    try std.testing.expectEqual(@as(usize, lock_body.len), parsed.lock_blob_len);
+    try std.testing.expectEqualSlices(u8, &lock_body, dbody[parsed.lock_blob_off..][0..parsed.lock_blob_len]);
+    // A truncated body is a read error, not a door: either way it is refused.
+    try std.testing.expectError(error.EndOfStream, stock_te_mod.parseDoorTeBody(&[_]u8{ 0, 0, 0, 0 }));
+
+    // The client's own edit applies, and a second nearby peer hears it.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 12;
+    g.sim.transform[ps].z = 12;
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = 14;
+    g.sim.transform[ps2].z = 12;
+
+    var fb: [2048]u8 = undefined;
+    var edit_buf: [1024]u8 = undefined;
+    const edit = try stock_te_mod.buildDoorTeBody(
+        &edit_buf,
+        9,
+        12,
+        70,
+        12,
+        door_def.id,
+        door_def.te_features[0..door_def.te_feature_n],
+        false,
+        &lock_body,
+    );
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", edit));
+    const stored = g.doors.get(12, 70, 12) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, lock_body.len), stored.lock_len);
+    try std.testing.expectEqualSlices(u8, &lock_body, stored.lock_blob[0..stored.lock_len]);
+    // The other peer learns the lock from the rebroadcast.
+    const got = cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) orelse return error.TestUnexpectedResult;
+    const heard = try stock_te_mod.parseDoorTeBody(got);
+    try std.testing.expect(heard.found_lock);
+    try std.testing.expectEqualSlices(u8, &lock_body, got[heard.lock_blob_off..][0..heard.lock_blob_len]);
+
+    // Removing the block drops the stored door.
+    _ = g.doors.removeAt(12, 70, 12);
+    try std.testing.expectEqual(@as(usize, 0), g.doors.count());
+    std.debug.print("PASS door-te: the padlock round-trips and reaches the other peer\n", .{});
+}

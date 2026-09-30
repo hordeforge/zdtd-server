@@ -43,6 +43,10 @@ pub const feature_hash_signable: i32 = 924617576;
 /// container's padlock state (`locked`, the allowed users and the password
 /// hash; TEFeatureLockable::Write IL=42). Same hash formula as the rows above.
 pub const feature_hash_lockable: i32 = unity_hash.getStableHashCode("TEFeatureLockable");
+/// `TEFeatureDoor` (`TEFeatureDoor.il`), whose ToClient body is `isOpen` then
+/// `animateOnSync` (Write IL=23: the version `18` goes out only on the
+/// persistent stream).
+pub const feature_hash_door: i32 = unity_hash.getStableHashCode("TEFeatureDoor");
 
 /// GetStableHashCode("TEFeatureCanvas"): the composite module that carries a
 /// canvas sign's state as an opaque body (`libraryId` string, the 16-byte sign
@@ -78,7 +82,8 @@ pub fn moduleHash(kind: blocks.FeatureKind) ?i32 {
         .pickup => feature_hash_pickup,
         .combine => feature_hash_combine,
         .area_repair => feature_hash_area_repair,
-        .door, .signable, .canvas, .land_claim, .other => null,
+        .door => feature_hash_door,
+        .signable, .canvas, .land_claim, .other => null,
     };
 }
 
@@ -212,7 +217,7 @@ fn writeCompositeStoragePayload(
                     try w.writeBytes(&unlocked_lock_body),
                 // Version-only on the network stream: no body.
                 .lock_pickable, .explodable, .pickup, .combine, .area_repair => {},
-                .door, .signable, .canvas, .land_claim, .other => unreachable,
+                .door, .signable, .canvas, .land_claim, .other => unreachable, // compositeOrderOk refuses these
             }
             finalizeU32(&w, mark);
         }
@@ -238,12 +243,18 @@ fn writeCompositeStoragePayload(
     return w.written();
 }
 
-/// A declared module list is usable when it is non-empty, leads with Storage
-/// (this builder carries a container) and every entry has a body.
+/// A declared module list is usable by the STORAGE builder when it is non-empty,
+/// leads with Storage (this builder carries a container) and every entry is one
+/// this builder can write. A door is deliberately excluded even though
+/// `moduleHash` resolves for it: its body needs the open flag, which only
+/// `buildDoorTeBody` has, so claiming it here would desync the client's read.
 fn compositeOrderOk(declared: []const blocks.FeatureKind) bool {
     if (declared.len == 0 or declared[0] != .storage) return false;
     for (declared) |kind| {
-        if (moduleHash(kind) == null) return false;
+        switch (kind) {
+            .storage, .lockable, .lock_pickable, .explodable, .pickup, .combine, .area_repair => {},
+            .door, .signable, .canvas, .land_claim, .other => return false,
+        }
     }
     return true;
 }
@@ -764,6 +775,133 @@ fn writeCollectorStackArray(w: *binary.Writer, slots: []const stock_inv.StockSlo
     for (slots) |s| try stock_inv.writeItemStack(w, s);
 }
 
+/// A door's `TEFeatureDoor` body on the network stream: `isOpen` then
+/// `animateOnSync` (false on a server send, which is what clears the field
+/// after the write). Two bytes, no version.
+pub fn writeDoorFeature(w: *binary.Writer, is_open: bool) !void {
+    try w.writeBool(is_open);
+    try w.writeBool(false);
+}
+
+/// Build a composite door TE body (`NetPackageTileEntity`), emitted in the
+/// block's declared module order exactly like storage: the client reads one hash
+/// per declared module and skips the payload when the order disagrees.
+pub fn buildDoorTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    block_id: i32,
+    declared: []const blocks.FeatureKind,
+    is_open: bool,
+    lock_blob: ?[]const u8,
+) ![]u8 {
+    var payload: [1024]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    const outer = try reserveU32(&pw);
+    try pw.writeI32(block_id);
+    try pw.writeByte(0); // null owner
+    if (declared.len == 0 or declared.len > 255) return error.Overflow;
+    try pw.writeByte(@intCast(declared.len));
+    for (declared) |kind| {
+        try pw.writeI32(moduleHash(kind) orelse return error.Overflow);
+        const mark = try reserveU32(&pw);
+        switch (kind) {
+            .door => try writeDoorFeature(&pw, is_open),
+            .lockable => if (lock_blob) |b|
+                try pw.writeBytes(b)
+            else
+                try pw.writeBytes(&unlocked_lock_body),
+            // Version-only on the network stream.
+            .lock_pickable, .explodable, .pickup, .combine, .area_repair => {},
+            // A door that also claims storage cannot be filled from here; the
+            // caller only routes blocks whose declaration it has checked.
+            .storage, .signable, .canvas, .land_claim, .other => return error.Overflow,
+        }
+        finalizeU32(&pw, mark);
+    }
+    finalizeU32(&pw, outer);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+pub const ParsedDoor = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    is_open: bool = false,
+    found_door: bool = false,
+    found_lock: bool = false,
+    /// Offset/length of the lockable module body inside `body` (replayed
+    /// verbatim, like the container lock).
+    lock_blob_off: usize = 0,
+    lock_blob_len: usize = 0,
+};
+
+/// Walk a composite door body (`TEFeatureDoor::read` IL=47 plus
+/// `TEFeatureDoor::Write` IL=23 for the module order and the two-byte body;
+/// `TEFeatureLockable::Read` IL=50 via `validateLockFeature`). Fails with
+/// `error.NotDoorTe` when no door module is present, so a storage or
+/// workstation body is never mistaken for one.
+pub fn parseDoorTeBody(body: []const u8) (binary.ReadError || error{NotDoorTe})!ParsedDoor {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedDoor = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    const outer_size = try pr.readU32();
+    if (outer_size < 4 or outer_size - 4 > pr.remaining()) return error.InvalidString;
+    _ = try pr.readI32(); // payload block id
+    const owner_tag = try pr.readByte();
+    if (owner_tag != 0) {
+        _ = try pr.readByte();
+        try pr.skipString();
+        try pr.skipString();
+    }
+    const mod_n = try pr.readByte();
+    var mi: u8 = 0;
+    while (mi < mod_n) : (mi += 1) {
+        const hash = try pr.readI32();
+        const feat_size = try pr.readU32();
+        if (feat_size < 4) return error.InvalidString;
+        const feat_payload_len = feat_size - 4;
+        if (pr.remaining() < feat_payload_len) return error.EndOfStream;
+        const feat_start = pr.pos;
+        if (hash == feature_hash_door) {
+            if (feat_payload_len < 2) return error.InvalidString;
+            out.found_door = true;
+            out.is_open = try pr.readBool();
+            _ = try pr.readBool(); // animateOnSync (client sets its own)
+        } else if (hash == feature_hash_lockable and feat_payload_len <= containers.max_lock_feature_bytes) {
+            try validateLockFeature(&pr, feat_payload_len);
+            out.found_lock = true;
+            out.lock_blob_off = (@intFromPtr(pr.data.ptr) - @intFromPtr(body.ptr)) + feat_start;
+            out.lock_blob_len = feat_payload_len;
+        } else {
+            pr.pos += feat_payload_len;
+        }
+        const consumed = pr.pos - feat_start;
+        if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
+        if (consumed > feat_payload_len) return error.InvalidString;
+    }
+    if (!out.found_door) return error.NotDoorTe;
+    return out;
+}
+
 /// Build the `NetPackageTileEntity` body for a collector (`TileEntityCollector`
 /// in `ToClient` mode): local chunk pos, then `lastWorldTimes`,
 /// `fillDataLookup`, `isUnderwater`, `isBlocked`, `outOfFuel`, `isFull` and the
@@ -858,8 +996,10 @@ pub fn peekTeBlockId(body: []const u8) ?i32 {
     return block_id;
 }
 
-/// Parse a collector TE body (the client's `ToServer` edit or a peer echo).
-/// Unknown names/flags are consumed and dropped: the outer header's block id is
+/// Parse a collector TE body (the client's `ToServer` edit or a peer echo),
+/// `TileEntityCollector::read` IL=627 / `write` IL=278
+/// (tile-entities-power.md section 4.6) plus the outer
+/// `NetPackageTileEntity` header. Unknown names/flags are consumed and dropped: the outer header's block id is
 /// what routes here, so the shape must parse or the caller rejects the body.
 pub fn parseCollectorTeBody(body: []const u8) binary.ReadError!ParsedCollector {
     var r: binary.Reader = .{ .data = body };

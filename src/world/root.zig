@@ -13,6 +13,7 @@ pub const containers = @import("containers.zig");
 pub const signs = @import("signs.zig");
 pub const workstations = @import("workstations.zig");
 pub const collectors = @import("collectors.zig");
+pub const doors = @import("doors.zig");
 pub const vending = @import("vending.zig");
 pub const light_te = @import("light_te.zig");
 pub const dtm = @import("dtm.zig");
@@ -40,6 +41,7 @@ test {
     _ = signs;
     _ = workstations;
     _ = collectors;
+    _ = doors;
     _ = vending;
     _ = light_te;
     _ = dtm;

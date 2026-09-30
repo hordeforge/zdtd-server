@@ -104,6 +104,7 @@ const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const collectors_mod = @import("../world/collectors.zig");
+const doors_mod = @import("../world/doors.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
 const assets_paths = @import("../assets/paths.zig");
@@ -447,6 +448,8 @@ pub const Game = struct {
     workstations: workstations_mod.WorkstationStore = .{},
     /// `TileEntityCollector` producer state (dew collector, apiary, coop).
     collectors: collectors_mod.Store = .{},
+    /// `TEFeatureDoor`/`TEFeatureLockable` state (doors, gates, hatches).
+    doors: doors_mod.Store = .{},
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
     vending: vending_mod.VendingStore = .{},

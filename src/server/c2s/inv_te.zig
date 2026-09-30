@@ -226,6 +226,51 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             }
             return true;
         } else |_| {}
+        // Door TE (`TEFeatureDoor` + `TEFeatureLockable`): the only state the
+        // block meta does not already carry is the lock, so the lockable module
+        // is stored and re-emitted to nearby peers, which is what makes a locked
+        // door read as locked for everyone else.
+        if (stock_te.parseDoorTeBody(body) catch |err| switch (err) {
+            error.NotDoorTe => null,
+            else => blk: {
+                self.harness.counters.inc(.c2s_malformed);
+                break :blk null;
+            },
+        }) |dr| {
+            const dp = self.sim.playerByPeer(c.slot) orelse return true;
+            const dpos = self.sim.transform[dp];
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                dpos.x,
+                dpos.y,
+                dpos.z,
+                @floatFromInt(dr.world_x),
+                @floatFromInt(dr.world_y),
+                @floatFromInt(dr.world_z),
+            )) return true;
+            if (dr.found_lock) {
+                const door = self.doors.getOrCreate(dr.world_x, dr.world_y, dr.world_z, @intCast(@max(dr.block_id, 0))) orelse return true;
+                if (dr.lock_blob_len > 0 and dr.lock_blob_len <= door.lock_blob.len and
+                    dr.lock_blob_off + dr.lock_blob_len <= body.len)
+                {
+                    door.lock_len = @intCast(dr.lock_blob_len);
+                    @memcpy(door.lock_blob[0..dr.lock_blob_len], body[dr.lock_blob_off..][0..dr.lock_blob_len]);
+                }
+                if (replicate_te.buildDoorBody(self, door, dr.is_open)) |dbody| {
+                    self.broadcastNear(
+                        "NetPackageTileEntity",
+                        dbody,
+                        @floatFromInt(door.x),
+                        @floatFromInt(door.z),
+                        self.interest_range,
+                    ) catch {};
+                } else |_| {}
+            }
+            return true;
+        }
         // Collector TE (`TileEntityCollector`): the body carries no version
         // byte (`write` emits the version only on the persistent stream,
         // IL_0008-000E), so the outer header's block id is what routes it. A
