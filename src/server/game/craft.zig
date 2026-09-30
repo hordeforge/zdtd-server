@@ -1081,7 +1081,11 @@ pub fn tickCollectors(self: *Game) void {
             c.last_world = now;
             continue;
         }
-        const has_mod = collectorHasMod(c);
+        // `modsChanged` maps each mod slot's `ModTypes` entry to the flags
+        // positionally (IL_006C-007B), so only the slot the block assigns the
+        // effect to counts.
+        const has_mod_speed = collectorModFlag(self, def.collector_mod_types, c, .speed);
+        const has_mod_count = collectorModFlag(self, def.collector_mod_types, c, .count);
         // `productionEnabled`: any output not disabled. The edges start and stop
         // the running sound (`HandleUpdate` IL_00E3-012E).
         const enabled = !collectorBlocked(self, c.x, c.y, c.z) and !c.isFull() and (!c.out_of_fuel);
@@ -1156,7 +1160,7 @@ pub fn tickCollectors(self: *Game) void {
             } else {
                 // `getCurrentConvertCount`'s else branch: `HasModCount ?
                 // ModdedConvertCountMultiplier : 1`.
-                convert_count = if (has_mod and row.modded_convert_count_multiplier > 0)
+                convert_count = if (has_mod_count and row.modded_convert_count_multiplier > 0)
                     @intCast(row.modded_convert_count_multiplier)
                 else
                     1;
@@ -1165,7 +1169,7 @@ pub fn tickCollectors(self: *Game) void {
         const out_count: u16 = @intFromFloat(@max(@as(f32, @floatFromInt(@max(convert_count, 1))) * out_scale, 1));
         // `getCurrentConvertSpeed` (IL=9): an installed converter mod scales the
         // budget by `ModdedConvertSpeedMultiplier`, else 1.
-        const speed_mult: f32 = if (has_mod and row.modded_convert_speed_multiplier > 0)
+        const speed_mult: f32 = if (has_mod_speed and row.modded_convert_speed_multiplier > 0)
             @floatFromInt(row.modded_convert_speed_multiplier)
         else
             1;
@@ -1192,12 +1196,22 @@ pub fn tickCollectors(self: *Game) void {
     }
 }
 
-/// Any non-empty `modSlotsInternal` slot sets stock's `HasModSpeed`/
-/// `HasModCount` (the `ModTypes` mapping of which mod has which effect is a
-/// recorded residual, so presence is the switch here).
-fn collectorHasMod(c: *const collectors_mod.Collector) bool {
-    for (c.mods) |sl| {
-        if (sl.type_id != 0 and sl.count > 0) return true;
+/// `HasModSpeed`/`HasModCount` for one effect: a non-empty mod slot whose
+/// positionally mapped `ModTypes` entry names that effect. A block that declares
+/// no `ModTypes` leaves the flags clear, which is what stock's own per-slot
+/// lookup ends up doing for a block with no mapping.
+fn collectorModFlag(
+    self: *Game,
+    types_csv: []const u8,
+    c: *const collectors_mod.Collector,
+    want: assets_blocks.CollectorModEffect,
+) bool {
+    _ = self;
+    if (types_csv.len == 0) return false;
+    for (c.mods, 0..) |sl, i| {
+        if (sl.type_id == 0 or sl.count == 0) continue;
+        const eff = assets_blocks.collectorModEffect(types_csv, i) orelse continue;
+        if (eff == want) return true;
     }
     return false;
 }

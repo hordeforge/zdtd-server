@@ -209,6 +209,32 @@ pub fn collectorFuelAccepts(items: []const u8, item_name: []const u8) bool {
     return false;
 }
 
+/// `BlockCollector/ModEffectTypes` (TileEntityCollector's modsChanged switch:
+/// 0 Convert, 1 Count, 2 Speed, 3 Modify, 4 Expand, 5 Cost, in that order).
+pub const CollectorModEffect = enum { convert, count, speed, modify, expand, cost };
+
+/// The effect a block assigns to mod slot `slot`: `ModTypes` carries one entry
+/// per slot, so the mapping is positional
+/// (`ModEffectTypes[] BlockCollector::ModTypes` indexed by the slot number,
+/// TileEntityCollector modsChanged IL_006C-007B). Null when the block declares
+/// nothing for that slot.
+pub fn collectorModEffect(types_csv: []const u8, slot: usize) ?CollectorModEffect {
+    var it = std.mem.splitScalar(u8, types_csv, ',');
+    var i: usize = 0;
+    while (it.next()) |raw| : (i += 1) {
+        if (i != slot) continue;
+        const name = std.mem.trim(u8, raw, " \t");
+        if (std.ascii.eqlIgnoreCase(name, "Convert")) return .convert;
+        if (std.ascii.eqlIgnoreCase(name, "Count")) return .count;
+        if (std.ascii.eqlIgnoreCase(name, "Speed")) return .speed;
+        if (std.ascii.eqlIgnoreCase(name, "Modify")) return .modify;
+        if (std.ascii.eqlIgnoreCase(name, "Expand")) return .expand;
+        if (std.ascii.eqlIgnoreCase(name, "Cost")) return .cost;
+        return null;
+    }
+    return null;
+}
+
 /// Is `item_name` one of a `CatalystTypes` comma list?
 pub fn collectorCatalystAccepts(types_csv: []const u8, item_name: []const u8) bool {
     var it = std.mem.splitScalar(u8, types_csv, ',');
@@ -336,6 +362,9 @@ pub const BlockDef = struct {
     /// the disabled one (IL_00E3-012E gates on `productionEnabled`).
     collector_running_sound: []const u8 = "",
     collector_activate_sound: []const u8 = "",
+    /// `ModTypes`: one `ModEffectTypes` name per mod slot, positionally mapped
+    /// (see `collectorModEffect`).
+    collector_mod_types: []const u8 = "",
     /// `CatalystTypes` comma list, plus the `name=value` `CatalystMultiplier`
     /// and `CatalystRequirements` tables.
     collector_catalyst_types: []const u8 = "",
@@ -821,6 +850,7 @@ pub fn loadFromPath(
         collector_catalyst_types: ?[]const u8 = null,
         collector_catalyst_multiplier: ?[]const u8 = null,
         collector_catalyst_requirements: ?[]const u8 = null,
+        collector_mod_types: ?[]const u8 = null,
         collector_running_sound: ?[]const u8 = null,
         collector_activate_sound: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
@@ -936,6 +966,7 @@ pub fn loadFromPath(
         var collector_catalyst_types: ?[]const u8 = null;
         var collector_catalyst_multiplier: ?[]const u8 = null;
         var collector_catalyst_requirements: ?[]const u8 = null;
+        var collector_mod_types: ?[]const u8 = null;
         var collector_running_sound: ?[]const u8 = null;
         var collector_activate_sound: ?[]const u8 = null;
         var trigger_delay: f32 = 0;
@@ -1119,6 +1150,8 @@ pub fn loadFromPath(
                 collector_outputs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "FuelTypes")) {
                 collector_fuel_types = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "ModTypes")) {
+                collector_mod_types = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "RunningSound")) {
                 collector_running_sound = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "ActivateSound")) {
@@ -1309,6 +1342,7 @@ pub fn loadFromPath(
             .collector_catalyst_types = if (collector_catalyst_types) |cc| try arena.dupe(u8, cc) else null,
             .collector_catalyst_multiplier = if (collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else null,
             .collector_catalyst_requirements = if (collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else null,
+            .collector_mod_types = if (collector_mod_types) |mt| try arena.dupe(u8, mt) else null,
             .collector_running_sound = if (collector_running_sound) |rs| try arena.dupe(u8, rs) else null,
             .collector_activate_sound = if (collector_activate_sound) |as_| try arena.dupe(u8, as_) else null,
             .trader_id = trader_id,
@@ -1393,6 +1427,7 @@ pub fn loadFromPath(
         var own_collector_catalyst_types = pb.collector_catalyst_types;
         var own_collector_catalyst_multiplier = pb.collector_catalyst_multiplier;
         var own_collector_catalyst_requirements = pb.collector_catalyst_requirements;
+        var own_collector_mod_types = pb.collector_mod_types;
         var own_collector_running_sound = pb.collector_running_sound;
         var own_collector_activate_sound = pb.collector_activate_sound;
         var own_trigger_delay = pb.trigger_delay;
@@ -1487,6 +1522,7 @@ pub fn loadFromPath(
                 if (own_collector_catalyst_types == null) own_collector_catalyst_types = base_p.collector_catalyst_types;
                 if (own_collector_catalyst_multiplier == null) own_collector_catalyst_multiplier = base_p.collector_catalyst_multiplier;
                 if (own_collector_catalyst_requirements == null) own_collector_catalyst_requirements = base_p.collector_catalyst_requirements;
+                if (own_collector_mod_types == null) own_collector_mod_types = base_p.collector_mod_types;
                 if (own_collector_running_sound == null) own_collector_running_sound = base_p.collector_running_sound;
                 if (own_collector_activate_sound == null) own_collector_activate_sound = base_p.collector_activate_sound;
             }
@@ -1587,6 +1623,7 @@ pub fn loadFromPath(
         pb.collector_catalyst_types = own_collector_catalyst_types;
         pb.collector_catalyst_multiplier = own_collector_catalyst_multiplier;
         pb.collector_catalyst_requirements = own_collector_catalyst_requirements;
+        pb.collector_mod_types = own_collector_mod_types;
         pb.collector_running_sound = own_collector_running_sound;
         pb.collector_activate_sound = own_collector_activate_sound;
         pb.trigger_delay = own_trigger_delay;
@@ -1691,6 +1728,7 @@ pub fn loadFromPath(
             .collector_catalyst_types = if (pb.collector_catalyst_types) |cc| try arena.dupe(u8, cc) else "",
             .collector_catalyst_multiplier = if (pb.collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else "",
             .collector_catalyst_requirements = if (pb.collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else "",
+            .collector_mod_types = if (pb.collector_mod_types) |mt| try arena.dupe(u8, mt) else "",
             .collector_running_sound = if (pb.collector_running_sound) |rs| try arena.dupe(u8, rs) else "",
             .collector_activate_sound = if (pb.collector_activate_sound) |as_| try arena.dupe(u8, as_) else "",
             .trigger_delay = pb.trigger_delay,

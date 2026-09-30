@@ -21152,6 +21152,7 @@ test "scenario a converter mod speeds a collector and grows its batch" {
         \\  <property name="Class" value="Collector" />
         \\  <property name="CollectorType" value="DewCollector" />
         \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,2,4,100,100,water}" />
+        \\  <property name="ModTypes" value="Speed,Count" />
         \\  <property name="Material" value="Mstone" />
         \\</block>
         \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
@@ -21164,6 +21165,10 @@ test "scenario a converter mod speeds a collector and grows its batch" {
     try std.testing.expectEqual(@as(u8, 1), assets_blocks.parseCollectorOutputs(dew.collector_outputs, &rows));
     try std.testing.expectEqual(@as(i32, 2), rows[0].modded_convert_speed_multiplier);
     try std.testing.expectEqual(@as(i32, 4), rows[0].modded_convert_count_multiplier);
+    // `ModTypes` is positional: slot 0 is the speed effect, slot 1 the count.
+    try std.testing.expectEqual(assets_blocks.CollectorModEffect.speed, assets_blocks.collectorModEffect(dew.collector_mod_types, 0).?);
+    try std.testing.expectEqual(assets_blocks.CollectorModEffect.count, assets_blocks.collectorModEffect(dew.collector_mod_types, 1).?);
+    try std.testing.expect(assets_blocks.collectorModEffect(dew.collector_mod_types, 2) == null);
 
     const idefs = [_]assets_items.ItemDef{
         .{ .id = 900, .name = "drinkJarBoiledWater" },
@@ -21191,8 +21196,23 @@ test "scenario a converter mod speeds a collector and grows its batch" {
     g.sim.director.clock.hours += 0.05;
     g.tickCollectors();
     try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 1), col.items[0].count);
+
+    // Move the same mod to the COUNT slot: the batch grows, the speed does not,
+    // so a full fill's worth of world time is needed again.
+    col.mods[0] = .{};
+    col.mods[1] = .{ .type_id = 903, .count = 1 };
+    col.items[0] = .{};
+    try std.testing.expect(col.fill_left > 0);
+    g.sim.director.clock.hours += 0.05;
+    g.tickCollectors();
+    // Half the fill is still outstanding at normal speed, so nothing lands.
+    try std.testing.expectEqual(@as(i32, 0), col.items[0].type_id);
+    g.sim.director.clock.hours += 0.05;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
     try std.testing.expectEqual(@as(u16, 4), col.items[0].count);
-    std.debug.print("PASS collector-mod: speed doubles, batch quadruples\n", .{});
+    std.debug.print("PASS collector-mod: the slot decides speed vs batch\n", .{});
 }
 
 test "scenario a running collector broadcasts its loop and stops it" {
