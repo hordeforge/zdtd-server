@@ -20399,3 +20399,58 @@ test "scenario a stand-on buff block applies its buffs when stepped on" {
     try std.testing.expectEqual(@as(i64, -1), g.sim.walk_buff_cell[ps]);
     std.debug.print("PASS walk-buff: standing on a burning block applies its buffs\n", .{});
 }
+
+test "scenario a turret wakes up then fires in bursts" {
+    // `AutoTurretFireController.Init` reads `WakeUpTime`, `BurstRoundCount`,
+    // `BurstFireRate` and `FireRate`: the state machine turns for `WakeUpTime`
+    // after acquiring a target (Asleep -> Awake), fires `BurstRoundCount` shots
+    // at `BurstFireRate`, then waits `FireRate` before the next burst
+    // (tile-entities-power.md section 6.2).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // A joined player keeps the director from despawning the target zombie.
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.clients[cl.slot].entered = true;
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.transform[ps].x = 396;
+    g.sim.transform[ps].z = 400;
+
+    const w = &g.sim;
+    const t = w.spawnTurretEx(400, 70, 400, .{ .ammo = 100 }) orelse return error.TestUnexpectedResult;
+    const ts = w.slotOfNetId(t) orelse return error.TestUnexpectedResult;
+    w.turret[ts].burst_rounds = 3;
+    w.turret[ts].burst_interval = 0.05;
+    w.turret[ts].fire_interval = 1.0;
+    w.turret[ts].wake_up_time = 0.4;
+    const gen = w.power.addNodeAt(.generator, 400, 70, 402, 100).?;
+    try std.testing.expect(w.power.connect(gen, w.turret[ts].power_node));
+    w.power.resolve();
+    try std.testing.expect(w.power.isEntityPowered(t));
+    _ = w.spawnZombie(402, 70, 400, 5000);
+
+    // The wake-up window: the turret turns, no shot yet. 0.4 s = 8 ticks.
+    var i: u32 = 0;
+    while (i < 5) : (i += 1) try g.step();
+    try std.testing.expectEqual(@as(u16, 100), w.turret[ts].ammo);
+    try std.testing.expect(w.turret[ts].awake);
+    try std.testing.expect(w.turret[ts].wake_left > 0);
+
+    // Then the burst: three shots at 0.05 s (1 tick each), and the pause after
+    // them leaves the magazine at 97 well into the next second.
+    i = 0;
+    while (i < 12) : (i += 1) try g.step();
+    const after_burst = w.turret[ts].ammo;
+    try std.testing.expectEqual(@as(u16, 97), after_burst);
+    i = 0;
+    while (i < 10) : (i += 1) try g.step();
+    try std.testing.expectEqual(@as(u16, 97), w.turret[ts].ammo);
+    std.debug.print("PASS turret-burst: wake-up then burst-then-pause\n", .{});
+}

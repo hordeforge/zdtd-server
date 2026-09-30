@@ -178,7 +178,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       powered `TileEntityPoweredRangedTrap` stacks,
       tile-entities-power.md:1102-1117, are a different block that zdtd does not
       place), and the degradation *rate* is 1 per shot, where stock scales it by
-      the item's degradation rows.
+      the item's degradation rows. The fire pattern closed 2026-09-28:
+      `BurstFireRate` and `FireRate` were conflated into one interval and
+      `WakeUpTime` was unread, so a turret fired continuously from the instant it
+      acquired a target; it now wakes for `WakeUpTime` and fires
+      `BurstRoundCount` shots at `BurstFireRate` with a `FireRate` pause between
+      bursts. Still open: the `Overheated` state (`CoolOffTime`/`OvershootTime`
+      heat cap) and `FallAsleepTime`.
 - [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
       runs `sensing.rayClear` between the turret and each nearer candidate
       (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a

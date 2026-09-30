@@ -1880,8 +1880,13 @@ pub const World = struct {
             if (f(self.turret_stats_ctx)) |ts| {
                 if (ts.max_distance > 0) t.range = ts.max_distance;
                 if (ts.entity_damage > 0) t.damage = ts.entity_damage;
-                if (ts.burst_fire_rate > 0) t.fire_interval = ts.burst_fire_rate;
-                if (ts.burst_rounds > 0) t.ammo = ts.burst_rounds;
+                // `BurstFireRate` is the cadence inside a burst and `FireRate`
+                // the pause between bursts; zdtd used the burst cadence as the
+                // only interval, so a burst-capable block fired continuously.
+                if (ts.burst_fire_rate > 0) t.burst_interval = ts.burst_fire_rate;
+                if (ts.fire_rate > 0) t.fire_interval = ts.fire_rate;
+                if (ts.burst_rounds > 0) t.burst_rounds = ts.burst_rounds;
+                if (ts.wake_up_time > 0) t.wake_up_time = ts.wake_up_time;
             }
         }
         // The deployed item wins over the block-derived defaults: its Meta is

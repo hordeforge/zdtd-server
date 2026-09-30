@@ -1178,6 +1178,16 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
             if (xml.parseU16(brc)) |v| ts.burst_rounds = v;
             try turret_stats_by_name.put(arena, kn, ts);
         }
+        if (xml.propertyValue(body, "FireRate")) |fr| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(fr)) |v| ts.fire_rate = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "WakeUpTime")) |wu| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(wu)) |v| ts.wake_up_time = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
         if (xml.propertyValue(body, "OutputPerFuel")) |opf| {
             if (xml.parseF32(opf)) |v| try power_output_per_fuel_by_name.put(arena, kn, v);
         }
@@ -1299,6 +1309,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (resolveTurretField("entity_damage", &turret_stats_by_name, &own_facts, nm, "EntityDamage")) |v| {
             ts.entity_damage = v;
             ts_any = true;
+        }
+        if (resolveTurretField("fire_rate", &turret_stats_by_name, &own_facts, nm, "FireRate")) |v| {
+            ts.fire_rate = v;
+        }
+        if (resolveTurretField("wake_up_time", &turret_stats_by_name, &own_facts, nm, "WakeUpTime")) |v| {
+            ts.wake_up_time = v;
         }
         if (resolveTurretField("burst_fire_rate", &turret_stats_by_name, &own_facts, nm, "BurstFireRate")) |v| {
             ts.burst_fire_rate = v;

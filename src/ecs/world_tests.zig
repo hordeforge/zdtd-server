@@ -661,7 +661,18 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     // component defaults.
     var w: World = .{};
     defer w.deinit();
-    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15, .burst_rounds = 15 };
+    // `BurstFireRate` is the cadence inside a burst, `FireRate` the pause
+    // between bursts and `WakeUpTime` the Asleep -> Awake turn; the previous
+    // code used the burst cadence as the only interval and seeded the magazine
+    // from the burst length.
+    var stats: c.TurretBlockStats = .{
+        .max_distance = 30,
+        .entity_damage = 32,
+        .burst_fire_rate = 0.15,
+        .burst_rounds = 15,
+        .fire_rate = 0.9,
+        .wake_up_time = 0.4,
+    };
     w.turret_stats_fn = struct {
         fn f(ctx: ?*anyopaque) ?c.TurretBlockStats {
             const s: *c.TurretBlockStats = @ptrCast(@alignCast(ctx.?));
@@ -673,10 +684,13 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     const s = w.slotOfNetId(id).?;
     try std.testing.expectEqual(@as(f32, 30), w.turret[s].range);
     try std.testing.expectEqual(@as(f32, 32), w.turret[s].damage);
-    try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].fire_interval);
-    // BurstRoundCount is the magazine: it was parsed off blocks.xml and then
-    // dropped, so every turret held the 200-round component fallback.
-    try std.testing.expectEqual(@as(u16, 15), w.turret[s].ammo);
+    try std.testing.expectEqual(@as(f32, 0.9), w.turret[s].fire_interval);
+    try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].burst_interval);
+    try std.testing.expectEqual(@as(f32, 0.4), w.turret[s].wake_up_time);
+    // BurstRoundCount is the burst length, not the magazine (the magazine is the
+    // deployed item's Meta), so the 200-round component fallback stands here.
+    try std.testing.expectEqual(@as(u16, 15), w.turret[s].burst_rounds);
+    try std.testing.expectEqual(@as(u16, 200), w.turret[s].ammo);
     // Without the hook the component defaults hold.
     var w2: World = .{};
     defer w2.deinit();

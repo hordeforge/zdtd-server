@@ -640,8 +640,16 @@ pub const BotDef = struct {
 pub const TurretBlockStats = struct {
     max_distance: f32 = 0,
     entity_damage: f32 = 0,
+    /// `BurstFireRate`: the cadence INSIDE a burst (`AutoTurretFireController.
+    /// Init` reads it next to BurstRoundCount).
     burst_fire_rate: f32 = 0,
     burst_rounds: u16 = 0,
+    /// `FireRate`: the base cadence, i.e. the pause between bursts.
+    fire_rate: f32 = 0,
+    /// `WakeUpTime`: how long the turret turns before it may fire after
+    /// acquiring a target (the Awake transition in the state machine,
+    /// tile-entities-power.md section 6.2).
+    wake_up_time: f32 = 0,
 };
 
 pub const VehicleKind = enum(u8) {
@@ -728,7 +736,21 @@ pub const Turret = struct {
     range: f32 = 24,
     damage: f32 = 12,
     fire_cd: f32 = 0,
+    /// Interval between bursts (`FireRate`).
     fire_interval: f32 = 0.4,
+    /// Interval between shots inside a burst (`BurstFireRate`); 0 = use
+    /// `fire_interval`.
+    burst_interval: f32 = 0,
+    /// Shots per burst (`BurstRoundCount`); 0 = continuous fire.
+    burst_rounds: u16 = 0,
+    burst_left: u16 = 0,
+    /// Pause left between bursts.
+    burst_cd: f32 = 0,
+    /// `WakeUpTime` and the wake countdown: the turret acquires a target,
+    /// spends `wake_up_time` turning, then fires (Asleep -> Awake).
+    wake_up_time: f32 = 0,
+    wake_left: f32 = 0,
+    awake: bool = false,
     ammo: u16 = 200,
     /// The item the placer deployed (0 = none): TurretSync carries it back with
     /// `ammo` as the item's Meta, which is where a deployed turret's magazine
