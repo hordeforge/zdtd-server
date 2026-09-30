@@ -334,10 +334,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       wave waits while `bloodmoon_active` (stock `get_OtherHordesAreActive`,
       aidirector.md:711-712). The scout-horde half of that test has no zdtd
       equivalent yet.
-- [ ] **Blood-moon scout tier uses the server-wide gamestage** - stock uses
-      `CalcGameStageAround` of the closest player within 120 m
-      (aidirector.md:394-397); `aidirector.zig:883-886` reads the party
-      high-water mark.
+- [x] **The scout drip used the server-wide gamestage** - closed 2026-09-28:
+      the daytime drip now spawns through the position-anchored form
+      (`spawnNearPlayers(..., count = 0)`, which resolves both the spawner tier
+      and the wave size from `scoutGroupAt`/`scoutWaveSizeAt` at the candidate
+      position) instead of one party high-water mark for the whole wave. Stock
+      uses `CalcGameStageAround` at the spawn (aidirector.md:394-397); the
+      blood-moon ladder itself keeps the party stage, which is what
+      `AIDirectorBloodMoonParty` advances.
 
 ### BLOCKER (root-caused 2026-09-28): the loadgen client links LiteNetLib 2.x
 

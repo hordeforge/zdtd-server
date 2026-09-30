@@ -1382,3 +1382,49 @@ test "MaxEnemyTier degrades a class down its PreviousTier ladder" {
     Hooks.name = "zLone";
     try std.testing.expect(d.spawnOneZombie(&w, 38, 70, 38, "ZombiesAll", 3, false) == null);
 }
+
+test "the scout drip takes its tier from the stage around the spawn" {
+    // Stock's `SpawnScouts` picks the tier from `CalcGameStageAround` at the hot
+    // spot, not from a server-wide high-water mark (aidirector.md 394-397), so
+    // the daytime drip resolves both the spawner and the wave size at the
+    // position it is about to spawn at. `scoutSpawnerName` bands are absolute
+    // (45/85/125), so 71 is Scouts2 while the party stage 0 would be Scouts1.
+    const Hooks = struct {
+        var spawner: []const u8 = "";
+        var wave_asked: []const u8 = "";
+        fn around(_: ?*anyopaque, _: f32, _: f32, radius: f32) i32 {
+            if (radius != Director.gamestage_around_radius) return 0;
+            return 71;
+        }
+        fn group(_: ?*anyopaque, spawner_name: []const u8) ?[]const u8 {
+            spawner = spawner_name;
+            return "ZombiesAll";
+        }
+        fn wave(_: ?*anyopaque, spawner_name: []const u8) aidirector.WaveRange {
+            wave_asked = spawner_name;
+            return .{ .min = 2, .max = 2 };
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.rules.director.initial_population_frac = 0;
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{
+        .clock = .{ .day = 3, .hours = 12.0 },
+        .party_stage = 0,
+        .stage_around_ctx = undefined,
+        .stage_around_fn = &Hooks.around,
+        .spawner_group_ctx = undefined,
+        .spawner_group_fn = &Hooks.group,
+        .spawner_wave_ctx = undefined,
+        .spawner_wave_fn = &Hooks.wave,
+    };
+    d.scouts_cd = 0;
+    _ = d.tick(&w, 0.05);
+    try std.testing.expectEqualStrings(aidirector.scoutSpawnerName(71), Hooks.spawner);
+    try std.testing.expectEqualStrings(aidirector.scoutSpawnerName(71), Hooks.wave_asked);
+    try std.testing.expect(Hooks.spawner.len > 0);
+    // The wave size came from the position's tier row (2), so the drip spawned
+    // its pair rather than a flat 1.
+    try std.testing.expect(w.countKind(.zombie) >= 2);
+}

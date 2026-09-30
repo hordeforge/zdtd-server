@@ -711,8 +711,10 @@ pub const Director = struct {
             // Heat map: decay always; the 5 s scout spawn is cap-gated.
             self.tickHeat(w, dt, spawn_z);
             if (spawn_z and !self.clock.isNight() and self.scouts_cd <= 0) {
-                // Wave size is the tier's own TotalPerWave, not a flat 1.
-                spawned += self.spawnNearPlayers(w, self.scoutWaveSize(1), w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
+                // Wave size is the tier's own TotalPerWave, not a flat 1, and
+                // both the size and the group come from the stage around the
+                // spawn position (count 0 = position-anchored form).
+                spawned += self.spawnNearPlayers(w, 0, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
                 self.scouts_cd = w.rules.director.scout_drip_cd;
             }
         }
@@ -945,12 +947,21 @@ pub const Director = struct {
     /// the spawned zombie carries the rule index so `releaseRule` on destroy
     /// decrements the alive count (kill attrition).
     fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32, group_override: []const u8) u32 {
+        // `count == 0` asks for the position-anchored form: the wave size and
+        // spawn group come from the stage ladder AROUND the spawn position
+        // (`scoutWaveSizeAt` / `scoutGroupAt`), which is what stock's
+        // `CalcGameStageAround(pos)` answers (aidirector.md 394-397), instead
+        // of one party-wide high-water mark for every spawn of the wave.
         var n: u32 = 0;
         for (w.kind_groups.slice(.player)) |p| {
-            if (n >= count) break;
+            if (count != 0 and n >= count) break;
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            // Position-anchored form: `want` is filled in from the first
+            // candidate position below, one wave per player.
+            var want: u32 = if (count == 0) 1 else count;
+            var group: []const u8 = group_override;
             var k: u32 = 0;
-            while (k < count and n < count) : (k += 1) {
+            while (k < want and (count == 0 or n < count)) : (k += 1) {
                 // Stock AIDirector ring placement (asm.il:413135): the base
                 // bearing spreads the batch, and a per-spawn jitter (seeded
                 // from the spawn counter) keeps the pattern from repeating
@@ -969,8 +980,12 @@ pub const Director = struct {
                 // its centre, ~1.7 m above the surface, so spawning at that Y
                 // embeds zombies in hillsides or leaves them floating on
                 // slopes; the world ground hook gives the surface at (x,z).
+                if (k == 0 and count == 0) {
+                    want = self.scoutWaveSizeAt(x, z, 1);
+                    group = self.scoutGroupAt(x, z);
+                }
                 const y = w.groundY(x, z) orelse w.transform[p].y;
-                const slot = self.spawnOneZombie(w, x, y, z, group_override, self.total_spawned +% n, false) orelse break;
+                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, false) orelse break;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
