@@ -262,8 +262,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       optional meta bump, and the reschedule (deterministic `GrowthRate` or the
       random jittered band). Residual: stock's block-light channel is answered
       by sky exposure (a roofed crop reads dark), `BlockPlaceholderMap.Replace`
-      and the biome `Next` remap are not modelled, and mines/dew collectors
-      still do not tick. Original entry: `Block.UpdateTick` /
+      and the biome `Next` remap are not modelled, and dew collectors still do
+      not tick (`BlockMine` closed 2026-09-28: the walk trigger arms a
+      `TriggerDelay * 20` tick fuse and the tick detonates with the authored
+      `Explosion` class block). Original entry: `Block.UpdateTick` /
       `WorldBlockTicker` is absent
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks

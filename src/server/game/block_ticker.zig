@@ -32,6 +32,9 @@ const ecs_world = @import("../../ecs/world.zig");
 const world_store = @import("../../world/store.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const packages = @import("../../wire/packages.zig");
+const world_explosion = @import("world_explosion.zig");
+const invsys = @import("../../ecs/inventory.zig");
+const protocol = @import("../../protocol.zig");
 
 /// Scheduled block ticks held at once. A streamed POI farm can register a few
 /// hundred plants; the ring is far above that, and a drop is counted rather
@@ -90,6 +93,36 @@ pub fn tick(self: *Game) void {
     }
 }
 
+/// Arm a mine's fuse. `TriggerMine` (IL=99) plays the trigger sound and
+/// schedules the block's own update `TriggerDelay * 20` sim ticks out; the
+/// tick then detonates (`BlockMine.UpdateTick` IL=8). A cell that already has a
+/// fuse burning is left alone, so a second contact cannot double-schedule the
+/// same mine.
+pub fn armMine(self: *Game, x: i32, y: i32, z: i32, id: u16, def: assets_blocks.BlockDef) void {
+    if (mineArmedAt(self, x, y, z, id)) return;
+    const delay_ticks: u32 = @intFromFloat(@max(def.trigger_delay, 0) * @as(f32, @floatFromInt(protocol.ticks_per_second)));
+    schedule(self, x, y, z, id, delay_ticks);
+}
+
+fn mineArmedAt(self: *const Game, x: i32, y: i32, z: i32, id: u16) bool {
+    var i: usize = 0;
+    while (i < blockTickCount(self)) : (i += 1) {
+        const t = blockTickAt(self, i);
+        if (t.id == id and t.x == x and t.y == y and t.z == z) return true;
+    }
+    return false;
+}
+
+/// The queue lives on `Game`; these two keep the module's private ring access
+/// in one place.
+fn blockTickCount(self: *const Game) usize {
+    return self.block_tick_n;
+}
+
+fn blockTickAt(self: *const Game, i: usize) ScheduledTick {
+    return self.block_tick_q[i];
+}
+
 /// One due tick: dispatch on the block's class.
 fn run(self: *Game, t: ScheduledTick) void {
     const cur = self.world.blockWorld(t.x, t.y, t.z) catch return;
@@ -97,7 +130,89 @@ fn run(self: *Game, t: ScheduledTick) void {
     // stock's ticker re-reads the cell and drops a stale entry the same way.
     if (cur != t.id) return;
     const def = self.blocks.byId(t.id) orelse return;
+    if (def.mine) {
+        mineTick(self, t, def);
+        return;
+    }
     if (def.plant_growing) plantTick(self, t, def);
+}
+
+/// `BlockMine.UpdateTick` (IL=8): the fuse ends and the mine detonates. The
+/// block itself goes air first (`explode(world, ref, -1)` runs through the
+/// SetBlock path in stock), then the authored `ExplosionData` places the block
+/// and entity damage with a linear falloff and the client gets the blast FX.
+fn mineTick(self: *Game, t: ScheduledTick, def: assets_blocks.BlockDef) void {
+    clearCell(self, t.x, t.y, t.z, t.id);
+    const cx: f32 = @floatFromInt(t.x);
+    const cy: f32 = @floatFromInt(t.y);
+    const cz: f32 = @floatFromInt(t.z);
+    const r_blocks = @max(def.explosion_radius_blocks, 0);
+    if (r_blocks > 0 and def.explosion_block_damage > 0) {
+        const ir: i32 = @intFromFloat(@ceil(r_blocks));
+        const r2 = r_blocks * r_blocks;
+        var dy: i32 = -ir;
+        while (dy <= ir) : (dy += 1) {
+            var dz: i32 = -ir;
+            while (dz <= ir) : (dz += 1) {
+                var dx: i32 = -ir;
+                while (dx <= ir) : (dx += 1) {
+                    const d2f: f32 = @floatFromInt(dx * dx + dy * dy + dz * dz);
+                    if (d2f > r2) continue;
+                    const wx = t.x + dx;
+                    const wy = t.y + dy;
+                    const wz = t.z + dz;
+                    const id = self.blockIdAtWorld(wx, wy, wz);
+                    if (id == 0) continue;
+                    const falloff = world_explosion.blastFalloff(wx, wy, wz, cx, cy, cz, r_blocks);
+                    _ = self.blastBlock(wx, wy, wz, id, def.explosion_block_damage, falloff, 1.0, -1);
+                }
+            }
+        }
+    }
+    // Entity leg: `Explosion.AttackEntities` with the same linear falloff. The
+    // blast's armour and resist legs are the residual (the block leg runs
+    // through `blastBlock`, which owns those).
+    const r_ent = @max(def.explosion_radius_entities, 0);
+    if (r_ent > 0 and def.explosion_entity_damage > 0) {
+        const r2e = r_ent * r_ent;
+        var it = self.sim.alive_bits.iterator(.{});
+        while (it.next()) |idx| {
+            const es: ecs_world.Slot = @intCast(idx);
+            if (!self.sim.mask[es].transform or !self.sim.mask[es].health) continue;
+            const kind = self.sim.kind[es];
+            if (kind == .trader or kind == .loot_bag) continue;
+            const nid = self.sim.network_id[es].id;
+            if (nid <= 0) continue;
+            const tt = self.sim.transform[es];
+            const edx = tt.x - cx;
+            const edy = tt.y - cy;
+            const edz = tt.z - cz;
+            const ed2 = edx * edx + edy * edy + edz * edz;
+            if (ed2 > r2e) continue;
+            const fall = 1.0 - @sqrt(ed2) / r_ent;
+            if (fall <= 0) continue;
+            var amount = def.explosion_entity_damage * fall;
+            if (self.sim.mask[es].player and self.sim.player[es].peer_slot >= 0) {
+                amount *= 1.0 - invsys.generalDamageResist(&self.sim, es);
+            }
+            if (amount <= 0) continue;
+            _ = self.sim.damageFrom(nid, amount, -1);
+        }
+    }
+    self.sim.pushNoise(cx, cy, cz, self.sim.rules.ai.combat_noise_radius);
+    if (packages.buildExplosionClient(
+        self.body_buf[0..192],
+        cx,
+        cy,
+        cz,
+        0,
+        @trunc(@min(def.explosion_block_damage, 65535.0)),
+        @intCast(@max(1, @as(u32, @intFromFloat(@ceil(@max(r_blocks, r_ent)))))),
+        @trunc(@min(def.explosion_entity_damage, 65535.0)),
+        -1,
+    )) |fxb| {
+        self.broadcastNear("NetPackageExplosionClient", fxb, cx, cz, self.interest_range) catch {};
+    } else |_| {}
 }
 
 /// `BlockPlantGrowing.UpdateTick` (IL=239).

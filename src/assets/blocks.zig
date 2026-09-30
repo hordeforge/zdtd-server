@@ -147,6 +147,19 @@ pub const BlockDef = struct {
     grow_if_anything_on_top: bool = false,
     grow_on_top_enabled: bool = false,
     fertile_level: i32 = 0,
+    /// blocks.xml `Class="Mine"` (`BlockMine`): a walk-triggered mine. The fuse
+    /// is `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules
+    /// `UpdateTick` at `TriggerDelay * 20`), and `UpdateTick` (IL=8) detonates.
+    mine: bool = false,
+    trigger_delay: f32 = 0,
+    /// The `Explosion` class block (`ExplosionData(DynamicProperties)`,
+    /// ExplosionData.il IL_0069-0105): stock defaults are RadiusBlocks 1,
+    /// BlockDamage 0, RadiusEntities 0, EntityDamage 0, BlastPower 0.
+    explosion_radius_blocks: f32 = 1,
+    explosion_block_damage: f32 = 0,
+    explosion_radius_entities: f32 = 0,
+    explosion_entity_damage: f32 = 0,
+    explosion_blast_power: f32 = 0,
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
     /// Door block: stock tags the openables with `BlockTag="Door"`
@@ -596,6 +609,13 @@ pub fn loadFromPath(
         grow_if_anything_on_top: bool = false,
         grow_on_top_enabled: bool = false,
         fertile_level: i32 = 0,
+        mine: bool = false,
+        trigger_delay: f32 = 0,
+        explosion_radius_blocks: f32 = 1,
+        explosion_block_damage: f32 = 0,
+        explosion_radius_entities: f32 = 0,
+        explosion_entity_damage: f32 = 0,
+        explosion_blast_power: f32 = 0,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -698,6 +718,16 @@ pub fn loadFromPath(
         var grow_if_anything_on_top = false;
         var grow_on_top_enabled = false;
         var fertile_level: i32 = 0;
+        var mine = false;
+        var trigger_delay: f32 = 0;
+        var explosion_radius_blocks: f32 = 1;
+        var explosion_block_damage: f32 = 0;
+        var explosion_radius_entities: f32 = 0;
+        var explosion_entity_damage: f32 = 0;
+        var explosion_blast_power: f32 = 0;
+        // `Explosion` class block window, set when its tag is seen.
+        var explosion_from: usize = 0;
+        var explosion_to: usize = 0;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
@@ -798,11 +828,35 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "class")) |cn| {
                     if (std.ascii.eqlIgnoreCase(cn, "TEFeatureSignable")) signable = true;
                     if (std.ascii.eqlIgnoreCase(cn, "TEFeatureCanvas")) canvas = true;
+                    // `<property class="Explosion">` holds the ExplosionData
+                    // fields (`new ExplosionData(properties, ...)` reads the
+                    // `Explosion` class block, ExplosionData.il IL_0069-0105).
+                    // Its children are named properties at the same XML level,
+                    // so remember the window they live in.
+                    if (std.ascii.eqlIgnoreCase(cn, "Explosion")) {
+                        if (std.mem.findPos(u8, clean, pi, ">")) |gt| {
+                            explosion_from = gt + 1;
+                            explosion_to = std.mem.findPos(u8, clean, gt, "</property>") orelse body_end;
+                        }
+                    }
                 }
                 p = pi + 10;
                 continue;
             };
-            if (std.mem.eql(u8, pname, "Class")) {
+            if (explosion_to > explosion_from and pi >= explosion_from and pi < explosion_to) {
+                const v = xml.attr(clean, pi, "value") orelse "";
+                if (std.mem.eql(u8, pname, "RadiusBlocks")) {
+                    if (xml.parseF32(v)) |f| explosion_radius_blocks = f;
+                } else if (std.mem.eql(u8, pname, "BlockDamage")) {
+                    if (xml.parseF32(v)) |f| explosion_block_damage = f;
+                } else if (std.mem.eql(u8, pname, "RadiusEntities")) {
+                    if (xml.parseF32(v)) |f| explosion_radius_entities = f;
+                } else if (std.mem.eql(u8, pname, "EntityDamage")) {
+                    if (xml.parseF32(v)) |f| explosion_entity_damage = f;
+                } else if (std.mem.eql(u8, pname, "BlastPower")) {
+                    if (xml.parseF32(v)) |f| explosion_blast_power = f;
+                }
+            } else if (std.mem.eql(u8, pname, "Class")) {
                 class = xml.attr(clean, pi, "value");
                 // BlockDamage subclasses: the ctor sets IsCheckCollideWithEntity
                 // and Init logs when `Damage` is absent (BlockDamage IL=53).
@@ -811,6 +865,7 @@ pub fn loadFromPath(
                     if (std.mem.eql(u8, cn, "Barbed")) hazard_kind = .barbed;
                     if (std.mem.eql(u8, cn, "Damage")) hazard_kind = .damage;
                     if (std.mem.eql(u8, cn, "PlantGrowing")) plant_growing = true;
+                    if (std.mem.eql(u8, cn, "Mine")) mine = true;
                 }
             } else if (std.mem.eql(u8, pname, "Damage")) {
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage = v;
@@ -818,6 +873,8 @@ pub fn loadFromPath(
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage_received = v;
             } else if (std.mem.eql(u8, pname, "SiblingBlock")) {
                 hazard_sibling = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "TriggerDelay")) {
+                if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| trigger_delay = v;
             } else if (std.mem.eql(u8, pname, "Next")) {
                 plant_next = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "GrowthRate")) {
@@ -981,6 +1038,13 @@ pub fn loadFromPath(
             .grow_if_anything_on_top = grow_if_anything_on_top,
             .grow_on_top_enabled = grow_on_top_enabled,
             .fertile_level = fertile_level,
+            .mine = mine,
+            .trigger_delay = trigger_delay,
+            .explosion_radius_blocks = explosion_radius_blocks,
+            .explosion_block_damage = explosion_block_damage,
+            .explosion_radius_entities = explosion_radius_entities,
+            .explosion_entity_damage = explosion_entity_damage,
+            .explosion_blast_power = explosion_blast_power,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -1050,6 +1114,13 @@ pub fn loadFromPath(
         var own_grow_if_anything_on_top = pb.grow_if_anything_on_top;
         var own_grow_on_top_enabled = pb.grow_on_top_enabled;
         var own_fertile_level = pb.fertile_level;
+        var own_mine = pb.mine;
+        var own_trigger_delay = pb.trigger_delay;
+        var own_expl_radius_blocks = pb.explosion_radius_blocks;
+        var own_expl_block_damage = pb.explosion_block_damage;
+        var own_expl_radius_entities = pb.explosion_radius_entities;
+        var own_expl_entity_damage = pb.explosion_entity_damage;
+        var own_expl_blast_power = pb.explosion_blast_power;
         var own_trader = pb.trader_id;
         var own_mesh = pb.mesh;
         var own_material = pb.material;
@@ -1121,6 +1192,18 @@ pub fn loadFromPath(
                 if (!own_grow_if_anything_on_top) own_grow_if_anything_on_top = base_p.grow_if_anything_on_top;
                 if (!own_grow_on_top_enabled) own_grow_on_top_enabled = base_p.grow_on_top_enabled;
                 if (own_fertile_level == 0) own_fertile_level = base_p.fertile_level;
+                if (!own_mine) {
+                    own_mine = base_p.mine;
+                    if (own_trigger_delay == 0) own_trigger_delay = base_p.trigger_delay;
+                    // An explosion block that declares nothing keeps the parent's
+                    // authored data (the defaults are the same fields, so only a
+                    // declared parent value can differ).
+                    if (own_expl_radius_blocks == 1) own_expl_radius_blocks = base_p.explosion_radius_blocks;
+                    if (own_expl_block_damage == 0) own_expl_block_damage = base_p.explosion_block_damage;
+                    if (own_expl_radius_entities == 0) own_expl_radius_entities = base_p.explosion_radius_entities;
+                    if (own_expl_entity_damage == 0) own_expl_entity_damage = base_p.explosion_entity_damage;
+                    if (own_expl_blast_power == 0) own_expl_blast_power = base_p.explosion_blast_power;
+                }
             }
             if (own_plant_growing and own_plant_next == null) own_plant_next = base_p.plant_next;
             if (own_trader < 0 and !xml.tagListContains(p1, "TraderID")) own_trader = base_p.trader_id;
@@ -1195,6 +1278,13 @@ pub fn loadFromPath(
         pb.grow_if_anything_on_top = own_grow_if_anything_on_top;
         pb.grow_on_top_enabled = own_grow_on_top_enabled;
         pb.fertile_level = own_fertile_level;
+        pb.mine = own_mine;
+        pb.trigger_delay = own_trigger_delay;
+        pb.explosion_radius_blocks = own_expl_radius_blocks;
+        pb.explosion_block_damage = own_expl_block_damage;
+        pb.explosion_radius_entities = own_expl_radius_entities;
+        pb.explosion_entity_damage = own_expl_entity_damage;
+        pb.explosion_blast_power = own_expl_blast_power;
         pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
         pb.material = own_material;
@@ -1280,6 +1370,13 @@ pub fn loadFromPath(
             .grow_if_anything_on_top = pb.grow_if_anything_on_top,
             .grow_on_top_enabled = pb.grow_on_top_enabled,
             .fertile_level = pb.fertile_level,
+            .mine = pb.mine,
+            .trigger_delay = pb.trigger_delay,
+            .explosion_radius_blocks = pb.explosion_radius_blocks,
+            .explosion_block_damage = pb.explosion_block_damage,
+            .explosion_radius_entities = pb.explosion_radius_entities,
+            .explosion_entity_damage = pb.explosion_entity_damage,
+            .explosion_blast_power = pb.explosion_blast_power,
             .tags = if (pb.tags) |t| try arena.dupe(u8, t) else "",
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,

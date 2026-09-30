@@ -19942,3 +19942,99 @@ test "scenario standing on a slow block scales an entity's motion" {
     try std.testing.expectEqual(@as(f32, 1.0), g.sim.move_scale[z]);
     std.debug.print("PASS movement-factor: a slow block halves the chase speed\n", .{});
 }
+
+test "scenario a mine walks its fuse then detonates" {
+    // `BlockMine.OnEntityWalking` (IL=113) arms the fuse on a walker step:
+    // `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules at
+    // `TriggerDelay * 20`), and `BlockMine.UpdateTick` (IL=8) detonates with the
+    // authored `Explosion` class block (`ExplosionData`).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "mineCookingPot")) return 24154;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            if (std.mem.eql(u8, name, "terrDirt")) return 5;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_mine.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="mineCookingPot">
+        \\  <property name="Class" value="Mine" />
+        \\  <property name="TriggerDelay" value="0.1" />
+        \\  <property name="MaxDamage" value="1" />
+        \\  <property name="Material" value="Mmetal" />
+        \\  <property class="Explosion">
+        \\    <property name="RadiusBlocks" value="2" />
+        \\    <property name="BlockDamage" value="500" />
+        \\    <property name="RadiusEntities" value="2" />
+        \\    <property name="EntityDamage" value="40" />
+        \\  </property>
+        \\</block>
+        \\<block name="terrStone"><property name="MaxDamage" value="10" /></block>
+        \\<block name="terrDirt"><property name="MaxDamage" value="10" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    g.maxdamage.deinit();
+    g.maxdamage = try assets_maxdamage.loadFromBlocksXml(gpa, bx);
+    g.maxdamage.tryMergeBundledAssignIds(gpa);
+    const mine = (g.blocks.byName("mineCookingPot") orelse return error.TestUnexpectedResult).id;
+    const def = (g.blocks.byId(mine) orelse return error.TestUnexpectedResult);
+    try std.testing.expect(def.mine);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), def.trigger_delay, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), def.explosion_radius_blocks, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 500.0), def.explosion_block_damage, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 40.0), def.explosion_entity_damage, 0.001);
+
+    // The player stands in the mine's cell (the feet probe reads the cell the
+    // entity occupies), so settle first and place the mine where it is.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    g.sim.transform[ps].x = 256;
+    g.sim.transform[ps].y = 70;
+    g.sim.transform[ps].z = 256;
+    _ = try g.step();
+    const mx: i32 = @floor(g.sim.transform[ps].x);
+    const my: i32 = @floor(g.sim.transform[ps].y);
+    const mz: i32 = @floor(g.sim.transform[ps].z);
+    // A stone neighbour for the authored block damage to chew on.
+    try g.world.setBlockWorld(mx + 1, my, mz, world_store.block_stone);
+    g.setBlockRaw(mx + 1, my, mz, world_store.block_stone);
+    try g.world.setBlockRawWorld(mx, my, mz, mine);
+    g.setBlockRaw(mx, my, mz, mine);
+    const hp_before = g.sim.health[ps].hp;
+
+    // Standing in it arms the fuse (0.1 s = 2 ticks) without contact damage.
+    _ = try g.step();
+    try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
+    try std.testing.expectEqual(mine, try g.world.blockWorld(mx, my, mz));
+    try std.testing.expectApproxEqAbs(hp_before, g.sim.health[ps].hp, 0.01);
+
+    // A second contact on the same cell must not schedule a second fuse.
+    _ = try g.step();
+    try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
+    try std.testing.expectEqual(mine, try g.world.blockWorld(mx, my, mz));
+
+    // The fuse burns out: the mine is gone, its blast chewed the stone next to
+    // it and the player standing on it takes the authored entity damage.
+    _ = try g.step();
+    try std.testing.expectEqual(@as(usize, 0), g.block_tick_n);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(mx, my, mz));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(mx + 1, my, mz));
+    try std.testing.expect(g.sim.health[ps].hp < hp_before);
+    std.debug.print("PASS mine: walk trigger, fuse, detonation\n", .{});
+}

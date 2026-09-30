@@ -30,6 +30,7 @@ const ecs_world = @import("../../ecs/world.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const packages = @import("../../wire/packages.zig");
 const log = @import("../../util/log.zig");
+const game_block_ticker = @import("block_ticker.zig");
 
 /// One packed cell key for the contact latch (x/z 19 bits each, y 8).
 fn cellKey(x: i32, y: i32, z: i32) i64 {
@@ -69,6 +70,19 @@ pub fn collisionTick(self: *Game) void {
         const factor = if (id != 0) (self.maxdamage.materialMovementFactor(id) orelse 1.0) else 1.0;
         self.sim.move_scale[s] = @max(factor, 0.0);
         const def = if (id != 0) self.blocks.byId(id) else null;
+        if (def) |d| {
+            // A mine is a walk trigger, not a hazard: `BlockMine.OnEntityWalking`
+            // (IL=113) arms the fuse and deals no contact damage, and
+            // `IsMovementBlocked` is always false so the walker steps on it.
+            // The lattice is the same contact latch: one arming per contact.
+            if (d.mine) {
+                if (self.sim.hazard_cell[s] != key) {
+                    self.sim.hazard_cell[s] = key;
+                    game_block_ticker.armMine(self, x, y, z, id, d);
+                }
+                continue;
+            }
+        }
         if (def == null or def.?.hazard == .none or def.?.hazard_damage <= 0) {
             self.sim.hazard_cell[s] = -1;
             continue;
