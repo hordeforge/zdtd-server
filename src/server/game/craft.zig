@@ -7,6 +7,8 @@
 
 const std = @import("std");
 const assets_blocks = @import("../../assets/blocks.zig");
+const sandbox = @import("../../assets/sandbox.zig");
+const game_tick = @import("tick.zig");
 const test_tmp = @import("../../util/test_tmp.zig");
 const ecs = @import("../../ecs/root.zig");
 const components = @import("../../ecs/components.zig");
@@ -1045,6 +1047,15 @@ pub fn activityWorldTimeDelayBits(self: *const Game) u64 {
 /// converter counts are recorded residuals.
 pub fn tickCollectors(self: *Game) void {
     const now = self.sim.director.clock.worldTimeBits();
+    // Sandbox scaling: `DewCollectorInput` gates the collector off at 0,
+    // `DewCollectorTime` scales the conversion budget and `DewCollectorOutput`
+    // the produced count (sandbox_data ids 105-107, all defaulting to 1).
+    var sandbox_buf: [512]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    const input_on = game_tick.sandboxFloat(sandbox_groups, "DewCollectorInput") > 0;
+    const time_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorTime");
+    const out_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorOutput");
+    if (!input_on) return;
     // Ownership of the send: this pass produces and `broadcastDirtyCollectors`
     // (same tick, after it) ships what changed, so a client watches the water
     // appear without waiting for its next chunk stream.
@@ -1059,7 +1070,7 @@ pub fn tickCollectors(self: *Game) void {
             c.last_world = now;
             continue;
         }
-        const elapsed: f32 = @floatFromInt(now - c.last_world);
+        const elapsed: f32 = @as(f32, @floatFromInt(now - c.last_world)) * time_scale;
         c.last_world = now;
         if (c.isFull()) continue;
         if (collectorBlocked(self, c.x, c.y, c.z)) continue;
@@ -1085,7 +1096,7 @@ pub fn tickCollectors(self: *Game) void {
         while (c.fill_left <= 0 and guard < 8) : (guard += 1) {
             const slot = c.firstFree() orelse break;
             slot.type_id = type_id;
-            slot.count = 1;
+            slot.count = @intFromFloat(@max(out_scale, 1));
             slot.quality = 0;
             c.dirty = true;
             c.fill_left += c.drawFillTime(row.min_convert_time, row.max_convert_time);

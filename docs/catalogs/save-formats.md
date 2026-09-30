@@ -16,8 +16,8 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZCL1` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 41 | restoreClock | - |
 | `ZCL2` | src/server/game/clock_persist.zig | 49 | restoreClock | - |
-| `ZPV` | src/server/persist.zig | 92 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
-| `ZPV` | src/server/persist.zig | 613 | zpv2DropName | - |
+| `ZPV` | src/server/persist.zig | 93 | saveAllStores | `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll field), 4 (ZPV4, tail's buff list followed uncond |
+| `ZPV` | src/server/persist.zig | 614 | zpv2DropName | - |
 | `ZCT4` | src/world/containers.zig | 201 | posFromGuid | - |
 | `ZCT4` | src/world/containers.zig | 220 | posFromGuid | - |
 | `ZCT4` | src/world/containers.zig | 294 | posFromGuid | - |

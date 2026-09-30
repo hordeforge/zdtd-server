@@ -312,12 +312,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       `TileEntityCollector` store holds the output slots and the conversion
       budget, and `tickCollectors` folds elapsed world time into the fill time
       and places `OutputItem`, with stock's `isDisabled` blocked-above leg
-      stopping it. Still open: the four-array wire body (`itemsInternal`,
-      `modSlotsInternal`, `fuelSlotsInternal`, `catalystSlotsInternal` plus
-      `lastWorldTimes`/`fillDataLookup`/`isUnderwater`/`isBlocked`/`outOfFuel`/
-      `isFull`), the matching C2S parse so a player can take the water out, fuel
-      and catalyst rows (`FuelTypes`/`CatalystTypes`, converter counts), the
-      audio broadcasts and persistence.
+      stopping it. The TE wire shipped too: `buildCollectorTeBody` writes stock's
+      ToClient shape (`lastWorldTimes`, `fillDataLookup`, `isUnderwater`,
+      `isBlocked`, `outOfFuel`, `isFull`, then the four i16-counted ItemStack
+      arrays) with no version byte, because `TileEntityCollector.write` emits
+      `21` only on the persistent stream (IL_0008-000E), so the C2S route is the
+      outer header's block id (`peekTeBlockId` plus `Class=Collector`); the dirty
+      broadcast ships each produced jar, the chunk stream sends the current state
+      on entry, and the client's own edit (items array emptied) applies and
+      echoes. `collectors.zcl` (ZCL1) persists the water, budget and draw state
+      through `saveAllStores`, and the sandbox options are consumed
+      (`DewCollectorInput` 0 disables, `DewCollectorTime` scales the budget,
+      `DewCollectorOutput` the yield). Still open: fuel and catalyst rows
+      (`FuelTypes`/`CatalystTypes` converter counts, which the apiary and coop
+      ships need), the mod slots, and the `ActivateSound`/`RunningSound`
+      broadcasts.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

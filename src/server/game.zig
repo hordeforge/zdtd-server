@@ -1045,6 +1045,15 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Collector TEs survive restart (collectors.zcl): the water a dew
+        // collector made, its conversion budget and its fill draw state must not
+        // vanish on reboot (rule 21).
+        self.collectors.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load collectors", e);
+                return e;
+            }
+        };
         // Land claims survive restart (claims.zlc); restored owners re-map on login.
         self.loadClaims() catch |e| {
             if (e != error.OpenFailed) {

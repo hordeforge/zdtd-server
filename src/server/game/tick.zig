@@ -342,7 +342,7 @@ fn taggedStaminaOt(
 /// does not carry it (`UpdateSandboxOptions` IL=21 copies these into
 /// `Stat.LossSandboxModifier` per stat; Food=161 HungerMultiplier,
 /// Water=162 ThirstMultiplier).
-fn sandboxFloat(groups: []const sandbox.Group, name: []const u8) f32 {
+pub fn sandboxFloat(groups: []const sandbox.Group, name: []const u8) f32 {
     const o = sandbox.optionByName(name) orelse return 1.0;
     const set = sandbox.findSet(o.set_name) orelse return o.default_f;
     for (groups) |g| {

@@ -29,6 +29,7 @@ const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
+const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
 const game_hazard = @import("game/hazard.zig");
 const world_deco_mirror = @import("../world/deco_mirror.zig");
@@ -20746,6 +20747,18 @@ test "scenario a dew collector converts world time into water" {
     try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
     try std.testing.expectEqual(@as(u16, 1), col.items[0].count);
 
+    // Sandbox scaling: `DewCollectorInput` 0 disables the collector, and
+    // `DewCollectorOutput` scales what one fill yields (sandbox ids 105-107).
+    {
+        // Option 107 is `DewCollectorInput` (base-26 "ED"), index 0 is its 0.0
+        // value, so the code "AEDA" is stock's own spelling for "collector off".
+        g.sandbox_code = "AEDA";
+        g.sim.director.clock.hours += 1.0;
+        g.tickCollectors();
+        try std.testing.expectEqual(@as(u32, 1), collectorWaterTotal(col));
+        g.sandbox_code = "";
+    }
+
     // A solid block over the collector blocks it (no water indoors).
     g.sim.director.clock.hours += 1.0;
     try g.world.setBlockWorld(px, py + 1, pz, 1);
@@ -20761,6 +20774,69 @@ test "scenario a dew collector converts world time into water" {
     g.noteBlockRemoved(px, py, pz, dew.id);
     try std.testing.expect(g.collectors.get(px, py, pz) == null);
     std.debug.print("PASS collector: world time fills the output, a roof stops it\n", .{});
+}
+
+test "scenario a collector's water survives a restart" {
+    // Rule 21: the produced state goes through the store. A dew collector's
+    // water, its conversion budget and its fill draw state ride
+    // {world}/collectors.zcl (ZCL1) and come back on the next boot.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewCollector")) return 1733;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_collector_save.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewCollector">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,100,100,10,20,water_collect}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewCollector") orelse return error.TestUnexpectedResult;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "terrStone" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const col = g.collectors.getOrCreate(40, 66, 40, dew.id) orelse return error.TestUnexpectedResult;
+    col.items[0] = .{ .type_id = 900, .count = 2, .quality = 0 };
+    col.fill_started = true;
+    col.fill_left = 7.5;
+    col.last_world = 4321;
+    // The real save-all path, not a direct store call, so the wiring is covered.
+    _ = g.saveAllStores();
+
+    // A fresh store loads the water back (the sibling Game owns the world).
+    var reloaded: collectors_mod.Store = .{};
+    try reloaded.load(dir, gpa);
+    const rc = reloaded.get(40, 66, 40) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, dew.id), rc.block_id);
+    try std.testing.expectEqual(@as(i32, 900), rc.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 2), rc.items[0].count);
+    try std.testing.expect(rc.fill_started);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.5), rc.fill_left, 0.001);
+    try std.testing.expectEqual(@as(u64, 4321), rc.last_world);
+    std.debug.print("PASS collector-save: the water survives a restart\n", .{});
 }
 
 test "scenario a collector TE streams and its water can be taken" {
