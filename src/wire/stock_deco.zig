@@ -23,7 +23,13 @@ pub const cnt_hardened_chest_insecure: u32 = assignids.cnt_hardened_chest_insecu
 
 /// DecoState.GeneratedActive. Forced: RestoreGeneratedDecos (asm.il ends 1258023)
 /// deletes state 2 (Dynamic) decos on the DecoResetWorldChunk path.
+/// `DecoState` (DecoState.il.txt): `GeneratedActive = 0`,
+/// `GeneratedInactive = 1`, `Dynamic = 2`. The client's `DecoChunk` update
+/// switches on this: an inactive entry is re-activated, a `Dynamic` one is
+/// REMOVED from the chunk (DecoChunk.il IL_0036 switch + RemoveDecoObject), so
+/// a removal rides the normal object form with this state.
 pub const deco_state_active: u8 = 0;
+pub const deco_state_dynamic: u8 = 2;
 
 /// On-wire DecoObject size: u64 pos + f32 realY + u32 rawData + u8 state
 /// (DecoObject::Write, asm.il ends 1264030). NOT the stock

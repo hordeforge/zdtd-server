@@ -401,11 +401,16 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
                 // deco chunk per world: a re-derivation would resurrect a
                 // decoration the player removed.
                 if (self.deco_mirror and need_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
+                // An object whose cell is gone was removed by a player: send
+                // the removal form rather than re-adding what the client last
+                // saw (else a re-stream re-renders a chopped tree).
+                var out = o;
+                if (self.deco_mirror) out.state = game_deco.decoObjectState(self, o, !need_mirror);
                 if (pw.full()) {
                     try self.sendGameCritical(peer, "NetPackageDecoUpdate", try pw.take());
                     self.pollNetOnce();
                 }
-                try pw.push(o);
+                try pw.push(out);
                 total += 1;
             }
             if (self.deco_mirror and need_mirror) self.world.markDecoChunkMirrored(dcx, dcz);
@@ -470,11 +475,13 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
     const need_mirror = !self.world.decoChunkMirrored(dcx, dcz);
     for (chunk_objs[0..n]) |o| {
         if (self.deco_mirror and need_mirror) _ = self.mirrorDeco(&dim_cache, o);
+        var out = o;
+        if (self.deco_mirror) out.state = game_deco.decoObjectState(self, o, !need_mirror);
         if (pw.full()) {
             try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
             self.pollNetOnce();
         }
-        try pw.push(o);
+        try pw.push(out);
     }
     try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
     if (self.deco_mirror and need_mirror) self.world.markDecoChunkMirrored(dcx, dcz);

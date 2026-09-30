@@ -26,6 +26,7 @@ const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("replicate_te.zig");
+const deco = @import("deco.zig");
 const containers_mod = @import("../../world/containers.zig");
 const chunk_fill_mod = @import("../game/chunk_fill.zig");
 const c2s_misc = @import("../c2s/misc.zig");
@@ -263,6 +264,27 @@ test "deco burst is biome driven and mirrors into the block store" {
     const unknown: packages.stock_deco.DecoObj = .{ .x = 9, .y = 60, .z = 9, .real_y = 60, .block_raw = 0xfffe };
     try std.testing.expect(!g.mirrorDeco(&cache, unknown));
     try std.testing.expect(try g.world.blockWorld(9, 60, 9) != 0xfffe);
+
+    // Removal form: while the deco chunk has never been mirrored the object is
+    // new and goes out active; once it has, an object whose cell is gone was
+    // removed by a player and rides `DecoState.Dynamic` so the client drops it
+    // (`DecoChunk` RemoveDecoObject) instead of re-rendering the chopped tree.
+    try std.testing.expectEqual(
+        packages.stock_deco.deco_state_active,
+        deco.decoObjectState(g, o, false),
+    );
+    try std.testing.expectEqual(
+        packages.stock_deco.deco_state_active,
+        deco.decoObjectState(g, o, true),
+    );
+    try g.world.setBlockDecoWorld(3, @intCast(h + 1), 5, g.world.terrain_ids.air);
+    // Pinned literal: `DecoState.Dynamic` is 2 (DecoState.il.txt); the client
+    // removes the object on that state (DecoChunk IL_005A).
+    try std.testing.expectEqual(@as(u8, 2), packages.stock_deco.deco_state_dynamic);
+    try std.testing.expectEqual(
+        packages.stock_deco.deco_state_dynamic,
+        deco.decoObjectState(g, o, true),
+    );
 }
 
 test "zombie chases over real terrain and stays on the surface" {

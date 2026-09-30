@@ -646,6 +646,7 @@ field-by-field provenance.
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |
 | `ecs/turrets.zig` `turret_sight_height` | 1.6 | R | Torso height the auto-turret line-of-sight query runs at, the same offset `sensing.rayClear`'s AI sight query uses; stock traces muzzle-to-entity transform (`AutoTurretFireController` IL_0165), which zdtd has no separate transform for |
 | `server/game/hazard.zig` `barbed_max_meta` | 15 | R | `BlockBarbed.OnEntityCollidedWithBlock` (IL_0018-002A): the cell meta increments per collision and the wire is destroyed when it reaches 15 |
+| `wire/stock_deco.zig` `deco_state_dynamic` | 2 | R | `DecoState.Dynamic` (DecoState.il.txt: GeneratedActive 0, GeneratedInactive 1, Dynamic 2); the client's `DecoChunk` update calls RemoveDecoObject on it (IL_005A), which is how a removed decoration is carried in the normal object form |
 | `server/game/hazard.zig` `meta_mask` | `0xf` | R | `BlockValue.meta` bit field (bits 22..25), the same nibble `world/deco_mirror.zig` packs children into |
 | `world/weather.zig blood_moon_storm_push` | 5000 | R | Blood-moon storm push ticks (RE: weather-environment.md storm state machine) |
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |

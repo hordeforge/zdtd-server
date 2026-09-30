@@ -173,6 +173,20 @@ pub fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
     return .{};
 }
 
+/// State byte for one derived deco object on the way out. While the deco chunk
+/// has never been mirrored, the object is new to the world and goes out active.
+/// Once the mirror has run, an object whose cell no longer holds its block was
+/// removed by a player (harvest/place/explosion): the client is told to drop it
+/// (stock `DecoState.Dynamic`, `DecoChunk` RemoveDecoObject) instead of being
+/// handed the tree again, which is what re-rendered a chopped tree on the
+/// client after a re-stream.
+pub fn decoObjectState(self: *Game, o: packages.stock_deco.DecoObj, mirrored: bool) u8 {
+    if (!mirrored) return packages.stock_deco.deco_state_active;
+    const id = self.world.blockWorld(o.x, o.y, o.z) catch 0;
+    if (id == 0) return packages.stock_deco.deco_state_dynamic;
+    return packages.stock_deco.deco_state_active;
+}
+
 /// Write one placed decoration into the block store so collision, harvest and
 /// the streamed chunk payload agree with what the client renders.
 pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {

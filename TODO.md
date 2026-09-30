@@ -234,10 +234,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       deco chunk the mirror wrote (join burst and stream path both skip a marked
       chunk) and `loadChunk` marks the deco chunk of every chunk that came from
       disk, whose plane already carries the derived decoration plus the player's
-      edits. Still open (client half): a reconnecting client is re-sent the
-      derived deco objects for a chunk, so the client re-renders a removed tree
-      until it gets a removal entry (stock's DecoUpdate removal form).
-      Original entry: no per-position deco record; the
+      edits. Client half closed the same day: once a deco chunk is marked, an
+      object whose cell is air (a player harvested or replaced it) is sent with
+      `DecoState.Dynamic` (2, DecoState.il.txt), which the client's `DecoChunk`
+      update treats as RemoveDecoObject, so a re-stream drops the stale tree
+      instead of re-rendering it. Original entry: no per-position deco record;
+      the
       seed-derived generator is re-mirrored over the block plane on every join
       burst and chunk stream (`src/world/deco_mirror.zig:132-137`), so a restart
       or any client streaming into that 128x128 deco chunk restores the tree.
