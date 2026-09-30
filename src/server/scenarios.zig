@@ -20655,3 +20655,107 @@ test "scenario a turret searches for targets on its find-target delay" {
     try std.testing.expectEqual(held, w.turret[ts].target_id);
     std.debug.print("PASS find-target-delay: the search waits its window\n", .{});
 }
+
+fn collectorWaterTotal(col: anytype) u32 {
+    var n: u32 = 0;
+    for (&col.items) |*s| {
+        if (s.type_id == 900) n += s.count;
+    }
+    return n;
+}
+
+test "scenario a dew collector converts world time into water" {
+    // `TileEntityCollector.HandleUpdate` (IL=120) folds elapsed world time into
+    // the output type's conversion budget and places `OutputItem` when the
+    // budget covers the fill time; `isDisabled` (blocked above, underway,
+    // full) stops it and stamps its time instead of banking it
+    // (tile-entities-power.md section 4.6).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewCollector")) return 1733;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_collector.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewCollector">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,100,100,10,20,water_collect}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewCollector") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(dew.collector);
+    try std.testing.expectEqual(@as(u8, 0), dew.collector_type);
+    var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+    const rn = assets_blocks.parseCollectorOutputs(dew.collector_outputs, &rows);
+    try std.testing.expectEqual(@as(u8, 1), rn);
+    try std.testing.expectEqualStrings("drinkJarBoiledWater", rows[0].output_item);
+    try std.testing.expectEqual(@as(i32, 10), rows[0].min_convert_time);
+    try std.testing.expectEqual(@as(i32, 20), rows[0].max_convert_time);
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "terrStone" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+
+    // The world clock has to advance for the budget to move: 600 world-time
+    // units per game second against a 10..20 unit fill.
+    g.sim.director.clock.hours += 0.6;
+    try g.world.setBlockWorld(px, py, pz, dew.id);
+    g.setBlockRaw(px, py, pz, dew.id);
+    g.noteBlockAdded(px, py, pz, dew.id);
+    const col = g.collectors.get(px, py, pz) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, dew.id), col.block_id);
+    g.tickCollectors(); // stamps last_world
+    _ = try g.step();
+    try std.testing.expectEqual(@as(i32, 0), col.items[0].type_id);
+
+    // One game second later the budget covers the first fill.
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 1), col.items[0].count);
+
+    // A solid block over the collector blocks it (no water indoors).
+    g.sim.director.clock.hours += 1.0;
+    try g.world.setBlockWorld(px, py + 1, pz, 1);
+    g.tickCollectors();
+    const held = collectorWaterTotal(col);
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(held, collectorWaterTotal(col));
+    try std.testing.expect(col.fill_left > 0);
+
+    // Removing the block drops the TE.
+    g.setBlockRaw(px, py, pz, 1);
+    g.noteBlockRemoved(px, py, pz, dew.id);
+    try std.testing.expect(g.collectors.get(px, py, pz) == null);
+    std.debug.print("PASS collector: world time fills the output, a roof stops it\n", .{});
+}

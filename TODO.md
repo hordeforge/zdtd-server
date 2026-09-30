@@ -305,6 +305,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
       never fire (world/blocks.md:262-263, 774-786).
+- [ ] **Dew collectors produced nothing** - backend closed 2026-09-28, TE stream
+      still open. `BlockCollector` parses (`Class="Collector"`, the
+      `CollectorTypes` name, the `OutputTypes` row list in
+      `BlockCollector/OutputType::.ctor` field order), a cell-keyed
+      `TileEntityCollector` store holds the output slots and the conversion
+      budget, and `tickCollectors` folds elapsed world time into the fill time
+      and places `OutputItem`, with stock's `isDisabled` blocked-above leg
+      stopping it. Still open: the four-array wire body (`itemsInternal`,
+      `modSlotsInternal`, `fuelSlotsInternal`, `catalystSlotsInternal` plus
+      `lastWorldTimes`/`fillDataLookup`/`isUnderwater`/`isBlocked`/`outOfFuel`/
+      `isFull`), the matching C2S parse so a player can take the water out, fuel
+      and catalyst rows (`FuelTypes`/`CatalystTypes`, converter counts), the
+      audio broadcasts and persistence.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

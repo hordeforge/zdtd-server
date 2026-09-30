@@ -103,6 +103,7 @@ const signs_mod = @import("../world/signs.zig");
 const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
+const collectors_mod = @import("../world/collectors.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
 const assets_paths = @import("../assets/paths.zig");
@@ -444,6 +445,8 @@ pub const Game = struct {
     /// `signs`, the signs.xml catalog.
     sign_texts: signs_mod.SignStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
+    /// `TileEntityCollector` producer state (dew collector, apiary, coop).
+    collectors: collectors_mod.Store = .{},
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
     vending: vending_mod.VendingStore = .{},
@@ -2849,6 +2852,13 @@ pub const Game = struct {
     /// One workstation step: burn/craft, then re-broadcast the stations it changed.
     pub fn tickWorkstations(self: *Game, dt: f32) !void {
         return game_craft.tickWorkstations(self, dt);
+    }
+
+
+    /// Collector producers (dew collector/apiary/coop): conversion budgets on
+    /// the world clock, so the pass cadence does not change the output.
+    pub fn tickCollectors(self: *Game) void {
+        return game_craft.tickCollectors(self);
     }
 
     /// BlockRadiusEffect: burning workstations (campfire, burning barrel)

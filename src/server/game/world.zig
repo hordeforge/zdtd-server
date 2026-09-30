@@ -383,6 +383,9 @@ pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
 /// which discards what was there rather than dropping it. Spilling on a reset
 /// would let a player farm a POI's containers by re-taking the quest.
 pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spill: bool) void {
+    // `BlockCollector.removeTileEntity` IL=7 drops the producer TE with the
+    // block.
+    _ = self.collectors.removeAt(x, y, z);
     // What the block held goes to the ground before the stores that hold it
     // are dropped. Stock fires OnBlockRemoved for any cleared cell, whatever
     // cleared it (RE blocks.md 4), so damage, a zombie dig and a collapse owe
@@ -422,6 +425,11 @@ pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
     // `craft.zig` owns.
     block_ticker.noteHeatBlock(self, x, y, z, new_id);
     block_ticker.noteAdded(self, x, y, z, new_id);
+    // A collector block registers its producer TE here (stock's
+    // `BlockCollector.addTileEntity` IL=13 news the `TileEntityCollector`).
+    if (self.blocks.byId(new_id)) |bd| {
+        if (bd.collector) _ = self.collectors.getOrCreate(x, y, z, new_id);
+    }
     if (self.blocks.isVending(new_id)) {
         _ = self.vending.getOrCreate(.{ .x = x, .y = y, .z = z }, new_id, self.blocks.traderId(new_id));
     }

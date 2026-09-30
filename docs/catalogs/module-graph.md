@@ -22,14 +22,14 @@ Only imports of another package directory are counted; single-file imports
 | `litenet` | `wire` | 1 |
 | `plugin` | `util` | 6 |
 | `server` | `apm` | 11 |
-| `server` | `assets` | 193 |
+| `server` | `assets` | 194 |
 | `server` | `ecs` | 162 |
 | `server` | `litenet` | 76 |
 | `server` | `plugin` | 16 |
 | `server` | `server/game` | 33 |
 | `server` | `util` | 170 |
 | `server` | `wire` | 146 |
-| `server` | `world` | 94 |
+| `server` | `world` | 95 |
 | `wire` | `assets` | 12 |
 | `wire` | `ecs` | 5 |
 | `wire` | `util` | 3 |

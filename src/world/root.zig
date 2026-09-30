@@ -12,6 +12,7 @@ pub const terrain_snapshot = @import("terrain_snapshot.zig");
 pub const containers = @import("containers.zig");
 pub const signs = @import("signs.zig");
 pub const workstations = @import("workstations.zig");
+pub const collectors = @import("collectors.zig");
 pub const vending = @import("vending.zig");
 pub const light_te = @import("light_te.zig");
 pub const dtm = @import("dtm.zig");
@@ -38,6 +39,7 @@ test {
     _ = containers;
     _ = signs;
     _ = workstations;
+    _ = collectors;
     _ = vending;
     _ = light_te;
     _ = dtm;

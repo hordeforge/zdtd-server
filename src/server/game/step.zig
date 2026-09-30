@@ -270,6 +270,7 @@ pub fn step(self: *Game) !void {
                 self.harness.counters.inc(.net_send_errors);
                 log.err("broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
             };
+            self.tickCollectors();
             self.tickBlockRadiusEffects();
             // Always-on radius sources (torch/candle/radiated barrel/pumpkin,
             // no fuel module): per-player local scan, WORK_PLAN T38.

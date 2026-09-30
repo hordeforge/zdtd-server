@@ -543,6 +543,7 @@ because it globs `.zig`.
 | `src/world/water.zig` | R | Stock water_info.xml point sources (used as local water-table hints); the leveling queue backing the dig-leveling pour (zdtd-owned, GAP water flow PARTIAL) |
 | `src/world/weather.zig` | R | Stock WeatherManager storm / bloodMoon state machine, server side. Live-verified 2026-08-12: stock `weather` telnet dump shows the 5-slot param vector (Temperature/Precipitation/CloudThickness/Wind/Fog) per biome, `default` group, no storms in the day-1 grace (worldTime < 22000), and `weather clouds N` drives forceClouds (value/100) -> GetCloudThickness. |
 | `src/world/workstations.zig` | Z | World-position keyed workstation state (forge/campfire/workbench TE 12). Slots mirror TileEntityWorkstation arrays; craft tick advances the queue  The craft output keeps the queue item's quality, so two crafts at different tiers never merge (stock TileEntityWorkstation builds the output ItemValue from RecipeQueueItem.Quality) (2026-09-13).|
+| `src/world/collectors.zig` | R | `TileEntityCollector` state (output slots, world-time conversion budget, cell-seeded fill draw) from `tile-entities-power.md` 4.6 and `BlockCollector.il.txt` IL_00A8-00C1/IL=132, `BlockCollector_OutputType.il.txt`; zdtd store shape |
 | `src/world/worldgen.zig` | R | On-the-fly procedural chunk generation (W0/W1/W2). Pure function of (seed, chunkX, chunkZ): no full-map bake, no global RNG |
 ## 3. Constants ledger (behavioral values)
 

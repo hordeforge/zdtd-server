@@ -6,6 +6,7 @@
 //! handItemDamage (entity damage from the hand item).
 
 const std = @import("std");
+const assets_blocks = @import("../../assets/blocks.zig");
 const test_tmp = @import("../../util/test_tmp.zig");
 const ecs = @import("../../ecs/root.zig");
 const components = @import("../../ecs/components.zig");
@@ -1033,4 +1034,70 @@ pub fn activityWorldTimeDelayBits(self: *const Game) u64 {
     const scaled = @as(f32, @floatFromInt(inc)) / 6.0;
     const clamped = std.math.clamp(if (scaled > 0) scaled else 1.0, 0.2, 5.0);
     return @intFromFloat(clamped * 1000.0);
+}
+
+/// Collector producers: `TileEntityCollector.HandleUpdate` (IL=120) folds the
+/// elapsed world time into each output type's conversion budget and places the
+/// `OutputItem` when the budget covers the fill time, with
+/// `isDisabled = isBlocked || outOfFuel || isUnderwater || isFull` gating it
+/// (tile-entities-power.md section 4.6). The dew collector needs no fuel
+/// (`Fuel` empty), so the unfuelled path runs here; fuel/catalyst rows and the
+/// converter counts are recorded residuals.
+pub fn tickCollectors(self: *Game) void {
+    const now = self.sim.director.clock.worldTimeBits();
+    for (self.collectors.items[0..], self.collectors.used[0..]) |*c, used| {
+        if (!used) continue;
+        const def = self.blocks.byId(c.block_id) orelse continue;
+        if (!def.collector) continue;
+        // `lastWorldTimes[name]` is stamped whenever the update runs, so time
+        // spent blocked or full is not banked (stock's `resetTimeValues`).
+        if (c.last_world == 0) {
+            c.last_world = now;
+            continue;
+        }
+        const elapsed: f32 = @floatFromInt(now - c.last_world);
+        c.last_world = now;
+        if (c.isFull()) continue;
+        if (collectorBlocked(self, c.x, c.y, c.z)) continue;
+        var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+        const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
+        if (rn == 0) continue;
+        const row = rows[0];
+        if (row.output_item.len == 0) continue;
+        // A fuel-costed output needs the `FuelTypes` item in a fuel slot; zdtd
+        // models no fuel slots yet, so those rows stay dormant rather than
+        // producing without their fuel.
+        if (row.fuel.len > 0) continue;
+        if (!c.fill_started) {
+            c.fill_started = true;
+            c.fill_left = c.drawFillTime(row.min_convert_time, row.max_convert_time);
+        }
+        const item = self.items.byName(row.output_item) orelse continue;
+        const type_id: i32 = item.id;
+        if (type_id == 0) continue;
+        c.fill_left -= elapsed;
+        if (c.fill_left > 0) continue;
+        var guard: u32 = 0;
+        while (c.fill_left <= 0 and guard < 8) : (guard += 1) {
+            const slot = c.firstFree() orelse break;
+            slot.type_id = type_id;
+            slot.count = 1;
+            slot.quality = 0;
+            c.fill_left += c.drawFillTime(row.min_convert_time, row.max_convert_time);
+            if (c.fill_left <= 0) c.fill_left = 1;
+        }
+    }
+}
+
+/// Stock `isBlocked`: a solid block over the collector stops it collecting (dew
+/// collectors do not work indoors). Water in that cell is stock's
+/// `IsUnderwater` leg.
+fn collectorBlocked(self: *Game, x: i32, y: i32, z: i32) bool {
+    const above = self.world.rawWorld(x, y + 1, z) catch return false;
+    if (above == 0) return false;
+    const id: u16 = @intCast(above & 0xffff);
+    if (id == self.world.terrain_ids.water) return true;
+    // Air does not block; anything else in the cell above does (stock's
+    // `isBlocked` probe reads the block's solid/`IsTerrain` flags).
+    return id != self.world.terrain_ids.air;
 }

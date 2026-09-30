@@ -104,6 +104,60 @@ pub const HarvestDrop = struct {
 /// (`BlockSpikes`/`BlockBarbed` override the retract/degrade leg).
 pub const HazardKind = enum(u8) { none = 0, damage = 1, spikes = 2, barbed = 3 };
 
+/// `OutputTypes` rows. The value is a list of rows; stock's own split pulls the
+/// `{...}` groups out (BlockCollector.il IL_00A8-00C1 splits on '{' and '}' and
+/// then `TrimEnd('}')`s each part), and a plain ';' list is accepted too. A
+/// value with neither yields no rows, so a shape this build cannot read
+/// disables production instead of inventing an output.
+pub const max_collector_outputs: usize = 4;
+
+/// One `OutputTypes` row: `BlockCollector/OutputType::.ctor` (IL=132) splits the
+/// row on ',' in this exact field order, so index 0 is Name, 1 Fuel, 2 FuelCost,
+/// 5 OutputItem, 6 OutputItemModded, 9 MinConvertTime and 10 MaxConvertTime.
+pub const CollectorOutputRow = struct {
+    name: []const u8 = "",
+    fuel: []const u8 = "",
+    fuel_cost: i32 = 0,
+    output_item: []const u8 = "",
+    output_item_modded: []const u8 = "",
+    min_convert_time: i32 = 0,
+    max_convert_time: i32 = 0,
+};
+
+/// Parse a block's `OutputTypes` value into rows. The slices point into `value`,
+/// so the caller must use them before it frees it.
+pub fn parseCollectorOutputs(value: []const u8, out: *[max_collector_outputs]CollectorOutputRow) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < value.len and n < out.len) {
+        while (i < value.len and (value[i] == '{' or value[i] == '}' or value[i] == ';' or value[i] == ' ')) i += 1;
+        const start = i;
+        while (i < value.len and value[i] != '}' and value[i] != ';') i += 1;
+        const row = std.mem.trim(u8, value[start..i], " \t}");
+        if (row.len > 0) {
+            var o: CollectorOutputRow = .{};
+            var it = std.mem.splitScalar(u8, row, ',');
+            var idx: u8 = 0;
+            while (it.next()) |raw| : (idx += 1) {
+                const f = std.mem.trim(u8, raw, " \t");
+                switch (idx) {
+                    0 => o.name = f,
+                    1 => o.fuel = f,
+                    2 => o.fuel_cost = std.fmt.parseInt(i32, f, 10) catch 0,
+                    5 => o.output_item = f,
+                    6 => o.output_item_modded = f,
+                    9 => o.min_convert_time = std.fmt.parseInt(i32, f, 10) catch 0,
+                    10 => o.max_convert_time = std.fmt.parseInt(i32, f, 10) catch 0,
+                    else => {},
+                }
+            }
+            out[n] = o;
+            n += 1;
+        }
+    }
+    return n;
+}
+
 /// Composite tile-entity feature modules (`TileEntityComposite`).
 /// `TileEntityComposite.read` iterates ITS OWN `modulesInternalOrder` and reads
 /// one hash per module, so the wire payload must carry exactly the block's
@@ -193,6 +247,15 @@ pub const BlockDef = struct {
     grow_if_anything_on_top: bool = false,
     grow_on_top_enabled: bool = false,
     fertile_level: i32 = 0,
+    /// blocks.xml `Class="Collector"` (`BlockCollector`): a producer TE (the
+    /// dew collector, apiary and chicken coop). `collector_type` is the
+    /// `CollectorTypes` enum name parsed by `Enum.TryParse` (DewCollector 0,
+    /// Apiary 1, ChickenCoop 2, BlockCollector.il IL_002C-0037), and
+    /// `collector_outputs` is the `OutputTypes` row list.
+    collector: bool = false,
+    collector_type: u8 = 0,
+    /// Raw `OutputTypes` value; rows come from `parseCollectorOutputs`.
+    collector_outputs: []const u8 = "",
     /// blocks.xml `Class="Mine"` (`BlockMine`): a walk-triggered mine. The fuse
     /// is `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules
     /// `UpdateTick` at `TriggerDelay * 20`), and `UpdateTick` (IL=8) detonates.
@@ -666,6 +729,9 @@ pub fn loadFromPath(
         explosion_radius_entities: f32 = 0,
         explosion_entity_damage: f32 = 0,
         explosion_blast_power: f32 = 0,
+        collector: bool = false,
+        collector_type: u8 = 0,
+        collector_outputs: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -772,6 +838,9 @@ pub fn loadFromPath(
         var grow_on_top_enabled = false;
         var fertile_level: i32 = 0;
         var mine = false;
+        var collector = false;
+        var collector_type: u8 = 0;
+        var collector_outputs: ?[]const u8 = null;
         var trigger_delay: f32 = 0;
         var explosion_radius_blocks: f32 = 1;
         var explosion_block_damage: f32 = 0;
@@ -936,6 +1005,7 @@ pub fn loadFromPath(
                     if (std.mem.eql(u8, cn, "TrunkTip")) hazard_kind = .damage;
                     if (std.mem.eql(u8, cn, "PlantGrowing")) plant_growing = true;
                     if (std.mem.eql(u8, cn, "Mine")) mine = true;
+                    if (std.mem.eql(u8, cn, "Collector")) collector = true;
                 }
             } else if (std.mem.eql(u8, pname, "Damage")) {
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage = v;
@@ -945,6 +1015,11 @@ pub fn loadFromPath(
                 walk_buffs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "SiblingBlock")) {
                 hazard_sibling = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "CollectorType")) {
+                const v = xml.attr(clean, pi, "value") orelse "";
+                if (std.mem.eql(u8, v, "DewCollector")) collector_type = 0 else if (std.mem.eql(u8, v, "Apiary")) collector_type = 1 else if (std.mem.eql(u8, v, "ChickenCoop")) collector_type = 2;
+            } else if (std.mem.eql(u8, pname, "OutputTypes")) {
+                collector_outputs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "TriggerDelay")) {
                 if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| trigger_delay = v;
             } else if (std.mem.eql(u8, pname, "Next")) {
@@ -1118,6 +1193,9 @@ pub fn loadFromPath(
             .explosion_radius_entities = explosion_radius_entities,
             .explosion_entity_damage = explosion_entity_damage,
             .explosion_blast_power = explosion_blast_power,
+            .collector = collector,
+            .collector_type = collector_type,
+            .collector_outputs = if (collector_outputs) |co| try arena.dupe(u8, co) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -1193,6 +1271,9 @@ pub fn loadFromPath(
         var own_te_features = pb.te_features;
         var own_te_feature_n = pb.te_feature_n;
         var own_mine = pb.mine;
+        var own_collector = pb.collector;
+        var own_collector_type = pb.collector_type;
+        var own_collector_outputs = pb.collector_outputs;
         var own_trigger_delay = pb.trigger_delay;
         var own_expl_radius_blocks = pb.explosion_radius_blocks;
         var own_expl_block_damage = pb.explosion_block_damage;
@@ -1277,7 +1358,12 @@ pub fn loadFromPath(
                     own_te_features = base_p.te_features;
                     own_te_feature_n = base_p.te_feature_n;
                 }
-                if (!own_mine) {
+                if (!own_collector and base_p.collector) {
+                own_collector = base_p.collector;
+                if (own_collector_type == 0) own_collector_type = base_p.collector_type;
+                if (own_collector_outputs == null) own_collector_outputs = base_p.collector_outputs;
+            }
+            if (!own_mine) {
                     own_mine = base_p.mine;
                     if (own_trigger_delay == 0) own_trigger_delay = base_p.trigger_delay;
                     // An explosion block that declares nothing keeps the parent's
@@ -1367,6 +1453,9 @@ pub fn loadFromPath(
         pb.te_features = own_te_features;
         pb.te_feature_n = own_te_feature_n;
         pb.mine = own_mine;
+        pb.collector = own_collector;
+        pb.collector_type = own_collector_type;
+        pb.collector_outputs = own_collector_outputs;
         pb.trigger_delay = own_trigger_delay;
         pb.explosion_radius_blocks = own_expl_radius_blocks;
         pb.explosion_block_damage = own_expl_block_damage;
@@ -1462,6 +1551,9 @@ pub fn loadFromPath(
             .te_features = pb.te_features,
             .te_feature_n = pb.te_feature_n,
             .mine = pb.mine,
+            .collector = pb.collector,
+            .collector_type = pb.collector_type,
+            .collector_outputs = if (pb.collector_outputs) |co| try arena.dupe(u8, co) else "",
             .trigger_delay = pb.trigger_delay,
             .explosion_radius_blocks = pb.explosion_radius_blocks,
             .explosion_block_damage = pb.explosion_block_damage,
