@@ -15,6 +15,7 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 const ecs = @import("../../ecs/root.zig");
 const workstations_mod = @import("../../world/workstations.zig");
 const vending_mod = @import("../../world/vending.zig");
@@ -169,6 +170,7 @@ pub fn broadcastStorageTe(self: *Game, cont: *const containers_mod.Container) !v
         cont,
         Game.resolveItemType,
         self,
+        self.compositeFeatures(@intCast(cont.block_id)),
     );
     // Position-scoped, like the powered-trigger and vending TE paths above.
     // NetPackageTileEntity::ProcessPackage (IL=103) rebroadcasts with
@@ -283,8 +285,17 @@ pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
         cont,
         Game.resolveItemType,
         self,
+        self.compositeFeatures(@intCast(cont.block_id)),
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// The composite modules a block declares, in declaration order. Empty when the
+/// table has no entry for the id (builtin/synthetic tables), which makes the
+/// builder fall back to the historical Storage payload.
+pub fn compositeFeatures(self: *const Game, block_id: u16) []const assets_blocks.FeatureKind {
+    const def = self.blocks.byId(block_id) orelse return &.{};
+    return def.te_features[0..def.te_feature_n];
 }
 
 /// Replay a stored sign to one peer (the composite TE body the client's own

@@ -646,6 +646,7 @@ field-by-field provenance.
 | `ecs/rules.zig` `Power.trigger_pulse_s` (mirrored to `ecs/electric.zig` `trigger_pulse_s` at init) | 0.5 | R | Trigger pulse width (RE: PowerItemTypes; tile-entities-power.md). Lifted to `[rules.power] trigger_pulse_s` (ADR 0021); the grid field keeps the value the rules overlay resolves |
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |
 | `ecs/turrets.zig` `turret_sight_height` | 1.6 | R | Torso height the auto-turret line-of-sight query runs at, the same offset `sensing.rayClear`'s AI sight query uses; stock traces muzzle-to-entity transform (`AutoTurretFireController` IL_0165), which zdtd has no separate transform for |
+| `wire/stock_te.zig` `unlocked_lock_body` | 6 bytes | R | `TEFeatureLockable` state for a container with no padlock: bool locked=false, i32 allowed-user count 0, and an empty password hash string (`TEFeatureLockable::Read` IL_002D-0076) |
 | `server/game/block_ticker.zig` `default_growth_rate` | 10 | R | `Block.GetTickRate` default, the reschedule interval in ticks (blocks.md section 7) |
 | `server/game/block_ticker.zig` `sky_scan_cells` | 24 | Z | Cells the sky-exposure probe walks above a plant cell, the stand-in for stock's block-light channel (`GetLight`/`GetBlockLightValue`) while zdtd has no light simulation; a roof within 24 cells reads dark |
 | `server/game/hazard.zig` `barbed_max_meta` | 15 | R | `BlockBarbed.OnEntityCollidedWithBlock` (IL_0018-002A): the cell meta increments per collision and the wire is destroyed when it reaches 15 |

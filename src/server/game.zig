@@ -30,6 +30,7 @@ const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
+const game_replicate_te = @import("game/replicate_te.zig");
 const game_sleeper = @import("game/sleeper.zig");
 const game_hooks = @import("game/hooks.zig");
 const game_deco = @import("game/deco.zig");
@@ -2033,6 +2034,11 @@ pub const Game = struct {
 
     pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
         return game_world.blockRawAt(self, x, y, z);
+    }
+
+    /// See `game_replicate_te.compositeFeatures`.
+    pub fn compositeFeatures(self: *const Game, block_id: u16) []const assets_blocks.FeatureKind {
+        return game_replicate_te.compositeFeatures(self, block_id);
     }
 
     /// See `game_world.parentCellOf`.

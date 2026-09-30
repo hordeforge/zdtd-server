@@ -104,6 +104,45 @@ pub const HarvestDrop = struct {
 /// (`BlockSpikes`/`BlockBarbed` override the retract/degrade leg).
 pub const HazardKind = enum(u8) { none = 0, damage = 1, spikes = 2, barbed = 3 };
 
+/// Composite tile-entity feature modules (`TileEntityComposite`).
+/// `TileEntityComposite.read` iterates ITS OWN `modulesInternalOrder` and reads
+/// one hash per module, so the wire payload must carry exactly the block's
+/// declared features in declaration order: a count that disagrees makes the
+/// client skip the whole TE payload (TileEntityComposite.il IL_0105-0139).
+pub const max_composite_features: usize = 8;
+
+pub const FeatureKind = enum {
+    storage,
+    lockable,
+    lock_pickable,
+    explodable,
+    pickup,
+    combine,
+    area_repair,
+    door,
+    signable,
+    canvas,
+    land_claim,
+    /// A declared `TEFeature*` with no zdtd model.
+    other,
+
+    /// Map a `class="TEFeatureX"` declaration to its kind.
+    pub fn fromClass(class_name: []const u8) FeatureKind {
+        if (std.mem.eql(u8, class_name, "TEFeatureStorage")) return .storage;
+        if (std.mem.eql(u8, class_name, "TEFeatureLockable")) return .lockable;
+        if (std.mem.eql(u8, class_name, "TEFeatureLockPickable")) return .lock_pickable;
+        if (std.mem.eql(u8, class_name, "TEFeatureExplodable")) return .explodable;
+        if (std.mem.eql(u8, class_name, "TEFeaturePickup")) return .pickup;
+        if (std.mem.eql(u8, class_name, "TEFeatureCombine")) return .combine;
+        if (std.mem.eql(u8, class_name, "TEFeatureAreaRepair")) return .area_repair;
+        if (std.mem.eql(u8, class_name, "TEFeatureDoor")) return .door;
+        if (std.mem.eql(u8, class_name, "TEFeatureSignable")) return .signable;
+        if (std.mem.eql(u8, class_name, "TEFeatureCanvas")) return .canvas;
+        if (std.mem.eql(u8, class_name, "TEFeatureLandClaim")) return .land_claim;
+        return .other;
+    }
+};
+
 pub const BlockDef = struct {
     id: u16 = 0,
     name: []const u8 = "",
@@ -182,6 +221,9 @@ pub const BlockDef = struct {
     /// letters and the writable crates). Only these positions accept a C2S
     /// sign-text TE write.
     signable: bool = false,
+    /// Composite modules the block declares, in declaration order.
+    te_features: [max_composite_features]FeatureKind = @splat(.other),
+    te_feature_n: u8 = 0,
     /// The block's composite TE carries `TEFeatureCanvas` (a canvas sign, or a
     /// writable crate's painted face). Like `signable`, the module list comes
     /// from the block's `CompositeFeatures`, so this flag gates the C2S canvas
@@ -627,6 +669,8 @@ pub fn loadFromPath(
         block_tag: ?[]const u8 = null,
         is_door: bool = false,
         signable: bool = false,
+        te_features: [max_composite_features]FeatureKind = @splat(.other),
+        te_feature_n: u8 = 0,
         canvas: bool = false,
         /// `Shape="Terrain"` (stock `BlockShape::IsTerrain`, the 17 terrain
         /// rows): leftovers take ids from 0 rather than 0xff.
@@ -735,6 +779,8 @@ pub fn loadFromPath(
         var block_tag: ?[]const u8 = null;
         var tags: ?[]const u8 = null;
         var signable = false;
+        var te_features: [max_composite_features]FeatureKind = @splat(.other);
+        var te_feature_n: u8 = 0;
         var canvas = false;
         var lp_hardness_scale: f32 = 1;
         var lp_declared = false;
@@ -828,6 +874,13 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "class")) |cn| {
                     if (std.ascii.eqlIgnoreCase(cn, "TEFeatureSignable")) signable = true;
                     if (std.ascii.eqlIgnoreCase(cn, "TEFeatureCanvas")) canvas = true;
+                    // Composite module declaration: keep the order, because the
+                    // client pairs the stream's module hashes with its own
+                    // declared order (TileEntityComposite.il IL_0146-0167).
+                    if (std.mem.startsWith(u8, cn, "TEFeature") and te_feature_n < max_composite_features) {
+                        te_features[te_feature_n] = FeatureKind.fromClass(cn);
+                        te_feature_n += 1;
+                    }
                     // `<property class="Explosion">` holds the ExplosionData
                     // fields (`new ExplosionData(properties, ...)` reads the
                     // `Explosion` class block, ExplosionData.il IL_0069-0105).
@@ -1052,6 +1105,8 @@ pub fn loadFromPath(
             .block_tag = if (block_tag) |bt| try arena.dupe(u8, bt) else null,
             .is_door = false, // resolved from BlockTag after the Extends walk
             .signable = signable,
+            .te_features = te_features,
+            .te_feature_n = te_feature_n,
             .canvas = canvas,
             .lp_hardness_scale = lp_hardness_scale,
             .lp_declared = lp_declared,
@@ -1114,6 +1169,8 @@ pub fn loadFromPath(
         var own_grow_if_anything_on_top = pb.grow_if_anything_on_top;
         var own_grow_on_top_enabled = pb.grow_on_top_enabled;
         var own_fertile_level = pb.fertile_level;
+        var own_te_features = pb.te_features;
+        var own_te_feature_n = pb.te_feature_n;
         var own_mine = pb.mine;
         var own_trigger_delay = pb.trigger_delay;
         var own_expl_radius_blocks = pb.explosion_radius_blocks;
@@ -1192,6 +1249,10 @@ pub fn loadFromPath(
                 if (!own_grow_if_anything_on_top) own_grow_if_anything_on_top = base_p.grow_if_anything_on_top;
                 if (!own_grow_on_top_enabled) own_grow_on_top_enabled = base_p.grow_on_top_enabled;
                 if (own_fertile_level == 0) own_fertile_level = base_p.fertile_level;
+                if (own_te_feature_n == 0) {
+                    own_te_features = base_p.te_features;
+                    own_te_feature_n = base_p.te_feature_n;
+                }
                 if (!own_mine) {
                     own_mine = base_p.mine;
                     if (own_trigger_delay == 0) own_trigger_delay = base_p.trigger_delay;
@@ -1278,6 +1339,8 @@ pub fn loadFromPath(
         pb.grow_if_anything_on_top = own_grow_if_anything_on_top;
         pb.grow_on_top_enabled = own_grow_on_top_enabled;
         pb.fertile_level = own_fertile_level;
+        pb.te_features = own_te_features;
+        pb.te_feature_n = own_te_feature_n;
         pb.mine = own_mine;
         pb.trigger_delay = own_trigger_delay;
         pb.explosion_radius_blocks = own_expl_radius_blocks;
@@ -1370,6 +1433,8 @@ pub fn loadFromPath(
             .grow_if_anything_on_top = pb.grow_if_anything_on_top,
             .grow_on_top_enabled = pb.grow_on_top_enabled,
             .fertile_level = pb.fertile_level,
+            .te_features = pb.te_features,
+            .te_feature_n = pb.te_feature_n,
             .mine = pb.mine,
             .trigger_delay = pb.trigger_delay,
             .explosion_radius_blocks = pb.explosion_radius_blocks,
@@ -1441,4 +1506,54 @@ fn loadLogged(allocator: std.mem.Allocator, path: []const u8, id_by_name: IdByNa
         }
         return null;
     };
+}
+
+test "composite module declarations keep their order" {
+    // `TileEntityComposite.read` walks its own module order and reads one hash
+    // per entry, so zdtd has to keep the declaration order from blocks.xml
+    // (TileEntityComposite.il IL_0146-0167). The version-only modules matter
+    // too: their presence is what offers the client's lockpick/pickup/explode
+    // affordances, even though their network body is empty.
+    const src =
+        \\<blocks>
+        \\<block name="cntVaultDoor01">
+        \\  <property name="Class" value="CompositeTileEntity" />
+        \\  <property class="TEFeatureStorage">
+        \\    <property name="LootList" value="vault" />
+        \\  </property>
+        \\  <property class="TEFeatureLockable" />
+        \\  <property class="TEFeatureLockPickable" />
+        \\</block>
+        \\<block name="cntStorageCrate">
+        \\  <property class="TEFeatureStorage" />
+        \\</block>
+        \\</blocks>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/blocks_composite.xml", .{tmp.sub_path});
+    try io_fs.writeFile(path, src);
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "cntVaultDoor01")) return 24096;
+            if (std.mem.eql(u8, name, "cntStorageCrate")) return 24097;
+            return null;
+        }
+    };
+    var t = try loadFromPath(std.testing.allocator, path, &Ids.id, null);
+    defer t.deinit();
+    const vault = t.byName("cntVaultDoor01").?;
+    try std.testing.expectEqual(@as(u8, 3), vault.te_feature_n);
+    try std.testing.expectEqualSlices(
+        FeatureKind,
+        &[_]FeatureKind{ .storage, .lockable, .lock_pickable },
+        vault.te_features[0..vault.te_feature_n],
+    );
+    const crate = t.byName("cntStorageCrate").?;
+    try std.testing.expectEqualSlices(
+        FeatureKind,
+        &[_]FeatureKind{.storage},
+        crate.te_features[0..crate.te_feature_n],
+    );
 }

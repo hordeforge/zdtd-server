@@ -50,6 +50,38 @@ pub const feature_hash_lockable: i32 = unity_hash.getStableHashCode("TEFeatureLo
 /// IL=18). zdtd stores and replays the bytes, never re-encodes them.
 pub const feature_hash_canvas: i32 = unity_hash.getStableHashCode("TEFeatureCanvas");
 
+/// GetStableHashCode for the remaining composite modules. The three above are
+/// pinned by earlier RE; these follow the same `GetStableHashCode` formula, and
+/// the version-only ones (LockPickable, Explodable, Pickup, Combine,
+/// AreaRepair) write nothing on the network stream (te-features.md: their
+/// Read/Write bodies serialize a UInt16 version that the network stream skips
+/// and nothing else), so their module body is empty.
+pub const feature_hash_lock_pickable: i32 = unity_hash.getStableHashCode("TEFeatureLockPickable");
+pub const feature_hash_explodable: i32 = unity_hash.getStableHashCode("TEFeatureExplodable");
+pub const feature_hash_pickup: i32 = unity_hash.getStableHashCode("TEFeaturePickup");
+pub const feature_hash_combine: i32 = unity_hash.getStableHashCode("TEFeatureCombine");
+pub const feature_hash_area_repair: i32 = unity_hash.getStableHashCode("TEFeatureAreaRepair");
+
+/// `TEFeatureLockable` body for a container the server holds no padlock state
+/// for: unlocked, no allowed users, empty password hash
+/// (`TEFeatureLockable::Read` IL_002D-0076: bool, i32 count, users, string).
+pub const unlocked_lock_body = [_]u8{ 0, 0, 0, 0, 0, 0 };
+
+/// The module hash for a declared feature, or null when zdtd has no body for it
+/// and the caller must not claim to carry it.
+pub fn moduleHash(kind: blocks.FeatureKind) ?i32 {
+    return switch (kind) {
+        .storage => feature_hash_storage,
+        .lockable => feature_hash_lockable,
+        .lock_pickable => feature_hash_lock_pickable,
+        .explodable => feature_hash_explodable,
+        .pickup => feature_hash_pickup,
+        .combine => feature_hash_combine,
+        .area_repair => feature_hash_area_repair,
+        .door, .signable, .canvas, .land_claim, .other => null,
+    };
+}
+
 /// Bound for one stored TEFeatureCanvas module body. The client's library id
 /// is short and the rest is 19 fixed bytes; a longer claim is dropped rather
 /// than sized for.
@@ -65,6 +97,7 @@ pub const max_lock_users: i32 = 32;
 pub const max_sign_text_bytes: usize = 1024;
 
 const unity_hash = @import("../assets/unity_hash.zig");
+const blocks = @import("../assets/blocks.zig");
 
 fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
     // stock chunk: 16×256×16; y is full world y in ToWorldPos (chunk Y * 256)
@@ -127,9 +160,10 @@ pub fn buildStorageTeBody(
     cont: *const containers.Container,
     resolve: ?stock_inv.TypeResolver,
     ctx: ?*anyopaque,
+    features: []const blocks.FeatureKind,
 ) ![]u8 {
     var payload: [4096]u8 = undefined;
-    const pay = try writeCompositeStoragePayload(&payload, world_x, world_y, world_z, block_id, cont, resolve, ctx);
+    const pay = try writeCompositeStoragePayload(&payload, world_x, world_y, world_z, block_id, cont, resolve, ctx, features);
 
     var w: binary.Writer = .{ .buf = buf };
     try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, block_id, pay.len);
@@ -146,6 +180,7 @@ fn writeCompositeStoragePayload(
     cont: *const containers.Container,
     resolve: ?stock_inv.TypeResolver,
     ctx: ?*anyopaque,
+    declared: []const blocks.FeatureKind,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     const lp = localChunkPos(world_x, world_y, world_z);
@@ -158,25 +193,59 @@ fn writeCompositeStoragePayload(
     const outer = try reserveU32(&w);
     try w.writeI32(block_id);
     try w.writeByte(0); // null owner
-    // Modules the client declares for this block: Storage always, plus the
-    // padlock module when the server holds one for this container.
+    // Modules the client declares for this block, in DECLARATION ORDER: the
+    // client reads one hash per `modulesInternalOrder` entry and skips the
+    // whole payload when the count or an order slot disagrees
+    // (TileEntityComposite.il IL_0105-0167).
     const has_lock = cont.lock_len > 0;
-    try w.writeByte(if (has_lock) 2 else 1);
-
-    try w.writeI32(feature_hash_storage);
-    const feat_mark = try reserveU32(&w);
-    try writeStorageFeature(&w, cont, resolve, ctx);
-    finalizeU32(&w, feat_mark);
-
-    if (has_lock) {
-        try w.writeI32(feature_hash_lockable);
-        const lock_mark = try reserveU32(&w);
-        try w.writeBytes(cont.lock_blob[0..cont.lock_len]);
-        finalizeU32(&w, lock_mark);
+    const declared_ok = compositeOrderOk(declared);
+    if (declared_ok) {
+        try w.writeByte(@intCast(declared.len));
+        for (declared) |kind| {
+            try w.writeI32(moduleHash(kind) orelse unreachable);
+            const mark = try reserveU32(&w);
+            switch (kind) {
+                .storage => try writeStorageFeature(&w, cont, resolve, ctx),
+                .lockable => if (has_lock)
+                    try w.writeBytes(cont.lock_blob[0..cont.lock_len])
+                else
+                    try w.writeBytes(&unlocked_lock_body),
+                // Version-only on the network stream: no body.
+                .lock_pickable, .explodable, .pickup, .combine, .area_repair => {},
+                .door, .signable, .canvas, .land_claim, .other => unreachable,
+            }
+            finalizeU32(&w, mark);
+        }
+    } else {
+        // No usable declaration (a builtin or synthetic table, or a block that
+        // declares a module zdtd has no body for): the historical Storage
+        // (+padlock when held) payload. Claiming a module we cannot fill would
+        // desync the client's Read, so an unsupported set is left as it was.
+        try w.writeByte(if (has_lock) 2 else 1);
+        try w.writeI32(feature_hash_storage);
+        const feat_mark = try reserveU32(&w);
+        try writeStorageFeature(&w, cont, resolve, ctx);
+        finalizeU32(&w, feat_mark);
+        if (has_lock) {
+            try w.writeI32(feature_hash_lockable);
+            const lock_mark = try reserveU32(&w);
+            try w.writeBytes(cont.lock_blob[0..cont.lock_len]);
+            finalizeU32(&w, lock_mark);
+        }
     }
 
     finalizeU32(&w, outer);
     return w.written();
+}
+
+/// A declared module list is usable when it is non-empty, leads with Storage
+/// (this builder carries a container) and every entry has a body.
+fn compositeOrderOk(declared: []const blocks.FeatureKind) bool {
+    if (declared.len == 0 or declared[0] != .storage) return false;
+    for (declared) |kind| {
+        if (moduleHash(kind) == null) return false;
+    }
+    return true;
 }
 
 /// Largest storage module body: `<54 slots x item value>` plus the header,

@@ -287,11 +287,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       drives spikes, barbed wire (meta 15 self-destruct), cactus, hay and the
       pipe fire hazards (blocks.md:520-534, block-behaviors.md:32); zdtd clears
       the movement bit and has no collision arm, so POI traps are inert.
-- [ ] **Composite TE features never stream** - the chunk body writes `teCount 0`
-      (`src/wire/stock_chunk.zig:672-675`), so `TEFeatureLockable`,
-      `LockPickable`, `Explodable` and `Door` never reach a client
-      (inventories/te-features.md:12-26): POI vault doors and locked lockers
-      open for anyone and a lockpick does nothing.
+- [x] **Composite TE module list was hardcoded** - closed 2026-09-28 for the
+      module list. The `teCount 0` in the chunk body is the terrain payload's
+      own field (TEs ride `NetPackageTileEntity`), and a locked container's
+      `TEFeatureLockable` module did stream, so "locked lockers open for anyone"
+      was stale. What was wrong is the LIST: `buildStorageTeBody` always wrote
+      `Storage` (+padlock), while `TileEntityComposite.read` walks its own
+      `modulesInternalOrder` and reads one hash per entry, dropping the whole TE
+      payload when the count disagrees (TileEntityComposite.il IL_0105-0167).
+      The block's declared `TEFeature*` class blocks now parse in declaration
+      order and the payload carries exactly that order, with the version-only
+      modules (LockPickable, Explodable, Pickup, Combine, AreaRepair) as empty
+      bodies and the unlocked default body for a declared Lockable with no
+      padlock; a declaration zdtd has no body for (Door, Signable, Canvas,
+      LandClaim) falls back to the historical shape rather than desyncing.
+      Still open: those four state-carrying modules, and POI-authored padlock
+      state (a prefab locker that starts locked).
 - [x] **`CanPlaceBlockAt` height ceiling and the world-edge band** - closed
       2026-09-28: `guard.placeBoundsOk` applies stock's `pos.y > 253` reject and
       `World.CanPlaceBlockAt`'s `InBoundsForPlayersPercent >= 0.5` gate (50 m

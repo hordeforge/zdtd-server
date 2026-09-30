@@ -11,6 +11,8 @@ const stock_inv = @import("stock_inv.zig");
 const platform_user = @import("platform_user.zig");
 const unity_hash = @import("../assets/unity_hash.zig");
 const containers = @import("../world/containers.zig");
+const containers_mod = containers;
+const blocks_mod = @import("../assets/blocks.zig");
 const workstations = @import("../world/workstations.zig");
 const PoweredTriggerTe = stock_te.PoweredTriggerTe;
 const Vec3i = stock_te.Vec3i;
@@ -308,7 +310,7 @@ test "storage te encode decode roundtrip" {
     cont.setSlot(2, .{ .item_id = 2, .count = 3, .quality = 1 });
 
     var buf: [8192]u8 = undefined;
-    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &.{});
 
     // The payload opens with chunkPos through StreamUtils.Write(Vector3i),
     // which emits x, y, z (`il/full-v3.2.0/_global/StreamUtils.il.txt` IL=13).
@@ -331,7 +333,7 @@ test "storage te encode decode roundtrip" {
     try std.testing.expectEqual(@as(u16, 4), parsed.size_y);
     cont.size_x = 6;
     cont.size_y = 2;
-    const body2 = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+    const body2 = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &.{});
     const parsed2 = try parseStorageTeBody(body2);
     try std.testing.expectEqual(@as(u16, 6), parsed2.size_x);
     try std.testing.expectEqual(@as(u16, 2), parsed2.size_y);
@@ -351,7 +353,7 @@ test "a storage slot count reaching past its feature is rejected" {
         .slot_count = 4,
     };
     var buf: [8192]u8 = undefined;
-    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &.{});
 
     // handle 1 | worldPos 12 | blockId 4 | payLen 4 = 21, then chunkPos 12 |
     // outer marker 4 | blockId 4 | ownerTag 1 | moduleCount 1 | hash 4 |
@@ -378,7 +380,7 @@ test "storage te carries the touch time the container was looted at" {
         .player_storage = false,
     };
     var buf: [8192]u8 = undefined;
-    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null, &.{});
     const parsed = try parseStorageTeBody(body);
     try std.testing.expect(parsed.touched);
     // Day 5 in stock world-time bits: (day - 1) * 24000, matching
@@ -388,7 +390,7 @@ test "storage te carries the touch time the container was looted at" {
     // An untouched container has no touch time to report.
     cont.touched = false;
     cont.touched_day = 0;
-    const body2 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const body2 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null, &.{});
     const parsed2 = try parseStorageTeBody(body2);
     try std.testing.expectEqual(@as(u32, 0), parsed2.world_time_touched);
 
@@ -396,7 +398,7 @@ test "storage te carries the touch time the container was looted at" {
     // saturate rather than wrap into a plausible-looking recent time.
     cont.touched = true;
     cont.touched_day = std.math.maxInt(u32);
-    const body3 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const body3 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null, &.{});
     const parsed3 = try parseStorageTeBody(body3);
     try std.testing.expectEqual(std.math.maxInt(u32), parsed3.world_time_touched);
 }
@@ -709,7 +711,7 @@ test "a locked container writes the lockable module and reads it back" {
     try std.testing.expectEqual(stock_te.feature_hash_lockable, unity_hash.getStableHashCode("TEFeatureLockable"));
 
     var buf: [8192]u8 = undefined;
-    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null, &.{});
     const parsed = try parseStorageTeBody(body);
     try std.testing.expect(parsed.found_storage);
     try std.testing.expect(parsed.found_lock);
@@ -717,7 +719,7 @@ test "a locked container writes the lockable module and reads it back" {
     try std.testing.expectEqualSlices(u8, lock, body[parsed.lock_blob_off..][0..parsed.lock_blob_len]);
     // Unlocked: the composite declares the storage module alone.
     cont.lock_len = 0;
-    const plain = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const plain = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null, &.{});
     const parsed_plain = try parseStorageTeBody(plain);
     try std.testing.expect(parsed_plain.found_storage);
     try std.testing.expect(!parsed_plain.found_lock);
@@ -795,4 +797,58 @@ test "a canvas composite body parses and a malformed canvas module is refused" {
     const count_off = 21 + 12 + 4 + 4 + 1;
     none_buf[count_off] = 0;
     try std.testing.expectError(error.NotSignableTe, parseSignableTeBody(none_buf[0..body.len], &text));
+}
+
+test "composite payload carries the block's declared modules in order" {
+    // `TileEntityComposite.read` walks its own `modulesInternalOrder` and reads
+    // one hash per entry, so the stream must carry exactly the declared
+    // features in declaration order: a count that disagrees makes the client
+    // drop the whole TE payload (TileEntityComposite.il IL_0105-0167). A
+    // LockPickable module has no state on the network stream, and a block that
+    // declares Lockable but holds no padlock writes the unlocked default body
+    // (TEFeatureLockable::Read IL_002D-0076).
+    var cont: containers_mod.Container = .{
+        .pos = .{ .x = 10, .y = 70, .z = 13 },
+        .block_id = 500,
+        .size_x = 8,
+        .size_y = 4,
+    };
+    cont.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 1 });
+
+    var buf: [8192]u8 = undefined;
+    const declared = [_]blocks_mod.FeatureKind{ .storage, .lockable, .lock_pickable };
+    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &declared);
+    const payload_start: usize = 1 + 12 + 4 + 4; // handle | worldPos | blockId | payLen
+    const modules = payload_start + 12 + 4 + 4 + 1; // chunkPos | outer | blockId | owner
+    try std.testing.expectEqual(@as(u8, 3), body[modules]);
+    var r: binary.Reader = .{ .data = body, .pos = modules + 1 };
+    const hashes = [_]i32{
+        stock_te.feature_hash_storage,
+        stock_te.feature_hash_lockable,
+        stock_te.feature_hash_lock_pickable,
+    };
+    for (hashes, 0..) |want, i| {
+        try std.testing.expectEqual(want, try r.readI32());
+        // The size marker counts itself (`parseStorageTeBody`: feat_size - 4).
+        const feat_size = try r.readU32();
+        try std.testing.expect(feat_size >= 4);
+        const len = feat_size - 4;
+        if (i == 0) {
+            try std.testing.expect(len > 0); // storage state
+        } else if (i == 1) {
+            // Unlocked: bool + i32 users + empty hash string.
+            try std.testing.expectEqual(@as(u32, stock_te.unlocked_lock_body.len), len);
+            try std.testing.expectEqualSlices(u8, &stock_te.unlocked_lock_body, body[r.pos..][0..len]);
+        } else {
+            // Version-only feature: no body on the network stream.
+            try std.testing.expectEqual(@as(u32, 0), len);
+        }
+        r.pos += len;
+    }
+
+    // A declared module zdtd has no body for must not be claimed: the payload
+    // falls back to the historical shape instead of desyncing the client.
+    const bad = [_]blocks_mod.FeatureKind{ .storage, .door };
+    const fallback = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &bad);
+    try std.testing.expectEqual(@as(u8, 1), fallback[modules]);
 }
