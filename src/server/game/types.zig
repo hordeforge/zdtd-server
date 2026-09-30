@@ -48,19 +48,6 @@ pub const max_land_claims: usize = 1024;
 /// save-region.md), which is what the client's marker list expects.
 pub const max_tracked_backpacks: usize = 3;
 
-/// Placed heat-block cap (torches/candles/barrels feeding the AI heat
-/// map; workstations feed through their own burn-state loop). Matches the
-/// workstation cap: same position-keyed scale, same tick-bounded walk.
-pub const max_heat_blocks: usize = 256;
-
-/// One placed block with blocks.xml HeatMapStrength (stock TileEntity heat
-/// source while active; torches/candles burn constantly).
-pub const HeatBlock = struct {
-    x: i32 = 0,
-    y: i32 = 0,
-    z: i32 = 0,
-    strength: f32 = 0,
-};
 
 /// Default trader AvailableMoney display value. Stock AvailableMoney is a
 /// per-day dukes pool that regenerates and is spent on player sells; zdtd has

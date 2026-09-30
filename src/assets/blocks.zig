@@ -917,6 +917,14 @@ pub fn loadFromPath(
                     if (std.mem.eql(u8, cn, "Spikes")) hazard_kind = .spikes;
                     if (std.mem.eql(u8, cn, "Barbed")) hazard_kind = .barbed;
                     if (std.mem.eql(u8, cn, "Damage")) hazard_kind = .damage;
+                    // The other two `BlockDamage` subclasses behave exactly
+                    // like the base for damage; they only override the
+                    // collision bounds (`BlockCactus.GetCollisionAABB` IL=60
+                    // shrinks them, `BlockTrunkTip` rotates them), which is
+                    // the recorded residual. Without this they read as no
+                    // hazard at all, so a desert POI's cactus was harmless.
+                    if (std.mem.eql(u8, cn, "Cactus")) hazard_kind = .damage;
+                    if (std.mem.eql(u8, cn, "TrunkTip")) hazard_kind = .damage;
                     if (std.mem.eql(u8, cn, "PlantGrowing")) plant_growing = true;
                     if (std.mem.eql(u8, cn, "Mine")) mine = true;
                 }
@@ -1556,4 +1564,38 @@ test "composite module declarations keep their order" {
         &[_]FeatureKind{.storage},
         crate.te_features[0..crate.te_feature_n],
     );
+}
+
+test "the other BlockDamage subclasses are hazards too" {
+    // `BlockCactus` and `BlockTrunkTip` derive from `BlockDamage` and override
+    // only the collision bounds (`BlockCactus.GetCollisionAABB` IL=60) or the
+    // vertex rotation, so their on-contact damage is the base one. Without the
+    // class mapping they read as no hazard at all and a desert POI's cactus was
+    // harmless.
+    const src =
+        \\<blocks>
+        \\<block name="treeCactus01">
+        \\  <property name="Class" value="Cactus" />
+        \\  <property name="Damage" value="4" />
+        \\</block>
+        \\<block name="treeMaster" />
+        \\</blocks>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/blocks_cactus.xml", .{tmp.sub_path});
+    try io_fs.writeFile(path, src);
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "treeCactus01")) return 24675;
+            if (std.mem.eql(u8, name, "treeMaster")) return 24676;
+            return null;
+        }
+    };
+    var t = try loadFromPath(std.testing.allocator, path, &Ids.id, null);
+    defer t.deinit();
+    const cactus = t.byName("treeCactus01").?;
+    try std.testing.expectEqual(HazardKind.damage, cactus.hazard);
+    try std.testing.expectEqual(@as(i32, 4), cactus.hazard_damage);
 }

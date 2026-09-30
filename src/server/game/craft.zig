@@ -687,20 +687,24 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         .smelt_scale_resolve = &resolveWorkstationSmeltScale,
         .melt_ctx = self,
     });
-    // Heat map feed (AIDirectorChunkData): burning workstations with a
-    // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
-    // raise the region's activity like stock TileEntity.heatMapLastTime.
+    // Heat map feed (AIDirectorChunkData): a workstation with a blocks.xml
+    // HeatMapStrength (forge 6, campfire 5, workbench 5, ...) that is
+    // CRAFTING raises the region's activity. Stock's
+    // `TileEntityWorkstation.UpdateTick` step 7 gates on `IsCrafting` (a lit
+    // forge with an empty queue attracts nothing) and `emitHeatMapEvent`
+    // (IL=48) reports at most once per `AIDirector.GetActivityWorldTimeDelay()`
+    // window, which is `clamp(TimeOfDayIncPerSec / 6, 0.2, 5) * 1000` world
+    // ticks (aidirector.md:38-40). Torches are the ticker's job (a different
+    // scale: `BlockTorchHeatMap.UpdateTick` IL=35).
+    const now_bits = self.sim.director.clock.worldTimeBits();
+    const delay_bits = activityWorldTimeDelayBits(self);
     for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
-        if (!u or !w.is_burning) continue;
+        if (!u or !w.isCraftingNow()) continue;
         const strength = self.blocks.heatStrength(@intCast(w.block_id));
-        if (strength > 0) {
-            self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, self.sim.rules.director.heat_event_ticks);
-        }
-    }
-    // Placed heat blocks (torches/candles/barrels burn constantly, no fuel
-    // state): same feed, same duration.
-    for (self.heat_blocks[0..self.heat_block_n]) |h| {
-        self.sim.director.notifyActivity(@floatFromInt(h.x), @floatFromInt(h.z), h.strength, self.sim.rules.director.heat_event_ticks);
+        if (strength <= 0) continue;
+        if (w.heat_next_world != 0 and now_bits < w.heat_next_world) continue;
+        w.heat_next_world = now_bits + delay_bits;
+        self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, self.sim.rules.director.heat_event_ticks);
     }
     try replicate_te.broadcastDirtyWorkstations(self);
 }
@@ -1018,4 +1022,15 @@ pub fn appendUnlockedRecipes(self: *const Game, slot: usize, out: [][]const u8) 
     SlotCtx.peer = slot;
     SlotCtx.game = self;
     return self.recipes.appendUnlockedFor(out, &self.progression_table, SlotCtx.level);
+}
+
+/// `AIDirector.GetActivityWorldTimeDelay()` (IL=16): the world-time window
+/// between activity passes, `clamp(TimeOfDayIncPerSec / 6, 0.2, 5) * 1000`
+/// (aidirector.md:38-40). A working workstation reports at most once per
+/// window.
+pub fn activityWorldTimeDelayBits(self: *const Game) u64 {
+    const inc = self.sim.director.clock.time_of_day_inc_per_sec;
+    const scaled = @as(f32, @floatFromInt(inc)) / 6.0;
+    const clamped = std.math.clamp(if (scaled > 0) scaled else 1.0, 0.2, 5.0);
+    return @intFromFloat(clamped * 1000.0);
 }

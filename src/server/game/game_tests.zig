@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const test_tmp = @import("../../util/test_tmp.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 const Game = @import("../game.zig").Game;
 const game = @import("../game.zig");
 const ln_peer = @import("../../litenet/peer.zig");
@@ -7046,32 +7047,76 @@ test "a burning zombie takes damage over time" {
     try std.testing.expect(g.sim.health[zs].hp < 400);
 }
 
-test "a placed torch feeds the AI heat map" {
-    // TorchHeatMap-class blocks carry HeatMapStrength and burn constantly:
-    // placing one registers it, and the craft tick feeds its strength into
-    // the director's region activity. Breaking it unregisters.
-    const game_dir = stock_paths.dedicated_server;
-    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+test "a placed torch feeds the AI heat map once per tick rate" {
+    // `BlockTorchHeatMap.UpdateTick` (IL=35): a placed torch/candle/barrel with
+    // `HeatMapStrength` adds `strength * 0.4` to the region's activity for the
+    // stock 720-tick duration, and `addScheduledTick` reschedules it
+    // `GetTickRate` (10) ticks out. Feeding every tick instead inflated the heat
+    // (and the scout and wandering spawns it drives) by 25x.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const world_dir = try test_tmp.rootOf(&tmp);
     const gpa = std.testing.allocator;
-    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    const g = try Game.create(gpa, world_dir, 0);
     defer g.destroy();
-    var capture: ln_peer.Capture = .{};
-    _ = try g.attachJoinedClient(&capture);
-    const torch = g.blocks.byName("wallTorchLightPlayer") orelse return error.SkipZigTest;
+
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_torch.xml", .{world_dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="wallTorchLightPlayer">
+        \\  <property name="Class" value="TorchHeatMap" />
+        \\  <property name="HeatMapStrength" value="8" />
+        \\</block>
+        \\<block name="terrStone" />
+        \\</blocks>
+    );
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "wallTorchLightPlayer")) return 1732;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const torch = g.blocks.byName("wallTorchLightPlayer") orelse return error.TestUnexpectedResult;
     try std.testing.expect(g.blocks.heatStrength(torch.id) > 0);
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    // Stand the player well clear, so no noise heat lands in the same region.
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.transform[ps].x = 2000;
+    g.sim.transform[ps].z = 2000;
+
+    // Place it the way the place path does: the ticker re-reads the cell, so an
+    // unplaced torch is a stale entry.
+    try g.world.setBlockRawWorld(256, 70, 256, torch.id);
+    g.setBlockRaw(256, 70, 256, torch.id);
     g.noteBlockAdded(256, 70, 256, torch.id);
-    try std.testing.expectEqual(@as(usize, 1), g.heat_block_n);
-    // The workstation/heat feed runs on the sleeper-tick cadence, not every
-    // tick.
+    // Scheduled, not fed: the first emission is one tick-rate away.
+    try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
     var ti: usize = 0;
-    while (ti < 40 and g.sim.director.heat_n == 0) : (ti += 1) try g.step();
+    while (ti < 9) : (ti += 1) {
+        _ = try g.step();
+        try std.testing.expectEqual(@as(usize, 0), g.sim.director.heat_n);
+    }
+    // The scheduled tick fires at the tick-rate boundary (the ticker drains
+    // after `tick_n` advances), never inside the first nine steps.
+    var tj: usize = 0;
+    while (tj < 4 and g.sim.director.heat_n == 0) : (tj += 1) _ = try g.step();
     try std.testing.expect(g.sim.director.heat_n > 0);
-    try std.testing.expect(g.sim.director.heat[0].activity > 0);
+    // strength * 0.4, not the full strength.
+    try std.testing.expectApproxEqAbs(@as(f32, 3.2), g.sim.director.heat[0].activity, 0.05);
+    // ...and it rescheduled itself.
+    try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
+
+    // Breaking the torch stops the chain: the next due tick finds air and drops.
     g.noteBlockRemoved(256, 70, 256, torch.id);
-    try std.testing.expectEqual(@as(usize, 0), g.heat_block_n);
+    try g.world.setBlockWorld(256, 70, 256, 0);
+    var tk: usize = 0;
+    while (tk < 12) : (tk += 1) _ = try g.step();
+    try std.testing.expectEqual(@as(usize, 0), g.block_tick_n);
 }
 
 test "radiated regen stops at 80 percent HP" {

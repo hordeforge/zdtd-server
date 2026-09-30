@@ -47,6 +47,14 @@ pub const default_growth_rate: u32 = 10;
 /// `BlockPlantGrowing.addScheduledTick`, IL=63).
 pub const growth_jitter_min: f32 = 0.5;
 pub const growth_jitter_max: f32 = 1.5;
+/// `BlockTorchHeatMap.UpdateTick` (IL=35) feeds the AI heat map with
+/// `HeatMapStrength * 0.4` (blocks.md:799-800). A burning workstation feeds its
+/// full strength instead (`TileEntity.emitHeatMapEvent` IL=48), so the two
+/// sources carry different scales.
+pub const torch_heat_scale: f32 = 0.4;
+/// `Block.GetTickRate` for a heat block: UpdateTick reschedules itself every
+/// 10 ticks, so a torch reports ten times a second rather than every tick.
+pub const heat_tick_rate: u32 = 10;
 
 pub const ScheduledTick = struct {
     due: u64,
@@ -134,7 +142,42 @@ fn run(self: *Game, t: ScheduledTick) void {
         mineTick(self, t, def);
         return;
     }
+    if (def.heat_strength > 0 and isHeatBlockClass(def.class)) {
+        heatTick(self, t, def);
+        return;
+    }
     if (def.plant_growing) plantTick(self, t, def);
+}
+
+/// `BlockTorchHeatMap.UpdateTick` (IL=35): a placed torch/candle/barrel adds
+/// `HeatMapStrength * 0.4` to the region's activity for the stock 720-tick
+/// duration, then reschedules itself `GetTickRate` ticks out. Rescheduling
+/// through the ticker is what keeps the emission at ten a second instead of the
+/// every-tick feed that inflated heat (and the scout/wandering spawns it
+/// drives) by 25x.
+fn heatTick(self: *Game, t: ScheduledTick, def: assets_blocks.BlockDef) void {
+    const strength: f32 = def.heat_strength;
+    self.sim.director.notifyActivity(
+        @floatFromInt(t.x),
+        @floatFromInt(t.z),
+        strength * torch_heat_scale,
+        self.sim.rules.director.heat_event_ticks,
+    );
+    schedule(self, t.x, t.y, t.z, t.id, heat_tick_rate);
+}
+
+/// The always-on heat classes: `BlockTorchHeatMap` and the burning `Light`
+/// blocks stock seeds the same way.
+pub fn isHeatBlockClass(class: []const u8) bool {
+    return std.mem.eql(u8, class, "TorchHeatMap") or std.mem.eql(u8, class, "Light");
+}
+
+/// Register a placed always-on heat block with the ticker. Called from
+/// `noteBlockAdded`, the one place every add routes through.
+pub fn noteHeatBlock(self: *Game, x: i32, y: i32, z: i32, id: u16) void {
+    const def = self.blocks.byId(id) orelse return;
+    if (def.heat_strength <= 0 or !isHeatBlockClass(def.class)) return;
+    schedule(self, x, y, z, id, heat_tick_rate);
 }
 
 /// `BlockMine.UpdateTick` (IL=8): the fuse ends and the mine detonates. The

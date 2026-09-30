@@ -395,7 +395,6 @@ pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spil
     self.vending.removeAt(.{ .x = x, .y = y, .z = z });
     self.light_te.removeAt(.{ .x = x, .y = y, .z = z });
     self.workstations.removeAt(x, y, z);
-    self.untrackHeatBlock(x, y, z);
     if (!self.isBedrollId(cur_id)) return;
     for (&self.clients) |*cl| {
         if (!cl.joined or !cl.has_bed) continue;
@@ -412,50 +411,16 @@ pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spil
 /// lands a powered block owes the grid a node exactly like a player placing
 /// one. Containers stay out: registering one broadcasts its TE, which can
 /// fail, and the placement path already owns that leg.
-/// Register a placed heat block (bounded; refresh in place on repeat).
-pub fn trackHeatBlock(self: *Game, x: i32, y: i32, z: i32, id: u16) void {
-    const strength = self.blocks.heatStrength(id);
-    if (strength <= 0) return;
-    for (self.heat_blocks[0..self.heat_block_n]) |*h| {
-        if (h.x == x and h.y == y and h.z == z) {
-            h.strength = strength;
-            return;
-        }
-    }
-    if (self.heat_block_n >= self.heat_blocks.len) return;
-    self.heat_blocks[self.heat_block_n] = .{ .x = x, .y = y, .z = z, .strength = strength };
-    self.heat_block_n += 1;
-}
-
-/// Drop a heat block on removal (swap-and-pop; order is not observed).
-pub fn untrackHeatBlock(self: *Game, x: i32, y: i32, z: i32) void {
-    var i: usize = 0;
-    while (i < self.heat_block_n) : (i += 1) {
-        const h = self.heat_blocks[i];
-        if (h.x == x and h.y == y and h.z == z) {
-            self.heat_block_n -= 1;
-            self.heat_blocks[i] = self.heat_blocks[self.heat_block_n];
-            self.heat_blocks[self.heat_block_n] = .{};
-            return;
-        }
-    }
-}
-
 pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
     if (new_id == 0) return;
-    // Placed always-on heat blocks (Class TorchHeatMap/Light: torches,
-    // candles, barrels): blocks.xml HeatMapStrength feeds the AI heat map
-    // while placed, like stock TileEntity heat. Workstation/Collector/
-    // Campfire classes feed through their own TE burn-state loops and never
-    // enter here (an unlit forge must not feed, a burning one must not
-    // double-feed).
-    if (self.blocks.byId(new_id)) |bd| {
-        if (bd.heat_strength > 0 and (std.mem.eql(u8, bd.class, "TorchHeatMap") or std.mem.eql(u8, bd.class, "Light"))) {
-            self.trackHeatBlock(x, y, z, new_id);
-        }
-    }
-    // A growing block registers its first scheduled tick here, the one place
-    // every add routes through (player placement, prefab stamping, deco).
+    // A placed always-on heat block (Class TorchHeatMap/Light: torches,
+    // candles, barrels) registers its first heat tick here, and a growing
+    // block its first growth tick: `noteBlockAdded` is the one place every add
+    // routes through (player placement, prefab stamping, deco mirror).
+    // Workstations do NOT feed here: stock gates their heat on `IsCrafting`
+    // inside the TE tick (`TileEntityWorkstation.UpdateTick` step 7), which
+    // `craft.zig` owns.
+    block_ticker.noteHeatBlock(self, x, y, z, new_id);
     block_ticker.noteAdded(self, x, y, z, new_id);
     if (self.blocks.isVending(new_id)) {
         _ = self.vending.getOrCreate(.{ .x = x, .y = y, .z = z }, new_id, self.blocks.traderId(new_id));

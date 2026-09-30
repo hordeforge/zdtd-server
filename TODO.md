@@ -280,8 +280,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       `movement_factor` (`BlockDamage.OnEntityCollidedWithBlock` IL_00AA-00DD,
       recomputed on a standing-block change by `EntityAlive.Update` IL_0243) and
       the AI chase speed scales by it. Still open from the same RE: `DamageType`
-      + `CalculateBlockDamage` resistance legs, `DontDamageOnTouch`, the shrunk
-      collision AABB and the `PassiveEffects` override of the standing factor.
+      + `CalculateBlockDamage` resistance legs, `DontDamageOnTouch` (set by
+      `BlockSpikes.Init` IL=0011-003B and never read anywhere in the dumped IL,
+      so it is a dead stock property), the shrunk collision AABB and the
+      `PassiveEffects` override of the standing factor. `Class="Cactus"` and
+      `Class="TrunkTip"` closed 2026-09-28: both derive from `BlockDamage` and
+      override only the collision bounds, so they now map to the damage hazard
+      instead of reading as no hazard (cactus hurt nothing before).
       Original entry: stock
       `BlockDamage.OnEntityCollidedWithBlock`
       drives spikes, barbed wire (meta 15 self-destruct), cactus, hay and the
@@ -342,6 +347,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       is what `Director.damageScale` documents. Recording it so the audit does
       not re-open it. Option 17 (`IncomingDamage`, the AI-to-player leg) IS
       server-side and already has its sandbox override.
+- [x] **Heat feed ran every tick at the wrong scale** - closed 2026-09-28:
+      torches/candles fed `HeatMapStrength` every tick instead of
+      `HeatMapStrength * 0.4` every `GetTickRate` (10) ticks
+      (`BlockTorchHeatMap.UpdateTick` IL=35, blocks.md:799-800), inflating the
+      region heat (and the scouts and wandering packs it drives) by 25x; the
+      registry that existed only to re-feed every tick is gone and the block
+      ticker owns the cadence. Workstations gated on `is_burning` and fed every
+      tick, where stock gates on `IsCrafting` and reports at most once per
+      `AIDirector.GetActivityWorldTimeDelay()` window (aidirector.md:38-40).
 - [x] **`PersistentPlayerProfiles` had no surface** - closed 2026-09-28: the
       pref parses (default true) and the server now remembers each player's
       character profile in the sibling store `{world_dir}/profiles.zpf`, keyed

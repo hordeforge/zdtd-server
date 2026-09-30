@@ -275,6 +275,10 @@ pub const Workstation = struct {
     queue_len: u8 = stock_queue_len,
     melt_len: u8 = stock_melt_len,
     is_burning: bool = false,
+    /// World-time bits when this station may feed the AI heat map again
+    /// (`TileEntity.emitHeatMapEvent` IL=48 cadence). Transient: not persisted,
+    /// and 0 means "never fed yet".
+    heat_next_world: u64 = 0,
     burn_time_left: f32 = 0,
     /// Block's Workstation Modules list includes "fuel": the queue waits for
     /// isBurning. Non-burning stations (workbench, cement mixer, table saw)
@@ -654,6 +658,16 @@ pub const Workstation = struct {
         }
         return false;
     }
+    /// True when a queued recipe is actually being crafted: stock's
+    /// `TileEntityWorkstation.UpdateTick` step 7 gates the heat-map emission on
+    /// `IsCrafting`, so a lit forge with an empty queue attracts nothing.
+    pub fn isCraftingNow(self: *const Workstation) bool {
+        for (self.queue[0..self.queue_len]) |q| {
+            if (q.hasRecipe() and q.is_crafting) return true;
+        }
+        return false;
+    }
+
 };
 
 pub const WorkstationStore = struct {
