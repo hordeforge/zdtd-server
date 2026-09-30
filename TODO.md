@@ -371,7 +371,13 @@ nothing here is already waived. The four gaps the same audit closed are in
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event
-      prefabs and therefore has nothing to send.
+      prefabs and therefore has nothing to send. Re-checked 2026-09-28: no
+      caller of `TryPlaceAt` exists anywhere in the dumped IL (the only
+      `AddEventPrefab` caller is the *client* receiver), so the trigger that
+      places an event prefab on a dedi is outside this RE set. An
+      implementation would have to invent when events fire, which is the
+      fabrication `missing > fake` forbids; the item stays open until the
+      trigger is RE'd (a quest action or game event in an undumped type).
 - [x] **`AllowZombieDigging` sandbox option ignored** - closed 2026-09-28:
       resolved once at init and gates both dig legs.
 - [x] **`ServerMaxAllowedViewDistance` (GamePref 190) is never read** - closed

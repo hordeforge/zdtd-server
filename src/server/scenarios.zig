@@ -20520,3 +20520,82 @@ test "scenario a turret cannot bear on a target behind its mount" {
     try std.testing.expect(w.turret[ts].ammo < 100);
     std.debug.print("PASS turret-cone: a target behind the mount is dropped\n", .{});
 }
+
+test "scenario the paced localization download ships a multi-part blob" {
+    // End-to-end check of GamePref 189 on the real sender: a patched
+    // localization blob big enough to need several parts goes out one part per
+    // window when the cap is set, and inline when it is not.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .server_max_world_transfer_speed_kibs = 64 });
+    defer g.destroy();
+
+    // A synthetic patched table whose CSV is incompressible enough to span
+    // several 128 KiB parts.
+    const rows = 300;
+    const cell_len = 4000;
+    var prng = std.Random.DefaultPrng.init(99);
+    const rand = prng.random();
+    var cells: [rows][cell_len]u8 = undefined;
+    for (&cells) |*cell| {
+        for (cell) |*ch| ch.* = 33 + rand.uintLessThan(u8, 90);
+    }
+    var keys: [rows][8]u8 = undefined;
+    var key_lens: [rows]usize = undefined;
+    for (&keys, &key_lens, 0..) |*kb, *kl, i| {
+        const ks = try std.fmt.bufPrint(kb, "key{d}", .{i});
+        kl.* = ks.len;
+    }
+    var entries: [rows]assets_localization.Entry = undefined;
+    for (&entries, 0..) |*e, i| {
+        e.* = .{ .key = keys[i][0..key_lens[i]] };
+        e.cells[1] = cells[i][0..];
+    }
+    g.localization.deinit();
+    g.localization = .{ .header = blk: {
+        var h: [assets_localization.max_columns][]const u8 = .{""} ** assets_localization.max_columns;
+        h[0] = "Key";
+        h[1] = "english";
+        break :blk h;
+    }, .header_n = 2, .entries = entries[0..] };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const peer = g.clients[c.slot].peer.?;
+    cap.clear();
+    try g.sendLocalization(peer);
+    const total = g.clients[c.slot].loc_parts_total;
+    try std.testing.expect(total > 2); // several parts, or the test proves nothing
+    try std.testing.expectEqual(@as(u32, 1), g.clients[c.slot].loc_parts_sent);
+    try std.testing.expectEqual(g.tick_n + 40, g.clients[c.slot].loc_next_tick);
+
+    // One part per 40-tick window (64 KiB/s over a 128 KiB part).
+    var t: u32 = 0;
+    while (t < 39) : (t += 1) try g.step();
+    try std.testing.expectEqual(@as(u32, 1), g.clients[c.slot].loc_parts_sent);
+    _ = try g.step();
+    try std.testing.expectEqual(@as(u32, 2), g.clients[c.slot].loc_parts_sent);
+    // The rest arrive over the following windows and the queue frees itself.
+    var w: u32 = 0;
+    while (w < 40 * (total + 2) and g.clients[c.slot].loc_blob.len > 0) : (w += 1) try g.step();
+    try std.testing.expectEqual(@as(usize, 0), g.clients[c.slot].loc_blob.len);
+
+    // Without a cap the whole blob goes inline.
+    g.server_max_world_transfer_speed_kibs = 0;
+    const encoded_before = g.harness.counters.get(.packages_encoded);
+    cap.clear();
+    try g.sendLocalization(peer);
+    try std.testing.expectEqual(@as(usize, 0), g.clients[c.slot].loc_blob.len);
+    try std.testing.expectEqual(@as(u32, 0), g.clients[c.slot].loc_parts_total);
+    // The inline path encodes every part (the socket capture cannot be the
+    // assertion here: back-to-back 128 KiB parts overflow a fresh peer's
+    // reliable window, which is exactly what the paced path avoids).
+    const encoded_after = g.harness.counters.get(.packages_encoded);
+    try std.testing.expect(encoded_after >= encoded_before + total);
+    std.debug.print("PASS localization-multipart: {d} parts paced one per window\n", .{total});
+}
