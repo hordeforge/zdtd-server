@@ -169,12 +169,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       is an empty magazine; `ItemValue.None` keeps the block-derived floor) and
       keeps the item identity, which `NetPackageTurretSync` now carries back with
       `ammo` as the item's Meta so the client's turret UI shows the rounds
-      (and re-syncs when a shot changes them). Still open from the same RE: the
-      turret's health is `max(1, MaxUseTimes - UseTimes)` and every shot applies
-      `UseTimes` degradation, which zdtd does not model, and the deployed
-      turret's only reload is redeploying a loaded item (stock's powered
-      `TileEntityPoweredRangedTrap` stacks, tile-entities-power.md:1102-1117,
-      are a different block that zdtd does not place).
+      (and re-syncs when a shot changes them). The durability leg closed the
+      same day: the turret deploys at `max(1, MaxUseTimes - UseTimes)`
+      (`EntityTurret.get_Health` IL=12 runs on the items table's per-quality
+      max), every shot degrades `UseTimes` by one and the health follows it down
+      to stock's 1 hp floor, so wear alone never destroys the turret. Still open:
+      the deployed turret's only reload is redeploying a loaded item (stock's
+      powered `TileEntityPoweredRangedTrap` stacks,
+      tile-entities-power.md:1102-1117, are a different block that zdtd does not
+      place), and the degradation *rate* is 1 per shot, where stock scales it by
+      the item's degradation rows.
 - [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
       runs `sensing.rayClear` between the turret and each nearer candidate
       (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a

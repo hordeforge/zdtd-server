@@ -93,6 +93,18 @@ const TurretCtx = struct {
             if (t.fire_cd <= 0) {
                 t.fire_cd = t.fire_interval;
                 t.ammo -%= 1;
+                // Firing degrades the deployed item (`EntityTurret.Fire` applies
+                // `UseTimes` degradation) and the turret's health IS the item's
+                // remaining uses (`get_Health` IL=12 is
+                // `max(1, MaxUseTimes - UseTimes)`), so a shot wears the turret
+                // down to 1 hp and no further: stock's floor means wear alone
+                // never destroys it. Only a deployed item carries a cap; a bot
+                // deploy keeps a flat 150.
+                if (t.item_max_use > 0) {
+                    t.item_use_times += 1;
+                    const worn = t.item_max_use - t.item_use_times;
+                    ctx.w.health[s].hp = @min(ctx.w.health[s].hp, @max(1, worn));
+                }
                 const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
                 // Turret fire leaves dmg_attacker unset (matches no filter).

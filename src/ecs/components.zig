@@ -736,6 +736,10 @@ pub const Turret = struct {
     item_type: i32 = 0,
     item_quality: u16 = 0,
     item_use_times: f32 = 0,
+    /// The deployed item's durability cap (`MaxUseTimes`), 0 when unknown. The
+    /// turret's health IS the item's remaining uses
+    /// (`EntityTurret.get_Health` IL=12) and every shot degrades `UseTimes`.
+    item_max_use: f32 = 0,
     target_id: i32 = -1,
     power_node: u16 = 0,
     /// Client slot that placed the turret; -1 = unowned (demo). Trap kills

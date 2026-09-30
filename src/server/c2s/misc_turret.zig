@@ -125,7 +125,22 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                 }
             } else |_| {}
         }
-        if (self.sim.spawnTurretEx(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z), magazine)) |tid| {
+        // The item's uses are the turret's health (`EntityTurret.get_Health`
+        // IL=12): a fully worn item deploys at 1 hp, and each shot degrades it,
+        // which `turretTick` applies.
+        var max_use: f32 = 0;
+        if (deploy_item) |iv| {
+            if (iv.type_id != 0) {
+                max_use = @floatFromInt(self.itemMaxUseTimes(@intCast(@as(u32, @intCast(iv.type_id))), @intCast(@min(iv.quality, 255))));
+            }
+        }
+        if (self.sim.spawnTurretEx(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z), .{
+            .ammo = magazine,
+            .item_type = if (deploy_item) |iv| iv.type_id else 0,
+            .item_quality = if (deploy_item) |iv| iv.quality else 0,
+            .item_use_times = if (deploy_item) |iv| iv.use_times else 0,
+            .item_max_use = max_use,
+        })) |tid| {
             // Stock sends the new counts from the turret tracker when a turret
             // is added (`TurretTracker` IL_002D), next to the vehicle count.
             self.broadcastVehicleCount();
@@ -138,14 +153,6 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                     self.sim.class_id[ts].hash = ch;
                 }
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
-                // Keep the deployed item identity: TurretSync carries it back
-                // with `ammo` as its Meta, which is what the client's turret UI
-                // reads the magazine from (`EntityTurret.get_AmmoCount`).
-                if (deploy_item) |iv| {
-                    self.sim.turret[ts].item_type = iv.type_id;
-                    self.sim.turret[ts].item_quality = iv.quality;
-                    self.sim.turret[ts].item_use_times = iv.use_times;
-                }
                 // The slot dies with the session; the name is what lets a
                 // restart hand the turret back to whoever placed it.
                 self.sim.turret[ts].setOwnerName(c.name[0..c.name_len]);

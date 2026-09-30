@@ -292,6 +292,7 @@ because it globs `.zig`.
 | `src/ecs/systems.zig` | R | ECS systems: pure functions over World SoA columns + resources. Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots  `classPhysResist` (per-entity class stat, else the class_table row) scales server-computed damage at the deferred accumulator and the turret apply loop (2026-09-14).|
 | `src/ecs/quest_trade.zig` | R | Quest + trader systems (journal phase graph, wallet, loot pickup, buy/sell/restock). Split out of systems.zig, re-exported through the systems facade |
 | `src/ecs/vehicle.zig` | R | Vehicle sim (kind speeds, drive control, seat attach/detach). Split out of systems.zig, re-exported through the systems facade |
+| `src/ecs/components.zig` `Turret.item_max_use` | Z | The `MaxUseTimes` the turret's deployed item was created with, so the turret's health can be `max(1, MaxUseTimes - UseTimes)` (`EntityTurret.get_Health` IL=12) and each shot degrades it. 0 = no item (a bot deploy), which keeps the 150 hp floor |
 | `src/ecs/world.zig` | R | ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers |
 | `src/ecs/world_tests.zig` | R | ECS world tests (spawn, damage, loot, ticks, handles, corpses). Split out of world.zig verbatim |
 | `src/ecs/world_bits.zig` | R | Word-packed slot set for parallel workers (fetchOr/fetchAnd). Split out of world.zig verbatim |

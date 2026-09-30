@@ -1822,20 +1822,37 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
+    /// What the placer deployed. Every field is optional so zdtd's own bots and
+    /// the compact spawn body keep the block-derived defaults.
+    pub const TurretDeploy = struct {
+        /// Magazine: `EntityTurret.get_AmmoCount` reads `OriginalItemValue.Meta`
+        /// (vehicles-drones-turrets.md:1096-1098). null = the block-derived
+        /// chain (`BurstRoundCount`, which is rounds PER BURST, so a floor); 0
+        /// is a real empty magazine.
+        ammo: ?u16 = null,
+        /// The deployed item identity, kept for TurretSync (the client's turret
+        /// UI reads the magazine from the item value's Meta).
+        item_type: i32 = 0,
+        item_quality: u16 = 0,
+        item_use_times: f32 = 0,
+        /// The item's `MaxUseTimes`. With it, the turret's health is the item's
+        /// remaining uses (`EntityTurret.get_Health` IL=12 is
+        /// `max(1, MaxUseTimes - UseTimes)`) and each shot degrades UseTimes.
+        item_max_use: f32 = 0,
+    };
+
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
-        return self.spawnTurretEx(x, y, z, null);
+        return self.spawnTurretEx(x, y, z, .{});
     }
 
-    /// Deploy a turret with the magazine its deployed item value carried:
-    /// `EntityTurret.get_AmmoCount`/`set_AmmoCount` read and write
-    /// `OriginalItemValue.Meta`, exactly like a gun's magazine
-    /// (vehicles-drones-turrets.md:1096-1098). `ammo = null` keeps the
-    /// block-derived default chain (`BurstRoundCount` from the autoTurret
-    /// block, which is rounds PER BURST, hence only a floor), which is what a
-    /// compact body or a bot deploy gets; `0` is a real empty magazine and is
-    /// honoured as such.
-    pub fn spawnTurretEx(self: *World, x: f32, y: f32, z: f32, ammo: ?u16) ?NetId {
-        const s = self.spawnBase(.turret, x, y, z, 150) orelse return null;
+    pub fn spawnTurretEx(self: *World, x: f32, y: f32, z: f32, deploy: TurretDeploy) ?NetId {
+        // Stock's turret health is the deployed item's remaining uses; without
+        // an item (a bot deploy, a compact body) the 150 floor stands.
+        const hp: f32 = if (deploy.item_max_use > 0)
+            @max(1, deploy.item_max_use - deploy.item_use_times)
+        else
+            150;
+        const s = self.spawnBase(.turret, x, y, z, hp) orelse return null;
         // Turret draw: autoTurret block RequiredPower via the Game hook (stock
         // 15 W). 15 is the no-hook offline floor; a wired hook that returns 0
         // fails closed instead of inventing 15 W after a game-dir load miss.
@@ -1863,8 +1880,13 @@ pub const World = struct {
                 if (ts.burst_rounds > 0) t.ammo = ts.burst_rounds;
             }
         }
-        // The deployed item's magazine wins over the block's burst count.
-        if (ammo) |a| t.ammo = a;
+        // The deployed item wins over the block-derived defaults: its Meta is
+        // the magazine and its uses are the durability.
+        if (deploy.ammo) |a| t.ammo = a;
+        t.item_type = deploy.item_type;
+        t.item_quality = deploy.item_quality;
+        t.item_use_times = deploy.item_use_times;
+        t.item_max_use = deploy.item_max_use;
         self.turret[s] = t;
         self.power.resolve();
 

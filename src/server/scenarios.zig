@@ -20204,6 +20204,62 @@ test "scenario a deployed turret takes its magazine from the item value" {
     // ItemValue.None carries no item, so the block-derived default stands.
     const none = (try spawnTurretAt.call(g, c, c.slot, null)) orelse return error.TestUnexpectedResult;
     try std.testing.expect(g.sim.turret[@intCast(none)].ammo > 0);
+
+    // The item's uses are the turret's health (`EntityTurret.get_Health` IL=12)
+    // and firing degrades them, so a turret wears down shot by shot instead of
+    // holding a flat 150 hp. Exercised through the sim entry point, because the
+    // offline items table has no max-uses row for the test item.
+    {
+        const w = &g.sim;
+        const worn = w.spawnTurretEx(300, 70, 300, .{
+            .ammo = 4,
+            .item_type = 1000,
+            .item_quality = 1,
+            .item_use_times = 90,
+            .item_max_use = 100,
+        }) orelse return error.TestUnexpectedResult;
+        const ws = w.slotOfNetId(worn) orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(@as(f32, 10), w.health[ws].hp, 0.001); // 100 - 90
+        try std.testing.expectEqual(@as(f32, 90), w.turret[ws].item_use_times);
+        // A worn-out item deploys at stock's 1 hp floor.
+        const spent = w.spawnTurretEx(302, 70, 300, .{
+            .ammo = 1,
+            .item_type = 1000,
+            .item_use_times = 150,
+            .item_max_use = 100,
+        }) orelse return error.TestUnexpectedResult;
+        const ss = w.slotOfNetId(spent) orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(@as(f32, 1), w.health[ss].hp, 0.001);
+    }
+    // Firing wears the deployed item: power one of the turrets spawned above,
+    // give it a target and watch the magazine and the item's uses move together.
+    {
+        const w = &g.sim;
+        const firing = w.spawnTurretEx(320, 70, 320, .{
+            .ammo = 5,
+            .item_type = 1000,
+            .item_quality = 1,
+            .item_use_times = 0,
+            .item_max_use = 40,
+        }) orelse return error.TestUnexpectedResult;
+        const fs = w.slotOfNetId(firing) orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(@as(f32, 40), w.health[fs].hp, 0.001);
+        const gen = w.power.addNodeAt(.generator, 320, 70, 322, 100).?;
+        try std.testing.expect(w.power.connect(gen, w.turret[fs].power_node));
+        w.power.resolve();
+        try std.testing.expect(w.power.isEntityPowered(firing));
+        const ft = w.transform[fs];
+        _ = w.spawnZombie(ft.x + 2, ft.y, ft.z, 900);
+        var shot: u32 = 0;
+        while (shot < 20 and w.turret[fs].item_use_times == 0) : (shot += 1) try g.step();
+        try std.testing.expect(w.turret[fs].item_use_times > 0);
+        // Health tracks the remaining uses exactly (`get_Health` IL=12).
+        try std.testing.expectApproxEqAbs(
+            @as(f32, 40) - w.turret[fs].item_use_times,
+            w.health[fs].hp,
+            0.001,
+        );
+    }
     _ = ps;
     std.debug.print("PASS turret-magazine: item meta is the magazine\n", .{});
 }
