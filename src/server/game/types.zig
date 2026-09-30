@@ -274,6 +274,8 @@ pub const InitOptions = struct {
     hide_command_execution_log: u8 = 0,
     /// See `Game.persistent_player_profiles`.
     persistent_player_profiles: bool = true,
+    /// See `Game.server_max_world_transfer_speed_kibs`.
+    server_max_world_transfer_speed_kibs: i32 = 0,
     server_visibility: u8 = 0,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;
@@ -819,6 +821,16 @@ pub const Client = struct {
     /// Cleared for free by `clients[slot] = .{}` on kick/disconnect.
     puid_primary: platform_user.Stored = .{},
     puid_native: platform_user.Stored = .{},
+
+    /// Paced localization download (`ServerMaxWorldTransferSpeedKiBs`): the
+    /// deflated blob is deflated once at join and sent a part at a time, one
+    /// `part_size` chunk per `loc_next_tick`, matching stock's
+    /// `WaitForSeconds(chunk_bytes / (pref * 1024))` per-chunk delay. Empty when
+    /// nothing is queued (the unthrottled path sends inline and never queues).
+    loc_blob: []u8 = &.{},
+    loc_parts_sent: u32 = 0,
+    loc_parts_total: u32 = 0,
+    loc_next_tick: u64 = 0,
 
     /// The character profile the client sent in
     /// `NetPackageRequestToSpawnPlayer` (stock keeps it on the

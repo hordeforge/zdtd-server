@@ -373,6 +373,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       ticker owns the cadence. Workstations gated on `is_burning` and fed every
       tick, where stock gates on `IsCrafting` and reports at most once per
       `AIDirector.GetActivityWorldTimeDelay()` window (aidirector.md:38-40).
+- [x] **`ServerMaxWorldTransferSpeedKiBs` had no surface** - closed
+      2026-09-28: the pref paces the join downloads, and zdtd's
+      patched-localization download is the surface. Stock ships one 128 KiB
+      part per `WaitForSeconds(chunk_bytes / (pref * 1024))`
+      (`NetPackageLocalization.prepareDataPackets` IL=107); zdtd now queues the
+      deflated blob on the client and ships one part per window from the tick's
+      client pass, freeing the queue on completion or disconnect. The
+      world-folder half has no surface: zdtd serves no stock-format world folder
+      (its save format is its own), and a pref at or below zero keeps the
+      previous inline send.
 - [x] **`PersistentPlayerProfiles` had no surface** - closed 2026-09-28: the
       pref parses (default true) and the server now remembers each player's
       character profile in the sibling store `{world_dir}/profiles.zpf`, keyed
@@ -388,10 +398,9 @@ nothing here is already waived. The four gaps the same audit closed are in
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
       is what the stock client uses off EOS, so disabling it would leave no
       server; both are out of scope until an EOS/Steam transport exists - a
-      docs decision, not code), `ServerMaxWorldTransferSpeedKiBs` (a byte-rate
-      cap on the join stream; the enter bundle paces per chunk already, so this
-      is a token bucket over those bytes), `PersistentPlayerProfiles` (needs a
-      `SaveDataLimit` (a cap on the save directory; `SaveDataLimit.il.txt`
+      docs decision, not code), `PersistentPlayerProfiles` (closed 2026-09-28:
+      the profile now persists in `profiles.zpf`), `SaveDataLimit` (a cap on the
+      save directory; `SaveDataLimit.il.txt`
       converts the pref to bytes with a 20 MiB floor the RegionFileManager
       applies, but nothing in zdtd's own store maps onto that eviction).
 - [x] **Disconnect `EntityRemove` reason** - closed 2026-09-28: the drop path

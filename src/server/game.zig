@@ -511,6 +511,11 @@ pub const Game = struct {
     /// (`GameManager::GetEntityCreationData` IL_02DA-02FF). False takes the
     /// client's profile every time and stores nothing.
     persistent_player_profiles: bool = true,
+    /// GamePref 189: the join-download bandwidth cap in KiB/s (`<= 0` = no
+    /// pacing). Stock paces the localization download with
+    /// `WaitForSeconds(chunk_bytes / (pref * 1024))`
+    /// (`NetPackageLocalization.prepareDataPackets` IL=107).
+    server_max_world_transfer_speed_kibs: i32 = 0,
     /// Remembered profiles, keyed on the client's platform identity. Sibling
     /// store `{world_dir}/profiles.zpf`; see `server/profiles.zig`.
     profiles: profiles_mod.Store = .{},
@@ -708,6 +713,7 @@ pub const Game = struct {
             .server_login_confirmation_text = opts.server_login_confirmation_text,
             .hide_command_execution_log = opts.hide_command_execution_log,
             .persistent_player_profiles = opts.persistent_player_profiles,
+            .server_max_world_transfer_speed_kibs = opts.server_max_world_transfer_speed_kibs,
             .server_visibility = opts.server_visibility,
             .effective_config = opts.effective_config,
             .max_players = max_pl,

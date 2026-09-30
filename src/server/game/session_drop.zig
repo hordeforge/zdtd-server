@@ -8,6 +8,7 @@ const persist = @import("../persist.zig");
 const plugin_compose = @import("plugin_compose.zig");
 const log = @import("../../util/log.zig");
 const game_player = @import("player.zig");
+const game_config_files = @import("config_files.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     log.infoTagged("player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -112,6 +113,8 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
             self.sim.turret[ti].owner_slot = -1;
         }
     }
+    // A queued localization download dies with the peer.
+    game_config_files.finishLocalization(self, &self.clients[slot]);
     self.clients[slot] = .{};
     self.refreshInfoPlayers();
 }

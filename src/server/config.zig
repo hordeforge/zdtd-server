@@ -86,6 +86,15 @@ pub const Config = struct {
     /// instead of the one the client presents at spawn
     /// (`GameManager::GetEntityCreationData` IL_02DA-02FF).
     persistent_player_profiles: bool = true,
+    /// Stock `ServerMaxWorldTransferSpeedKiBs` (GamePref 189): the bandwidth cap
+    /// for the join downloads. Stock paces the world-folder sender and the
+    /// localization download with `WaitForSeconds(chunk_bytes / (pref * 1024))`
+    /// (`NetPackageWorldFolder.prepareWorldFolderData` IL_002E-0050,
+    /// `NetPackageLocalization.prepareDataPackets` IL=107), and a value <= 0
+    /// disables the pacing. zdtd sends no world folder (its save format is its
+    /// own), so the localization download is the surface. Default 0 keeps the
+    /// unthrottled send; the stock serverconfig default is not in the RE.
+    server_max_world_transfer_speed_kibs: i32 = 0,
     /// `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public,
     /// 1 friends-only, 2 hidden.
     server_visibility: u8 = 0,
@@ -251,6 +260,7 @@ pub const known_serverconfig_names = [_][]const u8{
     "TelnetEnabled",
     "HideCommandExecutionLog",
     "PersistentPlayerProfiles",
+    "ServerMaxWorldTransferSpeedKiBs",
     "TelnetPort",
     "TelnetPassword",
     "TelnetFailedLoginLimit",
@@ -554,6 +564,13 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     // GameInfoString 11: the browser shows this next to the join dialog, and
     // stock copies it verbatim (server-browser-prefabs.md 1.1 "Identity").
     if (prop(raw, "ServerLoginConfirmationText")) |v| cfg.server_login_confirmation_text = try decodeAttr(arena, v);
+    if (prop(raw, "ServerMaxWorldTransferSpeedKiBs")) |v| {
+        if (xml.parseI32Prefix(v)) |n| {
+            cfg.server_max_world_transfer_speed_kibs = @max(n, 0);
+        } else {
+            std.debug.print("zdtd: serverconfig ServerMaxWorldTransferSpeedKiBs '{s}' invalid; keeping {d}\n", .{ v, cfg.server_max_world_transfer_speed_kibs });
+        }
+    }
     if (prop(raw, "PersistentPlayerProfiles")) |v| {
         if (parseXmlBool(v)) |b| {
             cfg.persistent_player_profiles = b;
@@ -1093,6 +1110,7 @@ test "known_serverconfig_names covers every applied prop key" {
         "TelnetEnabled",
         "HideCommandExecutionLog",
         "PersistentPlayerProfiles",
+        "ServerMaxWorldTransferSpeedKiBs",
         "TelnetPort",
         "TelnetPassword",
         "TelnetFailedLoginLimit",

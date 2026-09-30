@@ -755,6 +755,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .server_login_confirmation_text = cfg.server_login_confirmation_text,
         .hide_command_execution_log = cfg.hide_command_execution_log,
         .persistent_player_profiles = cfg.persistent_player_profiles,
+        .server_max_world_transfer_speed_kibs = cfg.server_max_world_transfer_speed_kibs,
         .server_visibility = cfg.server_visibility,
         .max_players = cfg.max_players,
         .reserved_slots = cfg.reserved_slots,

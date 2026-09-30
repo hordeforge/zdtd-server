@@ -7,6 +7,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const stock_inv = @import("../../wire/stock_inv.zig");
+const game_config_files = @import("config_files.zig");
 const apm = @import("../../apm/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
@@ -48,6 +49,11 @@ pub fn replicate(self: *Game) !void {
         var drain_budget: u32 = self.chunk_adds_per_stream_tick;
         for (&self.clients) |*cl| {
             if (cl.peer == null) continue;
+            // Paced localization download (`ServerMaxWorldTransferSpeedKiBs`):
+            // the join queues the deflated blob and this pass ships one part
+            // per window, the tick-side equivalent of stock's per-chunk
+            // `WaitForSeconds` coroutine.
+            game_config_files.drainLocalization(self, cl);
             self.drainSpawnArea(cl, &drain_budget) catch |err| {
                 self.harness.counters.inc(.stream_errors);
                 const n = self.harness.counters.get(.stream_errors);

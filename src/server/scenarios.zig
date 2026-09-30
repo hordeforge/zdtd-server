@@ -48,6 +48,8 @@ const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/sound_noise.zig");
 const assets_blocks = @import("../assets/blocks.zig");
+const game_config_files = @import("game/config_files.zig");
+const assets_localization = @import("../assets/localization.zig");
 const ecs_ai_tasks = @import("../ecs/ai_tasks.zig");
 const assets_gameevents = @import("../assets/gameevents.zig");
 const inv_c2s = @import("c2s/inv.zig");
@@ -20262,4 +20264,56 @@ test "scenario a deployed turret takes its magazine from the item value" {
     }
     _ = ps;
     std.debug.print("PASS turret-magazine: item meta is the magazine\n", .{});
+}
+
+test "scenario the localization download is paced by the transfer cap" {
+    // GamePref 189 `ServerMaxWorldTransferSpeedKiBs`: stock's localization
+    // sender ships one 128 KiB part per `WaitForSeconds(chunk_bytes / (pref *
+    // 1024))` (`NetPackageLocalization.prepareDataPackets` IL=107). zdtd has no
+    // coroutine, so the same rate is one part per window, drained by the tick's
+    // client pass.
+    try std.testing.expectEqual(@as(u64, 40), game_config_files.localizationTicksPerPart(64)); // 64 KiB/s -> 128 KiB per 2 s
+    try std.testing.expectEqual(@as(u64, 3), game_config_files.localizationTicksPerPart(1024)); // 1 MiB/s -> 0.125 s
+    try std.testing.expectEqual(@as(u64, 1), game_config_files.localizationTicksPerPart(0)); // no cap
+    // A 1 KiB/s cap is slower than a tick: the part waits its whole window.
+    try std.testing.expectEqual(@as(u64, 2560), game_config_files.localizationTicksPerPart(1));
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .server_max_world_transfer_speed_kibs = 64 });
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    _ = &cap;
+
+    // Two parts of a synthetic blob queued the way the join queues them.
+    const part = assets_localization.part_size;
+    const blob = try gpa.alloc(u8, part + 32);
+    @memset(blob, 0x41);
+    const slot = c.slot;
+    g.clients[slot].loc_blob = blob;
+    g.clients[slot].loc_parts_sent = 0;
+    g.clients[slot].loc_parts_total = 2;
+    g.clients[slot].loc_next_tick = g.tick_n;
+    try std.testing.expect(g.wire_chunks);
+    cap.clear();
+    try g.step();
+    try std.testing.expectEqual(@as(u32, 1), g.clients[slot].loc_parts_sent);
+    try std.testing.expectEqual(g.tick_n + 40, g.clients[slot].loc_next_tick);
+    // The next part waits out the cap window (64 KiB/s -> 128 KiB per 2 s = 40
+    // ticks at 20 TPS); nothing goes out inside it.
+    var t: u32 = 0;
+    while (t < 39) : (t += 1) try g.step();
+    try std.testing.expectEqual(@as(u32, 1), g.clients[slot].loc_parts_sent);
+    _ = try g.step();
+    // The second part completes the download, and finishing clears the queue
+    // (the counter resets with it, so the empty blob is the completion signal).
+    try std.testing.expectEqual(@as(usize, 0), g.clients[slot].loc_blob.len);
+    try std.testing.expectEqual(@as(u32, 0), g.clients[slot].loc_parts_sent);
+    std.debug.print("PASS localization-pace: one part per transfer window\n", .{});
 }

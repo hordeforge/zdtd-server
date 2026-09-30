@@ -9,10 +9,13 @@
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
+const Client = game_mod.Client;
 const Game = game_mod.Game;
 const ln_peer = @import("../../litenet/peer.zig");
+const game_net = @import("net.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const packages = @import("../../wire/packages.zig");
+const protocol = @import("../../protocol.zig");
 const paths = @import("../../assets/paths.zig");
 const flate = std.compress.flate;
 const clock = @import("../../util/clock.zig");
@@ -137,27 +140,103 @@ pub fn sendLocalization(self: *Game, peer: *ln_peer.Peer) !void {
         std.debug.print("zdtd: localization deflate failed: {s}\n", .{@errorName(err)});
         return err;
     };
+    const total: u32 = @intCast((blob.len + assets_localization.part_size - 1) / assets_localization.part_size);
+    // GamePref 189: pace the download. Stock's localization sender is a
+    // coroutine that ships one 128 KiB chunk per
+    // `WaitForSeconds(chunk_bytes / (pref * 1024))`; zdtd has no coroutine, so
+    // the same rate becomes one part per `localizationTicksPerPart` ticks,
+    // drained by the tick's client pass. `<= 0` keeps the unthrottled send.
+    const client: ?*Client = game_net.clientFor(self, peer);
+    if (self.server_max_world_transfer_speed_kibs > 0 and client != null) {
+        const c = client.?;
+        if (c.loc_blob.len > 0) self.allocator.free(c.loc_blob);
+        c.loc_blob = blob;
+        c.loc_parts_sent = 0;
+        c.loc_parts_total = total;
+        c.loc_next_tick = self.tick_n;
+        // The first part lands with the join; the rest follow at the cap.
+        try sendLocalizationPart(self, c, 0);
+        c.loc_parts_sent = 1;
+        c.loc_next_tick = self.tick_n + localizationTicksPerPart(self.server_max_world_transfer_speed_kibs);
+        return;
+    }
     defer self.allocator.free(blob);
-    const total: i32 = @intCast((blob.len + assets_localization.part_size - 1) / assets_localization.part_size);
-    var seq: i32 = 0;
+    var seq: u32 = 0;
     while (seq < total) : (seq += 1) {
-        const start = @as(usize, @intCast(seq)) * assets_localization.part_size;
-        const end = @min(start + assets_localization.part_size, blob.len);
-        const body = packages.buildLocalizationBody(
-            self.body_buf[0 .. end - start + 16],
-            seq,
-            total,
-            blob[start..end],
-        ) catch |err| {
-            std.debug.print("zdtd: localization body failed: {s}\n", .{@errorName(err)});
-            return err;
-        };
-        self.sendGameCritical(peer, "NetPackageLocalization", body) catch |err| {
-            std.debug.print("zdtd: localization part {d}/{d} send failed: {s}\n", .{ seq, total, @errorName(err) });
-            return err;
-        };
+        try sendLocalizationPartRaw(self, peer, blob, seq, total);
     }
     self.harness.counters.inc(.packages_encoded);
+}
+
+/// `NetPackageLocalization.prepareDataPackets` IL=107: `PACKET_SEND_DELAY =
+/// WaitForSeconds(131072 / (pref * 1024))` between 128 KiB parts, expressed here
+/// as whole ticks (at 20 TPS). `pref <= 0` disables the pacing, which the caller
+/// handles by sending inline; this returns at least 1 so a tiny cap can never
+/// send two parts in one tick.
+pub fn localizationTicksPerPart(pref_kibs: i32) u64 {
+    if (pref_kibs <= 0) return 1;
+    // `delay = part_bytes / (pref * 1024)` seconds; in ticks that is
+    // `part_bytes * ticks_per_second / (pref * 1024)`, rounded up so the
+    // average rate never exceeds the cap.
+    const part: u64 = assets_localization.part_size;
+    const per_sec: u64 = @as(u64, @intCast(pref_kibs)) * 1024;
+    return @max(1, (part * protocol.ticks_per_second + per_sec - 1) / per_sec);
+}
+
+/// Send one part of a queued localization blob to its client.
+fn sendLocalizationPart(self: *Game, c: *Client, seq: u32) !void {
+    const peer = c.peer orelse return;
+    try sendLocalizationPartRaw(self, peer, c.loc_blob, seq, c.loc_parts_total);
+}
+
+fn sendLocalizationPartRaw(self: *Game, peer: *ln_peer.Peer, blob: []const u8, seq: u32, total: u32) !void {
+    const start = @as(usize, seq) * assets_localization.part_size;
+    if (start >= blob.len) return;
+    const end = @min(start + assets_localization.part_size, blob.len);
+    const body = packages.buildLocalizationBody(
+        self.body_buf[0 .. end - start + 16],
+        @intCast(seq),
+        @intCast(total),
+        blob[start..end],
+    ) catch |err| {
+        std.debug.print("zdtd: localization body failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    self.sendGameCritical(peer, "NetPackageLocalization", body) catch |err| {
+        std.debug.print("zdtd: localization part {d}/{d} send failed: {s}\n", .{ seq, total, @errorName(err) });
+        return err;
+    };
+    self.harness.counters.inc(.packages_encoded);
+}
+
+/// Tick-pass half of the paced localization download: ship the next part when
+/// its tick arrives. The queue is freed when the last part goes out, so a
+/// finished download costs nothing.
+pub fn drainLocalization(self: *Game, c: *Client) void {
+    if (c.loc_blob.len == 0) return;
+    if (self.tick_n < c.loc_next_tick) return;
+    if (c.loc_parts_sent >= c.loc_parts_total) {
+        finishLocalization(self, c);
+        return;
+    }
+    sendLocalizationPart(self, c, c.loc_parts_sent) catch {
+        // A failed send keeps the part queued; the next window retries.
+        c.loc_next_tick = self.tick_n + localizationTicksPerPart(self.server_max_world_transfer_speed_kibs);
+        return;
+    };
+    c.loc_parts_sent += 1;
+    c.loc_next_tick = self.tick_n + localizationTicksPerPart(self.server_max_world_transfer_speed_kibs);
+    if (c.loc_parts_sent >= c.loc_parts_total) finishLocalization(self, c);
+}
+
+/// Drop a queued download (completed, or the peer left).
+pub fn finishLocalization(self: *Game, c: *Client) void {
+    if (c.loc_blob.len == 0) return;
+    self.allocator.free(c.loc_blob);
+    c.loc_blob = &.{};
+    c.loc_parts_sent = 0;
+    c.loc_parts_total = 0;
+    c.loc_next_tick = 0;
 }
 
 /// Join-phase config shipping (stock `SendXmlsToClient`, after localization
