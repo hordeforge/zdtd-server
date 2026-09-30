@@ -200,7 +200,7 @@ lint: need-zig need-python3 lint-webui lint-html
 	  exit 127; \
 	}
 	@command -v ruff >/dev/null || { \
-	  echo "zdtd: missing required tool: ruff; install from https://docs.astral.sh/ruff (CI pins 0.16.4)" >&2; \
+	  echo "zdtd: missing required tool: ruff; install with: uv tool install ruff==0.16.4 (the CI pin)" >&2; \
 	  exit 127; \
 	}
 	for script in scripts/*.sh; do bash -n "$$script"; done

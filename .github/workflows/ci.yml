@@ -39,9 +39,9 @@ jobs:
           missing=()
           command -v rg >/dev/null 2>&1 || missing+=(ripgrep)
           command -v shellcheck >/dev/null 2>&1 || missing+=(shellcheck)
-          # lint-webui runs oxlint via bunx; lint-html runs vnu via bunx + java.
-          # ubuntu runners preinstall node and java, but do not assume it.
-          command -v node >/dev/null 2>&1 || missing+=(nodejs npm)
+          # lint-html runs vnu via bunx --bun + java; every bunx call passes
+          # --bun, so no node is needed. ubuntu runners preinstall java, but do
+          # not assume it.
           command -v java >/dev/null 2>&1 || missing+=(openjdk-21-jre-headless)
           if ((${#missing[@]})); then
             export DEBIAN_FRONTEND=noninteractive
@@ -54,7 +54,7 @@ jobs:
           shellcheck --version
 
       # lint-webui runs oxlint through bunx at a pinned version; the runner
-      # preinstalls node, but not bun. Pin lives in .bun-version (scripts/bun-pin.sh).
+      # does not preinstall bun. Pin lives in .bun-version (scripts/bun-pin.sh).
       - name: Read toolchain pins
         id: pin
         run: |
@@ -107,21 +107,18 @@ jobs:
           restore-keys: |
             webui-lint-${{ runner.os }}-${{ steps.pin.outputs.bun }}-
 
-      # After the ~/.cache/zdtd restore so a cache hit keeps the venv; before
-      # make check so `ruff` is on PATH. Pin matches make lint / ruff.toml.
+      # Before make check so `ruff` is on PATH. Pin matches make lint / ruff.toml.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: ruff.toml
+
       - name: Install ruff
         run: |
           set -euo pipefail
-          venv="$HOME/.cache/zdtd/ruff-venv"
-          # The venv rides the cache above, so on a hit the install is a no-op
-          # and the job needs no PyPI round trip. A miss (or a bumped pin)
-          # rebuilds it.
-          if ! "$venv/bin/ruff" --version 2>/dev/null | grep -q 'ruff 0.16.4'; then
-            python3 -m venv "$venv"
-            "$venv/bin/pip" install --quiet --disable-pip-version-check 'ruff==0.16.4'
-          fi
-          echo "$venv/bin" >> "$GITHUB_PATH"
-          "$venv/bin/ruff" --version
+          uv tool install 'ruff==0.16.4'
+          ruff --version
 
       - name: Run validation gate
         run: make check

@@ -107,7 +107,8 @@ thin POSIX calls contained in `src/util/` (see
 and release builds use the exact compiler in `.zigversion`; `make check`
 enforces that pin. For `make check`, also provide Python 3.11+ (ruff.toml `target-version`), `rg` (ripgrep),
 ShellCheck, Bun (`bun` and `bunx`; pin in [`.bun-version`](.bun-version), same
-file CI installs via `scripts/bun-pin.sh`), Node.js (oxlint's plugin host),
+file CI installs via `scripts/bun-pin.sh`; every `bunx` call runs with `--bun`,
+so no Node.js is needed), ruff (`uv tool install`, version in `ruff.toml`),
 Java (CI uses JRE 21), curl, tar/gzip, and standard GNU shell utilities.
 If Clang is installed, the plugin gate also rebuilds C fixtures and addons;
 it needs the Wasm target and `wasm-ld`. `make release` requires `sha256sum`.

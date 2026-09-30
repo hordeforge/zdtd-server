@@ -9,7 +9,8 @@ rules live in [AGENTS.md](AGENTS.md); status in [docs/STATUS.md](docs/STATUS.md)
    (`build.zig.zon` `minimum_zig_version` must match).
 2. For `make check` (what CI validate runs), also install the tools listed under
    **Build** in [README.md](README.md): Python 3.11+, `rg`, ShellCheck, Bun from
-   [`.bun-version`](.bun-version), Node.js, Java, curl, tar/gzip, and `sha256sum`
+   [`.bun-version`](.bun-version), ruff (`uv tool install`, version in `ruff.toml`), Java,
+   curl, tar/gzip, and `sha256sum`
    for `make release`.
 3. From the repo root, list the day-to-day targets:
 
