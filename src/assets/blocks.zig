@@ -164,6 +164,13 @@ pub const BlockDef = struct {
     /// the entity and the wear the collision puts on the block.
     hazard_damage: i32 = 0,
     hazard_damage_received: i32 = 0,
+    /// blocks.xml `BuffsWhenWalkedOn` (semicolon-separated buff names, stock's
+    /// `Block.Init` splits the property on ';'): stand-on buffs
+    /// (`EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB applies each
+    /// one while the entity stands on the block and
+    /// `Block.UseBuffsWhenWalkedOn` IL=2 says so, which the base class always
+    /// does). "" when the block declares none.
+    walk_buffs: []const u8 = "",
     /// `SiblingBlock` name: the block `BlockSpikes` swaps in when it retracts
     /// (air when absent). Resolved by name at the hazard site.
     hazard_sibling: []const u8 = "",
@@ -641,6 +648,7 @@ pub fn loadFromPath(
         hazard_damage: i32 = 0,
         hazard_damage_received: i32 = 0,
         hazard_sibling: ?[]const u8 = null,
+        walk_buffs: ?[]const u8 = null,
         plant_growing: bool = false,
         plant_next: ?[]const u8 = null,
         growth_rate: f32 = 0,
@@ -752,6 +760,7 @@ pub fn loadFromPath(
         var hazard_damage: i32 = 0;
         var hazard_damage_received: i32 = 0;
         var hazard_sibling: ?[]const u8 = null;
+        var walk_buffs: ?[]const u8 = null;
         var plant_growing = false;
         var plant_next: ?[]const u8 = null;
         var growth_rate: f32 = 0;
@@ -932,6 +941,8 @@ pub fn loadFromPath(
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage = v;
             } else if (std.mem.eql(u8, pname, "Damage_received")) {
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| hazard_damage_received = v;
+            } else if (std.mem.eql(u8, pname, "BuffsWhenWalkedOn")) {
+                walk_buffs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "SiblingBlock")) {
                 hazard_sibling = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "TriggerDelay")) {
@@ -1089,6 +1100,7 @@ pub fn loadFromPath(
             .hazard_damage = hazard_damage,
             .hazard_damage_received = hazard_damage_received,
             .hazard_sibling = if (hazard_sibling) |hs| try arena.dupe(u8, hs) else null,
+            .walk_buffs = if (walk_buffs) |wb| try arena.dupe(u8, wb) else null,
             .plant_growing = plant_growing,
             .plant_next = if (plant_next) |pn| try arena.dupe(u8, pn) else null,
             .growth_rate = growth_rate,
@@ -1167,6 +1179,7 @@ pub fn loadFromPath(
         var own_hazard_damage = pb.hazard_damage;
         var own_hazard_damage_received = pb.hazard_damage_received;
         var own_hazard_sibling = pb.hazard_sibling;
+        var own_walk_buffs = pb.walk_buffs;
         var own_plant_growing = pb.plant_growing;
         var own_plant_next = pb.plant_next;
         var own_growth_rate = pb.growth_rate;
@@ -1241,6 +1254,9 @@ pub fn loadFromPath(
             }
             if (own_hazard_sibling == null and !xml.tagListContains(p1, "SiblingBlock")) {
                 own_hazard_sibling = base_p.hazard_sibling;
+            }
+            if (own_walk_buffs == null and !xml.tagListContains(p1, "BuffsWhenWalkedOn")) {
+                own_walk_buffs = base_p.walk_buffs;
             }
             // A block that does not declare `Class="PlantGrowing"` takes the
             // parent's whole plant fact set (stock copies the resolved
@@ -1337,6 +1353,7 @@ pub fn loadFromPath(
         pb.hazard_damage = own_hazard_damage;
         pb.hazard_damage_received = own_hazard_damage_received;
         pb.hazard_sibling = own_hazard_sibling;
+        pb.walk_buffs = own_walk_buffs;
         pb.plant_growing = own_plant_growing;
         pb.plant_next = own_plant_next;
         pb.growth_rate = own_growth_rate;
@@ -1431,6 +1448,7 @@ pub fn loadFromPath(
             .hazard_damage = pb.hazard_damage,
             .hazard_damage_received = pb.hazard_damage_received,
             .hazard_sibling = if (pb.hazard_sibling) |hs| try arena.dupe(u8, hs) else "",
+            .walk_buffs = if (pb.walk_buffs) |wb| try arena.dupe(u8, wb) else "",
             .plant_growing = pb.plant_growing,
             .plant_next = if (pb.plant_next) |pn| try arena.dupe(u8, pn) else "",
             .growth_rate = pb.growth_rate,

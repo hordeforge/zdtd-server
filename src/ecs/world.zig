@@ -500,6 +500,10 @@ pub const World = struct {
     /// MovementFactor (MaterialBlock.MovementFactor; Block.MovementFactor has no
     /// XML property string, so it comes from the material).
     move_scale: [max_entities]f32 = [_]f32{1.0} ** max_entities,
+    /// Cell whose `BuffsWhenWalkedOn` list was last applied to this entity
+    /// (`EntityAlive.updateCurrentBlockPosAndValue` applies them when the
+    /// standing block changes, not every tick). -1 = none.
+    walk_buff_cell: [max_entities]i64 = [_]i64{-1} ** max_entities,
     /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
     /// per-tick replicate pass build its candidate set and clear the motion
     /// bits in O(changed) rather than O(max_entities).

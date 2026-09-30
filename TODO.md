@@ -287,6 +287,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
       never fire (world/blocks.md:262-263, 774-786).
+- [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
+      `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
+      `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing
+      block changes, and `Block.UseBuffsWhenWalkedOn` (IL=2) defaults to true,
+      so a burning campfire or forge hurts whoever stands on it. The feet probe
+      now applies the list through `addCatalogBuff` with a per-entity cell latch,
+      so the buff lands on the step and re-applies after stepping off and back.
 - [x] **No collision or hazard block damage** - closed 2026-09-28 for the
       visible half: `server/game/hazard.zig` runs the `BlockDamage` collision
       pass once a tick (feet cell → `Damage` once per contact via a per-slot

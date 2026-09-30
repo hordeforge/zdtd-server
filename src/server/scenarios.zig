@@ -48,6 +48,7 @@ const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/sound_noise.zig");
 const assets_blocks = @import("../assets/blocks.zig");
+const assets_buffs = @import("../assets/buffs.zig");
 const game_config_files = @import("game/config_files.zig");
 const assets_localization = @import("../assets/localization.zig");
 const ecs_ai_tasks = @import("../ecs/ai_tasks.zig");
@@ -20316,4 +20317,85 @@ test "scenario the localization download is paced by the transfer cap" {
     try std.testing.expectEqual(@as(usize, 0), g.clients[slot].loc_blob.len);
     try std.testing.expectEqual(@as(u32, 0), g.clients[slot].loc_parts_sent);
     std.debug.print("PASS localization-pace: one part per transfer window\n", .{});
+}
+
+test "scenario a stand-on buff block applies its buffs when stepped on" {
+    // `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
+    // `EntityAlive.updateCurrentBlockPosAndValue` (IL_010A-01BB) when the
+    // standing block changes: the burning campfire/forge class of blocks hurts
+    // whoever stands on them.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "campfire")) return 1733;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_walkbuff.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="campfire">
+        \\  <property name="BuffsWhenWalkedOn" value="buffBurningElement" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    // The buff catalog the walk list resolves against: a synthetic row with the
+    // stock burning name, so the effect is observable without a game dir.
+    var bf_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bf = try std.fmt.bufPrint(&bf_buf, "{s}/buffs_walk.xml", .{dir});
+    try io_fs.writeFile(bf,
+        \\<buffs>
+        \\<buff name="buffBurningElement">
+        \\<stack_type value="replace"/>
+        \\<duration value="8"/>
+        \\<effect_group>
+        \\<passive_effect name="HealthChangeOT" operation="base_set" value="1.5"/>
+        \\</effect_group>
+        \\</buff>
+        \\</buffs>
+    );
+    g.buffs.deinit();
+    g.buffs = try assets_buffs.loadFromPath(gpa, bf);
+    const fire = g.blocks.byName("campfire") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("buffBurningElement", fire.walk_buffs);
+    const stone = g.blocks.byName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("", stone.walk_buffs);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const burn = g.buffs.indexOfName("buffBurningElement") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.buffsMut(ps).find(burn) == null);
+
+    // Stand the player on the burning block: the buff lands on the first step.
+    const px: i32 = @floor(g.sim.transform[ps].x);
+    const py: i32 = @floor(g.sim.transform[ps].y);
+    const pz: i32 = @floor(g.sim.transform[ps].z);
+    try g.world.setBlockWorld(px, py, pz, fire.id);
+    g.setBlockRaw(px, py, pz, fire.id);
+    _ = try g.step();
+    _ = try g.step();
+    try std.testing.expect(g.sim.buffsMut(ps).find(burn) != null);
+
+    // Stepping off clears the latch, so stepping back on applies again.
+    try g.world.setBlockWorld(px, py, pz, stone.id);
+    g.setBlockRaw(px, py, pz, stone.id);
+    _ = try g.step();
+    try std.testing.expectEqual(@as(i64, -1), g.sim.walk_buff_cell[ps]);
+    std.debug.print("PASS walk-buff: standing on a burning block applies its buffs\n", .{});
 }

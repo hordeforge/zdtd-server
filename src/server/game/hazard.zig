@@ -70,6 +70,28 @@ pub fn collisionTick(self: *Game) void {
         const factor = if (id != 0) (self.maxdamage.materialMovementFactor(id) orelse 1.0) else 1.0;
         self.sim.move_scale[s] = @max(factor, 0.0);
         const def = if (id != 0) self.blocks.byId(id) else null;
+        // Stand-on buffs (`BuffsWhenWalkedOn`, stock's `Block.Init` split of the
+        // property on ';'): applied once when the standing block CHANGES, which
+        // is what `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB does
+        // (it also re-applies on landing, and a fresh cell key covers that).
+        const buff_cell = cellKey(x, y + 1, z);
+        if (def) |d| {
+            if (d.walk_buffs.len > 0) {
+                if (self.sim.walk_buff_cell[s] != buff_cell) {
+                    self.sim.walk_buff_cell[s] = buff_cell;
+                    var it_b = std.mem.splitScalar(u8, d.walk_buffs, ';');
+                    while (it_b.next()) |raw_name| {
+                        const name = std.mem.trim(u8, raw_name, " \t");
+                        if (name.len == 0) continue;
+                        _ = self.addCatalogBuff(self.sim.network_id[s].id, s, name, -1);
+                    }
+                }
+            } else {
+                self.sim.walk_buff_cell[s] = -1;
+            }
+        } else {
+            self.sim.walk_buff_cell[s] = -1;
+        }
         if (def) |d| {
             // A mine is a walk trigger, not a hazard: `BlockMine.OnEntityWalking`
             // (IL=113) arms the fuse and deals no contact damage, and
