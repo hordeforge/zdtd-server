@@ -42,6 +42,8 @@ pub const Collector = struct {
     /// Deterministic draw state for `RandomRange(MinConvertTime,
     /// MaxConvertTime)` (rule 22: seeded from the cell, not the clock).
     rng: u32 = 1,
+    /// Set when the produced state changed and the owners still need it.
+    dirty: bool = false,
 
     pub fn isFull(self: *const Collector) bool {
         for (&self.items) |*s| {

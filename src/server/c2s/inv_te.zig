@@ -226,6 +226,59 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             }
             return true;
         } else |_| {}
+        // Collector TE (`TileEntityCollector`): the body carries no version
+        // byte (`write` emits the version only on the persistent stream,
+        // IL_0008-000E), so the outer header's block id is what routes it. A
+        // player taking the produced item sends the array with the slot emptied.
+        const collector_block: ?u16 = blk: {
+            const bid = stock_te.peekTeBlockId(body) orelse break :blk null;
+            if (bid < 0 or bid > 65535) break :blk null;
+            const id: u16 = @intCast(bid);
+            const bd = self.blocks.byId(id) orelse break :blk null;
+            if (!bd.collector) break :blk null;
+            break :blk id;
+        };
+        if (collector_block) |want_block| {
+            const cs = stock_te.parseCollectorTeBody(body) catch |err| blk: {
+                self.harness.counters.inc(.c2s_malformed);
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} collector parse err: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+                break :blk null;
+            } orelse return true;
+            const col = self.collectors.get(cs.world_x, cs.world_y, cs.world_z) orelse return true;
+            if (col.block_id != want_block) return true;
+            const cp = self.sim.playerByPeer(c.slot) orelse return true;
+            const cpos = self.sim.transform[cp];
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                cpos.x,
+                cpos.y,
+                cpos.z,
+                @floatFromInt(col.x),
+                @floatFromInt(col.y),
+                @floatFromInt(col.z),
+            )) return true;
+            // Apply the output array verbatim (the move itself is the client's
+            // inventory transaction, per ADR 0007's client-trusting apply), so an
+            // emptied slot is how the water leaves the collector.
+            var n: usize = 0;
+            while (n < cs.items_n and n < col.items.len) : (n += 1) {
+                const st = cs.items[n];
+                col.items[n] = .{
+                    .type_id = st.type_id,
+                    .count = @intCast(@max(st.count, 0)),
+                    .quality = st.quality,
+                };
+            }
+            while (n < col.items.len) : (n += 1) col.items[n] = .{};
+            col.dirty = true;
+            try replicate_te.broadcastDirtyCollectors(self);
+            try self.sendGame(peer, "NetPackageTileEntity", body);
+            return true;
+        }
         // Workstation TE (type 12 classic): apply arrays + queue into the
         // workstation store (craft tick advances it) and echo to nearby peers.
         if (stock_te.parseWorkstationTeBody(body)) |ws| {

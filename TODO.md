@@ -305,8 +305,8 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
       never fire (world/blocks.md:262-263, 774-786).
-- [ ] **Dew collectors produced nothing** - backend closed 2026-09-28, TE stream
-      still open. `BlockCollector` parses (`Class="Collector"`, the
+- [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
+      collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in
       `BlockCollector/OutputType::.ctor` field order), a cell-keyed
       `TileEntityCollector` store holds the output slots and the conversion

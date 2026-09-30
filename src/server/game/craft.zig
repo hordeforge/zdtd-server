@@ -1045,6 +1045,10 @@ pub fn activityWorldTimeDelayBits(self: *const Game) u64 {
 /// converter counts are recorded residuals.
 pub fn tickCollectors(self: *Game) void {
     const now = self.sim.director.clock.worldTimeBits();
+    // Ownership of the send: this pass produces and `broadcastDirtyCollectors`
+    // (same tick, after it) ships what changed, so a client watches the water
+    // appear without waiting for its next chunk stream.
+
     for (self.collectors.items[0..], self.collectors.used[0..]) |*c, used| {
         if (!used) continue;
         const def = self.blocks.byId(c.block_id) orelse continue;
@@ -1083,6 +1087,7 @@ pub fn tickCollectors(self: *Game) void {
             slot.type_id = type_id;
             slot.count = 1;
             slot.quality = 0;
+            c.dirty = true;
             c.fill_left += c.drawFillTime(row.min_convert_time, row.max_convert_time);
             if (c.fill_left <= 0) c.fill_left = 1;
         }

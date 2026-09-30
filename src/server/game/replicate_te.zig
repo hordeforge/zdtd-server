@@ -12,6 +12,8 @@
 //! (AGENTS: one stock package shape, one builder).
 
 const std = @import("std");
+const collectors_mod = @import("../../world/collectors.zig");
+const stock_inv = @import("../../wire/stock_inv.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
@@ -489,4 +491,122 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
         },
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// Send one collector's current state (`TileEntityCollector` in ToClient mode).
+/// The body carries no version byte (the write only emits `21` on the
+/// persistent stream, IL_0008-000E), so the receiver routes on the block id.
+pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
+    const col = self.collectors.get(x, y, z) orelse return;
+    var slots: [collectors_mod.max_output_slots]stock_inv.StockSlot = undefined;
+    const n = collectorSlots(col, &slots);
+    var world_name: [1]stock_te.CollectorWorldTime = undefined;
+    var flags: [1]stock_te.CollectorFlag = undefined;
+    const def = self.blocks.byId(col.block_id) orelse return;
+    var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+    const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
+    var worlds_n: usize = 0;
+    var flags_n: usize = 0;
+    if (rn > 0) {
+        world_name[0] = .{ .name = rows[0].name, .world_time = col.last_world };
+        worlds_n = 1;
+        flags[0] = .{ .name = rows[0].name, .flag = col.isFull() };
+        flags_n = 1;
+    }
+    const body = try stock_te.buildCollectorTeBody(
+        &self.body_buf,
+        255,
+        col.x,
+        col.y,
+        col.z,
+        col.block_id,
+        .{
+            .items = slots[0..n],
+            .last_world = world_name[0..worlds_n],
+            .is_full = flags[0..flags_n],
+            .is_blocked = collectorBlockedForTe(self, col.x, col.y, col.z),
+        },
+    );
+    try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// Ship every collector whose produced state changed since the last pass. Same
+/// dirty/clear discipline as the workstations: a failed encode or send leaves
+/// the flag set so the next tick retries.
+pub fn broadcastDirtyCollectors(self: *Game) !void {
+    for (self.collectors.items[0..], self.collectors.used[0..]) |*col, u| {
+        if (!u or !col.dirty) continue;
+        const def = self.blocks.byId(col.block_id) orelse {
+            col.dirty = false;
+            continue;
+        };
+        if (!def.collector) {
+            col.dirty = false;
+            continue;
+        }
+        var slots: [collectors_mod.max_output_slots]stock_inv.StockSlot = undefined;
+        const n = collectorSlots(col, &slots);
+        var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+        const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
+        var world_name: [1]stock_te.CollectorWorldTime = undefined;
+        var flags: [1]stock_te.CollectorFlag = undefined;
+        var worlds_n: usize = 0;
+        var flags_n: usize = 0;
+        if (rn > 0) {
+            world_name[0] = .{ .name = rows[0].name, .world_time = col.last_world };
+            worlds_n = 1;
+            flags[0] = .{ .name = rows[0].name, .flag = col.isFull() };
+            flags_n = 1;
+        }
+        const body = stock_te.buildCollectorTeBody(
+            self.body_buf[0..16384],
+            255,
+            col.x,
+            col.y,
+            col.z,
+            col.block_id,
+            .{
+                .items = slots[0..n],
+                .last_world = world_name[0..worlds_n],
+                .is_full = flags[0..flags_n],
+                .is_blocked = collectorBlockedForTe(self, col.x, col.y, col.z),
+            },
+        ) catch |err| {
+            self.harness.counters.inc(.encode_errors);
+            util_log.err("collector TE encode failed at ({d},{d},{d}): {s}\n", .{ col.x, col.y, col.z, @errorName(err) });
+            continue;
+        };
+        self.broadcastNear(
+            "NetPackageTileEntity",
+            body,
+            @floatFromInt(col.x),
+            @floatFromInt(col.z),
+            self.interest_range,
+        ) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            util_log.err("collector TE broadcast failed at ({d},{d},{d}): {s}\n", .{ col.x, col.y, col.z, @errorName(err) });
+            continue;
+        };
+        col.dirty = false;
+    }
+}
+
+/// The store's occupied output slots as wire stacks (the leading run; the
+/// builder writes the array's own length).
+fn collectorSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_output_slots]stock_inv.StockSlot) usize {
+    var n: usize = 0;
+    for (col.items) |s| {
+        if (s.type_id == 0 or s.count == 0) continue;
+        out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
+        n += 1;
+    }
+    return n;
+}
+
+fn collectorBlockedForTe(self: *Game, x: i32, y: i32, z: i32) bool {
+    const above = self.world.rawWorld(x, y + 1, z) catch return false;
+    if (above == 0) return false;
+    const id: u16 = @intCast(above & 0xffff);
+    if (id == self.world.terrain_ids.water) return true;
+    return id != self.world.terrain_ids.air;
 }

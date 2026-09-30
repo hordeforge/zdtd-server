@@ -17,6 +17,7 @@ const signs_mod = @import("../../world/signs.zig");
 const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
+const collectors_mod = @import("../../world/collectors.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("replicate_te.zig");
 const clock = @import("../../util/clock.zig");
@@ -77,6 +78,16 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
     // sendWorkstationTe holds the geometry gate, so a station whose real
     // array lengths are still unknown stays unsent rather than resizing the
     // client's grids.
+    // Collector producers (dew collector/apiary/coop) keep their water in a
+    // classic TE, so a joining client needs the current state with the chunk or
+    // it reads an empty collector until the next change.
+    var ci: usize = 0;
+    while (ci < collectors_mod.max_collectors) : (ci += 1) {
+        if (!self.collectors.used[ci]) continue;
+        const col = &self.collectors.items[ci];
+        if (col.x < x0 or col.x >= x1 or col.z < z0 or col.z >= z1) continue;
+        try replicate_te.sendCollectorTe(self, peer, col.x, col.y, col.z);
+    }
     var wi: usize = 0;
     while (wi < workstations_mod.max_workstations) : (wi += 1) {
         if (!self.workstations.used[wi]) continue;

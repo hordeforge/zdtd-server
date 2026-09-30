@@ -27,6 +27,9 @@ const systems = @import("../ecs/systems.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
+const collectors_mod = @import("../world/collectors.zig");
+const stock_te_mod = @import("../wire/stock_te.zig");
+const stock_inv_mod = @import("../wire/stock_inv.zig");
 const game_hazard = @import("game/hazard.zig");
 const world_deco_mirror = @import("../world/deco_mirror.zig");
 const schedule = @import("../ecs/schedule.zig");
@@ -6899,11 +6902,11 @@ test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock ge
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    var fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
+    var fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
     fuel[0] = .{ .type_id = out_type, .count = 4 };
-    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
@@ -7027,11 +7030,11 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    var fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
+    var fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
     fuel[0] = .{ .type_id = out_type, .count = 4 };
-    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
@@ -18470,10 +18473,10 @@ test "scenario material-based forge outputs survive queue validation" {
     try rw.writeString("forge");
     try rw.writeI32(0);
 
-    const fuel = [_]stock_inv.StockSlot{.{}} ** ws.stock_fuel_len;
-    const input = [_]stock_inv.StockSlot{.{}} ** ws.stock_input_len;
-    const tools = [_]stock_inv.StockSlot{.{}} ** ws.stock_tools_len;
-    const output = [_]stock_inv.StockSlot{.{}} ** ws.stock_output_len;
+    const fuel = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_fuel_len;
+    const input = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_input_len;
+    const tools = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_tools_len;
+    const output = [_]stock_inv_mod.StockSlot{.{}} ** ws.stock_output_len;
     var last_input_buf: [64]u8 = undefined;
     var liw: @import("../wire/binary.zig").Writer = .{ .buf = &last_input_buf };
     for (0..ws.stock_last_input_len) |_| try stock_inv.writeItemStack(&liw, .{});
@@ -20758,4 +20761,130 @@ test "scenario a dew collector converts world time into water" {
     g.noteBlockRemoved(px, py, pz, dew.id);
     try std.testing.expect(g.collectors.get(px, py, pz) == null);
     std.debug.print("PASS collector: world time fills the output, a roof stops it\n", .{});
+}
+
+test "scenario a collector TE streams and its water can be taken" {
+    // The collector body has no version byte (TileEntityCollector.write emits
+    // `21` only on the persistent stream, IL_0008-000E), so the outer block id
+    // routes it: build -> parse round trip, then the client's own edit (items
+    // array emptied) applies and echoes.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewCollector")) return 1733;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_collector_te.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewCollector">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,100,100,10,20,water_collect}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewCollector") orelse return error.TestUnexpectedResult;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "terrStone" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    g.sim.director.clock.hours += 0.6;
+    try g.world.setBlockWorld(px, py, pz, dew.id);
+    g.setBlockRaw(px, py, pz, dew.id);
+    g.noteBlockAdded(px, py, pz, dew.id);
+    const col = g.collectors.get(px, py, pz) orelse return error.TestUnexpectedResult;
+    g.tickCollectors();
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    col.dirty = true;
+
+    // The dirty broadcast ships the produced jar to the nearby client.
+    cap.clear();
+    try g.broadcastDirtyCollectors();
+    _ = try g.step();
+    try std.testing.expect(!col.dirty);
+    // The broadcast does not consume the jar: only the player's take does.
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+
+    // Round trip: the sent body parses back to the same cell, block and slot.
+    var body_buf: [4096]u8 = undefined;
+    var fb: [8192]u8 = undefined;
+    col.items[0] = .{ .type_id = 900, .count = 1, .quality = 0 };
+    var slots: [collectors_mod.max_output_slots]stock_inv_mod.StockSlot = undefined;
+    slots[0] = .{ .type_id = 900, .count = 1, .quality = 0 };
+    var wname: [1]stock_te_mod.CollectorWorldTime = .{.{ .name = "water", .world_time = 12345 }};
+    var flags: [1]stock_te_mod.CollectorFlag = .{.{ .name = "water", .flag = false }};
+    const sbody = try stock_te_mod.buildCollectorTeBody(
+        &body_buf,
+        255,
+        px,
+        py,
+        pz,
+        dew.id,
+        .{ .items = slots[0..1], .last_world = wname[0..1], .is_full = flags[0..1] },
+    );
+    const parsed = try stock_te_mod.parseCollectorTeBody(sbody);
+    try std.testing.expectEqual(@as(i32, px), parsed.world_x);
+    try std.testing.expectEqual(@as(i32, pz), parsed.world_z);
+    try std.testing.expectEqual(@as(i32, dew.id), parsed.block_id);
+    try std.testing.expectEqual(@as(u16, 1), parsed.items_n);
+    try std.testing.expectEqual(@as(i32, 900), parsed.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 0), parsed.fuel_n);
+
+    // The client's own edit empties the slot: it applies and the slot clears.
+    var slots_empty: [1]stock_inv_mod.StockSlot = .{.{}};
+    const ebody = try stock_te_mod.buildCollectorTeBody(
+        &body_buf,
+        7,
+        px,
+        py,
+        pz,
+        dew.id,
+        .{ .items = slots_empty[0..1], .last_world = wname[0..1], .is_full = flags[0..1] },
+    );
+    // A second nearby client proves the rebroadcast leg: the taker's own echo
+    // replays its handle, and the other peer only hears the change through the
+    // dirty broadcast.
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = @floatFromInt(px + 2);
+    g.sim.transform[ps2].z = @floatFromInt(pz);
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", ebody));
+    try std.testing.expectEqual(@as(i32, 0), col.items[0].type_id);
+    // The echo replays the client's handle so its wait clears.
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+    // The other peer learns the emptied slot from the dirty rebroadcast.
+    _ = try g.step();
+    try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+    std.debug.print("PASS collector-te: streams, round-trips and empties on take\n", .{});
 }

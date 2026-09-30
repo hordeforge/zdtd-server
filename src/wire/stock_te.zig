@@ -711,6 +711,196 @@ fn writeCraftComplete(w: *binary.Writer, cc: CraftComplete) !void {
     try w.writeString(cc.scrappedName());
 }
 
+/// Cap on a collector's slot arrays: stock's output grid is
+/// `outputGridInitialHeight` rows tall and the shipped collectors ship a
+/// handful of slots.
+pub const max_collector_slots: usize = 8;
+/// Output types a block may declare (`BlockCollector/OutputType` rows).
+pub const max_collector_output_types: usize = 4;
+
+/// One `lastWorldTimes` entry.
+pub const CollectorWorldTime = struct {
+    name: []const u8 = "",
+    world_time: u64 = 0,
+};
+
+/// One `FillData`: the in-flight conversion for an output type. `fill_time` is
+/// the drawn `RandomRange(MinConvertTime, MaxConvertTime)` and `fill_time_left`
+/// what remains.
+pub const CollectorFill = struct {
+    name: []const u8 = "",
+    slot: u32 = 0,
+    fill_time: u32 = 0,
+    fill_time_left: u32 = 0,
+};
+
+/// One `outOfFuel`/`isFull` map entry.
+pub const CollectorFlag = struct {
+    name: []const u8 = "",
+    flag: bool = false,
+};
+
+/// `TileEntityCollector.write` (IL=278) state. The version u16 is written only
+/// on the persistent stream (`if (mode == 0) Write((ushort)21)`), so the
+/// client body carries no version and the route is the outer header's block id.
+pub const CollectorSlots = struct {
+    items: []const stock_inv.StockSlot = &.{},
+    mods: []const stock_inv.StockSlot = &.{},
+    fuel: []const stock_inv.StockSlot = &.{},
+    catalyst: []const stock_inv.StockSlot = &.{},
+    last_world: []const CollectorWorldTime = &.{},
+    fills: []const CollectorFill = &.{},
+    is_underwater: bool = false,
+    is_blocked: bool = false,
+    out_of_fuel: []const CollectorFlag = &.{},
+    is_full: []const CollectorFlag = &.{},
+};
+
+/// `BinaryWriter.Write(Int16)` count then each `ItemStack.Write`, for the four
+/// collector arrays (IL_01D3-0297).
+fn writeCollectorStackArray(w: *binary.Writer, slots: []const stock_inv.StockSlot) !void {
+    if (slots.len > std.math.maxInt(i16)) return error.Overflow;
+    try w.writeI16(@intCast(slots.len));
+    for (slots) |s| try stock_inv.writeItemStack(w, s);
+}
+
+/// Build the `NetPackageTileEntity` body for a collector (`TileEntityCollector`
+/// in `ToClient` mode): local chunk pos, then `lastWorldTimes`,
+/// `fillDataLookup`, `isUnderwater`, `isBlocked`, `outOfFuel`, `isFull` and the
+/// four item stack arrays (tile-entities-power.md section 4.6).
+pub fn buildCollectorTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    te_block_id: i32,
+    cs: CollectorSlots,
+) ![]u8 {
+    var payload: [4096]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    if (cs.last_world.len > std.math.maxInt(u16)) return error.Overflow;
+    try pw.writeU16(@intCast(cs.last_world.len));
+    for (cs.last_world) |e| {
+        try pw.writeString(e.name);
+        try pw.writeU64(e.world_time);
+    }
+    if (cs.fills.len > std.math.maxInt(u16)) return error.Overflow;
+    try pw.writeU16(@intCast(cs.fills.len));
+    for (cs.fills) |f| {
+        try pw.writeString(f.name);
+        try pw.writeU32(f.slot);
+        try pw.writeU32(f.fill_time);
+        try pw.writeU32(f.fill_time_left);
+    }
+    try pw.writeBool(cs.is_underwater);
+    try pw.writeBool(cs.is_blocked);
+    for ([_][]const CollectorFlag{ cs.out_of_fuel, cs.is_full }) |flags| {
+        if (flags.len > std.math.maxInt(u16)) return error.Overflow;
+        try pw.writeU16(@intCast(flags.len));
+        for (flags) |f| {
+            try pw.writeString(f.name);
+            try pw.writeByte(if (f.flag) 1 else 0);
+        }
+    }
+    try writeCollectorStackArray(&pw, cs.items);
+    try writeCollectorStackArray(&pw, cs.mods);
+    try writeCollectorStackArray(&pw, cs.fuel);
+    try writeCollectorStackArray(&pw, cs.catalyst);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+pub const ParsedCollector = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    items: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    items_n: u16 = 0,
+    mods: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    mods_n: u16 = 0,
+    fuel: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    fuel_n: u16 = 0,
+    catalyst: [max_collector_slots]stock_inv.StockSlot = [_]stock_inv.StockSlot{.{}} ** max_collector_slots,
+    catalyst_n: u16 = 0,
+    is_underwater: bool = false,
+    is_blocked: bool = false,
+};
+
+fn readCollectorStackArray(r: *binary.Reader, out: []stock_inv.StockSlot, out_n: *u16) binary.ReadError!void {
+    const n = try r.readI16();
+    if (n < 0 or @as(usize, @intCast(n)) > out.len) return error.InvalidString;
+    out_n.* = @intCast(n);
+    for (out[0..@intCast(n)]) |*s| s.* = try stock_inv.readItemStack(r);
+}
+
+/// Block id from a TE body's outer header, without decoding the payload. The
+/// collector has no version byte to route on, so the caller checks the block's
+/// class before it commits to a collector parse.
+pub fn peekTeBlockId(body: []const u8) ?i32 {
+    var r: binary.Reader = .{ .data = body };
+    var handle: u8 = 0;
+    var x: i32 = 0;
+    var y: i32 = 0;
+    var z: i32 = 0;
+    var block_id: i32 = 0;
+    _ = readOuterTeHeader(&r, &handle, &x, &y, &z, &block_id) catch return null;
+    return block_id;
+}
+
+/// Parse a collector TE body (the client's `ToServer` edit or a peer echo).
+/// Unknown names/flags are consumed and dropped: the outer header's block id is
+/// what routes here, so the shape must parse or the caller rejects the body.
+pub fn parseCollectorTeBody(body: []const u8) binary.ReadError!ParsedCollector {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedCollector = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (pay_len > r.data.len - r.pos) return error.InvalidString;
+    _ = try r.readI32(); // local chunk pos x
+    _ = try r.readI32();
+    _ = try r.readI32();
+    const worlds = try r.readU16();
+    var i: u16 = 0;
+    while (i < worlds) : (i += 1) {
+        try r.skipString();
+        _ = try r.readU64();
+    }
+    const fills = try r.readU16();
+    var f: u16 = 0;
+    while (f < fills) : (f += 1) {
+        try r.skipString();
+        _ = try r.readU32();
+        _ = try r.readU32();
+        _ = try r.readU32();
+    }
+    out.is_underwater = try r.readBool();
+    out.is_blocked = try r.readBool();
+    var map_i: u8 = 0;
+    while (map_i < 2) : (map_i += 1) {
+        const n = try r.readU16();
+        var k: u16 = 0;
+        while (k < n) : (k += 1) {
+            try r.skipString();
+            _ = try r.readByte();
+        }
+    }
+    try readCollectorStackArray(&r, out.items[0..], &out.items_n);
+    try readCollectorStackArray(&r, out.mods[0..], &out.mods_n);
+    try readCollectorStackArray(&r, out.fuel[0..], &out.fuel_n);
+    try readCollectorStackArray(&r, out.catalyst[0..], &out.catalyst_n);
+    return out;
+}
+
 /// Build NetPackageTileEntity body for a workstation.
 pub fn buildWorkstationTeBody(
     buf: []u8,

@@ -2861,6 +2861,11 @@ pub const Game = struct {
         return game_craft.tickCollectors(self);
     }
 
+    /// Ship the collector TEs whose produced state changed this pass.
+    pub fn broadcastDirtyCollectors(self: *Game) !void {
+        return game_replicate_te.broadcastDirtyCollectors(self);
+    }
+
     /// BlockRadiusEffect: burning workstations (campfire, burning barrel)
     /// grant their ActiveRadiusEffects buff to nearby players.
     pub fn tickBlockRadiusEffects(self: *Game) void {
