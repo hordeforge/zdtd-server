@@ -2025,6 +2025,16 @@ pub const Game = struct {
         return game_world.blockRawAt(self, x, y, z);
     }
 
+    /// See `game_world.parentCellOf`.
+    pub fn parentCellOf(self: *const Game, x: i32, y: i32, z: i32) ?[3]i32 {
+        return game_world.parentCellOf(self, x, y, z);
+    }
+
+    /// See `game_world.clearMultiblockChildren`.
+    pub fn clearMultiblockChildren(self: *Game, x: i32, y: i32, z: i32, parent_id: u16) void {
+        game_world.clearMultiblockChildren(self, x, y, z, parent_id);
+    }
+
     pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.clearBlockRaw(self, x, y, z);
     }

@@ -110,6 +110,18 @@ pub fn childRaw(parent_raw: u32, off: Offset) ?u32 {
     return raw;
 }
 
+/// Inverse of `childRaw`: the cell offset from a CHILD cell back to its
+/// multi-block parent, decoded from the `parentx`/`parenty`/`parentz` fields
+/// (`parentx = meta - 8`, `parenty = rotationAndMeta3 - 32`, `parentz = meta2 - 8`;
+/// asm.il 140882-140960). Null when the value is not a child.
+pub fn parentOffset(raw: u32) ?Offset {
+    if (raw & ischild_bit == 0) return null;
+    const px: i32 = @as(i32, @intCast((raw >> meta_shift) & nibble)) - 8;
+    const pz: i32 = @as(i32, @intCast((raw >> meta2_shift) & nibble)) - 8;
+    const py: i32 = @as(i32, @intCast((raw >> rot_meta3_shift) & six_bits)) - 32;
+    return .{ .x = @intCast(px), .y = @intCast(py), .z = @intCast(pz) };
+}
+
 pub const Placement = struct {
     x: i32,
     y: i32,

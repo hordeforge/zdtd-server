@@ -224,11 +224,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       per-entity see distance, widened by the class's hear distance, and a
       negative `target_player_see` denies outright instead of squaring to a
       1 m radius.
-- [ ] **Player-placed multi-block groups occupy one cell** - stock adds children
-      on `OnBlockAdded` and redirects child damage to the parent
-      (world/blocks.md:246-249, 463-465); `src/server/c2s/blocks_setblock.zig:265-285`
-      writes one cell, so three of a forge's four cells are air and group damage
-      lands on one cell. `multiBlockDim` is parsed but only used for deco.
+- [x] **Multi-block children were not damage-redirected** - closed 2026-09-28.
+      The placement half of the original entry was already covered: the stock
+      client sends the anchor AND the `MultiBlockDim` children in one SetBlock
+      batch (`scenario multi-block SetBlock places anchor + ischild children`),
+      so a placed forge is not one cell. What was missing is the other half:
+      damage and breaks aimed at a CHILD acted on the child cell, which holds no
+      HP of its own, and removing the anchor left its children behind as
+      invisible solid cells. `Game.parentCellOf` now resolves a child's parent
+      (decoding the `parentx/y/z` fields `deco_mirror.childRaw` packs) and the
+      SetBlock loop rewrites the change onto the parent before any arm runs, and
+      `Game.clearMultiblockChildren` clears the children when the anchor cell is
+      removed or swapped. Residual: `Block.OnBlockAdded`'s children for the
+      non-client placement paths (POI reset, plugin placement), and child
+      rotation/meta on a partial-group damage echo.
 - [x] **Chopped decorations came back (server half)** - closed 2026-09-28: the
       mirror is a one-time derivation now. `World.decoChunkMirrored` marks each
       deco chunk the mirror wrote (join burst and stream path both skip a marked

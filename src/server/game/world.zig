@@ -16,6 +16,7 @@ pub const drainExplosions = world_explosion.drainExplosions;
 pub const blastBlock = world_explosion.blastBlock;
 const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
+const deco_mirror = @import("../../world/deco_mirror.zig");
 const packages = @import("../../wire/packages.zig");
 const utf8_util = @import("../../util/utf8.zig");
 const plugin_compose = @import("plugin_compose.zig");
@@ -591,6 +592,49 @@ pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
 /// a stale rotation/meta. When the chunk is not resident, fall back to the
 /// mirror (warmed by setBlockRaw / blockmeta.zbm). Resident-only
 /// (`chunkAt`, not `getOrCreate`) so a read cannot generate a chunk.
+/// Clear the child cells of a multi-block whose parent cell was just replaced
+/// or removed. Stock's `Block.OnBlockRemoved` for a multiblock removes its
+/// children (`MultiBlockArray` walk); leaving them behind leaves invisible
+/// solid cells where the block used to be. Only cells still marked as this
+/// parent's children are touched, so a neighbouring group is never clipped.
+pub fn clearMultiblockChildren(self: *Game, x: i32, y: i32, z: i32, parent_id: u16) void {
+    const name = self.maxdamage.idName(parent_id) orelse return;
+    const dim = self.maxdamage.multiBlockDim(name);
+    const offs = deco_mirror.offsetsFor(dim.x, dim.y, dim.z);
+    if (offs.n <= 1) return;
+    for (offs.slice()) |o| {
+        if (o.x == 0 and o.y == 0 and o.z == 0) continue;
+        const cx = x + o.x;
+        const cy = y + o.y;
+        const cz = z + o.z;
+        const craw = self.blockRawAt(cx, cy, cz);
+        if (craw == 0 or (craw & deco_mirror.ischild_bit) == 0) continue;
+        self.world.setBlockRawWorld(cx, cy, cz, 0) catch continue;
+        self.clearBlockHp(cx, cy, cz);
+        self.clearBlockRaw(cx, cy, cz);
+        if (packages.buildSetBlockBody(&self.body_buf, cx, cy, cz, 0)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(cx), @floatFromInt(cz), self.interest_range) catch {};
+        } else |_| {}
+    }
+}
+
+/// Multi-block parent cell for a CHILD cell, or null when the cell is not a
+/// child (`BlockValue.ischild` set and the decoded parent still holds a
+/// non-child block). Stock redirects damage and breaks through this offset
+/// instead of acting on the child, which holds no HP of its own.
+pub fn parentCellOf(self: *const Game, x: i32, y: i32, z: i32) ?[3]i32 {
+    const raw = self.blockRawAt(x, y, z);
+    const off = deco_mirror.parentOffset(raw) orelse return null;
+    const px = x + off.x;
+    const py = y + off.y;
+    const pz = z + off.z;
+    // Fail closed: a child whose parent is gone (or holds another child) is
+    // left alone rather than redirected into empty space.
+    const praw = self.blockRawAt(px, py, pz);
+    if (praw == 0 or (praw & deco_mirror.ischild_bit) != 0) return null;
+    return .{ px, py, pz };
+}
+
 pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
     const t = world_store.World.worldToChunk(x, z);
     if (self.world.chunkAt(t.pos)) |c| {

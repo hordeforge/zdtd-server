@@ -46,7 +46,9 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         const ep = self.sim.transform[editor];
         var i: usize = 0;
         while (i < n) : (i += 1) {
-            const b = changes[i];
+            // Rewritten below when the cell is a multi-block child (the change
+            // is redirected to the parent), so this one is mutable.
+            var b = changes[i];
             if (self.rejectIfBeyondEditRange(
                 c,
                 peer.local_id,
@@ -80,6 +82,17 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                     try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
                 } else |_| {}
                 continue;
+            }
+            // A child cell of a multi-block group carries no identity of its
+            // own: stock redirects every damage/break on it to the parent
+            // (`BlockValue.ischild` + the encoded parent offset), and the whole
+            // group lives or dies with the parent cell. Rewriting the change's
+            // coordinates here makes every arm below - damage, break, echo -
+            // operate on the parent without a second code path.
+            if (self.parentCellOf(b.x, b.y, b.z)) |p| {
+                b.x = p[0];
+                b.y = p[1];
+                b.z = p[2];
             }
             var place_id: u16 = b.block_id;
             var out_dmg: u16 = 0;
@@ -326,6 +339,9 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 place_id;
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
             if (place_id != cur_id) {
+                // The old block is gone (removed or swapped): its multi-block
+                // children go with it, or the cells stay solid and invisible.
+                if (cur_id != 0) self.clearMultiblockChildren(b.x, b.y, b.z, cur_id);
                 // Replacing one block with another displaces the old one just
                 // as removing it would, then the new one claims what its own
                 // type owns. Only clearing on place_id == 0 caught removals

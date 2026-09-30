@@ -28,6 +28,7 @@ const assets_maxdamage = @import("../assets/maxdamage.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
 const game_hazard = @import("game/hazard.zig");
+const world_deco_mirror = @import("../world/deco_mirror.zig");
 const schedule = @import("../ecs/schedule.zig");
 const invsys = @import("../ecs/inventory.zig");
 const ecs = @import("../ecs/world.zig");
@@ -19578,4 +19579,113 @@ test "scenario HideCommandExecutionLog gates the audit line by sender" {
         try std.testing.expectEqual(level < 2, g.commandLogVisible(true));
     }
     std.debug.print("PASS hide-command-log: console at 1, remote client at 2\n", .{});
+}
+
+test "scenario a multi-block child redirects to its parent and dies with it" {
+    // Stock multi-blocks (workbench, forge, beds, gun safes) carry one parent
+    // cell plus child cells whose BlockValue holds the parent offset
+    // (`ischild` bit + parentx/y/z). Damage and breaks on a child are the
+    // parent's, and a parent that is removed takes its children with it
+    // (`Block.OnBlockRemoved` walks the MultiBlockArray), or the leftover cells
+    // stay solid and invisible.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_multi.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="workbench">
+        \\  <property name="MultiBlockDim" value="2,1,1" />
+        \\  <property name="MaxDamage" value="100" />
+        \\</block>
+        \\<block name="terrStone" />
+        \\</blocks>
+    );
+    const Ids = struct {
+        var t: *const assets_maxdamage.Table = undefined;
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            return t.idByName(name);
+        }
+    };
+    g.maxdamage.deinit();
+    g.maxdamage = try assets_maxdamage.loadFromBlocksXml(gpa, bx);
+    g.maxdamage.tryMergeBundledAssignIds(gpa);
+    if (g.maxdamage.id_by_name.count() == 0) return error.SkipZigTest;
+    Ids.t = &g.maxdamage;
+    const bench = g.maxdamage.idByName("workbench") orelse return error.TestUnexpectedResult;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = 256;
+    const pz: i32 = 256;
+    const cy: i32 = 72;
+    // Stand clear of the group: a player inside it makes the deep-void rescue
+    // clear the very cells under test.
+    g.sim.transform[ps].x = @floatFromInt(px + 3);
+    g.sim.transform[ps].y = @floatFromInt(cy);
+    g.sim.transform[ps].z = @floatFromInt(pz);
+
+    // Parent at (px, cy, pz), child one cell to +z, encoded the way the mirror
+    // and the client pack children.
+    const parent_raw: u32 = bench;
+    // The child offset comes from the block's own MultiBlockDim (centred on
+    // x/z: a 2-wide block spans -1..0), never an invented neighbour cell.
+    const offs = world_deco_mirror.offsetsFor(2, 1, 1);
+    try std.testing.expect(offs.n > 1);
+    var child_off: world_deco_mirror.Offset = offs.items[0];
+    for (offs.slice()) |o| {
+        if (o.x != 0 or o.y != 0 or o.z != 0) child_off = o;
+    }
+    const cx = px + child_off.x;
+    const cyc = cy + child_off.y;
+    const cz = pz + child_off.z;
+    const child_raw = world_deco_mirror.childRaw(parent_raw, child_off) orelse
+        return error.TestUnexpectedResult;
+    // Both planes, as the server's own place commit writes them: the chunk
+    // plane (what `blockWorld` reads and clients get) and the sparse raw
+    // mirror (`blockRawAt`, which sees rotations and the child bit).
+    // Solid ground under every group cell, or the stability pass drops the
+    // floating parent the moment a neighbour changes.
+    for ([_][2]i32{ .{ px, pz }, .{ cx, cz } }) |cell| {
+        try g.world.setBlockRawWorld(cell[0], cy - 1, cell[1], world_store.block_stone);
+        g.setBlockRaw(cell[0], cy - 1, cell[1], world_store.block_stone);
+    }
+    try g.world.setBlockRawWorld(px, cy, pz, parent_raw);
+    g.setBlockRaw(px, cy, pz, parent_raw);
+    try g.world.setBlockRawWorld(cx, cyc, cz, child_raw);
+    g.setBlockRaw(cx, cyc, cz, child_raw);
+    try std.testing.expectEqual(@as(?[3]i32, .{ px, cy, pz }), g.parentCellOf(cx, cyc, cz));
+    try std.testing.expectEqual(@as(?[3]i32, null), g.parentCellOf(px, cy, pz));
+
+    // A break aimed at the CHILD lands on the parent: the parent cell goes air
+    // (the group dies as one) and the child is cleared with it.
+    var sb: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, cx, cyc, cz, 0)));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, cy, pz));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(cx, cyc, cz));
+
+    // And a break aimed at the PARENT clears its child even when the child is
+    // untouched by the request.
+    for ([_][2]i32{ .{ px, pz }, .{ cx, cz } }) |cell| {
+        try g.world.setBlockRawWorld(cell[0], cy - 1, cell[1], world_store.block_stone);
+        g.setBlockRaw(cell[0], cy - 1, cell[1], world_store.block_stone);
+    }
+    try g.world.setBlockRawWorld(px, cy, pz, parent_raw);
+    g.setBlockRaw(px, cy, pz, parent_raw);
+    try g.world.setBlockRawWorld(cx, cyc, cz, child_raw);
+    g.setBlockRaw(cx, cyc, cz, child_raw);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, px, cy, pz, 0)));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, cy, pz));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(cx, cyc, cz));
+    std.debug.print("PASS multi-block: child redirects and children clear with the parent\n", .{});
 }
