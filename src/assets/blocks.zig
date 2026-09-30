@@ -120,6 +120,10 @@ pub const CollectorOutputRow = struct {
     fuel_cost: i32 = 0,
     output_item: []const u8 = "",
     output_item_modded: []const u8 = "",
+    /// Fields 7 and 8 of the row: what an installed converter mod does to the
+    /// conversion speed and to the batch count.
+    modded_convert_speed_multiplier: i32 = 0,
+    modded_convert_count_multiplier: i32 = 0,
     min_convert_time: i32 = 0,
     max_convert_time: i32 = 0,
 };
@@ -146,6 +150,8 @@ pub fn parseCollectorOutputs(value: []const u8, out: *[max_collector_outputs]Col
                     2 => o.fuel_cost = std.fmt.parseInt(i32, f, 10) catch 0,
                     5 => o.output_item = f,
                     6 => o.output_item_modded = f,
+                    7 => o.modded_convert_speed_multiplier = std.fmt.parseInt(i32, f, 10) catch 0,
+                    8 => o.modded_convert_count_multiplier = std.fmt.parseInt(i32, f, 10) catch 0,
                     9 => o.min_convert_time = std.fmt.parseInt(i32, f, 10) catch 0,
                     10 => o.max_convert_time = std.fmt.parseInt(i32, f, 10) catch 0,
                     else => {},

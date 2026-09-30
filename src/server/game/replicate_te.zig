@@ -504,6 +504,8 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
     const fuel_n = collectorFuelSlots(col, &fuel_slots);
     var cat_slots: [collectors_mod.max_catalyst_slots]stock_inv.StockSlot = undefined;
     const cat_n = collectorCatalystSlots(col, &cat_slots);
+    var mod_slots: [collectors_mod.max_mod_slots]stock_inv.StockSlot = undefined;
+    const mod_n = collectorModSlots(col, &mod_slots);
     var world_name: [1]stock_te.CollectorWorldTime = undefined;
     var flags: [1]stock_te.CollectorFlag = undefined;
     var empty_flags: [1]stock_te.CollectorFlag = undefined;
@@ -530,6 +532,7 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
             .items = slots[0..n],
             .fuel = fuel_slots[0..fuel_n],
             .catalyst = cat_slots[0..cat_n],
+            .mods = mod_slots[0..mod_n],
             .last_world = world_name[0..worlds_n],
             .is_full = flags[0..flags_n],
             .out_of_fuel = empty_flags[0..flags_n],
@@ -559,6 +562,8 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
         const fuel_n = collectorFuelSlots(col, &fuel_slots);
         var cat_slots: [collectors_mod.max_catalyst_slots]stock_inv.StockSlot = undefined;
         const cat_n = collectorCatalystSlots(col, &cat_slots);
+        var mod_slots: [collectors_mod.max_mod_slots]stock_inv.StockSlot = undefined;
+        const mod_n = collectorModSlots(col, &mod_slots);
         var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
         const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
         var world_name: [1]stock_te.CollectorWorldTime = undefined;
@@ -584,6 +589,7 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
                 .items = slots[0..n],
                 .fuel = fuel_slots[0..fuel_n],
                 .catalyst = cat_slots[0..cat_n],
+            .mods = mod_slots[0..mod_n],
                 .last_world = world_name[0..worlds_n],
                 .is_full = flags[0..flags_n],
                 .out_of_fuel = empty_flags[0..flags_n],
@@ -636,6 +642,17 @@ fn collectorFuelSlots(col: *const collectors_mod.Collector, out: *[collectors_mo
 fn collectorCatalystSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_catalyst_slots]stock_inv.StockSlot) usize {
     var n: usize = 0;
     for (col.catalyst) |s| {
+        if (s.type_id == 0 or s.count == 0) continue;
+        out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
+        n += 1;
+    }
+    return n;
+}
+
+/// The converter mod slots as wire stacks.
+fn collectorModSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_mod_slots]stock_inv.StockSlot) usize {
+    var n: usize = 0;
+    for (col.mods) |s| {
         if (s.type_id == 0 or s.count == 0) continue;
         out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
         n += 1;

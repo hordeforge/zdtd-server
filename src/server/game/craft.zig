@@ -1081,6 +1081,7 @@ pub fn tickCollectors(self: *Game) void {
             c.last_world = now;
             continue;
         }
+        const has_mod = collectorHasMod(c);
         const elapsed: f32 = @as(f32, @floatFromInt(now - c.last_world)) * time_scale;
         c.last_world = now;
         if (c.isFull()) continue;
@@ -1135,18 +1136,29 @@ pub fn tickCollectors(self: *Game) void {
             if (def.collector_catalyst_types.len > 0 and mult > 0) {
                 convert_count = catalyst_count * @as(u16, @intCast(mult));
             } else {
-                convert_count = 1;
+                // `getCurrentConvertCount`'s else branch: `HasModCount ?
+                // ModdedConvertCountMultiplier : 1`.
+                convert_count = if (has_mod and row.modded_convert_count_multiplier > 0)
+                    @intCast(row.modded_convert_count_multiplier)
+                else
+                    1;
             }
         }
         const out_count: u16 = @intFromFloat(@max(@as(f32, @floatFromInt(@max(convert_count, 1))) * out_scale, 1));
+        // `getCurrentConvertSpeed` (IL=9): an installed converter mod scales the
+        // budget by `ModdedConvertSpeedMultiplier`, else 1.
+        const speed_mult: f32 = if (has_mod and row.modded_convert_speed_multiplier > 0)
+            @floatFromInt(row.modded_convert_speed_multiplier)
+        else
+            1;
         if (convert_count == 0) {
             // Required catalyst missing: stock's convert count is 0, so the
             // budget still runs but nothing is produced.
-            c.fill_left -= elapsed;
+            c.fill_left -= elapsed * speed_mult;
             if (c.fill_left <= 0) c.fill_left = c.drawFillTime(row.min_convert_time, row.max_convert_time);
             continue;
         }
-        c.fill_left -= elapsed;
+        c.fill_left -= elapsed * speed_mult;
         if (c.fill_left > 0) continue;
         var guard: u32 = 0;
         while (c.fill_left <= 0 and guard < 8) : (guard += 1) {
@@ -1160,6 +1172,16 @@ pub fn tickCollectors(self: *Game) void {
             if (c.fill_left <= 0) c.fill_left = 1;
         }
     }
+}
+
+/// Any non-empty `modSlotsInternal` slot sets stock's `HasModSpeed`/
+/// `HasModCount` (the `ModTypes` mapping of which mod has which effect is a
+/// recorded residual, so presence is the switch here).
+fn collectorHasMod(c: *const collectors_mod.Collector) bool {
+    for (c.mods) |sl| {
+        if (sl.type_id != 0 and sl.count > 0) return true;
+    }
+    return false;
 }
 
 /// `TileEntityCollector.getCatalystCount` (IL=57): non-empty catalyst slots

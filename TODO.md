@@ -334,9 +334,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       `getCatalystCount` (IL=57) counts the named stacks, and
       `getCurrentConvertCount` (IL=52) scales the batch by
       `CatalystMultiplier[output]` (IL=0555-0577 `name=value` rows) with a
-      `CatalystRequirements[output]` gate. Still open: the mod slots
-      (`HasModCount`/`ModdedConvertCountMultiplier`), the `CatalystConvert`
-      pairs, and the `ActivateSound`/`RunningSound` broadcasts.
+      `CatalystRequirements[output]` gate. Mod slots closed too: the
+      `modSlotsInternal` array rides the TE body and ZCL1, any non-empty slot
+      sets stock's `HasModSpeed`/`HasModCount`, and the row's
+      `ModdedConvertSpeedMultiplier` (field 7) scales the budget while
+      `ModdedConvertCountMultiplier` (field 8) sizes the batch. Still open: the
+      block's `ModTypes`/`ModTransformEnableNames` mapping of which mod does
+      which effect, the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
+      `ActivateSound`/`RunningSound` broadcasts.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

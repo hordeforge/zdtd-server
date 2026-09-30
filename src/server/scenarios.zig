@@ -21122,3 +21122,75 @@ test "scenario a collector catalyst scales the yield and gates a requirement" {
     try std.testing.expectEqual(@as(u16, 6), col.items[0].count);
     std.debug.print("PASS collector-catalyst: multiplier scales, requirement gates\n", .{});
 }
+
+test "scenario a converter mod speeds a collector and grows its batch" {
+    // `getCurrentConvertSpeed` (IL=9) scales the budget by
+    // `ModdedConvertSpeedMultiplier` when `HasModSpeed`, and
+    // `getCurrentConvertCount`'s else branch uses `ModdedConvertCountMultiplier`
+    // when `HasModCount` (rows 7 and 8 of the OutputTypes row).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewMod")) return 1735;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_dew_mod.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewMod">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,2,4,100,100,water}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewMod") orelse return error.TestUnexpectedResult;
+    var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+    try std.testing.expectEqual(@as(u8, 1), assets_blocks.parseCollectorOutputs(dew.collector_outputs, &rows));
+    try std.testing.expectEqual(@as(i32, 2), rows[0].modded_convert_speed_multiplier);
+    try std.testing.expectEqual(@as(i32, 4), rows[0].modded_convert_count_multiplier);
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 903, .name = "modCollectorSpeed" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const col = g.collectors.getOrCreate(80, 66, 80, dew.id) orelse return error.TestUnexpectedResult;
+    // Fill time 100..100 world units; one game minute (60 x 1000 = 60000) is
+    // plenty at speed 1, and the batch stays 1 without a mod.
+    g.sim.director.clock.hours += 0.001;
+    g.tickCollectors();
+    g.sim.director.clock.hours += 0.1;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 1), col.items[0].count);
+
+    // A converter mod doubles the speed and quadruples the batch: half the world
+    // time covers the next fill, and the stack is 4.
+    // The in-progress fill stays armed (100 units): only the doubled speed can
+    // cover it in the 50 units that follow.
+    col.mods[0] = .{ .type_id = 903, .count = 1 };
+    col.items[0] = .{};
+    try std.testing.expect(col.fill_left > 0);
+    g.sim.director.clock.hours += 0.05;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 4), col.items[0].count);
+    std.debug.print("PASS collector-mod: speed doubles, batch quadruples\n", .{});
+}
