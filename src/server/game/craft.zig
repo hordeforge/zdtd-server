@@ -1082,6 +1082,24 @@ pub fn tickCollectors(self: *Game) void {
             continue;
         }
         const has_mod = collectorHasMod(c);
+        // `productionEnabled`: any output not disabled. The edges start and stop
+        // the running sound (`HandleUpdate` IL_00E3-012E).
+        const enabled = !collectorBlocked(self, c.x, c.y, c.z) and !c.isFull() and (!c.out_of_fuel);
+        if (enabled and !c.running) {
+            if (def.collector_activate_sound.len > 0) {
+                replicate_te.broadcastCollectorSound(self, c.x, c.y, c.z, def.collector_activate_sound, true);
+            }
+            if (def.collector_running_sound.len > 0) {
+                replicate_te.broadcastCollectorSound(self, c.x, c.y, c.z, def.collector_running_sound, true);
+                c.sound_started = true;
+            }
+        } else if (!enabled and c.running and c.sound_started) {
+            if (def.collector_running_sound.len > 0) {
+                replicate_te.broadcastCollectorSound(self, c.x, c.y, c.z, def.collector_running_sound, false);
+            }
+            c.sound_started = false;
+        }
+        c.running = enabled;
         const elapsed: f32 = @as(f32, @floatFromInt(now - c.last_world)) * time_scale;
         c.last_world = now;
         if (c.isFull()) continue;

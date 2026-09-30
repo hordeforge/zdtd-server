@@ -28,6 +28,7 @@ const game_trader = @import("trader.zig");
 const rng_util = @import("../../util/rng.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const stock_te = packages.stock_te;
+const stock_block = packages.stock_block;
 const util_log = @import("../../util/log.zig");
 
 pub fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
@@ -540,6 +541,31 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
         },
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// `TileEntityCollector`'s running/activate sound: `Audio.Manager.BroadcastPlay`
+/// on the enabled edge and `BroadcastStop` on the disabled one
+/// (`HandleUpdate` IL_00E3-012E), which is the same `NetPackageAudio` body the
+/// client sends for its own sounds.
+pub fn broadcastCollectorSound(self: *Game, x: i32, y: i32, z: i32, group: []const u8, play: bool) void {
+    if (group.len == 0) return;
+    var buf: [192]u8 = undefined;
+    const body = stock_block.buildAudioPlayBody(&buf, .{
+        .entity_id = -1,
+        .sound_group = group,
+        .play = play,
+        .x = @floatFromInt(x),
+        .y = @floatFromInt(y),
+        .z = @floatFromInt(z),
+        .play_on_entity = false,
+        .volume_scale = 0,
+    }) catch {
+        self.harness.counters.inc(.encode_errors);
+        return;
+    };
+    self.broadcastNear("NetPackageAudio", body, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {
+        self.harness.counters.inc(.net_send_errors);
+    };
 }
 
 /// Ship every collector whose produced state changed since the last pass. Same

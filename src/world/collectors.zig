@@ -51,6 +51,12 @@ pub const Collector = struct {
     mods: [max_mod_slots]Slot = @splat(.{}),
     /// `outOfFuel` map flag (stock's `isDisabled` leg).
     out_of_fuel: bool = false,
+    /// `productionEnabled`: any output enabled. The enabled/disabled edges are
+    /// what drive the `ActivateSound`/`RunningSound` broadcasts
+    /// (`TileEntityCollector.HandleUpdate` IL_00E3-012E), and `sound_started`
+    /// records whether the running sound is currently playing.
+    running: bool = false,
+    sound_started: bool = false,
     /// World-time stamp of the last production pass (`lastWorldTimes`).
     last_world: u64 = 0,
     /// World-time units left in the current conversion (`fillTimeLeft`). The

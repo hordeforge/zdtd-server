@@ -331,6 +331,11 @@ pub const BlockDef = struct {
     collector_outputs: []const u8 = "",
     /// Raw `FuelTypes` value; rows come from `parseCollectorFuelTypes`.
     collector_fuel_types: []const u8 = "",
+    /// `RunningSound`/`ActivateSound`: the sound groups
+    /// `TileEntityCollector.HandleUpdate` plays on the enabled edge and stops on
+    /// the disabled one (IL_00E3-012E gates on `productionEnabled`).
+    collector_running_sound: []const u8 = "",
+    collector_activate_sound: []const u8 = "",
     /// `CatalystTypes` comma list, plus the `name=value` `CatalystMultiplier`
     /// and `CatalystRequirements` tables.
     collector_catalyst_types: []const u8 = "",
@@ -816,6 +821,8 @@ pub fn loadFromPath(
         collector_catalyst_types: ?[]const u8 = null,
         collector_catalyst_multiplier: ?[]const u8 = null,
         collector_catalyst_requirements: ?[]const u8 = null,
+        collector_running_sound: ?[]const u8 = null,
+        collector_activate_sound: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -929,6 +936,8 @@ pub fn loadFromPath(
         var collector_catalyst_types: ?[]const u8 = null;
         var collector_catalyst_multiplier: ?[]const u8 = null;
         var collector_catalyst_requirements: ?[]const u8 = null;
+        var collector_running_sound: ?[]const u8 = null;
+        var collector_activate_sound: ?[]const u8 = null;
         var trigger_delay: f32 = 0;
         var explosion_radius_blocks: f32 = 1;
         var explosion_block_damage: f32 = 0;
@@ -1110,6 +1119,10 @@ pub fn loadFromPath(
                 collector_outputs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "FuelTypes")) {
                 collector_fuel_types = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "RunningSound")) {
+                collector_running_sound = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "ActivateSound")) {
+                collector_activate_sound = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "CatalystTypes")) {
                 collector_catalyst_types = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "CatalystMultiplier")) {
@@ -1296,6 +1309,8 @@ pub fn loadFromPath(
             .collector_catalyst_types = if (collector_catalyst_types) |cc| try arena.dupe(u8, cc) else null,
             .collector_catalyst_multiplier = if (collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else null,
             .collector_catalyst_requirements = if (collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else null,
+            .collector_running_sound = if (collector_running_sound) |rs| try arena.dupe(u8, rs) else null,
+            .collector_activate_sound = if (collector_activate_sound) |as_| try arena.dupe(u8, as_) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -1378,6 +1393,8 @@ pub fn loadFromPath(
         var own_collector_catalyst_types = pb.collector_catalyst_types;
         var own_collector_catalyst_multiplier = pb.collector_catalyst_multiplier;
         var own_collector_catalyst_requirements = pb.collector_catalyst_requirements;
+        var own_collector_running_sound = pb.collector_running_sound;
+        var own_collector_activate_sound = pb.collector_activate_sound;
         var own_trigger_delay = pb.trigger_delay;
         var own_expl_radius_blocks = pb.explosion_radius_blocks;
         var own_expl_block_damage = pb.explosion_block_damage;
@@ -1470,6 +1487,8 @@ pub fn loadFromPath(
                 if (own_collector_catalyst_types == null) own_collector_catalyst_types = base_p.collector_catalyst_types;
                 if (own_collector_catalyst_multiplier == null) own_collector_catalyst_multiplier = base_p.collector_catalyst_multiplier;
                 if (own_collector_catalyst_requirements == null) own_collector_catalyst_requirements = base_p.collector_catalyst_requirements;
+                if (own_collector_running_sound == null) own_collector_running_sound = base_p.collector_running_sound;
+                if (own_collector_activate_sound == null) own_collector_activate_sound = base_p.collector_activate_sound;
             }
             if (!own_mine) {
                     own_mine = base_p.mine;
@@ -1568,6 +1587,8 @@ pub fn loadFromPath(
         pb.collector_catalyst_types = own_collector_catalyst_types;
         pb.collector_catalyst_multiplier = own_collector_catalyst_multiplier;
         pb.collector_catalyst_requirements = own_collector_catalyst_requirements;
+        pb.collector_running_sound = own_collector_running_sound;
+        pb.collector_activate_sound = own_collector_activate_sound;
         pb.trigger_delay = own_trigger_delay;
         pb.explosion_radius_blocks = own_expl_radius_blocks;
         pb.explosion_block_damage = own_expl_block_damage;
@@ -1670,6 +1691,8 @@ pub fn loadFromPath(
             .collector_catalyst_types = if (pb.collector_catalyst_types) |cc| try arena.dupe(u8, cc) else "",
             .collector_catalyst_multiplier = if (pb.collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else "",
             .collector_catalyst_requirements = if (pb.collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else "",
+            .collector_running_sound = if (pb.collector_running_sound) |rs| try arena.dupe(u8, rs) else "",
+            .collector_activate_sound = if (pb.collector_activate_sound) |as_| try arena.dupe(u8, as_) else "",
             .trigger_delay = pb.trigger_delay,
             .explosion_radius_blocks = pb.explosion_radius_blocks,
             .explosion_block_damage = pb.explosion_block_damage,

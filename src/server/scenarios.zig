@@ -21194,3 +21194,93 @@ test "scenario a converter mod speeds a collector and grows its batch" {
     try std.testing.expectEqual(@as(u16, 4), col.items[0].count);
     std.debug.print("PASS collector-mod: speed doubles, batch quadruples\n", .{});
 }
+
+test "scenario a running collector broadcasts its loop and stops it" {
+    // `TileEntityCollector.HandleUpdate` plays `ActivateSound` and `RunningSound`
+    // on the production-enabled edge and stops `RunningSound` on the disabled
+    // one (IL_00E3-012E), and `OnDestroy` stops it when the block goes
+    // (IL_0008-001E). Same NetPackageAudio body the client sends for its own
+    // sounds.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewNoisy")) return 1736;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_dew_sound.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewNoisy">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,0,drinkJarBoiledWater,drinkJarBoiledWater,100,100,100,100,water}" />
+        \\  <property name="RunningSound" value="dew_collector_running" />
+        \\  <property name="ActivateSound" value="dew_collector_activate" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewNoisy") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("dew_collector_running", dew.collector_running_sound);
+    try std.testing.expectEqualStrings("dew_collector_activate", dew.collector_activate_sound);
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "terrStone" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    const col = g.collectors.getOrCreate(px, py, pz, dew.id) orelse return error.TestUnexpectedResult;
+    col.last_world = 1;
+    cap.clear();
+    g.tickCollectors();
+    _ = try g.step();
+    const audio_id = packages.idOf("NetPackageAudio").?;
+    var nbuf: [64]u8 = undefined;
+    const started = try packages.parseAudioPlay(cap.findPkgId(audio_id) orelse return error.TestUnexpectedResult, &nbuf);
+    try std.testing.expectEqualStrings("dew_collector_activate", started.sound_group);
+    try std.testing.expect(started.play);
+    try std.testing.expect(col.sound_started);
+
+    // Roof it: the disabled edge stops the loop.
+    cap.clear();
+    try g.world.setBlockWorld(px, py + 1, pz, 1);
+    g.tickCollectors();
+    _ = try g.step();
+    try std.testing.expect(!col.sound_started);
+    const stopped = try packages.parseAudioPlay(cap.findPkgId(audio_id) orelse return error.TestUnexpectedResult, &nbuf);
+    try std.testing.expectEqualStrings("dew_collector_running", stopped.sound_group);
+    try std.testing.expect(!stopped.play);
+
+    // Removing the block stops whatever is still playing.
+    col.sound_started = true;
+    col.running = true;
+    cap.clear();
+    g.setBlockRaw(px, py, pz, 1);
+    g.noteBlockRemoved(px, py, pz, dew.id);
+    _ = try g.step();
+    const gone = try packages.parseAudioPlay(cap.findPkgId(audio_id) orelse return error.TestUnexpectedResult, &nbuf);
+    try std.testing.expectEqualStrings("dew_collector_running", gone.sound_group);
+    try std.testing.expect(!gone.play);
+    std.debug.print("PASS collector-sound: the loop starts, stops and dies with the block\n", .{});
+}

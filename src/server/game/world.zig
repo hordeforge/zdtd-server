@@ -18,6 +18,7 @@ const Client = game_mod.Client;
 const world_store = @import("../../world/store.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 const block_ticker = @import("block_ticker.zig");
+const replicate_te = @import("replicate_te.zig");
 const packages = @import("../../wire/packages.zig");
 const utf8_util = @import("../../util/utf8.zig");
 const plugin_compose = @import("plugin_compose.zig");
@@ -384,7 +385,15 @@ pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
 /// would let a player farm a POI's containers by re-taking the quest.
 pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spill: bool) void {
     // `BlockCollector.removeTileEntity` IL=7 drops the producer TE with the
-    // block.
+    // block, and `TileEntityCollector.OnDestroy` stops its running sound
+    // (IL_0008-001E).
+    if (self.collectors.get(x, y, z)) |col| {
+        if (col.sound_started) {
+            if (self.blocks.byId(col.block_id)) |bd| {
+                replicate_te.broadcastCollectorSound(self, x, y, z, bd.collector_running_sound, false);
+            }
+        }
+    }
     _ = self.collectors.removeAt(x, y, z);
     // What the block held goes to the ground before the stores that hold it
     // are dropped. Stock fires OnBlockRemoved for any cleared cell, whatever

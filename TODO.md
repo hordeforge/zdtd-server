@@ -338,10 +338,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       `modSlotsInternal` array rides the TE body and ZCL1, any non-empty slot
       sets stock's `HasModSpeed`/`HasModCount`, and the row's
       `ModdedConvertSpeedMultiplier` (field 7) scales the budget while
-      `ModdedConvertCountMultiplier` (field 8) sizes the batch. Still open: the
-      block's `ModTypes`/`ModTransformEnableNames` mapping of which mod does
-      which effect, the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
-      `ActivateSound`/`RunningSound` broadcasts.
+      `ModdedConvertCountMultiplier` (field 8) sizes the batch. Sounds closed
+      too: the enabled edge plays `ActivateSound` then `RunningSound`, the
+      disabled edge stops `RunningSound` (`HandleUpdate` IL_00E3-012E) and
+      `OnDestroy` stops it with the block (IL_0008-001E), all as
+      `NetPackageAudio`. Still open: the block's
+      `ModTypes`/`ModTransformEnableNames` mapping of which mod does which
+      effect, the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
+      `OpenSound`/`CloseSound` pair (a UI-open sound the client plays itself).
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing
