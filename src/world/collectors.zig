@@ -22,6 +22,9 @@ pub const max_output_slots: usize = 6;
 /// Fuel slots (`fuelGridHeight` rows).
 pub const max_fuel_slots: usize = 4;
 
+/// Catalyst slots (`catalystGridHeight` rows).
+pub const max_catalyst_slots: usize = 4;
+
 pub const Slot = struct {
     type_id: i32 = 0,
     count: u16 = 0,
@@ -37,6 +40,8 @@ pub const Collector = struct {
     items: [max_output_slots]Slot = @splat(.{}),
     /// `fuelSlotsInternal`: what a fuel-costed output burns.
     fuel: [max_fuel_slots]Slot = @splat(.{}),
+    /// `catalystSlotsInternal`: the conversion catalysts.
+    catalyst: [max_catalyst_slots]Slot = @splat(.{}),
     /// `outOfFuel` map flag (stock's `isDisabled` leg).
     out_of_fuel: bool = false,
     /// World-time stamp of the last production pass (`lastWorldTimes`).
@@ -129,7 +134,7 @@ pub const Store = struct {
     /// the output slots. Fixed size so a truncated tail is a clean reject.
     // pos (12) + block (4) + fill_started (1) + fill_left (4) + last_world (8)
     // + rng (4) + the output slots and the fuel slots (8 each).
-    const persisted_record_size: usize = 12 + 4 + 1 + 4 + 8 + 4 + max_output_slots * 8 + max_fuel_slots * 8;
+    const persisted_record_size: usize = 12 + 4 + 1 + 4 + 8 + 4 + max_output_slots * 8 + max_fuel_slots * 8 + max_catalyst_slots * 8;
 
     pub fn count(self: *const Store) usize {
         var n: usize = 0;
@@ -192,6 +197,12 @@ pub fn save(self: *const Store, dir: []const u8, allocator: std.mem.Allocator) !
             std.mem.writeInt(u16, buf[o + 6 ..][0..2], sl.quality, .little);
             o += 8;
         }
+        for (c.catalyst) |sl| {
+            std.mem.writeInt(i32, buf[o..][0..4], sl.type_id, .little);
+            std.mem.writeInt(u16, buf[o + 4 ..][0..2], sl.count, .little);
+            std.mem.writeInt(u16, buf[o + 6 ..][0..2], sl.quality, .little);
+            o += 8;
+        }
         n_records += 1;
     }
     std.mem.writeInt(u16, buf[4..6], n_records, .little);
@@ -225,6 +236,12 @@ pub fn loadFromSlice(self: *Store, buf: []const u8) !void {
             o += 8;
         }
         for (&c.fuel) |*sl| {
+            sl.type_id = std.mem.readInt(i32, buf[o..][0..4], .little);
+            sl.count = std.mem.readInt(u16, buf[o + 4 ..][0..2], .little);
+            sl.quality = std.mem.readInt(u16, buf[o + 6 ..][0..2], .little);
+            o += 8;
+        }
+        for (&c.catalyst) |*sl| {
             sl.type_id = std.mem.readInt(i32, buf[o..][0..4], .little);
             sl.count = std.mem.readInt(u16, buf[o + 4 ..][0..2], .little);
             sl.quality = std.mem.readInt(u16, buf[o + 6 ..][0..2], .little);
@@ -272,7 +289,7 @@ test "ZCL1 round-trips a collector and rejects a bad magic" {
     std.mem.writeInt(u16, buf[w + 6 ..][0..2], 2, .little);
     w += 8;
     // Remaining output slots plus the fuel slots.
-    const empty_slots = (max_output_slots - 1) + max_fuel_slots;
+    const empty_slots = (max_output_slots - 1) + max_fuel_slots + max_catalyst_slots;
     @memset(buf[w .. w + empty_slots * 8], 0);
     w += empty_slots * 8;
     std.mem.writeInt(u16, buf[4..6], 1, .little);

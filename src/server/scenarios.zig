@@ -21042,3 +21042,83 @@ test "scenario a fuelled collector burns its fuel and stops when empty" {
     try std.testing.expectEqual(@as(u16, 0), col.fuel[0].count);
     std.debug.print("PASS collector-fuel: honey burns into honeycomb\n", .{});
 }
+
+test "scenario a collector catalyst scales the yield and gates a requirement" {
+    // `getCurrentConvertCount` (IL=52): the batch is the catalyst count, scaled
+    // by `CatalystMultiplier[output]` when `UsesCatalyst` (CatalystTypes
+    // non-empty, IL=6) and that multiplier is positive, else 1;
+    // `CatalystRequirements[output]` the slots do not meet leaves the raw
+    // catalyst count, so a required catalyst gates production.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "apiary")) return 1734;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_apiary_cat.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="apiary">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="Apiary" />
+        \\  <property name="OutputTypes" value="{honeycomb,honey,1,0,0,honeycomb,honeycomb,100,100,10,20,apiary}" />
+        \\  <property name="FuelTypes" value="{honey,honey}" />
+        \\  <property name="CatalystTypes" value="beeswax" />
+        \\  <property name="CatalystMultiplier" value="honeycomb=3" />
+        \\  <property name="CatalystRequirements" value="honeycomb=1" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const apiary = g.blocks.byName("apiary") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(assets_blocks.collectorCatalystAccepts(apiary.collector_catalyst_types, "beeswax"));
+    try std.testing.expectEqual(@as(?i32, 3), assets_blocks.collectorTableValue(apiary.collector_catalyst_multiplier, "honeycomb"));
+    try std.testing.expectEqual(@as(?i32, 1), assets_blocks.collectorTableValue(apiary.collector_catalyst_requirements, "honeycomb"));
+    try std.testing.expectEqual(@as(?i32, null), assets_blocks.collectorTableValue(apiary.collector_catalyst_multiplier, "nope"));
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "honeycomb" },
+        .{ .id = 901, .name = "honey" },
+        .{ .id = 902, .name = "beeswax" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const col = g.collectors.getOrCreate(70, 66, 70, apiary.id) orelse return error.TestUnexpectedResult;
+    col.fuel[0] = .{ .type_id = 901, .count = 20 };
+    g.sim.director.clock.hours += 0.6;
+    g.tickCollectors();
+    // No catalyst: the requirement (1) is unmet, so nothing is produced.
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 0), col.items[0].type_id);
+
+    // One catalyst: the requirement is met and the yield is 1 * 3.
+    col.catalyst[0] = .{ .type_id = 902, .count = 1 };
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, 3), col.items[0].count);
+
+    // Two catalysts: 2 * 3.
+    col.items[0] = .{};
+    col.catalyst[1] = .{ .type_id = 902, .count = 1 };
+    col.fill_left = 0;
+    g.sim.director.clock.hours += 1.0;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(u16, 6), col.items[0].count);
+    std.debug.print("PASS collector-catalyst: multiplier scales, requirement gates\n", .{});
+}

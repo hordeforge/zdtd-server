@@ -502,6 +502,8 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
     const n = collectorSlots(col, &slots);
     var fuel_slots: [collectors_mod.max_fuel_slots]stock_inv.StockSlot = undefined;
     const fuel_n = collectorFuelSlots(col, &fuel_slots);
+    var cat_slots: [collectors_mod.max_catalyst_slots]stock_inv.StockSlot = undefined;
+    const cat_n = collectorCatalystSlots(col, &cat_slots);
     var world_name: [1]stock_te.CollectorWorldTime = undefined;
     var flags: [1]stock_te.CollectorFlag = undefined;
     var empty_flags: [1]stock_te.CollectorFlag = undefined;
@@ -527,6 +529,7 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
         .{
             .items = slots[0..n],
             .fuel = fuel_slots[0..fuel_n],
+            .catalyst = cat_slots[0..cat_n],
             .last_world = world_name[0..worlds_n],
             .is_full = flags[0..flags_n],
             .out_of_fuel = empty_flags[0..flags_n],
@@ -554,6 +557,8 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
         const n = collectorSlots(col, &slots);
         var fuel_slots: [collectors_mod.max_fuel_slots]stock_inv.StockSlot = undefined;
         const fuel_n = collectorFuelSlots(col, &fuel_slots);
+        var cat_slots: [collectors_mod.max_catalyst_slots]stock_inv.StockSlot = undefined;
+        const cat_n = collectorCatalystSlots(col, &cat_slots);
         var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
         const rn = assets_blocks.parseCollectorOutputs(def.collector_outputs, &rows);
         var world_name: [1]stock_te.CollectorWorldTime = undefined;
@@ -578,6 +583,7 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
             .{
                 .items = slots[0..n],
                 .fuel = fuel_slots[0..fuel_n],
+                .catalyst = cat_slots[0..cat_n],
                 .last_world = world_name[0..worlds_n],
                 .is_full = flags[0..flags_n],
                 .out_of_fuel = empty_flags[0..flags_n],
@@ -619,6 +625,17 @@ fn collectorSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.ma
 fn collectorFuelSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_fuel_slots]stock_inv.StockSlot) usize {
     var n: usize = 0;
     for (col.fuel) |s| {
+        if (s.type_id == 0 or s.count == 0) continue;
+        out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
+        n += 1;
+    }
+    return n;
+}
+
+/// The catalyst slots as wire stacks, same leading-run shape as the outputs.
+fn collectorCatalystSlots(col: *const collectors_mod.Collector, out: *[collectors_mod.max_catalyst_slots]stock_inv.StockSlot) usize {
+    var n: usize = 0;
+    for (col.catalyst) |s| {
         if (s.type_id == 0 or s.count == 0) continue;
         out[n] = .{ .type_id = s.type_id, .count = s.count, .quality = s.quality };
         n += 1;

@@ -203,6 +203,28 @@ pub fn collectorFuelAccepts(items: []const u8, item_name: []const u8) bool {
     return false;
 }
 
+/// Is `item_name` one of a `CatalystTypes` comma list?
+pub fn collectorCatalystAccepts(types_csv: []const u8, item_name: []const u8) bool {
+    var it = std.mem.splitScalar(u8, types_csv, ',');
+    while (it.next()) |raw| {
+        if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t"), item_name)) return true;
+    }
+    return false;
+}
+
+/// A `name=value` table (`CatalystMultiplier`/`CatalystRequirements`, both split
+/// on ',' then '=' with no options, BlockCollector.il IL_0555-0577).
+pub fn collectorTableValue(table_csv: []const u8, key: []const u8) ?i32 {
+    var it = std.mem.splitScalar(u8, table_csv, ',');
+    while (it.next()) |entry| {
+        const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
+        const name = std.mem.trim(u8, entry[0..eq], " \t");
+        if (!std.mem.eql(u8, name, key)) continue;
+        return std.fmt.parseInt(i32, std.mem.trim(u8, entry[eq + 1 ..], " \t"), 10) catch null;
+    }
+    return null;
+}
+
 /// Composite tile-entity feature modules (`TileEntityComposite`).
 /// `TileEntityComposite.read` iterates ITS OWN `modulesInternalOrder` and reads
 /// one hash per module, so the wire payload must carry exactly the block's
@@ -303,6 +325,11 @@ pub const BlockDef = struct {
     collector_outputs: []const u8 = "",
     /// Raw `FuelTypes` value; rows come from `parseCollectorFuelTypes`.
     collector_fuel_types: []const u8 = "",
+    /// `CatalystTypes` comma list, plus the `name=value` `CatalystMultiplier`
+    /// and `CatalystRequirements` tables.
+    collector_catalyst_types: []const u8 = "",
+    collector_catalyst_multiplier: []const u8 = "",
+    collector_catalyst_requirements: []const u8 = "",
     /// blocks.xml `Class="Mine"` (`BlockMine`): a walk-triggered mine. The fuse
     /// is `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules
     /// `UpdateTick` at `TriggerDelay * 20`), and `UpdateTick` (IL=8) detonates.
@@ -780,6 +807,9 @@ pub fn loadFromPath(
         collector_type: u8 = 0,
         collector_outputs: ?[]const u8 = null,
         collector_fuel_types: ?[]const u8 = null,
+        collector_catalyst_types: ?[]const u8 = null,
+        collector_catalyst_multiplier: ?[]const u8 = null,
+        collector_catalyst_requirements: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
         /// Extends `param1`: the property names this block does not inherit
@@ -890,6 +920,9 @@ pub fn loadFromPath(
         var collector_type: u8 = 0;
         var collector_outputs: ?[]const u8 = null;
         var collector_fuel_types: ?[]const u8 = null;
+        var collector_catalyst_types: ?[]const u8 = null;
+        var collector_catalyst_multiplier: ?[]const u8 = null;
+        var collector_catalyst_requirements: ?[]const u8 = null;
         var trigger_delay: f32 = 0;
         var explosion_radius_blocks: f32 = 1;
         var explosion_block_damage: f32 = 0;
@@ -1071,6 +1104,12 @@ pub fn loadFromPath(
                 collector_outputs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "FuelTypes")) {
                 collector_fuel_types = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "CatalystTypes")) {
+                collector_catalyst_types = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "CatalystMultiplier")) {
+                collector_catalyst_multiplier = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "CatalystRequirements")) {
+                collector_catalyst_requirements = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "TriggerDelay")) {
                 if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| trigger_delay = v;
             } else if (std.mem.eql(u8, pname, "Next")) {
@@ -1248,6 +1287,9 @@ pub fn loadFromPath(
             .collector_type = collector_type,
             .collector_outputs = if (collector_outputs) |co| try arena.dupe(u8, co) else null,
             .collector_fuel_types = if (collector_fuel_types) |cf| try arena.dupe(u8, cf) else null,
+            .collector_catalyst_types = if (collector_catalyst_types) |cc| try arena.dupe(u8, cc) else null,
+            .collector_catalyst_multiplier = if (collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else null,
+            .collector_catalyst_requirements = if (collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else null,
             .trader_id = trader_id,
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
@@ -1327,6 +1369,9 @@ pub fn loadFromPath(
         var own_collector_type = pb.collector_type;
         var own_collector_outputs = pb.collector_outputs;
         var own_collector_fuel_types = pb.collector_fuel_types;
+        var own_collector_catalyst_types = pb.collector_catalyst_types;
+        var own_collector_catalyst_multiplier = pb.collector_catalyst_multiplier;
+        var own_collector_catalyst_requirements = pb.collector_catalyst_requirements;
         var own_trigger_delay = pb.trigger_delay;
         var own_expl_radius_blocks = pb.explosion_radius_blocks;
         var own_expl_block_damage = pb.explosion_block_damage;
@@ -1416,6 +1461,9 @@ pub fn loadFromPath(
                 if (own_collector_type == 0) own_collector_type = base_p.collector_type;
                 if (own_collector_outputs == null) own_collector_outputs = base_p.collector_outputs;
                 if (own_collector_fuel_types == null) own_collector_fuel_types = base_p.collector_fuel_types;
+                if (own_collector_catalyst_types == null) own_collector_catalyst_types = base_p.collector_catalyst_types;
+                if (own_collector_catalyst_multiplier == null) own_collector_catalyst_multiplier = base_p.collector_catalyst_multiplier;
+                if (own_collector_catalyst_requirements == null) own_collector_catalyst_requirements = base_p.collector_catalyst_requirements;
             }
             if (!own_mine) {
                     own_mine = base_p.mine;
@@ -1511,6 +1559,9 @@ pub fn loadFromPath(
         pb.collector_type = own_collector_type;
         pb.collector_outputs = own_collector_outputs;
         pb.collector_fuel_types = own_collector_fuel_types;
+        pb.collector_catalyst_types = own_collector_catalyst_types;
+        pb.collector_catalyst_multiplier = own_collector_catalyst_multiplier;
+        pb.collector_catalyst_requirements = own_collector_catalyst_requirements;
         pb.trigger_delay = own_trigger_delay;
         pb.explosion_radius_blocks = own_expl_radius_blocks;
         pb.explosion_block_damage = own_expl_block_damage;
@@ -1610,6 +1661,9 @@ pub fn loadFromPath(
             .collector_type = pb.collector_type,
             .collector_outputs = if (pb.collector_outputs) |co| try arena.dupe(u8, co) else "",
             .collector_fuel_types = if (pb.collector_fuel_types) |cf| try arena.dupe(u8, cf) else "",
+            .collector_catalyst_types = if (pb.collector_catalyst_types) |cc| try arena.dupe(u8, cc) else "",
+            .collector_catalyst_multiplier = if (pb.collector_catalyst_multiplier) |cm| try arena.dupe(u8, cm) else "",
+            .collector_catalyst_requirements = if (pb.collector_catalyst_requirements) |cr| try arena.dupe(u8, cr) else "",
             .trigger_delay = pb.trigger_delay,
             .explosion_radius_blocks = pb.explosion_radius_blocks,
             .explosion_block_damage = pb.explosion_block_damage,

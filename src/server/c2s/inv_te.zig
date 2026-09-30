@@ -285,6 +285,16 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                 };
             }
             while (f < col.fuel.len) : (f += 1) col.fuel[f] = .{};
+            var k: usize = 0;
+            while (k < cs.catalyst_n and k < col.catalyst.len) : (k += 1) {
+                const st = cs.catalyst[k];
+                col.catalyst[k] = .{
+                    .type_id = st.type_id,
+                    .count = @intCast(@max(st.count, 0)),
+                    .quality = st.quality,
+                };
+            }
+            while (k < col.catalyst.len) : (k += 1) col.catalyst[k] = .{};
             col.dirty = true;
             try replicate_te.broadcastDirtyCollectors(self);
             try self.sendGame(peer, "NetPackageTileEntity", body);

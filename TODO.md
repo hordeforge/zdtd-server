@@ -329,9 +329,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       the class names, `removeFuel` drains `FuelCost` per production, `outOfFuel`
       rides the body, and the per-type sandbox gates
       (`DewCollectorInput`/`ApiaryInput`/`ChickenCoopInput`) disable their
-      collector. Still open: catalyst rows (`CatalystTypes`,
-      `getCurrentConvertCount` and the multiplier/requirement tables), the mod
-      slots, and the `ActivateSound`/`RunningSound` broadcasts.
+      collector. Catalyst rows closed too: `CatalystTypes` is the comma list
+      `UsesCatalyst` tests (IL=6), the catalyst slots ride the TE body both ways,
+      `getCatalystCount` (IL=57) counts the named stacks, and
+      `getCurrentConvertCount` (IL=52) scales the batch by
+      `CatalystMultiplier[output]` (IL=0555-0577 `name=value` rows) with a
+      `CatalystRequirements[output]` gate. Still open: the mod slots
+      (`HasModCount`/`ModdedConvertCountMultiplier`), the `CatalystConvert`
+      pairs, and the `ActivateSound`/`RunningSound` broadcasts.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

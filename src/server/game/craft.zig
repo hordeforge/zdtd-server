@@ -1122,13 +1122,37 @@ pub fn tickCollectors(self: *Game) void {
         const item = self.items.byName(row.output_item) orelse continue;
         const type_id: i32 = item.id;
         if (type_id == 0) continue;
+        // `getCurrentConvertCount` (IL=52): the batch starts at the catalyst
+        // count, and with `UsesCatalyst` (CatalystTypes non-empty, IL=6) and a
+        // positive `CatalystMultiplier[output]` it becomes count * multiplier;
+        // otherwise one. A `CatalystRequirements[output]` the slots do not meet
+        // leaves the raw catalyst count, so a required catalyst is a gate.
+        const catalyst_count = collectorCatalystCount(self, c, def.collector_catalyst_types);
+        const req: u16 = @intCast(@max(assets_blocks.collectorTableValue(def.collector_catalyst_requirements, row.name) orelse 0, 0));
+        var convert_count: u16 = catalyst_count;
+        if (catalyst_count >= req) {
+            const mult = assets_blocks.collectorTableValue(def.collector_catalyst_multiplier, row.name) orelse 1;
+            if (def.collector_catalyst_types.len > 0 and mult > 0) {
+                convert_count = catalyst_count * @as(u16, @intCast(mult));
+            } else {
+                convert_count = 1;
+            }
+        }
+        const out_count: u16 = @intFromFloat(@max(@as(f32, @floatFromInt(@max(convert_count, 1))) * out_scale, 1));
+        if (convert_count == 0) {
+            // Required catalyst missing: stock's convert count is 0, so the
+            // budget still runs but nothing is produced.
+            c.fill_left -= elapsed;
+            if (c.fill_left <= 0) c.fill_left = c.drawFillTime(row.min_convert_time, row.max_convert_time);
+            continue;
+        }
         c.fill_left -= elapsed;
         if (c.fill_left > 0) continue;
         var guard: u32 = 0;
         while (c.fill_left <= 0 and guard < 8) : (guard += 1) {
             const slot = c.firstFree() orelse break;
             slot.type_id = type_id;
-            slot.count = @intFromFloat(@max(out_scale, 1));
+            slot.count = out_count;
             slot.quality = 0;
             c.dirty = true;
             if (fuel_cost > 0) collectorBurnFuel(self, c, fuel_items, fuel_cost);
@@ -1136,6 +1160,19 @@ pub fn tickCollectors(self: *Game) void {
             if (c.fill_left <= 0) c.fill_left = 1;
         }
     }
+}
+
+/// `TileEntityCollector.getCatalystCount` (IL=57): non-empty catalyst slots
+/// whose item the block's `CatalystTypes` names. Catalysts are a requirement,
+/// not fuel: nothing drains them.
+fn collectorCatalystCount(self: *Game, c: *const collectors_mod.Collector, types_csv: []const u8) u16 {
+    var n: u16 = 0;
+    for (c.catalyst) |sl| {
+        if (sl.type_id == 0 or sl.count == 0) continue;
+        const item = self.items.byId(@intCast(sl.type_id)) orelse continue;
+        if (assets_blocks.collectorCatalystAccepts(types_csv, item.name)) n += 1;
+    }
+    return n;
 }
 
 /// `BlockCollector.getFuelCount` (IL=30): how many units of a fuel class the
