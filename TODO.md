@@ -342,6 +342,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       is what `Director.damageScale` documents. Recording it so the audit does
       not re-open it. Option 17 (`IncomingDamage`, the AI-to-player leg) IS
       server-side and already has its sandbox override.
+- [x] **`PersistentPlayerProfiles` had no surface** - closed 2026-09-28: the
+      pref parses (default true) and the server now remembers each player's
+      character profile in the sibling store `{world_dir}/profiles.zpf`, keyed
+      on the platform identity, reusing it at spawn instead of the profile the
+      client presents (`GameManager::GetEntityCreationData` IL_02DA-02FF). With
+      the pref off the presented profile wins and nothing is stored; a client
+      with no platform identity never keys a record.
 - [x] **`HideCommandExecutionLog` had no surface** - closed 2026-09-28: the
       level parses (0..3, stock-clamped) and gates both audit sites by sender
       (`commandLogVisible`: remote client at 2, operator console at 1).
@@ -353,9 +360,9 @@ nothing here is already waived. The four gaps the same audit closed are in
       docs decision, not code), `ServerMaxWorldTransferSpeedKiBs` (a byte-rate
       cap on the join stream; the enter bundle paces per chunk already, so this
       is a token bucket over those bytes), `PersistentPlayerProfiles` (needs a
-      server-side profile store; the stock client re-sends its profile each
-      join, so today true and false behave the same), `SaveDataLimit` (a cap on
-      the save directory; needs the refusal semantics from the save path).
+      `SaveDataLimit` (a cap on the save directory; `SaveDataLimit.il.txt`
+      converts the pref to bytes with a 20 MiB floor the RegionFileManager
+      applies, but nothing in zdtd's own store maps onto that eviction).
 - [x] **Disconnect `EntityRemove` reason** - closed 2026-09-28: the drop path
       sends `Unloaded(1)`, the value stock's `ConnectionManager.DisconnectClient`
       passes (`ldc.i4.1` at IL_01C1-01C8). The companion item, the disconnect

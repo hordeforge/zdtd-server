@@ -132,6 +132,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `ServerDescription` | empty | string | GSI server-browser description (GameInfoString 3); empty = client default |
 | `ServerWebsiteURL` | empty | string | GSI server-browser website (GameInfoString 4); empty = client default |
 | `HideCommandExecutionLog` | 0 | 0..3 | GamePref 153, a LEVEL not a bool: `SdtdConsole::Execute` logs `Executing command` below the sender's threshold - 0 logs everything, 1 hides an operator console connection's commands, 2 also hides a remote client's, 3 also hides the local game's (which a dedicated server never runs). zdtd logs its sanitized verb, never the raw line, so a client cannot forge audit entries |
+| `PersistentPlayerProfiles` | true | bool | GamePref 110: the server keeps each player's character profile in `{world_dir}/profiles.zpf` (keyed on the platform identity) and reuses it at spawn instead of the profile the client presents (`GameManager::GetEntityCreationData` IL_02DA-02FF). False takes the presented profile every join and stores nothing; a client with no platform identity never keys a record |
 | `ServerLoginConfirmationText` | empty | string | GSI confirmation line (GameInfoString 11) the browser shows beside the join dialog; empty omits the key |
 | `ServerVisibility` | 0 | 0..2 | GSI `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public, 1 friends-only, 2 hidden |
 | `Region` | empty | string | GSI server-browser region; empty = client default |

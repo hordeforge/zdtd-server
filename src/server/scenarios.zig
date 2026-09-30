@@ -53,6 +53,8 @@ const assets_gameevents = @import("../assets/gameevents.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const c2s_misc = @import("c2s/misc.zig");
 const platform_user = packages.platform_user;
+const wire_binary = @import("../wire/binary.zig");
+const stock_entity = @import("../wire/stock_entity.zig");
 const ally_mod = @import("ally.zig");
 const evidence_mod = @import("evidence.zig");
 const powerblocks_mod = @import("../ecs/powerblocks.zig");
@@ -20043,4 +20045,85 @@ test "scenario a mine walks its fuse then detonates" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(mx + 1, my, mz));
     try std.testing.expect(g.sim.health[ps].hp < hp_before);
     std.debug.print("PASS mine: walk trigger, fuse, detonation\n", .{});
+}
+
+test "scenario PersistentPlayerProfiles reuses the saved character" {
+    // GamePref 110 (default true): stock keeps the profile on the saved
+    // EntityCreationData and reuses it instead of the one the client presents
+    // at spawn (GameManager::GetEntityCreationData IL_02DA-02FF); false takes
+    // the presented one every time.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    var prng = std.Random.DefaultPrng.init(7);
+    const rand = prng.random();
+    const saved = profileFor(&rand, "BaseFemale", false);
+    const other = profileFor(&rand, "BaseMale", true);
+
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    try std.testing.expect(g.persistent_player_profiles);
+    const id: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000042" };
+    g.profiles.put(id, saved);
+
+    // First spawn: the stored profile wins over the presented one.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].puid_primary.set(id) catch return error.TestUnexpectedResult;
+    var body: [256]u8 = undefined;
+    const b = try spawnBody(&body, other);
+    var fb: [512]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", b));
+    try std.testing.expect(g.clients[c.slot].profile_ok);
+    try std.testing.expectEqualStrings("BaseFemale", g.clients[c.slot].profile.view().archetype);
+    try std.testing.expect(!g.clients[c.slot].profile.view().is_male);
+
+    // A client whose identity has no record stores what it presents.
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    const id2: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000043" };
+    g.clients[c2.slot].puid_primary.set(id2) catch return error.TestUnexpectedResult;
+    const b2 = try spawnBody(&body, other);
+    try g.injectFramed(c2, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", b2));
+    try std.testing.expectEqualStrings("BaseMale", g.clients[c2.slot].profile.view().archetype);
+    try std.testing.expectEqualStrings("BaseMale", g.profiles.get(id2).?.view().archetype);
+
+    // With the pref off the presented profile wins and nothing is remembered.
+    g.persistent_player_profiles = false;
+    var cap3: ln_peer.Capture = .{};
+    const c3 = try g.attachJoinedClient(&cap3);
+    g.clients[c3.slot].puid_primary.set(id) catch return error.TestUnexpectedResult;
+    const b3 = try spawnBody(&body, other);
+    try g.injectFramed(c3, try packages.framed(&fb, "NetPackageRequestToSpawnPlayer", b3));
+    try std.testing.expectEqualStrings("BaseMale", g.clients[c3.slot].profile.view().archetype);
+    std.debug.print("PASS persistent-profiles: stored wins, off takes the presented one\n", .{});
+}
+
+/// `NetPackageRequestToSpawnPlayer`: chunkViewDim i16 then the profile.
+fn spawnBody(buf: []u8, p: stock_entity.OwnedProfile) ![]u8 {
+    var w = wire_binary.Writer{ .buf = buf };
+    try w.writeI16(8);
+    try stock_entity.writePlayerProfile(&w, p.view());
+    return w.written();
+}
+
+/// A profile with a valid archetype/race/eye colour for the spawn body.
+fn profileFor(rand: *const std.Random, archetype: []const u8, male: bool) stock_entity.OwnedProfile {
+    _ = rand;
+    var p: stock_entity.OwnedProfile = .{};
+    @memcpy(p.archetype[0..archetype.len], archetype);
+    p.archetype_len = @intCast(archetype.len);
+    p.is_male = male;
+    const race = "White";
+    @memcpy(p.race_name[0..race.len], race);
+    p.race_name_len = @intCast(race.len);
+    p.variant_number = 1;
+    const eye = "Blue01";
+    @memcpy(p.eye_color[0..eye.len], eye);
+    p.eye_color_len = @intCast(eye.len);
+    return p;
 }

@@ -81,6 +81,11 @@ pub const Config = struct {
     /// `hide < 2` for a remote client (`IL_00C1-0122`), `hide < 3` for the
     /// local game. zdtd logs the sanitized verb instead of the raw line.
     hide_command_execution_log: u8 = 0,
+    /// Stock `PersistentPlayerProfiles` (GamePref 110, default true): the server
+    /// remembers each player's character profile in the save and reuses it
+    /// instead of the one the client presents at spawn
+    /// (`GameManager::GetEntityCreationData` IL_02DA-02FF).
+    persistent_player_profiles: bool = true,
     /// `ServerVisibility` (GameInfoInt 43, GamePrefs 169): 0 public,
     /// 1 friends-only, 2 hidden.
     server_visibility: u8 = 0,
@@ -245,6 +250,7 @@ pub const known_serverconfig_names = [_][]const u8{
     "AdminPort",
     "TelnetEnabled",
     "HideCommandExecutionLog",
+    "PersistentPlayerProfiles",
     "TelnetPort",
     "TelnetPassword",
     "TelnetFailedLoginLimit",
@@ -548,6 +554,13 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     // GameInfoString 11: the browser shows this next to the join dialog, and
     // stock copies it verbatim (server-browser-prefabs.md 1.1 "Identity").
     if (prop(raw, "ServerLoginConfirmationText")) |v| cfg.server_login_confirmation_text = try decodeAttr(arena, v);
+    if (prop(raw, "PersistentPlayerProfiles")) |v| {
+        if (parseXmlBool(v)) |b| {
+            cfg.persistent_player_profiles = b;
+        } else {
+            std.debug.print("zdtd: serverconfig PersistentPlayerProfiles '{s}' invalid; keeping {}\n", .{ v, cfg.persistent_player_profiles });
+        }
+    }
     if (prop(raw, "HideCommandExecutionLog")) |v| {
         if (xml.parseI32Prefix(v)) |n| {
             cfg.hide_command_execution_log = @intCast(std.math.clamp(n, 0, 3));
@@ -1079,6 +1092,7 @@ test "known_serverconfig_names covers every applied prop key" {
         "AdminPort",
         "TelnetEnabled",
         "HideCommandExecutionLog",
+        "PersistentPlayerProfiles",
         "TelnetPort",
         "TelnetPassword",
         "TelnetFailedLoginLimit",

@@ -49,7 +49,25 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
         // appearance and everyone nearby sees it too; a malformed or absent
         // profile keeps the previous/default one instead of failing the spawn.
         if (packages.parseRequestToSpawnProfile(body)) |prof| {
-            c.profile = prof;
+            // GamePref 110 `PersistentPlayerProfiles` (default true): stock
+            // reuses the profile saved on the player's EntityCreationData
+            // instead of the one the client presents, and takes the incoming
+            // one only when the pref is off or nothing was saved
+            // (`GameManager::GetEntityCreationData` IL_02DA-02FF). The key is
+            // the client's platform identity, the same one PersistentPlayerData
+            // uses; a client without one (EAC off, loadgen bots) always takes
+            // its own profile and stores nothing.
+            const key = c.puid_primary.get();
+            if (self.persistent_player_profiles) {
+                if (self.profiles.get(key)) |stored| {
+                    c.profile = stored.*;
+                } else {
+                    c.profile = prof;
+                    self.profiles.put(key, prof);
+                }
+            } else {
+                c.profile = prof;
+            }
             c.profile_ok = true;
         } else |_| {}
         const surf = self.spawnSurface(sp.x, sp.z);

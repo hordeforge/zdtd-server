@@ -278,6 +278,8 @@ pub const InitOptions = struct {
     server_login_confirmation_text: []const u8 = "",
     /// See `Game.hide_command_execution_log`.
     hide_command_execution_log: u8 = 0,
+    /// See `Game.persistent_player_profiles`.
+    persistent_player_profiles: bool = true,
     server_visibility: u8 = 0,
     admin_port: u16 = 0,
     /// TelnetPassword. Empty keeps the console on loopback with no login prompt;

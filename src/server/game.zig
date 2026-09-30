@@ -31,6 +31,7 @@ const game_trader = @import("game/trader.zig");
 const game_stability = @import("game/stability.zig");
 const game_replicate = @import("game/replicate.zig");
 const game_replicate_te = @import("game/replicate_te.zig");
+const profiles_mod = @import("profiles.zig");
 const game_sleeper = @import("game/sleeper.zig");
 const game_hooks = @import("game/hooks.zig");
 const game_deco = @import("game/deco.zig");
@@ -507,6 +508,15 @@ pub const Game = struct {
     /// IL_00C1-0122): 0 logs every executed command, 1 hides operator-console
     /// commands, 2 also hides remote-client ones, 3 hides all but nothing else.
     hide_command_execution_log: u8 = 0,
+    /// Stock `PersistentPlayerProfiles` (GamePref 110): when true the server
+    /// keeps each player's character profile in the save and reuses it instead
+    /// of the profile the client presents at spawn
+    /// (`GameManager::GetEntityCreationData` IL_02DA-02FF). False takes the
+    /// client's profile every time and stores nothing.
+    persistent_player_profiles: bool = true,
+    /// Remembered profiles, keyed on the client's platform identity. Sibling
+    /// store `{world_dir}/profiles.zpf`; see `server/profiles.zig`.
+    profiles: profiles_mod.Store = .{},
     /// Scheduled block ticks (`WorldBlockTicker`): a fixed ring drained once a
     /// tick by `block_ticker.tick`. See that module.
     block_tick_q: [block_ticker.tick_queue_cap]block_ticker.ScheduledTick = undefined,
@@ -700,6 +710,7 @@ pub const Game = struct {
             .server_max_view_distance = opts.server_max_view_distance,
             .server_login_confirmation_text = opts.server_login_confirmation_text,
             .hide_command_execution_log = opts.hide_command_execution_log,
+            .persistent_player_profiles = opts.persistent_player_profiles,
             .server_visibility = opts.server_visibility,
             .effective_config = opts.effective_config,
             .max_players = max_pl,
@@ -1048,6 +1059,13 @@ pub const Game = struct {
                 return e;
             }
         }
+        // Remembered character profiles survive restart (profiles.zpf).
+        self.profiles.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load profiles", e);
+                return e;
+            }
+        };
         // Ally relationships survive restart (allies.zal).
         self.allies.load(self.world.world_dir, self.allocator) catch |e| {
             if (e != error.OpenFailed) {
