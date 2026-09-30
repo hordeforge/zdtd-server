@@ -103,6 +103,7 @@ fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
 /// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
 fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void {
     cid.hash = def.hash;
+    cid.stomps_spikes = def.stomps_spikes;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -184,6 +185,10 @@ pub const EntityClass = struct {
     kind: Kind = .zombie,
     /// ECD wire class (Unity Mono GetHashCode). 0 = stock zombieBoe default at encode.
     hash: i32 = 0,
+    /// entityclasses `StompsSpikes`: the entity crushes Spike-tagged blocks
+    /// instead of taking their contact damage (`EntityAlive.CalculateBlockDamage`
+    /// IL=17 returns 999 with bypass).
+    stomps_spikes: bool = false,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

@@ -110,6 +110,8 @@ pub const ClassId = struct {
     id: u16 = 0,
     /// Unity Mono name hash for ECD EntitySpawn (0 = use table/default).
     hash: i32 = 0,
+    /// entityclasses `StompsSpikes` (see `world.EntityClass`).
+    stomps_spikes: bool = false,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

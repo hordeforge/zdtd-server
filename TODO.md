@@ -353,6 +353,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       so a burning campfire or forge hurts whoever stands on it. The feet probe
       now applies the list through `addCatalogBuff` with a per-entity cell latch,
       so the buff lands on the step and re-applies after stepping off and back.
+- [x] **Stompers bled on spikes like everything else** - closed 2026-09-28:
+      `EntityAlive.CalculateBlockDamage` (IL=17) gives an entity with the
+      entityclasses `StompsSpikes` property 999 block damage against a
+      BlockTags.Spike block with `bypass` set, instead of the block's contact
+      damage, so a stomper crushes wooden spikes rather than walking through
+      them wounded. zdtd parsed neither the property nor the tag: it now keeps
+      `EntityDef.stomps_spikes` on the class table (and the per-entity `ClassId`)
+      and the collision pass crushes a straddled Spike block for 999 when the
+      flag is set. Gated by `scenario a stomping entity crushes spikes instead of
+      taking them` (decisive: dropping the leg wounds the stomper for the trap's
+      20). Residual: stock's `bypass` flag has no consumer here, because zdtd has
+      no block-damage resistance path for it to skip.
 - [x] **No collision or hazard block damage** - closed 2026-09-28 for the
       visible half: `server/game/hazard.zig` runs the `BlockDamage` collision
       pass once a tick (feet cell → `Damage` once per contact via a per-slot

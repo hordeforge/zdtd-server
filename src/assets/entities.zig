@@ -41,6 +41,8 @@ pub const EntityDef = struct {
     /// parent's property map. Read by `EntityTagCompare` (requirements.zig) and
     /// by `inferKind` below.
     tags: []const u8 = "",
+    /// entityclasses `StompsSpikes` (`EntityClass.PropStompsSpikes`).
+    stomps_spikes: bool = false,
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude

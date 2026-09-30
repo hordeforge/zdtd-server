@@ -21284,3 +21284,87 @@ test "scenario a running collector broadcasts its loop and stops it" {
     try std.testing.expect(!gone.play);
     std.debug.print("PASS collector-sound: the loop starts, stops and dies with the block\n", .{});
 }
+
+test "scenario a stomping entity crushes spikes instead of taking them" {
+    // `EntityAlive.CalculateBlockDamage` (IL=17): with `stompsSpikes` set and a
+    // block carrying the Spike tag the entity deals 999 block damage with
+    // `bypass` and takes no contact damage; otherwise the default path runs.
+    // The trap is given more health than 999 so the two legs are distinguishable:
+    // the stomper leaves a damaged trap and no wound, the walker is wounded and
+    // the collision leg consumes the cell.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "spikeTrap")) return 1737;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_spike.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="spikeTrap">
+        \\  <property name="Class" value="Spikes" />
+        \\  <property name="Tags" value="spike" />
+        \\  <property name="Damage" value="20" />
+        \\  <property name="Material" value="Mmetal" />
+        \\  <property name="MaxDamage" value="5000" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const spike = g.blocks.byName("spikeTrap") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(assets_blocks.HazardKind.spikes, spike.hazard);
+    try std.testing.expectEqual(@as(i32, 20), spike.hazard_damage);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 900;
+    g.sim.transform[ps].z = 900; // far off, so the player never steps on the trap
+
+    const px: i32 = 100;
+    const py: i32 = 72;
+    const pz: i32 = 100;
+    const gx: f32 = @as(f32, @floatFromInt(px)) + 0.5;
+    const gy: f32 = @floatFromInt(py);
+    const gz: f32 = @as(f32, @floatFromInt(pz)) + 0.5;
+
+    // The stomper: the trap takes 999, the entity is unharmed.
+    const stomper = g.sim.spawnZombie(gx, gy, gz, 5000).?;
+    const ss = g.sim.slotOfNetId(stomper).?;
+    g.sim.class_id[ss].stomps_spikes = true;
+    g.sim.hazard_cell[ss] = -1;
+    try g.world.setBlockWorld(px, py, pz, spike.id);
+    g.setBlockRaw(px, py, pz, spike.id);
+    const hp_before = g.sim.health[ss].hp;
+    game_hazard.collisionTick(g);
+    try std.testing.expectEqual(hp_before, g.sim.health[ss].hp);
+    // 999 against 5000 leaves the trap standing but damaged, and the collision
+    // leg did not run.
+    try std.testing.expectEqual(@as(u16, spike.id), try g.world.blockWorld(px, py, pz));
+
+    // The control: an entity without the flag is wounded and the cell is
+    // consumed by the collision leg.
+    g.sim.class_id[ss].stomps_spikes = false;
+    g.sim.hazard_cell[ss] = -1;
+    try g.world.setBlockWorld(px, py, pz, spike.id);
+    g.setBlockRaw(px, py, pz, spike.id);
+    const hp2 = g.sim.health[ss].hp;
+    game_hazard.collisionTick(g);
+    try std.testing.expect(@abs(g.sim.health[ss].hp - (hp2 - 20.0)) < 0.1);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, py, pz));
+    std.debug.print("PASS stomps-spikes: the stomper crushes the trap, the walker bleeds\n", .{});
+}

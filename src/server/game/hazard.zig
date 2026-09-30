@@ -109,11 +109,30 @@ pub fn collisionTick(self: *Game) void {
             self.sim.hazard_cell[s] = -1;
             continue;
         }
+        // `EntityAlive.CalculateBlockDamage` (IL=17): an entity with
+        // `StompsSpikes` does not take spike contact damage, it crushes the
+        // block with 999 damage and `bypass` set. BlockTags.Spike is tag 6, so
+        // the check is the block's `BlockTag` field.
+        if (self.sim.class_id[s].stomps_spikes and def.?.hazard == .spikes and block_tag_spike(def.?)) {
+            if (self.sim.hazard_cell[s] == key) continue;
+            self.sim.hazard_cell[s] = key;
+            _ = self.addBlockDamage(x, y, z, 999) catch {};
+            continue;
+        }
         if (self.sim.hazard_cell[s] == key) continue; // already hit this contact
         self.sim.hazard_cell[s] = key;
         _ = self.sim.damageFrom(self.sim.network_id[s].id, @floatFromInt(def.?.hazard_damage), -1);
         applyBlockLeg(self, x, y, z, id, def.?);
     }
+}
+
+/// `Block.HasTag(BlockTags.Spike)`: the block's `BlockTag` field names the
+/// Spike tag (`spikes` in stock blocks.xml).
+fn block_tag_spike(def: assets_blocks.BlockDef) bool {
+    // The block's `Tags` string carries the FastTags set (BlockTags.Spike is
+    // tag 6 in the enum the RE lists); a `BlockSpikes` class always qualifies.
+    if (std.ascii.indexOfIgnoreCase(def.tags, "spike") != null) return true;
+    return def.hazard == .spikes;
 }
 
 /// The block's own leg after the collision damage, mirroring
