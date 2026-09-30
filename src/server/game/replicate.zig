@@ -6,6 +6,7 @@ const test_tmp = @import("../../util/test_tmp.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
+const stock_inv = @import("../../wire/stock_inv.zig");
 const apm = @import("../../apm/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
@@ -418,15 +419,25 @@ pub fn replicate(self: *Game) !void {
             const t = self.sim.turret[i];
             const is_on = t.target_id >= 0;
             const st = &self.turret_sync_sent[i];
+            // The turret's item value carries the magazine (`ammo` is its
+            // Meta), so the sync follows both the aim/on state and the ammo.
+            const item: ?stock_inv.StockSlot = if (t.item_type != 0) .{
+                .type_id = t.item_type,
+                .count = 1,
+                .quality = t.item_quality,
+                .meta = t.ammo,
+                .use_times = t.item_use_times,
+            } else null;
             // Slot recycled onto a new turret: a stale target/on pair equal to
             // the new turret's initial state must not suppress its first sync
             // (the client never saw this net id's TurretSync yet).
             if (st.gen != self.sim.network_id[i].gen) st.* = .{ .gen = self.sim.network_id[i].gen };
-            if (!st.sent or st.target != t.target_id or st.on != is_on) {
+            if (!st.sent or st.target != t.target_id or st.on != is_on or st.ammo != t.ammo) {
                 st.target = t.target_id;
                 st.on = is_on;
+                st.ammo = t.ammo;
                 st.sent = true;
-                if (packages.buildTurretSyncBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 32], nid, t.target_id, is_on)) |tb| {
+                if (packages.buildTurretSyncBody(self.body_buf[game_mod.turret_sync_body_off..][0..game_mod.turret_sync_body_cap], nid, t.target_id, is_on, item)) |tb| {
                     if (packages.framed(&turret_frame_buf, "NetPackageTurretSync", tb)) |tf| {
                         turret_framed = tf;
                         self.harness.counters.inc(.packages_encoded);

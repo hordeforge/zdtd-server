@@ -730,6 +730,12 @@ pub const Turret = struct {
     fire_cd: f32 = 0,
     fire_interval: f32 = 0.4,
     ammo: u16 = 200,
+    /// The item the placer deployed (0 = none): TurretSync carries it back with
+    /// `ammo` as the item's Meta, which is where a deployed turret's magazine
+    /// lives (`EntityTurret.get_AmmoCount` = `OriginalItemValue.Meta`).
+    item_type: i32 = 0,
+    item_quality: u16 = 0,
+    item_use_times: f32 = 0,
     target_id: i32 = -1,
     power_node: u16 = 0,
     /// Client slot that placed the turret; -1 = unowned (demo). Trap kills

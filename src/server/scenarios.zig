@@ -20127,3 +20127,83 @@ fn profileFor(rand: *const std.Random, archetype: []const u8, male: bool) stock_
     p.eye_color_len = @intCast(eye.len);
     return p;
 }
+
+test "scenario a deployed turret takes its magazine from the item value" {
+    // `EntityTurret.get_AmmoCount`/`set_AmmoCount` read and write
+    // `OriginalItemValue.Meta`, exactly like a gun's magazine
+    // (vehicles-drones-turrets.md:1096-1098), so the magazine a turret fires is
+    // the one the placer's item carried. zdtd seeded it from the autoTurret
+    // block's `BurstRoundCount` (rounds PER BURST), which left a deployed turret
+    // inert after a few shots.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    const spawnTurretAt = struct {
+        fn call(game: *game_mod.Game, cl: *game_mod.Client, slot: usize, meta: ?u16) !?i32 {
+            const p = game.sim.transform[game.sim.playerByPeer(slot).?];
+            var sb: [96]u8 = @splat(0);
+            var w: binary.Writer = .{ .buf = &sb };
+            try w.writeI32(1); // entityType
+            try w.writeF32(p.x + 1); // pos
+            try w.writeF32(p.y);
+            try w.writeF32(p.z + 1);
+            try w.writeF32(0); // rot
+            try w.writeF32(0);
+            try w.writeF32(0);
+            if (meta) |m| {
+                try packages.stock_inv.writeItemValue(&w, .{ .type_id = 1000, .count = 1, .quality = 1, .meta = m });
+            } else {
+                try w.writeByte(0); // ItemValue.None
+            }
+            try w.writeI32(cl.entity_id); // entityThatPlaced
+            const before = game.sim.countKind(.turret);
+            var fb: [160]u8 = undefined;
+            try game.injectFramed(cl, try packages.framed(&fb, "NetPackageTurretSpawn", w.written()));
+            if (game.sim.countKind(.turret) != before + 1) return null;
+            // The newest turret slot.
+            var found: ?usize = null;
+            for (game.sim.kind_groups.slice(.turret)) |s| {
+                if (game.sim.alive[s]) found = s;
+            }
+            return if (found) |s| @intCast(s) else null;
+        }
+    };
+
+    // A loaded 12-round magazine.
+    const loaded = (try spawnTurretAt.call(g, c, c.slot, 12)) orelse return error.TestUnexpectedResult;
+    const lt = g.sim.turret[@intCast(loaded)];
+    try std.testing.expectEqual(@as(u16, 12), lt.ammo);
+    // The deployed item identity is kept too, so TurretSync can carry the
+    // magazine back to the client (its Meta is the ammo count).
+    try std.testing.expectEqual(@as(i32, 1000), lt.item_type);
+    var yb: [96]u8 = undefined;
+    const sync = try packages.buildTurretSyncBody(&yb, 300, -1, true, .{
+        .type_id = lt.item_type,
+        .count = 1,
+        .quality = lt.item_quality,
+        .meta = lt.ammo,
+        .use_times = lt.item_use_times,
+    });
+    var sr = binary.Reader{ .data = sync, .pos = 9 };
+    const seen = try packages.stock_inv.readItemValue(&sr);
+    try std.testing.expectEqual(@as(i32, 1000), seen.type_id);
+    try std.testing.expectEqual(@as(u16, 12), seen.meta);
+    // A real item with an empty magazine is honoured as empty, not backfilled.
+    const empty = (try spawnTurretAt.call(g, c, c.slot, 0)) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, 0), g.sim.turret[@intCast(empty)].ammo);
+    // ItemValue.None carries no item, so the block-derived default stands.
+    const none = (try spawnTurretAt.call(g, c, c.slot, null)) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.turret[@intCast(none)].ammo > 0);
+    _ = ps;
+    std.debug.print("PASS turret-magazine: item meta is the magazine\n", .{});
+}

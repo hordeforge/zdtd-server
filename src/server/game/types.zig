@@ -216,6 +216,13 @@ pub const speeds_body_off: usize = 64;
 /// AliveFlags body offset (after speeds).
 pub const flags_body_off: usize = 96;
 
+/// TurretSync body offset, past the speeds and flags bodies so a sync built
+/// later in the spread loop cannot clobber the flags frame the loop still
+/// holds. The body carries an ItemValue when the deployed turret has an item,
+/// so it needs more room than the flag bodies.
+pub const turret_sync_body_off: usize = 192;
+pub const turret_sync_body_cap: usize = 96;
+
 pub const LandClaim = struct {
     x: i32,
     y: i32,
@@ -883,6 +890,10 @@ pub const AttackTargetSent = struct {
 pub const TurretSyncSent = struct {
     target: i32 = -1,
     on: bool = false,
+    /// Magazine last sent for this turret, so a shot re-syncs the client's
+    /// turret UI (stock's TurretSync carries the item value, whose Meta is the
+    /// ammo count).
+    ammo: u16 = 0,
     sent: bool = false,
     gen: u32 = 0,
 };

@@ -9,6 +9,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const relayBodyExcept = @import("misc_relay.zig").relayBodyExcept;
+const binary = @import("../../wire/binary.zig");
 
 /// True when `name` is a turret package and was handled.
 pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -105,7 +106,26 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         // Client-chosen coordinates: same reach + claim gate as SetBlock, so a
         // spam loop cannot plant turrets map-wide and drain the entity table.
         if (!self.placeAllowed(c, x, y, z)) return true;
-        if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
+        // The deployed turret's magazine rides its item value's Meta
+        // (`EntityTurret.get_AmmoCount` = `OriginalItemValue.Meta`, like a gun's
+        // magazine; vehicles-drones-turrets.md:1096-1098). The item value sits
+        // after `entityType i32 | pos f32x3 | rot f32x3` and is variable length,
+        // so a body too short to hold it keeps the block-derived default.
+        var magazine: ?u16 = null;
+        var deploy_item: ?packages.stock_inv.StockSlot = null;
+        if (stock and body.len > 28) {
+            var ir: binary.Reader = .{ .data = body[28..] };
+            if (packages.stock_inv.readItemValue(&ir)) |iv| {
+                // `ItemValue.None` (a zero version byte) carries no item: the
+                // default chain stands. A real item's meta is the magazine,
+                // and meta 0 is a genuinely empty one.
+                if (iv.type_id != 0) {
+                    magazine = iv.meta;
+                    deploy_item = iv;
+                }
+            } else |_| {}
+        }
+        if (self.sim.spawnTurretEx(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z), magazine)) |tid| {
             // Stock sends the new counts from the turret tracker when a turret
             // is added (`TurretTracker` IL_002D), next to the vehicle count.
             self.broadcastVehicleCount();
@@ -118,6 +138,14 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                     self.sim.class_id[ts].hash = ch;
                 }
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
+                // Keep the deployed item identity: TurretSync carries it back
+                // with `ammo` as its Meta, which is what the client's turret UI
+                // reads the magazine from (`EntityTurret.get_AmmoCount`).
+                if (deploy_item) |iv| {
+                    self.sim.turret[ts].item_type = iv.type_id;
+                    self.sim.turret[ts].item_quality = iv.quality;
+                    self.sim.turret[ts].item_use_times = iv.use_times;
+                }
                 // The slot dies with the session; the name is what lets a
                 // restart hand the turret back to whoever placed it.
                 self.sim.turret[ts].setOwnerName(c.name[0..c.name_len]);

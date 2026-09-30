@@ -157,11 +157,24 @@ nothing here is already waived. The four gaps the same audit closed are in
 - [x] **Blood moon does not suspend biome enemy spawning** - closed
       2026-09-28: the night drip is gated on `!bloodmoon_active`
       (`src/ecs/aidirector.zig:598`) and `bloodmoon_horde_drip_cd` is gone.
-- [ ] **Auto turret ammo never refills** - stock `DecrementAmmo` returns to
-      Armed on reload (tile-entities-power.md:1102-1117); `src/ecs/world.zig:1808`
-      seeds the lifetime counter from blocks.xml `BurstRoundCount` (rounds per
-      burst, not a magazine) and `src/ecs/turrets.zig:46` gates at 0 with no
-      refill path. A placed turret is inert after about 2.3 s.
+- [x] **Deployed turret ammo came from the wrong field** - closed 2026-09-28:
+      `EntityTurret.get_AmmoCount`/`set_AmmoCount` read and write
+      `OriginalItemValue.Meta`, exactly like a gun's magazine
+      (vehicles-drones-turrets.md:1096-1098), so the magazine a deployed turret
+      fires is the one the placer's item carried. zdtd seeded it from the
+      autoTurret block's `BurstRoundCount` (rounds PER BURST), which left a
+      deployed turret inert after a few shots. The turret spawn now parses the
+      body's `ItemValue` (`entityType | pos | rot | ItemValue |
+      entityThatPlaced`), uses its Meta as the magazine (a real item with meta 0
+      is an empty magazine; `ItemValue.None` keeps the block-derived floor) and
+      keeps the item identity, which `NetPackageTurretSync` now carries back with
+      `ammo` as the item's Meta so the client's turret UI shows the rounds
+      (and re-syncs when a shot changes them). Still open from the same RE: the
+      turret's health is `max(1, MaxUseTimes - UseTimes)` and every shot applies
+      `UseTimes` degradation, which zdtd does not model, and the deployed
+      turret's only reload is redeploying a loaded item (stock's powered
+      `TileEntityPoweredRangedTrap` stacks, tile-entities-power.md:1102-1117,
+      are a different block that zdtd does not place).
 - [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
       runs `sensing.rayClear` between the turret and each nearer candidate
       (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a

@@ -203,6 +203,8 @@ pub const default_max_players = game_types.default_max_players;
 pub const replicate_frame_cap = game_types.replicate_frame_cap;
 pub const speeds_body_off = game_types.speeds_body_off;
 pub const flags_body_off = game_types.flags_body_off;
+pub const turret_sync_body_off = game_types.turret_sync_body_off;
+pub const turret_sync_body_cap = game_types.turret_sync_body_cap;
 
 pub const LandClaim = game_types.LandClaim;
 pub const Client = game_types.Client;
