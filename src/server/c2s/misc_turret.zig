@@ -140,6 +140,7 @@ pub fn handleTurret(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             .item_quality = if (deploy_item) |iv| iv.quality else 0,
             .item_use_times = if (deploy_item) |iv| iv.use_times else 0,
             .item_max_use = max_use,
+            .yaw = stock_yaw,
         })) |tid| {
             // Stock sends the new counts from the turret tracker when a turret
             // is added (`TurretTracker` IL_002D), next to the vehicle count.

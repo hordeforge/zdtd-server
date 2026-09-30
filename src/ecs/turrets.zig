@@ -132,6 +132,35 @@ const TurretCtx = struct {
                 continue;
             };
             t.asleep_left = 0;
+            // `trackTarget` cone (IL=121, the gate `canHitEntity` runs): the
+            // bearing to the target must sit inside the mount's arc measured
+            // from `CenteredYaw`/`CenteredPitch`, so a target behind the turret
+            // is never hittable. A target it cannot bear on accumulates
+            // `OvershootTime` and is then dropped (Update IL_03D2-0412).
+            if (t.yaw_range_half > 0 or t.pitch_range_half > 0) {
+                const tgx = ctx.w.transform[zi].x;
+                const tgy = ctx.w.transform[zi].y + turret_sight_height;
+                const tgz = ctx.w.transform[zi].z;
+                const want_yaw = std.math.atan2(tgx - tx, tgz - tz) * (180.0 / std.math.pi);
+                const yaw_delta = wrap180(want_yaw - t.base_yaw);
+                const horiz = @sqrt((tgx - tx) * (tgx - tx) + (tgz - tz) * (tgz - tz));
+                const want_pitch = std.math.atan2(tgy - ty, @max(horiz, 0.001)) * (180.0 / std.math.pi);
+                const pitch_delta = want_pitch - t.base_pitch;
+                const in_cone = (t.yaw_range_half <= 0 or @abs(yaw_delta) <= t.yaw_range_half) and
+                    (t.pitch_range_half <= 0 or @abs(pitch_delta) <= t.pitch_range_half);
+                if (!in_cone) {
+                    t.target_id = -1;
+                    t.overshoot_left += ctx.dt;
+                    if (t.overshoot_left >= t.overshoot_time) {
+                        t.overshoot_left = 0;
+                        t.state = .asleep;
+                        t.wake_time = 0;
+                        t.burst_count = 0;
+                    }
+                    continue;
+                }
+                t.overshoot_left = 0;
+            }
             const dx = ctx.w.transform[zi].x - tx;
             const dz = ctx.w.transform[zi].z - tz;
             ctx.w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
@@ -168,6 +197,14 @@ const TurretCtx = struct {
         }
     }
 };
+
+/// Wrap an angle difference into [-180, 180], the `DeltaAngle` shape the aim
+/// gate compares against the mount's arc.
+fn wrap180(deg: f32) f32 {
+    var d = @mod(deg + 180.0, 360.0);
+    if (d < 0) d += 360.0;
+    return d - 180.0;
+}
 
 pub fn recordTurretOwner(value: *u32, turret_slot: Slot, owner_slot: i16) void {
     // Parallel execution has no meaningful wall-clock "last" worker. Match

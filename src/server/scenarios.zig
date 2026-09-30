@@ -20463,3 +20463,60 @@ test "scenario a turret wakes up, bursts, then overheats" {
     try std.testing.expect(w.turret[ts].ammo < 97);
     std.debug.print("PASS turret-burst: wake-up, burst, overheat, cooldown\n", .{});
 }
+
+test "scenario a turret cannot bear on a target behind its mount" {
+    // `trackTarget` (IL=121) only succeeds inside the mount's arc:
+    // `CenteredYaw +/- yawRange` and `CenteredPitch +/- pitchRange`, where
+    // `Init` halved the block's single `YawRange` float into +/- half. A target
+    // the turret cannot bear on accumulates `OvershootTime` and is dropped
+    // (AutoTurretFireController.Update IL_03D2-0412).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.clients[cl.slot].entered = true;
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.transform[ps].x = 380;
+    g.sim.transform[ps].z = 380;
+
+    const w = &g.sim;
+    // Mounted facing +z (yaw 0), a 45 degree arc (+/-22.5). On the ground, so
+    // the pitch leg of the cone is not what the test measures.
+    const t = w.spawnTurretEx(420, w.transform[ps].y, 420, .{ .ammo = 100, .yaw = 0 }) orelse return error.TestUnexpectedResult;
+    const ts = w.slotOfNetId(t) orelse return error.TestUnexpectedResult;
+    w.turret[ts].yaw_range_half = 22.5;
+    w.turret[ts].pitch_range_half = 22.5;
+    w.turret[ts].overshoot_time = 0.2;
+    const gen = w.power.addNodeAt(.generator, 420, @intFromFloat(w.transform[ts].y), 422, 100).?;
+    try std.testing.expect(w.power.connect(gen, w.turret[ts].power_node));
+    w.power.resolve();
+    try std.testing.expect(w.power.isEntityPowered(t));
+
+    // A zombie BEHIND the mount (-z): out of the cone, so no shots, and the
+    // target is dropped after OvershootTime.
+    // Both targets sit at the turret's own height: the pitch leg of the cone is
+    // +/-22.5, so a target on a different terrace is legitimately unhittable.
+    const ty0 = w.transform[ts].y;
+    const behind = w.spawnZombie(420, ty0, 414, 5000).?;
+    var i: u32 = 0;
+    while (i < 20) : (i += 1) try g.step();
+    try std.testing.expectEqual(@as(u16, 100), w.turret[ts].ammo);
+    try std.testing.expectEqual(components_mod.TurretState.asleep, w.turret[ts].state);
+    if (w.slotOfNetId(behind)) |bs| w.destroy(bs);
+
+    // A zombie in FRONT of the mount (+z) is inside the cone and gets shot.
+    _ = w.spawnZombie(420, ty0, 426, 5000);
+    var k: u32 = 0;
+    while (k < 25 and w.turret[ts].ammo == 100) : (k += 1) {
+        try g.step();
+    }
+    try std.testing.expect(w.turret[ts].ammo < 100);
+    std.debug.print("PASS turret-cone: a target behind the mount is dropped\n", .{});
+}

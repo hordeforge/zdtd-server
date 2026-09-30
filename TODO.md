@@ -185,10 +185,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       `BurstRoundCount` shots one `BurstFireRate` apart, then `Overheated` for
       `CooldownTime` and back to Awake (`FireRate` only stands in as the shot
       interval when a block declares no burst rate), and Awake with no target
-      holds for `FallAsleepTime` before dropping to Asleep. Still open: the aim
-      cone (`YawRange`/`PitchRange` against the mounted yaw), the
-      `OvershootTime` give-up that drops a target the turret cannot bear on,
-      `FindTargetDelay`, and the wake/overheat sound broadcasts.
+      holds for `FallAsleepTime` before dropping to Asleep. The aim cone closed
+      the same day: `YawRange`/`PitchRange` are single floats `Init` halves into
+      the mount's arc (IL_01EA-01FB), the turret keeps its deploy facing, and a
+      target it cannot bear on is dropped after `OvershootTime`
+      (Update IL_03D2-0412); an undeclared range means no cone, which is the
+      offline/bot path. Still open: `FindTargetDelay`, the yaw/pitch turn rate
+      (`AutoTurretYawLerp.degreesPerSecond`), the ray/tag leg of `canHitEntity`
+      (`E_` hit-object tag) and the wake/overheat sound broadcasts.
 - [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
       runs `sensing.rayClear` between the turret and each nearer candidate
       (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a

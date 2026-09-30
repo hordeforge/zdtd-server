@@ -658,6 +658,15 @@ pub const TurretBlockStats = struct {
     /// `FallAsleepTime`: how long the turret holds Awake with no target before
     /// it drops back to Asleep.
     fall_asleep_time: f32 = 0,
+    /// `YawRange`/`PitchRange`: HALF the mount's arc. `Init` parses each as one
+    /// float, halves it and builds `Vector2(-v, +v)` (IL_01EA-01FB), so a block
+    /// declaring 45 gives the turret +/-22.5 degrees. 0 = no cone (undeclared),
+    /// which keeps the offline/bot path firing at any bearing.
+    yaw_range_half: f32 = 0,
+    pitch_range_half: f32 = 0,
+    /// `OvershootTime`: how long the turret keeps trying to bear on a target it
+    /// cannot hit before dropping it.
+    overshoot_time: f32 = 0,
 };
 
 pub const VehicleKind = enum(u8) {
@@ -767,6 +776,17 @@ pub const Turret = struct {
     fall_asleep_time: f32 = 0,
     asleep_left: f32 = 0,
     state: TurretState = .asleep,
+    /// The mount's facing at deploy time: the cone (`YawRange`/`PitchRange`) is
+    /// measured against it, so a turret cannot bear on a target behind itself.
+    base_yaw: f32 = 0,
+    base_pitch: f32 = 0,
+    yaw_range_half: f32 = 0,
+    pitch_range_half: f32 = 0,
+    /// `OvershootTime` and the timer for a target the turret cannot bear on
+    /// (`AutoTurretFireController.Update` IL_03D2-0412 drops the target at the
+    /// cap).
+    overshoot_time: f32 = 0,
+    overshoot_left: f32 = 0,
     ammo: u16 = 200,
     /// The item the placer deployed (0 = none): TurretSync carries it back with
     /// `ammo` as the item's Meta, which is where a deployed turret's magazine

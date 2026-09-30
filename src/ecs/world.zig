@@ -1843,6 +1843,10 @@ pub const World = struct {
         /// remaining uses (`EntityTurret.get_Health` IL=12 is
         /// `max(1, MaxUseTimes - UseTimes)`) and each shot degrades UseTimes.
         item_max_use: f32 = 0,
+        /// The mount's facing at deploy (the spawn body's rotation): the aim
+        /// cone is measured against it.
+        yaw: f32 = 0,
+        pitch: f32 = 0,
     };
 
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
@@ -1889,6 +1893,9 @@ pub const World = struct {
                 if (ts.wake_up_time > 0) t.wake_up_time = ts.wake_up_time;
                 if (ts.cooldown_time > 0) t.cooldown_time = ts.cooldown_time;
                 if (ts.fall_asleep_time > 0) t.fall_asleep_time = ts.fall_asleep_time;
+                t.yaw_range_half = ts.yaw_range_half;
+                t.pitch_range_half = ts.pitch_range_half;
+                if (ts.overshoot_time > 0) t.overshoot_time = ts.overshoot_time;
             }
         }
         // The deployed item wins over the block-derived defaults: its Meta is
@@ -1898,6 +1905,8 @@ pub const World = struct {
         t.item_quality = deploy.item_quality;
         t.item_use_times = deploy.item_use_times;
         t.item_max_use = deploy.item_max_use;
+        t.base_yaw = deploy.yaw;
+        t.base_pitch = deploy.pitch;
         self.turret[s] = t;
         self.power.resolve();
 

@@ -1198,6 +1198,23 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
             if (xml.parseF32(fa)) |v| ts.fall_asleep_time = v;
             try turret_stats_by_name.put(arena, kn, ts);
         }
+        // `YawRange`/`PitchRange` are single floats in blocks.xml and `Init`
+        // halves them into the +/- arc (IL_01EA-01FB).
+        if (xml.propertyValue(body, "YawRange")) |yr| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(yr)) |v| ts.yaw_range_half = v * 0.5;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "PitchRange")) |pr| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(pr)) |v| ts.pitch_range_half = v * 0.5;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "OvershootTime")) |ot| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(ot)) |v| ts.overshoot_time = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
         if (xml.propertyValue(body, "OutputPerFuel")) |opf| {
             if (xml.parseF32(opf)) |v| try power_output_per_fuel_by_name.put(arena, kn, v);
         }
@@ -1319,6 +1336,15 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (resolveTurretField("entity_damage", &turret_stats_by_name, &own_facts, nm, "EntityDamage")) |v| {
             ts.entity_damage = v;
             ts_any = true;
+        }
+        if (resolveTurretField("yaw_range_half", &turret_stats_by_name, &own_facts, nm, "YawRange")) |v| {
+            ts.yaw_range_half = v * 0.5;
+        }
+        if (resolveTurretField("pitch_range_half", &turret_stats_by_name, &own_facts, nm, "PitchRange")) |v| {
+            ts.pitch_range_half = v * 0.5;
+        }
+        if (resolveTurretField("overshoot_time", &turret_stats_by_name, &own_facts, nm, "OvershootTime")) |v| {
+            ts.overshoot_time = v;
         }
         if (resolveTurretField("cooldown_time", &turret_stats_by_name, &own_facts, nm, "CooldownTime")) |v| {
             ts.cooldown_time = v;
