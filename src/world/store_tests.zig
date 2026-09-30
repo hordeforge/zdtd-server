@@ -1120,3 +1120,36 @@ test "a budgeted save drains across calls and loses nothing" {
     // A budgeted call on a clean world reports no work.
     try std.testing.expect(!try w2.saveAllBudget(1));
 }
+
+test "a deco chunk mirrors once per world and a loaded chunk suppresses it" {
+    // The deco mirror derives decorations into the block plane. Re-deriving on
+    // a later stream resurrects a decoration the player removed (the chopped
+    // tree that came back), so each deco chunk is marked once, and a chunk that
+    // came from disk is marked too: its plane already carries what the mirror
+    // wrote plus every player edit since.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(1);
+
+    try std.testing.expect(!w.decoChunkMirrored(0, 0));
+    w.markDecoChunkMirrored(0, 0);
+    try std.testing.expect(w.decoChunkMirrored(0, 0));
+    // Neighbours and out-of-grid coordinates stay clear (the mirror then runs,
+    // which is the pre-existing behaviour rather than a silent skip).
+    try std.testing.expect(!w.decoChunkMirrored(1, 0));
+    try std.testing.expect(!w.decoChunkMirrored(-1, 0));
+    try std.testing.expect(!w.decoChunkMirrored(0, store.max_deco_grid));
+
+    // A saved-then-reloaded chunk marks its own deco chunk (regular chunk
+    // 24,40 lives in deco chunk 3,5), which starts clear.
+    try std.testing.expect(!w.decoChunkMirrored(3, 5));
+    const c = try w.getOrCreate(.{ .x = 24, .z = 40 });
+    try w.setBlockWorld(24 * 16 + 1, 10, 40 * 16 + 1, block_stone);
+    try w.saveChunk(c);
+    const after = try w.getOrCreate(.{ .x = 24, .z = 40 });
+    try w.loadChunk(after);
+    try std.testing.expect(w.decoChunkMirrored(3, 5));
+}

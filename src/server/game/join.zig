@@ -380,6 +380,10 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
     while (dcz <= dcz_end and !capped) : (dcz += 1) {
         var dcx = deco.worldToDecoChunk(window.x0);
         while (dcx <= dcx_end and !capped) : (dcx += 1) {
+            // Mirror each deco chunk ONCE per world (see
+            // `World.decoChunkMirrored`): the mirror is a derivation, and a
+            // re-derivation would resurrect a decoration the player removed.
+            const need_mirror = !self.world.decoChunkMirrored(dcx, dcz);
             // Yield per deco chunk, the same ACK-drain the spawn-area chunk
             // loop does: a burst of thousands of deco objects in one pass
             // overflows the reliable window and starves other peers.
@@ -393,8 +397,10 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
                 }
                 // Mirror before streaming: the chunk payload the client gets
                 // must already contain the blocks it is about to be told to
-                // render, or the two disagree until the next edit.
-                if (self.deco_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
+                // render, or the two disagree until the next edit. Once per
+                // deco chunk per world: a re-derivation would resurrect a
+                // decoration the player removed.
+                if (self.deco_mirror and need_mirror and self.mirrorDeco(&dim_cache, o)) mirrored += 1;
                 if (pw.full()) {
                     try self.sendGameCritical(peer, "NetPackageDecoUpdate", try pw.take());
                     self.pollNetOnce();
@@ -402,6 +408,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
                 try pw.push(o);
                 total += 1;
             }
+            if (self.deco_mirror and need_mirror) self.world.markDecoChunkMirrored(dcx, dcz);
         }
     }
     // Always send a final package, even with 0 objects: the client needs at
@@ -458,8 +465,11 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
     const n = deco.generateForDecoChunk(&chunk_objs, dcx, dcz, self.worldSeed(), window, sampler);
     var pw = try deco.PackageWriter.init(&self.body_buf, deco.zdtd_decos_per_package);
     var dim_cache: DecoDimCache = .{};
+    // Same once-per-world rule as the join burst: the stream path must not
+    // re-derive a deco chunk the mirror already wrote.
+    const need_mirror = !self.world.decoChunkMirrored(dcx, dcz);
     for (chunk_objs[0..n]) |o| {
-        if (self.deco_mirror) _ = self.mirrorDeco(&dim_cache, o);
+        if (self.deco_mirror and need_mirror) _ = self.mirrorDeco(&dim_cache, o);
         if (pw.full()) {
             try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
             self.pollNetOnce();
@@ -467,6 +477,7 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
         try pw.push(o);
     }
     try self.sendGame(peer, "NetPackageDecoUpdate", try pw.take());
+    if (self.deco_mirror and need_mirror) self.world.markDecoChunkMirrored(dcx, dcz);
     if (c.deco_sent_n < c.deco_sent.len) {
         c.deco_sent[c.deco_sent_n] = key;
         c.deco_sent_n += 1;

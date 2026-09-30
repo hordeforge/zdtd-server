@@ -229,7 +229,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       (world/blocks.md:246-249, 463-465); `src/server/c2s/blocks_setblock.zig:265-285`
       writes one cell, so three of a forge's four cells are air and group damage
       lands on one cell. `multiBlockDim` is parsed but only used for deco.
-- [ ] **Chopped decorations come back** - no per-position deco record; the
+- [x] **Chopped decorations came back (server half)** - closed 2026-09-28: the
+      mirror is a one-time derivation now. `World.decoChunkMirrored` marks each
+      deco chunk the mirror wrote (join burst and stream path both skip a marked
+      chunk) and `loadChunk` marks the deco chunk of every chunk that came from
+      disk, whose plane already carries the derived decoration plus the player's
+      edits. Still open (client half): a reconnecting client is re-sent the
+      derived deco objects for a chunk, so the client re-renders a removed tree
+      until it gets a removal entry (stock's DecoUpdate removal form).
+      Original entry: no per-position deco record; the
       seed-derived generator is re-mirrored over the block plane on every join
       burst and chunk stream (`src/world/deco_mirror.zig:132-137`), so a restart
       or any client streaming into that 128x128 deco chunk restores the tree.

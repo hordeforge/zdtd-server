@@ -194,6 +194,19 @@ pub fn projectPlaneScalar(heights: *[256]u8, geo: rules_mod.Geometry, profile_ma
     for (heights) |*h| h.* = @intCast(@min(255, geo.project(@floatFromInt(h.*), profile_max)));
 }
 
+/// Deco-chunk grid the mirror bit set covers: 64 x 64 deco chunks of 128 blocks
+/// = a 8192-block map edge to edge, matching the widest wire profile zdtd
+/// accepts. 512 bytes, fixed.
+pub const max_deco_grid: i32 = 64;
+/// Regular 16-block chunks per deco chunk (128 / 16).
+pub const deco_chunks_per_regular: i32 = 8;
+pub const deco_mirrored_bytes: usize = @intCast(max_deco_grid * max_deco_grid / 8);
+
+fn decoChunkBit(dcx: i32, dcz: i32) ?usize {
+    if (dcx < 0 or dcz < 0 or dcx >= max_deco_grid or dcz >= max_deco_grid) return null;
+    return @intCast(dcz * max_deco_grid + dcx);
+}
+
 pub const Chunk = struct {
     pos: ChunkPos,
     /// Active column height (wire profile; ADR geometry/wire-profiles). Stock
@@ -617,6 +630,9 @@ pub const World = struct {
     // segfault 5/5). Chunks are freed on eviction/deinit; residency is still
     // bounded by `max_resident_chunks`.
     chunks: std.AutoHashMapUnmanaged(u64, *Chunk),
+    /// One bit per deco chunk whose derived decoration was already written into
+    /// the block plane, or loaded with it (see `decoChunkMirrored`).
+    deco_mirrored: [deco_mirrored_bytes]u8 = [_]u8{0} ** deco_mirrored_bytes,
     world_dir: []u8,
     allocator: std.mem.Allocator,
     heightmap: ?dtm.Heightmap = null,
@@ -1183,6 +1199,23 @@ pub const World = struct {
     }
 
     /// World-space `Chunk.setBlockDecoRaw` (surface height preserved).
+    /// Deco chunks (128 blocks) whose derived decoration has been written into
+    /// the block plane, one bit each. The mirror is a one-time derivation: a
+    /// second stream must not re-create a decoration the player removed, and a
+    /// chunk loaded from disk already carries both the derived decoration and
+    /// the player's edits, so `loadChunk` marks it too. Out-of-grid coordinates
+    /// (a map wider than the pinned grid) always mirror, which is the old
+    /// behaviour rather than a silent skip.
+    pub fn decoChunkMirrored(self: *const World, dcx: i32, dcz: i32) bool {
+        const idx = decoChunkBit(dcx, dcz) orelse return false;
+        return (self.deco_mirrored[idx >> 3] & (@as(u8, 1) << @intCast(idx & 7))) != 0;
+    }
+
+    pub fn markDecoChunkMirrored(self: *World, dcx: i32, dcz: i32) void {
+        const idx = decoChunkBit(dcx, dcz) orelse return;
+        self.deco_mirrored[idx >> 3] |= @as(u8, 1) << @intCast(idx & 7);
+    }
+
     pub fn setBlockDecoWorld(self: *World, x: i32, y: i32, z: i32, raw: u32) !void {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
@@ -1716,6 +1749,11 @@ pub const World = struct {
             @memcpy(&c.heights, data[12..][0..c.heights.len]);
         } else return error.ReadFailed;
         c.dirty = false;
+        // A chunk that came from disk already carries whatever the mirror wrote
+        // before the save, plus every player edit since. Re-deriving its
+        // decorations would resurrect the ones a player removed (the chopped
+        // tree that came back), so its deco chunk is marked as mirrored.
+        self.markDecoChunkMirrored(@divFloor(c.pos.x, deco_chunks_per_regular), @divFloor(c.pos.z, deco_chunks_per_regular));
     }
 
     /// Persist every dirty chunk. Thin wrapper over `saveAllBudget(0)`, which
