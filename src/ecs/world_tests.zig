@@ -672,6 +672,8 @@ test "spawnTurret applies the block-data combat stats through the hook" {
         .burst_rounds = 15,
         .fire_rate = 0.9,
         .wake_up_time = 0.4,
+        .cooldown_time = 2.5,
+        .fall_asleep_time = 3.5,
     };
     w.turret_stats_fn = struct {
         fn f(ctx: ?*anyopaque) ?c.TurretBlockStats {
@@ -684,9 +686,14 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     const s = w.slotOfNetId(id).?;
     try std.testing.expectEqual(@as(f32, 30), w.turret[s].range);
     try std.testing.expectEqual(@as(f32, 32), w.turret[s].damage);
-    try std.testing.expectEqual(@as(f32, 0.9), w.turret[s].fire_interval);
+    // `BurstFireRate` is the shot interval inside a burst, so `FireRate` only
+    // stands in when the block declares no burst rate (this fixture declares
+    // both, so the burst interval wins).
+    try std.testing.expectEqual(@as(f32, 0.4), w.turret[s].fire_interval);
     try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].burst_interval);
     try std.testing.expectEqual(@as(f32, 0.4), w.turret[s].wake_up_time);
+    try std.testing.expectEqual(@as(f32, 2.5), w.turret[s].cooldown_time);
+    try std.testing.expectEqual(@as(f32, 3.5), w.turret[s].fall_asleep_time);
     // BurstRoundCount is the burst length, not the magazine (the magazine is the
     // deployed item's Meta), so the 200-round component fallback stands here.
     try std.testing.expectEqual(@as(u16, 15), w.turret[s].burst_rounds);

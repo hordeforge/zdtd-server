@@ -48,13 +48,13 @@ const TurretCtx = struct {
             if (!ctx.w.alive[s] or !ctx.w.mask[s].turret or !ctx.w.mask[s].transform) continue;
             var t = &ctx.w.turret[s];
             if (t.fire_cd > 0) t.fire_cd -= ctx.dt;
-            if (t.burst_cd > 0) t.burst_cd -= ctx.dt;
-            if (t.wake_left > 0) t.wake_left -= ctx.dt;
             const powered = ctx.powered[s];
             if (!powered or t.ammo == 0) {
                 t.target_id = -1;
-                t.burst_left = 0;
-                t.awake = false;
+                t.state = .asleep;
+                t.burst_count = 0;
+                t.wake_time = 0;
+                t.cool_left = 0;
                 continue;
             }
             var best_id: i32 = -1;
@@ -90,26 +90,52 @@ const TurretCtx = struct {
                 best_slot = j;
             }
             t.target_id = best_id;
+            // `AutoTurretFireController.Update` state machine
+            // (tile-entities-power.md section 6.2), read from the IL:
+            //   Asleep: with a target, accumulate `WakeUpTime`, then -> Awake.
+            //           Without one, hold the centred aim.
+            //   Awake:  no target for `FallAsleepTime` -> Asleep; otherwise
+            //           fire a burst of `BurstRoundCount` shots at
+            //           `BurstFireRate`, then -> Overheated.
+            //   Overheated: accumulate `CooldownTime`, then -> Awake.
+            switch (t.state) {
+                .asleep => {
+                    if (best_slot == null) {
+                        t.wake_time = 0;
+                        continue;
+                    }
+                    t.wake_time += ctx.dt;
+                    if (t.wake_time < t.wake_up_time) continue;
+                    t.state = .awake;
+                    t.wake_time = 0;
+                    t.burst_count = 0;
+                },
+                .overheated => {
+                    t.cool_left += ctx.dt;
+                    if (t.cool_left < t.cooldown_time) continue;
+                    t.state = .awake;
+                    t.cool_left = 0;
+                    t.burst_count = 0;
+                },
+                .awake => {},
+            }
             const zi = best_slot orelse {
-                // Target lost (Asleep transition): the next acquisition wakes
-                // the turret again.
-                t.awake = false;
-                t.burst_left = 0;
+                // Awake with no target: hold Awake for `FallAsleepTime` so a
+                // brief loss does not re-run the wake-up, then sleep.
+                t.asleep_left += ctx.dt;
+                if (t.asleep_left >= t.fall_asleep_time) {
+                    t.state = .asleep;
+                    t.asleep_left = 0;
+                    t.wake_time = 0;
+                    t.burst_count = 0;
+                }
                 continue;
             };
-            // Asleep -> Awake: the turret spends `WakeUpTime` turning before it
-            // may fire (tile-entities-power.md section 6.2 state machine).
-            if (!t.awake) {
-                t.awake = true;
-                t.wake_left = t.wake_up_time;
-                t.burst_left = 0;
-            }
+            t.asleep_left = 0;
             const dx = ctx.w.transform[zi].x - tx;
             const dz = ctx.w.transform[zi].z - tz;
             ctx.w.transform[s].yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
-            if (t.fire_cd <= 0 and t.wake_left <= 0 and t.burst_cd <= 0) {
-                // Burst cadence: `BurstRoundCount` shots at `BurstFireRate`,
-                // then a `FireRate` pause before the next burst.
+            if (t.fire_cd <= 0 and t.state == .awake) {
                 t.ammo -%= 1;
                 // Firing degrades the deployed item (`EntityTurret.Fire` applies
                 // `UseTimes` degradation) and the turret's health IS the item's
@@ -127,12 +153,17 @@ const TurretCtx = struct {
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
                 // Turret fire leaves dmg_attacker unset (matches no filter).
                 recordTurretOwner(&ctx.owner_hit[zi], s, t.owner_slot);
+                // `Fire()` counts the round; the burst ends when the count
+                // reaches `BurstRoundCount`, which sends the turret Overheated.
+                const shot_iv = if (t.burst_interval > 0) t.burst_interval else t.fire_interval;
                 if (t.burst_rounds > 0) {
-                    if (t.burst_left == 0) t.burst_left = t.burst_rounds;
-                    t.burst_left -= 1;
+                    t.burst_count += 1;
+                    if (t.burst_count >= t.burst_rounds) {
+                        t.state = .overheated;
+                        t.cool_left = 0;
+                    }
                 }
-                t.fire_cd = if (t.burst_interval > 0) t.burst_interval else t.fire_interval;
-                if (t.burst_rounds > 0 and t.burst_left == 0) t.burst_cd = t.fire_interval;
+                t.fire_cd = shot_iv;
             }
         }
     }

@@ -20400,11 +20400,12 @@ test "scenario a stand-on buff block applies its buffs when stepped on" {
     std.debug.print("PASS walk-buff: standing on a burning block applies its buffs\n", .{});
 }
 
-test "scenario a turret wakes up then fires in bursts" {
-    // `AutoTurretFireController.Init` reads `WakeUpTime`, `BurstRoundCount`,
-    // `BurstFireRate` and `FireRate`: the state machine turns for `WakeUpTime`
-    // after acquiring a target (Asleep -> Awake), fires `BurstRoundCount` shots
-    // at `BurstFireRate`, then waits `FireRate` before the next burst
+test "scenario a turret wakes up, bursts, then overheats" {
+    // `AutoTurretFireController.Update` state machine (IL):
+    //   Asleep + target -> accumulate `WakeUpTime` -> Awake
+    //   Awake  + target -> `BurstRoundCount` shots at `BurstFireRate` -> Overheated
+    //   Overheated      -> accumulate `CooldownTime` -> Awake
+    //   Awake, no target for `FallAsleepTime` -> Asleep
     // (tile-entities-power.md section 6.2).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -20426,31 +20427,39 @@ test "scenario a turret wakes up then fires in bursts" {
     const w = &g.sim;
     const t = w.spawnTurretEx(400, 70, 400, .{ .ammo = 100 }) orelse return error.TestUnexpectedResult;
     const ts = w.slotOfNetId(t) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(components_mod.TurretState.asleep, w.turret[ts].state);
     w.turret[ts].burst_rounds = 3;
     w.turret[ts].burst_interval = 0.05;
-    w.turret[ts].fire_interval = 1.0;
-    w.turret[ts].wake_up_time = 0.4;
+    w.turret[ts].wake_up_time = 0.2;
+    w.turret[ts].cooldown_time = 0.5;
+    w.turret[ts].fall_asleep_time = 0.3;
     const gen = w.power.addNodeAt(.generator, 400, 70, 402, 100).?;
     try std.testing.expect(w.power.connect(gen, w.turret[ts].power_node));
     w.power.resolve();
     try std.testing.expect(w.power.isEntityPowered(t));
     _ = w.spawnZombie(402, 70, 400, 5000);
 
-    // The wake-up window: the turret turns, no shot yet. 0.4 s = 8 ticks.
+    // The wake window: the turret turns, no shot yet (0.2 s = 4 ticks).
     var i: u32 = 0;
-    while (i < 5) : (i += 1) try g.step();
+    while (i < 2) : (i += 1) try g.step();
     try std.testing.expectEqual(@as(u16, 100), w.turret[ts].ammo);
-    try std.testing.expect(w.turret[ts].awake);
-    try std.testing.expect(w.turret[ts].wake_left > 0);
+    try std.testing.expectEqual(components_mod.TurretState.asleep, w.turret[ts].state);
 
-    // Then the burst: three shots at 0.05 s (1 tick each), and the pause after
-    // them leaves the magazine at 97 well into the next second.
+    // Then the burst: three shots one tick apart, then Overheated.
     i = 0;
-    while (i < 12) : (i += 1) try g.step();
-    const after_burst = w.turret[ts].ammo;
-    try std.testing.expectEqual(@as(u16, 97), after_burst);
-    i = 0;
-    while (i < 10) : (i += 1) try g.step();
+    while (i < 6) : (i += 1) {
+        try g.step();
+    }
     try std.testing.expectEqual(@as(u16, 97), w.turret[ts].ammo);
-    std.debug.print("PASS turret-burst: wake-up then burst-then-pause\n", .{});
+    try std.testing.expectEqual(components_mod.TurretState.overheated, w.turret[ts].state);
+
+    // The cooldown holds the magazine; the next burst follows after 0.5 s.
+    i = 0;
+    while (i < 5) : (i += 1) try g.step();
+    try std.testing.expectEqual(@as(u16, 97), w.turret[ts].ammo);
+    try std.testing.expectEqual(components_mod.TurretState.overheated, w.turret[ts].state);
+    i = 0;
+    while (i < 14) : (i += 1) try g.step();
+    try std.testing.expect(w.turret[ts].ammo < 97);
+    std.debug.print("PASS turret-burst: wake-up, burst, overheat, cooldown\n", .{});
 }

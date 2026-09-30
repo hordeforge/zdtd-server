@@ -182,9 +182,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       `BurstFireRate` and `FireRate` were conflated into one interval and
       `WakeUpTime` was unread, so a turret fired continuously from the instant it
       acquired a target; it now wakes for `WakeUpTime` and fires
-      `BurstRoundCount` shots at `BurstFireRate` with a `FireRate` pause between
-      bursts. Still open: the `Overheated` state (`CoolOffTime`/`OvershootTime`
-      heat cap) and `FallAsleepTime`.
+      `BurstRoundCount` shots one `BurstFireRate` apart, then `Overheated` for
+      `CooldownTime` and back to Awake (`FireRate` only stands in as the shot
+      interval when a block declares no burst rate), and Awake with no target
+      holds for `FallAsleepTime` before dropping to Asleep. Still open: the aim
+      cone (`YawRange`/`PitchRange` against the mounted yaw), the
+      `OvershootTime` give-up that drops a target the turret cannot bear on,
+      `FindTargetDelay`, and the wake/overheat sound broadcasts.
 - [x] **Turrets shoot through walls** - closed 2026-09-28: turret acquisition now
       runs `sensing.rayClear` between the turret and each nearer candidate
       (stock `AutoTurretFireController` `Voxel.Raycast` IL_0165-022E), so a

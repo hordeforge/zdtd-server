@@ -1884,9 +1884,11 @@ pub const World = struct {
                 // the pause between bursts; zdtd used the burst cadence as the
                 // only interval, so a burst-capable block fired continuously.
                 if (ts.burst_fire_rate > 0) t.burst_interval = ts.burst_fire_rate;
-                if (ts.fire_rate > 0) t.fire_interval = ts.fire_rate;
+                if (ts.fire_rate > 0 and ts.burst_fire_rate <= 0) t.fire_interval = ts.fire_rate;
                 if (ts.burst_rounds > 0) t.burst_rounds = ts.burst_rounds;
                 if (ts.wake_up_time > 0) t.wake_up_time = ts.wake_up_time;
+                if (ts.cooldown_time > 0) t.cooldown_time = ts.cooldown_time;
+                if (ts.fall_asleep_time > 0) t.fall_asleep_time = ts.fall_asleep_time;
             }
         }
         // The deployed item wins over the block-derived defaults: its Meta is

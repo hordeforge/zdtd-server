@@ -637,6 +637,9 @@ pub const BotDef = struct {
 /// MaxDistance, EntityDamage, BurstFireRate, BurstRoundCount). Zero fields
 /// stay unset - callers fall back to the component defaults. Pure shape
 /// shared by the assets loader (assets→ecs allowed) and the world hook.
+/// `AutoTurretFireController/TurretState` (IL enum: Asleep, Awake, Overheated).
+pub const TurretState = enum(u8) { asleep = 0, awake = 1, overheated = 2 };
+
 pub const TurretBlockStats = struct {
     max_distance: f32 = 0,
     entity_damage: f32 = 0,
@@ -644,12 +647,17 @@ pub const TurretBlockStats = struct {
     /// Init` reads it next to BurstRoundCount).
     burst_fire_rate: f32 = 0,
     burst_rounds: u16 = 0,
-    /// `FireRate`: the base cadence, i.e. the pause between bursts.
+    /// `FireRate`: the base cadence, used as the shot interval when a block
+    /// declares no `BurstFireRate`.
     fire_rate: f32 = 0,
     /// `WakeUpTime`: how long the turret turns before it may fire after
-    /// acquiring a target (the Awake transition in the state machine,
-    /// tile-entities-power.md section 6.2).
+    /// acquiring a target (Asleep -> Awake).
     wake_up_time: f32 = 0,
+    /// `CooldownTime`: how long the `Overheated` state lasts after a burst.
+    cooldown_time: f32 = 0,
+    /// `FallAsleepTime`: how long the turret holds Awake with no target before
+    /// it drops back to Asleep.
+    fall_asleep_time: f32 = 0,
 };
 
 pub const VehicleKind = enum(u8) {
@@ -736,21 +744,29 @@ pub const Turret = struct {
     range: f32 = 24,
     damage: f32 = 12,
     fire_cd: f32 = 0,
-    /// Interval between bursts (`FireRate`).
+    /// Shot interval fallback when the block declares no `BurstFireRate`.
     fire_interval: f32 = 0.4,
     /// Interval between shots inside a burst (`BurstFireRate`); 0 = use
     /// `fire_interval`.
     burst_interval: f32 = 0,
-    /// Shots per burst (`BurstRoundCount`); 0 = continuous fire.
+    /// Shots per burst (`BurstRoundCount`); 0 = continuous fire, never
+    /// Overheated.
     burst_rounds: u16 = 0,
-    burst_left: u16 = 0,
-    /// Pause left between bursts.
-    burst_cd: f32 = 0,
-    /// `WakeUpTime` and the wake countdown: the turret acquires a target,
-    /// spends `wake_up_time` turning, then fires (Asleep -> Awake).
+    /// Shots fired in the current burst.
+    burst_count: u16 = 0,
+    /// `WakeUpTime` and its accumulator: the turret acquires a target and
+    /// spends `wake_up_time` turning before it may fire (Asleep -> Awake).
     wake_up_time: f32 = 0,
-    wake_left: f32 = 0,
-    awake: bool = false,
+    wake_time: f32 = 0,
+    /// `CooldownTime`: the `Overheated` state's length, and the timer inside
+    /// it. A zero cooldown falls straight back to Awake, which is stock's
+    /// degenerate case.
+    cooldown_time: f32 = 0,
+    cool_left: f32 = 0,
+    /// `FallAsleepTime`: Awake with no target for this long drops to Asleep.
+    fall_asleep_time: f32 = 0,
+    asleep_left: f32 = 0,
+    state: TurretState = .asleep,
     ammo: u16 = 200,
     /// The item the placer deployed (0 = none): TurretSync carries it back with
     /// `ammo` as the item's Meta, which is where a deployed turret's magazine
