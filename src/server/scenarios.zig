@@ -48,6 +48,7 @@ const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/sound_noise.zig");
 const assets_blocks = @import("../assets/blocks.zig");
+const ecs_ai_tasks = @import("../ecs/ai_tasks.zig");
 const assets_gameevents = @import("../assets/gameevents.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const c2s_misc = @import("c2s/misc.zig");
@@ -19822,4 +19823,122 @@ test "scenario a planted crop grows a stage per scheduled block tick" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, cy, pz));
     g.plant_light_fn = null;
     std.debug.print("PASS plant-tick: crops grow a stage per tick and unlit ones die\n", .{});
+}
+
+test "scenario standing on a slow block scales an entity's motion" {
+    // `MaterialBlock.MovementFactor` is the source of `Block.MovementFactor`
+    // (Block has no MovementFactor property string), and stock writes it onto
+    // `Entity.motionMultiplier` from the block the entity stands on
+    // (BlockDamage.OnEntityCollidedWithBlock IL_00AA-00DD), recomputed on a
+    // standing-block change by EntityAlive.Update IL_0243.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Slow = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "trapSpikesWoodDmg1")) return 24084;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_slow.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="trapSpikesWoodDmg1">
+        \\  <property name="Class" value="Spikes" />
+        \\  <property name="Damage" value="10" />
+        \\  <property name="Material" value="Mwood" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    var mt_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const mt = try std.fmt.bufPrint(&mt_buf, "{s}/materials_slow.xml", .{dir});
+    try io_fs.writeFile(mt,
+        \\<materials>
+        \\<material id="Mwood"><property name="movement_factor" value="0.5" /></material>
+        \\<material id="Mstone"><property name="movement_factor" value="1" /></material>
+        \\</materials>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Slow.id, null);
+    // The maxdamage table owns the block -> material map, so it reads the same
+    // synthetic blocks.xml; materials.xml then contributes movement_factor and
+    // the bundled AssignIds give the ids their names back.
+    g.maxdamage.deinit();
+    g.maxdamage = try assets_maxdamage.loadFromBlocksXml(gpa, bx);
+    try g.maxdamage.mergeMaterialsXml(gpa, mt);
+    g.maxdamage.tryMergeBundledAssignIds(gpa);
+    const slow = g.blocks.byName("trapSpikesWoodDmg1").?.id;
+    const stone = g.blocks.byName("terrStone").?.id;
+    try std.testing.expectEqual(@as(?f32, 0.5), g.maxdamage.materialMovementFactor(slow));
+    try std.testing.expectEqual(@as(?f32, 1.0), g.maxdamage.materialMovementFactor(stone));
+
+    // A player must be present or the director despawns the zombie (and the
+    // collision pass then never reads its cell).
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 256;
+    g.sim.transform[ps].y = 70;
+    g.sim.transform[ps].z = 258;
+
+    const zid = g.sim.spawnZombie(256, 70, 256, 100) orelse return error.TestUnexpectedResult;
+    const z = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    // Hold the zombie still: the pass reads the cell the entity occupies, and a
+    // drifting creature would step off the cell under test.
+    _ = try g.step();
+    g.sim.zombie_ai[z].state = .idle;
+    g.sim.zombie_ai[z].target_id = -1;
+
+    // The collision pass runs after the movement systems, so the cell it reads
+    // is the post-move one: patch the 3x3 around the entity's cell so whichever
+    // of them it settles in carries the block under test.
+    var cx: i32 = @floor(g.sim.transform[z].x);
+    var cy: i32 = @floor(g.sim.transform[z].y);
+    var cz: i32 = @floor(g.sim.transform[z].z);
+    const patchUnder = struct {
+        fn set(game: *game_mod.Game, bx0: i32, by0: i32, bz0: i32, id: u16) void {
+            var dz: i32 = -1;
+            while (dz <= 1) : (dz += 1) {
+                var dx: i32 = -1;
+                while (dx <= 1) : (dx += 1) {
+                    game.setBlockRaw(bx0 + dx, by0, bz0 + dz, id);
+                    game.world.setBlockRawWorld(bx0 + dx, by0, bz0 + dz, id) catch {};
+                }
+            }
+        }
+    };
+    patchUnder.set(g, cx, cy, cz, stone);
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 1.0), g.sim.move_scale[z]);
+    try std.testing.expectEqual(@as(f32, 8.0), ecs_ai_tasks.chaseSpeedFor(&g.sim, z, 8.0));
+
+    // The same cell with the slow material: the multiplier halves and the
+    // hazard leg still damages the zombie.
+    cx = @floor(g.sim.transform[z].x);
+    cy = @floor(g.sim.transform[z].y);
+    cz = @floor(g.sim.transform[z].z);
+    patchUnder.set(g, cx, cy, cz, slow);
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 0.5), g.sim.move_scale[z]);
+    try std.testing.expectEqual(@as(f32, 4.0), ecs_ai_tasks.chaseSpeedFor(&g.sim, z, 8.0));
+    try std.testing.expect(g.sim.health[z].hp < 100);
+
+    // Standing on air again clears the multiplier.
+    cx = @floor(g.sim.transform[z].x);
+    cy = @floor(g.sim.transform[z].y);
+    cz = @floor(g.sim.transform[z].z);
+    patchUnder.set(g, cx, cy, cz, 0);
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 1.0), g.sim.move_scale[z]);
+    std.debug.print("PASS movement-factor: a slow block halves the chase speed\n", .{});
 }

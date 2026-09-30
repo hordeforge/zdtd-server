@@ -272,10 +272,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       visible half: `server/game/hazard.zig` runs the `BlockDamage` collision
       pass once a tick (feet cell → `Damage` once per contact via a per-slot
       latch), `BlockSpikes` retracts into its `SiblingBlock` or air, and
-      `BlockBarbed` increments the cell meta and dies at 15. Still open from
-      the same RE: `MovementFactor` slow, `DamageType` +
-      `CalculateBlockDamage` resistance legs, `DontDamageOnTouch` and the
-      shrunk collision AABB. Original entry: stock
+      `BlockBarbed` increments the cell meta and dies at 15. `MovementFactor`
+      closed 2026-09-28: the same feet probe writes `Entity.motionMultiplier`
+      (`World.move_scale`) from the standing block's material
+      `movement_factor` (`BlockDamage.OnEntityCollidedWithBlock` IL_00AA-00DD,
+      recomputed on a standing-block change by `EntityAlive.Update` IL_0243) and
+      the AI chase speed scales by it. Still open from the same RE: `DamageType`
+      + `CalculateBlockDamage` resistance legs, `DontDamageOnTouch`, the shrunk
+      collision AABB and the `PassiveEffects` override of the standing factor.
+      Original entry: stock
       `BlockDamage.OnEntityCollidedWithBlock`
       drives spikes, barbed wire (meta 15 self-destruct), cactus, hay and the
       pipe fire hazards (blocks.md:520-534, block-behaviors.md:32); zdtd clears

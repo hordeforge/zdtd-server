@@ -493,6 +493,13 @@ pub const World = struct {
     /// none): a `BlockDamage` subclass hurts an entity once per contact, since
     /// stock's collision callback fires on the colliding pair, not every tick.
     hazard_cell: [max_entities]i64 = [_]i64{-1} ** max_entities,
+    /// `Entity.motionMultiplier`: stock sets it from the MovementFactor of the
+    /// block the entity stands on (BlockDamage.OnEntityCollidedWithBlock
+    /// IL_00AA-00DD, recomputed on a standing-block change in EntityAlive.Update
+    /// IL_0243). 1 = normal. The factor itself is the block's material
+    /// MovementFactor (MaterialBlock.MovementFactor; Block.MovementFactor has no
+    /// XML property string, so it comes from the material).
+    move_scale: [max_entities]f32 = [_]f32{1.0} ** max_entities,
     /// Slots with at least one dirty bit set, derived from `dirty[]`. Lets the
     /// per-tick replicate pass build its candidate set and clear the motion
     /// bits in O(changed) rather than O(max_entities).

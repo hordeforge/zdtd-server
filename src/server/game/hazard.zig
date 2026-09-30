@@ -11,10 +11,16 @@
 //! `BlockBarbed` increments the cell meta and dies at 15, a plain `BlockDamage`
 //! wears by `Damage_received`.
 //!
-//! Not modelled (recorded): the `MovementFactor` slow, the damage-type
-//! resistance leg (`DamageType` + `CalculateBlockDamage`), `DontDamageOnTouch`
-//! and the shrunk collision AABB (an entity used to hit only near the cell
-//! centre).
+//! The same pass carries the `MovementFactor` slow: stock writes
+//! `Entity.motionMultiplier` from the MovementFactor of the block the entity
+//! stands on (`BlockDamage.OnEntityCollidedWithBlock` IL_00AA-00DD, recomputed
+//! on a standing-block change by `EntityAlive.Update` IL_0243), and the factor
+//! itself is the block's material `MovementFactor`.
+//!
+//! Not modelled (recorded): the damage-type resistance leg (`DamageType` +
+//! `CalculateBlockDamage`), `DontDamageOnTouch` and the shrunk collision AABB
+//! (an entity used to hit only near the cell centre), and the `PassiveEffects`
+//! override that lets an entity's own passives scale the standing factor.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -57,6 +63,11 @@ pub fn collisionTick(self: *Game) void {
         const z: i32 = @floor(self.sim.transform[s].z);
         const key = cellKey(x, y, z);
         const id = self.world.blockWorld(x, y, z) catch 0;
+        // The block being stood on sets the entity's motion multiplier
+        // (`Entity.motionMultiplier`); 1 when nothing sets it. Negative or zero
+        // authored values clamp at 0 rather than freezing the entity in place.
+        const factor = if (id != 0) (self.maxdamage.materialMovementFactor(id) orelse 1.0) else 1.0;
+        self.sim.move_scale[s] = @max(factor, 0.0);
         const def = if (id != 0) self.blocks.byId(id) else null;
         if (def == null or def.?.hazard == .none or def.?.hazard_damage <= 0) {
             self.sim.hazard_cell[s] = -1;

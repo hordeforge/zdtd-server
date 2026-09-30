@@ -509,10 +509,10 @@ const AiCtx = struct {
             const sscale = ctx.zombie_speed_scale;
             const night = ctx.w.director.clock.isNight();
             const wspd: f32 = (if (night and pwsn > 0) pwsn * 10.0 else if (pws > 0) pws * 10.0 else if (night and ct.wander_speed_night > 0) ct.wander_speed_night * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
-            const cspd: f32 = (if (night)
+            const cspd: f32 = chaseSpeedFor(ctx.w, s, (if (night)
                 (if (pcs > 0) pcs * 1.6 else if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed)
             else
-                (if (pcsd > 0) pcsd * 1.6 else if (ct.chase_speed_day > 0) ct.chase_speed_day * 1.6 else ctx.w.rules.ai.chase_speed)) * sscale;
+                (if (pcsd > 0) pcsd * 1.6 else if (ct.chase_speed_day > 0) ct.chase_speed_day * 1.6 else ctx.w.rules.ai.chase_speed)) * sscale);
 
             // Give-up walk home (`EAIApproachAndAttackTarget` Update IL_0021-0128
             // with `isGoingHome`): path back to the latched return position at
@@ -1316,6 +1316,15 @@ fn lookUpdate(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
 /// EAIApproachAndAttackTarget::Update: grid A* toward the sensed player when a
 /// solid hook is set (else straight-line), melee on contact. Projects .attack
 /// in range else .chase. Aggro persists with no fresh target (np.id<0).
+/// Chase speed after the block the entity stands on. Stock writes
+/// `Entity.motionMultiplier` from the standing block's material MovementFactor
+/// (`BlockDamage.OnEntityCollidedWithBlock` IL_00AA-00DD) and `EntityAlive`
+/// applies it to motion, so a zombie wading through a spike field or over a
+/// trap block is slowed by the same factor a player is.
+pub fn chaseSpeedFor(w: *World, s: Slot, base: f32) f32 {
+    return base * w.move_scale[s];
+}
+
 fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f32, ct: *const EntityClass) void {
     ai.alert = true;
     // Chase clock (`EAIApproachAndAttackTarget` Start IL_0040-005B arms

@@ -445,6 +445,16 @@ pub const Table = struct {
         return self.restrict_submerged.contains(name);
     }
 
+    /// `MaterialBlock.MovementFactor` behind a block id (the slow a hazard or
+    /// trap block applies to a walker), or null when unknown. Stock's
+    /// `Block.MovementFactor` has no XML property of its own: it is the
+    /// material's field.
+    pub fn materialMovementFactor(self: *const Table, block_id: u16) ?f32 {
+        const name = self.idName(block_id) orelse return null;
+        const mat = self.block_material.get(name) orelse return null;
+        return self.material_movement_factor.get(mat);
+    }
+
     /// `MaterialBlock.FertileLevel` of the material behind a block id, or null
     /// when either the block or the material is unknown (the caller treats that
     /// as the 0 default).
