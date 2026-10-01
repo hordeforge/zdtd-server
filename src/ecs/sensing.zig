@@ -7,6 +7,7 @@
 const std = @import("std");
 const ai_steer = @import("ai_steer.zig");
 const rng_util = @import("../util/rng.zig");
+const ai_tasks = @import("ai_tasks.zig");
 
 /// `Entity.SeekYaw(yaw, _, yawSlowAt)` slow-down band and floor for the
 /// movement tail: stock passes 20 as `yawSlowAt` and floors the scaled rate at
@@ -278,6 +279,16 @@ fn withinHomeRadius(w: *const World, s: Slot, x: f32, z: f32) bool {
     const dx = x - a.home_x;
     const dz = z - a.home_z;
     return dx * dx + dz * dz <= r * r;
+}
+
+/// `CalcInvestigateTicks((30 + rand*30) * 20, player)` (entity-ai.md 1957): 600
+/// to 1200 ticks of investigate time, drawn from the entity's own stream so it
+/// stays deterministic and reproducible.
+pub fn noiseInvestigateTicks(ai: *c.ZombieAi, seed: i32) i32 {
+    if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(seed).state;
+    ai.wander_rng = rng_util.xorshift32Step(ai.wander_rng);
+    const frac = @as(f32, @floatFromInt(ai.wander_rng % 10000)) / 10000.0;
+    return @as(i32, @intFromFloat((30.0 + frac * 30.0) * 20.0));
 }
 
 /// Winner of the AITarget pass:/// Winner of the AITarget pass: the entity the AITask list treats as "the
@@ -743,18 +754,25 @@ pub fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform
         const r: f32 = w.class_id[s].search_radius;
         const x = pos[ts].x;
         const z = pos[ts].z;
+        var spot_x = x;
+        var spot_z = z;
         if (r > 0) {
             // Deterministic per-entity draw from the entity's own stream (the
             // sim has no ad-hoc RNG).
             const ang = rngDraw(ai, w.network_id[s].id) * std.math.tau;
             const inv_d = 1.0 / @max(@sqrt(dx * dx + dz * dz), 0.001);
-            ai.spot_x = x - dx * inv_d * 0.35 * r + @cos(ang) * r;
-            ai.spot_z = z - dz * inv_d * 0.35 * r + @sin(ang) * r;
-        } else {
-            ai.spot_x = x;
-            ai.spot_z = z;
+            spot_x = x - dx * inv_d * 0.35 * r + @cos(ang) * r;
+            spot_z = z - dz * inv_d * 0.35 * r + @sin(ang) * r;
         }
+        // `CalcInvestigateTicks(1200, revenge)` (IL=170): 1200 ticks by default;
+        // passive 183 (`EnemySearchDuration`) would shorten it, but no shipped
+        // buff or item carries that passive, so the divisor is 1.
+        // Fields set directly: this runs on a parallel AI worker holding a
+        // const World, and only its own slot's AI state is touched.
+        ai.spot_x = spot_x;
+        ai.spot_z = spot_z;
         ai.has_spot = true;
+        ai.spot_ticks = 1200;
         ai.alert = true;
         ai.state = .chase;
         ai.target_id = -1;
@@ -1394,4 +1412,28 @@ test "a living fight is kept over a fresh revenge target" {
     const out = applyRevengeTarget(&w, &snap, zs, &w.zombie_ai[zs], .{ .id = w.network_id[w.slotOfNetId(near).?].id, .slot = 0, .d2 = 0, .px = 0, .pz = 0 }, 0.05);
     try std.testing.expectEqual(w.network_id[w.slotOfNetId(near).?].id, out.id);
     try std.testing.expect(w.zombie_ai[zs].revenge_target == -1);
+}
+
+test "an investigate spot expires when its ticks run out" {
+    // `EntityAlive.SetInvestigatePosition(pos, ticks)` arms a lifetime, and the
+    // AI pass drops the spot at 0 (stock's EAIApproachSpot gives up the same
+    // way). 0 ticks means a director spot with no expiry. Driven through
+    // `ai_tasks.systemZombieAi` (the pass that owns the decrement).
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    w.setInvestigateSpot(zs, 12, 4, 3);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
+    _ = ai_tasks.systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].has_spot); // 2 left
+    _ = ai_tasks.systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].has_spot); // 1 left
+    _ = ai_tasks.systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[zs].has_spot); // expired
+    // A director spot (0 ticks) never expires.
+    w.setInvestigateSpot(zs, 12, 4, 0);
+    var i: usize = 0;
+    while (i < 20) : (i += 1) _ = ai_tasks.systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
 }

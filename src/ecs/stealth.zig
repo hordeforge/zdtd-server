@@ -11,6 +11,7 @@ const query = @import("query.zig");
 const protocol = @import("../protocol.zig");
 const stealthLightLevel = @import("sensing.zig").stealthLightLevel;
 const PlayerSnap = @import("sensing.zig").PlayerSnap;
+const sensing = @import("sensing.zig");
 const PlayerScan = @import("sensing.zig").PlayerScan;
 const scanFromSnaps = @import("sensing.zig").scanFromSnaps;
 const canSensePlayer = @import("sensing.zig").canSensePlayer;
@@ -179,9 +180,9 @@ fn stealthTick(w: *World, s: Slot) void {
             ai.alert = true;
             ai.state = .chase;
             ai.target_id = -1;
-            ai.spot_x = px;
-            ai.spot_z = pz;
-            ai.has_spot = true;
+            // Stock's noise investigate lifetime (EAISetNearestEntityAsTarget:
+            // CalcInvestigateTicks((30 + rand*30) * 20, player)).
+            w.setInvestigateSpot(zs, px, pz, sensing.noiseInvestigateTicks(ai, w.network_id[zs].id));
         }
     }
 }

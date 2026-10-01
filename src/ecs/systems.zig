@@ -118,9 +118,9 @@ pub fn consumeCombatNoise(w: *World) void {
                 w.sleeper[s].awake = true;
                 ai.state = .chase;
                 ai.alert = true;
-                ai.spot_x = ev.x;
-                ai.spot_z = ev.z;
-                ai.has_spot = true;
+                // Stock's noise investigate lifetime: `CalcInvestigateTicks(
+                // (30 + rand*30) * 20, player)` (EAISetNearestEntityAsTarget).
+                w.setInvestigateSpot(s, ev.x, ev.z, sensing.noiseInvestigateTicks(ai, w.network_id[s].id));
                 // Stock wakes broadcast NetPackageSleeperWakeup (the Game
                 // drains the ring in step).
                 w.pushSleeperWake(s);
@@ -130,9 +130,7 @@ pub fn consumeCombatNoise(w: *World) void {
                 ai.alert = true;
                 ai.state = .chase;
                 ai.target_id = -1;
-                ai.spot_x = ev.x;
-                ai.spot_z = ev.z;
-                ai.has_spot = true;
+                w.setInvestigateSpot(s, ev.x, ev.z, sensing.noiseInvestigateTicks(ai, w.network_id[s].id));
             }
         }
     }

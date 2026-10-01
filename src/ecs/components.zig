@@ -451,6 +451,9 @@ pub const ZombieAi = struct {
     spot_x: f32 = 0,
     spot_z: f32 = 0,
     has_spot: bool = false,
+    /// `EntityAlive.SetInvestigatePosition(pos, ticks)` lifetime: 0 = no expiry
+    /// (a director spot), else the ticks left before the spot is dropped.
+    spot_ticks: i32 = 0,
     /// EAITerritorial home (spawn pos). When has_home and far, walk back.
     home_x: f32 = 0,
     home_z: f32 = 0,

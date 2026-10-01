@@ -660,8 +660,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       within `1.4 * SearchRadius` of the attacker, `target_id` clear; inside the
       radius the attacker is promoted) and `a living fight is kept over a fresh
       revenge target` (both decisive: probing either branch fails its test).
-      Residual: `CalcInvestigateTicks`'s passive-183 divisor is not modelled, so
-      the spot clears on arrival as before.
+      The investigate lifetime closed the same day: a spot now carries the tick
+      count `SetInvestigatePosition(pos, ticks)` gives it (1200 for the revenge
+      leg, `(30 + rand*30) * 20` for a heard noise, both from the entity's own AI
+      stream) and the AI pass drops it when the count runs out, where before a
+      spot only cleared on arrival. A director spot armed with 0 keeps no expiry.
+      Gated by `an investigate spot expires when its ticks run out` (decisive:
+      disabling the decrement fails it). Residual: `CalcInvestigateTicks`'s
+      passive-183 divisor stays 1 because no shipped buff or item carries
+      `EnemySearchDuration` (checked against the RE docs and the IL field list).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -319,6 +319,16 @@ const AiCtx = struct {
             const s = ctx.slots[i];
             if (!ctx.w.alive[s] or !ctx.w.mask[s].zombie_ai or !ctx.w.mask[s].transform) continue;
             var ai = &ctx.w.zombie_ai[s];
+            // `SetInvestigatePosition`'s lifetime: a spot armed with ticks is
+            // dropped when they run out (stock's EAIApproachSpot gives up the
+            // same way). 0 = no expiry (a director spot).
+            if (ai.spot_ticks > 0) {
+                ai.spot_ticks -= 1;
+                if (ai.spot_ticks == 0) {
+                    ai.has_spot = false;
+                    if (ai.active_task == .approach_spot) ai.active_task = .none;
+                }
+            }
             // Knockback shove: displace before the AI step so the push wins
             // the tick and the entity re-approaches from the pushed spot.
             if (ai.kb_time > 0) {

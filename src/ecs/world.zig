@@ -1170,6 +1170,17 @@ pub const World = struct {
         self.spit_hit_reqs[n] = .{ .slot = @intCast(slot), .x = x, .y = y, .z = z };
     }
 
+    /// `EntityAlive.SetInvestigatePosition(pos, ticks, alert)`: arm an
+    /// investigate spot with its stock lifetime. `ticks` 0 = no expiry (the
+    /// director's own spots). The AI pass decrements and drops it.
+    pub fn setInvestigateSpot(self: *World, slot: Slot, x: f32, z: f32, ticks: i32) void {
+        const ai = &self.zombie_ai[slot];
+        ai.spot_x = x;
+        ai.spot_z = z;
+        ai.has_spot = true;
+        ai.spot_ticks = ticks;
+    }
+
     /// Push a sleeper wake request (RE entity-ai.md sleeper wake; stock sends
     /// NetPackageSleeperWakeup from EntityAlive.ConditionalTriggerSleeperWakeUp).
     /// Parallel AI workers push; the Game drains in step and broadcasts the
