@@ -479,11 +479,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       ("the generic ECD request does not prove item ownership or a legal spawn
       class"), so a V3.2.0 client that places a held entity
       (`ItemClassHeldEntity`: chicken coop items, `EntityPlayerLocal.RequestToSpawnEntityServer`)
-      never receives the ack its `SpawnRequest` waits on, and `grabDisabled()`
-      stays true. Fixing it needs an `EntityCreationData` reader (the generic
-      branch plus the optional stats/bag/trader blobs), a class allow-list and
-      bounds/rate validation, then spawn + `NetPackageEntitySpawn` with the tail
-      + the confirm to the requester.
+      never received the ack its `SpawnRequest` waits on and `grabDisabled()`
+      stayed true. Closed 2026-10-01: `stock_entity.parseSpawnRequest` reads the
+      generic `EntityCreationData` branch (refusing the class-switched middles,
+      the optional stats/bag/trader blobs and the player profile rather than
+      skipping them), the handler bounds the request to 8 m around the player,
+      resolves the class hash in the entityclass catalog, takes the per-tick
+      spawn token, spawns the living kinds and answers with
+      `NetPackageConfirmSpawnEntity` carrying the created entity id and the
+      client's Guid. Gated by `scenario a client-requested spawn answers with its
+      confirm` (decisive: dropping the bounds gate acks a spawn 400 m away).
+      Residual: the spawned entity reaches the requester through the ordinary
+      interest pass, so its `EntityCreationData` does not repeat the
+      `requestedBy`/`requestKey` pair (the ack alone correlates); the refused
+      middles (dropped items, falling trees/blocks, player characters) are still
+      dropped, as the typed drop/throw paths own those.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

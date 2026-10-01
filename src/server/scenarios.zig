@@ -21960,3 +21960,136 @@ test "scenario a requested spawn carries the V3.2.0 correlation tail" {
     try std.testing.expectEqualSlices(u8, &key, &akey);
     std.debug.print("PASS requested-spawn: the v37 tail and the ack layout match\n", .{});
 }
+
+test "scenario a client-requested spawn answers with its confirm" {
+    // protocol.md section 5.0: the client places a held entity through
+    // `NetPackageRequestToSpawnEntity` (a bare `EntityCreationData`), and the
+    // server creates it and acks with `NetPackageConfirmSpawnEntity`
+    // (section 5.1.2) so the client consumes its pending `SpawnRequest`. zdtd
+    // dropped the request, so `grabDisabled()` stayed true after a placement.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const py = g.sim.transform[ps].y;
+    const pz = g.sim.transform[ps].z;
+
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, i| b.* = @intCast(40 + i);
+
+    // A living class the entityclass table knows: the stock default zombie hash
+    // (`class_table[0]` is the builtin entry, whose hash is 0 until a game dir
+    // resolves entityclasses).
+    const zhash = stock_entity_mod.class_zombie_default;
+    var ecd: [512]u8 = undefined;
+    var w: wire_binary_mod.Writer = .{ .buf = &ecd };
+    try w.writeByte(37); // file version (requested-spawn tail present)
+    try w.writeI32(zhash); // entityClass
+    try w.writeI32(0); // id (server assigns)
+    try w.writeF32(0); // lifetime
+    try w.writeF32(px + 2);
+    try w.writeF32(py);
+    try w.writeF32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0); // yaw
+    try w.writeF32(0);
+    try w.writeBool(true); // onGround
+    try w.writeI32(4); // BodyDamage
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false); // no EntityStats
+    try w.writeI16(0); // deathTime
+    try w.writeBool(false); // no bag
+    try w.writeI32(0); // homePosition
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1); // homeRange
+    try w.writeByte(0); // spawnerSource
+    try w.writeU16(0); // entityData
+    try w.writeBool(false); // no traderData
+    try w.writeByte(255); // sleeperPose
+    try w.writeBool(false); // isSleeper
+    try w.writeI32(-1); // spawnById
+    try w.writeString(""); // spawnByName
+    try w.writeBool(false); // spawnByAllowShare
+    try w.writeByte(0); // headState
+    try w.writeF32(1); // overrideSize
+    try w.writeF32(1); // overrideHeadSize
+    try w.writeBool(false); // isDancing
+    try w.writeF32(0); // stressAmount
+    try w.writeI64(c.entity_id); // requestedBy
+    try w.writeBytes(&key);
+    const body = w.written();
+
+    const parsed = try stock_entity_mod.parseSpawnRequest(body);
+    try std.testing.expectEqual(@as(u8, 37), parsed.file_version);
+    try std.testing.expect(parsed.has_request_key);
+    try std.testing.expectEqual(c.entity_id, parsed.requested_by);
+
+    var fb: [1024]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    _ = try g.step();
+    // The requester hears the ack with the created entity id and its own key.
+    const ack = cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) orelse return error.TestUnexpectedResult;
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    const created = try ar.readI64();
+    try std.testing.expect(created > 0);
+    try std.testing.expectEqualSlices(u8, &key, ack[8..24]);
+    // The entity exists in the sim and its id matches the ack.
+    try std.testing.expectEqual(@as(i32, @intCast(created)), created);
+
+    // A request far from the player is refused (rule 20): no ack.
+    cap.clear();
+    w = .{ .buf = &ecd };
+    try w.writeByte(37);
+    try w.writeI32(zhash);
+    try w.writeI32(0);
+    try w.writeF32(0);
+    try w.writeF32(px + 400);
+    try w.writeF32(py);
+    try w.writeF32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeByte(255);
+    try w.writeBool(false);
+    try w.writeI32(-1);
+    try w.writeString("");
+    try w.writeBool(false);
+    try w.writeByte(0);
+    try w.writeF32(1);
+    try w.writeF32(1);
+    try w.writeBool(false);
+    try w.writeF32(0);
+    try w.writeI64(c.entity_id);
+    try w.writeBytes(&key);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", w.written()));
+    _ = try g.step();
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
+    std.debug.print("PASS requested-spawn-c2s: the request spawns and acks\n", .{});
+}

@@ -8,6 +8,32 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const wire_binary = @import("../../wire/binary.zig");
+const packages = @import("../../wire/packages.zig");
+const stock_entity = @import("../../wire/stock_entity.zig");
+
+/// How far from the requesting player a client-requested spawn may land, and how
+/// far above or below it. Stock trusts the authored ECD; zdtd bounds it (rule 20)
+/// rather than spawning at an arbitrary point in the world.
+const request_spawn_range: f32 = 8.0;
+const request_spawn_vertical_range: f32 = 8.0;
+
+/// Resolve an entityclasses row into the sim's `EntityClass` shape.
+fn entityClassFromDef(def: anytype) ecs_world_mod.EntityClass {
+    return .{
+        .name = def.name,
+        .max_hp = def.max_hp,
+        .kind = switch (def.kind) {
+            .animal => .animal,
+            else => .zombie,
+        },
+        .hash = def.hash,
+        .loot_list = def.loot_list,
+        .drop_prob = def.loot_drop_prob,
+        .stomps_spikes = def.stomps_spikes,
+    };
+}
+
+const ecs_world_mod = @import("../../ecs/world.zig");
 
 /// True when `name` is a spawn package and was handled.
 pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -49,9 +75,54 @@ pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageRequestToSpawnEntity")) {
-        // The generic ECD request does not prove item ownership or a legal
-        // spawn class. Typed drop/throw paths must validate and consume the
-        // corresponding server-side inventory first.
+        // V3.2.0 client-requested spawn (protocol.md section 5.0): the client
+        // places a held entity (`ItemClassHeldEntity`), a falling tree or a
+        // dropped item this way and waits for `NetPackageConfirmSpawnEntity` to
+        // consume its pending `EntityPlayerLocal.SpawnRequest`; the entity must
+        // also reach it, because the ack resolves the created id in its world.
+        // The ECD is client-authored, so the class has to resolve in the
+        // entityclass catalog, the transform has to sit near the requester and
+        // the per-tick spawn token has to be free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        const req = stock_entity.parseSpawnRequest(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const t = self.sim.transform[ps];
+        const dx = req.x - t.x;
+        const dz = req.z - t.z;
+        const dy = req.y - t.y;
+        if (dx * dx + dz * dz > request_spawn_range * request_spawn_range or @abs(dy) > request_spawn_vertical_range) {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        }
+        const def = self.entities.byHash(req.entity_class) orelse return true;
+        // Only the kinds zdtd can own server-side are spawned here; a dropped
+        // item, falling block/tree or player class never reaches this point (the
+        // reader refuses those middles), so the remaining kinds are the living
+        // ones.
+        const spawned: ?ecs_world_mod.NetId = switch (def.kind) {
+            .zombie => self.sim.spawnZombieDef(req.x, req.y, req.z, def.max_hp, entityClassFromDef(def)),
+            .animal => self.sim.spawnAnimalDef(req.x, req.y, req.z, entityClassFromDef(def)),
+            else => null,
+        };
+        const nid = spawned orelse return true;
+        const created: i32 = self.sim.network_id[self.sim.slotOfNetId(nid) orelse return true].id;
+        // The ack is what clears the client's pending request; it resolves the
+        // created entity id in the client's own world, which the spawn package
+        // (sent by the interest pass) provides.
+        if (req.has_request_key) {
+            var ack: [32]u8 = undefined;
+            const ab = packages.buildConfirmSpawnEntityBody(&ack, created, &req.request_key) catch {
+                self.harness.counters.inc(.encode_errors);
+                return true;
+            };
+            try self.sendGame(peer, "NetPackageConfirmSpawnEntity", ab);
+        }
         return true;
     }
     return false;
