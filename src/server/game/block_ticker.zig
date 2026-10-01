@@ -35,6 +35,7 @@ const packages = @import("../../wire/packages.zig");
 const world_explosion = @import("world_explosion.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
+const stock_entity = @import("../../wire/stock_entity.zig");
 
 /// Scheduled block ticks held at once. A streamed POI farm can register a few
 /// hundred plants; the ring is far above that, and a drop is counted rather
@@ -55,6 +56,134 @@ pub const torch_heat_scale: f32 = 0.4;
 /// `Block.GetTickRate` for a heat block: UpdateTick reschedules itself every
 /// 10 ticks, so a torch reports ten times a second rather than every tick.
 pub const heat_tick_rate: u32 = 10;
+
+/// Armed falling trees: one entry per trunk cell, deduping repeat requests the
+/// way stock's live-entity scan does (protocol.md section 5.0 step 2).
+pub const max_falling_trees: usize = 32;
+/// `EntityFallingTree` lifetime (entity-ai.md 4301: `lifetime 3`), in ticks.
+pub const falling_tree_lifetime_ticks: u32 = 3 * protocol.ticks_per_second;
+/// Trunk cells one tree may destroy, measured up from the requested base.
+pub const falling_tree_max_cells: u32 = 48;
+
+pub const FallingTree = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    entity_id: i32 = 0,
+};
+
+/// Arm a client-requested falling tree: dedupe the cell, spawn the entity the
+/// client animates and schedule the trunk's destruction at the lifetime.
+pub fn armFallingTree(self: *Game, base_x: i32, base_y: i32, base_z: i32, id: u16, dir: [3]f32) i32 {
+    // Stock's dedupe returns without a spawn (and so without a confirm); the
+    // caller acks only a non-zero result.
+    if (fallingTreeEntityAt(self, base_x, base_y, base_z) != null) return 0;
+    var slot: ?*FallingTree = null;
+    for (self.falling_trees[0..self.falling_trees_n]) |*ft| {
+        if (ft.entity_id == 0) {
+            slot = ft;
+            break;
+        }
+    }
+    if (slot == null and self.falling_trees_n < self.falling_trees.len) {
+        slot = &self.falling_trees[self.falling_trees_n];
+        self.falling_trees_n += 1;
+    }
+    const ft = slot orelse return 0;
+    const entity_id = self.sim.allocNetId() orelse return 0;
+    ft.* = .{ .x = base_x, .y = base_y, .z = base_z, .entity_id = entity_id };
+    // The client animates the topple from the ECD's blockPos + fallTreeDir, so
+    // the spawn is what makes the tree fall for everyone nearby.
+    var buf: [256]u8 = undefined;
+    const fx: f32 = @floatFromInt(base_x);
+    const fy: f32 = @floatFromInt(base_y);
+    const fz: f32 = @floatFromInt(base_z);
+    if (stock_entity.buildEntitySpawnStock(&buf, .{
+        .entity_id = entity_id,
+        .entity_class = stock_entity.class_falling_tree,
+        .x = fx + 0.5,
+        .y = fy,
+        .z = fz + 0.5,
+        .falling_tree = .{
+            .block_x = base_x,
+            .block_y = base_y,
+            .block_z = base_z,
+            .dir_x = dir[0],
+            .dir_y = dir[1],
+            .dir_z = dir[2],
+        },
+    })) |body| {
+        self.broadcastNear("NetPackageEntitySpawn", body, fx, fz, self.interest_range) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
+    } else |_| {
+        self.harness.counters.inc(.encode_errors);
+    }
+    schedule(self, base_x, base_y, base_z, id, falling_tree_lifetime_ticks);
+    return entity_id;
+}
+
+fn fallingTreeEntityAt(self: *const Game, x: i32, y: i32, z: i32) ?i32 {
+    for (self.falling_trees[0..self.falling_trees_n]) |ft| {
+        if (ft.entity_id != 0 and ft.x == x and ft.y == y and ft.z == z) return ft.entity_id;
+    }
+    return null;
+}
+
+/// `EntityFallingTree.DestroyTree` (IL=37): the trunk comes down with the tree.
+/// Stock destroys the cells as the physics body settles; zdtd walks up from the
+/// requested base while the cells still carry tree blocks and breaks them
+/// through the normal damage path, which broadcasts each block change.
+fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
+    var entity_id: i32 = 0;
+    for (self.falling_trees[0..self.falling_trees_n]) |*ft| {
+        if (ft.entity_id != 0 and ft.x == t.x and ft.y == t.y and ft.z == t.z) {
+            entity_id = ft.entity_id;
+            ft.* = .{};
+            break;
+        }
+    }
+    if (entity_id == 0) return;
+    var y = t.y;
+    var n: u32 = 0;
+    while (n < falling_tree_max_cells) : (n += 1) {
+        const id = self.world.blockWorld(t.x, y, t.z) catch break;
+        if (id == 0) break;
+        const def = self.blocks.byId(id) orelse break;
+        if (!isTreeBlock(def)) break;
+        // Break the cell the way the explosion/zombie-chew arms do: accumulate
+        // the damage, then clear the cell and replicate the removal.
+        const hp = self.maxDamageForBlock(id);
+        _ = self.addBlockDamage(t.x, y, t.z, @intCast(@min(hp +| 1, 65535))) catch break;
+        self.noteBlockRemoved(t.x, y, t.z, id);
+        self.world.setBlockWorld(t.x, y, t.z, 0) catch break;
+        self.clearBlockHp(t.x, y, t.z);
+        self.clearBlockRaw(t.x, y, t.z);
+        if (packages.buildSetBlockBody(&self.body_buf, t.x, y, t.z, 0)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(t.x), @floatFromInt(t.z), self.interest_range) catch {};
+        } else |_| {}
+        y += 1;
+    }
+    var buf: [16]u8 = undefined;
+    const body = packages.buildRemoveBodyReason(&buf, entity_id, .despawned) catch return;
+    self.broadcastNear(
+        "NetPackageEntityRemove",
+        body,
+        @floatFromInt(t.x),
+        @floatFromInt(t.z),
+        self.interest_range,
+    ) catch {
+        self.harness.counters.inc(.net_send_errors);
+    };
+}
+
+/// `Block.HasTag(BlockTags.TreeTrunk)` (tag 4): the block's `Tags` string names
+/// the trunk set, or its class is a log/trunk block.
+fn isTreeBlock(def: assets_blocks.BlockDef) bool {
+    if (std.ascii.indexOfIgnoreCase(def.tags, "tree") != null) return true;
+    if (std.ascii.indexOfIgnoreCase(def.tags, "trunk") != null) return true;
+    return false;
+}
 
 pub const ScheduledTick = struct {
     due: u64,
@@ -133,6 +262,12 @@ fn blockTickAt(self: *const Game, i: usize) ScheduledTick {
 
 /// One due tick: dispatch on the block's class.
 fn run(self: *Game, t: ScheduledTick) void {
+    // A falling tree is scheduled on its trunk base, whose block class is not a
+    // mine/heat/plant: route it before the class dispatch.
+    if (fallingTreeEntityAt(self, t.x, t.y, t.z) != null) {
+        fallingTreeTick(self, t);
+        return;
+    }
     const cur = self.world.blockWorld(t.x, t.y, t.z) catch return;
     // The cell changed since it was scheduled (harvested, replaced, collapsed):
     // stock's ticker re-reads the cell and drops a stale entry the same way.

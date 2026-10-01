@@ -100,6 +100,34 @@ pub fn handleSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
             self.harness.counters.inc(.c2s_rejects);
             return true;
         }
+        // A falling tree is the one client request with a branch zdtd services:
+        // the client chopped a trunk and asks for the topple (protocol.md
+        // section 5.0 step 2). Stock dedupes by blockPos against live falling
+        // trees, spawns the entity the client animates and destroys the trunk
+        // when it settles; the entity id is the ack's payload.
+        if (req.falling_tree) |ftree| {
+            const bid = self.world.blockWorld(ftree.block_x, ftree.block_y, ftree.block_z) catch return true;
+            if (bid == 0) return true;
+            const bdef = self.blocks.byId(bid) orelse return true;
+            if (std.ascii.indexOfIgnoreCase(bdef.tags, "tree") == null and
+                std.ascii.indexOfIgnoreCase(bdef.tags, "trunk") == null) return true;
+            const created = self.armFallingTree(
+                ftree.block_x,
+                ftree.block_y,
+                ftree.block_z,
+                bid,
+                .{ ftree.dir_x, ftree.dir_y, ftree.dir_z },
+            );
+            if (created != 0 and req.has_request_key) {
+                var ack: [32]u8 = undefined;
+                const ab = packages.buildConfirmSpawnEntityBody(&ack, created, &req.request_key) catch {
+                    self.harness.counters.inc(.encode_errors);
+                    return true;
+                };
+                try self.sendGame(peer, "NetPackageConfirmSpawnEntity", ab);
+            }
+            return true;
+        }
         const def = self.entities.byHash(req.entity_class) orelse return true;
         // Only the kinds zdtd can own server-side are spawned here; a dropped
         // item, falling block/tree or player class never reaches this point (the

@@ -304,7 +304,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `WorldBlockTicker` is absent
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
-      never fire (world/blocks.md:262-263, 774-786).
+      never fire (world/blocks.md:262-263, 774-786). **Trees fall now**: the
+      client's `NetPackageRequestToSpawnEntity` fallingTree middle parses
+      (protocol.md section 5.1: blockPos + fallTreeDir), the request dedupes per
+      trunk cell (stock returns without a spawn for a live tree at the same
+      blockPos), the server spawns the `fallingTree` ECD the client animates from
+      and acks the requester, and at the entity's 3 s lifetime
+      (`entity-ai.md` 4301) `fallingTreeTick` breaks the trunk cells above the
+      base through the normal damage/removal path and sends
+      `NetPackageEntityRemove`. Gated by `scenario a chopped tree falls and its
+      trunk comes down` (decisive: removing the ticker route leaves the trunk
+      standing).
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in

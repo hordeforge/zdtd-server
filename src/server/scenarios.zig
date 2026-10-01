@@ -31,6 +31,7 @@ const collectors_mod = @import("../world/collectors.zig");
 const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
 const stock_entity_mod = @import("../wire/stock_entity.zig");
+const block_ticker_mod = @import("game/block_ticker.zig");
 const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
@@ -22092,4 +22093,140 @@ test "scenario a client-requested spawn answers with its confirm" {
     _ = try g.step();
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
     std.debug.print("PASS requested-spawn-c2s: the request spawns and acks\n", .{});
+}
+
+test "scenario a chopped tree falls and its trunk comes down" {
+    // protocol.md section 5.0: the client asks for a falling tree when it chops
+    // a trunk (`NetPackageRequestToSpawnEntity` with the fallingTree middle),
+    // stock dedupes by blockPos, spawns the entity it animates and destroys the
+    // trunk when it settles (entity-ai.md 4301: lifetime 3, `DestroyTree` IL=37).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "treeTrunk")) return 1743;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_tree.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="treeTrunk">
+        \\  <property name="Class" value="TreeTrunk" />
+        \\  <property name="Tags" value="tree,trunk" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property name="MaxDamage" value="100" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const trunk = g.blocks.byName("treeTrunk") orelse return error.TestUnexpectedResult;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    // A four-block trunk next to the player.
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        try g.world.setBlockWorld(px + 2, py + @as(i32, @intCast(i)), pz, trunk.id);
+        g.setBlockRaw(px + 2, py + @as(i32, @intCast(i)), pz, trunk.id);
+    }
+    // The lowest trunk cell must be a real block for the arm's type check.
+    const base_id = try g.world.blockWorld(px + 2, py, pz);
+    try std.testing.expectEqual(trunk.id, base_id);
+
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, j| b.* = @intCast(90 + j);
+    var ecd: [256]u8 = undefined;
+    var w: wire_binary_mod.Writer = .{ .buf = &ecd };
+    try w.writeByte(37);
+    try w.writeI32(stock_entity_mod.class_falling_tree);
+    try w.writeI32(0);
+    try w.writeF32(0);
+    try w.writeF32(@floatFromInt(px + 2));
+    try w.writeF32(@floatFromInt(py));
+    try w.writeF32(@floatFromInt(pz));
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    // fallingTree middle: blockPos then fallTreeDir
+    try w.writeI32(px + 2);
+    try w.writeI32(py);
+    try w.writeI32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeByte(255);
+    try w.writeBool(false);
+    try w.writeI32(-1);
+    try w.writeString("");
+    try w.writeBool(false);
+    try w.writeByte(0);
+    try w.writeF32(1);
+    try w.writeF32(1);
+    try w.writeBool(false);
+    try w.writeF32(0);
+    try w.writeI64(c.entity_id);
+    try w.writeBytes(&key);
+    const body = w.written();
+    const parsed = try stock_entity_mod.parseSpawnRequest(body);
+    try std.testing.expect(parsed.falling_tree != null);
+    try std.testing.expectEqual(px + 2, parsed.falling_tree.?.block_x);
+
+    var fb: [512]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    // The nearby client gets the spawn the falling animation is built from, and
+    // the requester gets the correlation ack.
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntitySpawn").?) != null);
+    const ack = cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) orelse return error.TestUnexpectedResult;
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    const created = try ar.readI64();
+    try std.testing.expect(created > 0);
+    try std.testing.expectEqualSlices(u8, &key, ack[8..24]);
+
+    // A repeat request for the same cell arms nothing new (stock's dedupe).
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    _ = try g.step();
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
+
+    // The lifetime passes: the trunk comes down and the entity is removed.
+    var t: u32 = 0;
+    while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
+    var k: u32 = 0;
+    while (k < 4) : (k += 1) {
+        try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px + 2, py + @as(i32, @intCast(k)), pz));
+    }
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityRemove").?) != null);
+    std.debug.print("PASS falling-tree: the topple spawns and the trunk comes down\n", .{});
 }

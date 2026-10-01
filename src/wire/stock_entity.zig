@@ -519,6 +519,9 @@ pub const ParsedSpawnRequest = struct {
     has_request_key: bool = false,
     requested_by: i32 = 0,
     request_key: [16]u8 = [_]u8{0} ** 16,
+    /// fallingTree middle: the trunk cell the client chose and the fall
+    /// direction it wants (protocol.md section 5.1 middle).
+    falling_tree: ?FallingTreeInfo = null,
 };
 
 /// Read the generic branch of a client `EntityCreationData`. The class-switched
@@ -551,8 +554,18 @@ pub fn parseSpawnRequest(body: []const u8) binary.ReadError!ParsedSpawnRequest {
     _ = try r.readI32();
     _ = try r.readI16(); // homeRange
     _ = try r.readByte(); // spawnerSource
-    // Middle: only the generic branch (no writes) is accepted.
-    if (out.entity_class == class_item or out.entity_class == class_falling_tree or
+    // Middle: the fallingTree branch is the one client request zdtd services
+    // (chopping a tree); every other class-switched middle is refused.
+    if (out.entity_class == class_falling_tree) {
+        out.falling_tree = .{
+            .block_x = try r.readI32(),
+            .block_y = try r.readI32(),
+            .block_z = try r.readI32(),
+            .dir_x = try r.readF32(),
+            .dir_y = try r.readF32(),
+            .dir_z = try r.readF32(),
+        };
+    } else if (out.entity_class == class_item or
         out.entity_class == class_falling_block or out.entity_class == class_falling_blocks or
         out.entity_class == class_player_male or out.entity_class == class_player_female or
         out.entity_class == class_junk_drone)
