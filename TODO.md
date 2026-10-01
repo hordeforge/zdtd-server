@@ -349,6 +349,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       model (`Convert`/`Modify`/`Expand`/`Cost` and `ModTransformEnableNames`),
       the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
       `OpenSound`/`CloseSound` pair (a UI-open sound the client plays itself).
+- [x] **A land claim's show-bounds toggle never streamed** - closed 2026-10-01:
+      `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that one
+      byte (`Write` IL=381; the version `18` is persistent-only), so a claim
+      block's composite body was a module zdtd had no writer for and the client's
+      declared order never matched. `moduleHash(.land_claim)` now resolves, a body
+      builder/parser handle the declared order (refusing a body with no claim
+      module), the toggle applies only from the claim's owner (stock gates the
+      activation on ownership) and rebroadcasts to nearby peers, and the chunk
+      stream sends the current state on entry. Gated by `scenario a land claim
+      streams its show-bounds toggle` (decisive: dropping the ownership gate lets
+      a stranger clear another player's toggle). Residual: `TEFeatureCanvas`
+      (`CanvasState`: GlobalSignId + blend + rotation) remains the last composite
+      module with no body, and the leftover collect text in the entry above.
 - [x] **A locked door reached no other client** - closed 2026-09-28 for the
       `TEFeatureDoor` + `TEFeatureLockable` pair. A composite door's ToClient
       body is the declared module order with the door module's two bytes

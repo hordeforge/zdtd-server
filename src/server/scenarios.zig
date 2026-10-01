@@ -21667,3 +21667,110 @@ test "scenario an auto-close door shuts itself and tells the clients" {
     try std.testing.expect((packages.blockMeta(try g.world.rawWorld(px, dy, dz)) & packages.block_meta_on) != 0);
     std.debug.print("PASS door-auto-close: the deadline shuts the door\n", .{});
 }
+
+test "scenario a land claim streams its show-bounds toggle" {
+    // `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that
+    // one byte (TEFeatureLandClaim.Write IL=381; the version 18 is
+    // persistent-only), so the claim block's TE matches the client's declared
+    // module order and the bounds helper reaches the party.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "claimTest")) return 1741;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_claim.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="claimTest">
+        \\  <property name="Class" value="LandClaim" />
+        \\  <property name="Material" value="Mstone" />
+        \\  <property class="TEFeatureLandClaim" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const claim_def = g.blocks.byName("claimTest") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), claim_def.te_feature_n);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.land_claim, claim_def.te_features[0]);
+    try std.testing.expect(stock_te_mod.moduleHash(.land_claim) != null);
+
+    // Layout round trip: the one-byte module comes back, and a body without the
+    // claim module is refused rather than mistaken for one.
+    var body_buf: [512]u8 = undefined;
+    const cb = try stock_te_mod.buildLandClaimTeBody(
+        &body_buf,
+        255,
+        30,
+        70,
+        30,
+        claim_def.id,
+        claim_def.te_features[0..1],
+        true,
+    );
+    const parsed = try stock_te_mod.parseLandClaimTeBody(cb);
+    try std.testing.expect(parsed.found_claim);
+    try std.testing.expect(parsed.show_bounds);
+    try std.testing.expectError(error.EndOfStream, stock_te_mod.parseLandClaimTeBody(&[_]u8{ 0, 0, 0 }));
+
+    // Ownership gate + party broadcast: the owner's toggle applies and a second
+    // nearby peer hears it; another player's edit is dropped.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 30;
+    g.sim.transform[ps].z = 30;
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = 32;
+    g.sim.transform[ps2].z = 30;
+
+    try g.world.setBlockWorld(30, 70, 30, claim_def.id);
+    g.setBlockRaw(30, 70, 30, claim_def.id);
+    g.land_claims[0] = .{ .x = 30, .y = 70, .z = 30, .owner_entity = c.entity_id };
+    g.land_claims_n = 1;
+
+    var fb: [512]u8 = undefined;
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", cb));
+    try std.testing.expect(g.land_claims[0].show_bounds);
+    try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+
+    // A non-owner toggle is refused (stock gates the activation on ownership).
+    const other = try stock_te_mod.buildLandClaimTeBody(
+        &body_buf,
+        255,
+        30,
+        70,
+        30,
+        claim_def.id,
+        claim_def.te_features[0..1],
+        false,
+    );
+    var cap3: ln_peer.Capture = .{};
+    const c3 = try g.attachJoinedClient(&cap3);
+    g.clients[c3.slot].entered = true;
+    const ps3 = g.sim.playerByPeer(c3.slot).?;
+    g.sim.transform[ps3].x = 30;
+    g.sim.transform[ps3].z = 30;
+    try g.injectFramed(c3, try packages.framed(&fb, "NetPackageTileEntity", other));
+    try std.testing.expect(g.land_claims[0].show_bounds);
+    std.debug.print("PASS land-claim: the toggle streams to the party, not from strangers\n", .{});
+}

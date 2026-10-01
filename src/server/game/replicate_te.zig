@@ -495,6 +495,26 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
     try self.sendGame(peer, "NetPackageTileEntity", body);
 }
 
+/// Send a land claim block's TE (`TEFeatureLandClaim.showBounds`), only when the
+/// block at that cell declares the module.
+pub fn sendLandClaimTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32, show_bounds: bool) !void {
+    // A builtin/synthetic table carries no feature declaration, so there is
+    // nothing to fill: skip rather than fail the join that triggered the send.
+    const body = buildLandClaimBody(self, x, y, z, show_bounds) catch return;
+    try self.sendGame(peer, "NetPackageTileEntity", body);
+}
+
+/// Build the land-claim body for the block at a cell; an error when the block
+/// declares no land-claim module (so nothing is claimed on the wire).
+pub fn buildLandClaimBody(self: *Game, x: i32, y: i32, z: i32, show_bounds: bool) ![]const u8 {
+    const raw = self.world.rawWorld(x, y, z) catch return error.Overflow;
+    const id: u16 = @intCast(raw & 0xffff);
+    const def = self.blocks.byId(id) orelse return error.Overflow;
+    const declared = def.te_features[0..def.te_feature_n];
+    if (declared.len == 0 or declared[0] != .land_claim) return error.Overflow;
+    return stock_te.buildLandClaimTeBody(&self.body_buf, 255, x, y, z, id, declared, show_bounds);
+}
+
 /// Build the current door TE body for a stored door: declared module order,
 /// the open flag from the block meta, and the stored lock blob. Null when the
 /// block declares no usable door module set.

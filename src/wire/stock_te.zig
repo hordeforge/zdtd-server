@@ -47,6 +47,9 @@ pub const feature_hash_lockable: i32 = unity_hash.getStableHashCode("TEFeatureLo
 /// `animateOnSync` (Write IL=23: the version `18` goes out only on the
 /// persistent stream).
 pub const feature_hash_door: i32 = unity_hash.getStableHashCode("TEFeatureDoor");
+/// `TEFeatureLandClaim` (`TEFeatureLandClaim.il`): the ToClient body is the
+/// `showBounds` bool (Write IL=381; the version `18` is persistent-only).
+pub const feature_hash_land_claim: i32 = unity_hash.getStableHashCode("TEFeatureLandClaim");
 
 /// GetStableHashCode("TEFeatureCanvas"): the composite module that carries a
 /// canvas sign's state as an opaque body (`libraryId` string, the 16-byte sign
@@ -83,7 +86,8 @@ pub fn moduleHash(kind: blocks.FeatureKind) ?i32 {
         .combine => feature_hash_combine,
         .area_repair => feature_hash_area_repair,
         .door => feature_hash_door,
-        .signable, .canvas, .land_claim, .other => null,
+        .land_claim => feature_hash_land_claim,
+        .signable, .canvas, .other => null,
     };
 }
 
@@ -781,6 +785,105 @@ fn writeCollectorStackArray(w: *binary.Writer, slots: []const stock_inv.StockSlo
 pub fn writeDoorFeature(w: *binary.Writer, is_open: bool) !void {
     try w.writeBool(is_open);
     try w.writeBool(false);
+}
+
+/// Build a composite land-claim TE body (`TEFeatureLandClaim`): declared module
+/// order, with the one-byte `showBounds` module.
+pub fn buildLandClaimTeBody(
+    buf: []u8,
+    handle: u8,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    block_id: i32,
+    declared: []const blocks.FeatureKind,
+    show_bounds: bool,
+) ![]u8 {
+    var payload: [1024]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    const outer = try reserveU32(&pw);
+    try pw.writeI32(block_id);
+    try pw.writeByte(0); // null owner
+    if (declared.len == 0 or declared.len > 255) return error.Overflow;
+    try pw.writeByte(@intCast(declared.len));
+    for (declared) |kind| {
+        try pw.writeI32(moduleHash(kind) orelse return error.Overflow);
+        const mark = try reserveU32(&pw);
+        switch (kind) {
+            .land_claim => try pw.writeBool(show_bounds),
+            .lockable => try pw.writeBytes(&unlocked_lock_body),
+            .lock_pickable, .explodable, .pickup, .combine, .area_repair => {},
+            .storage, .door, .signable, .canvas, .other => return error.Overflow,
+        }
+        finalizeU32(&pw, mark);
+    }
+    finalizeU32(&pw, outer);
+    const pay = pw.written();
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, block_id, pay.len);
+    try w.writeBytes(pay);
+    return w.written();
+}
+
+pub const ParsedLandClaim = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    found_claim: bool = false,
+    show_bounds: bool = false,
+};
+
+/// Walk a composite land-claim body. Fails with `error.NotLandClaimTe` when no
+/// land-claim module is present (`TEFeatureLandClaim::Read` IL=356).
+pub fn parseLandClaimTeBody(body: []const u8) (binary.ReadError || error{NotLandClaimTe})!ParsedLandClaim {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedLandClaim = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    const outer_size = try pr.readU32();
+    if (outer_size < 4 or outer_size - 4 > pr.remaining()) return error.InvalidString;
+    _ = try pr.readI32();
+    const owner_tag = try pr.readByte();
+    if (owner_tag != 0) {
+        _ = try pr.readByte();
+        try pr.skipString();
+        try pr.skipString();
+    }
+    const mod_n = try pr.readByte();
+    var mi: u8 = 0;
+    while (mi < mod_n) : (mi += 1) {
+        const hash = try pr.readI32();
+        const feat_size = try pr.readU32();
+        if (feat_size < 4) return error.InvalidString;
+        const feat_payload_len = feat_size - 4;
+        if (pr.remaining() < feat_payload_len) return error.EndOfStream;
+        const feat_start = pr.pos;
+        if (hash == feature_hash_land_claim) {
+            if (feat_payload_len < 1) return error.InvalidString;
+            out.found_claim = true;
+            out.show_bounds = try pr.readBool();
+        } else if (hash == feature_hash_lockable and feat_payload_len <= containers.max_lock_feature_bytes) {
+            try validateLockFeature(&pr, feat_payload_len);
+        } else {
+            pr.pos += feat_payload_len;
+        }
+        const consumed = pr.pos - feat_start;
+        if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
+        if (consumed > feat_payload_len) return error.InvalidString;
+    }
+    if (!out.found_claim) return error.NotLandClaimTe;
+    return out;
 }
 
 /// Build a composite door TE body (`NetPackageTileEntity`), emitted in the

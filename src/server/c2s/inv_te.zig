@@ -226,6 +226,34 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             }
             return true;
         } else |_| {}
+        // Land claim TE (`TEFeatureLandClaim`): the showBounds toggle. Only the
+        // claim's owner may flip it (stock gates the activation on ownership),
+        // and every nearby client gets the re-emitted body so the bounds helper
+        // appears for the whole party.
+        if (stock_te.parseLandClaimTeBody(body) catch |err| switch (err) {
+            error.NotLandClaimTe => null,
+            else => null,
+        }) |lc| {
+            var ci: usize = 0;
+            while (ci < self.land_claims_n) : (ci += 1) {
+                const rec = &self.land_claims[ci];
+                if (rec.x != lc.world_x or rec.y != lc.world_y or rec.z != lc.world_z) continue;
+                if (rec.owner_entity != c.entity_id) return true;
+                if (rec.show_bounds == lc.show_bounds) return true;
+                rec.show_bounds = lc.show_bounds;
+                if (replicate_te.buildLandClaimBody(self, rec.x, rec.y, rec.z, rec.show_bounds)) |bo| {
+                    self.broadcastNear(
+                        "NetPackageTileEntity",
+                        bo,
+                        @floatFromInt(rec.x),
+                        @floatFromInt(rec.z),
+                        self.interest_range,
+                    ) catch {};
+                } else |_| {}
+                return true;
+            }
+            return true;
+        }
         // Door TE (`TEFeatureDoor` + `TEFeatureLockable`): the only state the
         // block meta does not already carry is the lock, so the lockable module
         // is stored and re-emitted to nearby peers, which is what makes a locked
