@@ -5445,8 +5445,10 @@ persists so little that a restart visibly damages a built base.
   (NetPackageChunkClusterInfo, 2026-08-21, right after WorldInfo per the
   client's chunkClusterLoaded gate; ChunkProviderDisc bounds for fixed DTM
   maps, infinite (0,0)/(0,0) for proc/flat). ToClient names never sent at all
-  include EntitySetSkillLevelClient, WallVolume, Light, TreeFade,
-  AudioPlayInHead, WaterSimChunkUpdate, AuthState.
+  include WallVolume, Light, AudioPlayInHead, WaterSimChunkUpdate, AuthState.
+  Corrected 2026-10-01: EntitySetSkillLevelClient **is** sent (the C2S
+  `NetPackageEntitySetSkillLevelServer` echo in `c2s/misc_progress.zig`) and
+  TreeFade **is** sent (the falling-tree settle edge, `block_ticker.zig`).
   Corrected (2026-08-21): EntityAddExpClient IS emitted on kills (killXpAward,
   stock_xp builder); ShowToolbeltMessage is not a pickup notification - its
   sole stock sender is the Homerun minigame (ShowTooltipMP unicast,

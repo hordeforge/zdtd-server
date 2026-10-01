@@ -611,6 +611,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       other clients` (decisive: dropping the relay sends nothing). Residual: the
       server-side itemclass hooks are no-ops in vanilla content (mod API
       surface), so only the relay is modelled.
+- [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
+      not yet implemented. The package is `m_persistentPlayerId` +
+      `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
+      Value, Value, Value, rawData, damage) + `m_localPlayerThatChanged`
+      (protocol-packages.md section 5.5 "Prop/land edits"; `PropChangeInfo.Write`
+      IL=107). Stock's `ProcessPackage` gates it with `ValidUserIdForSender` and
+      `ValidEntityIdForSender(localPlayerThatChanged)`, fans it to other clients
+      (`SetPropsOnClients(-1, pkg)`, channel 192) and applies it through
+      `GameManager.ChangeProps(persistentPlayerId, changes)` -> per change
+      `GetChunkSync` then `ChunkCluster.SetProp(ChunkPos, PropId, Position,
+      Rotation, Scale, BlockValue)` with the touched cluster's delayed-regen pair
+      (world-chunks.md 930-946). Implementing it needs: the PropChangeInfo reader,
+      the persistent-player-id ownership check against the claim/offline-owner
+      table, a per-cell prop store (position/rotation/scale/rawData/damage) on the
+      chunk world, the relay, and the chunk-stream leg. Nothing in the sim reads
+      props yet, so the apply has to land with the store, not before it.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event
@@ -628,6 +644,18 @@ nothing here is already waived. The four gaps the same audit closed are in
 - [x] **Vehicles and turrets streamed without EntityAliveFlags** - closed
       2026-09-28: the replicate pass now emits the flags leg for every alive
       kind, not just zombies and animals.
+- [x] **Three "missing" packages were already there** - verified 2026-10-01 while
+      sweeping the unhandled C2S/Both ids:
+      `NetPackageSetAttackTarget` (the zombie target fan-out) is sent by
+      `tickAttackTarget`'s per-tick edge detector, which deliberately covers more
+      than stock's per-change call sites (a target that dies, a recycled slot);
+      a second ring/drain built this round was deleted rather than kept.
+      `NetPackageEntitySetPartActive` applies `Entity.SetTransformActive`, which
+      the IL shows is `FindInChilds` + `GameObject.SetActive` with no send and no
+      gameplay state, so on a model-less dedicated server there is nothing to do.
+      The crawler/cripple rules (`LegCrawlerThreshold`, `LegCrippleScale`, the
+      0.05 floor and the per-side flags) are implemented in `rollDismember`; the
+      open part is the walk-type/animation setup, which is client-side.
 - [ ] **Sandbox `EntityIncomingDamage` (42) is client-side by design** - NOT a
       gap: stock's client applies the multiplier to the damage it claims and
       the server trusts the claimed strength (sandbox-options.md 274-292), which
