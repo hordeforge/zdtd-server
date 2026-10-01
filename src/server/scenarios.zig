@@ -22616,7 +22616,12 @@ test "scenario a class eye offset decides what the AI sees over cover" {
     const short_sees = ctx.canSee();
     g.sim.class_id[zs].see_offset = .{ 0, 3.2, 0 };
     const tall_sees = ctx.canSee();
+    // The lateral components move the eye too: a 1.5-block X offset steps the
+    // ray off the cover cell the default eye line runs through.
+    g.sim.class_id[zs].see_offset = .{ 1.5, 1.6, 0 };
+    const sideways_sees = ctx.canSee();
     try std.testing.expect(tall_sees != short_sees);
+    try std.testing.expect(sideways_sees != short_sees);
     std.debug.print("PASS ai-see-offset: the class eye height decides the line\n", .{});
 }
 

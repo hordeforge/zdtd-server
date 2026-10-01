@@ -261,15 +261,15 @@ pub const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 }
 /// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
 /// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
 fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
-    return losClearSeen(w, zx, zy, zz, px, py, pz, 1.6);
+    return losClearSeen(w, zx, zy, zz, px, py, pz, .{ 0, 1.6, 0 });
 }
 
-/// Same ray with the seer's own eye height: entityclasses `AISeeOffset`
-/// (entity-ai.md 3589) moves the sense origin per class, so a tall class sees
-/// over cover a short one cannot. `dy` is the seer's eye Y; the target keeps the
-/// torso offset.
-fn losClearSeen(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32, dy: f32) bool {
-    return rayClear(w, zx, zy + dy, zz, px, py + 1.6, pz);
+/// Same ray with the seer's own eye offset: entityclasses `AISeeOffset`
+/// (entity-ai.md 3589) moves the sense origin per class - the Y raises or lowers
+/// it, X/Z shift it sideways - so a class sees over or around cover one with a
+/// different offset cannot. The target keeps the torso offset.
+fn losClearSeen(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32, off: [3]f32) bool {
+    return rayClear(w, zx + off[0], zy + off[1], zz + off[2], px, py + 1.6, pz);
 }
 
 /// Voxel line clear between two world points: stock's `Voxel.Raycast` as used
@@ -406,7 +406,7 @@ pub fn canSensePlayer(
     const t = if (srange > 0.001) @min(@sqrt(d2) / srange, 1.0) else 0.0;
     const th = sightLightThreshold(w, zslot);
     if (light_level <= th[0] + (th[1] - th[0]) * t) return false;
-    const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset[1] else 1.6;
+    const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset else [3]f32{ 0, 1.6, 0 };
     return losClearSeen(w, zx, zy, zz, px, py, pz, eye);
 }
 
@@ -554,7 +554,7 @@ pub fn nearestMobSnap(w: *const World, zslot: Slot, zx: f32, zy: f32, zz: f32, z
                 }
             }
             if (!listed) continue;
-            const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset[1] else 1.6;
+            const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset else [3]f32{ 0, 1.6, 0 };
             const dx = w.transform[j].x - zx;
             const dz = w.transform[j].z - zz;
             const d = dx * dx + dz * dz;

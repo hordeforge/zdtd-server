@@ -337,7 +337,7 @@ nothing here is already waived. The four gaps the same audit closed are in
       suppressing the clear leaves the base block standing). Residual: Unity's
       contact impulses (the 4-instance cap per entity+id and the impulse-sized
       contact point).
-- [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
+- [x] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in
       `BlockCollector/OutputType::.ctor` field order), a cell-keyed
@@ -384,11 +384,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       field 3 is `AdditionalFuelCost`, which `fuelCost` scales by
       `itemsToCreate - 1`, so that term now rides each burn. Gated by `scenario a
       Convert mod swaps the output and a Cost mod discounts the fuel` (decisive:
-      dropping either branch fails it). Still open: the cosmetic `Modify`/
-      `Expand` effects (a renderer flag and a UI-grid +1) and
-      `ModTransformEnableNames`, the `CatalystConvert` pairs
-      (`Convert(ItemStack)`), and the `OpenSound`/`CloseSound` pair (a UI-open
-      sound the client plays itself).
+      dropping either branch fails it). The entry's remaining items are not
+      server behaviour, checked 2026-10-01: `ModTransformEnableNames`/
+      `DisableNames` toggle `modEnableRenderers`/`modDisableRenderers` objects
+      (IL_00CE-011F), `Expand` is `OutputWindowHeight`/`CatalystGridHeight` +1
+      (IL_000B-0018), `Modify` is only ever *set* (no reader in the assembly),
+      `CatalystConverts` is read only by `XUiC_CollectorFuelGrid` (the client's
+      fuel-grid window; `grep CatalystConverts` finds no reader in
+      `TileEntityCollector`), and `OpenSound`/`CloseSound` are the UI-open pair
+      the client plays itself. Nothing left to model here.
 - [x] **A land claim's show-bounds toggle never streamed** - closed 2026-10-01:
       `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that one
       byte (`Write` IL=381; the version `18` is persistent-only), so a claim
@@ -521,7 +525,7 @@ nothing here is already waived. The four gaps the same audit closed are in
       NOT a gap: the only stock sender is
       `ChunkManager::RemoveAllChunksOnAllClients` (IL=99), called solely from
       `PrefabEditModeManager`, the client prefab editor a dedi never enters.
-- [ ] **Client-requested spawns are dropped, so a held-entity placement waits
+- [x] **Client-requested spawns are dropped, so a held-entity placement waits
       forever** - the wire half landed 2026-10-01: `EntityCreationData` can now
       carry the V3.2.0 `requestedBy`/`requestKey` pair (FileVersion 37, protocol.md
       section 5.1 tail) and the paired `NetPackageConfirmSpawnEntity` encoder is
