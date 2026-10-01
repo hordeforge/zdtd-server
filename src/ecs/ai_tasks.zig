@@ -1310,7 +1310,16 @@ fn lookUpdate(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
         const f = rngFrac(ai, w.network_id[s].id);
         ai.look_yaw = w.transform[s].yaw + f * w.rules.ai.look_yaw_range_deg - w.rules.ai.look_yaw_range_deg * 0.5;
     }
-    w.transform[s].yaw = seekYawStep(w.transform[s].yaw, ai.look_yaw, w.rules.ai.look_turn_speed_deg, w.rules.ai.look_yaw_slow_at_deg, w.rules.ai.look_turn_speed_min_deg, dt);
+    // `Entity.SeekYaw(rotation.y + rand*120 - 60, 0, 35)` (EAILook.Continue
+    // IL=116): the shared helper's rate is `EntityClass.MaxTurnSpeed`, so the
+    // Rules value is only the fallback for an entity with no parsed class (it
+    // carries zombieTemplateMale's 250). Stock snaps for a parsed class that
+    // declares no `MaxTurnSpeed`; zdtd keeps the floor there so a fixture class
+    // behaves as it did.
+    const class_turn = if (w.mask[s].class_id) w.class_id[s].max_turn_speed else 0;
+    const max_turn = if (class_turn > 0) class_turn else w.rules.ai.look_turn_speed_deg;
+
+    w.transform[s].yaw = seekYawStep(w.transform[s].yaw, ai.look_yaw, max_turn, w.rules.ai.look_yaw_slow_at_deg, w.rules.ai.look_turn_speed_min_deg, dt);
 }
 
 /// EAIApproachAndAttackTarget::Update: grid A* toward the sensed player when a
@@ -3560,4 +3569,29 @@ test "a chase past chaseTimeMax gives up and walks home" {
     t = 0;
     while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.zombie_ai[zs2].going_home);
+}
+
+test "the idle look-around turns at the class MaxTurnSpeed" {
+    // EAILook.Continue's `SeekYaw(..., 0, 35)` uses `EntityClass.MaxTurnSpeed`;
+    // the Rules 250 is only the no-class fallback.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const s = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    w.mask[s].zombie_ai = true;
+    w.zombie_ai[s].look_yaw = 180;
+    w.zombie_ai[s].look_turn_cd = 100; // do not re-pick the sweep this tick
+    w.transform[s].yaw = 0;
+
+    // Class rate 60 deg/s: one 50 ms tick may turn 3 degrees at most.
+    w.mask[s].class_id = true;
+    w.class_id[s].max_turn_speed = 60;
+    lookUpdate(&w, s, &w.zombie_ai[s], 0.05);
+    try std.testing.expect(w.transform[s].yaw <= 3.01);
+
+    // No class data: the Rules fallback (250 deg/s) turns 12.5 degrees.
+    w.transform[s].yaw = 0;
+    w.mask[s].class_id = false;
+    lookUpdate(&w, s, &w.zombie_ai[s], 0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.5), w.transform[s].yaw, 0.5);
 }

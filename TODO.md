@@ -621,7 +621,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       declares a turn rate turns at that rate and a class that declares none
       snaps exactly as before. Gated by `the movement tail turns at the class
       MaxTurnSpeed, not instantly` (decisive: forcing the class value to 0 turns
-      the capped case into a snap and fails it).
+      the capped case into a snap and fails it). The idle look-around closed with
+      it: `EAILook.Continue` IL=116 reaches the same `SeekYaw(..., 0, 35)` helper,
+      so `lookUpdate` now takes the class rate too and only keeps the Rules 250
+      (which carries zombieTemplateMale's value) for an entity with no parsed
+      class. Gated by `the idle look-around turns at the class MaxTurnSpeed`
+      (decisive: pinning the Rules rate fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
