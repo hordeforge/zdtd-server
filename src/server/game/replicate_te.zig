@@ -599,6 +599,12 @@ pub fn sendCollectorTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32)
 /// (`HandleUpdate` IL_00E3-012E), which is the same `NetPackageAudio` body the
 /// client sends for its own sounds.
 pub fn broadcastCollectorSound(self: *Game, x: i32, y: i32, z: i32, group: []const u8, play: bool) void {
+    return broadcastSoundAt(self, x, y, z, group, play);
+}
+
+/// `Audio.Manager.BroadcastPlay`/`BroadcastStop` at a world cell: the same
+/// `NetPackageAudio` body the client sends for its own sounds.
+pub fn broadcastSoundAt(self: *Game, x: i32, y: i32, z: i32, group: []const u8, play: bool) void {
     if (group.len == 0) return;
     var buf: [192]u8 = undefined;
     const body = stock_block.buildAudioPlayBody(&buf, .{

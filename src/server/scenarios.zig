@@ -22230,3 +22230,76 @@ test "scenario a chopped tree falls and its trunk comes down" {
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityRemove").?) != null);
     std.debug.print("PASS falling-tree: the topple spawns and the trunk comes down\n", .{});
 }
+
+test "scenario a falling tree hurts what it lands on" {
+    // `collidedWith` (IL=58) damages an entity for `int(treeRB.mass * 0.36)`
+    // where `CreateMesh` sizes the mass as `(15 + 7 * h) * 5` for an h-cell
+    // trunk, once per tree, and `treeCanDamageEntity` (IL=20) spares players and
+    // supply crates. `Collide` IL=101 plays `treefallimpact` on the contact.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "treeLog")) return 1744;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_tree2.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="treeLog">
+        \\  <property name="Class" value="TreeTrunk" />
+        \\  <property name="Tags" value="tree" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property name="MaxDamage" value="50" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const log = g.blocks.byName("treeLog") orelse return error.TestUnexpectedResult;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+
+    // A three-cell trunk two blocks east, falling east (+x).
+    var i: u32 = 0;
+    while (i < 3) : (i += 1) {
+        try g.world.setBlockWorld(px + 2, py + @as(i32, @intCast(i)), pz, log.id);
+        g.setBlockRaw(px + 2, py + @as(i32, @intCast(i)), pz, log.id);
+    }
+    // A zombie in the fall line, a player right beside it (spared).
+    const zid = g.sim.spawnZombie(@floatFromInt(px + 4), @floatFromInt(py), @floatFromInt(pz), 500) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.transform[ps].x = @floatFromInt(px + 4);
+    g.sim.transform[ps].z = @floatFromInt(pz);
+    const player_hp = g.sim.health[ps].hp;
+
+    const entity_id = g.armFallingTree(px + 2, py, pz, log.id, .{ 1, 0, 0 });
+    try std.testing.expect(entity_id != 0);
+    // A second arm for the same trunk is a no-op (stock's dedupe).
+    try std.testing.expectEqual(@as(i32, 0), g.armFallingTree(px + 2, py, pz, log.id, .{ 1, 0, 0 }));
+    var t: u32 = 0;
+    while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
+    // h = 3 cells -> mass (15 + 21) * 5 = 180 -> 180 * 0.36 = 64 damage.
+    try std.testing.expectApproxEqAbs(@as(f32, 436), g.sim.health[zs].hp, 1.0);
+    // The player in the same spot is untouched (treeCanDamageEntity).
+    try std.testing.expectApproxEqAbs(player_hp, g.sim.health[ps].hp, 0.01);
+    std.debug.print("PASS falling-tree-damage: the trunk crushes the zombie, not the player\n", .{});
+}

@@ -314,7 +314,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       base through the normal damage/removal path and sends
       `NetPackageEntityRemove`. Gated by `scenario a chopped tree falls and its
       trunk comes down` (decisive: removing the ticker route leaves the trunk
-      standing).
+      standing). Impact damage and the landing sound closed the same day:
+      `collidedWith` (IL=58) damages a non-player, non-supply-crate entity in the
+      fall footprint for `int(treeRB.mass * 0.36)` with `CreateMesh`'s
+      `(15 + 7 * h) * 5` mass, once per tree (`treeCanDamageEntity` IL=20), and
+      `Collide` IL=101 plays `treefallimpact` at the base. Residual: the
+      `treefall` particle effect (zdtd parses that package but has no builder)
+      and Unity's contact impulses.
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in

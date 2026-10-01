@@ -36,6 +36,8 @@ const world_explosion = @import("world_explosion.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const protocol = @import("../../protocol.zig");
 const stock_entity = @import("../../wire/stock_entity.zig");
+const replicate_te = @import("replicate_te.zig");
+const ecs_world_mod = @import("../../ecs/world.zig");
 
 /// Scheduled block ticks held at once. A streamed POI farm can register a few
 /// hundred plants; the ring is far above that, and a drop is counted rather
@@ -70,7 +72,18 @@ pub const FallingTree = struct {
     y: i32 = 0,
     z: i32 = 0,
     entity_id: i32 = 0,
+    dir_x: f32 = 0,
+    dir_z: f32 = 0,
 };
+
+/// `EntityFallingTree.treeCanDamageEntity` (IL=20): once per entity per tree,
+/// players never, supply crates never, everything else yes.
+/// `collidedWith` (IL=58) damages for `int(treeRB.mass * 0.36)`, and
+/// `CreateMesh` sizes the mass as `(15 + 7 * h) * 5` for an h-cell trunk.
+pub const falling_tree_damage_scale: f32 = 0.36;
+/// Lateral reach of the falling trunk, in blocks (the collider is a capsule
+/// around a trunk one block wide plus its branches).
+pub const falling_tree_half_width: f32 = 1.5;
 
 /// Arm a client-requested falling tree: dedupe the cell, spawn the entity the
 /// client animates and schedule the trunk's destruction at the lifetime.
@@ -91,7 +104,14 @@ pub fn armFallingTree(self: *Game, base_x: i32, base_y: i32, base_z: i32, id: u1
     }
     const ft = slot orelse return 0;
     const entity_id = self.sim.allocNetId() orelse return 0;
-    ft.* = .{ .x = base_x, .y = base_y, .z = base_z, .entity_id = entity_id };
+    ft.* = .{
+        .x = base_x,
+        .y = base_y,
+        .z = base_z,
+        .entity_id = entity_id,
+        .dir_x = dir[0],
+        .dir_z = dir[2],
+    };
     // The client animates the topple from the ECD's blockPos + fallTreeDir, so
     // the spawn is what makes the tree fall for everyone nearby.
     var buf: [256]u8 = undefined;
@@ -146,6 +166,14 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
     if (entity_id == 0) return;
     var y = t.y;
     var n: u32 = 0;
+    var base_dir_x: f32 = 0;
+    var base_dir_z: f32 = 0;
+    for (self.falling_trees[0..self.falling_trees_n]) |ft| {
+        if (ft.x == t.x and ft.y == t.y and ft.z == t.z) {
+            base_dir_x = ft.dir_x;
+            base_dir_z = ft.dir_z;
+        }
+    }
     while (n < falling_tree_max_cells) : (n += 1) {
         const id = self.world.blockWorld(t.x, y, t.z) catch break;
         if (id == 0) break;
@@ -163,6 +191,43 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
             self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(t.x), @floatFromInt(t.z), self.interest_range) catch {};
         } else |_| {}
         y += 1;
+    }
+    // `collidedWith` (IL=58): the trunk's mass decides the impact damage, and
+    // `treeCanDamageEntity` (IL=20) spares players and supply crates.
+    if (n > 0) {
+        const mass: f32 = (15.0 + 7.0 * @as(f32, @floatFromInt(n))) * 5.0;
+        const dmg: f32 = @trunc(mass * falling_tree_damage_scale);
+        var dir_len = @sqrt(base_dir_x * base_dir_x + base_dir_z * base_dir_z);
+        var ux: f32 = 0;
+        var uz: f32 = 0;
+        if (dir_len > 0.001) {
+            ux = base_dir_x / dir_len;
+            uz = base_dir_z / dir_len;
+        }
+        dir_len = 0;
+        const reach: f32 = @floatFromInt(n);
+        const fbx: f32 = @floatFromInt(t.x);
+        const fbz: f32 = @floatFromInt(t.z);
+        var it = self.sim.alive_bits.iterator(.{});
+        while (it.next()) |idx| {
+            const s: ecs_world_mod.Slot = @intCast(idx);
+            if (!self.sim.alive[s] or !self.sim.mask[s].transform) continue;
+            const kind = self.sim.kind[s];
+            if (kind != .zombie and kind != .animal and kind != .vehicle) continue;
+            if (self.sim.mask[s].loot_bag and self.sim.loot_bag[s].supply_crate) continue;
+            const ex = self.sim.transform[s].x - fbx;
+            const ez = self.sim.transform[s].z - fbz;
+            const along = ex * ux + ez * uz;
+            const lateral = @abs(ex * uz - ez * ux);
+            if (along < 0 or along > reach + 1.0) continue;
+            if (lateral > falling_tree_half_width) continue;
+            const ey = self.sim.transform[s].y;
+            const top_y: f32 = @floatFromInt(t.y + @as(i32, @intCast(n)));
+            if (ey < @as(f32, @floatFromInt(t.y)) - 1.0 or ey > top_y + 1.0) continue;
+            _ = self.sim.damageFrom(self.sim.network_id[s].id, dmg, entity_id);
+        }
+        // `Collide` IL=101 plays `treefallimpact` on the settling contact.
+        replicate_te.broadcastSoundAt(self, t.x, t.y, t.z, "treefallimpact", true);
     }
     var buf: [16]u8 = undefined;
     const body = packages.buildRemoveBodyReason(&buf, entity_id, .despawned) catch return;
