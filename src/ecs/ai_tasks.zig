@@ -529,86 +529,86 @@ const AiCtx = struct {
                         ai.going_home = false;
                         ai.chase_target_id = -1;
                     } else {
-                    ai.alert = false;
-                    ai.target_id = -1;
-                    const dx = ctx.w.transform[s].x - ai.chase_home_x;
-                    const dz = ctx.w.transform[s].z - ai.chase_home_z;
-                    const sa = ctx.w.rules.ai.spot_arrive;
-                    if (dx * dx + dz * dz <= sa * sa) {
-                        ai.going_home = false;
-                        ai.has_path = false;
-                        ai.clearPath();
-                        ai.state = .idle;
+                        ai.alert = false;
+                        ai.target_id = -1;
+                        const dx = ctx.w.transform[s].x - ai.chase_home_x;
+                        const dz = ctx.w.transform[s].z - ai.chase_home_z;
+                        const sa = ctx.w.rules.ai.spot_arrive;
+                        if (dx * dx + dz * dz <= sa * sa) {
+                            ai.going_home = false;
+                            ai.has_path = false;
+                            ai.clearPath();
+                            ai.state = .idle;
+                            ai.active_task = .none;
+                            break :ai_body;
+                        }
+                        ai.state = .wander;
+                        ai.path_goal_x = ai.chase_home_x;
+                        ai.path_goal_z = ai.chase_home_z;
+                        ai.has_path = true;
                         ai.active_task = .none;
+                        chaseAlongPath(ctx.w, s, ai, ai.chase_home_x, ai.chase_home_z, cspd * 0.8, ctx.dt);
                         break :ai_body;
                     }
-                    ai.state = .wander;
-                    ai.path_goal_x = ai.chase_home_x;
-                    ai.path_goal_z = ai.chase_home_z;
-                    ai.has_path = true;
-                    ai.active_task = .none;
-                    chaseAlongPath(ctx.w, s, ai, ai.chase_home_x, ai.chase_home_z, cspd * 0.8, ctx.dt);
-                    break :ai_body;
+                }
+                // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
+                // executing task when it is no longer best or its Continue() fails.
+                if (ai.active_task != .none) {
+                    const t = taskById(ai.active_task).?;
+                    if (!(isBestTask(t, ai.active_task) and canContinue(ctx.w, s, ai.active_task, ai, np))) {
+                        ai.decision_cd = t.execute_delay * ctx.w.rules.ai.execute_delay_scale;
+                        // EAIBase::Reset fires on this exact path (asm.il:437713,
+                        // IL_006F): a finished Wander / ApproachSpot seeds lookTime.
+                        resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
+                        ai.active_task = .none;
                     }
                 }
-            // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
-            // executing task when it is no longer best or its Continue() fails.
-            if (ai.active_task != .none) {
-                const t = taskById(ai.active_task).?;
-                if (!(isBestTask(t, ai.active_task) and canContinue(ctx.w, s, ai.active_task, ai, np))) {
-                    ai.decision_cd = t.execute_delay * ctx.w.rules.ai.execute_delay_scale;
-                    // EAIBase::Reset fires on this exact path (asm.il:437713,
-                    // IL_006F): a finished Wander / ApproachSpot seeds lookTime.
-                    resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
-                    ai.active_task = .none;
-                }
-            }
 
-            // Re-eval timer: stock's fixed 0.05s/20Hz AI tick is replaced by
-            // zdtd's variable dt*active_scale LOD throttle. Step 2: on expiry,
-            // start the first table task that is best and CanExecute (== stock
-            // priority-ascending scan), then run its Start hook.
-            ai.decision_cd -= ctx.dt * ai.active_scale;
-            if (ai.decision_cd <= 0) {
-                var chosen: c.TaskId = .none;
-                for (zombie_tasks) |t| {
-                    if (c.aiTaskAllowed(ctx.w.class_id[s].ai_tasks, t.id) and
-                        isBestTask(t, ai.active_task) and
-                        canExecute(ctx.w, s, t.id, ai, np))
-                    {
-                        chosen = t.id;
-                        break;
+                // Re-eval timer: stock's fixed 0.05s/20Hz AI tick is replaced by
+                // zdtd's variable dt*active_scale LOD throttle. Step 2: on expiry,
+                // start the first table task that is best and CanExecute (== stock
+                // priority-ascending scan), then run its Start hook.
+                ai.decision_cd -= ctx.dt * ai.active_scale;
+                if (ai.decision_cd <= 0) {
+                    var chosen: c.TaskId = .none;
+                    for (zombie_tasks) |t| {
+                        if (c.aiTaskAllowed(ctx.w.class_id[s].ai_tasks, t.id) and
+                            isBestTask(t, ai.active_task) and
+                            canExecute(ctx.w, s, t.id, ai, np))
+                        {
+                            chosen = t.id;
+                            break;
+                        }
                     }
+                    // Preemption: stock removes the loser from executingTasks via the
+                    // same Reset path, so a Wander cut short by Approach still seeds
+                    // the look-around that plays once the chase ends.
+                    if (chosen != ai.active_task) resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
+                    ai.active_task = chosen;
+                    ai.decision_cd = (taskById(chosen) orelse zombie_tasks[0]).execute_delay * ctx.w.rules.ai.execute_delay_scale;
+                    startTask(chosen, ctx.w, s, ai);
                 }
-                // Preemption: stock removes the loser from executingTasks via the
-                // same Reset path, so a Wander cut short by Approach still seeds
-                // the look-around that plays once the chase ends.
-                if (chosen != ai.active_task) resetTask(ctx.w, s, ai.active_task, ai, ctx.w.network_id[s].id);
-                ai.active_task = chosen;
-                ai.decision_cd = (taskById(chosen) orelse zombie_tasks[0]).execute_delay * ctx.w.rules.ai.execute_delay_scale;
-                startTask(chosen, ctx.w, s, ai);
-            }
 
-            // Steps 3/4: run the winning task's Update and project it onto the
-            // coarse ZombieAi.state enum for downstream replication parity.
-            switch (ai.active_task) {
-                .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
-                .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
-                .runaway => runawayUpdate(ctx.w, ctx.pos, s, ai, cspd, ctx.dt),
-                .leap => leapUpdate(ctx.w, s, ai, np, ctx.dt),
-                .ranged_attack_target => rangedUpdate(ctx.w, s, ai, np, ctx.dt),
-                .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
-                .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
-                .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
-                .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
-                .look => lookUpdate(ctx.w, s, ai, ctx.dt),
-                .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
-                .none => {
-                    if (ai.state != .sleep) ai.state = .idle;
-                    ai.alert = false;
-                    ai.path_blocked = false;
-                },
-            }
+                // Steps 3/4: run the winning task's Update and project it onto the
+                // coarse ZombieAi.state enum for downstream replication parity.
+                switch (ai.active_task) {
+                    .break_block => breakBlockUpdate(ctx.w, s, ai, np, ctx.dt),
+                    .destroy_area => destroyAreaUpdate(ctx.w, s, ai, np, ctx.dt),
+                    .runaway => runawayUpdate(ctx.w, ctx.pos, s, ai, cspd, ctx.dt),
+                    .leap => leapUpdate(ctx.w, s, ai, np, ctx.dt),
+                    .ranged_attack_target => rangedUpdate(ctx.w, s, ai, np, ctx.dt),
+                    .approach_attack => approachUpdate(ctx, s, ai, np, cspd, ct),
+                    .territorial => territorialUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                    .approach_distraction => approachDistractionUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                    .approach_spot => approachSpotUpdate(ctx.w, s, ai, cspd, ctx.dt),
+                    .look => lookUpdate(ctx.w, s, ai, ctx.dt),
+                    .wander => wanderUpdate(ctx.w, s, ai, wspd, ctx.dt),
+                    .none => {
+                        if (ai.state != .sleep) ai.state = .idle;
+                        ai.alert = false;
+                        ai.path_blocked = false;
+                    },
+                }
             }
 
             if (ai.alert or ai.state == .chase or ai.state == .attack) {

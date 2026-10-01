@@ -2866,7 +2866,6 @@ pub const Game = struct {
         return game_craft.tickWorkstations(self, dt);
     }
 
-
     /// Collector producers (dew collector/apiary/coop): conversion budgets on
     /// the world clock, so the pass cadence does not change the output.
     pub fn tickCollectors(self: *Game) void {

@@ -1528,19 +1528,19 @@ pub fn loadFromPath(
                     own_te_feature_n = base_p.te_feature_n;
                 }
                 if (!own_collector and base_p.collector) {
-                own_collector = base_p.collector;
-                if (own_collector_type == 0) own_collector_type = base_p.collector_type;
-                if (own_collector_outputs == null) own_collector_outputs = base_p.collector_outputs;
-                if (own_collector_fuel_types == null) own_collector_fuel_types = base_p.collector_fuel_types;
-                if (own_collector_catalyst_types == null) own_collector_catalyst_types = base_p.collector_catalyst_types;
-                if (own_collector_catalyst_multiplier == null) own_collector_catalyst_multiplier = base_p.collector_catalyst_multiplier;
-                if (own_collector_catalyst_requirements == null) own_collector_catalyst_requirements = base_p.collector_catalyst_requirements;
-                if (own_collector_mod_types == null) own_collector_mod_types = base_p.collector_mod_types;
-                if (own_collector_running_sound == null) own_collector_running_sound = base_p.collector_running_sound;
-                if (own_collector_activate_sound == null) own_collector_activate_sound = base_p.collector_activate_sound;
-            }
-            if (own_auto_close == 0 and base_p.auto_close_time != 0) own_auto_close = base_p.auto_close_time;
-            if (!own_mine) {
+                    own_collector = base_p.collector;
+                    if (own_collector_type == 0) own_collector_type = base_p.collector_type;
+                    if (own_collector_outputs == null) own_collector_outputs = base_p.collector_outputs;
+                    if (own_collector_fuel_types == null) own_collector_fuel_types = base_p.collector_fuel_types;
+                    if (own_collector_catalyst_types == null) own_collector_catalyst_types = base_p.collector_catalyst_types;
+                    if (own_collector_catalyst_multiplier == null) own_collector_catalyst_multiplier = base_p.collector_catalyst_multiplier;
+                    if (own_collector_catalyst_requirements == null) own_collector_catalyst_requirements = base_p.collector_catalyst_requirements;
+                    if (own_collector_mod_types == null) own_collector_mod_types = base_p.collector_mod_types;
+                    if (own_collector_running_sound == null) own_collector_running_sound = base_p.collector_running_sound;
+                    if (own_collector_activate_sound == null) own_collector_activate_sound = base_p.collector_activate_sound;
+                }
+                if (own_auto_close == 0 and base_p.auto_close_time != 0) own_auto_close = base_p.auto_close_time;
+                if (!own_mine) {
                     own_mine = base_p.mine;
                     if (own_trigger_delay == 0) own_trigger_delay = base_p.trigger_delay;
                     // An explosion block that declares nothing keeps the parent's

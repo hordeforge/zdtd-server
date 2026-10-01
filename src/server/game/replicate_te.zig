@@ -646,7 +646,7 @@ pub fn broadcastDirtyCollectors(self: *Game) !void {
                 .items = slots[0..n],
                 .fuel = fuel_slots[0..fuel_n],
                 .catalyst = cat_slots[0..cat_n],
-            .mods = mod_slots[0..mod_n],
+                .mods = mod_slots[0..mod_n],
                 .last_world = world_name[0..worlds_n],
                 .is_full = flags[0..flags_n],
                 .out_of_fuel = empty_flags[0..flags_n],

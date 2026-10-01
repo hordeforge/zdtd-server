@@ -31,5 +31,5 @@ on [subsystems/persistence.md](../subsystems/persistence.md) and
 | `ZSG1` | src/world/signs.zig | 160 | - | - |
 | `ZVNM1` | src/world/vending.zig | 153 | - | - |
 | `ZVNM` | src/world/vending.zig | 160 | - | - |
-| `ZWS1` | src/world/workstations.zig | 722 | commaListAt | - |
-| `ZWS1` | src/world/workstations.zig | 821 | commaListAt | - |
+| `ZWS1` | src/world/workstations.zig | 721 | commaListAt | - |
+| `ZWS1` | src/world/workstations.zig | 820 | commaListAt | - |

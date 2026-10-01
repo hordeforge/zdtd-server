@@ -1061,9 +1061,18 @@ test "scenario writable crate: the echo keeps the client's sign module" {
     // module carrying the label.
     var cont: containers_mod.Container = .{ .pos = .{ .x = 258, .y = 71, .z = 258 }, .block_id = crate_block, .slot_count = 8 };
     var sbuf: [4096]u8 = undefined;
-    const storage_only = try packages.stock_te.buildStorageTeBody(&sbuf, 4, 258, 71, 258, crate_block, &cont, null, null,
-                                                                                  &.{},
-);
+    const storage_only = try packages.stock_te.buildStorageTeBody(
+        &sbuf,
+        4,
+        258,
+        71,
+        258,
+        crate_block,
+        &cont,
+        null,
+        null,
+        &.{},
+    );
 
     var sbuf2: [8192]u8 = undefined;
     @memcpy(sbuf2[0..storage_only.len], storage_only);
@@ -5165,9 +5174,18 @@ test "scenario inventory move drop place equip" {
         };
         cont.setSlot(0, .{ .item_id = 7, .count = 6, .quality = 1 });
         var teb: [8192]u8 = undefined;
-        const te_body = try stock_te.buildStorageTeBody(&teb, 255, 253, 70, 254, 42, &cont, null, null,
-                                                                          &.{},
-);
+        const te_body = try stock_te.buildStorageTeBody(
+            &teb,
+            255,
+            253,
+            70,
+            254,
+            42,
+            &cont,
+            null,
+            null,
+            &.{},
+        );
         var fb5: [9000]u8 = undefined;
         try g.injectFramed(c, try packages.framed(&fb5, "NetPackageTileEntity", te_body));
         const got = g.containers.get(.{ .x = 253, .y = 70, .z = 254 });
@@ -18548,9 +18566,18 @@ test "scenario a container padlock becomes server state and streams from it" {
     // wrote for a fresh padlock (locked true, no allowed users, no password).
     var cont: containers_mod.Container = .{ .pos = .{ .x = bx, .y = by, .z = bz }, .block_id = crate_block, .slot_count = 8 };
     var sbuf: [4096]u8 = undefined;
-    const storage_only = try packages.stock_te.buildStorageTeBody(&sbuf, 4, bx, by, bz, crate_block, &cont, null, null,
-                                                                                &.{},
-);
+    const storage_only = try packages.stock_te.buildStorageTeBody(
+        &sbuf,
+        4,
+        bx,
+        by,
+        bz,
+        crate_block,
+        &cont,
+        null,
+        null,
+        &.{},
+    );
     var sbuf2: [8192]u8 = undefined;
     @memcpy(sbuf2[0..storage_only.len], storage_only);
     const pay_len = std.mem.readInt(i32, sbuf2[17..21], .little);

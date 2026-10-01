@@ -48,7 +48,6 @@ pub const max_land_claims: usize = 1024;
 /// save-region.md), which is what the client's marker list expects.
 pub const max_tracked_backpacks: usize = 3;
 
-
 /// Default trader AvailableMoney display value. Stock AvailableMoney is a
 /// per-day dukes pool that regenerates and is spent on player sells; zdtd has
 /// no trader economy, so trade() credits the player wallet directly. Bucket B:

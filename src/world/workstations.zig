@@ -667,7 +667,6 @@ pub const Workstation = struct {
         }
         return false;
     }
-
 };
 
 pub const WorkstationStore = struct {
