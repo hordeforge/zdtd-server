@@ -1057,6 +1057,13 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Door locks and auto-close deadlines survive restart (doors.zdr).
+        self.doors.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load doors", e);
+                return e;
+            }
+        };
         // Land claims survive restart (claims.zlc); restored owners re-map on login.
         self.loadClaims() catch |e| {
             if (e != error.OpenFailed) {

@@ -369,8 +369,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       only. The property parses, the client's open flip arms the deadline in
       `world/doors.zig`, and `tickDoorTimers` clears the open bit and
       broadcasts the SetBlock. Gated by `scenario an auto-close door shuts
-      itself and tells the clients`. Residual: the armed deadline is not
-      persisted across a restart.
+      itself and tells the clients`. Deadline persistence closed 2026-10-01:
+      `doors.zdr` (ZDR1) carries the cell, block, lock blob and the armed
+      deadline through `saveAllStores`, so a restart keeps both the padlock and
+      the remaining timer. Gated by `scenario a door lock survives a restart`
+      (decisive: removing the save-all line fails it with OpenFailed).
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

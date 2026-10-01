@@ -28,6 +28,7 @@ const assets_maxdamage = @import("../assets/maxdamage.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
+const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
@@ -21414,6 +21415,32 @@ test "scenario a stomping entity crushes spikes instead of taking them" {
     try std.testing.expect(@abs(g.sim.health[ss].hp - (hp2 - 20.0)) < 0.1);
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, py, pz));
     std.debug.print("PASS stomps-spikes: the stomper crushes the trap, the walker bleeds\n", .{});
+}
+
+test "scenario a door lock survives a restart" {
+    // Rule 21 for doors: the padlock blob and any armed auto-close deadline ride
+    // {world}/doors.zdr (ZDR1) through the real save-all path.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    const door = g.doors.getOrCreate(21, 66, 21, 1738) orelse return error.TestUnexpectedResult;
+    door.lock_blob[0] = 1;
+    door.lock_len = 6;
+    door.close_at = 777;
+    _ = g.saveAllStores();
+    var reloaded: doors_mod.Store = .{};
+    try reloaded.load(dir, gpa);
+    const rd = reloaded.get(21, 66, 21) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, 1738), rd.block_id);
+    try std.testing.expectEqual(@as(u16, 6), rd.lock_len);
+    try std.testing.expectEqual(@as(u8, 1), rd.lock_blob[0]);
+    try std.testing.expectEqual(@as(u64, 777), rd.close_at);
+    std.debug.print("PASS door-save: the lock survives a restart\n", .{});
 }
 
 test "scenario a locked door streams its padlock to nearby clients" {
