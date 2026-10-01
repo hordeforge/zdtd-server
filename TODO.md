@@ -522,9 +522,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       hook once, and `server/game/particles.zig` sends the effect at the corpse
       (`ParticleEffect.ToId(name)` = the name hash). Gated by `scenario a dying
       entity spawns its death particle` (decisive: removing the hook sends
-      nothing), including the no-particle case. Residual: `ParticleOnDestroy`
-      (the destroy path) and the `allButAttachedToEntityId` exclusion stock
-      applies per observer.
+      nothing), including the no-particle case. `ParticleOnDestroy` and the
+      exclusion closed the same day: the class property parses, `sweepCorpses`
+      calls an `on_destroy_fn` hook while the corpse transform is still valid
+      (which broadcasts at the head, 1.6 blocks up), and `broadcastParticle`
+      skips the client attached to `entityThatCausedIt` the way stock's
+      `allButAttachedToEntityId` does. Gated by `scenario a destroyed corpse
+      spawns its destroy particle` and `scenario a particle caused by a player
+      skips that player` (both decisive: dropping the hook or the exclusion
+      fails them).
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

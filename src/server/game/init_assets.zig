@@ -824,6 +824,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // Death particles are a server send (`EntityAlive.OnEntityDeath` IL=146).
         self.sim.on_death_ctx = self;
         self.sim.on_death_fn = &game_particles.onEntityDeath;
+        self.sim.on_destroy_ctx = self;
+        self.sim.on_destroy_fn = &game_particles.onEntityDestroy;
         // on_player_damage verdict for the ECS damage path (zombie melee /
         // deferred accumulator): routes to the plugin + wasm host with the
         // attacker unknown. Unset hook = no plugins = today's behaviour.

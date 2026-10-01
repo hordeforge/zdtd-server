@@ -114,6 +114,8 @@ pub const ClassId = struct {
     stomps_spikes: bool = false,
     /// entityclasses `ParticleOnDeath` (see `world.EntityClass`).
     particle_on_death: []const u8 = "",
+    /// entityclasses `ParticleOnDestroy` (see `world.EntityClass`).
+    particle_on_destroy: []const u8 = "",
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

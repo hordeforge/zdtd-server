@@ -32,6 +32,7 @@ const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
 const stock_entity_mod = @import("../wire/stock_entity.zig");
 const block_ticker_mod = @import("game/block_ticker.zig");
+const game_particles_mod = @import("game/particles.zig");
 const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
@@ -22347,4 +22348,81 @@ test "scenario a dying entity spawns its death particle" {
     _ = g.sim.damageFrom(zid2, 100, -1);
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) == null);
     std.debug.print("PASS death-particle: the class effect rides the kill\n", .{});
+}
+
+test "scenario a destroyed corpse spawns its destroy particle" {
+    // `particleOnDestroy` fires through `SpawnParticleEffectServer` at the head
+    // when the entity is destroyed rather than killed (spawning.md 1344): the
+    // corpse dwell expiring is zdtd's destroy path.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    const zid = g.sim.spawnZombie(g.sim.transform[ps].x + 2, g.sim.transform[ps].y, g.sim.transform[ps].z, 20) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs].particle_on_destroy = "zombie_destroy";
+    // Shorten the dwell so the sweep runs inside the test.
+    _ = g.sim.damageFrom(zid, 100, -1);
+    g.sim.health[zs].corpse_seconds = 0.01;
+    cap.clear();
+    var outs: [8]i32 = undefined;
+    var out_slots: [8]@import("../ecs/world.zig").Slot = undefined;
+    const n = g.sim.sweepCorpses(0.05, &outs, &out_slots);
+    try std.testing.expect(n >= 1);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) != null);
+
+    // A corpse whose class declares no destroy particle sends none.
+    const zid2 = g.sim.spawnZombie(g.sim.transform[ps].x + 3, g.sim.transform[ps].y, g.sim.transform[ps].z, 20) orelse
+        return error.TestUnexpectedResult;
+    const zs2 = g.sim.slotOfNetId(zid2) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs2].particle_on_destroy = "";
+    _ = g.sim.damageFrom(zid2, 100, -1);
+    g.sim.health[zs2].corpse_seconds = 0.01;
+    cap.clear();
+    _ = g.sim.sweepCorpses(0.05, &outs, &out_slots);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) == null);
+    std.debug.print("PASS destroy-particle: the corpse effect fires at the destroy\n", .{});
+}
+
+test "scenario a particle caused by a player skips that player" {
+    // `SpawnParticleEffectServer(pe, entityThatCausedIt, ...)` fans out with
+    // `allButAttachedToEntityId`: the causing client played the effect locally.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+    const psb = g.sim.playerByPeer(cb.slot).?;
+    const px = g.sim.transform[psb].x;
+    const pz = g.sim.transform[psb].z;
+
+    cap_a.clear();
+    cap_b.clear();
+    game_particles_mod.broadcastParticle(g, "blood_impact", px, g.sim.transform[psb].y, pz, ca.entity_id);
+    _ = try g.step();
+    const au_id = packages.idOf("NetPackageParticleEffect").?;
+    try std.testing.expect(cap_a.findPkgId(au_id) == null);
+    try std.testing.expect(cap_b.findPkgId(au_id) != null);
+    std.debug.print("PASS particle-exclude: the causing player is skipped\n", .{});
 }

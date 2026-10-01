@@ -524,7 +524,10 @@ pub const ParsedSpawnRequest = struct {
     falling_tree: ?FallingTreeInfo = null,
 };
 
-/// Read the generic branch of a client `EntityCreationData`. The class-switched
+/// Read the generic branch of a client `EntityCreationData`
+/// (`EntityCreationData.write(networkWrite=true)` as `NetPackageRequestToSpawnEntity`
+/// carries it, protocol.md sections 5.0/5.1; the V3.2.0 `requestedBy`/`requestKey`
+/// tail is read only at file version 37). The class-switched
 /// middle (item, falling block/tree, player) and the optional EntityStats, bag,
 /// trader and player-profile blobs are refused rather than skipped: a
 /// client-requested spawn zdtd cannot fully account for fails closed.

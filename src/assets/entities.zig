@@ -47,6 +47,9 @@ pub const EntityDef = struct {
     /// `EntityAlive.OnEntityDeath` IL=146 spawns it through
     /// `GameManager.SpawnParticleEffectServer` at the corpse.
     particle_on_death: []const u8 = "",
+    /// entityclasses `ParticleOnDestroy` (`PropParticleOnDestroy`): the destroy
+    /// path spawns it at the head (`spawning.md` 1344).
+    particle_on_destroy: []const u8 = "",
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude
