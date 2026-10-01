@@ -425,7 +425,10 @@ pub fn canSensePlayer(
     // Heard through walls first: hearing is its own radius and is not clamped
     // by the see distance, so a class with a short SightRange still reacts to
     // noise (stock checks see and hear on the same AITarget row separately).
-    if (d2 < hear * hear) return true;
+    // `EAISetNearestEntityAsTarget` scales the hear radius by the same
+    // `senseScale` the see range uses (`hearDistMax * entity.senseScale`).
+    const hear_scaled = hear * (1.0 + w.feral_sense_scale * w.class_id[zslot].feral_sense);
+    if (d2 < hear_scaled * hear_scaled) return true;
     if (d2 >= senseDistSq(w, zslot)) return false;
     // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)),
     // then the CanSeeStealth light gate, then LOS.

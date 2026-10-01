@@ -57,6 +57,10 @@ pub const EntityDef = struct {
     /// to its origin, used by the sense/LOS query (entity-ai.md 3589). The
     /// stock default is 0,1.6,0, the offset zdtd hardcoded.
     see_offset: [3]f32 = .{ 0, 1.6, 0 },
+    /// entityclasses `AIFeralSense`: the class multiplier `EAIManager.feralSense`
+    /// that `EntityAlive.GetSeeDistance` folds into `senseScale = 1 +
+    /// CalcSenseScale() * feralSense` (IL=41). 0 = the class has no feral sense.
+    ai_feral_sense: f32 = 0,
     /// entityclasses `SearchRadius` (`EAISetAsTargetIfHurt.CanExecute` IL=170):
     /// when a hurt entity cannot sense its attacker it investigates a point
     /// `dir*(SearchRadius*0.35) + unitCircle*SearchRadius` around it instead of
@@ -1631,6 +1635,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .see_offset = parseVec3Loose(resolveProp(&classes, name, "AISeeOffset", 0) orelse "", .{ 0, 1.6, 0 }),
             .max_turn_speed = std.fmt.parseFloat(f32, resolveProp(&classes, name, "MaxTurnSpeed", 0) orelse "") catch 0,
             .search_radius = std.fmt.parseFloat(f32, resolveProp(&classes, name, "SearchRadius", 0) orelse "") catch 0,
+            .ai_feral_sense = std.fmt.parseFloat(f32, resolveProp(&classes, name, "AIFeralSense", 0) orelse "") catch 0,
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,

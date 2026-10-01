@@ -671,12 +671,15 @@ pub fn senseDistSq(w: *const World, s: Slot) f32 {
     // stock value means "never target this class"; squaring it here returns 1,
     // so the caller that needs a hard denial tests the raw field
     // (`sensing.nearestPlayerSnap`).
+    // `EntityAlive.GetSeeDistance` IL=41 folds the sandbox feral sense into the
+    // range: `sightRange = sightRangeBase * (1 + CalcSenseScale() * feralSense)`.
+    const feral: f32 = 1.0 + w.feral_sense_scale * w.class_id[s].feral_sense;
     const tp = w.class_id[s].target_player_see;
-    if (tp != 0) return tp * tp;
+    if (tp != 0) return tp * feral * (tp * feral);
     const pe = w.class_id[s].sight_range;
-    if (pe > 0) return pe * pe;
+    if (pe > 0) return pe * feral * (pe * feral);
     const sr = w.class_table[w.class_id[s].id].sight_range;
-    if (sr > 0) return sr * sr;
+    if (sr > 0) return sr * feral * (sr * feral);
     return w.rules.ai.sense_dist_sq;
 }
 
@@ -3621,4 +3624,26 @@ test "the idle look-around turns at the class MaxTurnSpeed" {
     w.mask[s].class_id = false;
     lookUpdate(&w, s, &w.zombie_ai[s], 0.05);
     try std.testing.expectApproxEqAbs(@as(f32, 12.5), w.transform[s].yaw, 0.5);
+}
+
+test "the sandbox feral sense scales the class sight range" {
+    // `EntityAlive.GetSeeDistance` IL=41: `senseScale = 1 + CalcSenseScale() *
+    // feralSense` multiplies `sightRangeBase`; `CalcSenseScale` is the sandbox
+    // `ZombieFeralSense` switch the Game caches on the sim each tick.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    w.mask[zs].class_id = true;
+    w.class_id[zs].sight_range = 20;
+    w.class_id[zs].feral_sense = 1;
+
+    // Off: the class range stands alone.
+    try std.testing.expectApproxEqAbs(@as(f32, 400), senseDistSq(&w, zs), 1);
+    // On: 20 * (1 + 1 * 1) = 40 m.
+    w.feral_sense_scale = 1;
+    try std.testing.expectApproxEqAbs(@as(f32, 1600), senseDistSq(&w, zs), 1);
+    // A class with no feral sense is unaffected by the option.
+    w.class_id[zs].feral_sense = 0;
+    try std.testing.expectApproxEqAbs(@as(f32, 400), senseDistSq(&w, zs), 1);
 }

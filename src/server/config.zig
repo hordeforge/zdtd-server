@@ -112,6 +112,9 @@ pub const Config = struct {
     // game.initWithOptions; see docs/GAME_OPTIONS.md for which are wired.
     game_difficulty: u8 = 1, // GameDifficulty 0..5 (1 = Adventurer; the stock default game - live dedi GameDifficulty stat = 1, console-commands.md; the shipped SandboxCode is the Adventurer preset)
     blood_moon_frequency: u8 = 7, // BloodMoonFrequency (0 = off)
+    /// Sandbox `ZombieFeralSense` (0 off, 1 day, 2 night, 3 always): the
+    /// `EAIManager.CalcSenseScale` switch behind the feral sight/hear scale.
+    zombie_feral_sense: u8 = 0,
     blood_moon_enemy_count: u8 = 8, // BloodMoonEnemyCount per player
     player_killing_mode: u8 = 3, // PlayerKillingMode 0..3 (0 = no PvP)
     day_night_length: u16 = 60, // DayNightLength, real minutes per full day
@@ -420,6 +423,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "ZombieFeralSense")) {
+            cfg.zombie_feral_sense = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 3);
         } else if (std.mem.eql(u8, o.name, "BloodMoonFrequency")) {
             cfg.blood_moon_frequency = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BloodMoonRange")) {
@@ -596,6 +601,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "ServerAdminSlotsPermission")) |v| cfg.admin_slots_permission = clampU8Named("ServerAdminSlotsPermission", v, 0, 255, cfg.admin_slots_permission);
     if (prop(raw, "GameDifficulty")) |v| cfg.game_difficulty = clampU8Named("GameDifficulty", v, 0, 5, cfg.game_difficulty);
     if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8Named("BloodMoonFrequency", v, 0, 255, cfg.blood_moon_frequency);
+    if (prop(raw, "ZombieFeralSense")) |v| cfg.zombie_feral_sense = clampU8Named("ZombieFeralSense", v, 0, 3, cfg.zombie_feral_sense);
     if (prop(raw, "BloodMoonEnemyCount")) |v| cfg.blood_moon_enemy_count = clampU8Named("BloodMoonEnemyCount", v, 0, 60, cfg.blood_moon_enemy_count);
     if (prop(raw, "PlayerKillingMode")) |v| cfg.player_killing_mode = clampU8Named("PlayerKillingMode", v, 0, 3, cfg.player_killing_mode);
     if (prop(raw, "DayNightLength")) |v| cfg.day_night_length = clampRangeNamed("DayNightLength", v, 10, 1200, cfg.day_night_length);

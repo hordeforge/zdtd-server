@@ -130,6 +130,8 @@ pub const ClassId = struct {
     max_turn_speed: f32 = 0,
     /// entityclasses `SearchRadius` (see `world.EntityClass`).
     search_radius: f32 = 0,
+    /// entityclasses `AIFeralSense` (see `world.EntityClass`).
+    feral_sense: f32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

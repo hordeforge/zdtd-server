@@ -669,6 +669,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       disabling the decrement fails it). Residual: `CalcInvestigateTicks`'s
       passive-183 divisor stays 1 because no shipped buff or item carries
       `EnemySearchDuration` (checked against the RE docs and the IL field list).
+- [x] **The `ZombieFeralSense` sandbox option did nothing** - closed 2026-10-02: the
+      option (0 off, 1 day, 2 night, 3 always) drives `EAIManager.CalcSenseScale`
+      IL=23, which `EntityAlive.GetSeeDistance` IL=41 folds into
+      `senseScale = 1 + scale * EntityClass.AIFeralSense` and multiplies into
+      `sightRange` (and `EAISetNearestEntityAsTarget` scales the hear radius the
+      same way). zdtd parsed neither the option nor the class property, so feral
+      sense was dead. The sandbox code and the serverconfig property now parse
+      into `config.zombie_feral_sense` -> `InitOptions` -> `World.feral_sense_option`,
+      the step pass caches `CalcSenseScale` against the world clock on
+      `World.feral_sense_scale`, `AIFeralSense` parses per class and rides
+      `EntityClass`/`ClassId`, and both the see distance (`senseDistSq`) and the
+      hear radius scale by it. Gated by `the sandbox feral sense scales the class
+      sight range` and `scenario the feral sense option follows the day/night
+      table` (both decisive: probing either fails its test).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

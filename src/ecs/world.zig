@@ -110,6 +110,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.see_offset = def.see_offset;
     cid.max_turn_speed = def.max_turn_speed;
     cid.search_radius = def.search_radius;
+    cid.feral_sense = def.ai_feral_sense;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -216,6 +217,12 @@ pub const EntityClass = struct {
     /// entityclasses `SearchRadius`: the scatter radius of the investigate point
     /// a hurt entity picks when it cannot sense its attacker.
     search_radius: f32 = 0,
+    /// entityclasses `AIFeralSense`: the class feral multiplier folded into
+    /// `senseScale` by the sandbox option (`EntityAlive.GetSeeDistance` IL=41).
+    ai_feral_sense: f32 = 0,
+    /// entityclasses `AIFeralSense`: the class feral multiplier folded into
+    /// `senseScale` by the sandbox option (`EntityAlive.GetSeeDistance` IL=41).
+    feral_sense: f32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.
@@ -467,6 +474,12 @@ pub const World = struct {
     /// by the survival tick. Feeds armorMitigation like stock
     /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
     buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// `EAIManager.CalcSenseScale` result for this tick: the sandbox
+    /// `ZombieFeralSense` option (0..3) resolved against the world clock.
+    /// Refreshed by the Game each tick; 0 = off.
+    feral_sense_scale: f32 = 0,
+    /// The sandbox `ZombieFeralSense` option (0 off, 1 day, 2 night, 3 always).
+    feral_sense_option: u8 = 0,
     /// Item-mod-side PhysicalDamageResist percent summed over the entity's
     /// equipped items' installed modifiers (EffectManager layer 13) and
     /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`

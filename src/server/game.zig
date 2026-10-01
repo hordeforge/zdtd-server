@@ -869,6 +869,7 @@ pub const Game = struct {
         self.sim.director.zombie_move_day = opts.zombie_move;
         self.sim.director.zombie_move_night = opts.zombie_move_night;
         self.sim.director.zombie_move_feral = opts.zombie_feral_move;
+        self.sim.feral_sense_option = opts.zombie_feral_sense;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;

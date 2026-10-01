@@ -22925,3 +22925,37 @@ test "scenario a Convert mod swaps the output and a Cost mod discounts the fuel"
     try std.testing.expectEqual(@as(u16, before - 8), col.fuel[0].count);
     std.debug.print("PASS collector-convert: the Convert mod swaps the output, Cost discounts fuel\n", .{});
 }
+
+test "scenario the feral sense option follows the day/night table" {
+    // `EAIManager.CalcSenseScale` (IL=23) switches on the sandbox
+    // `ZombieFeralSense`: 1 -> only daytime, 2 -> only dark, 3 -> always,
+    // anything else -> 0. The Game caches the result on the sim each tick.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const check = struct {
+        fn run(g2: *game_mod.Game, option: u8, hours: f32) f32 {
+            g2.sim.feral_sense_option = option;
+            g2.sim.director.clock.hours = hours;
+            _ = g2.step() catch {};
+            return g2.sim.feral_sense_scale;
+        }
+    }.run;
+
+    const noon: f32 = 12.0;
+    const night: f32 = 1.0;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), check(g, 0, noon), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), check(g, 1, noon), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), check(g, 1, night), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), check(g, 2, night), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), check(g, 2, noon), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), check(g, 3, noon), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), check(g, 3, night), 0.001);
+    std.debug.print("PASS feral-sense: the sandbox option follows the day/night table\n", .{});
+}

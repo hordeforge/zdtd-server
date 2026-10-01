@@ -352,6 +352,8 @@ pub const InitOptions = struct {
     zombie_move: u8 = 0,
     zombie_move_night: u8 = 3,
     zombie_feral_move: u8 = 3,
+    /// Sandbox `ZombieFeralSense` (0 off, 1 day, 2 night, 3 always).
+    zombie_feral_sense: u8 = 0,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,
