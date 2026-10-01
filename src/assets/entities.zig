@@ -53,6 +53,10 @@ pub const EntityDef = struct {
     /// entityclasses `DeadBodyHitPoints` (`PropDeadBodyHitPoints`): overkill
     /// beyond the negative of this removes the corpse at once.
     dead_body_hit_points: i32 = 0,
+    /// entityclasses `AISeeOffset` "x,y,z": where the class's eyes sit relative
+    /// to its origin, used by the sense/LOS query (entity-ai.md 3589). The
+    /// stock default is 0,1.6,0, the offset zdtd hardcoded.
+    see_offset: [3]f32 = .{ 0, 1.6, 0 },
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude
@@ -523,6 +527,20 @@ fn resolveExplosion(
         cur = rc.extends;
     }
     return if (found) out else null;
+}
+
+/// "x,y,z" triple with a caller default when the row is absent or malformed.
+fn parseVec3Loose(s: []const u8, default: [3]f32) [3]f32 {
+    var out = default;
+    var it = std.mem.splitScalar(u8, s, ',');
+    var i: usize = 0;
+    while (it.next()) |raw| : (i += 1) {
+        if (i >= 3) break;
+        const f = std.mem.trim(u8, raw, " \t");
+        if (f.len == 0) continue;
+        out[i] = std.fmt.parseFloat(f32, f) catch default[i];
+    }
+    return out;
 }
 
 fn parseBoolLoose(s: []const u8) bool {
@@ -1573,6 +1591,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             else
                 "",
             .dead_body_hit_points = std.fmt.parseInt(i32, resolveProp(&classes, name, "DeadBodyHitPoints", 0) orelse "", 10) catch 0,
+            .see_offset = parseVec3Loose(resolveProp(&classes, name, "AISeeOffset", 0) orelse "", .{ 0, 1.6, 0 }),
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,

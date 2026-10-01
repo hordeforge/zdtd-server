@@ -33,6 +33,7 @@ const stock_te_mod = @import("../wire/stock_te.zig");
 const stock_entity_mod = @import("../wire/stock_entity.zig");
 const block_ticker_mod = @import("game/block_ticker.zig");
 const game_particles_mod = @import("game/particles.zig");
+const game_sensing_mod = @import("../ecs/sensing.zig");
 const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
@@ -22512,4 +22513,95 @@ test "scenario a gibbed corpse is removed at once" {
     // The normally-killed corpse is still there.
     try std.testing.expect(g.sim.slotOfNetId(zid) != null);
     std.debug.print("PASS gibbed-corpse: overkill removes the body at once\n", .{});
+}
+
+test "scenario a class eye offset decides what the AI sees over cover" {
+    // entityclasses `AISeeOffset` (entity-ai.md 3589) moves the sense origin per
+    // class, so a tall class sees over cover a short one cannot. The default is
+    // 0,1.6,0, the offset the sight query used to hardcode.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var ex_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const ex = try std.fmt.bufPrint(&ex_buf, "{s}/entityclasses_see.xml", .{dir});
+    try io_fs.writeFile(ex,
+        \\<entityclasses>
+        \\<entity_class name="zombieTall" extends="zombieTemplateMale">
+        \\  <property name="AISeeOffset" value="0,3.2,0" />
+        \\</entity_class>
+        \\<entity_class name="zombieShort" extends="zombieTemplateMale">
+        \\  <property name="AISeeOffset" value="0,1.6,0" />
+        \\</entity_class>
+        \\<entity_class name="zombieTemplateMale">
+        \\  <property name="MaxHealth" value="100" />
+        \\</entity_class>
+        \\</entityclasses>
+    );
+    var table = try assets_entities.loadFromPath(gpa, ex);
+    defer table.deinit();
+    const tall = table.byName("zombieTall") orelse return error.TestUnexpectedResult;
+    const short = table.byName("zombieShort") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 3.2), tall.see_offset[1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.6), short.see_offset[1], 0.001);
+
+    // Live check: a wall one cell high blocks the short seer's eye line and not
+    // the tall one's (the ray runs 2.5 blocks horizontally at eye height).
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    const stone = @import("../world/store.zig").block_stone;
+    // Cover on the seer-target line (both share x=px; the seer stands at pz+3,
+    // the target at pz) at the seer's own cell height: the short 1.6 eye is
+    // inside that cell and the tall 3.2 ray passes above it.
+    try g.world.setBlockWorld(px, py + 1, pz + 2, stone);
+    const zid = g.sim.spawnZombie(@floatFromInt(px), @floatFromInt(py), @floatFromInt(pz + 3), 100) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.transform[ps].x = @floatFromInt(px);
+    g.sim.transform[ps].z = @floatFromInt(pz);
+
+    // The sense query reads the class's own eye height: the low cover hides the
+    // player from the 1.6 default and not from a 3.2 eye.
+    const Ctx = struct {
+        g: *game_mod.Game,
+        zs: @import("../ecs/world.zig").Slot,
+        ps: @import("../ecs/world.zig").Slot,
+        fn canSee(self: @This()) bool {
+            const zt = self.g.sim.transform[self.zs];
+            const pt = self.g.sim.transform[self.ps];
+            return game_sensing_mod.canSensePlayer(
+                &self.g.sim,
+                self.zs,
+                zt.x,
+                zt.y,
+                zt.z,
+                zt.yaw,
+                pt.x,
+                pt.y,
+                pt.z,
+                0,
+                // Bright daylight: the light gate must not be what decides this
+                // test (the builtin class's threshold pair would blind both).
+                200.0,
+            );
+        }
+    };
+    const ctx = Ctx{ .g = g, .zs = zs, .ps = ps };
+    // The seer looks at the player (the target is at -z from the seer).
+    g.sim.transform[zs].yaw = 180;
+    g.sim.class_id[zs].see_offset = .{ 0, 1.6, 0 };
+    const short_sees = ctx.canSee();
+    g.sim.class_id[zs].see_offset = .{ 0, 3.2, 0 };
+    const tall_sees = ctx.canSee();
+    try std.testing.expect(tall_sees != short_sees);
+    std.debug.print("PASS ai-see-offset: the class eye height decides the line\n", .{});
 }

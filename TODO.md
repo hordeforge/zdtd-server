@@ -417,6 +417,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       so a burning campfire or forge hurts whoever stands on it. The feet probe
       now applies the list through `addCatalogBuff` with a per-entity cell latch,
       so the buff lands on the step and re-applies after stepping off and back.
+- [x] **Every class saw from the same eye height** - closed 2026-10-01: the AI
+      sense/LOS query used a hardcoded 1.6 torso offset, but entityclasses
+      declares `AISeeOffset` per class (`PropAISeeOffset`; `seeOffset` feeds
+      `GetSeeDistance`/`CalcSenseScale`, entity-ai.md 3589). The property parses
+      into `EntityDef.see_offset` (default 0,1.6,0), rides `EntityClass` and the
+      per-entity `ClassId`, and both `canSensePlayer` and the mob-target scan use
+      the seer's own eye height. Gated by `scenario a class eye offset decides
+      what the AI sees over cover`, which loads a synthetic entityclasses.xml and
+      then asks the real sense query with the same cover at 1.6 and 3.2 eyes
+      (decisive: forcing 1.6 for both flips it). Residual: the eye offset is only
+      the Y component; stock also uses the full vector for the sense origin.
 - [x] **Stompers bled on spikes like everything else** - closed 2026-09-28:
       `EntityAlive.CalculateBlockDamage` (IL=17) gives an entity with the
       entityclasses `StompsSpikes` property 999 block damage against a

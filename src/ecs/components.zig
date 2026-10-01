@@ -124,6 +124,8 @@ pub const ClassId = struct {
     /// entityclasses `DeadBodyHitPoints` (see `world.EntityClass`): overkill
     /// beyond this removes the corpse immediately.
     dead_body_hit_points: i32 = 0,
+    /// entityclasses `AISeeOffset` (see `world.EntityClass`).
+    see_offset: [3]f32 = .{ 0, 1.6, 0 },
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

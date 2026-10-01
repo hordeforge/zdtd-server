@@ -261,7 +261,15 @@ pub const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 }
 /// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
 /// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
 fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
-    return rayClear(w, zx, zy + 1.6, zz, px, py + 1.6, pz);
+    return losClearSeen(w, zx, zy, zz, px, py, pz, 1.6);
+}
+
+/// Same ray with the seer's own eye height: entityclasses `AISeeOffset`
+/// (entity-ai.md 3589) moves the sense origin per class, so a tall class sees
+/// over cover a short one cannot. `dy` is the seer's eye Y; the target keeps the
+/// torso offset.
+fn losClearSeen(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32, dy: f32) bool {
+    return rayClear(w, zx, zy + dy, zz, px, py + 1.6, pz);
 }
 
 /// Voxel line clear between two world points: stock's `Voxel.Raycast` as used
@@ -398,7 +406,8 @@ pub fn canSensePlayer(
     const t = if (srange > 0.001) @min(@sqrt(d2) / srange, 1.0) else 0.0;
     const th = sightLightThreshold(w, zslot);
     if (light_level <= th[0] + (th[1] - th[0]) * t) return false;
-    return losClear(w, zx, zy, zz, px, py, pz);
+    const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset[1] else 1.6;
+    return losClearSeen(w, zx, zy, zz, px, py, pz, eye);
 }
 
 /// Per-zombie CanSeeStealth light threshold pair (RE entity-ai.md + IL):
@@ -545,6 +554,7 @@ pub fn nearestMobSnap(w: *const World, zslot: Slot, zx: f32, zy: f32, zz: f32, z
                 }
             }
             if (!listed) continue;
+            const eye = if (w.mask[zslot].class_id) w.class_id[zslot].see_offset[1] else 1.6;
             const dx = w.transform[j].x - zx;
             const dz = w.transform[j].z - zz;
             const d = dx * dx + dz * dz;
@@ -559,7 +569,16 @@ pub fn nearestMobSnap(w: *const World, zslot: Slot, zx: f32, zy: f32, zz: f32, z
                 if (diff < 0) diff = -diff;
                 if (diff > half) continue;
             }
-            if (!losClear(w, zx, zy, zz, w.transform[j].x, w.transform[j].y, w.transform[j].z)) continue;
+            if (!losClearSeen(
+                w,
+                zx,
+                zy,
+                zz,
+                w.transform[j].x,
+                w.transform[j].y,
+                w.transform[j].z,
+                eye,
+            )) continue;
             best = .{ .id = w.network_id[j].id, .slot = j, .d2 = d, .px = w.transform[j].x, .pz = w.transform[j].z };
         }
     }

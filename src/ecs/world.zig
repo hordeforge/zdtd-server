@@ -107,6 +107,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.particle_on_death = def.particle_on_death;
     cid.particle_on_destroy = def.particle_on_destroy;
     cid.dead_body_hit_points = def.dead_body_hit_points;
+    cid.see_offset = def.see_offset;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -200,6 +201,9 @@ pub const EntityClass = struct {
     /// entityclasses `DeadBodyHitPoints` (`OnDeathUpdate`: a body whose
     /// `DeathHealth` is at or below the negative of this is removed at once).
     dead_body_hit_points: i32 = 0,
+    /// entityclasses `AISeeOffset`: the class's eye offset for the sense/LOS
+    /// query (entity-ai.md 3589).
+    see_offset: [3]f32 = .{ 0, 1.6, 0 },
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.
