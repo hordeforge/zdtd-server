@@ -585,6 +585,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       `_netSync = IsLocal` there, false on a dedicated server). Gated by the same
       scenario, which asserts the `%` relay arrives at the other client and the
       `_`-prefixed write does not (decisive: suppressing the relay fails it).
+- [x] **A client's SimpleRPC never reached anyone** - closed 2026-10-01:
+      `NetPackageSimpleRPC` (C2S `read` IL=9: entityId i32, type u8) is the held
+      itemclass hook (`GameManager.SimpleRPC(entityId, type, true, IsRemote)`:
+      type 0 `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`) and the
+      assembly's one sender is `ItemClassTimeBomb`. Stock's `ProcessPackage`
+      IL=17 gates it with `ValidEntityIdForSender(entityId, false)` and, because a
+      dedicated server passes `_bOnlyLocal = false`, relays the call to tracked
+      players excluding the sender; zdtd dropped the package, so a timed charge's
+      activation reached nobody. The body parses, the arm enforces the
+      own-entity gate (forged ids are counted `ownership_rejects` with evidence)
+      and relays to every other peer. Gated by `scenario a client RPC reaches the
+      other clients` (decisive: dropping the relay sends nothing). Residual: the
+      server-side itemclass hooks are no-ops in vanilla content (mod API
+      surface), so only the relay is modelled.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

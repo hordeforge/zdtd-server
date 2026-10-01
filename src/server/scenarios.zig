@@ -22717,3 +22717,50 @@ test "scenario a client cvar write lands on its own entity" {
     try std.testing.expect(cap_b.findPkgId(cvar_id) == null);
     std.debug.print("PASS modify-cvar: the client write lands, cross-player does not\n", .{});
 }
+
+test "scenario a client RPC reaches the other clients" {
+    // `NetPackageSimpleRPC` (C2S `read` IL=9: entityId i32, type u8): stock's
+    // `ProcessPackage` IL=17 requires `ValidEntityIdForSender(entityId, false)`
+    // and calls `GameManager.SimpleRPC(id, type, true, world.IsRemote)`, which
+    // runs the itemclass hook and relays the call to tracked players excluding
+    // the sender (a dedicated server passes `_bOnlyLocal = false`).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+
+    var body_buf: [32]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const rpc_id = packages.idOf("NetPackageSimpleRPC").?;
+
+    // Own entity, type 0 (OnHoldingItemActivated): the other client hears it.
+    var w: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w.writeI32(ca.entity_id);
+    try w.writeByte(0);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSimpleRPC", w.written()));
+    try std.testing.expect(cap_b.findPkgId(rpc_id) != null);
+    try std.testing.expect(cap_a.findPkgId(rpc_id) == null);
+
+    // A forged entity id is refused (ValidEntityIdForSender) and relayed to
+    // nobody.
+    var w2: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w2.writeI32(cb.entity_id);
+    try w2.writeByte(1);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSimpleRPC", w2.written()));
+    try std.testing.expect(cap_b.findPkgId(rpc_id) == null);
+    std.debug.print("PASS simple-rpc: the sender's own RPC relays, a forged one does not\n", .{});
+}

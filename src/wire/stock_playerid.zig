@@ -375,3 +375,42 @@ pub fn parseRequestToSpawnProfile(body: []const u8) !stock_entity.OwnedProfile {
     _ = try r.readI16();
     return stock_entity.readOwnedProfile(&r);
 }
+
+/// `NetPackageSimpleRPC` (read IL=9 / write IL=12): `entityId` i32 then `type`
+/// byte (`SimpleRPCType`). A C2S RPC on the sender's own entity; the server's
+/// `ProcessPackage` (IL=17) requires `ValidEntityIdForSender(entityId, false)`
+/// and calls `GameManager.SimpleRPC(entityId, type, true, world.IsRemote)`,
+/// which runs `ItemClass.OnHoldingItemActivated` (type 0) or
+/// `OnHoldingReset` (type 1) and relays the call to tracked players, excluding
+/// the sender.
+pub const SimpleRPC = struct {
+    entity_id: i32,
+    rpc_type: u8,
+};
+
+/// Parse a C2S `NetPackageSimpleRPC` body (`GetLength` hints 10 = 4 + 1 plus
+/// the package base).
+pub fn parseSimpleRPC(body: []const u8) !SimpleRPC {
+    var r: binary.Reader = .{ .data = body };
+    return .{ .entity_id = try r.readI32(), .rpc_type = try r.readByte() };
+}
+
+/// Build a `NetPackageSimpleRPC` body in the stock `write` order (IL=12: i32
+/// entityId, u8 type) so a test or a relay emits exactly what `read` IL=9
+/// consumes.
+pub fn buildSimpleRPCBody(buf: []u8, v: SimpleRPC) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(v.entity_id);
+    try w.writeByte(v.rpc_type);
+    return w.written();
+}
+
+test "SimpleRPC body is entity id plus the type byte" {
+    var buf: [16]u8 = undefined;
+    const body = try buildSimpleRPCBody(&buf, .{ .entity_id = 900, .rpc_type = 1 });
+    try std.testing.expectEqual(@as(usize, 5), body.len);
+    const v = try parseSimpleRPC(body);
+    try std.testing.expectEqual(@as(i32, 900), v.entity_id);
+    try std.testing.expectEqual(@as(u8, 1), v.rpc_type);
+    try std.testing.expectError(error.EndOfStream, parseSimpleRPC(body[0..4]));
+}

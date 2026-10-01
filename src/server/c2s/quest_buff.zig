@@ -68,6 +68,28 @@ pub fn handleBuff(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
         try self.handleAddRemoveBuff(c, body);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSimpleRPC")) {
+        // Stock ProcessPackage IL=17: `ValidEntityIdForSender(entityId, false)`
+        // then `GameManager.SimpleRPC(id, type, true, world.IsRemote)`. The
+        // server runs the itemclass call (type 0 `ItemClass.OnHoldingItemActivated`,
+        // type 1 `OnHoldingReset`) and, because `_bOnlyLocal` is false on a
+        // dedicated server, relays the call to tracked players excluding the
+        // sender. In vanilla content both itemclass hooks are no-ops (the one
+        // sender in the assembly is a mod itemclass), so the relay is the part
+        // that reaches other clients.
+        const rpc = packages.stock_playerid.parseSimpleRPC(body) catch {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        // `ValidEntityIdForSender`: the sender may only RPC its own entity.
+        if (rpc.entity_id <= 0 or c.entity_id <= 0 or rpc.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            self.noteEvidence(c, peer.local_id, rpc.entity_id, .ownership, .strong, .block, @floatFromInt(rpc.entity_id), @floatFromInt(c.entity_id));
+            return true;
+        }
+        try self.broadcastExcept("NetPackageSimpleRPC", body, c.slot);
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageModifyCVar")) {
         // Stock ProcessPackage IL=26 resolves the id as an EntityAlive and
         // applies `Buffs.SetCustomVar(name, value, IsServer=true, op, false)`.
