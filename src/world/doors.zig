@@ -23,6 +23,9 @@ pub const Door = struct {
     /// a container lock).
     lock_blob: [containers.max_lock_feature_bytes]u8 = [_]u8{0} ** containers.max_lock_feature_bytes,
     lock_len: u16 = 0,
+    /// `autoCloseAtTickTime`: the tick the server closes this door at, 0 when
+    /// no timer is armed (`SetOpen` stamps `ticks + AutoCloseTime * 20`).
+    close_at: u64 = 0,
 };
 
 pub const Store = struct {

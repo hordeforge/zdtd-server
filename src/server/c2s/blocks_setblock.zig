@@ -22,6 +22,22 @@ const log = @import("../../util/log.zig");
 pub const max_passthrough_depth: usize = 8;
 
 /// True when `name` is a setblock package and was handled.
+/// `TEFeatureDoor.SetOpen`: a door with an `AutoCloseTime` arms its deadline
+/// (`ticks + AutoCloseTime * 20`) on the open edge of the block meta's open bit
+/// and disarms it on close. `tickDoorTimers` closes the door at the deadline.
+fn noteDoorOpenState(self: *Game, x: i32, y: i32, z: i32, block_id: u16, prev_raw: u32, new_raw: u32) void {
+    const bd = self.blocks.byId(block_id) orelse return;
+    if (bd.auto_close_time <= 0) return;
+    const was_open = (packages.blockMeta(prev_raw) & packages.block_meta_on) != 0;
+    const now_open = (packages.blockMeta(new_raw) & packages.block_meta_on) != 0;
+    const door = self.doors.getOrCreate(x, y, z, block_id) orelse return;
+    if (now_open and !was_open) {
+        door.close_at = self.tick_n + @as(u64, @intFromFloat(bd.auto_close_time * 20.0));
+    } else if (!now_open) {
+        door.close_at = 0;
+    }
+}
+
 pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageSetBlock")) {
         if (self.quarantineDenies(c, .block)) return true;
@@ -78,6 +94,7 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 if (self.sim.power.setSwitchAt(b.x, b.y, b.z, on)) {
                     self.sim.power.resolve();
                 }
+                noteDoorOpenState(self, b.x, b.y, b.z, cur_id, cur_raw, b.raw);
                 if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], b.x, b.y, b.z, b.raw, cur_dmg, editor_ent, editor_ent)) |sb| {
                     try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
                 } else |_| {}
@@ -337,6 +354,8 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 b.raw
             else
                 place_id;
+            // Captured before the write for the door open-edge test below.
+            const prev_raw = self.blockRawAt(b.x, b.y, b.z);
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
             if (place_id != cur_id) {
                 // The old block is gone (removed or swapped): its multi-block
@@ -350,6 +369,7 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
             }
             self.noteBlockAdded(b.x, b.y, b.z, place_id);
+            noteDoorOpenState(self, b.x, b.y, b.z, place_id, prev_raw, place_raw);
             // Sparse block_raw is a write-through mirror of the chunk plane
             // (GAP 13). Any place that does not store a fresh client raw must
             // drop a prior hit so blockRawAt cannot echo stale rotation/meta

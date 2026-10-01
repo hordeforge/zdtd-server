@@ -361,8 +361,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       C2S apply with a nearby rebroadcast, the lock-grant push and the chunk
       entry send are in. Gated by `scenario a locked door streams its padlock to
       nearby clients` (decisive: dropping the rebroadcast leaves the other peer
-      with nothing). Residual: the door's auto-close timer, the drawbridge and
-      honk-open halves, and door persistence (a restart drops stored locks).
+      with nothing). Residual: the drawbridge and honk-open halves, and door
+      persistence (a restart drops stored locks).
+- [x] **A door with an AutoCloseTime stayed open** - closed 2026-09-30:
+      `TEFeatureDoor.SetOpen` arms `ticks + AutoCloseTime * 20` on the open
+      edge and `UpdateTick` (IL=28) closes the door at the deadline, server
+      only. The property parses, the client's open flip arms the deadline in
+      `world/doors.zig`, and `tickDoorTimers` clears the open bit and
+      broadcasts the SetBlock. Gated by `scenario an auto-close door shuts
+      itself and tells the clients`. Residual: the armed deadline is not
+      persisted across a restart.
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing

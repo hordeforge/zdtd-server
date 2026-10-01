@@ -1039,6 +1039,35 @@ pub fn activityWorldTimeDelayBits(self: *const Game) u64 {
     return @intFromFloat(clamped * 1000.0);
 }
 
+/// `TEFeatureDoor.UpdateTick` (IL=28): a server-only pass that closes a door
+/// once `autoCloseAtTickTime` passes, re-stamping the block meta and telling
+/// nearby clients with the same `NetPackageSetBlock` a client edit would get.
+pub fn tickDoorTimers(self: *Game) void {
+    for (self.doors.items[0..], self.doors.used[0..]) |*door, used| {
+        if (!used or door.close_at == 0) continue;
+        if (self.tick_n < door.close_at) continue;
+        door.close_at = 0;
+        const raw = self.world.rawWorld(door.x, door.y, door.z) catch continue;
+        const id: u16 = @intCast(raw & 0xffff);
+        if (id != door.block_id) continue;
+        const meta = packages.blockMeta(raw);
+        if ((meta & packages.block_meta_on) == 0) continue; // already shut
+        const closed_raw = packages.withBlockMeta(raw, meta & ~packages.block_meta_on);
+        self.world.setBlockRawWorld(door.x, door.y, door.z, closed_raw) catch continue;
+        self.setBlockRaw(door.x, door.y, door.z, closed_raw);
+        var buf: [96]u8 = undefined;
+        if (packages.buildSetBlockBodyRaw(&buf, door.x, door.y, door.z, closed_raw, 0, -1, -1)) |body| {
+            self.broadcastNear(
+                "NetPackageSetBlock",
+                body,
+                @floatFromInt(door.x),
+                @floatFromInt(door.z),
+                self.interest_range,
+            ) catch {};
+        } else |_| {}
+    }
+}
+
 /// Collector producers: `TileEntityCollector.HandleUpdate` (IL=120) folds the
 /// elapsed world time into each output type's conversion budget and places the
 /// `OutputItem` when the budget covers the fill time, with

@@ -370,6 +370,11 @@ pub const BlockDef = struct {
     collector_catalyst_types: []const u8 = "",
     collector_catalyst_multiplier: []const u8 = "",
     collector_catalyst_requirements: []const u8 = "",
+    /// `TEFeatureDoor` `AutoCloseTime`: seconds a door stays open before the
+    /// server closes it (`SetOpen` stamps `ticks + autoCloseTime * 20` and
+    /// `UpdateTick` (IL=28) closes at the deadline on the server only). 0 = the
+    /// door never closes itself.
+    auto_close_time: f32 = 0,
     /// blocks.xml `Class="Mine"` (`BlockMine`): a walk-triggered mine. The fuse
     /// is `TriggerDelay` seconds of block ticks (`TriggerMine` IL=99 schedules
     /// `UpdateTick` at `TriggerDelay * 20`), and `UpdateTick` (IL=8) detonates.
@@ -843,6 +848,7 @@ pub fn loadFromPath(
         explosion_radius_entities: f32 = 0,
         explosion_entity_damage: f32 = 0,
         explosion_blast_power: f32 = 0,
+        auto_close_time: f32 = 0,
         collector: bool = false,
         collector_type: u8 = 0,
         collector_outputs: ?[]const u8 = null,
@@ -959,6 +965,7 @@ pub fn loadFromPath(
         var grow_on_top_enabled = false;
         var fertile_level: i32 = 0;
         var mine = false;
+        var auto_close_time: f32 = 0;
         var collector = false;
         var collector_type: u8 = 0;
         var collector_outputs: ?[]const u8 = null;
@@ -1150,6 +1157,10 @@ pub fn loadFromPath(
                 collector_outputs = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "FuelTypes")) {
                 collector_fuel_types = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "AutoCloseTime")) {
+                if (xml.parseF32(xml.attr(clean, pi, "value") orelse "")) |v| {
+                    if (std.math.isFinite(v) and v > 0) auto_close_time = v;
+                }
             } else if (std.mem.eql(u8, pname, "ModTypes")) {
                 collector_mod_types = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "RunningSound")) {
@@ -1335,6 +1346,7 @@ pub fn loadFromPath(
             .explosion_radius_entities = explosion_radius_entities,
             .explosion_entity_damage = explosion_entity_damage,
             .explosion_blast_power = explosion_blast_power,
+            .auto_close_time = auto_close_time,
             .collector = collector,
             .collector_type = collector_type,
             .collector_outputs = if (collector_outputs) |co| try arena.dupe(u8, co) else null,
@@ -1420,6 +1432,7 @@ pub fn loadFromPath(
         var own_te_features = pb.te_features;
         var own_te_feature_n = pb.te_feature_n;
         var own_mine = pb.mine;
+        var own_auto_close = pb.auto_close_time;
         var own_collector = pb.collector;
         var own_collector_type = pb.collector_type;
         var own_collector_outputs = pb.collector_outputs;
@@ -1526,6 +1539,7 @@ pub fn loadFromPath(
                 if (own_collector_running_sound == null) own_collector_running_sound = base_p.collector_running_sound;
                 if (own_collector_activate_sound == null) own_collector_activate_sound = base_p.collector_activate_sound;
             }
+            if (own_auto_close == 0 and base_p.auto_close_time != 0) own_auto_close = base_p.auto_close_time;
             if (!own_mine) {
                     own_mine = base_p.mine;
                     if (own_trigger_delay == 0) own_trigger_delay = base_p.trigger_delay;
@@ -1616,6 +1630,7 @@ pub fn loadFromPath(
         pb.te_features = own_te_features;
         pb.te_feature_n = own_te_feature_n;
         pb.mine = own_mine;
+        pb.auto_close_time = own_auto_close;
         pb.collector = own_collector;
         pb.collector_type = own_collector_type;
         pb.collector_outputs = own_collector_outputs;
@@ -1721,6 +1736,7 @@ pub fn loadFromPath(
             .te_features = pb.te_features,
             .te_feature_n = pb.te_feature_n,
             .mine = pb.mine,
+            .auto_close_time = pb.auto_close_time,
             .collector = pb.collector,
             .collector_type = pb.collector_type,
             .collector_outputs = if (pb.collector_outputs) |co| try arena.dupe(u8, co) else "",

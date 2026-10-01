@@ -2873,6 +2873,11 @@ pub const Game = struct {
         return game_craft.tickCollectors(self);
     }
 
+    /// Door auto-close (`TEFeatureDoor.UpdateTick` IL=28).
+    pub fn tickDoorTimers(self: *Game) void {
+        return game_craft.tickDoorTimers(self);
+    }
+
     /// Ship the collector TEs whose produced state changed this pass.
     pub fn broadcastDirtyCollectors(self: *Game) !void {
         return game_replicate_te.broadcastDirtyCollectors(self);

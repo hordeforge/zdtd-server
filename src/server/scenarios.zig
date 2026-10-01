@@ -21513,3 +21513,103 @@ test "scenario a locked door streams its padlock to nearby clients" {
     try std.testing.expectEqual(@as(usize, 0), g.doors.count());
     std.debug.print("PASS door-te: the padlock round-trips and reaches the other peer\n", .{});
 }
+
+test "scenario an auto-close door shuts itself and tells the clients" {
+    // `TEFeatureDoor.SetOpen` arms `autoCloseAtTickTime = ticks + AutoCloseTime
+    // * 20` on the open edge and `UpdateTick` (IL=28) closes the door at the
+    // deadline, on the server only. Without this a door left open stayed open.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "doorAuto")) return 1739;
+            if (std.mem.eql(u8, name, "doorPlain")) return 1740;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_door_auto.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="doorAuto">
+        \\  <property name="Class" value="Door" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property class="TEFeatureDoor">
+        \\    <property name="AutoCloseTime" value="0.25" />
+        \\  </property>
+        \\</block>
+        \\<block name="doorPlain">
+        \\  <property name="Class" value="Door" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property class="TEFeatureDoor" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const auto = g.blocks.byName("doorAuto") orelse return error.TestUnexpectedResult;
+    const plain = g.blocks.byName("doorPlain") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), auto.auto_close_time, 0.001);
+    try std.testing.expectEqual(@as(f32, 0), plain.auto_close_time);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 60;
+    g.sim.transform[ps].z = 60;
+
+    // Open the timed door the way the client does: a SetBlock whose meta
+    // carries the open bit.
+    const dx: i32 = 60;
+    const dy: i32 = 70;
+    const dz: i32 = 60;
+    try g.world.setBlockWorld(dx, dy, dz, auto.id);
+    g.setBlockRaw(dx, dy, dz, auto.id);
+    const open_raw = packages.withBlockMeta(@as(u32, auto.id), packages.block_meta_on);
+    var obuf: [64]u8 = undefined;
+    const ob = try packages.buildSetBlockBodyRaw(&obuf, dx, dy, dz, open_raw, 0, c.entity_id, c.entity_id);
+    var fb: [256]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", ob));
+    const door = g.doors.get(dx, dy, dz) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(door.close_at > g.tick_n);
+
+    // The deadline is five ticks out (0.25 s x 20): the door is still open one
+    // tick before and shut after, with the change broadcast.
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        g.tickDoorTimers();
+        try std.testing.expect((packages.blockMeta(try g.world.rawWorld(dx, dy, dz)) & packages.block_meta_on) != 0);
+        _ = try g.step();
+    }
+    // step() itself runs the pass, so drive to the deadline directly.
+    while (g.tick_n < door.close_at) _ = try g.step();
+    cap.clear();
+    g.tickDoorTimers();
+    _ = try g.step();
+    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(try g.world.rawWorld(dx, dy, dz)) & packages.block_meta_on);
+    try std.testing.expect(cap.indexOfPkgId(packages.idOf("NetPackageSetBlock").?) != null);
+
+    // A door without AutoCloseTime arms no timer and stays open.
+    const px: i32 = 62;
+    try g.world.setBlockWorld(px, dy, dz, plain.id);
+    g.setBlockRaw(px, dy, dz, plain.id);
+    const plain_open = packages.withBlockMeta(@as(u32, plain.id), packages.block_meta_on);
+    const pb = try packages.buildSetBlockBodyRaw(&obuf, px, dy, dz, plain_open, 0, c.entity_id, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", pb));
+    try std.testing.expect(g.doors.get(px, dy, dz) == null);
+    i = 0;
+    while (i < 10) : (i += 1) _ = try g.step();
+    try std.testing.expect((packages.blockMeta(try g.world.rawWorld(px, dy, dz)) & packages.block_meta_on) != 0);
+    std.debug.print("PASS door-auto-close: the deadline shuts the door\n", .{});
+}

@@ -271,6 +271,7 @@ pub fn step(self: *Game) !void {
                 log.err("broadcastDirtyWorkstations failed: {s}\n", .{@errorName(err)});
             };
             self.tickCollectors();
+            self.tickDoorTimers();
             self.broadcastDirtyCollectors() catch {};
             self.tickBlockRadiusEffects();
             // Always-on radius sources (torch/candle/radiated barrel/pumpkin,
