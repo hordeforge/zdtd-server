@@ -22222,9 +22222,19 @@ test "scenario a chopped tree falls and its trunk comes down" {
     _ = try g.step();
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
 
-    // The lifetime passes: the trunk comes down and the entity is removed.
+    // The lifetime passes: the tree settles, which broadcasts `TreeFade` and
+    // starts the one-second `timeToRemoveTree` countdown. The trunk is still
+    // standing at that point and nothing has been removed yet.
     var t: u32 = 0;
     while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageTreeFade").?) != null);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityRemove").?) == null);
+    try std.testing.expectEqual(trunk.id, try g.world.blockWorld(px + 2, py, pz));
+
+    // The fade window closes: `DestroyTree` clears the trunk and the entity is
+    // removed.
+    t = 0;
+    while (t < block_ticker_mod.falling_tree_fade_ticks + 2) : (t += 1) _ = try g.step();
     var k: u32 = 0;
     while (k < 4) : (k += 1) {
         try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px + 2, py + @as(i32, @intCast(k)), pz));

@@ -64,6 +64,9 @@ pub const heat_tick_rate: u32 = 10;
 pub const max_falling_trees: usize = 32;
 /// `EntityFallingTree` lifetime (entity-ai.md 4301: `lifetime 3`), in ticks.
 pub const falling_tree_lifetime_ticks: u32 = 3 * protocol.ticks_per_second;
+/// `timeToRemoveTree = 1`: the seconds between the settle (`TreeFade` out) and
+/// `DestroyTree` (entity-ai.md 1550-1563), in ticks.
+pub const falling_tree_fade_ticks: u32 = protocol.ticks_per_second;
 /// Trunk cells one tree may destroy, measured up from the requested base.
 pub const falling_tree_max_cells: u32 = 48;
 
@@ -74,6 +77,9 @@ pub const FallingTree = struct {
     entity_id: i32 = 0,
     dir_x: f32 = 0,
     dir_z: f32 = 0,
+    /// Phase 0 = falling; 1 = fading, the one-second window between the
+    /// `TreeFade` broadcast and `DestroyTree` (entity-ai.md 1550-1563).
+    phase: u8 = 0,
 };
 
 /// `EntityFallingTree.treeCanDamageEntity` (IL=20): once per entity per tree,
@@ -150,30 +156,129 @@ fn fallingTreeEntityAt(self: *const Game, x: i32, y: i32, z: i32) ?i32 {
     return null;
 }
 
+/// Trunk cells from the base up, capped: the falling mass and the destroy pass
+/// read the same walk.
+fn countTreeCells(self: *Game, x: i32, y: i32, z: i32) u32 {
+    var n: u32 = 0;
+    var yy = y;
+    while (n < falling_tree_max_cells) : (n += 1) {
+        const id = self.world.blockWorld(x, yy, z) catch break;
+        if (id == 0) break;
+        const def = self.blocks.byId(id) orelse break;
+        if (!isTreeBlock(def)) break;
+        yy += 1;
+    }
+    return n;
+}
+
 /// `EntityFallingTree.DestroyTree` (IL=37): the trunk comes down with the tree.
 /// Stock destroys the cells as the physics body settles; zdtd walks up from the
 /// requested base while the cells still carry tree blocks and breaks them
 /// through the normal damage path, which broadcasts each block change.
 fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
     var entity_id: i32 = 0;
+    var fading = false;
+    var entry: ?*FallingTree = null;
     for (self.falling_trees[0..self.falling_trees_n]) |*ft| {
         if (ft.entity_id != 0 and ft.x == t.x and ft.y == t.y and ft.z == t.z) {
             entity_id = ft.entity_id;
-            ft.* = .{};
+            fading = ft.phase == 1;
+            entry = ft;
             break;
         }
     }
-    if (entity_id == 0) return;
+    if (entity_id == 0 or entry == null) return;
+    // Settle: stock broadcasts `TreeFade` (channel 192) and waits its
+    // one-second `timeToRemoveTree` before `DestroyTree`. The landing FX and
+    // the impact damage belong to this edge; the block clearing to the next.
+    if (!fading) {
+        entry.?.phase = 1;
+        // The trunk's height sets the falling mass, measured before the destroy
+        // phase clears it (both walk the same cells).
+        const n = countTreeCells(self, t.x, t.y, t.z);
+        const base_dir_x = entry.?.dir_x;
+        const base_dir_z = entry.?.dir_z;
+        // `collidedWith` (IL=58): the trunk's mass decides the impact damage, and
+        // `treeCanDamageEntity` (IL=20) spares players and supply crates.
+        if (n > 0) {
+            const mass: f32 = (15.0 + 7.0 * @as(f32, @floatFromInt(n))) * 5.0;
+            const dmg: f32 = @trunc(mass * falling_tree_damage_scale);
+            var dir_len = @sqrt(base_dir_x * base_dir_x + base_dir_z * base_dir_z);
+            var ux: f32 = 0;
+            var uz: f32 = 0;
+            if (dir_len > 0.001) {
+                ux = base_dir_x / dir_len;
+                uz = base_dir_z / dir_len;
+            }
+            dir_len = 0;
+            const reach: f32 = @floatFromInt(n);
+            const fbx: f32 = @floatFromInt(t.x);
+            const fbz: f32 = @floatFromInt(t.z);
+            var it = self.sim.alive_bits.iterator(.{});
+            while (it.next()) |idx| {
+                const s: ecs_world_mod.Slot = @intCast(idx);
+                if (!self.sim.alive[s] or !self.sim.mask[s].transform) continue;
+                const kind = self.sim.kind[s];
+                if (kind != .zombie and kind != .animal and kind != .vehicle) continue;
+                if (self.sim.mask[s].loot_bag and self.sim.loot_bag[s].supply_crate) continue;
+                const ex = self.sim.transform[s].x - fbx;
+                const ez = self.sim.transform[s].z - fbz;
+                const along = ex * ux + ez * uz;
+                const lateral = @abs(ex * uz - ez * ux);
+                if (along < 0 or along > reach + 1.0) continue;
+                if (lateral > falling_tree_half_width) continue;
+                const ey = self.sim.transform[s].y;
+                const top_y: f32 = @floatFromInt(t.y + @as(i32, @intCast(n)));
+                if (ey < @as(f32, @floatFromInt(t.y)) - 1.0 or ey > top_y + 1.0) continue;
+                _ = self.sim.damageFrom(self.sim.network_id[s].id, dmg, entity_id);
+            }
+            // `Collide` IL=101 plays `treefallimpact` and spawns the `treefall`
+            // particle at the contact (`GameManager.SpawnParticleEffectServer(pe,
+            // entityId, false, false)`), rotated 90 degrees about the fall forward.
+            replicate_te.broadcastSoundAt(self, t.x, t.y, t.z, "treefallimpact", true);
+            var pbuf: [192]u8 = undefined;
+            const base_y: f32 = @floatFromInt(t.y);
+            if (packages.buildParticleEffectBody(&pbuf, .{
+                .particle_id = packages.particleId("treefall"),
+                .x = fbx,
+                .y = base_y,
+                .z = fbz,
+                // The RE's `rotation * AngleAxis(90, forward)`: a 90 degree turn
+                // about the horizontal fall direction.
+                .rot = .{ 0, 0.70710678, 0, 0.70710678 },
+            }, entity_id, false, false)) |pb| {
+                self.broadcastNear("NetPackageParticleEffect", pb, fbx, fbz, self.interest_range) catch {
+                    self.harness.counters.inc(.net_send_errors);
+                };
+            } else |_| {
+                self.harness.counters.inc(.encode_errors);
+            }
+        }
+
+        var fbuf: [8]u8 = undefined;
+        if (packages.buildTreeFadeBody(&fbuf, entity_id)) |fb| {
+            self.broadcastNear(
+                "NetPackageTreeFade",
+                fb,
+                @floatFromInt(t.x),
+                @floatFromInt(t.z),
+                self.interest_range,
+            ) catch {
+                self.harness.counters.inc(.net_send_errors);
+            };
+        } else |_| {
+            self.harness.counters.inc(.encode_errors);
+        }
+        // Re-arm for the destroy phase, keeping the entry so a repeat request
+        // for the same trunk stays deduped while the tree is live.
+        schedule(self, t.x, t.y, t.z, t.id, falling_tree_fade_ticks);
+        return;
+    }
+    // Destroy phase: the entity's slot is freed and `DestroyTree` runs.
+    const destroy_entry = entry.?;
+    destroy_entry.* = .{};
     var y = t.y;
     var n: u32 = 0;
-    var base_dir_x: f32 = 0;
-    var base_dir_z: f32 = 0;
-    for (self.falling_trees[0..self.falling_trees_n]) |ft| {
-        if (ft.x == t.x and ft.y == t.y and ft.z == t.z) {
-            base_dir_x = ft.dir_x;
-            base_dir_z = ft.dir_z;
-        }
-    }
     while (n < falling_tree_max_cells) : (n += 1) {
         const id = self.world.blockWorld(t.x, y, t.z) catch break;
         if (id == 0) break;
@@ -191,62 +296,6 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
             self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(t.x), @floatFromInt(t.z), self.interest_range) catch {};
         } else |_| {}
         y += 1;
-    }
-    // `collidedWith` (IL=58): the trunk's mass decides the impact damage, and
-    // `treeCanDamageEntity` (IL=20) spares players and supply crates.
-    if (n > 0) {
-        const mass: f32 = (15.0 + 7.0 * @as(f32, @floatFromInt(n))) * 5.0;
-        const dmg: f32 = @trunc(mass * falling_tree_damage_scale);
-        var dir_len = @sqrt(base_dir_x * base_dir_x + base_dir_z * base_dir_z);
-        var ux: f32 = 0;
-        var uz: f32 = 0;
-        if (dir_len > 0.001) {
-            ux = base_dir_x / dir_len;
-            uz = base_dir_z / dir_len;
-        }
-        dir_len = 0;
-        const reach: f32 = @floatFromInt(n);
-        const fbx: f32 = @floatFromInt(t.x);
-        const fbz: f32 = @floatFromInt(t.z);
-        var it = self.sim.alive_bits.iterator(.{});
-        while (it.next()) |idx| {
-            const s: ecs_world_mod.Slot = @intCast(idx);
-            if (!self.sim.alive[s] or !self.sim.mask[s].transform) continue;
-            const kind = self.sim.kind[s];
-            if (kind != .zombie and kind != .animal and kind != .vehicle) continue;
-            if (self.sim.mask[s].loot_bag and self.sim.loot_bag[s].supply_crate) continue;
-            const ex = self.sim.transform[s].x - fbx;
-            const ez = self.sim.transform[s].z - fbz;
-            const along = ex * ux + ez * uz;
-            const lateral = @abs(ex * uz - ez * ux);
-            if (along < 0 or along > reach + 1.0) continue;
-            if (lateral > falling_tree_half_width) continue;
-            const ey = self.sim.transform[s].y;
-            const top_y: f32 = @floatFromInt(t.y + @as(i32, @intCast(n)));
-            if (ey < @as(f32, @floatFromInt(t.y)) - 1.0 or ey > top_y + 1.0) continue;
-            _ = self.sim.damageFrom(self.sim.network_id[s].id, dmg, entity_id);
-        }
-        // `Collide` IL=101 plays `treefallimpact` and spawns the `treefall`
-        // particle at the contact (`GameManager.SpawnParticleEffectServer(pe,
-        // entityId, false, false)`), rotated 90 degrees about the fall forward.
-        replicate_te.broadcastSoundAt(self, t.x, t.y, t.z, "treefallimpact", true);
-        var pbuf: [192]u8 = undefined;
-        const base_y: f32 = @floatFromInt(t.y);
-        if (packages.buildParticleEffectBody(&pbuf, .{
-            .particle_id = packages.particleId("treefall"),
-            .x = fbx,
-            .y = base_y,
-            .z = fbz,
-            // The RE's `rotation * AngleAxis(90, forward)`: a 90 degree turn
-            // about the horizontal fall direction.
-            .rot = .{ 0, 0.70710678, 0, 0.70710678 },
-        }, entity_id, false, false)) |pb| {
-            self.broadcastNear("NetPackageParticleEffect", pb, fbx, fbz, self.interest_range) catch {
-                self.harness.counters.inc(.net_send_errors);
-            };
-        } else |_| {
-            self.harness.counters.inc(.encode_errors);
-        }
     }
     var buf: [16]u8 = undefined;
     const body = packages.buildRemoveBodyReason(&buf, entity_id, .despawned) catch return;

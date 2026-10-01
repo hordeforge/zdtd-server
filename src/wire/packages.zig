@@ -178,6 +178,7 @@ pub const water_mass_full: u16 = stock_block.water_mass_full;
 pub const AudioPlay = stock_block.AudioPlay;
 pub const parseAudioPlay = stock_block.parseAudioPlay;
 pub const buildAudioPlayBody = stock_block.buildAudioPlayBody;
+pub const buildTreeFadeBody = stock_block.buildTreeFadeBody;
 
 /// `NetPackageQuestTreasurePoint/QuestPointActions`
 /// (NetPackageQuestTreasurePoint_QuestPointActions.il.txt:3).

@@ -321,9 +321,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `Collide` IL=101 plays `treefallimpact` at the base and spawns the
       `treefall` particle (`ParticleEffect.ToId(name)` = the name hash,
       `ParticleEffect.Write` IL=47), which zdtd could parse but not build; a
-      `buildParticleEffectBody` now exists and the landing sends it. Residual:
-      Unity's contact impulses (the 4-instance cap per entity+id and the
-      impulse-sized contact point).
+      `buildParticleEffectBody` now exists and the landing sends it. The
+      lifecycle's fade leg closed 2026-10-01: at the settle the server now
+      broadcasts `NetPackageTreeFade` (one i32 entityId, `write` IL=8) and waits
+      stock's `timeToRemoveTree = 1` second before `DestroyTree` clears the
+      trunk and the entity is removed, so the client fades the tree instead of
+      seeing it vanish. Gated by the tree scenario, which asserts the fade at
+      the settle (trunk still standing, no remove yet) and the clearing plus
+      remove one second later (decisive: suppressing the fade send fails it).
+      Residual: Unity's contact impulses (the 4-instance cap per entity+id and
+      the impulse-sized contact point), and stock clears the base cell in
+      `CreateMesh` at spawn rather than at `DestroyTree`.
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in

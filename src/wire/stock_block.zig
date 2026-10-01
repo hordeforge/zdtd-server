@@ -286,6 +286,23 @@ test "water set body round-trips the stock layout" {
     try std.testing.expectError(error.EndOfStream, parseWaterSet(body[0 .. body.len - 1], &out));
 }
 
+/// `NetPackageTreeFade` body (RE entity-ai.md 1563, `write` IL=8): one i32
+/// entityId. The server broadcasts it when a falling tree's rigidbody settles,
+/// which starts the client's fade-out (`ProcessPackage` IL=17 sets
+/// `targetFade = 0`); `DestroyTree` runs one second later.
+pub fn buildTreeFadeBody(buf: []u8, entity_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    return w.written();
+}
+
+test "TreeFade body is one entity id" {
+    var buf: [8]u8 = undefined;
+    const body = try buildTreeFadeBody(&buf, 4242);
+    try std.testing.expectEqual(@as(usize, 4), body.len);
+    try std.testing.expectEqual(@as(i32, 4242), std.mem.readInt(i32, body[0..4], .little));
+}
+
 /// `Audio.NetPackageAudio` body: the `NetPackageEntityTargeted` base
 /// (`entityId` i32, NetPackageEntityTargeted.il.txt:11) then `soundGroupName`
 /// string, `play` bool, `position` as three bare f32, `playOnEntity` bool,
