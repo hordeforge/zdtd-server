@@ -22764,3 +22764,104 @@ test "scenario a client RPC reaches the other clients" {
     try std.testing.expect(cap_b.findPkgId(rpc_id) == null);
     std.debug.print("PASS simple-rpc: the sender's own RPC relays, a forged one does not\n", .{});
 }
+
+test "scenario a Convert mod swaps the output and a Cost mod discounts the fuel" {
+    // `HasModConvert` makes the production use the row's `OutputItemModded`
+    // (`TileEntityCollector` IL_0019-0044) and `HasModCost` divides the fuel draw
+    // by `DiscountedFuelDivisor` (`fuelCost` IL=26); the additional-fuel term is
+    // `AdditionalFuelCost * (itemsToCreate - 1)`.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewConvert")) return 1736;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_dew_convert.xml", .{dir});
+    // Row fields: 0 name, 1 fuel, 2 FuelCost, 3 AdditionalFuelCost,
+    // 4 DiscountedFuelDivisor, 5 OutputItem, 6 OutputItemModded.
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewConvert">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="FuelTypes" value="{gas,gasCan}" />
+        \\  <property name="OutputTypes" value="{water,gas,8,4,4,drinkJarBoiledWater,drinkJarMurkyWater,0,0,100,100,water}" />
+        \\  <property name="ModTypes" value="Convert,Cost" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewConvert") orelse return error.TestUnexpectedResult;
+    var rows: [assets_blocks.max_collector_outputs]assets_blocks.CollectorOutputRow = undefined;
+    try std.testing.expectEqual(@as(u8, 1), assets_blocks.parseCollectorOutputs(dew.collector_outputs, &rows));
+    try std.testing.expectEqual(@as(i32, 8), rows[0].fuel_cost);
+    try std.testing.expectEqual(@as(i32, 4), rows[0].additional_fuel_cost);
+    try std.testing.expectEqual(@as(i32, 4), rows[0].discounted_fuel_divisor);
+    try std.testing.expectEqual(assets_blocks.CollectorModEffect.convert, assets_blocks.collectorModEffect(dew.collector_mod_types, 0).?);
+    try std.testing.expectEqual(assets_blocks.CollectorModEffect.cost, assets_blocks.collectorModEffect(dew.collector_mod_types, 1).?);
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "drinkJarMurkyWater" },
+        .{ .id = 903, .name = "modCollectorConvert" },
+        .{ .id = 904, .name = "gasCan", .stack = 1000 },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const col = g.collectors.getOrCreate(80, 66, 80, dew.id) orelse return error.TestUnexpectedResult;
+    // Fuel: 20 gas cans against a cost of 8 / 4 = 2 (Cost mod) + 0 (batch 1).
+    col.fuel[0] = .{ .type_id = 904, .count = 20 };
+    g.sim.director.clock.hours += 0.001;
+    g.tickCollectors();
+    g.sim.director.clock.hours += 0.1;
+    g.tickCollectors();
+    // Without the Convert mod the base item lands.
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+
+    // With the Convert mod in slot 0 the modded item lands.
+    col.mods[0] = .{ .type_id = 903, .count = 1 };
+    col.items[0] = .{};
+    var before = col.fuel[0].count;
+    g.sim.director.clock.hours += 0.2;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 901), col.items[0].type_id);
+    // `ModTypes="Convert,Cost"` is positional: slot 0 is Convert, so slot 1
+    // still has no Cost mod and the full 8 units burn.
+    try std.testing.expectEqual(@as(u16, before - 8), col.fuel[0].count);
+
+    // A Cost mod in slot 1 divides the draw by `DiscountedFuelDivisor` (8 / 4).
+    col.mods[1] = .{ .type_id = 903, .count = 1 };
+    col.items[0] = .{};
+    before = col.fuel[0].count;
+    g.sim.director.clock.hours += 0.2;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 901), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, before - 2), col.fuel[0].count);
+
+    // Both mods out: the base item and the full draw return (refuel first: the
+    // three productions above left less than one undiscounted draw).
+    col.mods[0] = .{};
+    col.mods[1] = .{};
+    col.items[0] = .{};
+    col.fuel[0] = .{ .type_id = 904, .count = 20 };
+    before = col.fuel[0].count;
+    g.sim.director.clock.hours += 0.2;
+    g.tickCollectors();
+    try std.testing.expectEqual(@as(i32, 900), col.items[0].type_id);
+    try std.testing.expectEqual(@as(u16, before - 8), col.fuel[0].count);
+    std.debug.print("PASS collector-convert: the Convert mod swaps the output, Cost discounts fuel\n", .{});
+}

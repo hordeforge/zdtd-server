@@ -377,10 +377,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       too: the enabled edge plays `ActivateSound` then `RunningSound`, the
       disabled edge stops `RunningSound` (`HandleUpdate` IL_00E3-012E) and
       `OnDestroy` stops it with the block (IL_0008-001E), all as
-      `NetPackageAudio`. Still open: the `ModTypes` effects this server does not
-      model (`Convert`/`Modify`/`Expand`/`Cost` and `ModTransformEnableNames`),
-      the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
-      `OpenSound`/`CloseSound` pair (a UI-open sound the client plays itself).
+      `NetPackageAudio`. The two behavioural `ModTypes` effects closed
+      2026-10-01: `Convert` makes the production use the row's `OutputItemModded`
+      (`TileEntityCollector` IL_0019-0044) and `Cost` divides the fuel draw by the
+      row's `DiscountedFuelDivisor` (`fuelCost` IL=26); the same read showed row
+      field 3 is `AdditionalFuelCost`, which `fuelCost` scales by
+      `itemsToCreate - 1`, so that term now rides each burn. Gated by `scenario a
+      Convert mod swaps the output and a Cost mod discounts the fuel` (decisive:
+      dropping either branch fails it). Still open: the cosmetic `Modify`/
+      `Expand` effects (a renderer flag and a UI-grid +1) and
+      `ModTransformEnableNames`, the `CatalystConvert` pairs
+      (`Convert(ItemStack)`), and the `OpenSound`/`CloseSound` pair (a UI-open
+      sound the client plays itself).
 - [x] **A land claim's show-bounds toggle never streamed** - closed 2026-10-01:
       `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that one
       byte (`Write` IL=381; the version `18` is persistent-only), so a claim

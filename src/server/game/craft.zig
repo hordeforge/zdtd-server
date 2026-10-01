@@ -1115,6 +1115,11 @@ pub fn tickCollectors(self: *Game) void {
         // effect to counts.
         const has_mod_speed = collectorModFlag(self, def.collector_mod_types, c, .speed);
         const has_mod_count = collectorModFlag(self, def.collector_mod_types, c, .count);
+        // `HasModConvert` swaps the produced item for the row's
+        // `OutputItemModded` (IL_0019-0044) and `HasModCost` divides the fuel
+        // draw by `DiscountedFuelDivisor` (`fuelCost` IL=26).
+        const has_mod_convert = collectorModFlag(self, def.collector_mod_types, c, .convert);
+        const has_mod_cost = collectorModFlag(self, def.collector_mod_types, c, .cost);
         // `productionEnabled`: any output not disabled. The edges start and stop
         // the running sound (`HandleUpdate` IL_00E3-012E).
         const enabled = !collectorBlocked(self, c.x, c.y, c.z) and !c.isFull() and (!c.out_of_fuel);
@@ -1160,7 +1165,13 @@ pub fn tickCollectors(self: *Game) void {
                 continue;
             };
             fuel_items = ft.items;
-            fuel_cost = @intCast(@max(row.fuel_cost, 1));
+            // `fuelCost` IL=26: the base `FuelCost`, plus
+            // `AdditionalFuelCost * (itemsToCreate - 1)`, divided by
+            // `DiscountedFuelDivisor` when a Cost mod is installed. The batch is
+            // one here (the count is computed below), so the additional term is
+            // applied at burn time; the divisor is a plain factor.
+            const divisor: i32 = if (has_mod_cost and row.discounted_fuel_divisor > 0) row.discounted_fuel_divisor else 1;
+            fuel_cost = @intCast(@max(@divTrunc(@max(row.fuel_cost, 1), divisor), 1));
             if (collectorFuelCount(self, c, fuel_items) < fuel_cost) {
                 c.out_of_fuel = true;
                 continue;
@@ -1171,7 +1182,10 @@ pub fn tickCollectors(self: *Game) void {
             c.fill_started = true;
             c.fill_left = c.drawFillTime(row.min_convert_time, row.max_convert_time);
         }
-        const item = self.items.byName(row.output_item) orelse continue;
+        // `HasModConvert` produces the row's modded output; a row that declares
+        // none keeps the base item (fail closed, never an invented id).
+        const output_name = if (has_mod_convert and row.output_item_modded.len > 0) row.output_item_modded else row.output_item;
+        const item = self.items.byName(output_name) orelse continue;
         const type_id: i32 = item.id;
         if (type_id == 0) continue;
         // `getCurrentConvertCount` (IL=52): the batch starts at the catalyst
@@ -1218,7 +1232,15 @@ pub fn tickCollectors(self: *Game) void {
             slot.count = out_count;
             slot.quality = 0;
             c.dirty = true;
-            if (fuel_cost > 0) collectorBurnFuel(self, c, fuel_items, fuel_cost);
+            if (fuel_cost > 0) {
+                // The additional-fuel term scales with the batch size
+                // (`getAdditionalFuelCost(output) * (itemsToCreate - 1)`).
+                const extra: u16 = if (row.additional_fuel_cost > 0 and out_count > 1)
+                    @intCast(@min(row.additional_fuel_cost * (@as(i32, out_count) - 1), 65535))
+                else
+                    0;
+                collectorBurnFuel(self, c, fuel_items, fuel_cost +| extra);
+            }
             c.fill_left += c.drawFillTime(row.min_convert_time, row.max_convert_time);
             if (c.fill_left <= 0) c.fill_left = 1;
         }

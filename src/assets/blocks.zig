@@ -118,6 +118,13 @@ pub const CollectorOutputRow = struct {
     name: []const u8 = "",
     fuel: []const u8 = "",
     fuel_cost: i32 = 0,
+    /// Row field 3: `BlockCollector/OutputType::.ctor` reads
+    /// `AdditionalFuelCost` right after `FuelCost`, and `fuelCost` IL=26 adds
+    /// `getAdditionalFuelCost(output) * (itemsToCreate - 1)` to the base draw.
+    additional_fuel_cost: i32 = 0,
+    /// Row field 4: `DiscountedFuelDivisor`, what `fuelCost` divides the draw by
+    /// when the TE has `HasModCost` (an arm that defaults to 1).
+    discounted_fuel_divisor: i32 = 1,
     output_item: []const u8 = "",
     output_item_modded: []const u8 = "",
     /// Fields 7 and 8 of the row: what an installed converter mod does to the
@@ -148,6 +155,8 @@ pub fn parseCollectorOutputs(value: []const u8, out: *[max_collector_outputs]Col
                     0 => o.name = f,
                     1 => o.fuel = f,
                     2 => o.fuel_cost = std.fmt.parseInt(i32, f, 10) catch 0,
+                    3 => o.additional_fuel_cost = std.fmt.parseInt(i32, f, 10) catch 0,
+                    4 => o.discounted_fuel_divisor = std.fmt.parseInt(i32, f, 10) catch 1,
                     5 => o.output_item = f,
                     6 => o.output_item_modded = f,
                     7 => o.modded_convert_speed_multiplier = std.fmt.parseInt(i32, f, 10) catch 0,
