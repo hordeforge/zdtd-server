@@ -30,6 +30,7 @@ const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
 const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
+const stock_entity_mod = @import("../wire/stock_entity.zig");
 const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
@@ -21900,4 +21901,62 @@ test "scenario a canvas sign stores and relays its drawing state" {
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", forged));
     try std.testing.expect(g.sign_texts.get(.{ .x = 41, .y = 70, .z = 41 }) == null);
     std.debug.print("PASS canvas: the drawing state round-trips and relays\n", .{});
+}
+
+test "scenario a requested spawn carries the V3.2.0 correlation tail" {
+    // `EntityCreationData` gained `requestedBy` (i64 on the wire) + `requestKey`
+    // (16 Guid bytes) in V3.2.0, written after `stressAmount` and consumed by
+    // the client only at readFileVersion >= 37 (protocol.md section 5.1 tail).
+    // The client's `EntityPlayerLocal.SpawnRequest` is keyed by that Guid, so a
+    // body without the pair leaves a held-entity placement pending forever
+    // (`grabDisabled()` stays true).
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, i| b.* = @intCast(i + 1);
+
+    // FileVersion 36 stays the default: no pair, and a v36 client is unaffected.
+    var plain_buf: [512]u8 = undefined;
+    const plain = try stock_entity_mod.buildEntitySpawnStock(&plain_buf, .{
+        .entity_id = 77,
+        .entity_class = 2000,
+        .x = 1,
+        .y = 70,
+        .z = 2,
+    });
+    // channel pkgId prefix is not part of buildEntitySpawnStock; the ECD version
+    // byte sits right after the entityId.
+    try std.testing.expectEqual(@as(u8, 36), plain[4]);
+
+    var req_buf: [512]u8 = undefined;
+    const req = try stock_entity_mod.buildEntitySpawnStock(&req_buf, .{
+        .entity_id = 78,
+        .entity_class = 2000,
+        .x = 1,
+        .y = 70,
+        .z = 2,
+        .requested_by = 107,
+        .request_key = key,
+    });
+    try std.testing.expectEqual(@as(u8, 37), req[4]);
+    // The pair is the last 24 bytes: i64 requestedBy then the 16-byte key.
+    try std.testing.expectEqual(@as(usize, plain.len + 24), req.len);
+    var r: wire_binary_mod.Reader = .{ .data = req };
+    _ = try r.readI32(); // entityId
+    _ = try r.readByte(); // version
+    r.pos = req.len - 24;
+    try std.testing.expectEqual(@as(i64, 107), try r.readI64());
+    var got: [16]u8 = undefined;
+    @memcpy(&got, req[req.len - 16 ..][0..16]);
+    try std.testing.expectEqualSlices(u8, &key, &got);
+
+    // The paired ack body is i64 created entity id + the same 16 bytes. The
+    // encoder already existed; this proves the layout the client reads.
+    var ack_buf: [32]u8 = undefined;
+    const ack = try packages.buildConfirmSpawnEntityBody(&ack_buf, 78, &key);
+    try std.testing.expectEqual(@as(usize, 24), ack.len);
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    try std.testing.expectEqual(@as(i64, 78), try ar.readI64());
+    var akey: [16]u8 = undefined;
+    @memcpy(&akey, ack[8..][0..16]);
+    try std.testing.expectEqualSlices(u8, &key, &akey);
+    std.debug.print("PASS requested-spawn: the v37 tail and the ack layout match\n", .{});
 }

@@ -64,6 +64,14 @@ pub const SpawnOpts = struct {
     player: ?PlayerSpawnInfo = null,
     /// Falling-tree data, required when entity_class == class_falling_tree.
     falling_tree: ?FallingTreeInfo = null,
+    /// V3.2.0 requested-spawn correlation (`EntityCreationData` tail, protocol.md
+    /// section 5.1): `requestedBy` (the requesting entity id) plus the client's
+    /// `requestKey` Guid. Setting the key lifts the body to FileVersion 37 and
+    /// appends the pair, which is what lets the client consume its pending
+    /// `SpawnRequest` when the matching `NetPackageConfirmSpawnEntity` arrives.
+    /// A null key keeps FileVersion 36, the shape every other spawn uses.
+    requested_by: i32 = 0,
+    request_key: ?[16]u8 = null,
     /// Junk-drone order state (junkDrone tail only; paired with belongs_player_id).
     drone_order_state: i32 = 0,
     /// Required when entity_class == class_falling_block.
@@ -364,13 +372,14 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // NetPackageEntityTargeted
     try w.writeI32(opts.entity_id);
-    // EntityCreationData.write FileVersion 36. V3.2.0 appends a
-    // requestedBy/requestKey tail that `read` consumes only at
-    // readFileVersion >= 37 (changelog-3.2.0 §3.3): a 3.2.0 client reading
-    // our v36 body skips the tail, so keeping v36 stays parse-compatible.
-    // The tail is only meaningful for client-requested spawns, which zdtd
-    // drops (c2s/misc.zig RequestToSpawnEntity), so it is not emitted.
-    try w.writeByte(36);
+    // EntityCreationData.write FileVersion: 36 normally, 37 when the
+    // requested-spawn tail rides along. V3.2.0 appends a requestedBy/requestKey
+    // tail that `read` consumes only at readFileVersion >= 37
+    // (changelog-3.2.0 §3.3), so a 3.2.0 client reading our v36 body skips the
+    // tail and stays parse-compatible; a requested spawn needs v37 so the client
+    // sees the correlation pair.
+    const file_version: u8 = if (opts.request_key != null) 37 else 36;
+    try w.writeByte(file_version);
     try w.writeI32(opts.entity_class);
     try w.writeI32(opts.entity_id);
     try w.writeF32(std.math.floatMax(f32)); // lifetime
@@ -483,8 +492,14 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
         try w.writeI32(opts.belongs_player_id);
         try w.writeI32(opts.drone_order_state);
     }
-    // ECD v36 tail (always written after junkDrone branch).
+    // ECD tail (always written after junkDrone branch).
     try w.writeF32(0); // stressAmount
+    // V3.2.0 requested-spawn pair: written always by the client, consumed only
+    // at readFileVersion >= 37 (protocol.md section 5.1 tail).
+    if (opts.request_key) |key| {
+        try w.writeI64(opts.requested_by);
+        try w.writeBytes(&key);
+    }
     return w.written();
 }
 

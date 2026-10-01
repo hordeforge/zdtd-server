@@ -470,6 +470,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       NOT a gap: the only stock sender is
       `ChunkManager::RemoveAllChunksOnAllClients` (IL=99), called solely from
       `PrefabEditModeManager`, the client prefab editor a dedi never enters.
+- [ ] **Client-requested spawns are dropped, so a held-entity placement waits
+      forever** - the wire half landed 2026-10-01: `EntityCreationData` can now
+      carry the V3.2.0 `requestedBy`/`requestKey` pair (FileVersion 37, protocol.md
+      section 5.1 tail) and the paired `NetPackageConfirmSpawnEntity` encoder is
+      wired (`packages.buildConfirmSpawnEntityBody`, i64 + 16 Guid bytes). Still
+      open: the C2S side. `NetPackageRequestToSpawnEntity` is dropped today
+      ("the generic ECD request does not prove item ownership or a legal spawn
+      class"), so a V3.2.0 client that places a held entity
+      (`ItemClassHeldEntity`: chicken coop items, `EntityPlayerLocal.RequestToSpawnEntityServer`)
+      never receives the ack its `SpawnRequest` waits on, and `grabDisabled()`
+      stays true. Fixing it needs an `EntityCreationData` reader (the generic
+      branch plus the optional stats/bag/trader blobs), a class allow-list and
+      bounds/rate validation, then spawn + `NetPackageEntitySpawn` with the tail
+      + the confirm to the requester.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event
