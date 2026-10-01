@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const binary = @import("binary.zig");
+const unity_hash = @import("../assets/unity_hash.zig");
 
 /// NetPackageChat body (RE chat.md §1): chatType u8 (EChatType: 0 Global,
 /// 1 Friends, 2 Party, 3 Whisper, 4 Discord), senderEntityId i32, msg string,
@@ -250,6 +251,81 @@ pub const ParticleEffectInvoke = struct {
     /// variable, so a relay must forward `body[0..wire_len]`.
     wire_len: usize = 0,
 };
+
+/// One `ParticleEffect` as `ParticleEffect::Write` (IL=47/397-435) emits it:
+/// `ParticleId` (the effect name's `GetHashCode`, `ParticleEffect.ToId` IL=3),
+/// position, rotation quaternion, Color32, the two sound names, the volume
+/// scale, the parent entity id and the attachment byte.
+pub const ParticleEffect = struct {
+    /// `ParticleEffect.ToId(name)` = the Unity Mono name hash.
+    particle_id: i32 = 0,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    rot: [4]f32 = .{ 0, 0, 0, 1 },
+    color: [4]u8 = .{ 255, 255, 255, 255 },
+    sound_name: []const u8 = "",
+    additional_sound_name: []const u8 = "",
+    volume_scale: f32 = 1,
+    parent_entity_id: i32 = -1,
+    attachment: u8 = 0,
+};
+
+/// Server-side `ParticleEffect` id: `name.GetHashCode()` (`ParticleEffect.ToId`
+/// IL=3), the same formula the block/item catalogs use.
+pub fn particleId(name: []const u8) i32 {
+    return unity_hash.getStableHashCode(name);
+}
+
+/// Build a `NetPackageParticleEffect` body (`ParticleEffect::Write` then
+/// `entityThatCausedIt`, `forceCreation`, `worldSpawn`; write IL=20). The
+/// dedicated `GameManager.SpawnParticleEffectServer(pe, id, false, false)`
+/// sends this form, which the client plays for everyone but the causing entity.
+pub fn buildParticleEffectBody(
+    buf: []u8,
+    pe: ParticleEffect,
+    entity_caused: i32,
+    force_creation: bool,
+    world_spawn: bool,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(pe.particle_id);
+    try w.writeF32(pe.x);
+    try w.writeF32(pe.y);
+    try w.writeF32(pe.z);
+    for (pe.rot) |v| try w.writeF32(v);
+    try w.writeBytes(&pe.color);
+    try w.writeString(pe.sound_name);
+    try w.writeString(pe.additional_sound_name);
+    try w.writeF32(pe.volume_scale);
+    try w.writeI32(pe.parent_entity_id);
+    try w.writeByte(pe.attachment);
+    try w.writeI32(entity_caused);
+    try w.writeBool(force_creation);
+    try w.writeBool(world_spawn);
+    return w.written();
+}
+
+test "a built particle effect parses back field for field" {
+    var buf: [256]u8 = undefined;
+    const body = try buildParticleEffectBody(&buf, .{
+        .particle_id = particleId("treefall"),
+        .x = 11,
+        .y = 70,
+        .z = 12,
+        .sound_name = "treefallimpact",
+        .volume_scale = 1,
+    }, 4242, false, false);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(particleId("treefall"), try r.readI32());
+    try std.testing.expectEqual(@as(f32, 11), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 70), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 12), try r.readF32());
+    const inv = try parseParticleEffectInvoke(body);
+    try std.testing.expectEqual(@as(i32, 4242), inv.entity_caused);
+    try std.testing.expect(!inv.force_creation);
+    try std.testing.expect(!inv.world_spawn);
+}
 
 /// NetPackageParticleEffect (write IL=20, NetPackageParticleEffect.il.txt:43):
 /// `pe` (ParticleEffect::Write) | `entityThatCausedIt` i32 | `forceCreation`

@@ -22297,6 +22297,10 @@ test "scenario a falling tree hurts what it lands on" {
     try std.testing.expectEqual(@as(i32, 0), g.armFallingTree(px + 2, py, pz, log.id, .{ 1, 0, 0 }));
     var t: u32 = 0;
     while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
+    // The landing also broadcasts the `treefall` particle and its sound.
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) != null);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageAudio").?) != null);
+
     // h = 3 cells -> mass (15 + 21) * 5 = 180 -> 180 * 0.36 = 64 damage.
     try std.testing.expectApproxEqAbs(@as(f32, 436), g.sim.health[zs].hp, 1.0);
     // The player in the same spot is untouched (treeCanDamageEntity).

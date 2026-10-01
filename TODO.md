@@ -318,9 +318,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       `collidedWith` (IL=58) damages a non-player, non-supply-crate entity in the
       fall footprint for `int(treeRB.mass * 0.36)` with `CreateMesh`'s
       `(15 + 7 * h) * 5` mass, once per tree (`treeCanDamageEntity` IL=20), and
-      `Collide` IL=101 plays `treefallimpact` at the base. Residual: the
-      `treefall` particle effect (zdtd parses that package but has no builder)
-      and Unity's contact impulses.
+      `Collide` IL=101 plays `treefallimpact` at the base and spawns the
+      `treefall` particle (`ParticleEffect.ToId(name)` = the name hash,
+      `ParticleEffect.Write` IL=47), which zdtd could parse but not build; a
+      `buildParticleEffectBody` now exists and the landing sends it. Residual:
+      Unity's contact impulses (the 4-instance cap per entity+id and the
+      impulse-sized contact point).
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in

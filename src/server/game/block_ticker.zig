@@ -226,8 +226,27 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
             if (ey < @as(f32, @floatFromInt(t.y)) - 1.0 or ey > top_y + 1.0) continue;
             _ = self.sim.damageFrom(self.sim.network_id[s].id, dmg, entity_id);
         }
-        // `Collide` IL=101 plays `treefallimpact` on the settling contact.
+        // `Collide` IL=101 plays `treefallimpact` and spawns the `treefall`
+        // particle at the contact (`GameManager.SpawnParticleEffectServer(pe,
+        // entityId, false, false)`), rotated 90 degrees about the fall forward.
         replicate_te.broadcastSoundAt(self, t.x, t.y, t.z, "treefallimpact", true);
+        var pbuf: [192]u8 = undefined;
+        const base_y: f32 = @floatFromInt(t.y);
+        if (packages.buildParticleEffectBody(&pbuf, .{
+            .particle_id = packages.particleId("treefall"),
+            .x = fbx,
+            .y = base_y,
+            .z = fbz,
+            // The RE's `rotation * AngleAxis(90, forward)`: a 90 degree turn
+            // about the horizontal fall direction.
+            .rot = .{ 0, 0.70710678, 0, 0.70710678 },
+        }, entity_id, false, false)) |pb| {
+            self.broadcastNear("NetPackageParticleEffect", pb, fbx, fbz, self.interest_range) catch {
+                self.harness.counters.inc(.net_send_errors);
+            };
+        } else |_| {
+            self.harness.counters.inc(.encode_errors);
+        }
     }
     var buf: [16]u8 = undefined;
     const body = packages.buildRemoveBodyReason(&buf, entity_id, .despawned) catch return;

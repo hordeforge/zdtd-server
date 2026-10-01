@@ -280,6 +280,9 @@ pub const max_audio_clip_len: usize = stock_chat.max_audio_clip_len;
 pub const parseSoundAtPosition = stock_chat.parseSoundAtPosition;
 pub const buildSoundAtPosition = stock_chat.buildSoundAtPosition;
 pub const ParticleEffectInvoke = stock_chat.ParticleEffectInvoke;
+pub const ParticleEffect = stock_chat.ParticleEffect;
+pub const particleId = stock_chat.particleId;
+pub const buildParticleEffectBody = stock_chat.buildParticleEffectBody;
 pub const parseParticleEffectInvoke = stock_chat.parseParticleEffectInvoke;
 
 pub const stock_attach = @import("stock_attach.zig");
