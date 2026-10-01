@@ -577,10 +577,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       counted) and every legal stock case still applies. Gated by `scenario a
       client cvar write lands on its own entity` (decisive: dropping the arm
       leaves the value 0), which also pins the cross-player reject, the
-      non-player case and the bogus-operation reject. Residual: stock
-      net-syncs the write onward when the name is not `.`/`_` prefixed, and zdtd
-      does not push min-event cvar writes to observers (the pre-existing
-      documented non-goal in `ecs/cvars.zig`).
+      non-player case and the bogus-operation reject. The relay closed the same
+      day: a changed, net-synced write (`%` always, `.`/`_` never, otherwise
+      net_sync, per `netSyncedName`) is relayed to every other client, so a
+      `%`-named cvar cannot drift from the server's; server-side min-event writes
+      stay un-pushed, which is stock's own behaviour (the server passes
+      `_netSync = IsLocal` there, false on a dedicated server). Gated by the same
+      scenario, which asserts the `%` relay arrives at the other client and the
+      `_`-prefixed write does not (decisive: suppressing the relay fails it).
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

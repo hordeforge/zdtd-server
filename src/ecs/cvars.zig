@@ -13,9 +13,12 @@
 //! case-insensitively (`CaseInsensitiveStringDictionary`).
 //!
 //! Non-goals: persistence (stock saves CVars with the entity; zdtd's store is
-//! per client session), the random-roll value forms, and the
-//! `NetPackageModifyCVar` relay (see `netSyncedName` for the stock prefix rule
-//! and why the server does not push min-event writes).
+//! per client session), the random-roll value forms, and pushing *min-event*
+//! writes to observers (stock's server passes `_netSync = IsLocal`, false on a
+//! dedicated server, because the owning client runs the same XML; see
+//! `netSyncedName` for the prefix rule). The C2S side is implemented:
+//! `NetPackageModifyCVar` applies the client's write (`ProcessPackage` IL=26
+//! passes `IsServer`, true) and relays it to observers when the name says so.
 
 const std = @import("std");
 const testing = std.testing;

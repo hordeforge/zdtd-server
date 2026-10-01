@@ -115,12 +115,20 @@ pub fn handleBuff(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
             self.harness.counters.inc(.c2s_rejects);
             return true;
         };
+        var changed = false;
         if (self.sim.kind[s] == .player) {
             if (self.sim.playerByPeer(c.slot)) |ps| {
-                if (ps == s) _ = self.clients[c.slot].cvars.apply(owned, op, v.value);
+                if (ps == s) changed = self.clients[c.slot].cvars.apply(owned, op, v.value);
             }
         } else {
-            _ = self.sim.cvarsMut(s).apply(owned, op, v.value);
+            changed = self.sim.cvarsMut(s).apply(owned, op, v.value);
+        }
+        // Stock applies with `_netSync = IsServer` and relays the write to
+        // observers when the name says so (`%` always, `.`/`_` never, otherwise
+        // net_sync): without the relay another client's copy of the cvar drifts
+        // from the server's. Only a real change goes out (`changed`).
+        if (changed and ecs.cvars.Set.netSyncedName(owned, true)) {
+            try self.broadcastExcept("NetPackageModifyCVar", body, c.slot);
         }
         return true;
     }

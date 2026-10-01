@@ -22690,5 +22690,30 @@ test "scenario a client cvar write lands on its own entity" {
     _ = try g.step();
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w4.written()));
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), g.sim.cvarsMut(zs).get("bleed"), 0.001);
+    // Stock relays the write to observers when the name says so (`%` always,
+    // `.`/`_` never, otherwise net_sync): the other client's copy must not
+    // drift from the server's.
+    _ = try g.step();
+    cap_b.clear();
+    var w5: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w5.writeI32(zid);
+    try w5.writeString("%bleedSync");
+    try w5.writeF32(2.0);
+    try w5.writeI16(2); // add
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w5.written()));
+    const cvar_id = packages.idOf("NetPackageModifyCVar").?;
+    try std.testing.expect(cap_b.findPkgId(cvar_id) != null);
+    // A `_`-prefixed name is never networked, and a `set` that writes the value
+    // already there is not a change, so neither relays.
+    _ = try g.step();
+    var w6: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w6.writeI32(zid);
+    try w6.writeString("_localOnly");
+    try w6.writeF32(4.0);
+    try w6.writeI16(0);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w6.written()));
+    try std.testing.expect(cap_b.findPkgId(cvar_id) == null);
     std.debug.print("PASS modify-cvar: the client write lands, cross-player does not\n", .{});
 }
