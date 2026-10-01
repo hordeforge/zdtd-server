@@ -22229,7 +22229,11 @@ test "scenario a chopped tree falls and its trunk comes down" {
     while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageTreeFade").?) != null);
     try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityRemove").?) == null);
-    try std.testing.expectEqual(trunk.id, try g.world.blockWorld(px + 2, py, pz));
+    // `CreateMesh` cleared the base cell at the request, so the trunk's own
+    // base has been air since then; the cells above it are still standing
+    // until the destroy edge.
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px + 2, py, pz));
+    try std.testing.expectEqual(trunk.id, try g.world.blockWorld(px + 2, py + 1, pz));
 
     // The fade window closes: `DestroyTree` clears the trunk and the entity is
     // removed.

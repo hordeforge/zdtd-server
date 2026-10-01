@@ -80,6 +80,9 @@ pub const FallingTree = struct {
     /// Phase 0 = falling; 1 = fading, the one-second window between the
     /// `TreeFade` broadcast and `DestroyTree` (entity-ai.md 1550-1563).
     phase: u8 = 0,
+    /// Trunk height measured at the request: the falling mass source, and how
+    /// far up the destroy pass walks.
+    cells: u32 = 0,
 };
 
 /// `EntityFallingTree.treeCanDamageEntity` (IL=20): once per entity per tree,
@@ -110,6 +113,9 @@ pub fn armFallingTree(self: *Game, base_x: i32, base_y: i32, base_z: i32, id: u1
     }
     const ft = slot orelse return 0;
     const entity_id = self.sim.allocNetId() orelse return 0;
+    // Measured before the base cell is cleared (below): the mass at the settle
+    // and the destroy walk both come from this.
+    const cells = countTreeCells(self, base_x, base_y, base_z);
     ft.* = .{
         .x = base_x,
         .y = base_y,
@@ -117,6 +123,7 @@ pub fn armFallingTree(self: *Game, base_x: i32, base_y: i32, base_z: i32, id: u1
         .entity_id = entity_id,
         .dir_x = dir[0],
         .dir_z = dir[2],
+        .cells = cells,
     };
     // The client animates the topple from the ECD's blockPos + fallTreeDir, so
     // the spawn is what makes the tree fall for everyone nearby.
@@ -144,6 +151,18 @@ pub fn armFallingTree(self: *Game, base_x: i32, base_y: i32, base_z: i32, id: u1
         };
     } else |_| {
         self.harness.counters.inc(.encode_errors);
+    }
+    // `CreateMesh` (IL=292) clears the base cell when it still matches the
+    // tree's block: the trunk becomes the entity, so the cell is air from the
+    // request onward rather than from the destroy.
+    if (cells > 0) {
+        self.noteBlockRemoved(base_x, base_y, base_z, id);
+        self.world.setBlockWorld(base_x, base_y, base_z, 0) catch {};
+        self.clearBlockHp(base_x, base_y, base_z);
+        self.clearBlockRaw(base_x, base_y, base_z);
+        if (packages.buildSetBlockBody(&self.body_buf, base_x, base_y, base_z, 0)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, fx, fz, self.interest_range) catch {};
+        } else |_| {}
     }
     schedule(self, base_x, base_y, base_z, id, falling_tree_lifetime_ticks);
     return entity_id;
@@ -193,9 +212,9 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
     // the impact damage belong to this edge; the block clearing to the next.
     if (!fading) {
         entry.?.phase = 1;
-        // The trunk's height sets the falling mass, measured before the destroy
-        // phase clears it (both walk the same cells).
-        const n = countTreeCells(self, t.x, t.y, t.z);
+        // The trunk's height came from the request (the base cell is already
+        // air, so a fresh walk would stop there).
+        const n = entry.?.cells;
         const base_dir_x = entry.?.dir_x;
         const base_dir_z = entry.?.dir_z;
         // `collidedWith` (IL=58): the trunk's mass decides the impact damage, and
@@ -276,12 +295,18 @@ fn fallingTreeTick(self: *Game, t: ScheduledTick) void {
     }
     // Destroy phase: the entity's slot is freed and `DestroyTree` runs.
     const destroy_entry = entry.?;
+    const trunk_cells = destroy_entry.cells;
     destroy_entry.* = .{};
     var y = t.y;
     var n: u32 = 0;
-    while (n < falling_tree_max_cells) : (n += 1) {
+    // The base cell is already air (`CreateMesh` cleared it), so the walk skips
+    // empty cells within the measured trunk height instead of stopping.
+    while (n < trunk_cells) : (n += 1) {
         const id = self.world.blockWorld(t.x, y, t.z) catch break;
-        if (id == 0) break;
+        if (id == 0) {
+            y += 1;
+            continue;
+        }
         const def = self.blocks.byId(id) orelse break;
         if (!isTreeBlock(def)) break;
         // Break the cell the way the explosion/zombie-chew arms do: accumulate

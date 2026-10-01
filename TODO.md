@@ -329,9 +329,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       seeing it vanish. Gated by the tree scenario, which asserts the fade at
       the settle (trunk still standing, no remove yet) and the clearing plus
       remove one second later (decisive: suppressing the fade send fails it).
-      Residual: Unity's contact impulses (the 4-instance cap per entity+id and
-      the impulse-sized contact point), and stock clears the base cell in
-      `CreateMesh` at spawn rather than at `DestroyTree`.
+      The base cell closed 2026-10-01: `CreateMesh` (IL=292) clears
+      `treeBlockPos` when it still matches the tree's block, so the trunk's base
+      is air from the request onward; the trunk height and the destroy walk are
+      measured before that clear, and the destroy pass skips empty cells inside
+      the measured height instead of stopping at the cleared base (decisive:
+      suppressing the clear leaves the base block standing). Residual: Unity's
+      contact impulses (the 4-instance cap per entity+id and the impulse-sized
+      contact point).
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in
