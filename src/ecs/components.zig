@@ -128,6 +128,8 @@ pub const ClassId = struct {
     see_offset: [3]f32 = .{ 0, 1.6, 0 },
     /// entityclasses `MaxTurnSpeed` (see `world.EntityClass`).
     max_turn_speed: f32 = 0,
+    /// entityclasses `SearchRadius` (see `world.EntityClass`).
+    search_radius: f32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

@@ -17,7 +17,7 @@ Only imports of another package directory are counted; single-file imports
 | `assets` | `ecs` | 14 |
 | `assets` | `util` | 116 |
 | `ecs` | `assets` | 1 |
-| `ecs` | `util` | 9 |
+| `ecs` | `util` | 10 |
 | `litenet` | `util` | 3 |
 | `litenet` | `wire` | 1 |
 | `plugin` | `util` | 6 |

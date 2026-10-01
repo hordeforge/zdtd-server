@@ -2258,7 +2258,9 @@ test "zombie sealed in a box stays inside it" {
     try std.testing.expect(w.zombie_ai[zs].path_blocked);
 }
 test "hurt zombie chases its attacker over the nearer player" {
-    var w: World = .{};
+    // Keep-current-fight roll off: this case pins the retarget itself (the roll
+    // has its own test).
+    var w: World = .{ .rules = .{ .ai = .{ .revenge_keep_fight_chance = 0.0 } } };
     defer w.deinit();
     const z = w.spawnZombie(0, 70, 0, 40).?;
     const zs = w.slotOfNetId(z).?;

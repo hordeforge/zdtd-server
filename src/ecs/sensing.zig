@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const ai_steer = @import("ai_steer.zig");
+const rng_util = @import("../util/rng.zig");
 
 /// `Entity.SeekYaw(yaw, _, yawSlowAt)` slow-down band and floor for the
 /// movement tail: stock passes 20 as `yawSlowAt` and floors the scaled rate at
@@ -259,7 +260,27 @@ pub fn snapshotPlayers(w: *const World, out: *PlayerScan, for_ai_targets: bool) 
     return n;
 }
 
-/// Winner of the AITarget pass: the entity the AITask list treats as "the
+/// One in [0,1) from the entity's shared AI stream (the same xorshift the AI
+/// tasks draw from, so a revenge scatter stays deterministic and reproducible).
+fn rngDraw(ai: *c.ZombieAi, seed: i32) f32 {
+    if (ai.wander_rng == 0) ai.wander_rng = rng_util.XorShift32.initFromNetId(seed).state;
+    ai.wander_rng = rng_util.xorshift32Step(ai.wander_rng);
+    return @as(f32, @floatFromInt(ai.wander_rng % 10000)) / 10000.0;
+}
+
+/// `EAITarget.check`'s `isWithinHomeDistance(x, y, z)` leg (entity-ai.md 1782):
+/// the entity's territorial home radius. Reads the tick-start snapshot, so a
+/// parallel AI worker never touches another slot's live transform.
+fn withinHomeRadius(w: *const World, s: Slot, x: f32, z: f32) bool {
+    const a = &w.zombie_ai[s];
+    if (!a.has_home) return true;
+    const r = w.rules.ai.territorial_radius;
+    const dx = x - a.home_x;
+    const dz = z - a.home_z;
+    return dx * dx + dz * dz <= r * r;
+}
+
+/// Winner of the AITarget pass:/// Winner of the AITarget pass: the entity the AITask list treats as "the
 /// player" for this tick (nearest sensed, or the attacker via revenge).
 pub const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
 
@@ -703,6 +724,44 @@ pub fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform
     if (ai.revenge_target == np.id) return np;
     const dx = pos[ts].x - w.transform[s].x;
     const dz = pos[ts].z - w.transform[s].z;
+    // `EAISetAsTargetIfHurt.CanExecute` IL=170, first leg: with a LIVING current
+    // attack target, `RandomFloat < 0.66` clears the revenge and keeps the fight
+    // (the zombie prefers what it is already fighting). The target check below
+    // only needs `bNeedToSee` against a *new* target, so a shot from an unseen
+    // attacker still promotes here.
+    const keep_fight = np.id >= 0 and rngDraw(ai, w.network_id[s].id) < w.rules.ai.revenge_keep_fight_chance;
+    if (keep_fight) {
+        ai.revenge_target = -1;
+        ai.revenge_time = 0;
+        return np;
+    }
+    // `EAITarget.check(e)`'s `isWithinHomeDistance` leg: an attacker outside the
+    // entity's home radius is not a valid target, so the leg samples an
+    // investigate point `dir*(SearchRadius*0.35) + unitCircle*SearchRadius`
+    // around it (IL=170) and clears the revenge target instead of hunting it.
+    if (ai.has_home and !withinHomeRadius(w, s, pos[ts].x, pos[ts].z)) {
+        const r: f32 = w.class_id[s].search_radius;
+        const x = pos[ts].x;
+        const z = pos[ts].z;
+        if (r > 0) {
+            // Deterministic per-entity draw from the entity's own stream (the
+            // sim has no ad-hoc RNG).
+            const ang = rngDraw(ai, w.network_id[s].id) * std.math.tau;
+            const inv_d = 1.0 / @max(@sqrt(dx * dx + dz * dz), 0.001);
+            ai.spot_x = x - dx * inv_d * 0.35 * r + @cos(ang) * r;
+            ai.spot_z = z - dz * inv_d * 0.35 * r + @sin(ang) * r;
+        } else {
+            ai.spot_x = x;
+            ai.spot_z = z;
+        }
+        ai.has_spot = true;
+        ai.alert = true;
+        ai.state = .chase;
+        ai.target_id = -1;
+        ai.revenge_target = -1;
+        ai.revenge_time = 0;
+        return np;
+    }
     // Stock's SetAttackTarget bypasses the sense check for the whole window, so
     // aggro must latch here too or the far-attacker case falls back to wander.
     ai.alert = true;
@@ -1274,4 +1333,65 @@ test "the movement tail turns at the class MaxTurnSpeed, not instantly" {
     // The capped class turned 3 degrees (60 * 0.05), the unset one snapped.
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), w.transform[capped_slot].yaw, 0.5);
     try std.testing.expectApproxEqAbs(@as(f32, 90.0), w.transform[snapping_slot].yaw, 0.001);
+}
+
+test "an attacker outside home range is investigated, not hunted" {
+    // `EAITarget.check`'s `isWithinHomeDistance` leg (entity-ai.md 1782) inside
+    // `EAISetAsTargetIfHurt.CanExecute` IL=170: a target outside the home radius
+    // fails the check, and the leg samples an investigate point
+    // `dir*(SearchRadius*0.35) + unitCircle*SearchRadius` around it instead.
+    var w: World = .{ .rules = .{ .ai = .{ .revenge_keep_fight_chance = 0.0, .territorial_radius = 10.0 } } };
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    const p = w.spawnPlayer(40, 70, 0, 0) orelse return error.TestUnexpectedResult;
+    const ps = w.slotOfNetId(p) orelse return error.TestUnexpectedResult;
+    w.mask[zs].class_id = true;
+    w.class_id[zs].search_radius = 8;
+    w.zombie_ai[zs].has_home = true;
+    w.zombie_ai[zs].home_x = 0;
+    w.zombie_ai[zs].home_z = 0;
+    w.zombie_ai[zs].revenge_target = w.network_id[ps].id;
+    w.zombie_ai[zs].revenge_time = 5;
+    const snap: [max_entities]c.Transform = w.transform;
+    const out = applyRevengeTarget(&w, &snap, zs, &w.zombie_ai[zs], .{ .id = -1, .slot = 0, .d2 = 0, .px = 0, .pz = 0 }, 0.05);
+    try std.testing.expect(out.id == -1); // not promoted
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
+    try std.testing.expect(w.zombie_ai[zs].target_id == -1);
+    try std.testing.expect(w.zombie_ai[zs].revenge_target == -1);
+    // The investigate point sits within dir*0.35*R + R of the attacker.
+    const sdx = w.zombie_ai[zs].spot_x - w.transform[ps].x;
+    const sdz = w.zombie_ai[zs].spot_z - w.transform[ps].z;
+    const sd = @sqrt(sdx * sdx + sdz * sdz);
+    try std.testing.expect(sd > 0.001);
+    try std.testing.expect(sd <= 8.0 * 1.4);
+
+    // Inside the home radius the attacker is a valid target again.
+    const z2 = w.spawnZombie(0, 70, 20, 100) orelse return error.TestUnexpectedResult;
+    const zs2 = w.slotOfNetId(z2) orelse return error.TestUnexpectedResult;
+    w.zombie_ai[zs2].has_home = true;
+    w.zombie_ai[zs2].home_x = 40; // the attacker sits inside this home radius
+    w.zombie_ai[zs2].home_z = 0;
+    w.zombie_ai[zs2].revenge_target = w.network_id[ps].id;
+    w.zombie_ai[zs2].revenge_time = 5;
+    const snap2: [max_entities]c.Transform = w.transform;
+    _ = applyRevengeTarget(&w, &snap2, zs2, &w.zombie_ai[zs2], .{ .id = -1, .slot = 0, .d2 = 0, .px = 0, .pz = 0 }, 0.05);
+    try std.testing.expect(w.zombie_ai[zs2].target_id == w.network_id[ps].id);
+}
+
+test "a living fight is kept over a fresh revenge target" {
+    // `RandomFloat < 0.66` with a living current target clears the revenge.
+    var w: World = .{ .rules = .{ .ai = .{ .revenge_keep_fight_chance = 1.0 } } };
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    const near = w.spawnPlayer(3, 70, 0, 0) orelse return error.TestUnexpectedResult;
+    const far = w.spawnPlayer(20, 70, 0, 1) orelse return error.TestUnexpectedResult;
+    w.zombie_ai[zs].target_id = w.network_id[w.slotOfNetId(near).?].id;
+    w.zombie_ai[zs].revenge_target = w.network_id[w.slotOfNetId(far).?].id;
+    w.zombie_ai[zs].revenge_time = 5;
+    const snap: [max_entities]c.Transform = w.transform;
+    const out = applyRevengeTarget(&w, &snap, zs, &w.zombie_ai[zs], .{ .id = w.network_id[w.slotOfNetId(near).?].id, .slot = 0, .d2 = 0, .px = 0, .pz = 0 }, 0.05);
+    try std.testing.expectEqual(w.network_id[w.slotOfNetId(near).?].id, out.id);
+    try std.testing.expect(w.zombie_ai[zs].revenge_target == -1);
 }

@@ -109,6 +109,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.dead_body_hit_points = def.dead_body_hit_points;
     cid.see_offset = def.see_offset;
     cid.max_turn_speed = def.max_turn_speed;
+    cid.search_radius = def.search_radius;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -212,6 +213,9 @@ pub const EntityClass = struct {
     /// entityclasses `MaxTurnSpeed` degrees per second (`Entity.SeekYaw`, 0 =
     /// unset = snap).
     max_turn_speed: f32 = 0,
+    /// entityclasses `SearchRadius`: the scatter radius of the investigate point
+    /// a hurt entity picks when it cannot sense its attacker.
+    search_radius: f32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

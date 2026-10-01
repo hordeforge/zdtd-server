@@ -644,6 +644,24 @@ nothing here is already waived. The four gaps the same audit closed are in
       pre-existing sleeper tests had encoded the old loose behaviour; each now
       opens the stir band explicitly, with the case it actually covers named in a
       comment.
+- [x] **A hurt entity always dropped its fight for the attacker** - closed
+      2026-10-01: the revenge leg promoted the attacker to `target_id` as soon as
+      the window was open, with no regard for what the entity was already
+      fighting, and it kept hunting an attacker outside its home radius.
+      `EAISetAsTargetIfHurt.CanExecute` IL=170 has two legs zdtd lacked: with a
+      living current attack target, `RandomFloat < 0.66` clears the revenge and
+      keeps the fight (now `rules.ai.revenge_keep_fight_chance`, default 0.66,
+      drawn from the entity's own AI stream), and `EAITarget.check`'s
+      `isWithinHomeDistance` leg makes a target outside the entity's home radius
+      invalid, in which case the leg samples an investigate point
+      `revenge.pos + dir*(SearchRadius*0.35) + unitCircle*SearchRadius` and clears
+      the revenge instead of hunting (`SearchRadius` now parses per class).
+      Gated by `an attacker outside home range is investigated, not hunted` (spot
+      within `1.4 * SearchRadius` of the attacker, `target_id` clear; inside the
+      radius the attacker is promoted) and `a living fight is kept over a fresh
+      revenge target` (both decisive: probing either branch fails its test).
+      Residual: `CalcInvestigateTicks`'s passive-183 divisor is not modelled, so
+      the spot clears on arrival as before.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -326,6 +326,10 @@ pub const Ai = struct {
     spot_arrive: f32 = 0.75,
     /// EAITerritorial leash radius (m). Beyond this, walk back to home.
     territorial_radius: f32 = 32.0,
+    /// `EAISetAsTargetIfHurt.CanExecute` IL=170: with a living current attack
+    /// target, this chance clears a fresh revenge target and keeps the fight
+    /// (stock's `RandomFloat < 0.66`). 0 disables the preference.
+    revenge_keep_fight_chance: f32 = 0.66,
     /// EAITaskList.executeDelayScale base (asm.il:437541).
     execute_delay_scale: f32 = 0.85,
     /// EAILook::Continue re-pick interval (s = 14 ticks at 20 Hz).
@@ -927,6 +931,7 @@ pub const AiOverlay = struct {
     path_goal_slack: ?u32 = null,
     spot_arrive: ?f32 = null,
     territorial_radius: ?f32 = null,
+    revenge_keep_fight_chance: ?f32 = null,
     execute_delay_scale: ?f32 = null,
     look_turn_interval_s: ?f32 = null,
     look_yaw_range_deg: ?f32 = null,

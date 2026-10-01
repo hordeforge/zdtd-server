@@ -57,6 +57,11 @@ pub const EntityDef = struct {
     /// to its origin, used by the sense/LOS query (entity-ai.md 3589). The
     /// stock default is 0,1.6,0, the offset zdtd hardcoded.
     see_offset: [3]f32 = .{ 0, 1.6, 0 },
+    /// entityclasses `SearchRadius` (`EAISetAsTargetIfHurt.CanExecute` IL=170):
+    /// when a hurt entity cannot sense its attacker it investigates a point
+    /// `dir*(SearchRadius*0.35) + unitCircle*SearchRadius` around it instead of
+    /// retargeting. 0 = unset (the attacker's own position).
+    search_radius: f32 = 0,
     /// entityclasses `MaxTurnSpeed` degrees per second: the cap
     /// `Entity.SeekYaw` applies when the entity turns toward its movement
     /// direction (entity-ai.md 3770). 0 = unset, and stock snaps in that case.
@@ -1625,6 +1630,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .dead_body_hit_points = std.fmt.parseInt(i32, resolveProp(&classes, name, "DeadBodyHitPoints", 0) orelse "", 10) catch 0,
             .see_offset = parseVec3Loose(resolveProp(&classes, name, "AISeeOffset", 0) orelse "", .{ 0, 1.6, 0 }),
             .max_turn_speed = std.fmt.parseFloat(f32, resolveProp(&classes, name, "MaxTurnSpeed", 0) orelse "") catch 0,
+            .search_radius = std.fmt.parseFloat(f32, resolveProp(&classes, name, "SearchRadius", 0) orelse "") catch 0,
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,

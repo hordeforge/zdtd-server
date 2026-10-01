@@ -280,6 +280,7 @@ test, so a retune cannot land silently).
 | `path_goal_slack` | 2 | Policy: goal drift cells before replan |
 | `spot_arrive` | 0.75 | Policy (asm.il:424093) |
 | `territorial_radius` | 32.0 | Policy (EAITerritorial leash, m) |
+| `revenge_keep_fight_chance` | 0.66 | `EAISetAsTargetIfHurt.CanExecute` IL=170: with a living current target, this chance clears a fresh revenge target and keeps the fight (`RandomFloat < 0.66`) |
 | `execute_delay_scale` | 0.85 | Policy (asm.il:437541) |
 | `look_turn_interval_s` | 0.70 | Policy (EAILook 14 ticks at 20 Hz) |
 | `look_yaw_range_deg` | 120.0 | Policy (SeekYaw sweep) |
