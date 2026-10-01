@@ -528,6 +528,8 @@ pub const ParsedSpawnRequest = struct {
 /// middle (item, falling block/tree, player) and the optional EntityStats, bag,
 /// trader and player-profile blobs are refused rather than skipped: a
 /// client-requested spawn zdtd cannot fully account for fails closed.
+/// RE ../7dtd-engine-research/docs/network/protocol-packages.md sections 5.0-5.1:
+/// NetPackageRequestToSpawnEntity carries the EntityCreationData header, middle and tail.
 pub fn parseSpawnRequest(body: []const u8) binary.ReadError!ParsedSpawnRequest {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedSpawnRequest = .{};
