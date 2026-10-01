@@ -5,6 +5,13 @@
 //! re-exported so existing `systems.*` call sites keep working.
 
 const std = @import("std");
+const ai_steer = @import("ai_steer.zig");
+
+/// `Entity.SeekYaw(yaw, _, yawSlowAt)` slow-down band and floor for the
+/// movement tail: stock passes 20 as `yawSlowAt` and floors the scaled rate at
+/// 20 deg/s (entity-ai.md 3770).
+const movement_yaw_slow_at_deg: f32 = 20.0;
+const movement_yaw_min_deg: f32 = 20.0;
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const EntityClass = @import("world.zig").EntityClass;
@@ -766,7 +773,15 @@ pub fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) voi
     const spd: f32 = if (swim) speed * w.rules.ai.swim_speed_frac else speed;
     const mx = dx * inv * spd * dt;
     const mz = dz * inv * spd * dt;
-    t.yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+    // `Entity.SeekYaw(yaw, 0, 20)` in the movement tail (entity-ai.md 3770):
+    // `maxTurn = EntityClass.MaxTurnSpeed`, 0 snaps (stock's own branch), and
+    // inside 20 degrees the rate scales quadratically with a 20 deg/s floor.
+    const want_yaw = std.math.atan2(dx, dz) * (180.0 / std.math.pi);
+    const max_turn = if (w.mask[s].class_id) w.class_id[s].max_turn_speed else 0;
+    t.yaw = if (max_turn > 0)
+        ai_steer.seekYawStep(t.yaw, want_yaw, max_turn, movement_yaw_slow_at_deg, movement_yaw_min_deg, dt)
+    else
+        want_yaw;
     const solid_fn = w.solid_fn orelse {
         t.x += mx;
         t.z += mz;
@@ -1234,4 +1249,29 @@ test "radius fan-out: vector mask matches the scalar reference" {
         try std.testing.expectEqual(wn, gn);
         try std.testing.expectEqualSlices(Slot, want[0..wn], got[0..gn]);
     }
+}
+
+test "the movement tail turns at the class MaxTurnSpeed, not instantly" {
+    // `Entity.SeekYaw(yaw, 0, 20)` in the movement tail: `maxTurn =
+    // EntityClass.MaxTurnSpeed` caps the turn, and 0 (property absent) snaps.
+    var w: World = .{};
+    defer w.deinit();
+
+    const capped = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const capped_slot = w.slotOfNetId(capped) orelse return error.TestUnexpectedResult;
+    const snapping = w.spawnZombie(0, 70, 4, 100) orelse return error.TestUnexpectedResult;
+    const snapping_slot = w.slotOfNetId(snapping) orelse return error.TestUnexpectedResult;
+    w.mask[capped_slot].class_id = true;
+    w.class_id[capped_slot].max_turn_speed = 60; // 60 deg/s: one 50 ms tick turns 3 deg
+    w.mask[snapping_slot].class_id = true;
+    w.class_id[snapping_slot].max_turn_speed = 0; // unset: stock snaps
+    w.transform[capped_slot].yaw = 0;
+    w.transform[snapping_slot].yaw = 0;
+
+    // Walk +x: the target yaw is 90 degrees east.
+    stepToward(&w, capped_slot, 20, 0, 1.0, 0.05);
+    stepToward(&w, snapping_slot, 20, 4, 1.0, 0.05);
+    // The capped class turned 3 degrees (60 * 0.05), the unset one snapped.
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), w.transform[capped_slot].yaw, 0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 90.0), w.transform[snapping_slot].yaw, 0.001);
 }

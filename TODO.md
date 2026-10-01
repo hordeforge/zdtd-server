@@ -611,6 +611,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       other clients` (decisive: dropping the relay sends nothing). Residual: the
       server-side itemclass hooks are no-ops in vanilla content (mod API
       surface), so only the relay is modelled.
+- [x] **Zombies snapped their facing instead of turning** - closed 2026-10-01: the
+      movement helper set `transform.yaw` straight to the travel direction, but
+      stock's movement tail runs `Entity.SeekYaw(yaw, 0, 20)` with
+      `maxTurn = EntityClass.MaxTurnSpeed` (entity-ai.md 3770: `maxTurn <= 0`
+      snaps, and inside the 20-degree band the rate scales quadratically with a
+      20 deg/s floor). `MaxTurnSpeed` now parses per class through the
+      `resolveProp` walk and `limitFor`/`stepToward` uses it, so a class that
+      declares a turn rate turns at that rate and a class that declares none
+      snaps exactly as before. Gated by `the movement tail turns at the class
+      MaxTurnSpeed, not instantly` (decisive: forcing the class value to 0 turns
+      the capped case into a snap and fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
