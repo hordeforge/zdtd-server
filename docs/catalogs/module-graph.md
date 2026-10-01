@@ -23,20 +23,20 @@ Only imports of another package directory are counted; single-file imports
 | `plugin` | `util` | 6 |
 | `server` | `apm` | 11 |
 | `server` | `assets` | 196 |
-| `server` | `ecs` | 162 |
+| `server` | `ecs` | 163 |
 | `server` | `litenet` | 76 |
 | `server` | `plugin` | 16 |
 | `server` | `server/game` | 33 |
 | `server` | `util` | 170 |
-| `server` | `wire` | 149 |
-| `server` | `world` | 102 |
+| `server` | `wire` | 154 |
+| `server` | `world` | 103 |
 | `wire` | `assets` | 12 |
 | `wire` | `ecs` | 5 |
 | `wire` | `util` | 3 |
 | `wire` | `world` | 4 |
 | `world` | `assets` | 23 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 39 |
+| `world` | `util` | 40 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)

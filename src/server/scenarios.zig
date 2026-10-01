@@ -28,7 +28,11 @@ const assets_maxdamage = @import("../assets/maxdamage.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
+const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
+const stock_entity_mod = @import("../wire/stock_entity.zig");
+const block_ticker_mod = @import("game/block_ticker.zig");
+const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
 const game_hazard = @import("game/hazard.zig");
@@ -21416,6 +21420,32 @@ test "scenario a stomping entity crushes spikes instead of taking them" {
     std.debug.print("PASS stomps-spikes: the stomper crushes the trap, the walker bleeds\n", .{});
 }
 
+test "scenario a door lock survives a restart" {
+    // Rule 21 for doors: the padlock blob and any armed auto-close deadline ride
+    // {world}/doors.zdr (ZDR1) through the real save-all path.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    const door = g.doors.getOrCreate(21, 66, 21, 1738) orelse return error.TestUnexpectedResult;
+    door.lock_blob[0] = 1;
+    door.lock_len = 6;
+    door.close_at = 777;
+    _ = g.saveAllStores();
+    var reloaded: doors_mod.Store = .{};
+    try reloaded.load(dir, gpa);
+    const rd = reloaded.get(21, 66, 21) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, 1738), rd.block_id);
+    try std.testing.expectEqual(@as(u16, 6), rd.lock_len);
+    try std.testing.expectEqual(@as(u8, 1), rd.lock_blob[0]);
+    try std.testing.expectEqual(@as(u64, 777), rd.close_at);
+    std.debug.print("PASS door-save: the lock survives a restart\n", .{});
+}
+
 test "scenario a locked door streams its padlock to nearby clients" {
     // A door's composite TE carries `TEFeatureDoor` (isOpen + animateOnSync, 2
     // bytes on the network stream, TEFeatureDoor.Write IL=23) and
@@ -21639,4 +21669,564 @@ test "scenario an auto-close door shuts itself and tells the clients" {
     while (i < 10) : (i += 1) _ = try g.step();
     try std.testing.expect((packages.blockMeta(try g.world.rawWorld(px, dy, dz)) & packages.block_meta_on) != 0);
     std.debug.print("PASS door-auto-close: the deadline shuts the door\n", .{});
+}
+
+test "scenario a land claim streams its show-bounds toggle" {
+    // `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that
+    // one byte (TEFeatureLandClaim.Write IL=381; the version 18 is
+    // persistent-only), so the claim block's TE matches the client's declared
+    // module order and the bounds helper reaches the party.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "claimTest")) return 1741;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_claim.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="claimTest">
+        \\  <property name="Class" value="LandClaim" />
+        \\  <property name="Material" value="Mstone" />
+        \\  <property class="TEFeatureLandClaim" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const claim_def = g.blocks.byName("claimTest") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), claim_def.te_feature_n);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.land_claim, claim_def.te_features[0]);
+    try std.testing.expect(stock_te_mod.moduleHash(.land_claim) != null);
+
+    // Layout round trip: the one-byte module comes back, and a body without the
+    // claim module is refused rather than mistaken for one.
+    var body_buf: [512]u8 = undefined;
+    const cb = try stock_te_mod.buildLandClaimTeBody(
+        &body_buf,
+        255,
+        30,
+        70,
+        30,
+        claim_def.id,
+        claim_def.te_features[0..1],
+        true,
+    );
+    const parsed = try stock_te_mod.parseLandClaimTeBody(cb);
+    try std.testing.expect(parsed.found_claim);
+    try std.testing.expect(parsed.show_bounds);
+    try std.testing.expectError(error.EndOfStream, stock_te_mod.parseLandClaimTeBody(&[_]u8{ 0, 0, 0 }));
+
+    // Ownership gate + party broadcast: the owner's toggle applies and a second
+    // nearby peer hears it; another player's edit is dropped.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 30;
+    g.sim.transform[ps].z = 30;
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = 32;
+    g.sim.transform[ps2].z = 30;
+
+    try g.world.setBlockWorld(30, 70, 30, claim_def.id);
+    g.setBlockRaw(30, 70, 30, claim_def.id);
+    g.land_claims[0] = .{ .x = 30, .y = 70, .z = 30, .owner_entity = c.entity_id };
+    g.land_claims_n = 1;
+
+    var fb: [512]u8 = undefined;
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", cb));
+    try std.testing.expect(g.land_claims[0].show_bounds);
+    try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+
+    // A non-owner toggle is refused (stock gates the activation on ownership).
+    const other = try stock_te_mod.buildLandClaimTeBody(
+        &body_buf,
+        255,
+        30,
+        70,
+        30,
+        claim_def.id,
+        claim_def.te_features[0..1],
+        false,
+    );
+    var cap3: ln_peer.Capture = .{};
+    const c3 = try g.attachJoinedClient(&cap3);
+    g.clients[c3.slot].entered = true;
+    const ps3 = g.sim.playerByPeer(c3.slot).?;
+    g.sim.transform[ps3].x = 30;
+    g.sim.transform[ps3].z = 30;
+    try g.injectFramed(c3, try packages.framed(&fb, "NetPackageTileEntity", other));
+    try std.testing.expect(g.land_claims[0].show_bounds);
+    std.debug.print("PASS land-claim: the toggle streams to the party, not from strangers\n", .{});
+}
+
+test "scenario a canvas sign stores and relays its drawing state" {
+    // The canvas path is the signable leg: `parseSignableTeBody` also accepts a
+    // canvas-only body (`has_canvas`), so a `TEFeatureCanvas` block whose
+    // declaration carries no signable module still stores and relays its
+    // `SignCanvas.CanvasState` (library id + 16-byte Guid + blend + rotation +
+    // imposter flag, CanvasState.Write IL=18). This proves the C2S leg end to
+    // end: parse, declaration gate, store for replay, relay to a second peer.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "canvasTest")) return 1742;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_canvas.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="canvasTest">
+        \\  <property name="Class" value="Sign" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property class="TEFeatureCanvas" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const canvas_def = g.blocks.byName("canvasTest") orelse return error.TestUnexpectedResult;
+    const stone = g.blocks.byName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), canvas_def.te_feature_n);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.canvas, canvas_def.te_features[0]);
+    try std.testing.expect(canvas_def.canvas);
+    try std.testing.expect(!stone.canvas);
+
+    // Hand-roll the client's body: one canvas module, no signable module.
+    const canvasBody = struct {
+        fn build(buf: []u8, handle: u8, x: i32, y: i32, z: i32, block_id: i32) ![]u8 {
+            var module: [64]u8 = undefined;
+            var mw: wire_binary_mod.Writer = .{ .buf = &module };
+            try mw.writeString("prefab");
+            try mw.writeBytes(&([_]u8{7} ** 16));
+            try mw.writeByte(2); // BlendMode
+            try mw.writeByte(1); // CanvasRotation
+            try mw.writeBool(true); // ShowOnImposter
+            const canvas = mw.written();
+
+            var payload: [256]u8 = undefined;
+            var pw: wire_binary_mod.Writer = .{ .buf = &payload };
+            try pw.writeI32(x);
+            try pw.writeI32(y);
+            try pw.writeI32(z);
+            const outer = pw.pos;
+            try pw.writeU32(0);
+            try pw.writeI32(block_id);
+            try pw.writeByte(0);
+            try pw.writeByte(1);
+            try pw.writeI32(packages.stock_te.feature_hash_canvas);
+            try pw.writeU32(@intCast(4 + canvas.len));
+            try pw.writeBytes(canvas);
+            const marker = pw.pos - outer;
+            std.mem.writeInt(u32, payload[outer..][0..4], @intCast(marker), .little);
+            const pay = pw.written();
+
+            var out: wire_binary_mod.Writer = .{ .buf = buf };
+            try out.writeByte(handle);
+            try out.writeI32(x);
+            try out.writeI32(y);
+            try out.writeI32(z);
+            try out.writeI32(block_id);
+            try out.writeI32(@intCast(pay.len));
+            try out.writeBytes(pay);
+            return out.written();
+        }
+    }.build;
+
+    var body_buf: [512]u8 = undefined;
+    const cb = try canvasBody(&body_buf, 5, 40, 70, 40, canvas_def.id);
+
+    // The client's edit applies to the replay store and reaches a second peer.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 40;
+    g.sim.transform[ps].z = 40;
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = 41;
+    g.sim.transform[ps2].z = 40;
+
+    try g.world.setBlockWorld(40, 70, 40, canvas_def.id);
+    g.setBlockRaw(40, 70, 40, canvas_def.id);
+    var fb: [1024]u8 = undefined;
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", cb));
+    const stored = g.sign_texts.get(.{ .x = 40, .y = 70, .z = 40 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, canvas_def.id), stored.block_id);
+    var text: [64]u8 = undefined;
+    const reparsed = try packages.stock_te.parseSignableTeBody(stored.body[0..stored.len], &text);
+    try std.testing.expect(reparsed.has_canvas);
+    try std.testing.expect(!reparsed.has_text);
+    try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+
+    // A canvas body addressed to a block whose declaration has no canvas module
+    // is refused: no replay entry appears for that cell.
+    try g.world.setBlockWorld(41, 70, 41, stone.id);
+    g.setBlockRaw(41, 70, 41, stone.id);
+    const forged = try canvasBody(&body_buf, 9, 41, 70, 41, stone.id);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", forged));
+    try std.testing.expect(g.sign_texts.get(.{ .x = 41, .y = 70, .z = 41 }) == null);
+    std.debug.print("PASS canvas: the drawing state round-trips and relays\n", .{});
+}
+
+test "scenario a requested spawn carries the V3.2.0 correlation tail" {
+    // `EntityCreationData` gained `requestedBy` (i64 on the wire) + `requestKey`
+    // (16 Guid bytes) in V3.2.0, written after `stressAmount` and consumed by
+    // the client only at readFileVersion >= 37 (protocol.md section 5.1 tail).
+    // The client's `EntityPlayerLocal.SpawnRequest` is keyed by that Guid, so a
+    // body without the pair leaves a held-entity placement pending forever
+    // (`grabDisabled()` stays true).
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, i| b.* = @intCast(i + 1);
+
+    // FileVersion 36 stays the default: no pair, and a v36 client is unaffected.
+    var plain_buf: [512]u8 = undefined;
+    const plain = try stock_entity_mod.buildEntitySpawnStock(&plain_buf, .{
+        .entity_id = 77,
+        .entity_class = 2000,
+        .x = 1,
+        .y = 70,
+        .z = 2,
+    });
+    // channel pkgId prefix is not part of buildEntitySpawnStock; the ECD version
+    // byte sits right after the entityId.
+    try std.testing.expectEqual(@as(u8, 36), plain[4]);
+
+    var req_buf: [512]u8 = undefined;
+    const req = try stock_entity_mod.buildEntitySpawnStock(&req_buf, .{
+        .entity_id = 78,
+        .entity_class = 2000,
+        .x = 1,
+        .y = 70,
+        .z = 2,
+        .requested_by = 107,
+        .request_key = key,
+    });
+    try std.testing.expectEqual(@as(u8, 37), req[4]);
+    // The pair is the last 24 bytes: i64 requestedBy then the 16-byte key.
+    try std.testing.expectEqual(@as(usize, plain.len + 24), req.len);
+    var r: wire_binary_mod.Reader = .{ .data = req };
+    _ = try r.readI32(); // entityId
+    _ = try r.readByte(); // version
+    r.pos = req.len - 24;
+    try std.testing.expectEqual(@as(i64, 107), try r.readI64());
+    var got: [16]u8 = undefined;
+    @memcpy(&got, req[req.len - 16 ..][0..16]);
+    try std.testing.expectEqualSlices(u8, &key, &got);
+
+    // The paired ack body is i64 created entity id + the same 16 bytes. The
+    // encoder already existed; this proves the layout the client reads.
+    var ack_buf: [32]u8 = undefined;
+    const ack = try packages.buildConfirmSpawnEntityBody(&ack_buf, 78, &key);
+    try std.testing.expectEqual(@as(usize, 24), ack.len);
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    try std.testing.expectEqual(@as(i64, 78), try ar.readI64());
+    var akey: [16]u8 = undefined;
+    @memcpy(&akey, ack[8..][0..16]);
+    try std.testing.expectEqualSlices(u8, &key, &akey);
+    std.debug.print("PASS requested-spawn: the v37 tail and the ack layout match\n", .{});
+}
+
+test "scenario a client-requested spawn answers with its confirm" {
+    // protocol.md section 5.0: the client places a held entity through
+    // `NetPackageRequestToSpawnEntity` (a bare `EntityCreationData`), and the
+    // server creates it and acks with `NetPackageConfirmSpawnEntity`
+    // (section 5.1.2) so the client consumes its pending `SpawnRequest`. zdtd
+    // dropped the request, so `grabDisabled()` stayed true after a placement.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const py = g.sim.transform[ps].y;
+    const pz = g.sim.transform[ps].z;
+
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, i| b.* = @intCast(40 + i);
+
+    // A living class the entityclass table knows: the stock default zombie hash
+    // (`class_table[0]` is the builtin entry, whose hash is 0 until a game dir
+    // resolves entityclasses).
+    const zhash = stock_entity_mod.class_zombie_default;
+    var ecd: [512]u8 = undefined;
+    var w: wire_binary_mod.Writer = .{ .buf = &ecd };
+    try w.writeByte(37); // file version (requested-spawn tail present)
+    try w.writeI32(zhash); // entityClass
+    try w.writeI32(0); // id (server assigns)
+    try w.writeF32(0); // lifetime
+    try w.writeF32(px + 2);
+    try w.writeF32(py);
+    try w.writeF32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0); // yaw
+    try w.writeF32(0);
+    try w.writeBool(true); // onGround
+    try w.writeI32(4); // BodyDamage
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false); // no EntityStats
+    try w.writeI16(0); // deathTime
+    try w.writeBool(false); // no bag
+    try w.writeI32(0); // homePosition
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1); // homeRange
+    try w.writeByte(0); // spawnerSource
+    try w.writeU16(0); // entityData
+    try w.writeBool(false); // no traderData
+    try w.writeByte(255); // sleeperPose
+    try w.writeBool(false); // isSleeper
+    try w.writeI32(-1); // spawnById
+    try w.writeString(""); // spawnByName
+    try w.writeBool(false); // spawnByAllowShare
+    try w.writeByte(0); // headState
+    try w.writeF32(1); // overrideSize
+    try w.writeF32(1); // overrideHeadSize
+    try w.writeBool(false); // isDancing
+    try w.writeF32(0); // stressAmount
+    try w.writeI64(c.entity_id); // requestedBy
+    try w.writeBytes(&key);
+    const body = w.written();
+
+    const parsed = try stock_entity_mod.parseSpawnRequest(body);
+    try std.testing.expectEqual(@as(u8, 37), parsed.file_version);
+    try std.testing.expect(parsed.has_request_key);
+    try std.testing.expectEqual(c.entity_id, parsed.requested_by);
+
+    var fb: [1024]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    _ = try g.step();
+    // The requester hears the ack with the created entity id and its own key.
+    const ack = cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) orelse return error.TestUnexpectedResult;
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    const created = try ar.readI64();
+    try std.testing.expect(created > 0);
+    try std.testing.expectEqualSlices(u8, &key, ack[8..24]);
+    // The entity exists in the sim and its id matches the ack.
+    try std.testing.expectEqual(@as(i32, @intCast(created)), created);
+
+    // A request far from the player is refused (rule 20): no ack.
+    cap.clear();
+    w = .{ .buf = &ecd };
+    try w.writeByte(37);
+    try w.writeI32(zhash);
+    try w.writeI32(0);
+    try w.writeF32(0);
+    try w.writeF32(px + 400);
+    try w.writeF32(py);
+    try w.writeF32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeByte(255);
+    try w.writeBool(false);
+    try w.writeI32(-1);
+    try w.writeString("");
+    try w.writeBool(false);
+    try w.writeByte(0);
+    try w.writeF32(1);
+    try w.writeF32(1);
+    try w.writeBool(false);
+    try w.writeF32(0);
+    try w.writeI64(c.entity_id);
+    try w.writeBytes(&key);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", w.written()));
+    _ = try g.step();
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
+    std.debug.print("PASS requested-spawn-c2s: the request spawns and acks\n", .{});
+}
+
+test "scenario a chopped tree falls and its trunk comes down" {
+    // protocol.md section 5.0: the client asks for a falling tree when it chops
+    // a trunk (`NetPackageRequestToSpawnEntity` with the fallingTree middle),
+    // stock dedupes by blockPos, spawns the entity it animates and destroys the
+    // trunk when it settles (entity-ai.md 4301: lifetime 3, `DestroyTree` IL=37).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "treeTrunk")) return 1743;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_tree.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="treeTrunk">
+        \\  <property name="Class" value="TreeTrunk" />
+        \\  <property name="Tags" value="tree,trunk" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property name="MaxDamage" value="100" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const trunk = g.blocks.byName("treeTrunk") orelse return error.TestUnexpectedResult;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    // A four-block trunk next to the player.
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        try g.world.setBlockWorld(px + 2, py + @as(i32, @intCast(i)), pz, trunk.id);
+        g.setBlockRaw(px + 2, py + @as(i32, @intCast(i)), pz, trunk.id);
+    }
+    // The lowest trunk cell must be a real block for the arm's type check.
+    const base_id = try g.world.blockWorld(px + 2, py, pz);
+    try std.testing.expectEqual(trunk.id, base_id);
+
+    var key: [16]u8 = undefined;
+    for (&key, 0..) |*b, j| b.* = @intCast(90 + j);
+    var ecd: [256]u8 = undefined;
+    var w: wire_binary_mod.Writer = .{ .buf = &ecd };
+    try w.writeByte(37);
+    try w.writeI32(stock_entity_mod.class_falling_tree);
+    try w.writeI32(0);
+    try w.writeF32(0);
+    try w.writeF32(@floatFromInt(px + 2));
+    try w.writeF32(@floatFromInt(py));
+    try w.writeF32(@floatFromInt(pz));
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    // fallingTree middle: blockPos then fallTreeDir
+    try w.writeI32(px + 2);
+    try w.writeI32(py);
+    try w.writeI32(pz);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeByte(255);
+    try w.writeBool(false);
+    try w.writeI32(-1);
+    try w.writeString("");
+    try w.writeBool(false);
+    try w.writeByte(0);
+    try w.writeF32(1);
+    try w.writeF32(1);
+    try w.writeBool(false);
+    try w.writeF32(0);
+    try w.writeI64(c.entity_id);
+    try w.writeBytes(&key);
+    const body = w.written();
+    const parsed = try stock_entity_mod.parseSpawnRequest(body);
+    try std.testing.expect(parsed.falling_tree != null);
+    try std.testing.expectEqual(px + 2, parsed.falling_tree.?.block_x);
+
+    var fb: [512]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    // The nearby client gets the spawn the falling animation is built from, and
+    // the requester gets the correlation ack.
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntitySpawn").?) != null);
+    const ack = cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) orelse return error.TestUnexpectedResult;
+    var ar: wire_binary_mod.Reader = .{ .data = ack };
+    const created = try ar.readI64();
+    try std.testing.expect(created > 0);
+    try std.testing.expectEqualSlices(u8, &key, ack[8..24]);
+
+    // A repeat request for the same cell arms nothing new (stock's dedupe).
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
+    _ = try g.step();
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageConfirmSpawnEntity").?) == null);
+
+    // The lifetime passes: the trunk comes down and the entity is removed.
+    var t: u32 = 0;
+    while (t < block_ticker_mod.falling_tree_lifetime_ticks + 2) : (t += 1) _ = try g.step();
+    var k: u32 = 0;
+    while (k < 4) : (k += 1) {
+        try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px + 2, py + @as(i32, @intCast(k)), pz));
+    }
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityRemove").?) != null);
+    std.debug.print("PASS falling-tree: the topple spawns and the trunk comes down\n", .{});
 }

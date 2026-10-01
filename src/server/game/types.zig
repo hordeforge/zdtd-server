@@ -234,6 +234,10 @@ pub const LandClaim = struct {
     /// reassigned across restarts). Empty when the claim predates the field.
     owner_name: [32]u8 = .{0} ** 32,
     owner_name_len: u8 = 0,
+    /// `TEFeatureLandClaim.showBounds`: the claim block's bounds-helper toggle
+    /// (`Write` IL=381 emits the version only on the persistent stream, so the
+    /// client body is this one byte).
+    show_bounds: bool = false,
 };
 
 pub const InitOptions = struct {

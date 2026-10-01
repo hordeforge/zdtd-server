@@ -79,6 +79,14 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
     // sendWorkstationTe holds the geometry gate, so a station whose real
     // array lengths are still unknown stays unsent rather than resizing the
     // client's grids.
+    // Land claims: the bounds-helper toggle is TE state, so a client entering
+    // the area needs it with the chunk.
+    var lci: usize = 0;
+    while (lci < self.land_claims_n) : (lci += 1) {
+        const lc = &self.land_claims[lci];
+        if (lc.x < x0 or lc.x >= x1 or lc.z < z0 or lc.z >= z1) continue;
+        try replicate_te.sendLandClaimTe(self, peer, lc.x, lc.y, lc.z, lc.show_bounds);
+    }
     // Doors with stored lock state: a joining client needs the padlock or the
     // door reads unlocked for it.
     var di: usize = 0;

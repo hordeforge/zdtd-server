@@ -304,7 +304,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `WorldBlockTicker` is absent
       (`grep UpdateTick src/` finds prose only), so `Class=PlantGrowing` crops
       never reach `cropsHarvestableMaster`, no tree falls, and torch heat ticks
-      never fire (world/blocks.md:262-263, 774-786).
+      never fire (world/blocks.md:262-263, 774-786). **Trees fall now**: the
+      client's `NetPackageRequestToSpawnEntity` fallingTree middle parses
+      (protocol.md section 5.1: blockPos + fallTreeDir), the request dedupes per
+      trunk cell (stock returns without a spawn for a live tree at the same
+      blockPos), the server spawns the `fallingTree` ECD the client animates from
+      and acks the requester, and at the entity's 3 s lifetime
+      (`entity-ai.md` 4301) `fallingTreeTick` breaks the trunk cells above the
+      base through the normal damage/removal path and sends
+      `NetPackageEntityRemove`. Gated by `scenario a chopped tree falls and its
+      trunk comes down` (decisive: removing the ticker route leaves the trunk
+      standing).
 - [ ] **Dew collectors produced nothing** - closed 2026-09-28 for the dew
       collector end to end. `BlockCollector` parses (`Class="Collector"`, the
       `CollectorTypes` name, the `OutputTypes` row list in
@@ -349,6 +359,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       model (`Convert`/`Modify`/`Expand`/`Cost` and `ModTransformEnableNames`),
       the `CatalystConvert` pairs (`Convert(ItemStack)`), and the
       `OpenSound`/`CloseSound` pair (a UI-open sound the client plays itself).
+- [x] **A land claim's show-bounds toggle never streamed** - closed 2026-10-01:
+      `TEFeatureLandClaim` persists `showBounds` and its ToClient body is that one
+      byte (`Write` IL=381; the version `18` is persistent-only), so a claim
+      block's composite body was a module zdtd had no writer for and the client's
+      declared order never matched. `moduleHash(.land_claim)` now resolves, a body
+      builder/parser handle the declared order (refusing a body with no claim
+      module), the toggle applies only from the claim's owner (stock gates the
+      activation on ownership) and rebroadcasts to nearby peers, and the chunk
+      stream sends the current state on entry. Gated by `scenario a land claim
+      streams its show-bounds toggle` (decisive: dropping the ownership gate lets
+      a stranger clear another player's toggle). `TEFeatureCanvas` then turned out
+      to need no new code: the signable leg already carries a canvas-only body
+      (`parseSignableTeBody` sets `has_canvas`, `validateCanvasFeature` walks the
+      `CanvasState`), and the C2S path is now verified end to end by `scenario a
+      canvas sign stores and relays its drawing state` (decisive: dropping the
+      `signable or canvas` declaration gate stores a canvas body on a block that
+      declares neither). No composite module is left without a body.
 - [x] **A locked door reached no other client** - closed 2026-09-28 for the
       `TEFeatureDoor` + `TEFeatureLockable` pair. A composite door's ToClient
       body is the declared module order with the door module's two bytes
@@ -369,8 +396,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       only. The property parses, the client's open flip arms the deadline in
       `world/doors.zig`, and `tickDoorTimers` clears the open bit and
       broadcasts the SetBlock. Gated by `scenario an auto-close door shuts
-      itself and tells the clients`. Residual: the armed deadline is not
-      persisted across a restart.
+      itself and tells the clients`. Deadline persistence closed 2026-10-01:
+      `doors.zdr` (ZDR1) carries the cell, block, lock blob and the armed
+      deadline through `saveAllStores`, so a restart keeps both the padlock and
+      the remaining timer. Gated by `scenario a door lock survives a restart`
+      (decisive: removing the save-all line fails it with OpenFailed).
 - [x] **Stand-on buff blocks never applied their buffs** - closed 2026-09-28:
       `BuffsWhenWalkedOn` (blocks.xml, a ';' list) is applied by
       `EntityAlive.updateCurrentBlockPosAndValue` IL_010A-01BB when the standing
@@ -450,6 +480,30 @@ nothing here is already waived. The four gaps the same audit closed are in
       NOT a gap: the only stock sender is
       `ChunkManager::RemoveAllChunksOnAllClients` (IL=99), called solely from
       `PrefabEditModeManager`, the client prefab editor a dedi never enters.
+- [ ] **Client-requested spawns are dropped, so a held-entity placement waits
+      forever** - the wire half landed 2026-10-01: `EntityCreationData` can now
+      carry the V3.2.0 `requestedBy`/`requestKey` pair (FileVersion 37, protocol.md
+      section 5.1 tail) and the paired `NetPackageConfirmSpawnEntity` encoder is
+      wired (`packages.buildConfirmSpawnEntityBody`, i64 + 16 Guid bytes). Still
+      open: the C2S side. `NetPackageRequestToSpawnEntity` is dropped today
+      ("the generic ECD request does not prove item ownership or a legal spawn
+      class"), so a V3.2.0 client that places a held entity
+      (`ItemClassHeldEntity`: chicken coop items, `EntityPlayerLocal.RequestToSpawnEntityServer`)
+      never received the ack its `SpawnRequest` waits on and `grabDisabled()`
+      stayed true. Closed 2026-10-01: `stock_entity.parseSpawnRequest` reads the
+      generic `EntityCreationData` branch (refusing the class-switched middles,
+      the optional stats/bag/trader blobs and the player profile rather than
+      skipping them), the handler bounds the request to 8 m around the player,
+      resolves the class hash in the entityclass catalog, takes the per-tick
+      spawn token, spawns the living kinds and answers with
+      `NetPackageConfirmSpawnEntity` carrying the created entity id and the
+      client's Guid. Gated by `scenario a client-requested spawn answers with its
+      confirm` (decisive: dropping the bounds gate acks a spawn 400 m away).
+      Residual: the spawned entity reaches the requester through the ordinary
+      interest pass, so its `EntityCreationData` does not repeat the
+      `requestedBy`/`requestKey` pair (the ack alone correlates); the refused
+      middles (dropped items, falling trees/blocks, player characters) are still
+      dropped, as the typed drop/throw paths own those.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

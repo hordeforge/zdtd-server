@@ -104,6 +104,7 @@ const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const collectors_mod = @import("../world/collectors.zig");
+const block_ticker_mod = @import("game/block_ticker.zig");
 const doors_mod = @import("../world/doors.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
@@ -450,6 +451,9 @@ pub const Game = struct {
     collectors: collectors_mod.Store = .{},
     /// `TEFeatureDoor`/`TEFeatureLockable` state (doors, gates, hatches).
     doors: doors_mod.Store = .{},
+    /// Armed falling trees (client-requested topples).
+    falling_trees: [block_ticker_mod.max_falling_trees]block_ticker_mod.FallingTree = @splat(.{}),
+    falling_trees_n: usize = 0,
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
     vending: vending_mod.VendingStore = .{},
@@ -1054,6 +1058,13 @@ pub const Game = struct {
         self.collectors.load(self.world.world_dir, self.allocator) catch |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load collectors", e);
+                return e;
+            }
+        };
+        // Door locks and auto-close deadlines survive restart (doors.zdr).
+        self.doors.load(self.world.world_dir, self.allocator) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load doors", e);
                 return e;
             }
         };
@@ -2870,6 +2881,12 @@ pub const Game = struct {
     /// the world clock, so the pass cadence does not change the output.
     pub fn tickCollectors(self: *Game) void {
         return game_craft.tickCollectors(self);
+    }
+
+    /// Arm a client-requested falling tree (chopped trunk topples and comes
+    /// down). Returns the created entity id, 0 when the cell is already armed.
+    pub fn armFallingTree(self: *Game, x: i32, y: i32, z: i32, id: u16, dir: [3]f32) i32 {
+        return block_ticker_mod.armFallingTree(self, x, y, z, id, dir);
     }
 
     /// Door auto-close (`TEFeatureDoor.UpdateTick` IL=28).

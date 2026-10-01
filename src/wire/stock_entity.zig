@@ -64,6 +64,14 @@ pub const SpawnOpts = struct {
     player: ?PlayerSpawnInfo = null,
     /// Falling-tree data, required when entity_class == class_falling_tree.
     falling_tree: ?FallingTreeInfo = null,
+    /// V3.2.0 requested-spawn correlation (`EntityCreationData` tail, protocol.md
+    /// section 5.1): `requestedBy` (the requesting entity id) plus the client's
+    /// `requestKey` Guid. Setting the key lifts the body to FileVersion 37 and
+    /// appends the pair, which is what lets the client consume its pending
+    /// `SpawnRequest` when the matching `NetPackageConfirmSpawnEntity` arrives.
+    /// A null key keeps FileVersion 36, the shape every other spawn uses.
+    requested_by: i32 = 0,
+    request_key: ?[16]u8 = null,
     /// Junk-drone order state (junkDrone tail only; paired with belongs_player_id).
     drone_order_state: i32 = 0,
     /// Required when entity_class == class_falling_block.
@@ -364,13 +372,14 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // NetPackageEntityTargeted
     try w.writeI32(opts.entity_id);
-    // EntityCreationData.write FileVersion 36. V3.2.0 appends a
-    // requestedBy/requestKey tail that `read` consumes only at
-    // readFileVersion >= 37 (changelog-3.2.0 §3.3): a 3.2.0 client reading
-    // our v36 body skips the tail, so keeping v36 stays parse-compatible.
-    // The tail is only meaningful for client-requested spawns, which zdtd
-    // drops (c2s/misc.zig RequestToSpawnEntity), so it is not emitted.
-    try w.writeByte(36);
+    // EntityCreationData.write FileVersion: 36 normally, 37 when the
+    // requested-spawn tail rides along. V3.2.0 appends a requestedBy/requestKey
+    // tail that `read` consumes only at readFileVersion >= 37
+    // (changelog-3.2.0 §3.3), so a 3.2.0 client reading our v36 body skips the
+    // tail and stays parse-compatible; a requested spawn needs v37 so the client
+    // sees the correlation pair.
+    const file_version: u8 = if (opts.request_key != null) 37 else 36;
+    try w.writeByte(file_version);
     try w.writeI32(opts.entity_class);
     try w.writeI32(opts.entity_id);
     try w.writeF32(std.math.floatMax(f32)); // lifetime
@@ -483,9 +492,113 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
         try w.writeI32(opts.belongs_player_id);
         try w.writeI32(opts.drone_order_state);
     }
-    // ECD v36 tail (always written after junkDrone branch).
+    // ECD tail (always written after junkDrone branch).
     try w.writeF32(0); // stressAmount
+    // V3.2.0 requested-spawn pair: written always by the client, consumed only
+    // at readFileVersion >= 37 (protocol.md section 5.1 tail).
+    if (opts.request_key) |key| {
+        try w.writeI64(opts.requested_by);
+        try w.writeBytes(&key);
+    }
     return w.written();
+}
+
+/// One `NetPackageRequestToSpawnEntity` body (protocol.md section 5.0: the body
+/// is `EntityCreationData.write(networkWrite=true)` alone), reduced to what a
+/// server needs to decide and correlate: the class hash, the requested id, the
+/// spawn transform and the V3.2.0 `requestedBy`/`requestKey` pair.
+pub const ParsedSpawnRequest = struct {
+    file_version: u8 = 36,
+    entity_class: i32 = 0,
+    entity_id: i32 = 0,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    yaw: f32 = 0,
+    on_ground: bool = true,
+    has_request_key: bool = false,
+    requested_by: i32 = 0,
+    request_key: [16]u8 = [_]u8{0} ** 16,
+    /// fallingTree middle: the trunk cell the client chose and the fall
+    /// direction it wants (protocol.md section 5.1 middle).
+    falling_tree: ?FallingTreeInfo = null,
+};
+
+/// Read the generic branch of a client `EntityCreationData`. The class-switched
+/// middle (item, falling block/tree, player) and the optional EntityStats, bag,
+/// trader and player-profile blobs are refused rather than skipped: a
+/// client-requested spawn zdtd cannot fully account for fails closed.
+/// RE ../7dtd-engine-research/docs/network/protocol-packages.md sections 5.0-5.1:
+/// NetPackageRequestToSpawnEntity carries the EntityCreationData header, middle and tail.
+pub fn parseSpawnRequest(body: []const u8) binary.ReadError!ParsedSpawnRequest {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedSpawnRequest = .{};
+    out.file_version = try r.readByte();
+    out.entity_class = try r.readI32();
+    out.entity_id = try r.readI32();
+    _ = try r.readF32(); // lifetime
+    out.x = try r.readF32();
+    out.y = try r.readF32();
+    out.z = try r.readF32();
+    _ = try r.readF32(); // rot.x
+    out.yaw = try r.readF32();
+    _ = try r.readF32(); // rot.z
+    out.on_ground = try r.readBool();
+    // BodyDamage.Write
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readU32();
+    if (try r.readBool()) return error.InvalidString; // EntityStats
+    _ = try r.readI16(); // deathTime
+    if (try r.readBool()) return error.InvalidString; // bag
+    _ = try r.readI32(); // homePosition
+    _ = try r.readI32();
+    _ = try r.readI32();
+    _ = try r.readI16(); // homeRange
+    _ = try r.readByte(); // spawnerSource
+    // Middle: the fallingTree branch is the one client request zdtd services
+    // (chopping a tree); every other class-switched middle is refused.
+    if (out.entity_class == class_falling_tree) {
+        out.falling_tree = .{
+            .block_x = try r.readI32(),
+            .block_y = try r.readI32(),
+            .block_z = try r.readI32(),
+            .dir_x = try r.readF32(),
+            .dir_y = try r.readF32(),
+            .dir_z = try r.readF32(),
+        };
+    } else if (out.entity_class == class_item or
+        out.entity_class == class_falling_block or out.entity_class == class_falling_blocks or
+        out.entity_class == class_player_male or out.entity_class == class_player_female or
+        out.entity_class == class_junk_drone)
+    {
+        return error.InvalidString;
+    }
+    const data_len = try r.readU16();
+    if (r.remaining() < data_len) return error.EndOfStream;
+    r.pos += data_len; // entityData
+    if (try r.readBool()) return error.InvalidString; // traderData
+    // networkWrite block
+    _ = try r.readByte(); // sleeperPose
+    const is_sleeper = try r.readBool();
+    _ = try r.readI32(); // spawnById
+    try r.skipString(); // spawnByName
+    _ = try r.readBool(); // spawnByAllowShare
+    _ = try r.readByte(); // headState
+    _ = try r.readF32(); // overrideSize
+    _ = try r.readF32(); // overrideHeadSize
+    _ = try r.readBool(); // isDancing
+    if (is_sleeper) _ = try r.readBool(); // isSleeperPassive
+    _ = try r.readF32(); // stressAmount
+    // V3.2.0 requested-spawn pair (read only at file version >= 37).
+    if (out.file_version >= 37) {
+        out.requested_by = @intCast(try r.readI64());
+        if (r.remaining() < 16) return error.EndOfStream;
+        @memcpy(&out.request_key, r.data[r.pos..][0..16]);
+        r.pos += 16;
+        out.has_request_key = true;
+    }
+    return out;
 }
 
 /// NetPackageWorldSpawnPoints body: SpawnPointList (RE
