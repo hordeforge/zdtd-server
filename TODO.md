@@ -359,9 +359,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       activation on ownership) and rebroadcasts to nearby peers, and the chunk
       stream sends the current state on entry. Gated by `scenario a land claim
       streams its show-bounds toggle` (decisive: dropping the ownership gate lets
-      a stranger clear another player's toggle). Residual: `TEFeatureCanvas`
-      (`CanvasState`: GlobalSignId + blend + rotation) remains the last composite
-      module with no body, and the leftover collect text in the entry above.
+      a stranger clear another player's toggle). `TEFeatureCanvas` then turned out
+      to need no new code: the signable leg already carries a canvas-only body
+      (`parseSignableTeBody` sets `has_canvas`, `validateCanvasFeature` walks the
+      `CanvasState`), and the C2S path is now verified end to end by `scenario a
+      canvas sign stores and relays its drawing state` (decisive: dropping the
+      `signable or canvas` declaration gate stores a canvas body on a block that
+      declares neither). No composite module is left without a body.
 - [x] **A locked door reached no other client** - closed 2026-09-28 for the
       `TEFeatureDoor` + `TEFeatureLockable` pair. A composite door's ToClient
       body is the declared module order with the door module's two bytes

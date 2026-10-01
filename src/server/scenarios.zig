@@ -30,6 +30,7 @@ const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
 const doors_mod = @import("../world/doors.zig");
 const stock_te_mod = @import("../wire/stock_te.zig");
+const wire_binary_mod = @import("../wire/binary.zig");
 const assets_sandbox = @import("../assets/sandbox.zig");
 const stock_inv_mod = @import("../wire/stock_inv.zig");
 const game_hazard = @import("game/hazard.zig");
@@ -21773,4 +21774,130 @@ test "scenario a land claim streams its show-bounds toggle" {
     try g.injectFramed(c3, try packages.framed(&fb, "NetPackageTileEntity", other));
     try std.testing.expect(g.land_claims[0].show_bounds);
     std.debug.print("PASS land-claim: the toggle streams to the party, not from strangers\n", .{});
+}
+
+test "scenario a canvas sign stores and relays its drawing state" {
+    // The canvas path is the signable leg: `parseSignableTeBody` also accepts a
+    // canvas-only body (`has_canvas`), so a `TEFeatureCanvas` block whose
+    // declaration carries no signable module still stores and relays its
+    // `SignCanvas.CanvasState` (library id + 16-byte Guid + blend + rotation +
+    // imposter flag, CanvasState.Write IL=18). This proves the C2S leg end to
+    // end: parse, declaration gate, store for replay, relay to a second peer.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "canvasTest")) return 1742;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_canvas.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="canvasTest">
+        \\  <property name="Class" value="Sign" />
+        \\  <property name="Material" value="Mwood" />
+        \\  <property class="TEFeatureCanvas" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const canvas_def = g.blocks.byName("canvasTest") orelse return error.TestUnexpectedResult;
+    const stone = g.blocks.byName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 1), canvas_def.te_feature_n);
+    try std.testing.expectEqual(assets_blocks.FeatureKind.canvas, canvas_def.te_features[0]);
+    try std.testing.expect(canvas_def.canvas);
+    try std.testing.expect(!stone.canvas);
+
+    // Hand-roll the client's body: one canvas module, no signable module.
+    const canvasBody = struct {
+        fn build(buf: []u8, handle: u8, x: i32, y: i32, z: i32, block_id: i32) ![]u8 {
+            var module: [64]u8 = undefined;
+            var mw: wire_binary_mod.Writer = .{ .buf = &module };
+            try mw.writeString("prefab");
+            try mw.writeBytes(&([_]u8{7} ** 16));
+            try mw.writeByte(2); // BlendMode
+            try mw.writeByte(1); // CanvasRotation
+            try mw.writeBool(true); // ShowOnImposter
+            const canvas = mw.written();
+
+            var payload: [256]u8 = undefined;
+            var pw: wire_binary_mod.Writer = .{ .buf = &payload };
+            try pw.writeI32(x);
+            try pw.writeI32(y);
+            try pw.writeI32(z);
+            const outer = pw.pos;
+            try pw.writeU32(0);
+            try pw.writeI32(block_id);
+            try pw.writeByte(0);
+            try pw.writeByte(1);
+            try pw.writeI32(packages.stock_te.feature_hash_canvas);
+            try pw.writeU32(@intCast(4 + canvas.len));
+            try pw.writeBytes(canvas);
+            const marker = pw.pos - outer;
+            std.mem.writeInt(u32, payload[outer..][0..4], @intCast(marker), .little);
+            const pay = pw.written();
+
+            var out: wire_binary_mod.Writer = .{ .buf = buf };
+            try out.writeByte(handle);
+            try out.writeI32(x);
+            try out.writeI32(y);
+            try out.writeI32(z);
+            try out.writeI32(block_id);
+            try out.writeI32(@intCast(pay.len));
+            try out.writeBytes(pay);
+            return out.written();
+        }
+    }.build;
+
+    var body_buf: [512]u8 = undefined;
+    const cb = try canvasBody(&body_buf, 5, 40, 70, 40, canvas_def.id);
+
+    // The client's edit applies to the replay store and reaches a second peer.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 40;
+    g.sim.transform[ps].z = 40;
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    g.clients[c2.slot].entered = true;
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    g.sim.transform[ps2].x = 41;
+    g.sim.transform[ps2].z = 40;
+
+    try g.world.setBlockWorld(40, 70, 40, canvas_def.id);
+    g.setBlockRaw(40, 70, 40, canvas_def.id);
+    var fb: [1024]u8 = undefined;
+    cap.clear();
+    cap2.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", cb));
+    const stored = g.sign_texts.get(.{ .x = 40, .y = 70, .z = 40 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, canvas_def.id), stored.block_id);
+    var text: [64]u8 = undefined;
+    const reparsed = try packages.stock_te.parseSignableTeBody(stored.body[0..stored.len], &text);
+    try std.testing.expect(reparsed.has_canvas);
+    try std.testing.expect(!reparsed.has_text);
+    try std.testing.expect(cap2.findPkgId(packages.idOf("NetPackageTileEntity").?) != null);
+
+    // A canvas body addressed to a block whose declaration has no canvas module
+    // is refused: no replay entry appears for that cell.
+    try g.world.setBlockWorld(41, 70, 41, stone.id);
+    g.setBlockRaw(41, 70, 41, stone.id);
+    const forged = try canvasBody(&body_buf, 9, 41, 70, 41, stone.id);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", forged));
+    try std.testing.expect(g.sign_texts.get(.{ .x = 41, .y = 70, .z = 41 }) == null);
+    std.debug.print("PASS canvas: the drawing state round-trips and relays\n", .{});
 }
