@@ -5,6 +5,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Development builds identify as `0.13.0-dev.1`, keeping the immutable `v0.12.0` release identity exclusive to its tagged commit.
+
 ## [0.12.0] - 2026-09-29
 
 ### Added
