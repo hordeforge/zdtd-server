@@ -47,6 +47,11 @@ pub const Health = struct {
     /// > 0 means dead-but-in-world: the corpse stays replicated until the sweep
     /// destroys it, so the client's ragdoll is not yanked mid-animation.
     corpse_seconds: f32 = 0,
+    /// `EntityAlive.DeathHealth`: the hp the lethal hit left behind (negative
+    /// overshoot). `OnDeathUpdate` slams the corpse timer when
+    /// `death_health <= -DeadBodyHitPoints`, i.e. a gibbed body is removed at
+    /// once instead of dwelling.
+    death_health: f32 = 0,
 };
 
 pub const NetworkId = struct {
@@ -116,6 +121,9 @@ pub const ClassId = struct {
     particle_on_death: []const u8 = "",
     /// entityclasses `ParticleOnDestroy` (see `world.EntityClass`).
     particle_on_destroy: []const u8 = "",
+    /// entityclasses `DeadBodyHitPoints` (see `world.EntityClass`): overkill
+    /// beyond this removes the corpse immediately.
+    dead_body_hit_points: i32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → fill path default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.

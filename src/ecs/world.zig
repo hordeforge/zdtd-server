@@ -106,6 +106,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.stomps_spikes = def.stomps_spikes;
     cid.particle_on_death = def.particle_on_death;
     cid.particle_on_destroy = def.particle_on_destroy;
+    cid.dead_body_hit_points = def.dead_body_hit_points;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -196,6 +197,9 @@ pub const EntityClass = struct {
     /// entityclasses `ParticleOnDestroy`, spawned when the entity is destroyed
     /// (corpse dwell expiry, chunk unload) rather than killed.
     particle_on_destroy: []const u8 = "",
+    /// entityclasses `DeadBodyHitPoints` (`OnDeathUpdate`: a body whose
+    /// `DeathHealth` is at or below the negative of this is removed at once).
+    dead_body_hit_points: i32 = 0,
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.
@@ -2049,6 +2053,9 @@ pub const World = struct {
                 const pname = if (self.mask[s].class_id) self.class_id[s].particle_on_death else "";
                 df(self.on_death_ctx, self.network_id[s].id, px, py, pz, pname);
             }
+            // Stock's `DeathHealth` is the hp the lethal hit left: `OnDeathUpdate`
+            // reads it for the gibbed-corpsse removal.
+            self.health[s].death_health = self.health[s].hp;
             // Drop loot bag for zombies/animals (caller must S2C stock ECD + Bag).
             if ((self.kind[s] == .zombie or self.kind[s] == .animal) and self.mask[s].transform) {
                 const x = self.transform[s].x;
@@ -2187,9 +2194,16 @@ pub const World = struct {
     /// client's ragdoll mid-animation and skip the paired EntityRemove the
     /// sweep reports, leaving a permanent ghost.
     pub fn markCorpse(self: *World, s: Slot) void {
+        // `OnDeathUpdate`: overkill at or below `-DeadBodyHitPoints` slams the
+        // dwell so the sweep removes the body on its next pass (a gibbed
+        // corpse). A hair above zero: the sweep's own `<= 0` test is the
+        // "never armed" sentinel.
+        const gibbed = self.mask[s].class_id and
+            self.class_id[s].dead_body_hit_points > 0 and
+            self.health[s].death_health <= -@as(f32, @floatFromInt(self.class_id[s].dead_body_hit_points));
         self.health[s].hp = 0;
         self.markDirty(s, .{ .hp = true });
-        self.health[s].corpse_seconds = self.corpseDwell(s);
+        self.health[s].corpse_seconds = if (gibbed) 0.001 else self.corpseDwell(s);
         if (self.mask[s].zombie_ai) {
             self.zombie_ai[s].state = .idle;
             self.zombie_ai[s].target_id = -1;

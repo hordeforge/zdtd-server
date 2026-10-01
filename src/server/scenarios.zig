@@ -22426,3 +22426,90 @@ test "scenario a particle caused by a player skips that player" {
     try std.testing.expect(cap_b.findPkgId(au_id) != null);
     std.debug.print("PASS particle-exclude: the causing player is skipped\n", .{});
 }
+
+test "scenario entityclass properties reach the sim through the parser" {
+    // Class properties are read with `resolveProp` (the Extends walk), not a
+    // `pname` arm: a class parsed from entityclasses.xml must carry
+    // StompsSpikes (spike crushing), the death/destroy particles and
+    // DeadBodyHitPoints (the gibbed-corpse removal in OnDeathUpdate).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var ex_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const ex = try std.fmt.bufPrint(&ex_buf, "{s}/entityclasses_props.xml", .{dir});
+    try io_fs.writeFile(ex,
+        \\<entityclasses>
+        \\<entity_class name="zombieStomper" extends="zombieTemplateMale">
+        \\  <property name="MaxHealth" value="120" />
+        \\  <property name="StompsSpikes" value="true" />
+        \\  <property name="ParticleOnDeath" value="zombie_death" />
+        \\  <property name="ParticleOnDestroy" value="zombie_destroy" />
+        \\  <property name="DeadBodyHitPoints" value="1000" />
+        \\</entity_class>
+        \\<entity_class name="zombieTemplateMale">
+        \\  <property name="MaxHealth" value="100" />
+        \\  <property name="Tags" value="entity,zombie" />
+        \\</entity_class>
+        \\</entityclasses>
+    );
+    var table = try assets_entities.loadFromPath(gpa, ex);
+    defer table.deinit();
+    const def = table.byName("zombieStomper") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(def.stomps_spikes);
+    try std.testing.expectEqualStrings("zombie_death", def.particle_on_death);
+    try std.testing.expectEqualStrings("zombie_destroy", def.particle_on_destroy);
+    try std.testing.expectEqual(@as(i32, 1000), def.dead_body_hit_points);
+    // The parent has none of them, and MaxHealth still resolves.
+    const parent = table.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!parent.stomps_spikes);
+    try std.testing.expectEqual(@as(f32, 100), parent.max_hp);
+    std.debug.print("PASS entityclass-props: StompsSpikes/particles/DeadBodyHitPoints parse\n", .{});
+}
+
+test "scenario a gibbed corpse is removed at once" {
+    // `EntityAlive.OnDeathUpdate`: a body whose `DeathHealth` is at or below
+    // `-DeadBodyHitPoints` has its dwell slammed, so the next sweep removes it
+    // (spawning.md 1344).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+
+    const zid = g.sim.spawnZombie(px + 2, g.sim.transform[ps].y, pz, 40) orelse return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs].dead_body_hit_points = 1000;
+    // A normal kill: death_health lands near zero, so the corpse keeps its dwell.
+    _ = g.sim.damageFrom(zid, 41, -1);
+    try std.testing.expect(g.sim.health[zs].corpse_seconds > 1.0);
+
+    const zid2 = g.sim.spawnZombie(px + 3, g.sim.transform[ps].y, pz, 40) orelse return error.TestUnexpectedResult;
+    const zs2 = g.sim.slotOfNetId(zid2) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs2].dead_body_hit_points = 1000;
+    // Overkill beyond the threshold: the dwell is slammed to a hair above zero,
+    // so the very next sweep destroys the body.
+    _ = g.sim.damageFrom(zid2, 5000, -1);
+    try std.testing.expect(g.sim.health[zs2].death_health <= -1000.0);
+    try std.testing.expect(g.sim.health[zs2].corpse_seconds <= 0.01);
+    var outs: [8]i32 = undefined;
+    var out_slots: [8]@import("../ecs/world.zig").Slot = undefined;
+    const n = g.sim.sweepCorpses(0.05, &outs, &out_slots);
+    try std.testing.expect(n >= 1);
+    try std.testing.expect(g.sim.slotOfNetId(zid2) == null);
+    // The normally-killed corpse is still there.
+    try std.testing.expect(g.sim.slotOfNetId(zid) != null);
+    std.debug.print("PASS gibbed-corpse: overkill removes the body at once\n", .{});
+}

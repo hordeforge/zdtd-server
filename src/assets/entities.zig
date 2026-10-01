@@ -50,6 +50,9 @@ pub const EntityDef = struct {
     /// entityclasses `ParticleOnDestroy` (`PropParticleOnDestroy`): the destroy
     /// path spawns it at the head (`spawning.md` 1344).
     particle_on_destroy: []const u8 = "",
+    /// entityclasses `DeadBodyHitPoints` (`PropDeadBodyHitPoints`): overkill
+    /// beyond the negative of this removes the corpse at once.
+    dead_body_hit_points: i32 = 0,
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude
@@ -1555,6 +1558,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .target_class_n = target_n,
             .entity_flags = parseEntityFlags(resolveProp(&classes, name, "EntityFlags", 0) orelse ""),
             .flee = flee_params,
+            // Class properties that reach the sim through resolveProp (the
+            // Extends walk), not a `pname` arm: StompsSpikes (spike crushing,
+            // EntityAlive.CalculateBlockDamage IL=17), the death/destroy
+            // particles (OnEntityDeath IL=146, spawning.md 1344) and
+            // DeadBodyHitPoints (the gibbed-corpse removal in OnDeathUpdate).
+            .stomps_spikes = parseBoolLoose(resolveProp(&classes, name, "StompsSpikes", 0) orelse ""),
+            .particle_on_death = if (resolveProp(&classes, name, "ParticleOnDeath", 0)) |v|
+                try arena.dupe(u8, v)
+            else
+                "",
+            .particle_on_destroy = if (resolveProp(&classes, name, "ParticleOnDestroy", 0)) |v|
+                try arena.dupe(u8, v)
+            else
+                "",
+            .dead_body_hit_points = std.fmt.parseInt(i32, resolveProp(&classes, name, "DeadBodyHitPoints", 0) orelse "", 10) catch 0,
             .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,

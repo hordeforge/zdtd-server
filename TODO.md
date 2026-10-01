@@ -530,7 +530,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       `allButAttachedToEntityId` does. Gated by `scenario a destroyed corpse
       spawns its destroy particle` and `scenario a particle caused by a player
       skips that player` (both decisive: dropping the hook or the exclusion
-      fails them).
+      fails them). The same paragraph's gibbing rule closed 2026-10-01:
+      `DeadBodyHitPoints` parses, `damageFrom` records `DeathHealth` (the lethal
+      overshoot) and `markCorpse` slams the dwell when it is at or below the
+      negative threshold, so an overkilled body is swept at once. That round also
+      found and fixed a wiring hole: `StompsSpikes`, `ParticleOnDeath`,
+      `ParticleOnDestroy` and `DeadBodyHitPoints` are read with `resolveProp`
+      (the Extends walk), so the earlier `pname` arms never matched and a parsed
+      catalog carried none of them; `scenario entityclass properties reach the
+      sim through the parser` now pins all four.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event
