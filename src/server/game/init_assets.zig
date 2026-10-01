@@ -6,6 +6,7 @@ const std = @import("std");
 const game_mod = @import("../game.zig");
 const game_hooks = @import("hooks.zig");
 const game_wasm_host = @import("wasm_host.zig");
+const game_particles = @import("particles.zig");
 const Game = game_mod.Game;
 const biomes_mod = @import("../../world/biomes.zig");
 const util_sim = @import("../../util/sim.zig");
@@ -820,6 +821,9 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // rest). Unset hook = no plugins = today's behaviour.
         self.sim.kill_verdict_ctx = self;
         self.sim.kill_verdict_fn = &game_wasm_host.killVerdict;
+        // Death particles are a server send (`EntityAlive.OnEntityDeath` IL=146).
+        self.sim.on_death_ctx = self;
+        self.sim.on_death_fn = &game_particles.onEntityDeath;
         // on_player_damage verdict for the ECS damage path (zombie melee /
         // deferred accumulator): routes to the plugin + wasm host with the
         // attacker unknown. Unset hook = no plugins = today's behaviour.

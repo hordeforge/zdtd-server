@@ -22307,3 +22307,44 @@ test "scenario a falling tree hurts what it lands on" {
     try std.testing.expectApproxEqAbs(player_hp, g.sim.health[ps].hp, 0.01);
     std.debug.print("PASS falling-tree-damage: the trunk crushes the zombie, not the player\n", .{});
 }
+
+test "scenario a dying entity spawns its death particle" {
+    // `EntityAlive.OnEntityDeath` (IL=146) spawns the entityclass
+    // `ParticleOnDeath` through `GameManager.SpawnParticleEffectServer` before the
+    // corpse work, so the effect rides `NetPackageParticleEffect` at the entity.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+
+    const zid = g.sim.spawnZombie(px + 3, g.sim.transform[ps].y, pz, 20) orelse return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    // The class table's row carries the particle; a synthetic class stands in
+    // for a stock zombie's `ParticleOnDeath`.
+    g.sim.class_id[zs].particle_on_death = "zombie_death";
+    cap.clear();
+    _ = g.sim.damageFrom(zid, 100, -1);
+    // The ECS hook fires on the crossing, before the corpse is removed.
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) != null);
+    try std.testing.expect(g.sim.health[zs].hp <= 0);
+
+    // An entity whose class declares no particle sends none.
+    const zid2 = g.sim.spawnZombie(px + 4, g.sim.transform[ps].y, pz, 20) orelse return error.TestUnexpectedResult;
+    const zs2 = g.sim.slotOfNetId(zid2) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs2].particle_on_death = "";
+    cap.clear();
+    _ = g.sim.damageFrom(zid2, 100, -1);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageParticleEffect").?) == null);
+    std.debug.print("PASS death-particle: the class effect rides the kill\n", .{});
+}

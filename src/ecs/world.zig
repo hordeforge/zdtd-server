@@ -104,6 +104,7 @@ fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
 fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void {
     cid.hash = def.hash;
     cid.stomps_spikes = def.stomps_spikes;
+    cid.particle_on_death = def.particle_on_death;
     cid.target_class_hashes = def.target_class_hashes;
     cid.target_chase_max = def.target_chase_max;
     cid.target_chase_max_players = def.target_chase_max_players;
@@ -189,6 +190,8 @@ pub const EntityClass = struct {
     /// instead of taking their contact damage (`EntityAlive.CalculateBlockDamage`
     /// IL=17 returns 999 with bypass).
     stomps_spikes: bool = false,
+    /// entityclasses `ParticleOnDeath` (`EntityAlive.OnEntityDeath` IL=146).
+    particle_on_death: []const u8 = "",
     /// Loot container name (LootDropEntityClass / LootListOnDeath); empty → default.
     /// Must point to static/indefinite-lifetime data (comptime literal or
     /// binary-embedded table). Never assign an arena/allocator-owned slice.
@@ -669,6 +672,11 @@ pub const World = struct {
     /// no plugins, today's behaviour exactly.
     kill_verdict_ctx: ?*anyopaque = null,
     kill_verdict_fn: ?*const fn (?*anyopaque, Kind, i32, i32) i32 = null,
+    /// Death side-effect hook: (ctx, net_id, x, y, z, particle_name) called once
+    /// when an entity crosses to dead, before it is removed. Game wires this to
+    /// the death-particle send (`EntityAlive.OnEntityDeath` IL=146).
+    on_death_ctx: ?*anyopaque = null,
+    on_death_fn: ?*const fn (?*anyopaque, i32, f32, f32, f32, []const u8) void = null,
     /// on_player_damage verdict for the ECS damage path (zombie melee /
     /// deferred accumulator): (ctx, victim_net_id, amount) -> i32. Below 0
     /// denies the hit (victim keeps hp), above 0 scales the applied amount by
@@ -2021,6 +2029,16 @@ pub const World = struct {
                     return .{ .applied = applied };
                 }
                 if (v > 0) kill_scale = @intCast(v);
+            }
+            // Death side effect (`EntityAlive.OnEntityDeath` IL=146): the class's
+            // `ParticleOnDeath` goes out through SpawnParticleEffectServer before
+            // the corpse work. Fired once, on the crossing.
+            if (self.on_death_fn) |df| {
+                const px = self.transform[s].x;
+                const py = self.transform[s].y;
+                const pz = self.transform[s].z;
+                const pname = if (self.mask[s].class_id) self.class_id[s].particle_on_death else "";
+                df(self.on_death_ctx, self.network_id[s].id, px, py, pz, pname);
             }
             // Drop loot bag for zombies/animals (caller must S2C stock ECD + Bag).
             if ((self.kind[s] == .zombie or self.kind[s] == .animal) and self.mask[s].transform) {

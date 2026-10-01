@@ -513,6 +513,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       `requestedBy`/`requestKey` pair (the ack alone correlates); the refused
       middles (dropped items, falling trees/blocks, player characters) are still
       dropped, as the typed drop/throw paths own those.
+- [x] **Entity death particles never spawned** - closed 2026-10-01:
+      `EntityAlive.OnEntityDeath` (IL=146) spawns the entityclass
+      `ParticleOnDeath` through `GameManager.SpawnParticleEffectServer` before the
+      corpse work, which zdtd could not send at all (it parsed
+      `NetPackageParticleEffect` but had no builder). The class property parses
+      (`PropParticleOnDeath`), the ECS death crossing calls a new `on_death_fn`
+      hook once, and `server/game/particles.zig` sends the effect at the corpse
+      (`ParticleEffect.ToId(name)` = the name hash). Gated by `scenario a dying
+      entity spawns its death particle` (decisive: removing the hook sends
+      nothing), including the no-particle case. Residual: `ParticleOnDestroy`
+      (the destroy path) and the `allButAttachedToEntityId` exclusion stock
+      applies per observer.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

@@ -43,6 +43,10 @@ pub const EntityDef = struct {
     tags: []const u8 = "",
     /// entityclasses `StompsSpikes` (`EntityClass.PropStompsSpikes`).
     stomps_spikes: bool = false,
+    /// entityclasses `ParticleOnDeath` (`EntityClass.PropParticleOnDeath`):
+    /// `EntityAlive.OnEntityDeath` IL=146 spawns it through
+    /// `GameManager.SpawnParticleEffectServer` at the corpse.
+    particle_on_death: []const u8 = "",
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Stock `EntityFlying` (the vulture): `applyGravity` holds an altitude

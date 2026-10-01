@@ -213,6 +213,7 @@ test {
     _ = game_block_ticker;
     _ = game_harness;
     _ = game_wasm_host;
+    _ = particles;
     _ = game_plugin_compose;
     _ = game_constants;
     _ = game_lifecycle;
@@ -262,3 +263,4 @@ test {
     _ = c2s_join_spawn;
     _ = c2s_dispatch;
 }
+pub const particles = @import("game/particles.zig");
