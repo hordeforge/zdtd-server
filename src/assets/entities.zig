@@ -206,6 +206,13 @@ pub const EntityDef = struct {
     sleeper_wake_near_max: f32 = 0,
     sleeper_wake_far_min: f32 = 0,
     sleeper_wake_far_max: f32 = 0,
+    /// entityclasses `SleeperSightToSenseMin/Max` "min,max" roll ranges (stock
+    /// defaults (25,25)/(200,200)): `GetSleeperDisturbedLevel` level 1, the
+    /// light value at which a sleeping body STIRS (groans) without waking.
+    sleeper_sense_near_min: f32 = 0,
+    sleeper_sense_near_max: f32 = 0,
+    sleeper_sense_far_min: f32 = 0,
+    sleeper_sense_far_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone angle (stock default
     /// 180 = only excludes targets strictly behind; the sense gate halves it
     /// like EntityAlive.IsInFrontOfMe). 0 = unset → Rules floor.
@@ -1458,6 +1465,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.parseF32(lo)) |f| sw_far_min = f;
             if (xml.parseF32(hi)) |f| sw_far_max = f;
         }
+        // SleeperSightToSenseMin/Max: the same shape for the level-1 STIR
+        // threshold (RE entity-ai.md D8.6 step 5: `sightGroanThresholdAtRange`
+        // from SleeperSightToSenseMin/Max, stock defaults (25,25)/(200,200)).
+        var sn_near_min: f32 = 0;
+        var sn_near_max: f32 = 0;
+        var sn_far_min: f32 = 0;
+        var sn_far_max: f32 = 0;
+        if (resolveProp(&classes, name, "SleeperSightToSenseMin", 0)) |ssn| {
+            const comma = std.mem.findScalar(u8, ssn, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, ssn[0..ci], " ") else ssn;
+            const hi = if (comma) |ci| std.mem.trim(u8, ssn[ci + 1 ..], " ") else ssn;
+            if (xml.parseF32(lo)) |f| sn_near_min = f;
+            if (xml.parseF32(hi)) |f| sn_near_max = f;
+        }
+        if (resolveProp(&classes, name, "SleeperSightToSenseMax", 0)) |ssf| {
+            const comma = std.mem.findScalar(u8, ssf, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, ssf[0..ci], " ") else ssf;
+            const hi = if (comma) |ci| std.mem.trim(u8, ssf[ci + 1 ..], " ") else ssf;
+            if (xml.parseF32(lo)) |f| sn_far_min = f;
+            if (xml.parseF32(hi)) |f| sn_far_max = f;
+        }
         // MaxViewAngle: full cone angle, stock EntityAlive cctor default 180
         // (RE entity-ai.md), per-class property overrides. Bounded: a crafted
         // value must not exceed a full 360. 0 stays "unset" → Rules floor.
@@ -1616,6 +1644,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .sleeper_wake_near_max = sw_near_max,
             .sleeper_wake_far_min = sw_far_min,
             .sleeper_wake_far_max = sw_far_max,
+            .sleeper_sense_near_min = sn_near_min,
+            .sleeper_sense_near_max = sn_near_max,
+            .sleeper_sense_far_min = sn_far_min,
+            .sleeper_sense_far_max = sn_far_max,
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,

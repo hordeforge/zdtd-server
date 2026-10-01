@@ -288,6 +288,10 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
     // the light gate itself is covered by the next test).
     w.sleeper[zs].wake_light_near = -1000;
     w.sleeper[zs].wake_light_far = -500;
+    // Stir (level-1) gate open too: these cases are about the crouch/volume
+    // reach, not the SleeperSightToSense band.
+    w.sleeper[zs].sense_light_near = -1000;
+    w.sleeper[zs].sense_light_far = -500;
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
@@ -324,6 +328,10 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     w.sleeper[zs].volume_r = 20;
     w.sleeper[zs].wake_light_near = -1000;
     w.sleeper[zs].wake_light_far = -500;
+    // Stir (level-1) gate open too: these cases are about the crouch/volume
+    // reach, not the SleeperSightToSense band.
+    w.sleeper[zs].sense_light_near = -1000;
+    w.sleeper[zs].sense_light_far = -500;
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
@@ -354,6 +362,10 @@ test "stealth: sleepers wake inside the GetSleeperDisturbedLevel light gate" {
     w.sleeper[zs].volume_r = 20;
     w.sleeper[zs].wake_light_near = -17.5;
     w.sleeper[zs].wake_light_far = 410.0;
+    // This case is about the WAKE gate; open the level-1 stir band so the
+    // night player at 4 m still stirs without waking.
+    w.sleeper[zs].sense_light_near = -1000;
+    w.sleeper[zs].sense_light_far = -500;
     const p = w.spawnPlayer(4, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     // Day (ambient 0.5 → lightLevel 46.26): 4 m wakes (threshold 39.4).
@@ -415,9 +427,15 @@ test "group AI: combat noise wakes sleepers within radius" {
     var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
     defer w.deinit();
     _ = w.spawnZombie(0, 70, 0, 40).?;
-    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    // sightRangeBase 20: the 11 m player is inside it, so
+    // GetSleeperDisturbedLevel can reach level 1 (pct <= 1).
+    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 20.0 }, 0).?;
     const zs = w.slotOfNetId(z).?;
     w.sleeper[zs].volume_r = 16;
+    // This case is about the noise wake and the groan that precedes it: open the
+    // level-1 stir band so the in-volume player disturbs the body first.
+    w.sleeper[zs].sense_light_near = -1000;
+    w.sleeper[zs].sense_light_far = -500;
     _ = w.spawnPlayer(1, 70, 0, 0).?;
     var hit: u32 = 0;
     var t: f32 = 0;
@@ -603,4 +621,39 @@ test "stealth noise: heat rows feed the activity map" {
     // per second - 240 s = 4800 ticks → 1.0 / 240 s.
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 240.0), w.director.heat[0].decay, 0.0001);
+}
+
+test "stealth: the stir band needs more light than the wake band at range" {
+    // GetSleeperDisturbedLevel IL=38: level 2 (wake) tests the
+    // SleeperSightToWakeMin/Max pair, level 1 (stir, the groan) the
+    // SleeperSightToSenseMin/Max pair. A light level between the two stirs
+    // without waking; below the stir band nothing happens.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 30 * 30 } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 30.0 }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 20;
+    // Sitting player at 10 m: pct = 1/3.
+    w.sleeper[zs].wake_light_near = 60;
+    w.sleeper[zs].wake_light_far = 60;
+    w.sleeper[zs].sense_light_near = 30;
+    w.sleeper[zs].sense_light_far = 30;
+    const p = w.spawnPlayer(10, 70, 0, 0).?;
+    _ = w.slotOfNetId(p).?;
+    // Day ambient 0.5 -> lightLevel 46.26 (see the wake-gate test): above the
+    // stir band 30, below the wake band 60.
+    w.ambient_light = 0.5;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+
+    // Below the stir band: neither stir nor wake.
+    w.sleeper[zs].groan_sent = false;
+    w.sleeper_wake_n = 0;
+    w.ambient_light = 0; // lightLevel 0: below the stir band
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    try std.testing.expect(!w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 0), w.sleeper_wake_n);
 }

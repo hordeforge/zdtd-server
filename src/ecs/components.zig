@@ -252,6 +252,12 @@ pub const ClassId = struct {
     /// rolls its wake threshold pair from these at spawn. 0 = unset (falls to
     /// the stock default ranges in world.spawnSleeperDef).
     sleeper_wake_near_min: f32 = 0,
+    /// entityclasses `SleeperSightToSenseMin/Max` roll ranges (see
+    /// `world.EntityClass`): the level-1 stir (groan) threshold pair.
+    sleeper_sense_near_min: f32 = 0,
+    sleeper_sense_near_max: f32 = 0,
+    sleeper_sense_far_min: f32 = 0,
+    sleeper_sense_far_max: f32 = 0,
     sleeper_wake_near_max: f32 = 0,
     sleeper_wake_far_min: f32 = 0,
     sleeper_wake_far_max: f32 = 0,
@@ -1412,6 +1418,11 @@ pub const Sleeper = struct {
     /// zombieTemplateMale "-40,5" / "340,480"); these defaults sit at the
     /// stock roll midpoints for direct-constructed test sleepers.
     wake_light_near: f32 = -17.5,
+    /// The `SleeperSightToSenseMin/Max` pair rolled the same way: the light
+    /// value at which the body STIRS (`GetSleeperDisturbedLevel` level 1) even
+    /// though it does not wake.
+    sense_light_near: f32 = 25.0,
+    sense_light_far: f32 = 200.0,
     wake_light_far: f32 = 410.0,
 };
 

@@ -13891,6 +13891,10 @@ test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
     g.sim.sleeper[zs].volume_r = 20;
     g.sim.sleeper[zs].wake_light_near = -17.5;
     g.sim.sleeper[zs].wake_light_far = 410.0;
+    // This scenario is about the groan broadcast: open the level-1 stir band so
+    // the night player disturbs the body without waking it.
+    g.sim.sleeper[zs].sense_light_near = -1000;
+    g.sim.sleeper[zs].sense_light_far = -500;
     _ = g.sim.spawnPlayer(4, 70, 0, 0); // 4 m in the volume, dark
     try g.step();
     try std.testing.expect(!g.sim.sleeper[zs].awake);
@@ -22721,6 +22725,57 @@ test "scenario a client cvar write lands on its own entity" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w6.written()));
     try std.testing.expect(cap_b.findPkgId(cvar_id) == null);
     std.debug.print("PASS modify-cvar: the client write lands, cross-player does not\n", .{});
+}
+
+test "scenario a class stir band reaches the sim through the parser" {
+    // `SleeperSightToSenseMin/Max` (entity-ai.md D8.6 step 5: the
+    // `sightGroanThresholdAtRange` pair) must reach the per-sleeper roll the
+    // same way the wake pair does, or a parsed class stirs at the wrong light.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var ex_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const ex = try std.fmt.bufPrint(&ex_buf, "{s}/entityclasses_sense.xml", .{dir});
+    try io_fs.writeFile(ex,
+        \\<entityclasses>
+        \\<entity_class name="sleeperSensing" extends="zombieTemplateMale">
+        \\  <property name="SleeperSightToWakeMin" value="-40,5" />
+        \\  <property name="SleeperSightToWakeMax" value="340,480" />
+        \\  <property name="SleeperSightToSenseMin" value="7,9" />
+        \\  <property name="SleeperSightToSenseMax" value="40,60" />
+        \\</entity_class>
+        \\<entity_class name="zombieTemplateMale">
+        \\  <property name="MaxHealth" value="100" />
+        \\</entity_class>
+        \\</entityclasses>
+    );
+    var table = try assets_entities.loadFromPath(gpa, ex);
+    defer table.deinit();
+    const def = table.byName("sleeperSensing") orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 7), def.sleeper_sense_near_min, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 9), def.sleeper_sense_near_max, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), def.sleeper_sense_far_min, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 60), def.sleeper_sense_far_max, 0.001);
+    // The rolled per-sleeper pair stays inside the class ranges.
+    const ec: @import("../ecs/world.zig").EntityClass = .{
+        .max_hp = 100,
+        .hash = def.hash,
+        .kind = .zombie,
+        .sleeper_sense_near_min = def.sleeper_sense_near_min,
+        .sleeper_sense_near_max = def.sleeper_sense_near_max,
+        .sleeper_sense_far_min = def.sleeper_sense_far_min,
+        .sleeper_sense_far_max = def.sleeper_sense_far_max,
+    };
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    const z = g.sim.spawnSleeperDef(0, 70, 0, ec, 0) orelse return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.sleeper[zs].sense_light_near >= 7 and g.sim.sleeper[zs].sense_light_near <= 9);
+    try std.testing.expect(g.sim.sleeper[zs].sense_light_far >= 40 and g.sim.sleeper[zs].sense_light_far <= 60);
+    std.debug.print("PASS sleeper-sense: the stir pair parses and rolls\n", .{});
 }
 
 test "scenario a client RPC reaches the other clients" {

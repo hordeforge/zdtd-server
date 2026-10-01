@@ -627,6 +627,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       (which carries zombieTemplateMale's value) for an entity with no parsed
       class. Gated by `the idle look-around turns at the class MaxTurnSpeed`
       (decisive: pinning the Rules rate fails it).
+- [x] **Sleepers stirred on any in-volume player** - closed 2026-10-01: the groan
+      (level 1 of `GetSleeperDisturbedLevel` IL=38) used the `wake` gate's
+      fall-through, so any player in the volume stirred a sleeper whatever the
+      light. Stock's level 1 tests its OWN pair, `SleeperSightToSenseMin/Max`
+      (stock `(25,25)` / `(200,200)`), interpolated by `dist/sightRangeBase`, and
+      the wake pair is level 2. The sense pair now parses through the
+      `resolveProp` walk, rides `EntityClass`/`ClassId`, and each sleeper rolls it
+      from the class ranges with the same two deterministic draws the wake pair
+      uses; the stir now requires the player's light to exceed that threshold
+      (and the volume/`pct <= 1` gates). Gated by two tests: `the stir band needs
+      more light than the wake band at range` (a light level between the bands
+      stirs without waking, below both does nothing; decisive: degrading the
+      threshold fails it) and `scenario a class stir band reaches the sim through
+      the parser` (the ranges parse and the roll stays inside them). The four
+      pre-existing sleeper tests had encoded the old loose behaviour; each now
+      opens the stir band explicitly, with the case it actually covers named in a
+      comment.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

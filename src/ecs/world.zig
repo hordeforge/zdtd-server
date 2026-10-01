@@ -156,6 +156,10 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.sight_light_min = def.sight_light_min;
     cid.sight_light_max = def.sight_light_max;
     cid.sleeper_wake_near_min = def.sleeper_wake_near_min;
+    cid.sleeper_sense_near_min = def.sleeper_sense_near_min;
+    cid.sleeper_sense_near_max = def.sleeper_sense_near_max;
+    cid.sleeper_sense_far_min = def.sleeper_sense_far_min;
+    cid.sleeper_sense_far_max = def.sleeper_sense_far_max;
     cid.sleeper_wake_near_max = def.sleeper_wake_near_max;
     cid.sleeper_wake_far_min = def.sleeper_wake_far_min;
     cid.sleeper_wake_far_max = def.sleeper_wake_far_max;
@@ -316,6 +320,12 @@ pub const EntityClass = struct {
     sleeper_wake_near_max: f32 = 0,
     sleeper_wake_far_min: f32 = 0,
     sleeper_wake_far_max: f32 = 0,
+    /// entityclasses `SleeperSightToSenseMin/Max` roll ranges: the level-1 stir
+    /// (groan) light threshold pair.
+    sleeper_sense_near_min: f32 = 0,
+    sleeper_sense_near_max: f32 = 0,
+    sleeper_sense_far_min: f32 = 0,
+    sleeper_sense_far_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone (stock default 180);
     /// the sense gate halves it. 0 = use the Rules cone floor.
     view_angle_deg: f32 = 0,
@@ -1506,6 +1516,16 @@ pub const World = struct {
             const frac_b = @as(f32, @floatFromInt(h & 0xffffffff)) / @as(f32, @floatFromInt(std.math.maxInt(u32)));
             self.sleeper[s].wake_light_near = near_min + (near_max - near_min) * frac_a;
             self.sleeper[s].wake_light_far = far_min + (far_max - far_min) * frac_b;
+            // The same two draws seed the level-1 STIR pair from
+            // SleeperSightToSenseMin/Max (stock defaults (25,25)/(200,200)).
+            const sn: [4]f32 = .{
+                if (def.sleeper_sense_near_min != 0 or def.sleeper_sense_near_max != 0) def.sleeper_sense_near_min else 25.0,
+                if (def.sleeper_sense_near_min != 0 or def.sleeper_sense_near_max != 0) def.sleeper_sense_near_max else 25.0,
+                if (def.sleeper_sense_far_min != 0 or def.sleeper_sense_far_max != 0) def.sleeper_sense_far_min else 200.0,
+                if (def.sleeper_sense_far_min != 0 or def.sleeper_sense_far_max != 0) def.sleeper_sense_far_max else 200.0,
+            };
+            self.sleeper[s].sense_light_near = sn[0] + (sn[1] - sn[0]) * frac_a;
+            self.sleeper[s].sense_light_far = sn[2] + (sn[3] - sn[2]) * frac_b;
             self.zombie_ai[s].state = .sleep;
             self.sleeper_vol[s] = volume;
         }

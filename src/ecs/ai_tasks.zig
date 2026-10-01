@@ -347,6 +347,7 @@ const AiCtx = struct {
                 const ar = ctx.w.rules.ai;
                 const sr = @sqrt(senseDistSq(ctx.w, s)); // sightRangeBase
                 var near = false;
+                var stirred = false;
                 for (ctx.scan.slice()) |pl| {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
@@ -375,12 +376,26 @@ const AiCtx = struct {
                             break;
                         }
                     }
-                    // In the volume but not waking (dark/crouched beyond the
-                    // wake reach): the sleeper STIRS - RE EntityAlive.
-                    // SetSleeperActive (IL=26) clears IsSleeperPassive and
-                    // broadcasts NetPackageSleeperPassiveChange so the client
-                    // plays the groan. One-shot per sleeper.
-                    if (!sl.groan_sent) {
+                    // `GetSleeperDisturbedLevel` IL=38 level 1: a player inside
+                    // the volume whose light exceeds the STIR pair
+                    // (`SleeperSightToSenseMin/Max`, stock (25,25)/(200,200))
+                    // disturbs the body without waking it. The wake gate above
+                    // runs first, so a bright player at close range still wakes.
+                    if (sr > 0.001) {
+                        const pct = dist / sr;
+                        if (pct <= 1.0) {
+                            const sense = sl.sense_light_near + (sl.sense_light_far - sl.sense_light_near) * pct;
+                            if (pl.light_level > sense) stirred = true;
+                        }
+                    } else {
+                        stirred = true; // no sightRangeBase: gate open (fallback)
+                    }
+                    // In the volume, above the stir threshold but not the wake
+                    // one: the sleeper STIRS - RE EntityAlive.SetSleeperActive
+                    // (IL=26) clears IsSleeperPassive and broadcasts
+                    // NetPackageSleeperPassiveChange so the client plays the
+                    // groan. One-shot per sleeper.
+                    if (stirred and !sl.groan_sent) {
                         ctx.w.sleeper[s].groan_sent = true;
                         ctx.w.pushSleeperGroan(s);
                     }
