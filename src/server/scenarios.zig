@@ -22619,3 +22619,76 @@ test "scenario a class eye offset decides what the AI sees over cover" {
     try std.testing.expect(tall_sees != short_sees);
     std.debug.print("PASS ai-see-offset: the class eye height decides the line\n", .{});
 }
+
+test "scenario a client cvar write lands on its own entity" {
+    // `NetPackageModifyCVar` (C2S): stock ProcessPackage IL=26 resolves the id as
+    // an EntityAlive and calls `Buffs.SetCustomVar(name, value, true, op,
+    // false)`. zdtd dropped the arm, so a client-driven cvar never reached the
+    // sim.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    g.clients[ca.slot].entered = true;
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+
+    var body_buf: [128]u8 = undefined;
+    var frame_buf: [256]u8 = undefined;
+    // Own entity: the write lands (add 2.5 to a cvar, twice).
+    var w: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w.writeI32(ca.entity_id);
+    try w.writeString("testCVar");
+    try w.writeF32(2.5);
+    try w.writeI16(2); // add
+    const cbody = w.written();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", cbody));
+    _ = try g.step();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", cbody));
+    _ = try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), g.clients[ca.slot].cvars.get("testCVar"), 0.001);
+
+    // Another player's entity: rejected (no ownership check in stock; zdtd
+    // keeps one client out of another's cvars).
+    var w2: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w2.writeI32(cb.entity_id);
+    try w2.writeString("testCVar");
+    try w2.writeF32(9.0);
+    try w2.writeI16(0); // set
+    _ = try g.step();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w2.written()));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), g.clients[cb.slot].cvars.get("testCVar"), 0.001);
+
+    // A non-player entity: allowed (zombie bleed counters are the stock shape).
+    const zid = g.sim.spawnZombie(g.sim.transform[g.sim.playerByPeer(ca.slot).?].x + 2, g.sim.transform[g.sim.playerByPeer(ca.slot).?].y, g.sim.transform[g.sim.playerByPeer(ca.slot).?].z, 60) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    var w3: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w3.writeI32(zid);
+    try w3.writeString("bleed");
+    try w3.writeF32(3.0);
+    try w3.writeI16(2); // add
+    _ = try g.step();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w3.written()));
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), g.sim.cvarsMut(zs).get("bleed"), 0.001);
+
+    // A bogus operation is refused, and the name survives the packet (the pool
+    // owns it, so the store's slice stays valid).
+    var w4: wire_binary_mod.Writer = .{ .buf = &body_buf };
+    try w4.writeI32(zid);
+    try w4.writeString("bleed");
+    try w4.writeF32(1.0);
+    try w4.writeI16(99);
+    _ = try g.step();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageModifyCVar", w4.written()));
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), g.sim.cvarsMut(zs).get("bleed"), 0.001);
+    std.debug.print("PASS modify-cvar: the client write lands, cross-player does not\n", .{});
+}

@@ -239,3 +239,62 @@ test "parseAddRemoveBuff rejects truncated and oversized input" {
     var tiny: [4]u8 = undefined;
     try std.testing.expectError(error.Overflow, parseAddRemoveBuff(body, &tiny));
 }
+
+/// `NetPackageModifyCVar` (read IL=17 / write IL=21): `m_entityId` i32,
+/// `cvarName` string, `value` f32, `operation` i16 (`CVarOperation`). The
+/// client's `EntityBuffs.SetCustomVar` write for a cvar it owns; the server's
+/// `ProcessPackage` (IL=26) resolves the entity as `EntityAlive` and applies it
+/// with `_netSync = IsServer` (true), which is why a truthy name is net-synced
+/// on the stock server.
+pub const max_cvar_name: usize = 64;
+
+pub const ModifyCVar = struct {
+    entity_id: i32,
+    name: []const u8,
+    value: f32,
+    operation: i16,
+};
+
+/// Parse a C2S `NetPackageModifyCVar` body. `name_buf` receives the cvar name;
+/// the returned slice borrows it. Untrusted input: the name length is capped by
+/// the caller's buffer.
+pub fn parseModifyCVar(body: []const u8, name_buf: []u8) !ModifyCVar {
+    var r: binary.Reader = .{ .data = body };
+    const entity_id = try r.readI32();
+    const name = try r.readString(name_buf);
+    return .{
+        .entity_id = entity_id,
+        .name = name,
+        .value = try r.readF32(),
+        .operation = try r.readI16(),
+    };
+}
+
+/// Build a `NetPackageModifyCVar` body in the stock `write` order (IL=21:
+/// i32 entityId, string cvarName, f32 value, i16 operation, `conv.i2` on the
+/// enum) so a test or a future relay emits exactly what `read` IL=17 consumes.
+pub fn buildModifyCVarBody(buf: []u8, v: ModifyCVar) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(v.entity_id);
+    try w.writeString(v.name);
+    try w.writeF32(v.value);
+    try w.writeI16(v.operation);
+    return w.written();
+}
+
+test "ModifyCVar round-trips and refuses a truncated body" {
+    var buf: [64]u8 = undefined;
+    const body = try buildModifyCVarBody(&buf, .{
+        .entity_id = 77,
+        .name = "%staminaRegen",
+        .value = 2.5,
+        .operation = 2,
+    });
+    var name_buf: [max_cvar_name]u8 = undefined;
+    const v = try parseModifyCVar(body, &name_buf);
+    try std.testing.expectEqual(@as(i32, 77), v.entity_id);
+    try std.testing.expectEqualStrings("%staminaRegen", v.name);
+    try std.testing.expectEqual(@as(f32, 2.5), v.value);
+    try std.testing.expectEqual(@as(i16, 2), v.operation);
+    try std.testing.expectError(error.EndOfStream, parseModifyCVar(body[0 .. body.len - 1], &name_buf));
+}

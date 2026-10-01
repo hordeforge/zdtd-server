@@ -563,6 +563,24 @@ nothing here is already waived. The four gaps the same audit closed are in
       (the Extends walk), so the earlier `pname` arms never matched and a parsed
       catalog carried none of them; `scenario entityclass properties reach the
       sim through the parser` now pins all four.
+- [x] **Client cvar writes were dropped** - closed 2026-10-01:
+      `NetPackageModifyCVar` (C2S `read` IL=17: entityId, cvarName, value,
+      operation) is the client's `EntityBuffs.SetCustomVar` write; stock's
+      `ProcessPackage` IL=26 resolves the id as an `EntityAlive` and applies it
+      with `_netSync = IsServer`. zdtd had the cvar store but no arm, so a
+      client-driven cvar never reached the sim. The body parses (the eight stock
+      `CVarOperation` spellings; anything else is a counted reject), the name is
+      copied into a bounded session pool so the store's slice outlives the packet
+      (256 names of 64 bytes, drops counted), and the write lands on the sender's
+      own player entity or a non-player entity. Stock performs no ownership
+      check; zdtd rejects a write aimed at another player's entity (rule 17,
+      counted) and every legal stock case still applies. Gated by `scenario a
+      client cvar write lands on its own entity` (decisive: dropping the arm
+      leaves the value 0), which also pins the cross-player reject, the
+      non-player case and the bogus-operation reject. Residual: stock
+      net-syncs the write onward when the name is not `.`/`_` prefixed, and zdtd
+      does not push min-event cvar writes to observers (the pre-existing
+      documented non-goal in `ecs/cvars.zig`).
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event

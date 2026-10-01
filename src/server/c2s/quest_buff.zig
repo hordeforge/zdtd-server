@@ -68,6 +68,62 @@ pub fn handleBuff(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
         try self.handleAddRemoveBuff(c, body);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageModifyCVar")) {
+        // Stock ProcessPackage IL=26 resolves the id as an EntityAlive and
+        // applies `Buffs.SetCustomVar(name, value, IsServer=true, op, false)`.
+        // Untrusted: the operation must be one of the eight stock spellings and
+        // the name is copied into the session pool (the store holds slices);
+        // there is no ownership check in stock, so zdtd allows the sender's own
+        // player entity plus any non-player entity and rejects another player's
+        // (rule 17) rather than letting one client rewrite another's cvars.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var name_buf: [packages.stock_buff.max_cvar_name]u8 = undefined;
+        const v = packages.stock_buff.parseModifyCVar(body, &name_buf) catch {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        const op: ecs.cvars.Operation = switch (v.operation) {
+            0 => .set,
+            1 => .setvalue,
+            2 => .add,
+            3 => .subtract,
+            4 => .multiply,
+            5 => .divide,
+            6 => .percent_add,
+            7 => .percent_subtract,
+            else => {
+                self.harness.counters.inc(.c2s_rejects);
+                return true;
+            },
+        };
+        const s = self.sim.slotOfNetId(v.entity_id) orelse {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        if (!self.sim.alive[s]) {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        }
+        if (self.sim.kind[s] == .player and v.entity_id != c.entity_id) {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        }
+        const owned = self.internCVarName(v.name) orelse {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        if (self.sim.kind[s] == .player) {
+            if (self.sim.playerByPeer(c.slot)) |ps| {
+                if (ps == s) _ = self.clients[c.slot].cvars.apply(owned, op, v.value);
+            }
+        } else {
+            _ = self.sim.cvarsMut(s).apply(owned, op, v.value);
+        }
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageQuestEvent")) {
         try self.handleQuestEvent(peer, c, body);
         return true;

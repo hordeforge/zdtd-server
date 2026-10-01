@@ -105,6 +105,11 @@ const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const collectors_mod = @import("../world/collectors.zig");
 const block_ticker_mod = @import("game/block_ticker.zig");
+
+/// Client-supplied CVar names kept for the session (the store's slices must
+/// outlive the packet): 256 names of at most 64 bytes, no heap.
+pub const max_interned_cvar_names: usize = 256;
+pub const max_cvar_name_len: usize = 64;
 const doors_mod = @import("../world/doors.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
@@ -451,6 +456,12 @@ pub const Game = struct {
     collectors: collectors_mod.Store = .{},
     /// `TEFeatureDoor`/`TEFeatureLockable` state (doors, gates, hatches).
     doors: doors_mod.Store = .{},
+    /// Interned client-supplied CVar names (`NetPackageModifyCVar`): the cvar
+    /// store holds slices, and a packet's name does not outlive the frame, so a
+    /// bounded pool owns them for the session (no heap on the packet path).
+    cvar_name_pool: [max_interned_cvar_names][max_cvar_name_len]u8 = @splat(@splat(0)),
+    cvar_name_pool_n: usize = 0,
+    cvar_name_pool_dropped: u32 = 0,
     /// Armed falling trees (client-requested topples).
     falling_trees: [block_ticker_mod.max_falling_trees]block_ticker_mod.FallingTree = @splat(.{}),
     falling_trees_n: usize = 0,
@@ -2881,6 +2892,30 @@ pub const Game = struct {
     /// the world clock, so the pass cadence does not change the output.
     pub fn tickCollectors(self: *Game) void {
         return game_craft.tickCollectors(self);
+    }
+
+    /// Copy a client-supplied cvar name into the session pool so the store's
+    /// slice stays valid past the packet. Null when the pool is full or the
+    /// name is empty/oversized (fail closed, counted).
+    pub fn internCVarName(self: *Game, name: []const u8) ?[]const u8 {
+        if (name.len == 0 or name.len > max_cvar_name_len) {
+            self.cvar_name_pool_dropped += 1;
+            return null;
+        }
+        var i: usize = 0;
+        while (i < self.cvar_name_pool_n) : (i += 1) {
+            const have = std.mem.sliceTo(&self.cvar_name_pool[i], 0);
+            if (std.ascii.eqlIgnoreCase(have, name)) return have;
+        }
+        if (self.cvar_name_pool_n >= self.cvar_name_pool.len) {
+            self.cvar_name_pool_dropped += 1;
+            return null;
+        }
+        const slot = &self.cvar_name_pool[self.cvar_name_pool_n];
+        @memcpy(slot[0..name.len], name);
+        slot[name.len] = 0;
+        self.cvar_name_pool_n += 1;
+        return slot[0..name.len];
     }
 
     /// Arm a client-requested falling tree (chopped trunk topples and comes
