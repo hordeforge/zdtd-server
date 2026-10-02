@@ -152,6 +152,13 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `SkillGainRate` (int 1..5, default 1): every Nth level grants
+    /// skill points (`Progression::AddLevelExpRecursive` IL_00DF-00EA
+    /// `Level % SkillPointsGainRate`).
+    skill_gain_rate: u8 = 1,
+    /// Sandbox `SkillPointsPerLevel` (int, default 1): the per-level award,
+    /// overriding progression.xml's `skill_points_per_level`.
+    skill_points_per_level: i32 = -1,
     /// Sandbox `InfectionChance` (float, default 1.0): scales the immunity
     /// roll against an infection-tagged buff (`EntityBuffs.HasImmunity`
     /// IL_0064-008B: 0 forces full immunity, else `resist * (2 - chance)`).
@@ -470,6 +477,10 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "SkillGainRate")) {
+            cfg.skill_gain_rate = sandboxClampU8(sandbox.valueI(o, set, g.index), 1, 5);
+        } else if (std.mem.eql(u8, o.name, "SkillPointsPerLevel")) {
+            cfg.skill_points_per_level = @max(0, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "InfectionChance")) {
             cfg.infection_chance = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "TreasureMapChance")) {
@@ -704,6 +715,10 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "SkillGainRate")) |v| cfg.skill_gain_rate = clampU8Named("SkillGainRate", v, 1, 5, cfg.skill_gain_rate);
+    if (prop(raw, "SkillPointsPerLevel")) |v| {
+        if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.skill_points_per_level = @max(0, n);
+    }
     if (prop(raw, "InfectionChance")) |v| {
         if (xml.parseF32(v)) |f| cfg.infection_chance = std.math.clamp(f, 0, 10);
     }

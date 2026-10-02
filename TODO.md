@@ -885,6 +885,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       clamped 0..10). Gated by `scenario the infection chance retunes the immunity
       roll`: the infection buff lands at chance 1 and is refused at chance 0,
       while a bleeding buff still lands (decisive: forcing the retune fails it).
+- [x] **The skill gain rate and per-level award options did nothing** - closed
+      2026-10-02: `Progression::AddLevelExpRecursive` (IL_00DF-0137) grants skill
+      points only when `Level % SkillPointsGainRate == 0` (sandbox `SkillGainRate`
+      id 116, default 1) and the award is the sandbox `SkillPointsPerLevel` (id
+      117) when set, else progression.xml's `skill_points_per_level`, scaled by
+      `SkillPointMultiplier ^ Level` when that XML multiplier is non-zero (the
+      2.147484e9 clamp included). zdtd granted the flat XML award on EVERY level
+      and never parsed `skill_point_multiplier`, so a server at `SkillGainRate=5`
+      handed out five times the intended points and the multiplier curve was
+      ignored. `config.skill_gain_rate` / `config.skill_points_per_level`
+      (sandbox and serverconfig arms) ride `InitOptions` to `Game`, and
+      `progression.xml`'s `skill_point_multiplier` is parsed. Gated by `scenario
+      the skill point options set the level-up award`: with rate 5 the levels 2-4
+      ups grant nothing and level 5 grants the award, and with the rate 1 and the
+      multiplier 2 the level-6 and level-7 ups grant 64 and 128 (decisive: opening
+      the rate gate grants on every level).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

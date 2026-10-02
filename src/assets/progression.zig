@@ -32,6 +32,11 @@ pub const LevelCurve = struct {
     exp_to_level: u32 = 10000,
     experience_multiplier: f32 = 1.05,
     skill_points_per_level: u16 = 1,
+    /// progression.xml root `skill_point_multiplier` (stock
+    /// `Progression.SkillPointMultiplier`, default 0). 0 keeps the flat grant;
+    /// otherwise the level-up grant is `SkillPointsPerLevel * mult^level`
+    /// (`Progression::AddLevelExpRecursive` IL_0119-0135).
+    skill_point_multiplier: f32 = 0,
     clamp_exp_cost_at_level: u16 = 60,
     loaded: bool = false,
 
@@ -216,6 +221,7 @@ fn parseCurve(clean: []const u8) LevelCurve {
     if (xml.attr(clean, li, "exp_to_level")) |v| c.exp_to_level = std.fmt.parseInt(u32, v, 10) catch c.exp_to_level;
     if (xml.attr(clean, li, "experience_multiplier")) |v| c.experience_multiplier = std.fmt.parseFloat(f32, v) catch c.experience_multiplier;
     if (xml.attr(clean, li, "skill_points_per_level")) |v| c.skill_points_per_level = std.fmt.parseInt(u16, v, 10) catch c.skill_points_per_level;
+    if (xml.attr(clean, li, "skill_point_multiplier")) |v| c.skill_point_multiplier = xml.parseF32(v) orelse 0;
     if (xml.attr(clean, li, "clamp_exp_cost_at_level")) |v| c.clamp_exp_cost_at_level = std.fmt.parseInt(u16, v, 10) catch c.clamp_exp_cost_at_level;
     c.loaded = true;
     return c;

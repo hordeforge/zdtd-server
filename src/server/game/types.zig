@@ -376,6 +376,10 @@ pub const InitOptions = struct {
     treasure_map_chance: f32 = 1.0,
     /// Sandbox `InfectionChance` (the infection immunity scale).
     infection_chance: f32 = 1.0,
+    /// Sandbox `SkillGainRate`: every Nth level grants skill points.
+    skill_gain_rate: u8 = 1,
+    /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
+    skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

@@ -365,6 +365,10 @@ pub const Game = struct {
     /// Sandbox `InfectionChance`: scales the immunity roll against an
     /// infection-tagged buff.
     infection_chance: f32 = 1.0,
+    /// Sandbox `SkillGainRate`: every Nth level grants skill points.
+    skill_gain_rate: u8 = 1,
+    /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
+    skill_points_per_level: i32 = -1,
 
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -906,6 +910,8 @@ pub const Game = struct {
         self.loot_max_tier = opts.loot_max_tier;
         self.treasure_map_chance = opts.treasure_map_chance;
         self.infection_chance = opts.infection_chance;
+        self.skill_gain_rate = opts.skill_gain_rate;
+        self.skill_points_per_level = opts.skill_points_per_level;
         self.sim.loot_bag_chance = opts.loot_bag_chance;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;

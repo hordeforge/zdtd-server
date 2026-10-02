@@ -80,10 +80,23 @@ fn awardXpTyped(self: *Game, slot: usize, base: u64, notify_type: ?i16) void {
         if (c.xp < next_threshold) break;
         c.level += 1;
         next_threshold += self.progression.expForLevel(c.level);
-        // Level-up grants skill points (progression.xml skill_points_per_level;
-        // RE progression.md: LevelUp -> GrantPoints: player level += 1, skill
-        // points += award).
-        c.skill_points +|= self.progression.skill_points_per_level;
+        // Level-up grants skill points (`Progression::AddLevelExpRecursive`
+        // IL_00DF-0137): only when `Level % SkillPointsGainRate` is 0 (the
+        // sandbox `SkillGainRate`, default 1), and the award is the sandbox
+        // `SkillPointsPerLevel` when set (else progression.xml's value),
+        // multiplied by `SkillPointMultiplier ^ Level` when that is non-zero.
+        if (self.skill_gain_rate > 0 and c.level % @as(u16, self.skill_gain_rate) == 0) {
+            const per: i32 = if (self.skill_points_per_level >= 0)
+                self.skill_points_per_level
+            else
+                @intCast(self.progression.skill_points_per_level);
+            const mult = self.progression.skill_point_multiplier;
+            const award: i64 = if (mult == 0 or per <= 0)
+                per
+            else
+                @intFromFloat(@min(@as(f64, @floatFromInt(per)) * std.math.pow(f64, @floatCast(mult), @floatFromInt(c.level)), 2147483647.0));
+            if (award > 0) c.skill_points +|= @intCast(@min(award, 65535));
+        }
         // Level-up refreshes the EntityNetworkStats snapshot the peers hold:
         // stock's NED dirty path pushes PlayerStats when progression changes.
         broadcastPlayerStats(self, slot);

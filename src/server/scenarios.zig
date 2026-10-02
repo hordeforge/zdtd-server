@@ -23570,3 +23570,59 @@ test "scenario the infection chance retunes the immunity roll" {
     try std.testing.expect(g.addCatalogBuff(player_id, ps, "buffBleeding", player_id));
     std.debug.print("PASS infection-chance: InfectionChance 0 blocks the infection buff\n", .{});
 }
+
+test "scenario the skill point options set the level-up award" {
+    // `Progression::AddLevelExpRecursive` IL_00DF-0137: skill points are granted
+    // only when `Level % SkillPointsGainRate` is 0 (sandbox `SkillGainRate`,
+    // default 1), and the award is the sandbox `SkillPointsPerLevel` (else
+    // progression.xml's) times `SkillPointMultiplier ^ Level` when that is set.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const player_mod = @import("game/player.zig");
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const cxp = &g.clients[c.slot];
+    cxp.level = 1;
+    cxp.xp = 0;
+
+    // Gain rate 5: the level 2..4 ups grant nothing, level 5 grants.
+    g.skill_gain_rate = 5;
+    g.skill_points_per_level = 2;
+    g.progression.skill_point_multiplier = 0;
+    const xpTo = struct {
+        fn f(g2: *game_mod.Game, from_level: u16, to_level: u16) u64 {
+            var sum: u64 = 0;
+            var l = from_level;
+            while (l < to_level) : (l += 1) sum += g2.progression.expForLevel(l);
+            return sum;
+        }
+    }.f;
+    const before = cxp.skill_points;
+    // Levels 2..4 are not multiples of 5: no award.
+    player_mod.awardXp(g, c.slot, xpTo(g, 1, 4));
+    try std.testing.expectEqual(@as(u32, 4), cxp.level);
+    try std.testing.expectEqual(before, cxp.skill_points);
+    // The level-5 up is: the sandbox award lands.
+    player_mod.awardXp(g, c.slot, xpTo(g, 4, 5));
+    try std.testing.expectEqual(@as(u32, 5), cxp.level);
+    try std.testing.expectEqual(before + 2, cxp.skill_points);
+
+    // Rate 1 with a multiplier: every level grants `per * mult^level`, so the
+    // level-6 up grants 2^6 = 64 and the level-7 up 2^7 = 128.
+    g.skill_gain_rate = 1;
+    g.skill_points_per_level = 1;
+    g.progression.skill_point_multiplier = 2.0;
+    const before2 = cxp.skill_points;
+    player_mod.awardXp(g, c.slot, xpTo(g, 5, 7));
+    try std.testing.expectEqual(@as(u32, 7), cxp.level);
+    try std.testing.expectEqual(before2 + 64 + 128, cxp.skill_points);
+    std.debug.print("PASS skill-points: SkillGainRate and the multiplier gate the award\n", .{});
+}
