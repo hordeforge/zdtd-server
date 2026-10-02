@@ -1625,4 +1625,21 @@ test "the player Ctx leaves IsIndoors unknown rather than false" {
     pctx.init(g, c, ps);
     const ctx = pctx.build(g, c, ps, &g.sim.health[ps], groups);
     try std.testing.expectEqual(@as(?bool, null), ctx.is_indoors);
+    // The other "cannot know" gates in the same list are NOT fabricated, checked
+    // against their own IL: `IsSheltered` casts the target to
+    // `EntityPlayerLocal` (IL_0011-0018) and answers false when the cast fails,
+    // so false is the dedi's stock answer; `IsLocalPlayer`/`IsFPV`/`IsSDCS` read
+    // the local player or its Unity state, which a dedi does not have;
+    // `IsAlly` is `IsFriendOfLocalPlayer`, false without a local player;
+    // `HasParticle` (client FX) and `HasAttachedPrefab` (Transform parent path,
+    // IL_0010-0015) are Unity-side; `IsOnLadder` is `Entity.IsInElevator()`, and
+    // no elevator exists in this sim, so false is the current truth.
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_sheltered);
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_local_player);
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_fpv);
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_sdcs);
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_ally);
+    try std.testing.expectEqual(@as(?bool, false), ctx.has_particle);
+    try std.testing.expectEqual(@as(?bool, false), ctx.has_attached_prefab);
+    try std.testing.expectEqual(@as(?bool, false), ctx.is_on_ladder);
 }
