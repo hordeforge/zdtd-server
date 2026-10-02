@@ -23473,3 +23473,58 @@ test "scenario the loot tier cap clamps a rolled quality" {
     try std.testing.expectEqual(@as(u8, 6), quality_of(g, bs));
     std.debug.print("PASS loot-tier: LootMaxTier clamps the rolled quality\n", .{});
 }
+
+test "scenario the treasure map chance scales a tagged entry" {
+    // `LootContainer.GetSandboxProb` (IL=9) returns the sandbox
+    // `TreasureMapChance` for an item tagged `treasureMap`, and
+    // `getProbability` (IL_00B3) multiplies the entry's probability by it, so 0
+    // removes treasure maps from loot and a higher value makes them likelier.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // One container with a 0.5 treasure-map entry and a 0.5 plain entry.
+    var conts = [_]assets_loot.LootContainer{
+        .{ .name = "mapTest", .size_x = 4, .size_y = 3, .pick_min = 2, .pick_max = 2, .entry_n = 2 },
+    };
+    conts[0].entries[0] = .{ .name = "treasureMapNote", .prob = 0.5, .count_min = 1, .count_max = 1 };
+    conts[0].entries[1] = .{ .name = "plainLoot", .prob = 0.5, .count_min = 1, .count_max = 1 };
+    g.loot = .{ .containers = &conts, .source = .xml };
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 800, .name = "treasureMapNote", .tags = "treasureMap" },
+        .{ .id = 801, .name = "plainLoot" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+    try std.testing.expect(game_mod.Game.isTreasureMapItem(g, "treasureMapNote"));
+    try std.testing.expect(!game_mod.Game.isTreasureMapItem(g, "plainLoot"));
+
+    const bag_nid = g.sim.spawnLootBag(30, 70, 30, 1, 1).?;
+    const bs = g.sim.slotOfNetId(bag_nid).?;
+    const maps = struct {
+        fn f(g2: *game_mod.Game, s: ecs.Slot) usize {
+            var n: usize = 0;
+            for (g2.sim.inventory[s].slots) |sl| {
+                if (sl.item_id == 800 and sl.count > 0) n += 1;
+            }
+            return n;
+        }
+    }.f;
+
+    // Option 0: 0.5 * 0 = 0, so the tagged entry never spawns (the plain one
+    // still can).
+    g.treasure_map_chance = 0;
+    g.fillLootBagFromTable(bag_nid, "mapTest", 11, 1);
+    try std.testing.expectEqual(@as(usize, 0), maps(g, bs));
+
+    // Option 5: 0.5 * 5 >= 1, so it always spawns.
+    g.sim.inventory[bs].clear();
+    g.treasure_map_chance = 5.0;
+    g.fillLootBagFromTable(bag_nid, "mapTest", 11, 1);
+    try std.testing.expectEqual(@as(usize, 1), maps(g, bs));
+    std.debug.print("PASS treasure-map: TreasureMapChance scales the tagged entry\n", .{});
+}

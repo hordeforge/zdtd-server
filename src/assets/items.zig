@@ -23,7 +23,8 @@ pub const max_item_passives_total: usize = 8192;
 pub const max_triggered_per_item: usize = 64;
 pub const max_item_triggered_total: usize = 8192;
 
-const tagsIntersect = item_parse.tagsIntersect;
+/// Tags helper shared with the loot/entity paths (a comma-list intersection).
+pub const tagsIntersect = item_parse.tagsIntersect;
 /// Matches Block.ItemsStartHere (MAX_BLOCKS). Catalog constant; wire stock_inv
 /// keeps the same pin for encode. Assets must not import wire for this alone.
 pub const items_start_here: i32 = 65536;

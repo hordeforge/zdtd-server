@@ -359,6 +359,9 @@ pub const Game = struct {
     max_tech_type: u8 = 4,
     /// Sandbox `LootMaxTier`: the loot quality tier ceiling (-1 = no cap).
     loot_max_tier: i32 = 6,
+    /// Sandbox `TreasureMapChance`: the probability scale for loot entries whose
+    /// item carries the `treasureMap` tag.
+    treasure_map_chance: f32 = 1.0,
 
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -898,6 +901,7 @@ pub const Game = struct {
         self.sim.enemy_spawn_mode = opts.enemy_spawn_mode;
         self.max_tech_type = opts.max_tech_type;
         self.loot_max_tier = opts.loot_max_tier;
+        self.treasure_map_chance = opts.treasure_map_chance;
         self.sim.loot_bag_chance = opts.loot_bag_chance;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
@@ -2425,8 +2429,16 @@ pub const Game = struct {
     pub fn takeInvToken(self: *Game, c: *Client) bool {
         return game_rate_limits.takeInvToken(self, c);
     }
-    /// The tick's sandbox harvest scales (`GameUtils.HarvestOnAttack`
-    /// IL_0341-0384 reads the four statics the sandbox sets).
+    /// `LootContainer::GetSandboxProb`'s tag test: does the looted item carry
+    /// the `treasureMap` tag (`LootContainer.treasureTags` IL_0179)? A function
+    /// value for `LootGateCtx.treasure_prob`, so it takes a context pointer
+    /// rather than a method receiver.
+    pub fn isTreasureMapItem(ctx: ?*anyopaque, item_name: []const u8) bool {
+        const self: *const Game = @ptrCast(@alignCast(ctx.?));
+        const d = self.items.byName(item_name) orelse return false;
+        return assets_items.tagsIntersect("treasureMap", d.tags);
+    }
+
     /// `LootContainer` IL_029D: clamp a rolled loot quality to the sandbox
     /// `LootMaxTier` (stock clamps the ItemValue max, then the min to it; a
     /// single rolled quality collapses both to this clamp).

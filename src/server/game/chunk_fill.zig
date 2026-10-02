@@ -526,7 +526,13 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
             };
         }
     }
+    const treasure_ctx: assets_loot.TreasureProb = .{
+        .chance = self.treasure_map_chance,
+        .is_treasure = game_mod.Game.isTreasureMapItem,
+        .ctx = self,
+    };
     const gate_ctx: assets_loot.LootGateCtx = .{
+        .treasure_prob = treasure_ctx,
         .biome_name = self.world.biome_layers_table.nameById(biome_id),
         .player = player_ctx,
         .buffs = buff_sink,

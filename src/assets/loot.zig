@@ -208,11 +208,25 @@ pub const QtyScale = struct {
     scale: *const fn (?*anyopaque, item_name: []const u8, entry_tags: []const u8, base: u16) u16,
 };
 
+/// `LootGateCtx.treasure_prob`: the sandbox `TreasureMapChance` multiplier plus
+/// the caller's `treasureMap` tag test.
+pub const TreasureProb = struct {
+    chance: f32,
+    is_treasure: *const fn (ctx: ?*anyopaque, item_name: []const u8) bool,
+    ctx: ?*anyopaque,
+};
+
 pub const LootGateCtx = struct {
     biome_name: ?[]const u8 = null,
     player: ?requirements.Ctx = null,
     /// Reports the `buffs=` of every entry that actually spawned.
     buffs: ?LootBuffSink = null,
+    /// `LootContainer.GetSandboxProb` (IL=9) + `getProbability` IL_00B3: an
+    /// entry whose ITEM carries the `treasureMap` tag has its probability
+    /// multiplied by the sandbox `TreasureMapChance`. The item tag lives in the
+    /// item table, which this module does not own, so the caller supplies the
+    /// predicate.
+    treasure_prob: ?TreasureProb = null,
     /// Scales an entry's probability by its `tags=` list (stock
     /// `getProbability` -> `EffectManager.GetValue(79, ..., entry.tags)`, the
     /// player's LootProb passives; 128 stock rows). Null = no scaling.
@@ -523,6 +537,15 @@ pub const LootTable = struct {
         return cnt;
     }
 
+    /// `LootContainer.GetSandboxProb` (IL=9): the `TreasureMapChance`
+    /// multiplier for an entry whose item carries the `treasureMap` tag, 1.0
+    /// otherwise.
+    fn sandboxProb(e: LootEntry, ctx: LootGateCtx) f32 {
+        const tp = ctx.treasure_prob orelse return 1.0;
+        if (!tp.is_treasure(tp.ctx, e.name)) return 1.0;
+        return tp.chance;
+    }
+
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32, ctx: LootGateCtx) bool {
         var p = self.entryProb(e, loot_stage);
         // The entry's own `tags=` are the query set for the player's LootProb
@@ -530,6 +553,9 @@ pub const LootTable = struct {
         if (ctx.prob_scale) |ps| {
             if (e.tags.len > 0) p = ps.scale(ps.ctx, e.tags, p);
         }
+        // Stock applies the sandbox probability last, on both the tagged and
+        // untagged branches (`getProbability` IL_00B3-00C4 / IL_0171).
+        p *= sandboxProb(e, ctx);
         // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
         // the NaN→int conversion in `@round` traps; fail closed to match the C#
         // unchecked cast (NaN rounds to 0, i.e. never picked).
@@ -632,14 +658,14 @@ pub const LootTable = struct {
             var total: u32 = 0;
             var e: u8 = 0;
             while (e < g.entry_n) : (e += 1) {
-                total +|= pickWeight(g.entries[e].prob);
+                total +|= pickWeight(g.entries[e].prob * sandboxProb(g.entries[e], ctx));
             }
             if (total == 0) break;
             const roll = s % total;
             var chosen: u8 = 0;
             var acc: u32 = 0;
             while (chosen < g.entry_n) : (chosen += 1) {
-                acc +|= pickWeight(g.entries[chosen].prob);
+                acc +|= pickWeight(g.entries[chosen].prob * sandboxProb(g.entries[chosen], ctx));
                 if (roll < acc) break;
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
@@ -869,7 +895,7 @@ pub const LootTable = struct {
     /// weight 0, unpickable.
     fn groupEntryWeight(self: *const LootTable, e: LootEntry, loot_stage: i32, ctx: LootGateCtx) u32 {
         if (e.force_prob) return 1;
-        var ep = self.entryProb(e, loot_stage);
+        var ep = self.entryProb(e, loot_stage) * sandboxProb(e, ctx);
         if (ctx.prob_scale) |ps| {
             if (e.tags.len > 0) ep = ps.scale(ps.ctx, e.tags, ep);
         }

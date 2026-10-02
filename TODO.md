@@ -857,6 +857,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       before `rollLootDrop`. Gated by `loot bag chance scales the drop
       probability`: a 0.5 class drops nothing at chance 0 and always drops at
       chance 2 (decisive: dropping the multiplier fails it).
+- [x] **The `TreasureMapChance` sandbox option did nothing** - closed
+      2026-10-02: `LootContainer.GetSandboxProb` (IL=9) returns the sandbox
+      `TreasureMapChance` static for an item whose tags intersect `treasureTags`
+      (`treasureMap`, IL_0179) and 1 otherwise, and `getProbability`
+      (IL_00B3 / IL_0171) multiplies the entry's probability by it - both in the
+      gate branch and in the container weight sum. zdtd scored treasure-map
+      entries at their authored probability, so a server with
+      `TreasureMapChance=0` still handed them out and a raised value did nothing.
+      `LootGateCtx` now carries a `treasure_prob` sink (`TreasureProb`: chance +
+      the caller's tag test, like the existing prob/qty sinks) and
+      `sandboxProb` folds it into `probGate`, the group entry weight and the
+      container pick weight; `Game.isTreasureMapItem` supplies the tag test and
+      both the bag fill and the container fill pass the ctx. Gated by `scenario
+      the treasure map chance scales a tagged entry`: a 0.5 tagged entry never
+      spawns at 0 and always at 5 while an untagged 0.5 entry is unaffected
+      (decisive: returning 1.0 from the fold leaves the map in the bag).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -372,6 +372,8 @@ pub const InitOptions = struct {
     loot_max_tier: i32 = 6,
     /// Sandbox `LootBagChance` (the corpse loot-bag probability multiplier).
     loot_bag_chance: f32 = 1.0,
+    /// Sandbox `TreasureMapChance` (the treasure-map entry probability scale).
+    treasure_map_chance: f32 = 1.0,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,
