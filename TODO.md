@@ -1202,7 +1202,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       a machine either. Parses through the sandbox and serverconfig arms. Gated by
       `VendingEnabled gates the vending lock target` (a machine position resolves
       with the option on, an empty position stays null, the machine position becomes
-      null with it off; decisive: disabling the check fails it).
+      null with it off; decisive: disabling the check fails it). The
+      `NetPackageTraderData` post-trade copy resolves its machine through the same
+      helper, so a modified client cannot trade with a disabled machine through that
+      path either. While verifying this, the purchase path itself was confirmed
+      present, not a gap: stock's client sends the post-trade `TraderData` and
+      `applyTraderDataCopyFrom` applies it (loot-economy.md §5), so vending and
+      trader buys both work without the short trade body.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

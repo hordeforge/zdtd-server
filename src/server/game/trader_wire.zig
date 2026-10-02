@@ -8,6 +8,7 @@ const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("replicate_te.zig");
+const game_misc_lock = @import("../c2s/misc_lock.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const vending_mod = @import("../../world/vending.zig");
 const plugin_compose = @import("plugin_compose.zig");
@@ -161,6 +162,10 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
         return;
     }
 
+    // Sandbox `VendingEnabled` off: the machine is not a vending target, so a
+    // post-trade copy for its position is refused the same way the lock open is
+    // (`misc_lock.vendingTargetAt`).
+    _ = game_misc_lock.vendingTargetAt(self, td.te_x, td.te_y, td.te_z) orelse return;
     const vm = self.vending.get(.{ .x = td.te_x, .y = td.te_y, .z = td.te_z }) orelse return;
     if (!inTradeReach(self, c, @floatFromInt(td.te_x), @floatFromInt(td.te_y), @floatFromInt(td.te_z))) return;
     // Atomic: validate whole batch, plan mutations, then apply. Record desired
