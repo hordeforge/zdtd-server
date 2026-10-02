@@ -8,6 +8,7 @@
 //! VM fold and equip sync stay in tick.zig.
 
 const std = @import("std");
+const assets_item_parse = @import("../../assets/item_parse.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -582,7 +583,14 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
     // Deterministic draw off entity id + buff id (same hash-roll policy as
     // the dismember/loot legs); a zero resist never refuses. The query tag
     // is the buff's own name (NameTag = lowercased buff name at parse).
-    const resist = buffResist(self, ps, def.name);
+    var resist = buffResist(self, ps, def.name);
+    // `EntityBuffs.HasImmunity` IL_0064-008B: for an infection-tagged buff the
+    // sandbox `InfectionChance` retunes the resist - 0 forces full immunity
+    // (never catch), otherwise `resist * (2 - chance)`.
+    if (assets_item_parse.tagsIntersect("infection", def.tags)) {
+        const chance = self.infection_chance;
+        resist = if (chance == 0) 1.0 else resist * (2.0 - chance);
+    }
     if (resist > 0) {
         var h: u64 = @bitCast(@as(i64, entity_id));
         h = h *% 1103515245 +% def_id +% 12345;

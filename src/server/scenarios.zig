@@ -23528,3 +23528,45 @@ test "scenario the treasure map chance scales a tagged entry" {
     try std.testing.expectEqual(@as(usize, 1), maps(g, bs));
     std.debug.print("PASS treasure-map: TreasureMapChance scales the tagged entry\n", .{});
 }
+
+test "scenario the infection chance retunes the immunity roll" {
+    // `EntityBuffs.HasImmunity` IL_0064-008B: for an infection-tagged buff the
+    // sandbox `InfectionChance` retunes the resist roll - 0 forces full immunity
+    // (the infection never lands), otherwise `resist * (2 - chance)`. A buff
+    // without the tag is unaffected.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // The buff catalog: one infection-tagged buff and one plain buff (the
+    // resist query is the buff's own name tag, so no passives are needed).
+    const bdefs = [_]assets_buffs.BuffDef{
+        .{ .name = "buffInfectionCatch", .tags = "infection" },
+        .{ .name = "buffBleeding", .tags = "bleeding" },
+    };
+    g.buffs = .{ .defs = &bdefs };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const player_id = g.sim.network_id[ps].id;
+
+    // Chance 1 (default): the immunity roll is the plain resist, here 0, so the
+    // infection lands.
+    g.infection_chance = 1.0;
+    try std.testing.expect(g.addCatalogBuff(player_id, ps, "buffInfectionCatch", player_id));
+
+    // Chance 0: full immunity, the infection never lands. The non-infection
+    // buff still lands.
+    g.infection_chance = 0;
+    g.sim.buffsMut(ps).* = .{};
+    try std.testing.expect(!g.addCatalogBuff(player_id, ps, "buffInfectionCatch", player_id));
+    try std.testing.expect(g.addCatalogBuff(player_id, ps, "buffBleeding", player_id));
+    std.debug.print("PASS infection-chance: InfectionChance 0 blocks the infection buff\n", .{});
+}

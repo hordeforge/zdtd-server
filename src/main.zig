@@ -780,6 +780,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .loot_max_tier = cfg.loot_max_tier,
         .loot_bag_chance = cfg.loot_bag_chance,
         .treasure_map_chance = cfg.treasure_map_chance,
+        .infection_chance = cfg.infection_chance,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
         .player_killing_mode = cfg.player_killing_mode,

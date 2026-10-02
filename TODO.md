@@ -873,6 +873,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       the treasure map chance scales a tagged entry`: a 0.5 tagged entry never
       spawns at 0 and always at 5 while an untagged 0.5 entry is unaffected
       (decisive: returning 1.0 from the fold leaves the map in the bag).
+- [x] **The `InfectionChance` sandbox option did nothing** - closed 2026-10-02:
+      option 160 (float, default 1.0) retunes the immunity roll of an
+      infection-tagged incoming buff (`EntityBuffs.HasImmunity` IL_0064-008B:
+      `InfectionChance == 0` forces full immunity, i.e. the infection never
+      lands; otherwise `resist * (2 - InfectionChance)`). zdtd ran the plain
+      `BuffResistance` (passive 197) roll, so a server with `InfectionChance=0`
+      still infected players. `addCatalogBuff` now applies the rule when the buff
+      carries the `infection` tag, through `config.infection_chance` ->
+      `InitOptions` -> `Game.infection_chance` (sandbox and serverconfig arms,
+      clamped 0..10). Gated by `scenario the infection chance retunes the immunity
+      roll`: the infection buff lands at chance 1 and is refused at chance 0,
+      while a bleeding buff still lands (decisive: forcing the retune fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

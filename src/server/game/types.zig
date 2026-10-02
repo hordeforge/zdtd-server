@@ -374,6 +374,8 @@ pub const InitOptions = struct {
     loot_bag_chance: f32 = 1.0,
     /// Sandbox `TreasureMapChance` (the treasure-map entry probability scale).
     treasure_map_chance: f32 = 1.0,
+    /// Sandbox `InfectionChance` (the infection immunity scale).
+    infection_chance: f32 = 1.0,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

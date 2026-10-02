@@ -152,6 +152,10 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `InfectionChance` (float, default 1.0): scales the immunity
+    /// roll against an infection-tagged buff (`EntityBuffs.HasImmunity`
+    /// IL_0064-008B: 0 forces full immunity, else `resist * (2 - chance)`).
+    infection_chance: f32 = 1.0,
     /// Sandbox `TreasureMapChance` (float, default 1.0): the probability
     /// multiplier for loot entries whose item carries the `treasureMap` tag
     /// (`LootContainer.GetSandboxProb` IL=9, applied in `getProbability`).
@@ -466,6 +470,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "InfectionChance")) {
+            cfg.infection_chance = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "TreasureMapChance")) {
             cfg.treasure_map_chance = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "LootBagChance")) {
@@ -698,6 +704,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "InfectionChance")) |v| {
+        if (xml.parseF32(v)) |f| cfg.infection_chance = std.math.clamp(f, 0, 10);
+    }
     if (prop(raw, "TreasureMapChance")) |v| {
         if (xml.parseF32(v)) |f| cfg.treasure_map_chance = std.math.clamp(f, 0, 100);
     }

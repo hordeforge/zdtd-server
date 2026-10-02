@@ -362,6 +362,9 @@ pub const Game = struct {
     /// Sandbox `TreasureMapChance`: the probability scale for loot entries whose
     /// item carries the `treasureMap` tag.
     treasure_map_chance: f32 = 1.0,
+    /// Sandbox `InfectionChance`: scales the immunity roll against an
+    /// infection-tagged buff.
+    infection_chance: f32 = 1.0,
 
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -902,6 +905,7 @@ pub const Game = struct {
         self.max_tech_type = opts.max_tech_type;
         self.loot_max_tier = opts.loot_max_tier;
         self.treasure_map_chance = opts.treasure_map_chance;
+        self.infection_chance = opts.infection_chance;
         self.sim.loot_bag_chance = opts.loot_bag_chance;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
