@@ -1056,6 +1056,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       inheritance stock gives it) and `item_parse.isLimitedItem` mirrors
       `ItemClass.IsLimited`, so (2) keeps a `Limited`-group output craftable and
       refuses the rest; the same unit test asserts both halves.
+- [x] **The `IntroQuestEnabled` sandbox option did nothing** - closed
+      2026-10-02: option 119 (yes/no, default on) gates a quest whose
+      `FilterTags` carry `introquest` (`DialogRequirementQuestsAvailable`
+      IL_00AC-00B8, tag literal IL_0000-000A). The round-115 tag machinery carries
+      it: `QuestTag.introquest` folds from the quest XML `tags=` attribute and
+      `sandboxAllowsQuest` drops the entry while the option is off, so a server
+      that disables intro quests stops offering them. Gated by the
+      `sandbox buried/poi quest gates` unit test, which now also asserts the
+      intro leg (decisive: dropping the check offers the intro quest).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

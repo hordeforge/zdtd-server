@@ -272,8 +272,10 @@ pub fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
 pub fn sandboxAllowsQuest(self: *const Game, d: ecs.quest.QuestDef) bool {
     const buried = @intFromEnum(ecs.quest.QuestTag.buried);
     const poi = @intFromEnum(ecs.quest.QuestTag.poi);
+    const introquest = @intFromEnum(ecs.quest.QuestTag.introquest);
     if (!self.buried_quests_enabled and (d.quest_tags & buried) != 0) return false;
     if (!self.poi_quests_enabled and (d.quest_tags & poi) != 0) return false;
+    if (!self.intro_quest_enabled and (d.quest_tags & introquest) != 0) return false;
     return true;
 }
 
@@ -466,6 +468,7 @@ test "sandbox buried/poi quest gates" {
     const buried = ecs.quest.QuestDef{ .id = 1, .name = "q_buried", .title = "b", .kind = .kill_zombies, .quest_tags = @intFromEnum(ecs.quest.QuestTag.buried) };
     const poi = ecs.quest.QuestDef{ .id = 2, .name = "q_poi", .title = "p", .kind = .kill_zombies, .quest_tags = @intFromEnum(ecs.quest.QuestTag.poi) };
     const plain = ecs.quest.QuestDef{ .id = 3, .name = "q_plain", .title = "x", .kind = .kill_zombies };
+    const intro = ecs.quest.QuestDef{ .id = 4, .name = "q_intro", .title = "i", .kind = .kill_zombies, .quest_tags = @intFromEnum(ecs.quest.QuestTag.introquest) };
     try std.testing.expect(sandboxAllowsQuest(g, buried));
     try std.testing.expect(sandboxAllowsQuest(g, poi));
     g.buried_quests_enabled = false;
@@ -473,5 +476,9 @@ test "sandbox buried/poi quest gates" {
     try std.testing.expect(sandboxAllowsQuest(g, poi));
     g.poi_quests_enabled = false;
     try std.testing.expect(!sandboxAllowsQuest(g, poi));
+    try std.testing.expect(sandboxAllowsQuest(g, plain));
+    try std.testing.expect(sandboxAllowsQuest(g, intro));
+    g.intro_quest_enabled = false;
+    try std.testing.expect(!sandboxAllowsQuest(g, intro));
     try std.testing.expect(sandboxAllowsQuest(g, plain));
 }

@@ -383,6 +383,8 @@ pub const Game = struct {
     backpack_crafting: u8 = 1,
     /// Sandbox `VendingResetInterval` (-1 = each row's traders.xml value).
     vending_reset_interval: i32 = -1,
+    /// Sandbox `IntroQuestEnabled`.
+    intro_quest_enabled: bool = true,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled`.
     buried_quests_enabled: bool = true,
     poi_quests_enabled: bool = true,

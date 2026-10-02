@@ -39,6 +39,9 @@ pub const QuestTag = enum(u32) {
     buried = 1 << 10,
     /// `QuestEntry.poiTag` IL_0020-003F (quests toggled by `POIQuestsEnabled`).
     poi = 1 << 11,
+    /// `DialogRequirementQuestsAvailable.introtag` IL_0000-000A (`introquest`,
+    /// the quests gated by `IntroQuestEnabled`).
+    introquest = 1 << 12,
 };
 
 /// Map a stock tag string ("clear", "fetch", ...) to its bit; null when the

@@ -152,6 +152,10 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `IntroQuestEnabled` (yes/no, default on): a quest tagged
+    /// `introquest` is unavailable while off
+    /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
+    intro_quest_enabled: bool = true,
     /// Sandbox `VendingResetInterval` (int -1..14, default -1): the vending
     /// machine restock cadence, overriding each trader_info's own
     /// `reset_interval` (`TraderInfo.get_ResetInterval` IL_4x uses
@@ -544,6 +548,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
+            cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingResetInterval")) {
             cfg.vending_reset_interval = @max(-1, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BuriedQuestsEnabled")) {
@@ -810,6 +816,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
     if (prop(raw, "VendingResetInterval")) |v| {
         if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.vending_reset_interval = if (n < 0) -1 else @min(n, 14);
     }
