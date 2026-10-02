@@ -39,10 +39,17 @@ pub fn takeBlockToken(self: *Game, c: *Client) bool {
 /// hottest untrusted input (rule 20). Split out so the rule is testable without
 /// a Game.
 pub fn damageBurstAllows(now: u64, last_ns: *u64, burst: *u8, gap_ns: u64, burst_max: u8) bool {
-    // A backwards clock (or a wrapped counter) counts as inside the gap, so it
-    // spends the burst instead of handing out a fresh one: fail closed on the
-    // hottest untrusted input.
-    if (last_ns.* != 0 and (now < last_ns.* or now -% last_ns.* < gap_ns)) {
+    if (last_ns.* != 0 and now < last_ns.*) {
+        // A backwards clock (or a wrapped counter) spends the burst instead of
+        // handing out a fresh one, and the high-water mark stays: overwriting it
+        // with the older time would make the next legitimate claim look far in
+        // the future and reopen the gap. Fail closed on the hottest untrusted
+        // input.
+        if (burst.* >= burst_max) return false;
+        burst.* += 1;
+        return true;
+    }
+    if (last_ns.* != 0 and now -% last_ns.* < gap_ns) {
         if (burst.* >= burst_max) return false;
         burst.* += 1;
     } else {
@@ -58,7 +65,9 @@ pub fn takeDamageToken(self: *Game, c: *Client) bool {
 
 pub fn acceptChatRate(self: *const Game, c: *Client) bool {
     const now = clock.monoNs();
-    if (c.last_chat_ns != 0 and now -% c.last_chat_ns < self.min_chat_gap_ns) return false;
+    // A backwards or wrapped clock counts as inside the gap (same rule as the
+    // damage burst): fail closed on a flood guard.
+    if (c.last_chat_ns != 0 and (now < c.last_chat_ns or now -% c.last_chat_ns < self.min_chat_gap_ns)) return false;
     c.last_chat_ns = now;
     return true;
 }
@@ -140,4 +149,26 @@ test "the damage claim limiter allows a burst and then throttles" {
     last = 5000;
     burst = 3;
     try std.testing.expect(!damageBurstAllows(10, &last, &burst, gap, max));
+}
+
+test "a backwards clock does not reopen the damage gap" {
+    // The guard is a "has enough time passed?" check. `now -% last` alone reads a
+    // backwards jump as a huge elapsed time, so the guard would allow the very
+    // flood it exists to stop. The comparison is `now < last` first, which is why
+    // the second claim here is refused even though the burst is not spent.
+    var last: u64 = 0;
+    var burst: u8 = 0;
+    try std.testing.expect(damageBurstAllows(1000, &last, &burst, 500, 4));
+    try std.testing.expectEqual(@as(u8, 1), burst);
+    // Backwards: allowed once (it spends the burst) but the high-water mark is
+    // not moved back, so the next claim still has to pay.
+    try std.testing.expect(damageBurstAllows(400, &last, &burst, 500, 4));
+    try std.testing.expectEqual(@as(u8, 2), burst);
+    try std.testing.expectEqual(@as(u64, 1000), last);
+    try std.testing.expect(damageBurstAllows(300, &last, &burst, 500, 4));
+    try std.testing.expect(damageBurstAllows(200, &last, &burst, 500, 4));
+    try std.testing.expect(!damageBurstAllows(100, &last, &burst, 500, 4));
+    // A forward claim past the gap starts fresh again.
+    try std.testing.expect(damageBurstAllows(1000 + 501, &last, &burst, 500, 4));
+    try std.testing.expectEqual(@as(u8, 1), burst);
 }
