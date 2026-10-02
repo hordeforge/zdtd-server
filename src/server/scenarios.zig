@@ -22959,3 +22959,80 @@ test "scenario the feral sense option follows the day/night table" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), check(g, 3, night), 0.001);
     std.debug.print("PASS feral-sense: the sandbox option follows the day/night table\n", .{});
 }
+
+test "scenario the crop growth option scales the plant delay" {
+    // `BlockPlantGrowing.GetTickRate` IL=10: the delay is
+    // `growthRate * CropGrowthModifier * 20 * 60`, where the modifier is the
+    // sandbox `CropGrowthSpeed` picker. zdtd's base is already in ticks, so the
+    // modifier scales it directly.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "plantYucca1")) return 1201;
+            if (std.mem.eql(u8, name, "plantYucca2")) return 1202;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_crop_speed.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="plantYucca1">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="GrowthRate" value="2" />
+        \\  <property name="Next" value="plantYucca2" />
+        \\  <property name="Material" value="Mplants" />
+        \\</block>
+        \\<block name="plantYucca2">
+        \\  <property name="Class" value="PlantGrowing" />
+        \\  <property name="GrowthRate" value="2" />
+        \\  <property name="Material" value="Mplants" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const stage1 = g.blocks.byName("plantYucca1") orelse return error.TestUnexpectedResult;
+    const stage2 = g.blocks.byName("plantYucca2") orelse return error.TestUnexpectedResult;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px: i32 = @intFromFloat(g.sim.transform[ps].x);
+    const py: i32 = @intFromFloat(g.sim.transform[ps].y);
+    const pz: i32 = @intFromFloat(g.sim.transform[ps].z);
+    try g.world.setBlockWorld(px, py, pz, stage1.id);
+    g.setBlockRaw(px, py, pz, stage1.id);
+
+    // Modifier 1 (default): the block's own GrowthRate 2 ticks per stage.
+    g.sim.crop_growth_speed = 1.0;
+    block_ticker_mod.noteAdded(g, px, py, pz, stage1.id);
+    try std.testing.expectEqual(@as(u32, 2), g.block_tick_q[0].due - g.tick_n);
+    g.block_tick_n = 0;
+
+    // Modifier 3: three times the delay.
+    g.sim.crop_growth_speed = 3.0;
+    block_ticker_mod.noteAdded(g, px, py, pz, stage1.id);
+    try std.testing.expectEqual(@as(u32, 6), g.block_tick_q[0].due - g.tick_n);
+    g.block_tick_n = 0;
+
+    // Modifier 0 (sandbox "instant"): floored at one tick so the scheduler does
+    // not spin, which is still a stage per tick.
+    g.sim.crop_growth_speed = 0;
+    block_ticker_mod.noteAdded(g, px, py, pz, stage1.id);
+    try std.testing.expectEqual(@as(u32, 1), g.block_tick_q[0].due - g.tick_n);
+    _ = try g.step();
+    try std.testing.expectEqual(stage2.id, try g.world.blockWorld(px, py, pz));
+    std.debug.print("PASS crop-speed: the sandbox modifier scales the growth delay\n", .{});
+}

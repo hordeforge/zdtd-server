@@ -641,9 +641,15 @@ const sky_scan_cells: i32 = 24;
 /// random form jitters it by `GrowthDeviation` (a gaussian in stock; zdtd uses
 /// the seeded per-position roll) and clamps into [0.5x, 1.5x].
 fn delayFor(self: *Game, x: i32, y: i32, z: i32, def: assets_blocks.BlockDef) u32 {
-    const base: f32 = if (def.growth_rate > 0) def.growth_rate else @floatFromInt(default_growth_rate);
+    // `BlockPlantGrowing.GetTickRate` IL=10 multiplies the block's growthRate by
+    // the static `CropGrowthModifier` (the sandbox `CropGrowthSpeed` picker), so
+    // a larger option value means a longer delay. zdtd's base is already in
+    // ticks, so the modifier applies directly; a 0-modifier delay floors at one
+    // tick rather than spinning the scheduler.
+    const raw: f32 = if (def.growth_rate > 0) def.growth_rate else @floatFromInt(default_growth_rate);
+    const base: f32 = @max(raw * self.sim.crop_growth_speed, 1.0);
     if (!def.growth_random or def.growth_deviation <= 0) {
-        return @intFromFloat(@max(base, 1.0));
+        return @intFromFloat(base);
     }
     // Deterministic per (cell, tick): the crop chain stays reproducible for a
     // given seed and schedule, which stock's GameRandom also is per world.

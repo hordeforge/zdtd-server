@@ -360,6 +360,8 @@ pub const InitOptions = struct {
     heat_map_sensitivity: f32 = 1.0,
     /// Sandbox `AllowZombieDigging` (false = the AI never digs).
     allow_zombie_digging: bool = true,
+    /// Sandbox `CropGrowthSpeed`: the plant growth-delay modifier.
+    crop_growth_speed: f32 = 1.0,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

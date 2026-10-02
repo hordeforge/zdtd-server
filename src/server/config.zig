@@ -115,6 +115,11 @@ pub const Config = struct {
     /// Sandbox `ZombieFeralSense` (0 off, 1 day, 2 night, 3 always): the
     /// `EAIManager.CalcSenseScale` switch behind the feral sight/hear scale.
     zombie_feral_sense: u8 = 0,
+    /// Sandbox `CropGrowthSpeed` (float picker, default 1.0): the
+    /// `BlockPlantGrowing.CropGrowthModifier` that `GetTickRate` multiplies into
+    /// the growth delay (`growthRate * modifier * 20 * 60`), so a larger value
+    /// means slower growth.
+    crop_growth_speed: f32 = 1.0,
     /// Sandbox `AllowZombieDigging` (0/1, default 1): gates the AI dig decision
     /// (`EntityMoveHelper.AllowZombieDigging`, IL_02E3).
     allow_zombie_digging: bool = true,
@@ -434,6 +439,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "CropGrowthSpeed")) {
+            cfg.crop_growth_speed = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 1000);
         } else if (std.mem.eql(u8, o.name, "AllowZombieDigging")) {
             cfg.allow_zombie_digging = sandbox.valueI(o, set, g.index) != 0;
         } else if (std.mem.eql(u8, o.name, "HeatMapSensitivity")) {
@@ -620,6 +627,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "BloodMoonFrequency")) |v| cfg.blood_moon_frequency = clampU8Named("BloodMoonFrequency", v, 0, 255, cfg.blood_moon_frequency);
     if (prop(raw, "ZombieFeralSense")) |v| cfg.zombie_feral_sense = clampU8Named("ZombieFeralSense", v, 0, 3, cfg.zombie_feral_sense);
     if (prop(raw, "AISmellMode")) |v| cfg.ai_smell_mode = clampU8Named("AISmellMode", v, 0, 5, cfg.ai_smell_mode);
+    if (prop(raw, "CropGrowthSpeed")) |v| {
+        if (xml.parseF32(v)) |f| cfg.crop_growth_speed = std.math.clamp(f, 0, 1000);
+    }
     if (prop(raw, "AllowZombieDigging")) |v| cfg.allow_zombie_digging = clampU8Named("AllowZombieDigging", v, 0, 1, @intFromBool(cfg.allow_zombie_digging)) != 0;
     if (prop(raw, "HeatMapSensitivity")) |v| {
         // Float picker: parse, warn and keep the default on garbage, clamp to a

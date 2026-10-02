@@ -716,6 +716,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       Gated by the dig case in `move helper: a blocked grounded zombie digs the
       blocking block`, which now walks the same wall with the option off and
       asserts no dig starts (decisive: forcing the gate open fails it).
+- [x] **The `CropGrowthSpeed` sandbox option did nothing** - closed 2026-10-02:
+      the float picker is `BlockPlantGrowing.CropGrowthModifier`, which
+      `GetTickRate` IL=10 multiplies into the growth delay
+      (`growthRate * modifier * 20 * 60`), so a larger value means slower growth
+      and 0 the instant step. zdtd ignored it, so a server that set crops to slow
+      still grew them at the block's own rate. The sandbox code and the
+      serverconfig property (clamped 0..1000) now parse into
+      `config.crop_growth_speed` -> `InitOptions` -> `World.crop_growth_speed`,
+      and `block_ticker.delayFor` scales the base delay (floored at one tick so a
+      0 modifier cannot spin the scheduler). Gated by `scenario the crop growth
+      option scales the plant delay`: GrowthRate 2 gives a 2-tick delay at 1.0, 6
+      at 3.0 and 1 at 0 (decisive: dropping the factor fails it). Open question
+      found while reading this: stock's tick rate also multiplies by `20 * 60`,
+      which zdtd's tick-unit base does not carry, so the absolute growth time
+      needs its own round against a stock blocks.xml GrowthRate.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
