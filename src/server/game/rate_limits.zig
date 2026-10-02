@@ -34,16 +34,26 @@ pub fn takeBlockToken(self: *Game, c: *Client) bool {
     return takeToken(&c.block_tokens, &c.block_refill_ns, self.block_bucket_cap, self.block_refill_ns);
 }
 
-pub fn takeDamageToken(self: *Game, c: *Client) bool {
-    const now = clock.monoNs();
-    if (c.last_damage_ns != 0 and now -% c.last_damage_ns < self.min_damage_gap_ns) {
-        if (c.damage_burst >= self.damage_burst_max) return false;
-        c.damage_burst += 1;
+/// Pure burst rule behind `takeDamageToken`: claims closer together than
+/// `gap_ns` may spend at most `burst_max` in a row, so a client cannot flood the
+/// hottest untrusted input (rule 20). Split out so the rule is testable without
+/// a Game.
+pub fn damageBurstAllows(now: u64, last_ns: *u64, burst: *u8, gap_ns: u64, burst_max: u8) bool {
+    // A backwards clock (or a wrapped counter) counts as inside the gap, so it
+    // spends the burst instead of handing out a fresh one: fail closed on the
+    // hottest untrusted input.
+    if (last_ns.* != 0 and (now < last_ns.* or now -% last_ns.* < gap_ns)) {
+        if (burst.* >= burst_max) return false;
+        burst.* += 1;
     } else {
-        c.damage_burst = 1;
+        burst.* = 1;
     }
-    c.last_damage_ns = now;
+    last_ns.* = now;
     return true;
+}
+
+pub fn takeDamageToken(self: *Game, c: *Client) bool {
+    return damageBurstAllows(clock.monoNs(), &c.last_damage_ns, &c.damage_burst, self.min_damage_gap_ns, self.damage_burst_max);
 }
 
 pub fn acceptChatRate(self: *const Game, c: *Client) bool {
@@ -107,4 +117,27 @@ test "a monotonic clock wrap does not hand out free tokens" {
     const wrapped: u64 = near_max +% period;
     try std.testing.expect(takeTokenAt(wrapped, &tokens, &refill, cap, period));
     try std.testing.expectEqual(@as(u8, 0), tokens);
+}
+
+test "the damage claim limiter allows a burst and then throttles" {
+    // Rule 20 on the hottest untrusted input. Inside the minimum gap the client
+    // may spend a small burst, then every further claim is refused; a claim after
+    // the gap starts a fresh burst.
+    var last: u64 = 0;
+    var burst: u8 = 0;
+    const gap: u64 = 100;
+    const max: u8 = 3;
+    try std.testing.expect(damageBurstAllows(1000, &last, &burst, gap, max)); // first, burst = 1
+    try std.testing.expect(damageBurstAllows(1050, &last, &burst, gap, max)); // burst = 2
+    try std.testing.expect(damageBurstAllows(1060, &last, &burst, gap, max)); // burst = 3, the cap
+    try std.testing.expect(!damageBurstAllows(1070, &last, &burst, gap, max));
+    try std.testing.expect(!damageBurstAllows(1080, &last, &burst, gap, max));
+    try std.testing.expect(!damageBurstAllows(1090, &last, &burst, gap, max));
+    // Past the gap: fresh burst, allowed again.
+    try std.testing.expect(damageBurstAllows(2000, &last, &burst, gap, max));
+    try std.testing.expectEqual(@as(u8, 1), burst);
+    // A clock running backwards must not hand out a free burst.
+    last = 5000;
+    burst = 3;
+    try std.testing.expect(!damageBurstAllows(10, &last, &burst, gap, max));
 }
