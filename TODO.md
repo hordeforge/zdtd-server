@@ -1112,18 +1112,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       default (on, 1.0, 1.0), with 0 spelled out for the dew case. Gated by
       `scenario an out-of-range collector type keeps stock's default behaviour`
       (decisive: restoring the dew arm disables it).
-- [ ] **`Unlocks` does not read back through `ItemTable.byName`** - found
-      2026-10-02 while wiring the magazine unlock list. Parsing
-      `<property name="Unlocks" value="recipeA,recipeB" />` reaches the def
-      literal (a debug print at the assignment showed the value for idx 0 and a
-      scan of `table.defs` showed it on the row), but the `ItemDef` returned by
-      `byName` for the same row has an empty `unlocks` while its `Tags`, `Group`
-      and `EconomicValue` from the same literal are correct. Something rebuilds
-      or re-appends that row after the first literal fills it. The parse was
-      therefore reverted (an unverified field is worse than none) and
-      `test "a minimal items.xml fixture reaches the stock property path"` now
-      pins the working half. Next round: find the second def-building pass and
-      land `Unlocks` with it, then the CVar/read-action legs below.
+- [x] **`Unlocks` did not read back through `ItemTable.byName`** - closed
+      2026-10-02, and it was a fixture bug, not a parse bug: the round-123/124
+      fixtures wrote `Extends` as an **attribute** (`<item ... extends="x">`),
+      which items.xml does not use and zdtd does not read, so the child row
+      inherited nothing and the debug output looked like a lost property. With
+      the property form (`<property name="Extends" value="x"/>`) everything
+      inherits, and `Unlocks` now parses into `ItemDef.unlocks` and inherits like
+      `Tags`/`Group`. Pinned by `test "the stock item property path and Extends
+      inheritance work offline"`, which also records the attribute-form caveat so
+      the next round does not repeat it.
 - [ ] **Learnable recipes (magazine unlocks) are not modelled** - located
       2026-10-02, data helper landed. `Recipe.IsUnlocked` (IL_0000-003E) returns
       true when `CraftingProgression` is off or the recipe is not learnable, else
@@ -1135,11 +1133,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       item properties `Unlocks`/`UnlockedBy` (`ItemClass.PropUnlocks` /
       `PropUnlockedBy`, IL_0C46-0C72) are not parsed, no magazine read action
       increments the CVar, and per-player CVars are not part of the sim.
-      `assets_recipes.isLearnable` now exposes the tag; the rest needs the item
-      property parse (verify it against a full items.xml fixture, a minimal one
-      does not exercise the stock property path), per-player CVar storage, the
-      read action, and the craft-validation gate - all four together, because
-      gating without the read path would block every learnable recipe.
+      The item side is now in place (`ItemDef.unlocks` parses and inherits, see
+      the closed entry above); what remains is per-player CVar storage, the
+      magazine read action that increments the CVar named after each unlocked
+      recipe, and the craft-validation gate - all together, because gating
+      without the read path would block every learnable recipe.
 - [ ] **Biome-progression recipe unlocks are not modelled** - located
       2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
       `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a
