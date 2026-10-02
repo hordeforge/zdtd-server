@@ -153,3 +153,18 @@ test "entity stat changed body size" {
     try std.testing.expectEqual(@as(f32, 100), f32At(body, 13)); // max
     try std.testing.expectEqual(@as(f32, 25), f32At(body, 17)); // maxModifier
 }
+
+test "EnumStat ordinals match the dump" {
+    // NetPackageEntityStatChanged_EnumStat fields, in dump order: the ordinal
+    // rides the wire as `enumStat:u8`, so a reorder here would make the client
+    // label food as water.
+    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(EntityStatKind.health));
+    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(EntityStatKind.stamina));
+    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(EntityStatKind.sickness));
+    try std.testing.expectEqual(@as(u8, 3), @intFromEnum(EntityStatKind.gassiness));
+    try std.testing.expectEqual(@as(u8, 4), @intFromEnum(EntityStatKind.speed_modifier));
+    try std.testing.expectEqual(@as(u8, 5), @intFromEnum(EntityStatKind.wellness));
+    try std.testing.expectEqual(@as(u8, 6), @intFromEnum(EntityStatKind.core_temp_old));
+    try std.testing.expectEqual(@as(u8, 7), @intFromEnum(EntityStatKind.food));
+    try std.testing.expectEqual(@as(u8, 8), @intFromEnum(EntityStatKind.water));
+}

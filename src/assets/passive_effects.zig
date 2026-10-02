@@ -243,6 +243,19 @@ test "stock PassiveEffects ordinals" {
     try std.testing.expectEqual(@as(?u8, 112), idOfName("StaminaLoss"));
     try std.testing.expectEqual(@as(?u8, 141), idOfName("HarvestCount"));
     try std.testing.expectEqual(@as(?u8, 163), idOfName("TargetArmor"));
+    // The ordinals the crafting, stage and spell folds read by name (a table
+    // edit that moved one would silently point a fold at another passive).
+    try std.testing.expectEqual(@as(?u8, 73), idOfName("RecipeTagUnlocked"));
+    try std.testing.expectEqual(@as(?u8, 90), idOfName("CraftingTime"));
+    try std.testing.expectEqual(@as(?u8, 91), idOfName("CraftingTier"));
+    try std.testing.expectEqual(@as(?u8, 92), idOfName("CraftingOutputCount"));
+    try std.testing.expectEqual(@as(?u8, 198), idOfName("CraftingIngredientCount"));
+    try std.testing.expectEqual(@as(?u8, 157), idOfName("GameStage"));
+    try std.testing.expectEqual(@as(?u8, 158), idOfName("TraderStage"));
+    try std.testing.expectEqual(@as(?u8, 159), idOfName("LootStage"));
+    try std.testing.expectEqual(@as(?u8, 106), idOfName("HealthGain"));
+    try std.testing.expectEqual(@as(?u8, 107), idOfName("HealthLoss"));
+    try std.testing.expectEqual(@as(?u8, 167), idOfName("HealthSteal"));
     // The name lookup is case-sensitive, like stock's Parse(name, false).
     try std.testing.expectEqual(@as(?u8, null), idOfName("entitydamage"));
     try std.testing.expectEqual(@as(?u8, null), idOfName("NoSuchEffect"));
