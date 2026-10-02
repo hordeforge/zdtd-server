@@ -6,6 +6,7 @@
 //! Split out of tick.zig (same functions, moved verbatim); buff-event
 //! drivers and the survival VM stay in tick.zig.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -696,4 +697,32 @@ pub fn sampleFlushCounters(self: *Game) void {
     // never see them (saveAll returns before the write happens).
     self.harness.counters.add(.persistence_errors, e -| self.flush_seen.errors);
     self.flush_seen = .{ .queued = q, .written = w, .errors = e, .sync = s, .waits = wt };
+}
+
+test "the airdrop schedule replays stock in both modes" {
+    // `nextAirdropHour` is the deterministic replay of stock's `calcNextAirdrop`
+    // (`day + RandomRange(min, max+1) - 1` at the drop hour, aidirector.md), so
+    // the days mode must step by the span and land on the drop hour, and the
+    // interval mode must simply add the configured hours.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try game_mod.Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+
+    g.airdrop_schedule = .days;
+    g.airdrop_day_min = 3;
+    g.airdrop_day_max = 5;
+    g.airdrop_drop_hour = 12;
+    // First drop: day 3 at 12:00. day 3 -> hour 3*24+12.
+    try std.testing.expectEqual(@as(u64, 84), nextAirdropHour(g, 0));
+    try std.testing.expectEqual(@as(u64, 84), nextAirdropHour(g, 83));
+    // Standing on the first drop schedules the next span (3 days = 72 h) later.
+    try std.testing.expectEqual(@as(u64, 156), nextAirdropHour(g, 84));
+    try std.testing.expectEqual(@as(u64, 156), nextAirdropHour(g, 155));
+    try std.testing.expectEqual(@as(u64, 228), nextAirdropHour(g, 156));
+
+    g.airdrop_schedule = .interval;
+    g.air_drop_interval_hours = 24;
+    try std.testing.expectEqual(@as(u64, 124), nextAirdropHour(g, 100));
 }
