@@ -88,6 +88,14 @@ pub const RecipeDef = struct {
 /// the sandbox `CraftingInput` exemption (`Recipe.CanCraft` IL_0097 consults
 /// `XUiM_Recipes.GetCraftingInputModifier`, which returns 1 for a recipe whose
 /// tags intersect `sandboxIgnore`).
+/// `Recipe.get_IsLearnable` (IL=3 over the `Recipe.LearnableRecipe` FastTags
+/// literal `learnable`, Recipe cctor IL_000F-001E): a learnable recipe is locked
+/// until the player's CVar named after the recipe is positive
+/// (`Recipe.IsUnlocked` IL_0009-003C via `RecipeTagUnlocked = 73`).
+pub fn isLearnable(tags_csv: []const u8) bool {
+    return tagsContain(tags_csv, "learnable");
+}
+
 pub fn tagsContain(tags_csv: []const u8, tag: []const u8) bool {
     var it = std.mem.splitScalar(u8, tags_csv, ',');
     while (it.next()) |raw| {
@@ -420,4 +428,14 @@ pub fn resolveCraftTime(def: RecipeDef, componentTime: fn ([]const u8) f32) f32 
         total += componentTime(def.ingredients[i].name) * @as(f32, @floatFromInt(def.ingredients[i].count));
     }
     return total;
+}
+
+test "a learnable recipe carries the stock tag" {
+    // `Recipe.LearnableRecipe` (cctor IL_000F-001E) is the `learnable` FastTags
+    // literal; `Recipe.IsUnlocked` IL_0009-003C only lets such a recipe through
+    // when the player's CVar named after the recipe is positive.
+    try std.testing.expect(isLearnable("learnable"));
+    try std.testing.expect(isLearnable("forge, learnable"));
+    try std.testing.expect(!isLearnable("forge"));
+    try std.testing.expect(!isLearnable(""));
 }

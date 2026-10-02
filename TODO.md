@@ -1112,6 +1112,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       default (on, 1.0, 1.0), with 0 spelled out for the dew case. Gated by
       `scenario an out-of-range collector type keeps stock's default behaviour`
       (decisive: restoring the dew arm disables it).
+- [ ] **Learnable recipes (magazine unlocks) are not modelled** - located
+      2026-10-02, data helper landed. `Recipe.IsUnlocked` (IL_0000-003E) returns
+      true when `CraftingProgression` is off or the recipe is not learnable, else
+      it requires `GetValue(RecipeTagUnlocked = 73, base = the player's CVar named
+      after the recipe, player, recipe, recipe.tags) > 0` (`Recipe.LearnableRecipe`
+      is the `learnable` FastTags literal, Recipe cctor IL_000F-001E). zdtd
+      supplies only the progression-table requirement, so a learnable recipe is
+      craftable without its magazine at all, and there is no CVar write path: the
+      item properties `Unlocks`/`UnlockedBy` (`ItemClass.PropUnlocks` /
+      `PropUnlockedBy`, IL_0C46-0C72) are not parsed, no magazine read action
+      increments the CVar, and per-player CVars are not part of the sim.
+      `assets_recipes.isLearnable` now exposes the tag; the rest needs the item
+      property parse (verify it against a full items.xml fixture, a minimal one
+      does not exercise the stock property path), per-player CVar storage, the
+      read action, and the craft-validation gate - all four together, because
+      gating without the read path would block every learnable recipe.
 - [ ] **Biome-progression recipe unlocks are not modelled** - located
       2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
       `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a
