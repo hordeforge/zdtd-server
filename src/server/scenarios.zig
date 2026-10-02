@@ -23139,6 +23139,70 @@ test "scenario the crop growth option scales the plant delay" {
     std.debug.print("PASS crop-speed: the sandbox modifier scales the growth delay\n", .{});
 }
 
+test "scenario an out-of-range collector type keeps stock's default behaviour" {
+    // `BlockCollector`'s two switches (IL_0009-001B for `isDisabled`,
+    // IL_000A-001C for the time scale) have a default branch that leaves the
+    // collector enabled and unscaled, so a type outside 0..2 must not inherit
+    // the dew collector's sandbox pickers.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "oddBox")) return 1743;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_collector_odd.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="oddBox">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,1,drinkJarBoiledWater,,0,0,100,100,water}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    // The parser maps an unknown name to DewCollector (0), so force the
+    // out-of-range value the same way the table loader does.
+    for (@constCast(g.blocks.defs)) |*d| {
+        if (std.mem.eql(u8, d.name, "oddBox")) d.collector_type = 7;
+    }
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+        .{ .id = 901, .name = "terrStone" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    // Dew collector input 0 disables only the dew type.
+    var sbuf: [7]u8 = undefined;
+    sbuf[0] = 'A';
+    sbuf[1] = @intCast('A' + (107 / 26));
+    sbuf[2] = @intCast('A' + (107 % 26));
+    sbuf[3] = @intCast('A' + 0); // DewCollectorInput index 0 = 0.0
+    sbuf[4] = @intCast('A' + (105 / 26));
+    sbuf[5] = @intCast('A' + (105 % 26));
+    sbuf[6] = @intCast('A' + 7); // DewCollectorTime index 7 = 2.0
+    g.sandbox_code = sbuf[0..7];
+    g.sim.director.clock.day = 1;
+    const c = g.collectors.getOrCreate(300, 70, 300, 1743) orelse return error.TestUnexpectedResult;
+    g.tick_n += 1;
+    g.tickCollectors();
+    try std.testing.expect(c.last_world != 0);
+    std.debug.print("PASS collector-type: an out-of-range type keeps the stock default\n", .{});
+}
+
 test "scenario each collector type has its own sandbox scale" {
     // Sandbox ids 105-110 and 152-154: `DewCollectorTime`/`DewCollectorOutput`,
     // `ApiaryTime`/`ApiaryOutput` and `ChickenCoopTime`/`ChickenCoopOutput` are

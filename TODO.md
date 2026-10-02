@@ -1102,6 +1102,26 @@ nothing here is already waived. The four gaps the same audit closed are in
       serverconfig arms. Gated by the extended `scenario workstation recipe
       authority`, which asserts a zeroed queue (decisive: disabling the gate
       keeps the 9-count entry).
+- [x] **An out-of-range collector type inherited the dew pickers** - closed
+      2026-10-02: `BlockCollector`'s `isDisabled` (IL_0009-001B) and time-scale
+      (IL_000A-001C) switches cover types 0..2 and their default branch leaves the
+      collector **enabled and unscaled**. zdtd's `else` arm applied the dew
+      collector's `DewCollectorInput`/`Time`/`Output` pickers, so a modded
+      collector type would have been switched off by an operator setting meant
+      for the dew collector and scaled by it too. The arm now returns the stock
+      default (on, 1.0, 1.0), with 0 spelled out for the dew case. Gated by
+      `scenario an out-of-range collector type keeps stock's default behaviour`
+      (decisive: restoring the dew arm disables it).
+- [ ] **Biome-progression recipe unlocks are not modelled** - located
+      2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
+      `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a
+      recipe marked biomeProgression is unavailable until the player has visited
+      that biome. zdtd has no visited-biome state (only the current
+      `biomeStandingOn`), no recipe-tag check, and no unlock grant on biome
+      entry, so those recipes are craftable anywhere from the start. The
+      GameStats `biome_progression` bool is already echoed. Needs: per-player
+      visited-biome bits, the `biomeprogression` tag on recipes (items.zig-style
+      parse), the craft-validation gate, and the client unlock notification.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

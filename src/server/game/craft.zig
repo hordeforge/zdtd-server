@@ -1220,7 +1220,11 @@ pub fn tickCollectors(self: *Game) void {
         const type_on, const time_scale, const out_scale = switch (def.collector_type) {
             1 => .{ apiary_on, apiary_time, apiary_out },
             2 => .{ coop_on, coop_time, coop_out },
-            else => .{ dew_on, dew_time, dew_out },
+            0 => .{ dew_on, dew_time, dew_out },
+            // `BlockCollector`'s switch default (IL_0009-001B for the gate and
+            // IL_000A-001C for the scale) leaves an out-of-range type enabled
+            // and unscaled, so a modded type must not inherit the dew pickers.
+            else => .{ true, 1.0, 1.0 },
         };
         if (!type_on) continue;
         // `lastWorldTimes[name]` is stamped whenever the update runs, so time
