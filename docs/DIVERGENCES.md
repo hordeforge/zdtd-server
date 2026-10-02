@@ -457,8 +457,12 @@ None of the 29 is a live gap, for one of three reasons:
   (`wire/stock_props.zig`, `PropChangeInfo.Write` pinned), the store
   (`world/props.zig`) and the relay (`c2s/blocks_props.zig`: chunk required per
   change, batch abandoned on a miss, body fanned out excluding the changer) all
-  land. Still missing: the chunk-stream leg, so a late joiner does not receive
-  props placed before it arrived, and persistence. `SimpleRPC` (IL=17) carries the holding-item
+  land. No stream leg or persistence, and none is
+  wanted: `Chunk::write(_bw, _bNetworkWrite)` (IL=601) and
+  `Chunk::read(..., _bNetworkRead)` (IL=775) contain no prop reference, and neither
+  does the disk path (`Chunk::save`, `Chunk::write(stream)`), so stock keeps props in
+  memory and the client renders them from its own prefab data - only the changes
+  travel. The path is complete. `SimpleRPC` (IL=17) carries the holding-item
   hooks - type 0 `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset` -
   which are client-side item callbacks with no server state to change. All
   three are unhandled: the package reaches the dispatch chain, raises the
