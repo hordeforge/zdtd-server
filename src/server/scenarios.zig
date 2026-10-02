@@ -24547,3 +24547,51 @@ test "scenario the trader price options scale the stock prices" {
     try std.testing.expectEqual(base_price, g.sim.trader_stock[ts].entries[0].price);
     std.debug.print("PASS trader-price: the sandbox price options scale both sides\n", .{});
 }
+
+test "scenario MaxSpawnedZombies caps the live population" {
+    // The alive-zombie cap is a spawn gate (`spawn_z = director and alive_z <
+    // cap`, aidirector.md 2): filling the world to `max_spawned_zombies` stops
+    // the drip spawning more, and raising the pref lets it resume. The cap had
+    // no test, so a regression that dropped the gate would go unnoticed.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const px = g.sim.transform[ps].x;
+    const pz = g.sim.transform[ps].z;
+
+    // Night so the ordinary drip is the spawner under test. `Game.create` has
+    // already filled toward the loaded-region target, so the world starts at or
+    // above a low pref and the gate must hold it there.
+    g.sim.director.clock.hours = 23;
+    g.sim.director.clock.setDayNightLength(60);
+    _ = g.sim.spawnZombie(px + 8, 70, pz + 8, 50).?;
+    const before = g.sim.countKind(.zombie);
+    try std.testing.expect(before >= 1);
+
+    // Several drip intervals' worth of director time with the pref below the
+    // live count: nothing spawns.
+    g.sim.director.max_alive = 1;
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        _ = g.sim.director.tick(&g.sim, 60.0);
+    }
+    try std.testing.expectEqual(before, g.sim.countKind(.zombie));
+
+    // Raising the pref lets the same loop spawn, so the gate above is the cap
+    // and not the spawner being idle.
+    g.sim.director.max_alive = 64;
+    i = 0;
+    while (i < 8) : (i += 1) {
+        _ = g.sim.director.tick(&g.sim, 60.0);
+    }
+    try std.testing.expect(g.sim.countKind(.zombie) > before);
+    std.debug.print("PASS spawn cap: MaxSpawnedZombies gates the live population\n", .{});
+}
