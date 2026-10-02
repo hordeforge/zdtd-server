@@ -443,15 +443,20 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
         }
     }
     const global_mod = stageGlobalModifier(self, c.slot, "GlobalGameStageModifier");
-    return assets_gamestages.playerStage(self.gamestages.config, .{
+    const stage = assets_gamestages.playerStage(self.gamestages.config, .{
         .level = c.level,
         .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
-        .biome_mod = bmods.game_mod,
+        .biome_mod = bmods.game_mod * self.biome_gs_modifier,
         .biome_bonus = bmods.game_bonus,
         .quest_mod = qmod,
         .quest_bonus = qbonus,
         .global_modifier = global_mod,
     });
+    // `EntityPlayer::GetGameStage` IL_00EC-00F8: the folded stage times the
+    // sandbox `GlobalGameStageModifier`, floored and clamped to at least 1.
+    const scaled: f32 = @as(f32, @floatFromInt(stage)) * self.global_gs_modifier;
+    const floored: i32 = @intFromFloat(@floor(scaled));
+    return @max(1, floored);
 }
 
 /// Fold a named GetValue passive for one player's damage legs: the victim's
@@ -1739,4 +1744,27 @@ pub fn sendPersistentPlayerState(self: *Game, c: *const Client, eid: i32, reason
         vm_buf[0..vm_n],
     ) catch return;
     try self.broadcast("NetPackagePersistentPlayerState", pps);
+}
+
+test "the sandbox gamestage modifiers reach the stage" {
+    // `EntityPlayer::GetGameStage` IL_0092 (biome leg) and IL_00EC-00F8 (final
+    // multiply, floor, max 1).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    var capture: @import("../../litenet/peer.zig").Capture = .{};
+    const c = try g.attachJoinedClient(&capture);
+    g.clients[c.slot].level = 10;
+    const base_stage = gameStageOf(g, c.slot);
+    try std.testing.expect(base_stage >= 1);
+    // GlobalGSModifier 3 scales the stage, floored like the IL.
+    g.global_gs_modifier = 3.0;
+    try std.testing.expectEqual(@as(i32, base_stage * 3), gameStageOf(g, c.slot));
+    // 0 floors to the max(1, ...) clamp.
+    g.global_gs_modifier = 0;
+    try std.testing.expectEqual(@as(i32, 1), gameStageOf(g, c.slot));
+    g.global_gs_modifier = 1.0;
+    try std.testing.expectEqual(base_stage, gameStageOf(g, c.slot));
 }

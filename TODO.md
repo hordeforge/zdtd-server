@@ -1212,6 +1212,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       present, not a gap: stock's client sends the post-trade `TraderData` and
       `applyTraderDataCopyFrom` applies it (loot-economy.md §5), so vending and
       trader buys both work without the short trade body.
+- [x] **The `GlobalGSModifier` and `BiomeGSModifier` options did nothing** -
+      closed 2026-10-02: ids 60/61 (float, default 1.0). `EntityPlayer::GetGameStage`
+      multiplies the folded stage by `GlobalGameStageModifier` before the floor
+      (IL_00EC-00F8, clamped to 1) and the standing biome's `GameStageMod` by
+      `BiomeGameStageModifier` (IL_0092), so an operator raising either changed the
+      gamestage on a vanilla server and nothing here - and the gamestage drives
+      spawns, loot and quest selection. `gameStageOf` now applies both, with the
+      options parsed through the sandbox and serverconfig arms. Gated by
+      `the sandbox gamestage modifiers reach the stage` (x3 scales, 0 floors to the
+      clamp, 1.0 restores; decisive: dropping the multiplier fails it).
+      Residual: the sibling loot-stage and trader-stage options (`GlobalLSModifier`
+      / `BiomeLSModifier` / `POITierLSModifier` / `GlobalTSModifier`) are still
+      unparsed and are the same shape for a later round.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

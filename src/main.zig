@@ -795,6 +795,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .backpack_crafting = cfg.backpack_crafting,
         .vending_reset_interval = cfg.vending_reset_interval,
         .vending_enabled = cfg.vending_enabled,
+        .global_gs_modifier = cfg.global_gs_modifier,
+        .biome_gs_modifier = cfg.biome_gs_modifier,
         .intro_quest_enabled = cfg.intro_quest_enabled,
         .crafting_output = cfg.crafting_output,
         .crafting_time = cfg.crafting_time,

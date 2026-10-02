@@ -404,6 +404,9 @@ pub const InitOptions = struct {
     vending_reset_interval: i32 = -1,
     /// Sandbox `VendingEnabled` (false = vending machines cannot be opened).
     vending_enabled: bool = true,
+    /// Sandbox `GlobalGSModifier` / `BiomeGSModifier` (gamestage multipliers).
+    global_gs_modifier: f32 = 1.0,
+    biome_gs_modifier: f32 = 1.0,
     /// Sandbox `IntroQuestEnabled` (false = the trader stops offering
     /// `introquest`-tagged quests).
     intro_quest_enabled: bool = true,
