@@ -409,6 +409,8 @@ pub const InitOptions = struct {
     crafting_output: f32 = 1.0,
     /// Sandbox `CraftingTime`: the craft duration scale.
     crafting_time: f32 = 1.0,
+    /// Sandbox `WorkstationCrafting` (false = no station crafting at all).
+    workstation_crafting: bool = true,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled` (false = the trader
     /// stops offering quests tagged `buried` / `poi`).
     buried_quests_enabled: bool = true,

@@ -797,6 +797,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .intro_quest_enabled = cfg.intro_quest_enabled,
         .crafting_output = cfg.crafting_output,
         .crafting_time = cfg.crafting_time,
+        .workstation_crafting = cfg.workstation_crafting,
         .buried_quests_enabled = cfg.buried_quests_enabled,
         .poi_quests_enabled = cfg.poi_quests_enabled,
         .skill_points_per_level = cfg.skill_points_per_level,

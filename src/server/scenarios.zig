@@ -7140,6 +7140,34 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
         try std.testing.expectEqual(@as(f32, 6.0), q2.one_item_craft_time); // 3.0 x ladder 2.0
     }
 
+    // Sandbox `WorkstationCrafting` off empties the queue
+    // (`XUiM_Recipes.FilterRecipesByWorkstation` IL_0010-0025).
+    {
+        g.workstation_crafting = false;
+        var queue3 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        queue3[queue3.len - 1] = queue[queue.len - 1];
+        queue3[queue3.len - 1].output_count = 3;
+        queue3[queue3.len - 1].one_item_craft_time = 3.0;
+        var body3: [4096]u8 = undefined;
+        const c2s3 = try stock_te.buildWorkstationTeBody(&body3, 3, wx, wy, wz, 1301, .{
+            .fuel = fuel[0..],
+            .input = input[0..],
+            .tools = tools[0..],
+            .output = output[0..],
+            .last_input_count = ws.stock_last_input_len,
+            .last_input = liw.written(),
+            .queue = queue3[0..],
+            .melt = melt[0..],
+            .is_burning = true,
+            .burn_time_left = 30,
+        });
+        var fb3: [4096]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb3, "NetPackageTileEntity", c2s3));
+        const q3 = g.workstations.get(wx, wy, wz).?.queue[ws.stock_queue_len - 1];
+        try std.testing.expectEqual(@as(u16, 0), q3.output_count);
+        try std.testing.expectEqual(@as(f32, 0), q3.one_item_craft_time);
+    }
+
     std.debug.print("PASS workstation-authority: spoofed count/time replaced by recipe 3/3.0\n", .{});
 }
 

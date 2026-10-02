@@ -442,6 +442,15 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                             dst.* = .{};
                             continue;
                         };
+                        // Sandbox `WorkstationCrafting` off empties every
+                        // station's recipe list
+                        // (`XUiM_Recipes.FilterRecipesByWorkstation` IL_0010-0025),
+                        // so the queue refuses the craft rather than trusting
+                        // the blob.
+                        if (!self.workstation_crafting) {
+                            dst.* = .{};
+                            continue;
+                        }
                         // The recipe must also be craftable on THIS station:
                         // its craft_area has to be in the block's
                         // CraftingAreaRecipes (or the block name when no list

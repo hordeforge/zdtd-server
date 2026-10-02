@@ -1091,6 +1091,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `scenario workstation recipe authority` (spoofed 2/0.2 replaced by the
       recipe's 3/3.0, then 9/6.0 with the two sandbox groups encoded; decisive:
       pinning either scale fails it).
+- [x] **The `WorkstationCrafting` sandbox option did nothing** - closed
+      2026-10-02: option 95 (yes/no, default on). `XUiM_Recipes.
+      FilterRecipesByWorkstation` IL_0010-0025 returns the empty list for a named
+      workstation while the option is off, so the client never offers a station
+      recipe - but the server's queue validation still accepted the client's
+      queue blob, letting a spoofed or stale client craft at a forge or campfire
+      on a server that forbids station crafting. The queue now refuses every
+      entry while the option is off, and it parses through the sandbox and
+      serverconfig arms. Gated by the extended `scenario workstation recipe
+      authority`, which asserts a zeroed queue (decisive: disabling the gate
+      keeps the 9-count entry).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
