@@ -220,3 +220,15 @@ test "party actions body parses the stock field order" {
     try std.testing.expectEqual(@as(i32, 20), a.invited_entity);
     try std.testing.expectEqualStrings("", a.voice_lobby);
 }
+
+test "PartyActions ordinals match the dump" {
+    // NetPackagePartyActions/PartyActions field order: 0 SendInvite,
+    // 1 AcceptInvite, 2 ChangeLead, 3 LeaveParty, 4 KickFromParty,
+    // 5 Disconnected, 6 JoinAutoParty, 7 SetVoiceLobby. The ordinal is the
+    // packet's action byte. (The seventh entry is easy to miss: the dump's
+    // field line lists eight, not the six the enum name suggests.)
+    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(PartyActions.send_invite));
+    try std.testing.expectEqual(@as(u8, 5), @intFromEnum(PartyActions.disconnected));
+    try std.testing.expectEqual(@as(u8, 6), @intFromEnum(PartyActions.join_auto_party));
+    try std.testing.expectEqual(@as(u8, 7), @intFromEnum(PartyActions.set_voice_lobby));
+}

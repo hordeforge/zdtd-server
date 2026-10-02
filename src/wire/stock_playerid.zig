@@ -414,3 +414,13 @@ test "SimpleRPC body is entity id plus the type byte" {
     try std.testing.expectEqual(@as(u8, 1), v.rpc_type);
     try std.testing.expectError(error.EndOfStream, parseSimpleRPC(body[0..4]));
 }
+
+test "RespawnType ordinals match the dump" {
+    // RespawnType field order: 0 NewGame, 1 LoadedGame, 2 Died, 3 Teleport,
+    // 4 EnterMultiplayer, 5 JoinMultiplayer, 6 Unknown. The ordinal rides
+    // NetPackagePlayerSpawnedInWorld's reason field.
+    try std.testing.expectEqual(@as(i32, 0), @intFromEnum(RespawnType.new_game));
+    try std.testing.expectEqual(@as(i32, 4), @intFromEnum(RespawnType.enter_multiplayer));
+    try std.testing.expectEqual(@as(i32, 5), @intFromEnum(RespawnType.join_multiplayer));
+    try std.testing.expectEqual(@as(i32, 6), @intFromEnum(RespawnType.unknown));
+}
