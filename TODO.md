@@ -1046,9 +1046,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       option parsing through the sandbox and serverconfig arms. Gated by the
       existing `general craft path rejects workstation/tool/material recipes`
       unit test, which now also asserts 0 and 3 refuse (decisive: opening the
-      gate fails it). Residual: `BasicsOnly` (2) is treated as refuse-all until
-      the item `Groups` "Limited" mark is parsed (zdtd has no item-group field),
-      so a BasicsOnly server loses the limited-item crafts stock would allow.
+      gate fails it). The `BasicsOnly` (2) residual closed in the next round:
+      items.xml `Group` now parses into `ItemDef.groups` (with the Extends
+      inheritance stock gives it) and `item_parse.isLimitedItem` mirrors
+      `ItemClass.IsLimited`, so (2) keeps a `Limited`-group output craftable and
+      refuses the rest; the same unit test asserts both halves.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
