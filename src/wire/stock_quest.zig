@@ -694,3 +694,14 @@ pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
         .op = body[2],
     };
 }
+
+test "QuestState ordinals match the dump" {
+    // Quest/QuestState field order: NotStarted, InProgress, ReadyForTurnIn,
+    // Completed, Failed (0..4). The ordinal rides the journal blob and the PDF
+    // quest list, so a reorder would show the client the wrong state.
+    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(QuestState.not_started));
+    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(QuestState.in_progress));
+    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(QuestState.ready_turn_in));
+    try std.testing.expectEqual(@as(u8, 3), @intFromEnum(QuestState.completed));
+    try std.testing.expectEqual(@as(u8, 4), @intFromEnum(QuestState.failed));
+}

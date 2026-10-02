@@ -99,3 +99,12 @@ test "map marker remove body layout, both key forms" {
     try std.testing.expectEqual(@as(i32, 15), try r2.readI32());
     try std.testing.expectEqual(@as(usize, 0), r2.remaining());
 }
+
+test "MapObjectType ordinals match the dump" {
+    // EnumMapObjectType field order: 0 Entity, 1 SleepingBag, ... 13 SupplyDrop,
+    // 15 LandClaim. The ordinal rides the wire as `mapObjectType:i32`, so a
+    // reorder would remove the wrong marker.
+    try std.testing.expectEqual(@as(i32, 1), @intFromEnum(MapObjectType.sleeping_bag));
+    try std.testing.expectEqual(@as(i32, 13), @intFromEnum(MapObjectType.supply_drop));
+    try std.testing.expectEqual(@as(i32, 15), @intFromEnum(MapObjectType.land_claim));
+}
