@@ -81,6 +81,12 @@ pub const Vending = struct {
     rental_end_day: i32 = 0,
     /// trader_info Rentable drives the optional nextAutoBuy u64 on the wire.
     rentable: bool = false,
+    /// Session restock clock (`TraderInfo.get_ResetIntervalInTicks`): the row's
+    /// (or the sandbox `VendingResetInterval`) interval in days and the day of
+    /// the last fill. Stock keeps the trader analogue in the `TraderInfo.lastTime`
+    /// static, so this is not persisted either.
+    reset_interval: i32 = 0,
+    last_restock_day: u32 = 0,
     next_auto_buy: u64 = 0,
 
     /// ClearVendingMachine / ClearOwner (loot-economy §6): the machine returns

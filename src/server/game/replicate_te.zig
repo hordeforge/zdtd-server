@@ -339,6 +339,33 @@ pub fn vendingEntries(self: *Game, v: *const vending_mod.Vending, out: []package
 /// the block's blocks.xml TraderID (stock BlockVendingMachine.OnBlockAdded
 /// sets exactly that). Vending is owner-priced, so rows start at markup 0
 /// (base EconomicValue); trader_info markups do not apply here.
+/// `TraderInfo.get_ResetInterval` (IL=4x) for a vending machine: a player-owned
+/// or rentable row never restocks (-1); otherwise the sandbox
+/// `VendingResetInterval` overrides the row's own `reset_interval` when set.
+fn vendingResetInterval(self: *const Game, ti: assets_traders.TraderInfo) i32 {
+    if (ti.player_owned or ti.rentable) return -1;
+    if (self.vending_reset_interval != -1) return self.vending_reset_interval;
+    return ti.reset_interval;
+}
+
+/// Lazy vending restock, mirroring the trader one: an empty machine fills
+/// immediately, a stocked one refills once its interval (days) has elapsed
+/// since the last fill.
+pub fn maybeRestockVending(self: *Game, v: *vending_mod.Vending) void {
+    if (v.stock_n == 0) {
+        fillVendingStore(self, v);
+        v.last_restock_day = self.sim.director.clock.day;
+        return;
+    }
+    const ti = self.traders.traderInfo(@intCast(@max(v.trader_id, 0))) orelse return;
+    v.reset_interval = vendingResetInterval(self, ti);
+    if (v.reset_interval < 0) return; // never restocks
+    const day = self.sim.director.clock.day;
+    if (day -| v.last_restock_day < @as(u32, @intCast(@max(v.reset_interval, 1)))) return;
+    fillVendingStore(self, v);
+    v.last_restock_day = day;
+}
+
 pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     const tt = self.traders;
     var n: usize = 0;

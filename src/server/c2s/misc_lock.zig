@@ -190,7 +190,7 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                     // TraderData under the request's VendingMachineLockContext
                     // type name; the client opens the trader window from it.
                     const v = self.vending.get(vp) orelse return true;
-                    if (v.stock_n == 0) replicate_te.fillVendingStore(self, v);
+                    replicate_te.maybeRestockVending(self, v);
                     var vent_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
                     const vn = replicate_te.vendingEntries(self, v, &vent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{

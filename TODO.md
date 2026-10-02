@@ -991,9 +991,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       three-level fallback. Gated by `scenario the trader reset interval option
       overrides the per-trader value`: XML 7, override 1, and a player-owned row
       at -1 (decisive: disabling the override leaves 7).
-      Residual: `VendingResetInterval` (id 137) has no seam yet because zdtd has
-      no vending-machine restock pass (vending stock is created on place/load and
-      never refilled), so it is left unparsed rather than dead.
+      The `VendingResetInterval`
+      (id 137) residual closed in a later round: vending machines now restock
+      lazily on their interval (`maybeRestockVending`), taking the sandbox
+      override, else the row's own `reset_interval`, and never for a
+      player-owned or rentable row (`TraderInfo.get_ResetInterval`).
 - [x] **The `TraderMaxTier` sandbox option did nothing** - closed 2026-10-02:
       option 136 (int 0..6, default 6, 0 = unset) is `TraderInfo.TraderMaxTier`,
       the ceiling `TraderInfo.SpawnItem` clamps a rolled quality range to; stock

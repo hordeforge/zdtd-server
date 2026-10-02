@@ -152,6 +152,12 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `VendingResetInterval` (int -1..14, default -1): the vending
+    /// machine restock cadence, overriding each trader_info's own
+    /// `reset_interval` (`TraderInfo.get_ResetInterval` IL_4x uses
+    /// `VendingResetInterval` for an `IsVendingMachine` row, -1 = unset falls
+    /// back to the XML, and a player-owned or rentable row never restocks).
+    vending_reset_interval: i32 = -1,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled` (yes/no, default on):
     /// `QuestEntry` drops a quest whose `FilterTags` carry `buried` / `poi` when
     /// the matching option is off (IL_0000-003F), so the trader stops offering
@@ -538,6 +544,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "VendingResetInterval")) {
+            cfg.vending_reset_interval = @max(-1, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BuriedQuestsEnabled")) {
             cfg.buried_quests_enabled = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "POIQuestsEnabled")) {
@@ -802,6 +810,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "VendingResetInterval")) |v| {
+        if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.vending_reset_interval = if (n < 0) -1 else @min(n, 14);
+    }
     if (prop(raw, "BuriedQuestsEnabled")) |v| cfg.buried_quests_enabled = clampU8Named("BuriedQuestsEnabled", v, 0, 1, @intFromBool(cfg.buried_quests_enabled)) != 0;
     if (prop(raw, "POIQuestsEnabled")) |v| cfg.poi_quests_enabled = clampU8Named("POIQuestsEnabled", v, 0, 1, @intFromBool(cfg.poi_quests_enabled)) != 0;
     if (prop(raw, "BackpackCrafting")) |v| cfg.backpack_crafting = clampU8Named("BackpackCrafting", v, 0, 3, cfg.backpack_crafting);

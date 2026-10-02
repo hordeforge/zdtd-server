@@ -24120,3 +24120,70 @@ test "scenario the scrapping output option scales the scrap yield" {
     try std.testing.expectEqual(@as(u16, 4), scrap(g, ps, 1302, 1.0)); // scrap100 = full
     std.debug.print("PASS scrapping-output: the sandbox scale and scrap100 factor reach the yield\n", .{});
 }
+
+test "scenario a vending machine restocks on its interval" {
+    // `TraderInfo.get_ResetInterval` IL=4x for an `IsVendingMachine` row: the
+    // sandbox `VendingResetInterval` when set, else the row's own
+    // `reset_interval`; -1 never restocks. The machine refills lazily when its
+    // interval has elapsed since the last fill.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="traderAlways" count="all">
+        \\    <item name="resourceWood" count="3"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1" is_vending="true" reset_interval="1"><trader_items><item group="traderAlways"/></trader_items></trader_info>
+        \\  <trader_info id="2" player_owned="true" reset_interval="1"><trader_items><item group="traderAlways"/></trader_items></trader_info>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var tbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tbuf, "{s}/traders_vending.xml", .{dir});
+    try io_fs.writeFile(tpath, tsrc);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    g.traders.deinit();
+    g.traders = try assets_traders.loadFromPath(gpa, tpath);
+
+    const wood = g.ecsIdFromItemName("resourceWood");
+    try std.testing.expect(wood != 0);
+
+    // Day 1: the empty machine fills.
+    g.sim.director.clock.day = 1;
+    const v = g.vending.getOrCreate(.{ .x = 500, .y = 70, .z = 500 }, 1, 1) orelse
+        return error.TestUnexpectedResult;
+    replicate_te.maybeRestockVending(g, v);
+    try std.testing.expect(v.stock_n > 0);
+    try std.testing.expectEqual(@as(u32, 1), v.last_restock_day);
+
+    // Drain it, then day 2 is still inside the 1-day window boundary? It is
+    // exactly at it: 2 - 1 = 1 >= 1, so the refill runs and the day advances.
+    v.stock_n = 0;
+    g.sim.director.clock.day = 2;
+    replicate_te.maybeRestockVending(g, v);
+    try std.testing.expect(v.stock_n > 0);
+    try std.testing.expectEqual(@as(u32, 2), v.last_restock_day);
+
+    // Sandbox override 14: the same day-3 open no longer restocks.
+    g.vending_reset_interval = 14;
+    v.stock_n = 1;
+    g.sim.director.clock.day = 3;
+    replicate_te.maybeRestockVending(g, v);
+    try std.testing.expectEqual(@as(u32, 2), v.last_restock_day);
+    try std.testing.expectEqual(@as(i32, 14), v.reset_interval);
+
+    // A player-owned row never restocks.
+    g.vending_reset_interval = -1;
+    const owned = g.vending.getOrCreate(.{ .x = 510, .y = 70, .z = 500 }, 2, 2) orelse
+        return error.TestUnexpectedResult;
+    owned.stock_n = 1;
+    owned.last_restock_day = 1;
+    g.sim.director.clock.day = 9;
+    replicate_te.maybeRestockVending(g, owned);
+    try std.testing.expectEqual(@as(u32, 1), owned.last_restock_day);
+    std.debug.print("PASS vending-restock: the interval gates the refill\n", .{});
+}

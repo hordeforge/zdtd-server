@@ -400,6 +400,8 @@ pub const InitOptions = struct {
     scrapping_output: f32 = 1.0,
     /// Sandbox `BackpackCrafting` (1 = Enabled; 0/2/3 forbid the backpack path).
     backpack_crafting: u8 = 1,
+    /// Sandbox `VendingResetInterval` (-1 = each row's traders.xml value).
+    vending_reset_interval: i32 = -1,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled` (false = the trader
     /// stops offering quests tagged `buried` / `poi`).
     buried_quests_enabled: bool = true,
