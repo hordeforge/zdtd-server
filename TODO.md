@@ -1112,6 +1112,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       default (on, 1.0, 1.0), with 0 spelled out for the dew case. Gated by
       `scenario an out-of-range collector type keeps stock's default behaviour`
       (decisive: restoring the dew arm disables it).
+- [ ] **`Unlocks` does not read back through `ItemTable.byName`** - found
+      2026-10-02 while wiring the magazine unlock list. Parsing
+      `<property name="Unlocks" value="recipeA,recipeB" />` reaches the def
+      literal (a debug print at the assignment showed the value for idx 0 and a
+      scan of `table.defs` showed it on the row), but the `ItemDef` returned by
+      `byName` for the same row has an empty `unlocks` while its `Tags`, `Group`
+      and `EconomicValue` from the same literal are correct. Something rebuilds
+      or re-appends that row after the first literal fills it. The parse was
+      therefore reverted (an unverified field is worse than none) and
+      `test "a minimal items.xml fixture reaches the stock property path"` now
+      pins the working half. Next round: find the second def-building pass and
+      land `Unlocks` with it, then the CVar/read-action legs below.
 - [ ] **Learnable recipes (magazine unlocks) are not modelled** - located
       2026-10-02, data helper landed. `Recipe.IsUnlocked` (IL_0000-003E) returns
       true when `CraftingProgression` is off or the recipe is not learnable, else

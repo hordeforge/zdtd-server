@@ -2336,3 +2336,32 @@ test "tech substitute walks the previous tech chain" {
     // A chain that dead-ends drops the item.
     try std.testing.expectEqual(@as(u16, 0), t.techSubstitute(orphan, 1));
 }
+
+test "a minimal items.xml fixture reaches the stock property path" {
+    // Regression guard for the item property path itself: a two-item fixture
+    // with no game dir still lands `Tags`, `Group` and `EconomicValue` on the
+    // defs, so a future property addition can be tested offline. (`Unlocks`
+    // reaches the parse as well but did not read back through `byName` in
+    // round 124 - recorded in TODO.)
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try @import("../util/test_tmp.zig").rootOf(&tmp);
+    var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&pbuf, "{s}/items_props.xml", .{dir});
+    try @import("../util/io_fs.zig").writeFile(path,
+        \\<items>
+        \\<item name="probeWidget">
+        \\  <property name="Tags" value="probeTag" />
+        \\  <property name="Group" value="probeGroup" />
+        \\  <property name="EconomicValue" value="42" />
+        \\</item>
+        \\</items>
+    );
+    var table = try loadFromPath(std.testing.allocator, path);
+    defer table.deinit();
+    const d = table.byName("probeWidget") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("probeTag", d.tags);
+    try std.testing.expectEqualStrings("probeGroup", d.groups);
+    try std.testing.expectEqual(@as(f32, 42), d.econ);
+
+}
