@@ -147,8 +147,15 @@ pub const PlayerCtx = struct {
             .is_looking_at_block = true,
             // Stock IsLookingAtEntity inherits IsLookingAtBlock stub → always true.
             .is_looking_at_entity = true,
-            // AmountEnclosed not tracked yet (RE IsIndoors IL=25) → 0 → false.
-            .is_indoors = false,
+            // `IsIndoors` IL=25 is `target.Stats.AmountEnclosed > 0`, and that
+            // stat is `1 - max(chunk Sunlight at the feet, one block up) / 15`
+            // (`EntityAlive::GetAmountEnclosed` IL=003B-0088): it needs the
+            // chunk's sunlight lightmap, which the server-side world does not
+            // build. Leaving it null makes the gate refuse (unsupported) instead
+            // of answering a fabricated `false` that would fire every
+            // `!IsIndoors` row in a roofed base and never fire an `IsIndoors`
+            // one. Fill it if a lightmap ever lands server-side.
+            .is_indoors = null,
             // Seated in a vehicle (`Entity::AttachedToEntity`): scan the
             // vehicle seats for this entity id.
             .attached_to_entity = isSeated(&game.sim, c.entity_id),
@@ -1596,4 +1603,26 @@ pub fn fireDied(self: *Game, ps: ecs.Slot) void {
     }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+test "the player Ctx leaves IsIndoors unknown rather than false" {
+    // `IsIndoors` is `Stats.AmountEnclosed > 0`, and AmountEnclosed needs the
+    // chunk sunlight lightmap (`EntityAlive::GetAmountEnclosed` IL=003B-0088),
+    // which the server-side world does not build. The Ctx must carry null so the
+    // gate refuses; a fabricated `false` would fire every `!IsIndoors` row in a
+    // roofed base and never an `IsIndoors` one.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    var capture: @import("../../litenet/peer.zig").Capture = .{};
+    const c = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const groups = sandbox_buf[0..sandbox.decode(g.sandbox_code, &sandbox_buf)];
+    var pctx: PlayerCtx = .{};
+    pctx.init(g, c, ps);
+    const ctx = pctx.build(g, c, ps, &g.sim.health[ps], groups);
+    try std.testing.expectEqual(@as(?bool, null), ctx.is_indoors);
 }

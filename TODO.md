@@ -1254,6 +1254,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       with an `onSelfAttackedOther` `ModifyCVar` row bumps its cvar on the
       landed hit and the control (no held item) stays at zero (decisive:
       emptying the row slice fails it).
+- [ ] **`IsIndoors` refuses instead of answering false** - changed 2026-10-02
+      from a fabricated `false` to the fail-closed null. `IsIndoors` IL=25 tests
+      `Stats.AmountEnclosed > 0`, and the stat is
+      `1 - max(chunk Sunlight at the feet, one block up) / 15`
+      (`EntityAlive::GetAmountEnclosed` IL_003B-0088) - it needs the chunk's
+      sunlight lightmap, which the server-side world never builds. The old
+      `false` made every `!IsIndoors` row fire (and every `IsIndoors` row dead) in
+      any base, which is a fabricated stock value; the gate now refuses, so those
+      rows are inert and counted as unsupported. Reopen when a server-side
+      lightmap lands: the fill is one line in `PlayerCtx.build`. Gated by
+      `the player Ctx leaves IsIndoors unknown rather than false` (decisive:
+      restoring `false` fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

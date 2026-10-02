@@ -142,9 +142,12 @@ pub const Kind = enum(u8) {
     /// that always returns true after RequirementBase::IsValid. Fill true when
     /// Ctx is filled. Null Ctx refuses.
     is_looking_at_entity,
-    /// `IsIndoors` IL=25: `target.Stats.AmountEnclosed > 0`. Enclosure is not
-    /// tracked yet, AmountEnclosed stays 0 → always false when Ctx is filled.
-    /// Null Ctx refuses. (# ponytail: enclosure model later if indoors passives matter)
+    /// `IsIndoors` IL=25: `target.Stats.AmountEnclosed > 0`, where the stat is
+    /// `1 - max(chunk Sunlight at the feet, one block up) / 15`
+    /// (`EntityAlive::GetAmountEnclosed` IL=003B-0088, reading the chunk's
+    /// sunlight lightmap). Null Ctx refuses, which is what the server passes:
+    /// it has no lightmap, and a fabricated `false` would be worse than a
+    /// refused gate.
     is_indoors,
     is_attached_to_entity,
     /// `IsSecondaryAttack` IL=65: the held item HAS a secondary action
@@ -1127,8 +1130,13 @@ test "IsLookingAtEntity is true per stock stub and refuses without fold" {
 
 test "IsIndoors is false without enclosure and refuses without fold" {
     const indoors = Requirement{ .kind = .is_indoors, .name = "IsIndoors" };
+    var null_counts: Counts = .{};
     try testing.expect(!all(&.{indoors}, .{ .is_indoors = false }));
     try testing.expect(all(&.{indoors}, .{ .is_indoors = true }));
+    // A null Ctx refuses the gate instead of answering: the server has no
+    // sunlight lightmap, so `AmountEnclosed` is unknown, not zero.
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{indoors}, .{}, &null_counts));
+    try testing.expectEqual(@as(u32, 1), null_counts.unsupported);
     const inverted = Requirement{ .kind = .is_indoors, .name = "IsIndoors", .negated = true };
     try testing.expect(all(&.{inverted}, .{ .is_indoors = false }));
     var counts: Counts = .{};
