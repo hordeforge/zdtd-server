@@ -901,6 +901,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       ups grant nothing and level 5 grants the award, and with the rate 1 and the
       multiplier 2 the level-6 and level-7 ups grant 64 and 128 (decisive: opening
       the rate gate grants on every level).
+- [x] **The `SillyLowGravity` sandbox option did nothing** - closed 2026-10-02:
+      option 150 (float, `Gravity` set 0.5..1.0, default 1.0) scales the world
+      gravity (stock rewrites `Physics.gravity` from the stored
+      `originalGravity`), which on the server is the sim's own gravity rules: the
+      AI integration and hop impulse, falling blocks and the vehicle
+      integrator. zdtd ignored it, so a "low gravity" server still dropped
+      everything at the stock rate. `config.silly_low_gravity` (sandbox and
+      serverconfig arms) multiplies `rules.ai.gravity` and
+      `rules.vehicle.gravity` at the rules install point. Gated by `scenario the
+      silly low gravity option scales the sim gravity`: the rules halve and a
+      zombie falls visibly slower than in the default game (decisive: dropping
+      the multiply leaves the rules at stock).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

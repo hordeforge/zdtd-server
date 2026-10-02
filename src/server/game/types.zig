@@ -378,6 +378,8 @@ pub const InitOptions = struct {
     infection_chance: f32 = 1.0,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
+    /// Sandbox `SillyLowGravity`: the sim gravity multiplier.
+    silly_low_gravity: f32 = 1.0,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,

@@ -23626,3 +23626,42 @@ test "scenario the skill point options set the level-up award" {
     try std.testing.expectEqual(before2 + 64 + 128, cxp.skill_points);
     std.debug.print("PASS skill-points: SkillGainRate and the multiplier gate the award\n", .{});
 }
+
+test "scenario the silly low gravity option scales the sim gravity" {
+    // Sandbox `SillyLowGravity` (float 0.5..1.0, default 1.0) scales the world
+    // gravity: stock rewrites `Physics.gravity` from the stored
+    // `originalGravity`, so the sim's gravity rules scale with it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // Default: the rules keep their stock values.
+    try std.testing.expectApproxEqAbs(@as(f32, -1.6), g.sim.rules.ai.gravity, 1e-5);
+    const normal = g.sim.rules.ai.gravity;
+
+    // A second game with the option at 0.5 halves both gravity rules, and the
+    // integration follows: a 1 s fall drops a quarter of the distance.
+    const g2 = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .silly_low_gravity = 0.5 });
+    defer g2.destroy();
+    try std.testing.expectApproxEqAbs(normal * 0.5, g2.sim.rules.ai.gravity, 1e-5);
+    try std.testing.expectApproxEqAbs(g.sim.rules.vehicle.gravity * 0.5, g2.sim.rules.vehicle.gravity, 1e-5);
+
+    const damage_apply_mod = @import("../ecs/damage_apply.zig");
+    const fall = struct {
+        fn f(g3: *game_mod.Game) f32 {
+            const z = g3.sim.spawnZombie(0, 90, 0, 40) orelse return 0;
+            const s = g3.sim.slotOfNetId(z).?;
+            for (0..20) |_| damage_apply_mod.applyGravity(&g3.sim, s, 0.05);
+            return g3.sim.transform[s].y;
+        }
+    }.f;
+    const y_normal = fall(g);
+    const y_low = fall(g2);
+    try std.testing.expect(y_low > y_normal);
+    std.debug.print("PASS silly-gravity: SillyLowGravity scales the sim gravity\n", .{});
+}

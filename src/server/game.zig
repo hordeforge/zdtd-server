@@ -925,6 +925,14 @@ pub const Game = struct {
         // Sim rules (ADR 0021): defaults overlaid by the mode pack then
         // zdtd.toml in main.zig; this is the single install point.
         self.sim.rules = opts.rules;
+        // Sandbox `SillyLowGravity`: stock scales `Physics.gravity` from the
+        // stored `originalGravity`, so the sim's own gravity rules scale too
+        // (AI integration, hop impulse, falling blocks and the vehicle
+        // integrator). 1.0 leaves them untouched.
+        if (opts.silly_low_gravity != 1.0) {
+            self.sim.rules.ai.gravity *= opts.silly_low_gravity;
+            self.sim.rules.vehicle.gravity *= opts.silly_low_gravity;
+        }
         // [rules.geometry] elevation projection onto the block store (Layer A
         // of the malleable-geometry work; stock defaults are the identity).
         self.world.geometry = opts.rules.geometry;
