@@ -23726,3 +23726,54 @@ test "scenario the headshot mode gates a non-head kill" {
     try std.testing.expect(g.sim.health[s4].hp <= 0);
     std.debug.print("PASS headshot-mode: body hits cannot kill at modes 1 and 2\n", .{});
 }
+
+test "scenario the stamina usage option scales the swing cost" {
+    // Sandbox `StaminaUsage` (option 9, float, default 1.0) is
+    // `ItemActionAttack.StaminaUsageMultiplier`, which `EntityPlayerLocal`
+    // (IL_065D) multiplies into the actor's stamina drain; the server's own
+    // swing cost scales with it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // A melee tool with a stamina cost in its item def.
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1000, .name = "meleeToolSwing", .stamina_loss = 10 },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const z = g.sim.spawnZombie(260, 70, 260, 200).?;
+
+    const swing = struct {
+        fn f(g2: *game_mod.Game, cl: *game_mod.Client, slot: ecs.Slot, zid: i32, body: []u8, frame: []u8) !void {
+            g2.sim.inventory[slot].slots[0] = .{ .item_id = 1000, .count = 1, .quality = 1 };
+            g2.sim.inventory[slot].holding = 0;
+            const b = try packages.buildDamageBody(body, zid, 0, 3, 1, false, cl.entity_id);
+            _ = b;
+            try g2.injectFramed(cl, try packages.framed(frame, "NetPackageDamageEntity", body));
+        }
+    }.f;
+
+    var dmg_body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    g.stamina_usage = 1.0;
+    var before = g.sim.health[ps].stamina;
+    try swing(g, c, ps, z, &dmg_body, &frame_buf);
+    const full_cost = before - g.sim.health[ps].stamina;
+    try std.testing.expectApproxEqAbs(@as(f32, 10), full_cost, 0.01);
+
+    // Half the option, half the cost.
+    g.stamina_usage = 0.5;
+    before = g.sim.health[ps].stamina;
+    try swing(g, c, ps, z, &dmg_body, &frame_buf);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), before - g.sim.health[ps].stamina, 0.01);
+    std.debug.print("PASS stamina-usage: the sandbox scale reaches the swing drain\n", .{});
+}

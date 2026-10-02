@@ -382,6 +382,8 @@ pub const InitOptions = struct {
     silly_low_gravity: f32 = 1.0,
     /// Sandbox `HeadshotMode` (0 off, 1 headshot-only, 2 headshot-finisher).
     headshot_mode: u8 = 0,
+    /// Sandbox `StaminaUsage`: the action stamina-cost scale.
+    stamina_usage: f32 = 1.0,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,

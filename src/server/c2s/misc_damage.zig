@@ -295,7 +295,11 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                 const held = self.sim.inventory[actor_slot].heldItem();
                 if (self.items.byId(held.item_id)) |item_def| {
                     if (item_def.stamina_loss > 0) {
-                        const cost = item_def.stamina_loss * self.sim.rules.combat.stamina_usage_multiplier;
+                        // Sandbox `StaminaUsage` (`ItemActionAttack.
+                        // StaminaUsageMultiplier`, read by `EntityPlayerLocal`
+                        // IL_065D on the drain) scales the server's own swing
+                        // cost, on top of the sim's rules floor.
+                        const cost = item_def.stamina_loss * self.sim.rules.combat.stamina_usage_multiplier * self.stamina_usage;
                         if (cost > 0) self.sim.health[actor_slot].stamina = @max(0, self.sim.health[actor_slot].stamina - cost);
                     }
                 }

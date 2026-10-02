@@ -930,6 +930,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `nohead`-tagged victim exemption (the entity XML `Tags` is not copied onto
       `EntityClass`) and the passive-174 (`HeadShotOnly`) leg, which applies to
       non-player attackers and does not reach this handler.
+- [x] **The `StaminaUsage` sandbox option did nothing** - closed 2026-10-02:
+      option 9 (float, default 1.0) is `ItemActionAttack.StaminaUsageMultiplier`,
+      which `EntityPlayerLocal` IL_065D multiplies into the actor's stamina drain
+      on an action. zdtd's server-side swing cost (the sim's own model of the same
+      drain) ignored it, so a server at `StaminaUsage=2` still billed the stock
+      cost on its replicated stamina. `config.stamina_usage` (sandbox and
+      serverconfig arms) now scales that cost on top of the sim's rules floor.
+      Gated by `scenario the stamina usage option scales the swing cost`: a 10-cost
+      swing drains 10 at 1.0 and 5 at 0.5 (decisive: dropping the factor drains
+      10). Residual: the *local* player's own copy is client-side; only the
+      server's replicated model is scaled here.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
