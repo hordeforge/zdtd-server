@@ -152,6 +152,11 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `ItemDegradation` (float, default 1.0, "DisabledLowDefaultHigh"):
+    /// the scale on the wear an item takes per use. Stock multiplies the wear
+    /// by `ItemAction.ItemDegradationModifier` (`EntityAlive` IL_017C and every
+    /// item action); 0 disables wear.
+    item_degradation: f32 = 1.0,
     /// Sandbox `StaminaUsage` (float, default 1.0): the scale on the stamina an
     /// action costs. Stock applies it as `ItemActionAttack.StaminaUsageMultiplier`
     /// on the actor's stamina drain (`EntityPlayerLocal` IL_065D), so the
@@ -492,6 +497,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "ItemDegradation")) {
+            cfg.item_degradation = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "StaminaUsage")) {
             cfg.stamina_usage = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "HeadshotMode")) {
@@ -736,6 +743,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "ItemDegradation")) |v| {
+        if (xml.parseF32(v)) |f| cfg.item_degradation = std.math.clamp(f, 0, 10);
+    }
     if (prop(raw, "StaminaUsage")) |v| {
         if (xml.parseF32(v)) |f| cfg.stamina_usage = std.math.clamp(f, 0, 10);
     }

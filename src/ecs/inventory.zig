@@ -311,6 +311,9 @@ pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
         const d = f(w.item_degradation_ctx, s.item_id);
         if (d > 0) use_amount = d;
     }
+    // Sandbox `ItemDegradation` (`ItemAction.ItemDegradationModifier`,
+    // `EntityAlive` IL_017C): the wear per use scales with it; 0 disables wear.
+    use_amount *= w.item_degradation;
     const before = s.use_times;
     // Already broken: percentUsesLeft has hit 0, so the counter stops there
     // rather than running up forever. Reusing that resolver keeps MaxUseTimes

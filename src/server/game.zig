@@ -917,6 +917,7 @@ pub const Game = struct {
         self.skill_gain_rate = opts.skill_gain_rate;
         self.headshot_mode = opts.headshot_mode;
         self.stamina_usage = opts.stamina_usage;
+        self.sim.item_degradation = opts.item_degradation;
         self.skill_points_per_level = opts.skill_points_per_level;
         self.sim.loot_bag_chance = opts.loot_bag_chance;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;

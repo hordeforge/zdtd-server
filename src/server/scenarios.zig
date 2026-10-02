@@ -23777,3 +23777,45 @@ test "scenario the stamina usage option scales the swing cost" {
     try std.testing.expectApproxEqAbs(@as(f32, 5), before - g.sim.health[ps].stamina, 0.01);
     std.debug.print("PASS stamina-usage: the sandbox scale reaches the swing drain\n", .{});
 }
+
+test "scenario the item degradation option scales the wear per use" {
+    // Sandbox `ItemDegradation` (option 21, float, default 1.0) is
+    // `ItemAction.ItemDegradationModifier`: stock multiplies an item's wear per
+    // use by it (`EntityAlive` IL_017C and every item action), and the
+    // "Disabled" step is 0.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1100, .name = "degradeTool" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = 1100, .count = 1, .quality = 1, .use_times = 0 };
+
+    const wear = struct {
+        fn f(g2: *game_mod.Game, slot: ecs.Slot) f32 {
+            const before = g2.sim.inventory[slot].slots[0].use_times;
+            _ = invsys.degradeUse(&g2.sim, 0, 0, 1.0);
+            return g2.sim.inventory[slot].slots[0].use_times - before;
+        }
+    }.f;
+
+    g.sim.item_degradation = 1.0;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), wear(g, ps), 0.001);
+    g.sim.item_degradation = 2.0;
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), wear(g, ps), 0.001);
+    g.sim.item_degradation = 0.5;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), wear(g, ps), 0.001);
+    g.sim.item_degradation = 0;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), wear(g, ps), 0.001);
+    std.debug.print("PASS item-degradation: the sandbox scale reaches the per-use wear\n", .{});
+}

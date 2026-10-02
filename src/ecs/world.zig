@@ -485,6 +485,9 @@ pub const World = struct {
     /// The sandbox `AllowZombieDigging` option (0 = the AI never digs through a
     /// blocking cell; stock `EntityMoveHelper.AllowZombieDigging`).
     allow_zombie_digging: bool = true,
+    /// The sandbox `ItemDegradation` option (default 1.0): the scale on the wear
+    /// an item takes per use (`ItemAction.ItemDegradationModifier`).
+    item_degradation: f32 = 1.0,
     /// The sandbox `LootBagChance` option (default 1.0): the multiplier
     /// `EntityAlive`'s death path applies to `Entity.lootDropProb` before the
     /// bag roll (IL_00F3-011D `lootDropProb *= LootContainer.LootBagChance`).

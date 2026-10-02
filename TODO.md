@@ -941,6 +941,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       swing drains 10 at 1.0 and 5 at 0.5 (decisive: dropping the factor drains
       10). Residual: the *local* player's own copy is client-side; only the
       server's replicated model is scaled here.
+- [x] **The `ItemDegradation` sandbox option did nothing** - closed 2026-10-02:
+      option 21 (float, default 1.0) is `ItemAction.ItemDegradationModifier`,
+      which scales an item's wear per use (`EntityAlive` IL_017C adds
+      `GetValue(...) * modifier` to `UseTimes`; every item action writes its own
+      `UseTimes` the same way), with 0 as the "Disabled" step. zdtd's
+      `degradeUse` applied the item's `DegradationPerUse` (or the 1.0 default)
+      unscaled, so a server at `ItemDegradation=2` still got stock tool life.
+      `World.item_degradation` now scales the wear inside `degradeUse`, fed by
+      `config.item_degradation` (sandbox and serverconfig arms). Gated by
+      `scenario the item degradation option scales the wear per use`: 1.0, 2.0,
+      0.5 and 0 give wear 1, 2, 0.5 and 0 (decisive: dropping the factor wears
+      1).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

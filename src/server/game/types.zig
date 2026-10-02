@@ -384,6 +384,8 @@ pub const InitOptions = struct {
     headshot_mode: u8 = 0,
     /// Sandbox `StaminaUsage`: the action stamina-cost scale.
     stamina_usage: f32 = 1.0,
+    /// Sandbox `ItemDegradation`: the per-use wear scale.
+    item_degradation: f32 = 1.0,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,
