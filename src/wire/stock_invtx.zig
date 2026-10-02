@@ -383,6 +383,18 @@ test "parseStockInvTx reads the stock InventoryTransaction layout" {
     // A native 11-byte body must NOT parse as a stock transaction.
     var native: [11]u8 = .{ 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 };
     try std.testing.expectError(error.EndOfStream, parseStockInvTx(&native));
+
+    // The op code is a client i16 narrowed to u8: -1 and 3 must be rejected
+    // bodies, not a trapping @intCast (rule 20). Both bytes are patched into the
+    // golden body, whose only op starts at offset 16+4+4+4+2 = 30.
+    const op_off = 32; // 4 count + 16 guid + 4 initial + 4 final + 4 opCount
+    const golden = w.written();
+    for ([_]i16{ -1, 3, 300 }) |bad| {
+        var patched: [256]u8 = undefined;
+        @memcpy(patched[0..golden.len], golden);
+        std.mem.writeInt(i16, patched[op_off..][0..2], bad, .little);
+        try std.testing.expectError(error.InvalidArgument, parseStockInvTx(patched[0..golden.len]));
+    }
 }
 
 test "id mapping body is name, then length, then bytes" {
