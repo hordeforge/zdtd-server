@@ -702,6 +702,12 @@ pub const Client = struct {
     /// rows. Names point into the buff catalog's arena. Session-scoped: stock
     /// saves CVars with the entity, which is a separate persistence gap.
     cvars: cvars.Set = .{},
+    /// Name storage for custom variables restored from `players.zsv`. Normal
+    /// writes point at catalog arena strings; a restored name has no such home,
+    /// so `persist_players` interns it here (fail-closed: a full pool drops the
+    /// variable's name and the entry is skipped).
+    cvar_name_pool: [cvars.max_cvars * 32]u8 = [_]u8{0} ** (cvars.max_cvars * 32),
+    cvar_name_pool_used: usize = 0,
     /// Deferred ModifyStats refunds (`delay=` rows: 21 kill-event stamina
     /// refunds at 1.0 s). Fixed slots drained on the survival tick; a full
     /// row drops and counts (bounded, never grows).

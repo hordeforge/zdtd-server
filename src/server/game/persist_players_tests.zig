@@ -264,7 +264,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVI", data[0..4]);
     }
     {
         // The record is carried, not rewritten (its name is not the harness
@@ -484,7 +484,7 @@ test "players v14 record gains an absent identity section on save (ZPV15 migrati
 
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+    try std.testing.expectEqualStrings("ZPVI", data[0..4]);
     // The rewritten record walks cleanly under the v15 layout. The identity
     // section is the absent marker because the harness client presented no
     // platform id, so this row is still name-keyed (ADR 0038 notices it).
@@ -613,13 +613,14 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     }
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'H'), data[3]);
+    try std.testing.expectEqual(@as(u8, 'I'), data[3]);
     // Record length via the v14 walker: name(7) + 16 + inv(1) + jn(1) +
     // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
     // bed(1) + skills(5) + backpacks(1, an empty marker list) + the v14
     // counters(12) (the fixture has no inventory slots, so the ZPV12 slot
     // widening changes nothing).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1), game.zpvRecordLen(data, 8, @import("../persist.zig").persist_version));
+    // The trailing +1 is the ZPV18 cvar section (empty: no cvars on the fixture).
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1 + 1), game.zpvRecordLen(data, 8, @import("../persist.zig").persist_version));
 }
 
 test "players zpv10 inventory slots widen to the ZPV12 stride" {
@@ -677,9 +678,11 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
 
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'H'), data[3]); // carried to v17
+    try std.testing.expectEqual(@as(u8, 'I'), data[3]); // carried to v17
     // No prog tail on this fixture, so the ZPV13 marker list (which lives
     // inside the prog block) adds nothing to the length.
+    // The trailing +1 is the ZPV18 cvar section (empty); this fixture carries
+    // no prog tail, so no identity section is emitted either.
     const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(persist.persist_version) + 1 + 1;
     try std.testing.expectEqual(want, game.zpvRecordLen(data, 8, persist.persist_version));
     // The slot's leading fields survived the widening at their own offsets.
@@ -745,7 +748,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVI", data[0..4]);
     }
     {
         // Carried, not rewritten, so the migrated tail is read from the file:
@@ -838,7 +841,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVI", data[0..4]);
     }
     {
         // The carried record is not the harness client's, so verify it in the
@@ -910,7 +913,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVI", data[0..4]);
     }
     {
         // Carried, not rewritten, so the widened slot is checked in the file:
@@ -1213,7 +1216,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVH", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVI", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
@@ -1235,5 +1238,40 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
         }
         try std.testing.expect(found);
         std.debug.print("PASS zpv4->zpv5: legacy journal upgraded in place and round-trips\n", .{});
+    }
+}
+
+test "players ZPV18 round-trips custom variables" {
+    // ZPV18 appends `n:u8 | n x (name_len:u8, name, value:f32)` after the ZPV15
+    // identity section, so a relog keeps the recipe-unlock CVars and the buff
+    // variables instead of starting from zero.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer g.destroy();
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        g.clients[cl.slot].entered = true;
+        _ = g.clients[cl.slot].cvars.apply("recipeForgeIron", .set, 2);
+        _ = g.clients[cl.slot].cvars.apply(".hiddenProbe", .set, 0.25);
+        try g.savePlayers();
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer g.destroy();
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const set = &g.clients[cl.slot].cvars;
+        try std.testing.expectEqual(@as(f32, 2), set.get("recipeForgeIron"));
+        try std.testing.expectEqual(@as(f32, 0.25), set.get(".hiddenProbe"));
+        // The name was interned in the client's pool, not left pointing at the
+        // freed file buffer.
+        const i = set.indexOf("recipeForgeIron").?;
+        const nm = set.entries[i].name;
+        const pool = g.clients[cl.slot].cvar_name_pool[0..];
+        try std.testing.expect(@intFromPtr(nm.ptr) >= @intFromPtr(&pool[0]));
+        try std.testing.expect(@intFromPtr(nm.ptr) + nm.len <= @intFromPtr(&pool[0]) + pool.len);
     }
 }

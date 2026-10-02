@@ -1145,17 +1145,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       `PropUnlockedBy`, IL_0C46-0C72) are not parsed, no magazine read action
       increments the CVar, and per-player CVars are not part of the sim.
       The item side is in place (`ItemDef.unlocks` parses and inherits) and
-      per-player CVars exist (`ecs/cvars.zig`, `World.cvarsMut`), but they are
-      **not persisted**: `players.zsv` (ZPV17) carries no cvar section, so a
-      relog loses every cvar, including the recipe-name CVars this gate would read
-      and the buff cvars. Plan for the round that lands it: bump to ZPV18 (magic
-      'I'), append `n:u8 | n x (name_len:u8, name, value:f32)` after the ZPV15
-      identity section (`persist.zpvRecordSpan` gains `cvars_off`, the migration
-      paths emit an empty section for older records), restore with
-      `Set.apply(name, .set, value)` and dupe names into stable storage (the store
-      requires names that outlive it), then the read action and the craft gate -
-      all together, because gating without the read path would block every
-      learnable recipe.
+      per-player CVars now survive a relog: `players.zsv` is ZPV18 (magic 'I'),
+      which appends `n:u8 | n x (name_len:u8, name, value:f32)` after the ZPV15
+      identity section; `persist.zpvRecordSpan` exposes `cvars_off`, every
+      migration path emits the section (empty for an older record) and restore
+      interns the names in `Client.cvar_name_pool` before `Set.apply`. What
+      remains is the magazine read action that increments the CVar named after
+      each unlocked recipe and the craft-validation gate - together, because
+      gating without the read path would block every learnable recipe.
 - [ ] **Biome-progression recipe unlocks are not modelled** - located
       2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
       `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a

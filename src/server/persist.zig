@@ -129,8 +129,8 @@ pub const Zpv2Drop = struct {
 /// meta:u16), 11 from v7 (those plus use_times: f32), 13 from v10 (plus
 /// seed:u16 - the stock ItemValue.Seed, so a plantable's per-item seed
 /// survives a restart).
-/// Version this build writes (ZPV17). Older files stay readable.
-pub const persist_version: u8 = 17;
+/// Version this build writes (ZPV18). Older files stay readable.
+pub const persist_version: u8 = 18;
 
 pub fn zpvSlotStride(version: u8) usize {
     if (version >= 17) return ecs.components.inv_slot_persist_stride; // 52 + flags + mod_n + 4 qualities
@@ -153,6 +153,7 @@ pub fn zpvVersionFromMagic(b: u8) ?u8 {
         'F' => 15,
         'G' => 16,
         'H' => 17,
+        'I' => 18,
         else => null,
     };
 }
@@ -321,6 +322,9 @@ pub fn emitZpv14Stats(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl:
 pub const RecordSpan = struct {
     len: usize,
     identity_off: usize = 0,
+    /// Where the ZPV18 custom-variable section starts (0 when the record
+    /// predates it).
+    cvars_off: usize = 0,
 };
 
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
@@ -393,12 +397,66 @@ pub fn zpvRecordSpan(data: []const u8, off: usize, version: u8) error{CorruptPla
             }
             if (version >= 15) {
                 const identity_off = p;
-                const end = try zpvIdentitySectionEnd(data, p);
-                return .{ .len = end - off, .identity_off = identity_off };
+                const id_end = try zpvIdentitySectionEnd(data, p);
+                if (version >= 18) {
+                    const cvar_end = try zpvCvarSectionEnd(data, id_end);
+                    return .{ .len = cvar_end - off, .identity_off = identity_off, .cvars_off = id_end };
+                }
+                return .{ .len = id_end - off, .identity_off = identity_off };
             }
         }
     }
     return .{ .len = p - off };
+}
+
+/// Longest custom-variable name the ZPV18 tail carries. Stock cvar names are
+/// short (recipe names, `.foo`-style effect vars); a longer name is dropped at
+/// save rather than truncated into a different variable.
+pub const zpv_cvar_name_max: usize = 32;
+
+/// End offset of the ZPV18 custom-variable section:
+/// `n:u8 | n x (name_len:u8, name, value:f32)`. `Set` caps the store at
+/// `cvars.max_cvars`, so the count is validated against the remaining bytes.
+pub fn zpvCvarSectionEnd(data: []const u8, p_in: usize) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const n: usize = data[p];
+    p += 1;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (p >= data.len) return error.CorruptPlayersFile;
+        const nl: usize = data[p];
+        p += 1;
+        if (nl == 0 or nl > zpv_cvar_name_max or p + nl + 4 > data.len) return error.CorruptPlayersFile;
+        p += nl + 4;
+    }
+    return p;
+}
+
+/// Emit the ZPV18 custom-variable section for one client (null = an empty
+/// section, which a carried older record gets).
+pub fn emitZpv18Cvars(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    var n: u8 = 0;
+    if (cl) |c| {
+        var i: u8 = 0;
+        while (i < c.cvars.n) : (i += 1) {
+            if (c.cvars.entries[i].name.len == 0 or c.cvars.entries[i].name.len > zpv_cvar_name_max) continue;
+            n += 1;
+        }
+    }
+    try out.append(allocator, n);
+    if (cl) |c| {
+        var i: u8 = 0;
+        while (i < c.cvars.n) : (i += 1) {
+            const e = c.cvars.entries[i];
+            if (e.name.len == 0 or e.name.len > zpv_cvar_name_max) continue;
+            try out.append(allocator, @intCast(e.name.len));
+            try out.appendSlice(allocator, e.name);
+            var vb: [4]u8 = undefined;
+            std.mem.writeInt(u32, &vb, @bitCast(e.value), .little);
+            try out.appendSlice(allocator, &vb);
+        }
+    }
 }
 
 /// Advance past one identity (`present:u8 | plat_len:u8 | plat | id_len:u8 |

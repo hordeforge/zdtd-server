@@ -30,6 +30,8 @@ const emitZpv11Skills = persist.emitZpv11Skills;
 const emitZpv13Backpacks = persist.emitZpv13Backpacks;
 const emitZpv14Stats = persist.emitZpv14Stats;
 const emitZpv15Identity = persist.emitZpv15Identity;
+const emitZpv18Cvars = persist.emitZpv18Cvars;
+const zpv_cvar_name_max = persist.zpv_cvar_name_max;
 const zpvRecordHasProgTail = persist.zpvRecordHasProgTail;
 const zpvRecordSpan = persist.zpvRecordSpan;
 const zpvRecordLen = persist.zpvRecordLen;
@@ -141,6 +143,7 @@ pub fn savePlayers(self: *Game) !void {
                 // The carried bytes are v12+ shaped, so a v15 file already
                 // holds its identity section; only older records need one.
                 if (old_version < 15) try emitZpv15Identity(&out, self.allocator, null);
+                if (had_prog_tail and old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -162,6 +165,7 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 try emitZpv15Identity(&out, self.allocator, null);
+                if (had_prog_tail and old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -176,6 +180,10 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                if (had_prog_tail) {
+                    try emitZpv15Identity(&out, self.allocator, null);
+                    if (old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
+                }
                 written += 1;
                 continue;
             }
@@ -193,6 +201,10 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                if (had_prog_tail) {
+                    try emitZpv15Identity(&out, self.allocator, null);
+                    if (old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
+                }
                 written += 1;
                 continue;
             }
@@ -212,6 +224,10 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                if (had_prog_tail) {
+                    try emitZpv15Identity(&out, self.allocator, null);
+                    if (old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
+                }
                 written += 1;
                 continue;
             }
@@ -229,6 +245,10 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                if (had_prog_tail) {
+                    try emitZpv15Identity(&out, self.allocator, null);
+                    if (old_version < 18) try emitZpv18Cvars(&out, self.allocator, null);
+                }
                 written += 1;
                 continue;
             }
@@ -494,7 +514,13 @@ pub fn savePlayers(self: *Game) !void {
         if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
         if (tail_has_prog) try emitZpv13Backpacks(&out, self.allocator, cl);
         if (tail_has_prog) try emitZpv14Stats(&out, self.allocator, cl);
-        if (tail_has_prog) try emitZpv15Identity(&out, self.allocator, cl);
+        if (tail_has_prog) {
+            try emitZpv15Identity(&out, self.allocator, cl);
+            // ZPV18: the player's custom variables (recipe-unlock CVars, buff
+            // vars). Emitted with the identity section, because the record walk
+            // only reaches both through the progression block.
+            try emitZpv18Cvars(&out, self.allocator, cl);
+        }
         // Identity-keyed row with no identity to key on: the row falls back to
         // the login name, so another client can still claim it (ADR 0038). A
         // real client always presents one; the bots do not, which is why this
@@ -510,6 +536,17 @@ pub fn savePlayers(self: *Game) !void {
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
     try io_fs.writeFile(path, out.items);
+}
+
+/// Copy a restored cvar name into the client's name pool so the store's borrowed
+/// slice outlives the file buffer. Null when the pool is full (the entry is then
+/// skipped, matching how an unresolvable skill name is dropped).
+fn internCvarName(c: *Client, name: []const u8) ?[]const u8 {
+    if (c.cvar_name_pool_used + name.len > c.cvar_name_pool.len) return null;
+    const at = c.cvar_name_pool_used;
+    @memcpy(c.cvar_name_pool[at..][0..name.len], name);
+    c.cvar_name_pool_used += name.len;
+    return c.cvar_name_pool[at..][0..name.len];
 }
 
 pub fn tryRestorePlayer(self: *Game, c: *Client) void {
@@ -561,6 +598,24 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // corrupt tail the caller reports.
             const sp = zpvRecordSpan(data, rec_start, version) catch RecordSpan{ .len = 0 };
             if (sp.identity_off != 0) zpvIdentityFrom(data, sp.identity_off, &rec_ident);
+            if (version >= 18 and sp.cvars_off != 0) {
+                var cp = sp.cvars_off;
+                const cn: usize = data[cp];
+                cp += 1;
+                var ci: usize = 0;
+                while (ci < cn) : (ci += 1) {
+                    if (cp >= data.len) break;
+                    const cvl: usize = data[cp];
+                    cp += 1;
+                    if (cvl == 0 or cvl > zpv_cvar_name_max or cp + cvl + 4 > data.len) break;
+                    const raw_name = data[cp..][0..cvl];
+                    cp += cvl;
+                    const value: f32 = @bitCast(std.mem.readInt(u32, data[cp..][0..4], .little));
+                    cp += 4;
+                    const stable = internCvarName(c, raw_name) orelse continue;
+                    _ = c.cvars.apply(stable, .set, value);
+                }
+            }
         }
         const rest = data[off..][0..16];
         off += 16;
