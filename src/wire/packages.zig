@@ -215,6 +215,10 @@ pub const buildEntityStealthBody = stock_estats.buildEntityStealthBody;
 pub const buildEntityStealthCrouchBody = stock_estats.buildEntityStealthCrouchBody;
 
 pub const stock_invtx = @import("stock_invtx.zig");
+pub const stock_props = @import("stock_props.zig");
+pub const PropChange = stock_props.PropChange;
+pub const buildSetPropBody = stock_props.buildSetPropBody;
+pub const parseSetPropBody = stock_props.parseSetPropBody;
 pub const buildInvTxRequest = stock_invtx.buildInvTxRequest;
 pub const parseInvTxRequest = stock_invtx.parseInvTxRequest;
 pub const buildInvTxResponseHead = stock_invtx.buildInvTxResponseHead;

@@ -70,6 +70,7 @@ pub const stock_te = @import("stock_te.zig");
 pub const te_tests = @import("te_tests.zig");
 pub const stock_sign = @import("stock_sign.zig");
 pub const stock_party = @import("stock_party.zig");
+pub const stock_props = @import("stock_props.zig");
 pub const stock_xp = @import("stock_xp.zig");
 pub const te_types = @import("te_types.zig");
 
@@ -98,6 +99,7 @@ test {
     _ = stock_world;
     _ = stock_estats;
     _ = stock_invtx;
+    _ = stock_props;
     _ = stock_lock;
     _ = stock_playerid;
     _ = playerid_tests;
