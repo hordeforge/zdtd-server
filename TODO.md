@@ -1230,6 +1230,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       max-1 clamp; `EntityPlayer::GetTraderStage` IL_0052-005E scales the quest
       stage, including the `partyLootStage` fallback zdtd uses when traders.xml
       carries no `quest_tier_mod`.
+- [x] **Option-coverage and package-sweep audits re-run** - 2026-10-02. The
+      package sweep compared all 242 stock `NetPackage*` dump types against zdtd:
+      every real package class has a builder or handler; the 51 "missing" names
+      are nested types (`*_c`, `*_Type` enums, `*_d__N` state machines,
+      `NetPackageManager` helpers), not packages. The option audit found 61 of 165
+      sandbox option names unreferenced outside the tables; the ones checked by
+      name in the IL (`StarterSkillPoints`, `WorkstationsInTheWild`,
+      `ElectricalOutput`, the eight `Biome*Respawn`/`Biome*Density`,
+      `ZombiesEatAnimals`, `FullChickenStressEvent`, `PointsPerMagazine`,
+      `LoseItemsOnDeathType/Count`, `DegradeItemsOnDeath`) have **no reader at
+      all** in the dump - set by the sandbox manager and never consumed - so they
+      are non-gaps like `SmeltingType`, not missing work. Limitation recorded: an
+      option the client reads *by numeric index* would not show up in a
+      name-based grep, so "unreferenced by name" means "no named consumer", not
+      "dead"; those stay out of the work list until a consumer is found.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

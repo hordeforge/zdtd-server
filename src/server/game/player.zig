@@ -1807,3 +1807,36 @@ test "the sandbox loot and trader stage modifiers reach the stage" {
     g.global_ts_modifier = 1.0;
     try std.testing.expectEqual(base_ts, g.questRewardStage(qd, c.slot));
 }
+
+test "the POI tier loot modifier scales the POI terms" {
+    // `GetLootStage` IL_0055/0071: `POITierMod[tier]` and `POITierBonus[tier]`
+    // are each multiplied by `POITierLootStageModifier`, so the sandbox option
+    // must move a stage that has POI terms (the global leg is covered above).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    var capture: @import("../../litenet/peer.zig").Capture = .{};
+    const c = try g.attachJoinedClient(&capture);
+    g.clients[c.slot].level = 5;
+    const tiers = [_]f32{ 12, 20 };
+    const bonuses = [_]f32{ 3, 5 };
+    g.loot.poi_tier_mod = &tiers;
+    g.loot.poi_tier_bonus = &bonuses;
+    const stub = struct {
+        fn tier(_: ?*anyopaque, _: f32, _: f32) u8 {
+            return 1;
+        }
+    }.tier;
+    g.sim.poi_tier_fn = stub;
+    const plain = lootStageOf(g, c.slot);
+    g.poi_tier_ls_modifier = 2.0;
+    const doubled = lootStageOf(g, c.slot);
+    try std.testing.expect(doubled > plain);
+    g.poi_tier_ls_modifier = 0;
+    const zeroed = lootStageOf(g, c.slot);
+    try std.testing.expect(zeroed < plain);
+    g.poi_tier_ls_modifier = 1.0;
+    g.sim.poi_tier_fn = null;
+}
