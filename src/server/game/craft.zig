@@ -364,11 +364,15 @@ pub fn craftTimeForPlayer(self: *Game, peer_slot: ?usize, recipe: assets_recipes
     return total;
 }
 
-/// `Recipe.IsUnlocked` (IL_0000-003E), called by `Recipe.CanCraft` (IL=128) and
-/// `CanCraftAny` (IL=134): with crafting progression on, a recipe carrying the
-/// `learnable` tag is locked until the player's CVar named after the recipe is
-/// positive (`GetValue(RecipeTagUnlocked = 73, base = that CVar)`). The magazine
-/// read reaches this store through `NetPackageModifyCVar`, and ZPV18 persists it.
+/// `Recipe.IsUnlocked` (IL_0000-003E): with crafting progression on, a recipe
+/// carrying the `learnable` tag is locked until the player's CVar named after the
+/// recipe is positive (`GetValue(RecipeTagUnlocked = 73, base = that CVar)`).
+/// Stock calls it from the `RecipeUnlocked` requirement, `XUiM_ItemStack` and
+/// `XUiM_Recipes.GetRecipeIsUnlocked` - all client-side, so the vanilla server
+/// would accept a learnable craft from a modified client. zdtd validates it in
+/// both craft paths (rule 17: the request is a request), which a stock client
+/// never notices because its own UI gates the same recipes. The magazine read
+/// reaches the store through `NetPackageModifyCVar`, and ZPV18 persists it.
 pub fn craftUnlocked(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) bool {
     if (!craftingProgressionOn(self)) return true;
     if (!assets_recipes.isLearnable(recipe.tags)) return true;

@@ -1133,6 +1133,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       stock's on-branch returns the folded value **unclamped** (IL_0026-0027);
       zdtd keeps a clamp to the item ceiling because the crafted quality write has
       none of its own (marked in the code as a ponytail shortcut to move).
+- [ ] **The `RecipeUnlocked` requirement type is not evaluated** - located
+      2026-10-02: `RecipeUnlocked` (a `TargetedCompareRequirementBase` subclass)
+      resolves an `item_name` through `CraftingManager.GetNonScrapableRecipes`
+      and returns `Recipe.IsUnlocked(player)` for each, so a buff/progression row
+      can gate on "recipe X unlocked". zdtd's requirement evaluator has no arm
+      for it (`assets/requirements.zig` matches the stock type names it knows and
+      fails closed on the rest), so such a row is inert. `craftUnlocked` already
+      implements the underlying check; wiring it needs the recipe catalog in the
+      requirement context (the `Ctx` carries cvars and tags, not the catalog).
 - [x] **Learnable recipes (magazine unlocks) are not modelled** - closed
       2026-10-02: the gate is in. `Recipe.IsUnlocked` (IL_0000-003E) is reached
       from `Recipe.CanCraft` (IL=128) and `CanCraftAny` (IL=134); with

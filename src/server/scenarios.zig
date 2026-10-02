@@ -7168,6 +7168,57 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
         try std.testing.expectEqual(@as(f32, 0), q3.one_item_craft_time);
     }
 
+    // The workstation leg of the learnable gate: mark the loaded recipe
+    // `learnable` and show the queue refuses it until the player's recipe CVar
+    // is positive (`Recipe.IsUnlocked` through the CanCraft validation).
+    {
+        g.workstation_crafting = true;
+        g.sandbox_code = &.{};
+        g.tick_n += 1;
+        for (@constCast(g.recipes.defs)) |*rd| {
+            if (std.mem.eql(u8, rd.name, "frameShapes:cube")) rd.tags = "learnable";
+        }
+        var queue4 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        queue4[queue4.len - 1] = queue[queue.len - 1];
+        queue4[queue4.len - 1].output_count = 3;
+        queue4[queue4.len - 1].one_item_craft_time = 3.0;
+        var body4: [4096]u8 = undefined;
+        const c2s4 = try stock_te.buildWorkstationTeBody(&body4, 3, wx, wy, wz, 1301, .{
+            .fuel = fuel[0..],
+            .input = input[0..],
+            .tools = tools[0..],
+            .output = output[0..],
+            .last_input_count = ws.stock_last_input_len,
+            .last_input = liw.written(),
+            .queue = queue4[0..],
+            .melt = melt[0..],
+            .is_burning = true,
+            .burn_time_left = 30,
+        });
+        var fb4: [4096]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb4, "NetPackageTileEntity", c2s4));
+        const q4 = g.workstations.get(wx, wy, wz).?.queue[ws.stock_queue_len - 1];
+        try std.testing.expectEqual(@as(u16, 0), q4.output_count);
+        _ = g.clients[ca.slot].cvars.apply("frameShapes:cube", .set, 1);
+        var body5: [4096]u8 = undefined;
+        const c2s5 = try stock_te.buildWorkstationTeBody(&body5, 3, wx, wy, wz, 1301, .{
+            .fuel = fuel[0..],
+            .input = input[0..],
+            .tools = tools[0..],
+            .output = output[0..],
+            .last_input_count = ws.stock_last_input_len,
+            .last_input = liw.written(),
+            .queue = queue4[0..],
+            .melt = melt[0..],
+            .is_burning = true,
+            .burn_time_left = 30,
+        });
+        var fb5: [4096]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb5, "NetPackageTileEntity", c2s5));
+        const q5 = g.workstations.get(wx, wy, wz).?.queue[ws.stock_queue_len - 1];
+        try std.testing.expectEqual(@as(u16, 3), q5.output_count);
+    }
+
     std.debug.print("PASS workstation-authority: spoofed count/time replaced by recipe 3/3.0\n", .{});
 }
 
