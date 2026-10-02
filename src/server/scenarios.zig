@@ -23900,3 +23900,54 @@ test "scenario the trader hours preset overrides the trader's own hours" {
     try std.testing.expect(trader_mod.traderIsOpen(g, ts));
     std.debug.print("PASS trader-hours: the preset window replaces the trader's own hours\n", .{});
 }
+
+test "scenario the trader reset interval option overrides the per-trader value" {
+    // Sandbox `TraderResetInterval` (option 133, int, default -1): when set it
+    // replaces each trader_info's `reset_interval` (`TraderInfo.get_ResetInterval`
+    // IL=4x), while a player-owned or rentable row never restocks.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="groupCasino">
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1" open_time="4:05" close_time="21:50" reset_interval="7"/>
+        \\  <trader_info id="2" player_owned="true" reset_interval="1"/>
+        \\  <traderAlways>
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </traderAlways>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var tbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tbuf, "{s}/traders_reset.xml", .{dir});
+    try io_fs.writeFile(tpath, tsrc);
+    const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    g.traders.deinit();
+    g.traders = tt;
+
+    // XML value wins while the sandbox option is unset.
+    const a = g.sim.spawnTrader("traderXml", 0, 70, 0, 1, 500).?;
+    const as = g.sim.slotOfNetId(a).?;
+    _ = g.fillTraderFromXml(a);
+    try std.testing.expectEqual(@as(i32, 7), g.sim.trader_stock[as].reset_interval);
+
+    // The sandbox override replaces it.
+    g.trader_reset_interval = 1;
+    _ = g.fillTraderFromXml(a);
+    try std.testing.expectEqual(@as(i32, 1), g.sim.trader_stock[as].reset_interval);
+
+    // A player-owned row never restocks, whatever the XML or the option say.
+    const b = g.sim.spawnTrader("traderOwned", 0, 70, 8, 2, 500).?;
+    const bs = g.sim.slotOfNetId(b).?;
+    _ = g.fillTraderFromXml(b);
+    try std.testing.expectEqual(@as(i32, -1), g.sim.trader_stock[bs].reset_interval);
+    std.debug.print("PASS trader-reset: the sandbox interval overrides the per-trader value\n", .{});
+}

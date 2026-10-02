@@ -198,9 +198,17 @@ pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.Roll
                 if (tt.traderInfo(info_id)) |ti| {
                     resolved_row = true;
                     if (ti.refs.len > 0) refs = ti.refs;
-                    // Per-trader RestockInterval drives systems.traderRestock
-                    // (-1 = never, 0 = daily, N = every N days).
-                    self.sim.trader_stock[s].reset_interval = ti.reset_interval;
+                    // `TraderInfo.get_ResetInterval` (IL=4x): a player-owned or
+                    // rentable row never restocks (-1); otherwise the sandbox
+                    // `TraderResetInterval` overrides the per-trader
+                    // RestockInterval when it is set (-1 = unset, XML wins).
+                    // -1 = never, 0 = daily, N = every N days.
+                    self.sim.trader_stock[s].reset_interval = if (ti.player_owned or ti.rentable)
+                        -1
+                    else if (self.trader_reset_interval != -1)
+                        self.trader_reset_interval
+                    else
+                        ti.reset_interval;
                     self.sim.trader_stock[s].last_restock_day = self.sim.director.clock.day;
                 }
             }

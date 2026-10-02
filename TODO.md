@@ -977,6 +977,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       23:00 (decisive: pinning the lookup to preset 0 closes it at noon).
       Residuals: preset 5 (dawn/dusk from the DayLightLength stat) and preset 6
       (no pinned times in the IL) keep the XML path.
+- [x] **The `TraderResetInterval` sandbox option did nothing** - closed
+      2026-10-02: option 133 (int, default -1 = unset) overrides the trader
+      restock cadence. `TraderInfo.get_ResetInterval` (IL=4x) returns -1 for a
+      player-owned or rentable row (never restocks), else the sandbox
+      `GlobalResetInterval` when set, else the row's own `reset_interval`. zdtd
+      used the XML value only, so an operator's restock cadence was ignored; it
+      also ignored the player-owned/rentable rule, so a rented machine restocked
+      on its authored interval. `fillTraderFromXml` now applies the full
+      three-level fallback. Gated by `scenario the trader reset interval option
+      overrides the per-trader value`: XML 7, override 1, and a player-owned row
+      at -1 (decisive: disabling the override leaves 7).
+      Residual: `VendingResetInterval` (id 137) has no seam yet because zdtd has
+      no vending-machine restock pass (vending stock is created on place/load and
+      never refilled), so it is left unparsed rather than dead.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

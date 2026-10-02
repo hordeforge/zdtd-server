@@ -373,6 +373,8 @@ pub const Game = struct {
     quests_enabled: bool = true,
     /// Sandbox `TraderHours` preset (0 = per-trader traders.xml hours).
     trader_hours_preset: u8 = 0,
+    /// Sandbox `TraderResetInterval` (-1 = each trader's traders.xml value).
+    trader_reset_interval: i32 = -1,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
@@ -923,6 +925,7 @@ pub const Game = struct {
         self.stamina_usage = opts.stamina_usage;
         self.quests_enabled = opts.quests_enabled;
         self.trader_hours_preset = opts.trader_hours_preset;
+        self.trader_reset_interval = opts.trader_reset_interval;
         self.sim.item_degradation = opts.item_degradation;
         self.skill_points_per_level = opts.skill_points_per_level;
         self.sim.loot_bag_chance = opts.loot_bag_chance;

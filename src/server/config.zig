@@ -152,6 +152,11 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `TraderResetInterval` (int -1..14, default -1): the global trader
+    /// restock cadence, overriding each trader_info's own `reset_interval`
+    /// (`TraderInfo.get_ResetInterval` IL=4x: -1 = unset falls back to the XML,
+    /// and a player-owned or rentable row never restocks).
+    trader_reset_interval: i32 = -1,
     /// Sandbox `TraderHours` (int 0..6, default 0): the global trader-hours
     /// preset (`TraderInfo.set_TraderHoursPreset` IL=81, values 1..4 pinned to
     /// fixed windows; 0 keeps each trader's own traders.xml hours). Presets 5
@@ -506,6 +511,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "TraderResetInterval")) {
+            cfg.trader_reset_interval = @max(-1, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "TraderHours")) {
             cfg.trader_hours_preset = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 6);
         } else if (std.mem.eql(u8, o.name, "QuestsEnabled")) {
@@ -756,6 +763,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "TraderResetInterval")) |v| {
+        if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.trader_reset_interval = if (n < 0) -1 else @min(n, 14);
+    }
     if (prop(raw, "TraderHours")) |v| cfg.trader_hours_preset = clampU8Named("TraderHours", v, 0, 6, cfg.trader_hours_preset);
     if (prop(raw, "QuestsEnabled")) |v| cfg.quests_enabled = clampU8Named("QuestsEnabled", v, 0, 1, @intFromBool(cfg.quests_enabled)) != 0;
     if (prop(raw, "ItemDegradation")) |v| {

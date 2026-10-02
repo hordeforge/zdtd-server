@@ -788,6 +788,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .item_degradation = cfg.item_degradation,
         .quests_enabled = cfg.quests_enabled,
         .trader_hours_preset = cfg.trader_hours_preset,
+        .trader_reset_interval = cfg.trader_reset_interval,
         .skill_points_per_level = cfg.skill_points_per_level,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
