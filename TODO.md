@@ -747,6 +747,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       sandbox scale`: with `DewCollectorOutput=4` and `ApiaryOutput=1`, the dew
       collector yields 4 and the apiary right beside it yields 1 (decisive:
       pointing the apiary at the dew pair yields 4).
+- [x] **The harvest abundance sandbox options did nothing** - closed 2026-10-02:
+      `GameUtils.HarvestOnAttack` IL_0341-0384 scales a harvest drop count by one
+      of four sandbox statics: `SeedDropOutput` (id 92) when the DROPPED ITEM
+      carries the `seedMulti` tag, else `CropOutput` (91) for a `crops` block,
+      else `MiningOutput` (101) for an `ore` block, else `HarvestingOutput` (102);
+      each defaults to 1.0 and a 0 scale drops nothing. zdtd's block harvest
+      ignored all four, so `MiningOutput=2` mined the same ore as 1 and
+      `CropOutput=0` still yielded crops. `rollBlockDropEvent` now multiplies the
+      rolled count by the row's scale (and skips at 0), reading the four values
+      through `Game.harvestScales`, which decodes the sandbox code once per tick.
+      Gated by `scenario the sandbox abundance scales block harvest drops`:
+      `MiningOutput=2` and `CropOutput=2` double an ore and a crop drop while a
+      third block with `CropOutput=0` drops nothing (decisive: skipping the scale
+      yields 2 instead of 4). The same round fixed the two collector test codes
+      that wrote the sandbox grammar wrong (`'A'` once, then 3-byte groups), which
+      had made the apiary case pass on defaults.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -105,6 +105,7 @@ const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const collectors_mod = @import("../world/collectors.zig");
 const block_ticker_mod = @import("game/block_ticker.zig");
+const sandbox = @import("../assets/sandbox.zig");
 
 /// Client-supplied CVar names kept for the session (the store's slices must
 /// outlive the packet): 256 names of at most 64 bytes, no heap.
@@ -456,6 +457,12 @@ pub const Game = struct {
     collectors: collectors_mod.Store = .{},
     /// `TEFeatureDoor`/`TEFeatureLockable` state (doors, gates, hatches).
     doors: doors_mod.Store = .{},
+    /// Sandbox harvest abundance scales, refreshed once per tick from the
+    /// sandbox code: {CropOutput, SeedDropOutput, MiningOutput, HarvestingOutput}.
+    /// A per-break decode of the sandbox table would be far too hot.
+    harvest_scales: [4]f32 = .{ 1, 1, 1, 1 },
+    harvest_scales_tick: u64 = std.math.maxInt(u64),
+
     /// Interned client-supplied CVar names (`NetPackageModifyCVar`): the cvar
     /// store holds slices, and a packet's name does not outlive the frame, so a
     /// bounded pool owns them for the session (no heap on the packet path).
@@ -2400,6 +2407,23 @@ pub const Game = struct {
     pub fn takeInvToken(self: *Game, c: *Client) bool {
         return game_rate_limits.takeInvToken(self, c);
     }
+    /// The tick's sandbox harvest scales (`GameUtils.HarvestOnAttack`
+    /// IL_0341-0384 reads the four statics the sandbox sets).
+    pub fn harvestScales(self: *Game) [4]f32 {
+        if (self.harvest_scales_tick != self.tick_n) {
+            var buf: [512]sandbox.Group = undefined;
+            const groups = buf[0..sandbox.decode(self.sandbox_code, &buf)];
+            self.harvest_scales = .{
+                game_tick.sandboxFloat(groups, "CropOutput"),
+                game_tick.sandboxFloat(groups, "SeedDropOutput"),
+                game_tick.sandboxFloat(groups, "MiningOutput"),
+                game_tick.sandboxFloat(groups, "HarvestingOutput"),
+            };
+            self.harvest_scales_tick = self.tick_n;
+        }
+        return self.harvest_scales;
+    }
+
     pub fn takeBlockToken(self: *Game, c: *Client) bool {
         return game_rate_limits.takeBlockToken(self, c);
     }

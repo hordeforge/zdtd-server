@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
+const item_parse = @import("../../assets/item_parse.zig");
 const game_tick = @import("tick.zig");
 const game_player = @import("player.zig");
 const game_loot = @import("loot.zig");
@@ -857,6 +858,17 @@ pub fn rollBlockDropEvent(
                 }
             }
         }
+        // Sandbox abundance (`GameUtils.HarvestOnAttack` IL_0341-0384): the
+        // count is multiplied by `SeedDropOutput` when the DROPPED ITEM carries
+        // the `seedMulti` tag, else by `CropOutput` for a `crops` block, else
+        // `MiningOutput` for an `ore` block, else `HarvestingOutput`; a 0
+        // multiplier drops nothing (`beq` skips the row).
+        if (event == .harvest) {
+            const scale = harvestOutputScale(self, block_id, d.item_name);
+            if (scale <= 0) continue;
+            count = @trunc(@min(@as(f64, @floatFromInt(count)) * @as(f64, scale), 65535.0));
+            if (count == 0) continue;
+        }
         // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 drop row;
         // an unknown item fails closed to a skip (missing beats fake).
         const item = self.items.byName(d.item_name) orelse continue;
@@ -893,6 +905,22 @@ pub fn rollBlockDropEvent(
 
 /// Harvest wrapper for the dig chokes (breaker's inventory, no overall
 /// gate): the terrain harvest drop path.
+/// Sandbox harvest abundance for one drop row (`GameUtils.HarvestOnAttack`
+/// IL_0341-0384): `SeedDropOutput` when the dropped ITEM carries the
+/// `seedMulti` tag, else `CropOutput` for a `crops` block, else `MiningOutput`
+/// for an `ore` block, else `HarvestingOutput`. The four scales come from the
+/// sandbox code; 0 means the row drops nothing.
+fn harvestOutputScale(self: *Game, block_id: u16, item_name: []const u8) f32 {
+    const scales = self.harvestScales();
+    const block_tags = if (self.blocks.byId(block_id)) |b| b.tags else "";
+    if (self.items.byName(item_name)) |it| {
+        if (item_parse.tagsIntersect("seedMulti", it.tags)) return scales[1];
+    }
+    if (item_parse.tagsIntersect("crops", block_tags)) return scales[0];
+    if (item_parse.tagsIntersect("ore", block_tags)) return scales[2];
+    return scales[3];
+}
+
 pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32, block_id: u16) u32 {
     return rollBlockDropEvent(self, peer_slot, x, y, z, block_id, .harvest, 1.0);
 }

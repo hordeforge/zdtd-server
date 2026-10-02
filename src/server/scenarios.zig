@@ -23118,25 +23118,113 @@ test "scenario each collector type has its own sandbox scale" {
     // Option 106 `DewCollectorOutput` index 3 = 4.0 ("CJ D"? see the code below),
     // option 109 `ApiaryOutput` index 0 = 1.0. Encoded by hand with the stock
     // triplets: 'A' + option id in base 26 + index letter.
+    // Sandbox code grammar (`sandbox.decode`): one leading 'A', then 3-byte
+    // groups of (option id base-26 pair, value index).
     const encode = struct {
-        fn opt(id: u32, index: u8) [4]u8 {
-            var out: [4]u8 = .{ 'A', 0, 0, 0 };
-            out[1] = @intCast('A' + (id / 26));
-            out[2] = @intCast('A' + (id % 26));
-            out[3] = @intCast('A' + index);
-            return out;
+        fn group(id: u32, index: u8) [3]u8 {
+            return .{ @intCast('A' + (id / 26)), @intCast('A' + (id % 26)), @intCast('A' + index) };
         }
-    }.opt;
-    const a = encode(106, 3); // DewCollectorOutput = 4.0
-    const b = encode(109, 0); // ApiaryOutput = 1.0
-    g.sandbox_code = &[_]u8{ a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3] };
+    }.group;
+    const a = encode(106, 3); // DewCollectorOutput index 3 = 4.0
+    const b = encode(109, 1); // ApiaryOutput index 1 = 2.0
+    g.sandbox_code = &[_]u8{ 'A', a[0], a[1], a[2], b[0], b[1], b[2] };
 
     g.sim.director.clock.hours += 0.001;
     g.tickCollectors();
     g.sim.director.clock.hours += 0.2;
     g.tickCollectors();
-    // The dew collector's 4x output applies to it, not to the apiary.
+    // Each reads its own option: 4 jars from the dew collector, 2 from the
+    // apiary (whose own `ApiaryOutput` is also non-default, so a shared read of
+    // the dew option shows up as 4).
     try std.testing.expectEqual(@as(u16, 4), cdew.items[0].count);
-    try std.testing.expectEqual(@as(u16, 1), capee.items[0].count);
+    try std.testing.expectEqual(@as(u16, 2), capee.items[0].count);
     std.debug.print("PASS collector-types: each type reads its own sandbox scale\n", .{});
+}
+
+test "scenario the sandbox abundance scales block harvest drops" {
+    // `GameUtils.HarvestOnAttack` IL_0341-0384 multiplies a harvest drop count by
+    // `SeedDropOutput` (item tagged `seedMulti`), else `CropOutput` (`crops`
+    // block), else `MiningOutput` (`ore` block), else `HarvestingOutput`; a 0
+    // scale drops nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "oreRock")) return 1751;
+            if (std.mem.eql(u8, name, "plantCrop")) return 1752;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_abundance.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="oreRock">
+        \\  <property name="Material" value="Mstone" />
+        \\  <property name="Tags" value="ore" />
+        \\  <drop event="Harvest" name="ironFragment" count="2,2" prob="1" />
+        \\</block>
+        \\<block name="plantCrop">
+        \\  <property name="Material" value="Mplants" />
+        \\  <property name="Tags" value="crops" />
+        \\  <drop event="Harvest" name="corn" count="3,3" prob="1" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const ore = g.blocks.byName("oreRock") orelse return error.TestUnexpectedResult;
+    const crop = g.blocks.byName("plantCrop") orelse return error.TestUnexpectedResult;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "ironFragment" },
+        .{ .id = 901, .name = "corn" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const chunk_fill = @import("game/chunk_fill.zig");
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+
+    // Sandbox code grammar (`sandbox.decode`): one leading 'A', then 3-byte
+    // groups of (option id base-26 pair, value index).
+    const encode = struct {
+        fn group(id: u32, index: u8) [3]u8 {
+            return .{ @intCast('A' + (id / 26)), @intCast('A' + (id % 26)), @intCast('A' + index) };
+        }
+    }.group;
+
+    // MiningOutput (id 101) and CropOutput (id 91) share the
+    // `LootAbundanceValues` ladder, where index 10 = 2.0.
+    const a = encode(101, 10);
+    const b = encode(91, 10);
+    g.sandbox_code = &[_]u8{ 'A', a[0], a[1], a[2], b[0], b[1], b[2] };
+    g.tick_n += 1; // force the per-tick scale cache to refresh
+    try std.testing.expectEqual(@as(f32, 2.0), g.harvestScales()[2]);
+    try std.testing.expectEqual(@as(f32, 2.0), g.harvestScales()[0]);
+
+    try g.world.setBlockWorld(300, 70, 300, ore.id);
+    const ore_drops = chunk_fill.tryBlockHarvestDrop(g, c.slot, 300, 70, 300, ore.id);
+    try std.testing.expectEqual(@as(u32, 4), ore_drops);
+    try g.world.setBlockWorld(304, 70, 300, crop.id);
+    const crop_drops = chunk_fill.tryBlockHarvestDrop(g, c.slot, 304, 70, 300, crop.id);
+    try std.testing.expectEqual(@as(u32, 6), crop_drops);
+
+    // A 0 scale drops nothing: CropOutput index 0 = 0.0 (the ladder's head).
+    const z = encode(91, 0);
+    g.sandbox_code = &[_]u8{ 'A', z[0], z[1], z[2] };
+    g.tick_n += 1;
+    try std.testing.expectEqual(@as(f32, 0.0), g.harvestScales()[0]);
+    try g.world.setBlockWorld(308, 70, 300, crop.id);
+    try std.testing.expectEqual(@as(u32, 0), chunk_fill.tryBlockHarvestDrop(g, c.slot, 308, 70, 300, crop.id));
+    std.debug.print("PASS harvest-abundance: the per-type sandbox scales reach the drops\n", .{});
 }
