@@ -1416,6 +1416,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       Operational note for long sessions: prune `.zcache/o` (or use the default
       cache) periodically, and read the error tail of a "flake" before theorising -
       the first pass here guessed at clock coupling and was wrong.
+- [x] **The requirement-vocabulary count in the gap ledger was stale** - fixed
+      2026-10-02: the row said "57 of 57" and the totals row "59 of 59 stock kinds
+      evaluate". Diffing the `Kind` enum (64 entries) against the arms in
+      `require_eval.zig` (64) shows every kind has an evaluator, and that switch
+      has no `else` arm, so exhaustiveness is compiler-enforced and a hand count
+      cannot drift out of date again. Both clauses now state the mechanism.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
