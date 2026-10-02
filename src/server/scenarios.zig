@@ -24595,3 +24595,35 @@ test "scenario MaxSpawnedZombies caps the live population" {
     try std.testing.expect(g.sim.countKind(.zombie) > before);
     std.debug.print("PASS spawn cap: MaxSpawnedZombies gates the live population\n", .{});
 }
+
+test "scenario the feral sense option widens the sense range" {
+    // The `ZombieFeralSense` option table is covered, but its *consumer* was
+    // not: `senseDistSq` is `EntityAlive.GetSeeDistance` (`sightRange * (1 +
+    // CalcSenseScale() * feralSense)`, IL=41), which is the range every
+    // acquisition path uses. A regression that dropped the fold would leave the
+    // option cosmetic.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const zid = g.sim.spawnZombie(g.sim.transform[ps].x + 30, 70, g.sim.transform[ps].z, 50).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+
+    // A 10-block sight zombie that is feral-sense sensitive.
+    g.sim.class_id[zs].target_player_see = 0;
+    g.sim.class_id[zs].sight_range = 10;
+    g.sim.class_id[zs].feral_sense = 1;
+    g.sim.feral_sense_scale = 0;
+    try std.testing.expectApproxEqAbs(@as(f32, 100.0), ecs_ai_tasks.senseDistSq(&g.sim, zs), 0.01);
+    // CalcSenseScale 1 doubles the range: (10 * 2)^2.
+    g.sim.feral_sense_scale = 1;
+    try std.testing.expectApproxEqAbs(@as(f32, 400.0), ecs_ai_tasks.senseDistSq(&g.sim, zs), 0.01);
+    std.debug.print("PASS feral-sense: the option widens the acquisition range\n", .{});
+}
