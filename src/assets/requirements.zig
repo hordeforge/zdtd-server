@@ -70,6 +70,11 @@ pub const SeedType = enum(u8) { random, player, item };
 /// `.unsupported` and refuses the gate.
 pub const Kind = enum(u8) {
     unsupported,
+    /// `RecipeUnlocked` (IL=7 over `TargetedCompareRequirementBase::IsValid`):
+    /// `item_name` resolves through `CraftingManager.GetNonScrapableRecipes`
+    /// and passes when any is `Recipe.IsUnlocked(player)`. The Ctx carries a
+    /// callback; without one the gate refuses.
+    recipe_unlocked,
     progression_level,
     player_level,
     /// `IsDayNumber` IL=32: compare `GameUtils.WorldTimeToDays(worldTime)`
@@ -340,6 +345,11 @@ pub const Ctx = struct {
     /// Always false on dedi (no local player / IsFriendOfLocalPlayer).
     /// Null = no identity fold (refuse).
     is_ally: ?bool = null,
+    /// `RecipeUnlocked item_name="x"`: the caller answers whether the entity has
+    /// that recipe unlocked (`craftUnlocked` on the Game side). Null = no recipe
+    /// fold in scope (refuse).
+    recipe_unlocked_ctx: ?*const anyopaque = null,
+    recipe_unlocked: ?*const fn (ctx: *const anyopaque, item_name: []const u8) bool = null,
     /// Always false until elevator state is tracked (RE IsOnLadder IL=19 =
     /// IsInElevator). Null = no identity fold (refuse).
     is_on_ladder: ?bool = null,

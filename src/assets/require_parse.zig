@@ -17,6 +17,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "IsDayNumber")) return .is_day_number;
     if (std.mem.eql(u8, name, "TimeOfDay")) return .time_of_day;
     if (std.mem.eql(u8, name, "HasBuff")) return .has_buff;
+    if (std.mem.eql(u8, name, "RecipeUnlocked")) return .recipe_unlocked;
     if (std.mem.eql(u8, name, "IsAlive")) return .is_alive;
     if (std.mem.eql(u8, name, "WasAlive")) return .was_alive;
     if (std.mem.eql(u8, name, "IsMale")) return .is_male;

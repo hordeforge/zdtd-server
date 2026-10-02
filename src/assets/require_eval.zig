@@ -776,6 +776,11 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .is_day_number => return evalIsDayNumber(r, ctx),
         .time_of_day => return evalTimeOfDay(r, ctx),
         .has_buff => return evalHasBuff(r, use_ctx),
+        .recipe_unlocked => {
+            const f = ctx.recipe_unlocked orelse return .unsupported;
+            const c = ctx.recipe_unlocked_ctx orelse return .unsupported;
+            return verdict(f(c, r.arg), r.negated);
+        },
         .is_alive => return verdict(use_ctx.alive, r.negated),
         .was_alive => return verdict(use_ctx.alive, r.negated),
         .is_male => return evalIsMale(r, ctx),
@@ -865,4 +870,30 @@ fn evalList(reqs: []const Requirement, or_mode: bool, ctx: Ctx, counts: *Counts)
 pub fn all(reqs: []const Requirement, ctx: Ctx) bool {
     var counts: Counts = .{};
     return evaluate(reqs, ctx, &counts) == .pass;
+}
+
+test "RecipeUnlocked delegates to the callback" {
+    const stub = struct {
+        fn f(ctx: *const anyopaque, item_name: []const u8) bool {
+            _ = ctx;
+            return std.mem.eql(u8, item_name, "forgeIron");
+        }
+    }.f;
+    var counts: Counts = .{};
+    var ctx: Ctx = .{};
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&[_]Requirement{
+        .{ .kind = .recipe_unlocked, .name = "RecipeUnlocked", .arg = "forgeIron" },
+    }, ctx, &counts));
+    var marker: u8 = 7;
+    ctx.recipe_unlocked_ctx = @ptrCast(&marker);
+    ctx.recipe_unlocked = stub;
+    try std.testing.expectEqual(Verdict.pass, evaluate(&[_]Requirement{
+        .{ .kind = .recipe_unlocked, .name = "RecipeUnlocked", .arg = "forgeIron" },
+    }, ctx, &counts));
+    try std.testing.expectEqual(Verdict.fail, evaluate(&[_]Requirement{
+        .{ .kind = .recipe_unlocked, .name = "RecipeUnlocked", .arg = "forgeSteel" },
+    }, ctx, &counts));
+    try std.testing.expectEqual(Verdict.pass, evaluate(&[_]Requirement{
+        .{ .kind = .recipe_unlocked, .name = "!RecipeUnlocked", .arg = "forgeSteel", .negated = true },
+    }, ctx, &counts));
 }

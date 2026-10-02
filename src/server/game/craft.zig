@@ -364,6 +364,19 @@ pub fn craftTimeForPlayer(self: *Game, peer_slot: ?usize, recipe: assets_recipes
     return total;
 }
 
+/// Context for the `RecipeUnlocked` requirement callback: the craft paths know
+/// the Game and the player, which a bare `Ctx` does not.
+const RecipeUnlockCtx = struct {
+    g: *Game,
+    peer_slot: usize,
+};
+
+fn recipeUnlockedCb(ctx: *const anyopaque, item_name: []const u8) bool {
+    const c: *const RecipeUnlockCtx = @ptrCast(@alignCast(ctx));
+    const recipe = c.g.recipes.byName(item_name) orelse return false;
+    return craftUnlocked(c.g, c.peer_slot, recipe);
+}
+
 /// `Recipe.IsUnlocked` (IL_0000-003E): with crafting progression on, a recipe
 /// carrying the `learnable` tag is locked until the player's CVar named after the
 /// recipe is positive (`GetValue(RecipeTagUnlocked = 73, base = that CVar)`).
@@ -390,7 +403,12 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
     if (!craftingProgressionOn(self)) return 6;
     var v: f32 = 1;
     var counts: assets_requirements.Counts = .{};
-    const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
+    var unlock_ctx: RecipeUnlockCtx = .{ .g = self, .peer_slot = peer_slot };
+    const ctx: assets_requirements.Ctx = .{
+        .tags = recipe.tags,
+        .recipe_unlocked_ctx = &unlock_ctx,
+        .recipe_unlocked = recipeUnlockedCb,
+    };
     for (self.progression_table.crafting_skills) |sk| {
         foldCraftingPassive("CraftingTier", sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
     }
@@ -416,7 +434,12 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
 pub fn craftingOutputFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u16 {
     var v: f32 = @floatFromInt(if (recipe.count == 0) 1 else recipe.count);
     var counts: assets_requirements.Counts = .{};
-    const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
+    var unlock_ctx: RecipeUnlockCtx = .{ .g = self, .peer_slot = peer_slot };
+    const ctx: assets_requirements.Ctx = .{
+        .tags = recipe.tags,
+        .recipe_unlocked_ctx = &unlock_ctx,
+        .recipe_unlocked = recipeUnlockedCb,
+    };
     for (self.progression_table.crafting_skills) |sk| {
         foldCraftingPassive("CraftingOutputCount", sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
     }
