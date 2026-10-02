@@ -287,8 +287,11 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             .item = iid,
             .count = r.count,
             .quality = r.quality,
-            .price = if (econ > 0) ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle, 5) else 5,
-            .sell = if (econ > 0) @max(1, ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle, 1)) else 1,
+            // `XUiM_Trader::GetBuyPrice` IL_0228-0233 multiplies by the sandbox
+            // `TraderBuyPrices` (131) before its CeilToInt; `GetSellPrice` does
+            // the same with `TraderSellPrices` (130).
+            .price = if (econ > 0) ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle * @as(f64, self.trader_buy_prices), 5) else 5,
+            .sell = if (econ > 0) @max(1, ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle * @as(f64, self.trader_sell_prices), 1)) else 1,
             .stats = srolled.stats,
             .stats_n = srolled.n,
         };

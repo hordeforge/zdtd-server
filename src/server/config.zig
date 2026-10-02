@@ -169,6 +169,12 @@ pub const Config = struct {
     /// `introquest` is unavailable while off
     /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
     intro_quest_enabled: bool = true,
+    /// Sandbox `TraderSellPrices` / `TraderBuyPrices` (float, default 1.0,
+    /// `BarterValues`): the price multipliers the trader price math applies
+    /// before its `CeilToInt` (`XUiM_Trader::GetBuyPrice` IL_0228-0233 reads
+    /// `SandboxOptionManager.GetFloat(131)`, `GetSellPrice` the same for 130).
+    trader_sell_prices: f32 = 1.0,
+    trader_buy_prices: f32 = 1.0,
     /// Sandbox `GlobalGSModifier` / `BiomeGSModifier` (float, default 1.0):
     /// multipliers on the player's gamestage
     /// (`EntityPlayer::GetGameStage` IL_00EC multiplies the folded stage by
@@ -591,6 +597,10 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
             cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
+        } else if (std.mem.eql(u8, o.name, "TraderSellPrices")) {
+            cfg.trader_sell_prices = @max(0, sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "TraderBuyPrices")) {
+            cfg.trader_buy_prices = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "GlobalLSModifier")) {
             cfg.global_ls_modifier = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BiomeLSModifier")) {
@@ -879,6 +889,12 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }
     if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
+    if (prop(raw, "TraderSellPrices")) |v| {
+        if (xml.parseF32(v)) |f| cfg.trader_sell_prices = @max(0, f);
+    }
+    if (prop(raw, "TraderBuyPrices")) |v| {
+        if (xml.parseF32(v)) |f| cfg.trader_buy_prices = @max(0, f);
+    }
     if (prop(raw, "GlobalLSModifier")) |v| {
         if (xml.parseF32(v)) |f| cfg.global_ls_modifier = @max(0, f);
     }

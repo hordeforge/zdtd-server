@@ -1346,6 +1346,20 @@ nothing here is already waived. The four gaps the same audit closed are in
 - [x] **`HideCommandExecutionLog` had no surface** - closed 2026-09-28: the
       level parses (0..3, stock-clamped) and gates both audit sites by sender
       (`commandLogVisible`: remote client at 2, operator console at 1).
+- [x] **The `TraderSellPrices` and `TraderBuyPrices` options did nothing** -
+      closed 2026-10-02: ids 130/131 (float, default 1.0, `BarterValues`).
+      `XUiM_Trader::GetBuyPrice` multiplies the computed unit price by
+      `SandboxOptionManager.GetFloat(131)` before its `CeilToInt`
+      (IL_0228-0233) and `GetSellPrice` does the same with 130, so an operator
+      changing either moved every trader price on a vanilla server and nothing
+      here - zdtd computes the price the client displays, so the client showed
+      the unscaled value too. `fillTraderFromXml` now applies both, parsed through
+      the sandbox and serverconfig arms. Gated by `scenario the trader price
+      options scale the stock prices` (the buy price doubles exactly, the sell
+      side moves up; decisive: dropping the buy multiplier fails it). Audit note:
+      the name grep missed these two because the client reads them through the
+      manager API by enum ordinal, not a named static - exactly the limitation
+      recorded in round 136.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

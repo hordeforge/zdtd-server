@@ -24480,3 +24480,57 @@ test "scenario a vending machine restocks on its interval" {
     try std.testing.expectEqual(@as(u32, 1), owned.last_restock_day);
     std.debug.print("PASS vending-restock: the interval gates the refill\n", .{});
 }
+
+test "scenario the trader price options scale the stock prices" {
+    // `XUiM_Trader::GetBuyPrice` IL_0228-0233 multiplies the computed unit price
+    // by the sandbox `TraderBuyPrices` (131) before its CeilToInt, and
+    // `GetSellPrice` by `TraderSellPrices` (130). zdtd computes the price the
+    // client displays, so it has to apply them too.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="traderAlways" count="all">
+        \\    <item name="resourceWood" count="5"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1"><trader_items><item group="traderAlways"/></trader_items></trader_info>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var tbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tbuf, "{s}/traders_price.xml", .{dir});
+    try io_fs.writeFile(tpath, tsrc);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    g.traders.deinit();
+    g.traders = try assets_traders.loadFromPath(gpa, tpath);
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1500, .name = "resourceWood", .econ = 100, .econ_sell_scale = 1.0 },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+    try std.testing.expect(g.ecsIdFromItemName("resourceWood") != 0);
+
+    const t = g.sim.spawnTrader("traderPrice", 0, 70, 0, 1, 500).?;
+    const ts = g.sim.slotOfNetId(t).?;
+    _ = g.fillTraderFromXml(t);
+    const base_price = g.sim.trader_stock[ts].entries[0].price;
+    const base_sell = g.sim.trader_stock[ts].entries[0].sell;
+    try std.testing.expect(base_price > 5);
+
+    g.trader_buy_prices = 2.0;
+    g.trader_sell_prices = 2.0;
+    _ = g.fillTraderFromXml(t);
+    try std.testing.expectEqual(@as(u16, base_price * 2), g.sim.trader_stock[ts].entries[0].price);
+    // The sell side floors at 1 before the option, so only the direction is
+    // observable there (the buy side is exact).
+    try std.testing.expect(g.sim.trader_stock[ts].entries[0].sell > base_sell);
+
+    g.trader_buy_prices = 1.0;
+    g.trader_sell_prices = 1.0;
+    _ = g.fillTraderFromXml(t);
+    try std.testing.expectEqual(base_price, g.sim.trader_stock[ts].entries[0].price);
+    std.debug.print("PASS trader-price: the sandbox price options scale both sides\n", .{});
+}

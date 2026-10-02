@@ -797,6 +797,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .vending_enabled = cfg.vending_enabled,
         .global_gs_modifier = cfg.global_gs_modifier,
         .biome_gs_modifier = cfg.biome_gs_modifier,
+        .trader_sell_prices = cfg.trader_sell_prices,
+        .trader_buy_prices = cfg.trader_buy_prices,
         .global_ls_modifier = cfg.global_ls_modifier,
         .biome_ls_modifier = cfg.biome_ls_modifier,
         .poi_tier_ls_modifier = cfg.poi_tier_ls_modifier,

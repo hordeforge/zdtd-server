@@ -407,6 +407,9 @@ pub const InitOptions = struct {
     /// Sandbox `GlobalGSModifier` / `BiomeGSModifier` (gamestage multipliers).
     global_gs_modifier: f32 = 1.0,
     biome_gs_modifier: f32 = 1.0,
+    /// Sandbox `TraderSellPrices` / `TraderBuyPrices`.
+    trader_sell_prices: f32 = 1.0,
+    trader_buy_prices: f32 = 1.0,
     /// Sandbox loot-stage and trader-stage multipliers.
     global_ls_modifier: f32 = 1.0,
     biome_ls_modifier: f32 = 1.0,
