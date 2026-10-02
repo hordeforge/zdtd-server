@@ -319,6 +319,10 @@ pub fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
 }
 
 pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
+    // Sandbox `QuestsEnabled` off: a quest the server never offered cannot be
+    // started either (the client's dialog is gated client-side; this is the
+    // authoritative half).
+    if (!self.quests_enabled) return false;
     if (!systems.questAccept(&self.sim, c.slot, def_id)) return false;
     shareQuestWithParty(self, c, def_id);
     return true;

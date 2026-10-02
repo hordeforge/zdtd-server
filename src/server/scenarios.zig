@@ -23819,3 +23819,34 @@ test "scenario the item degradation option scales the wear per use" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), wear(g, ps), 0.001);
     std.debug.print("PASS item-degradation: the sandbox scale reaches the per-use wear\n", .{});
 }
+
+test "scenario quests off starts none" {
+    // Sandbox `QuestsEnabled` (option 118, yes/no, default on): the stock
+    // requirement verb that gates the trader's "quests available" dialog reads
+    // it, and the server's accept path refuses a quest it never offered.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // One hand-made quest so the accept path has something real to start.
+    const defs = [_]quest_mod.QuestDef{
+        .{ .id = 1, .kind = .kill_zombies, .title = "Kill", .reward_coin = 10, .phases = &[_]quest_mod.PhaseSpec{.{ .kind = .kill_zombies, .required = 2 }}, .highest_phase = 1 },
+    };
+    g.sim.catalog = .{ .defs = &defs, .starter_id = 99, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Off: the accept is refused.
+    g.quests_enabled = false;
+    try std.testing.expect(!g.acceptQuestFor(c, 1));
+    // On: the same quest starts.
+    g.quests_enabled = true;
+    try std.testing.expect(g.acceptQuestFor(c, 1));
+    std.debug.print("PASS quests-enabled: the option gates the accept path\n", .{});
+}

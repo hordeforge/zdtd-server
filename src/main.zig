@@ -786,6 +786,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .headshot_mode = cfg.headshot_mode,
         .stamina_usage = cfg.stamina_usage,
         .item_degradation = cfg.item_degradation,
+        .quests_enabled = cfg.quests_enabled,
         .skill_points_per_level = cfg.skill_points_per_level,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,

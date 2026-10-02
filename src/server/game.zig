@@ -369,6 +369,8 @@ pub const Game = struct {
     headshot_mode: u8 = 0,
     /// Sandbox `StaminaUsage`: the action stamina-cost scale.
     stamina_usage: f32 = 1.0,
+    /// Sandbox `QuestsEnabled` (false = no quests offered or started).
+    quests_enabled: bool = true,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
@@ -917,6 +919,7 @@ pub const Game = struct {
         self.skill_gain_rate = opts.skill_gain_rate;
         self.headshot_mode = opts.headshot_mode;
         self.stamina_usage = opts.stamina_usage;
+        self.quests_enabled = opts.quests_enabled;
         self.sim.item_degradation = opts.item_degradation;
         self.skill_points_per_level = opts.skill_points_per_level;
         self.sim.loot_bag_chance = opts.loot_bag_chance;

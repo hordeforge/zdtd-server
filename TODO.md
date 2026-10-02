@@ -953,6 +953,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `scenario the item degradation option scales the wear per use`: 1.0, 2.0,
       0.5 and 0 give wear 1, 2, 0.5 and 0 (decisive: dropping the factor wears
       1).
+- [x] **The `QuestsEnabled` sandbox option did nothing** - closed 2026-10-02:
+      option 118 (yes/no, default on) is read by the trader's quest-availability
+      requirement verb (`DialogRequirementQuestsAvailable`), so with quests off
+      the trader offers none. zdtd built the offer list and accepted quest starts
+      regardless. `buildTraderQuestOffers` now returns 0 offers and
+      `acceptQuestFor` refuses when the option is off (the authoritative half of
+      a gate whose dialog side is client-side). Gated by `scenario quests off
+      starts none`: the same accept is refused at off and starts at on
+      (decisive: disabling the gate starts it). Residuals: `POIQuestsEnabled` and
+      `BuriedQuestsEnabled` need a per-quest POI/buried predicate that zdtd's
+      catalog does not carry yet.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

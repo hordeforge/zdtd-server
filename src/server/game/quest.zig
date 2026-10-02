@@ -276,6 +276,10 @@ pub fn buildTraderQuestOffers(
     tier: u8,
     out: []packages.stock_quest.QuestPacketEntry,
 ) usize {
+    // Sandbox `QuestsEnabled` off: the trader offers nothing (the stock
+    // requirement verb that gates the "quests available" dialog reads the same
+    // option), so the list comes back empty.
+    if (!self.quests_enabled) return 0;
     const list = self.sim.catalog.listById(list_id) orelse return 0;
     const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
     // quests_per_tier (quests.xml root): stock caps how many quests of the

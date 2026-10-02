@@ -386,6 +386,8 @@ pub const InitOptions = struct {
     stamina_usage: f32 = 1.0,
     /// Sandbox `ItemDegradation`: the per-use wear scale.
     item_degradation: f32 = 1.0,
+    /// Sandbox `QuestsEnabled` (false = no quests offered or started).
+    quests_enabled: bool = true,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,
