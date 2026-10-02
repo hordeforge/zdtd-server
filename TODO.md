@@ -777,6 +777,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       dropping the factor crafts with 3). `CraftingOutput`/`CraftingTime` were
       checked in the same read and are **UI-only** in this assembly (their only
       reader is `XUiM_Recipes` itself), so they are not server-side gaps.
+- [x] **The `TerrainDamage` sandbox option did nothing** - closed 2026-10-02: a
+      player's block damage is scaled by `TerrainDamagePercent` for a terrain
+      cell and `BlockDamagePercent` otherwise (`ItemActionAttack`
+      IL_0306-0329), where terrain is `BlockValue.get_isTerrain` (IL=7:
+      `type - 1 < 239`, i.e. ids 2..239). zdtd applied `BlockDamagePlayer` to
+      everything, so a server with `TerrainDamage=0` (terrain indestructible)
+      still let players dig dirt and stone. `blocks_setblock` now selects the
+      scale with `world_store.isTerrainId`, and a 0 percent leaves the block
+      untouched. Gated by `scenario terrain and non-terrain blocks use their own
+      damage scale`: at `TerrainDamage=200` a terrain cell takes double while the
+      prop cell takes 1x, and at 0 the terrain cell stops taking damage while the
+      prop still does (decisive: using one scale for both fails it). Note the
+      wire value is CUMULATIVE damage, so a repeat of the same value is a no-op
+      (the test sends rising values).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -23306,3 +23306,64 @@ test "scenario the crafting input option scales the ingredients" {
     try std.testing.expect(craft_mod.tryCraft(g, c.slot, ig_idx, 1));
     std.debug.print("PASS crafting-input: the sandbox scale reaches the ingredient check\n", .{});
 }
+
+test "scenario terrain and non-terrain blocks use their own damage scale" {
+    // `ItemActionAttack` IL_0306-0329: a player's block damage is scaled by
+    // `TerrainDamage` for a terrain cell (`BlockValue.isTerrain` = ids 2..239,
+    // IL=7) and by `BlockDamagePlayer` otherwise.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+
+    // A terrain-id block (5 = terrDirt) and a high-id prop block (600).
+    const terrain_id: u16 = 5;
+    const prop_id: u16 = 600;
+    try g.world.setBlockWorld(320, 70, 320, terrain_id);
+    try g.world.setBlockWorld(324, 70, 320, prop_id);
+
+    // TerrainDamage 200%: 10 damage becomes 20. BlockDamagePlayer stays 100%.
+    g.terrain_damage = 200;
+    g.block_damage_player = 100;
+    var body: [128]u8 = undefined;
+    const send = struct {
+        fn f(g2: *game_mod.Game, cl: *game_mod.Client, ib: []u8, fb: []u8, x: i32, z: i32, id: u16, dmg: u16) !void {
+            var w: wire_binary_mod.Writer = .{ .buf = ib };
+            try packages.platform_user.write(&w, null);
+            try w.writeI16(1);
+            try w.writeByte(1); // BlockValueRef type 1 = BlockPosition
+            try w.writeI32(x);
+            try w.writeI32(70);
+            try w.writeI32(z);
+            try w.writeI32(0);
+            try w.writeByte(1); // block_change_flag_value
+            try w.writeU32(id);
+            try w.writeU16(dmg);
+            try w.writeI32(0);
+            try g2.injectFramed(cl, try packages.framed(fb, "NetPackageSetBlock", w.written()));
+        }
+    }.f;
+    var frame_buf: [512]u8 = undefined;
+    try send(g, c, &body, &frame_buf, 320, 320, terrain_id, 10);
+    try send(g, c, &body, &frame_buf, 324, 320, prop_id, 10);
+    try std.testing.expectEqual(@as(u16, 20), g.getBlockHp(320, 70, 320));
+    try std.testing.expectEqual(@as(u16, 10), g.getBlockHp(324, 70, 320));
+
+    // A 0 terrain scale leaves the terrain cell alone while the prop still takes
+    // its own scale. The wire value is the CUMULATIVE damage, so send 30.
+    g.terrain_damage = 0;
+    g.block_damage_player = 100;
+    try send(g, c, &body, &frame_buf, 320, 320, terrain_id, 30);
+    try send(g, c, &body, &frame_buf, 324, 320, prop_id, 30);
+    try std.testing.expectEqual(@as(u16, 20), g.getBlockHp(320, 70, 320));
+    try std.testing.expectEqual(@as(u16, 30), g.getBlockHp(324, 70, 320));
+    std.debug.print("PASS terrain-damage: the terrain cell reads TerrainDamage\n", .{});
+}

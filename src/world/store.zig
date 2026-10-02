@@ -45,6 +45,13 @@ pub const sea_level: u8 = 64;
 // Stock AssignIds via bundled dump (never terrainFiller=2 as painted surface).
 // Module pins = offline/test defaults. Live server prefers World.terrain_ids
 // resolved once via maxdamage.idByName (HARDCODE A05).
+/// `BlockValue.get_isTerrain` (IL=7): `type - 1 < 239`, i.e. the AssignIds
+/// terrain blocks occupy ids 2..239 (id 1 is air). The stock client's own
+/// predicate, used for the `TerrainDamage` sandbox split.
+pub fn isTerrainId(id: u16) bool {
+    return id >= 2 and id <= 239;
+}
+
 pub const block_air: u16 = assignids.air;
 pub const block_stone: u16 = assignids.terr_stone;
 pub const block_bedrock: u16 = assignids.terr_bedrock;

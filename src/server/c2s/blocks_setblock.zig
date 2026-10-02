@@ -154,8 +154,14 @@ pub fn handleSetBlock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
                 const base_cur = if (cur_id != 0) cur_id else b.block_id;
                 var abs: u16 = cur_dmg;
                 if (wire_abs > cur_dmg) {
-                    if (self.block_damage_player != 100) {
-                        const delta: u32 = @as(u32, wire_abs - cur_dmg) * self.block_damage_player / 100;
+                    // `ItemActionAttack` IL_0306-0329 picks the scale by
+                    // `BlockValue.isTerrain`: `TerrainDamage` percent for a
+                    // terrain cell (ids 2..239), `BlockDamagePlayer` otherwise.
+                    // A 0 percent leaves the block untouched, which is the
+                    // sandbox "Disabled" step.
+                    const scale: u16 = if (world_store.isTerrainId(base_cur)) self.terrain_damage else self.block_damage_player;
+                    if (scale != 100) {
+                        const delta: u32 = @as(u32, wire_abs - cur_dmg) * scale / 100;
                         abs = @intCast(@min(@as(u32, cur_dmg) + delta, std.math.maxInt(u16)));
                     } else {
                         abs = wire_abs;
