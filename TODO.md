@@ -1192,6 +1192,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       GameStats `biome_progression` bool is already echoed. Needs: per-player
       visited-biome bits, the `biomeprogression` tag on recipes (items.zig-style
       parse), the craft-validation gate, and the client unlock notification.
+- [x] **The `VendingEnabled` sandbox option did nothing** - closed 2026-10-02:
+      option 129 (yes/no, default on). `BlockVendingMachine` (IL_006D-0190) enables
+      the machine's activation command only while `TraderManager.VendingEnabled`,
+      so with the option off a stock client never offers the machine - but the
+      server still treated the lock request's position as a vending machine and
+      echoed its TraderData and stock. `vendingTargetAt` now returns null while the
+      option is off, and the lock handler uses it, so a modified client cannot open
+      a machine either. Parses through the sandbox and serverconfig arms. Gated by
+      `VendingEnabled gates the vending lock target` (a machine position resolves
+      with the option on, an empty position stays null, the machine position becomes
+      null with it off; decisive: disabling the check fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

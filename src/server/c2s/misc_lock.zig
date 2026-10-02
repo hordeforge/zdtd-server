@@ -60,6 +60,16 @@ fn nextLockTarget(r: *wire_binary.Reader) ?LockTarget {
 }
 
 /// True when `name` is a lock package and was handled.
+/// Sandbox `VendingEnabled` off disables the machine's activation command
+/// (`BlockVendingMachine` IL_006D-0190 sets `cmds[0].enabled`), so the position is
+/// not a vending target: the machine does not open and no TraderData is echoed.
+pub fn vendingTargetAt(self: *Game, x: i32, y: i32, z: i32) ?vending_mod.PosKey {
+    if (!self.vending_enabled) return null;
+    const p: vending_mod.PosKey = .{ .x = x, .y = y, .z = z };
+    if (self.vending.get(p) == null) return null;
+    return p;
+}
+
 pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageLockRequest")) {
         if (packages.parseLockRequest(body)) |req| {
@@ -118,9 +128,11 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                             .pos => |p| {
                                 // TileEntity lock target (type 0): a vending block
                                 // under the position opens as a vending machine.
-                                if (self.vending.get(.{ .x = p[0], .y = p[1], .z = p[2] }) != null) {
-                                    vending_pos = .{ .x = p[0], .y = p[1], .z = p[2] };
-                                }
+                                // Sandbox `VendingEnabled` off: stock disables the
+                                // activation command, so the machine is not a
+                                // vending target at all and a modified client
+                                // gets the plain lock path.
+                                vending_pos = vendingTargetAt(self, p[0], p[1], p[2]);
                             },
                             else => {},
                         }
@@ -249,4 +261,23 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
         return true;
     }
     return false;
+}
+
+test "VendingEnabled gates the vending lock target" {
+    // `BlockVendingMachine` IL_006D-0190: the machine's activation command is
+    // enabled only while `TraderManager.VendingEnabled`, so the server must not
+    // treat the position as a vending target when it is off.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    _ = g.vending.getOrCreate(.{ .x = 7, .y = 70, .z = 8 }, 1234, 3) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(vendingTargetAt(g, 7, 70, 8) != null);
+    // A position with no machine stays null either way.
+    try std.testing.expect(vendingTargetAt(g, 9, 70, 9) == null);
+    g.vending_enabled = false;
+    try std.testing.expect(vendingTargetAt(g, 7, 70, 8) == null);
+    g.vending_enabled = true;
+    try std.testing.expect(vendingTargetAt(g, 7, 70, 8) != null);
 }

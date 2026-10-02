@@ -169,6 +169,11 @@ pub const Config = struct {
     /// `introquest` is unavailable while off
     /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
     intro_quest_enabled: bool = true,
+    /// Sandbox `VendingEnabled` (yes/no, default on): off disables the vending
+    /// machine's activation command (`BlockVendingMachine` IL_006D-0190 sets
+    /// `cmds[0].enabled = TraderManager.VendingEnabled`), so the machine cannot
+    /// be opened and the server refuses the lock target as well.
+    vending_enabled: bool = true,
     /// Sandbox `VendingResetInterval` (int -1..14, default -1): the vending
     /// machine restock cadence, overriding each trader_info's own
     /// `reset_interval` (`TraderInfo.get_ResetInterval` IL_4x uses
@@ -569,6 +574,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
             cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
+        } else if (std.mem.eql(u8, o.name, "VendingEnabled")) {
+            cfg.vending_enabled = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingResetInterval")) {
             cfg.vending_reset_interval = @max(-1, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BuriedQuestsEnabled")) {
@@ -843,6 +850,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }
     if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
+    if (prop(raw, "VendingEnabled")) |v| cfg.vending_enabled = clampU8Named("VendingEnabled", v, 0, 1, @intFromBool(cfg.vending_enabled)) != 0;
     if (prop(raw, "VendingResetInterval")) |v| {
         if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.vending_reset_interval = if (n < 0) -1 else @min(n, 14);
     }

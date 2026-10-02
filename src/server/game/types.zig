@@ -402,6 +402,8 @@ pub const InitOptions = struct {
     backpack_crafting: u8 = 1,
     /// Sandbox `VendingResetInterval` (-1 = each row's traders.xml value).
     vending_reset_interval: i32 = -1,
+    /// Sandbox `VendingEnabled` (false = vending machines cannot be opened).
+    vending_enabled: bool = true,
     /// Sandbox `IntroQuestEnabled` (false = the trader stops offering
     /// `introquest`-tagged quests).
     intro_quest_enabled: bool = true,
