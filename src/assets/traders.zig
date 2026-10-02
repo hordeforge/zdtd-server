@@ -586,3 +586,24 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?TraderTable {
     return paths.tryLoadConfig("traders.xml", TraderTable, loadFromPath, allocator, game_dir, config_dir);
 }
+
+test "the sandbox abundance scales a rolled stock count" {
+    // `rollAllRefs` IL: the rolled count is multiplied by the sandbox
+    // `TraderItemAbundance`/`VendingItemAbundance` and floored at 1, so the same
+    // deterministic roll yields a bigger stack on an abundant server.
+    const refs = [_]ItemRef{.{ .name = "resourceWood", .count_min = 4, .count_max = 4 }};
+    const roll = struct {
+        fn f(abundance: f32) u16 {
+            var out: [4]RolledItem = undefined;
+            var rng = rng_util.XorShift32.initFromU64(0x1234);
+            const t: TraderTable = .{};
+            const n = t.rollAllRefs(&refs, &rng, .{}, abundance, &out);
+            return if (n == 0) 0 else out[0].count;
+        }
+    }.f;
+    try std.testing.expectEqual(@as(u16, 4), roll(1.0));
+    try std.testing.expectEqual(@as(u16, 8), roll(2.0));
+    // The max(1, ...) floor holds when the scale would zero the stack.
+    try std.testing.expectEqual(@as(u16, 1), roll(0.1));
+    try std.testing.expectEqual(@as(u16, 1), roll(0.0));
+}
