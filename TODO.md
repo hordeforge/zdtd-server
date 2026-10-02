@@ -736,6 +736,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `delayFor` applies it (`GrowthRate` 1 -> 1200 ticks per stage); the crop
       scenario asserts the schedule and pulls each tick due rather than stepping
       1200 times, so it still runs fast.
+- [x] **One sandbox scale covered every collector type** - closed 2026-10-02: the
+      sandbox pickers are per type (`DewCollectorTime`/`DewCollectorOutput` ids
+      105-106, `ApiaryTime`/`ApiaryOutput` 108-109, `ChickenCoopTime`/
+      `ChickenCoopOutput` 152-153, all default 1.0), but `tickCollectors` applied
+      the dew pair to every type: an apiary with `ApiaryOutput=0.5` produced full
+      jars, and setting the dew output to 4 multiplied the apiary and coop too.
+      The tick now selects the pair by the collector's `CollectorType` alongside
+      its `...Input` gate. Gated by `scenario each collector type has its own
+      sandbox scale`: with `DewCollectorOutput=4` and `ApiaryOutput=1`, the dew
+      collector yields 4 and the apiary right beside it yields 1 (decisive:
+      pointing the apiary at the dew pair yields 4).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -23063,3 +23063,80 @@ test "scenario the crop growth option scales the plant delay" {
     try std.testing.expectEqual(stage2.id, try g.world.blockWorld(px, py, pz));
     std.debug.print("PASS crop-speed: the sandbox modifier scales the growth delay\n", .{});
 }
+
+test "scenario each collector type has its own sandbox scale" {
+    // Sandbox ids 105-110 and 152-154: `DewCollectorTime`/`DewCollectorOutput`,
+    // `ApiaryTime`/`ApiaryOutput` and `ChickenCoopTime`/`ChickenCoopOutput` are
+    // separate pickers, so scaling the dew collector must not scale an apiary.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const Ids = struct {
+        fn id(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "dewBox")) return 1741;
+            if (std.mem.eql(u8, name, "apiaryBox")) return 1742;
+            if (std.mem.eql(u8, name, "terrStone")) return 1;
+            return null;
+        }
+    };
+    var bx_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const bx = try std.fmt.bufPrint(&bx_buf, "{s}/blocks_collector_types.xml", .{dir});
+    try io_fs.writeFile(bx,
+        \\<blocks>
+        \\<block name="dewBox">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="DewCollector" />
+        \\  <property name="OutputTypes" value="{water,,0,0,1,drinkJarBoiledWater,,0,0,100,100,water}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="apiaryBox">
+        \\  <property name="Class" value="Collector" />
+        \\  <property name="CollectorType" value="Apiary" />
+        \\  <property name="OutputTypes" value="{honey,,0,0,1,drinkJarBoiledWater,,0,0,100,100,honey}" />
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrStone"><property name="Material" value="Mstone" /></block>
+        \\</blocks>
+    );
+    g.blocks.deinit();
+    g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const dew = g.blocks.byName("dewBox") orelse return error.TestUnexpectedResult;
+    const apiary = g.blocks.byName("apiaryBox") orelse return error.TestUnexpectedResult;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 900, .name = "drinkJarBoiledWater" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const cdew = g.collectors.getOrCreate(80, 66, 80, dew.id) orelse return error.TestUnexpectedResult;
+    const capee = g.collectors.getOrCreate(84, 66, 80, apiary.id) orelse return error.TestUnexpectedResult;
+    // Option 106 `DewCollectorOutput` index 3 = 4.0 ("CJ D"? see the code below),
+    // option 109 `ApiaryOutput` index 0 = 1.0. Encoded by hand with the stock
+    // triplets: 'A' + option id in base 26 + index letter.
+    const encode = struct {
+        fn opt(id: u32, index: u8) [4]u8 {
+            var out: [4]u8 = .{ 'A', 0, 0, 0 };
+            out[1] = @intCast('A' + (id / 26));
+            out[2] = @intCast('A' + (id % 26));
+            out[3] = @intCast('A' + index);
+            return out;
+        }
+    }.opt;
+    const a = encode(106, 3); // DewCollectorOutput = 4.0
+    const b = encode(109, 0); // ApiaryOutput = 1.0
+    g.sandbox_code = &[_]u8{ a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3] };
+
+    g.sim.director.clock.hours += 0.001;
+    g.tickCollectors();
+    g.sim.director.clock.hours += 0.2;
+    g.tickCollectors();
+    // The dew collector's 4x output applies to it, not to the apiary.
+    try std.testing.expectEqual(@as(u16, 4), cdew.items[0].count);
+    try std.testing.expectEqual(@as(u16, 1), capee.items[0].count);
+    std.debug.print("PASS collector-types: each type reads its own sandbox scale\n", .{});
+}

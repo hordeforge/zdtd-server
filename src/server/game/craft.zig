@@ -1085,8 +1085,16 @@ pub fn tickCollectors(self: *Game) void {
     const dew_on = game_tick.sandboxFloat(sandbox_groups, "DewCollectorInput") > 0;
     const apiary_on = game_tick.sandboxFloat(sandbox_groups, "ApiaryInput") > 0;
     const coop_on = game_tick.sandboxFloat(sandbox_groups, "ChickenCoopInput") > 0;
-    const time_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorTime");
-    const out_scale = game_tick.sandboxFloat(sandbox_groups, "DewCollectorOutput");
+    // Each collector TYPE has its own time/output picker (sandbox ids 105-110
+    // and 152-154, all defaulting to 1): `ApiaryTime`/`ApiaryOutput` for the
+    // apiary and `ChickenCoopTime`/`ChickenCoopOutput` for the coop, so scaling
+    // one type must not scale the others.
+    const dew_time = game_tick.sandboxFloat(sandbox_groups, "DewCollectorTime");
+    const dew_out = game_tick.sandboxFloat(sandbox_groups, "DewCollectorOutput");
+    const apiary_time = game_tick.sandboxFloat(sandbox_groups, "ApiaryTime");
+    const apiary_out = game_tick.sandboxFloat(sandbox_groups, "ApiaryOutput");
+    const coop_time = game_tick.sandboxFloat(sandbox_groups, "ChickenCoopTime");
+    const coop_out = game_tick.sandboxFloat(sandbox_groups, "ChickenCoopOutput");
     // Ownership of the send: this pass produces and `broadcastDirtyCollectors`
     // (same tick, after it) ships what changed, so a client watches the water
     // appear without waiting for its next chunk stream.
@@ -1098,10 +1106,10 @@ pub fn tickCollectors(self: *Game) void {
         // Stock's `isDisabled` checks the type's sandbox input gate:
         // `DewCollectorInput`/`ApiaryInput`/`ChickenCoopInput` at 0 turn the
         // whole collector off (BlockCollector.il IL_001D-0047).
-        const type_on = switch (def.collector_type) {
-            1 => apiary_on,
-            2 => coop_on,
-            else => dew_on,
+        const type_on, const time_scale, const out_scale = switch (def.collector_type) {
+            1 => .{ apiary_on, apiary_time, apiary_out },
+            2 => .{ coop_on, coop_time, coop_out },
+            else => .{ dew_on, dew_time, dew_out },
         };
         if (!type_on) continue;
         // `lastWorldTimes[name]` is stamped whenever the update runs, so time
