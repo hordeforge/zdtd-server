@@ -19802,6 +19802,7 @@ test "scenario a planted crop grows a stage per scheduled block tick" {
     };
     g.blocks.deinit();
     g.blocks = try assets_blocks.loadFromPath(gpa, bx, &Ids.id, null);
+    const growth_rate_ticks_per_minute = block_ticker_mod.growth_rate_ticks_per_minute;
     const stage1 = g.blocks.byName("plantedYucca1").?.id;
     const stage2 = g.blocks.byName("plantedYucca2").?.id;
     const stage3 = g.blocks.byName("plantedYucca3Harvest").?.id;
@@ -19823,14 +19824,38 @@ test "scenario a planted crop grows a stage per scheduled block tick" {
     try g.world.setBlockRawWorld(px, cy, pz, stage1);
     g.noteBlockAdded(px, cy, pz, stage1);
     try std.testing.expectEqual(@as(usize, 1), g.block_tick_n);
+    // `GetTickRate` IL=10: GrowthRate 1 minute * 1200 ticks/min = 1200 ticks.
+    try std.testing.expectEqual(@as(u32, growth_rate_ticks_per_minute), g.block_tick_q[0].due - g.tick_n);
 
-    _ = try g.step(); // tick 1: stage 1 -> stage 2
+    // Pull each scheduled tick for this cell due instead of stepping 1200
+    // times: the first takes the plant to stage 2, the next to the harvest
+    // stage. The queue is a swap-remove ring, so match the cell rather than
+    // assuming an index.
+    const pullDue = struct {
+        fn f(g2: *game_mod.Game, x: i32, y: i32, z: i32) void {
+            var i: usize = 0;
+            while (i < g2.block_tick_n) : (i += 1) {
+                if (g2.block_tick_q[i].x == x and g2.block_tick_q[i].y == y and g2.block_tick_q[i].z == z) {
+                    g2.block_tick_q[i].due = g2.tick_n;
+                    return;
+                }
+            }
+        }
+    }.f;
+    pullDue(g, px, cy, pz);
+    _ = try g.step();
     try std.testing.expectEqual(stage2, try g.world.blockWorld(px, cy, pz));
-    _ = try g.step(); // tick 2: stage 2 -> harvest stage
+    pullDue(g, px, cy, pz);
+    _ = try g.step();
     try std.testing.expectEqual(stage3, try g.world.blockWorld(px, cy, pz));
     // The chain ends: the harvest stage carries no growth class, so its own
     // tick drains without scheduling another and the queue empties.
     try std.testing.expect(g.block_tick_n > 0);
+    // The harvest block keeps its own growth class (no `Next`), so its tick is
+    // scheduled too; pulling it due drains it without a new schedule.
+    pullDue(g, px, cy, pz);
+    _ = try g.step();
+    pullDue(g, px, cy, pz);
     _ = try g.step();
     try std.testing.expectEqual(@as(usize, 0), g.block_tick_n);
     try std.testing.expectEqual(stage3, try g.world.blockWorld(px, cy, pz));
@@ -19871,6 +19896,8 @@ test "scenario a planted crop grows a stage per scheduled block tick" {
     try g.world.setBlockRawWorld(px, cy, pz, shroom);
     g.setBlockRaw(px, cy, pz, shroom);
     g.noteBlockAdded(px, cy, pz, shroom);
+    // Same 1200-tick schedule: pull its tick due so the light check runs.
+    pullDue(g, px, cy, pz);
     _ = try g.step();
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(px, cy, pz));
     g.plant_light_fn = null;
@@ -23015,16 +23042,16 @@ test "scenario the crop growth option scales the plant delay" {
     try g.world.setBlockWorld(px, py, pz, stage1.id);
     g.setBlockRaw(px, py, pz, stage1.id);
 
-    // Modifier 1 (default): the block's own GrowthRate 2 ticks per stage.
+    // Modifier 1 (default): GrowthRate 2 minutes * 1200 ticks/min = 2400 ticks.
     g.sim.crop_growth_speed = 1.0;
     block_ticker_mod.noteAdded(g, px, py, pz, stage1.id);
-    try std.testing.expectEqual(@as(u32, 2), g.block_tick_q[0].due - g.tick_n);
+    try std.testing.expectEqual(@as(u32, 2400), g.block_tick_q[0].due - g.tick_n);
     g.block_tick_n = 0;
 
     // Modifier 3: three times the delay.
     g.sim.crop_growth_speed = 3.0;
     block_ticker_mod.noteAdded(g, px, py, pz, stage1.id);
-    try std.testing.expectEqual(@as(u32, 6), g.block_tick_q[0].due - g.tick_n);
+    try std.testing.expectEqual(@as(u32, 7200), g.block_tick_q[0].due - g.tick_n);
     g.block_tick_n = 0;
 
     // Modifier 0 (sandbox "instant"): floored at one tick so the scheduler does

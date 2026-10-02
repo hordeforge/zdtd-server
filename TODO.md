@@ -727,10 +727,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       and `block_ticker.delayFor` scales the base delay (floored at one tick so a
       0 modifier cannot spin the scheduler). Gated by `scenario the crop growth
       option scales the plant delay`: GrowthRate 2 gives a 2-tick delay at 1.0, 6
-      at 3.0 and 1 at 0 (decisive: dropping the factor fails it). Open question
-      found while reading this: stock's tick rate also multiplies by `20 * 60`,
-      which zdtd's tick-unit base does not carry, so the absolute growth time
-      needs its own round against a stock blocks.xml GrowthRate.
+      at 3.0 and 1 at 0 (decisive: dropping the factor fails it). The open
+      question that read raised closed the next round: `GetTickRate` IL=10 also
+      multiplies by `20 * 60` (the XML `GrowthRate` is MINUTES), and zdtd's base
+      did not carry that factor, so every crop grew 1200x too fast (a
+      `GrowthRate="120"` crop came up in six seconds instead of two in-game
+      hours). `growth_rate_ticks_per_minute` holds the `20 * 60` factor and
+      `delayFor` applies it (`GrowthRate` 1 -> 1200 ticks per stage); the crop
+      scenario asserts the schedule and pulls each tick due rather than stepping
+      1200 times, so it still runs fast.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

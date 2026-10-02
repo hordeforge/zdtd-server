@@ -46,6 +46,11 @@ pub const tick_queue_cap: usize = 4096;
 /// `Block.GetTickRate` default: the reschedule interval in ticks (RE blocks.md
 /// section 7).
 pub const default_growth_rate: u32 = 10;
+/// `BlockPlantGrowing.GetTickRate` (IL=10) scales `growthRate` by `20 * 60`:
+/// the XML value is in minutes and the tick rate is ticks, so a
+/// `GrowthRate="120"` crop takes 120 * 1200 = 144000 ticks (two in-game hours)
+/// per stage.
+pub const growth_rate_ticks_per_minute: u32 = 20 * 60;
 /// Random-growth jitter band: `GrowthRate` * [0.5, 1.5] (RE
 /// `BlockPlantGrowing.addScheduledTick`, IL=63).
 pub const growth_jitter_min: f32 = 0.5;
@@ -647,7 +652,7 @@ fn delayFor(self: *Game, x: i32, y: i32, z: i32, def: assets_blocks.BlockDef) u3
     // ticks, so the modifier applies directly; a 0-modifier delay floors at one
     // tick rather than spinning the scheduler.
     const raw: f32 = if (def.growth_rate > 0) def.growth_rate else @floatFromInt(default_growth_rate);
-    const base: f32 = @max(raw * self.sim.crop_growth_speed, 1.0);
+    const base: f32 = @max(raw * @as(f32, @floatFromInt(growth_rate_ticks_per_minute)) * self.sim.crop_growth_speed, 1.0);
     if (!def.growth_random or def.growth_deviation <= 0) {
         return @intFromFloat(base);
     }
