@@ -52,6 +52,10 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
 }
 
 pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
+    // Sandbox `TradersEnabled` off: stock's dialog requirement
+    // (`DialogRequirementCanTrade` IL_0000-000A) means the client never offers a
+    // trade, and the server refuses one that arrives anyway.
+    if (!self.traders_enabled) return;
     const t = packages.parseTraderTrade(body) catch return;
     // Same reach gate as the TraderData echo below: the client can only open
     // the trade window by activating the NPC in use range, so a trade naming
@@ -113,6 +117,7 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
     const read = packages.stock_entity.readTraderDataBody(&tr, &entries_buf) catch return;
 
     if (td.is_entity) {
+        if (!self.traders_enabled) return;
         const ts = self.sim.slotOfNetId(td.entity_id) orelse return;
         if (!self.sim.mask[ts].trader_stock) return;
         const epos = self.sim.transform[ts];

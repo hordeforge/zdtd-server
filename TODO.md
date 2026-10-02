@@ -1373,6 +1373,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       options the client reads by enum ordinal rather than through a named static -
       the blind spot round 136 recorded. The same pass left two more real ones for
       later rounds: `TradersEnabled` (128) and `GlobalLootCount` (78).
+- [x] **The `TradersEnabled` sandbox option did nothing** - closed 2026-10-02:
+      option 128 (yes/no, default on). `DialogRequirementCanTrade.IsValid`
+      (IL_0000-000A) is `GetBool(TradersEnabled)`, so with it off a stock client
+      offers no trade dialog at all - but the server still resolved trader lock
+      targets and applied trades, letting a modified client trade on a server that
+      forbids it. The mirror now covers all three entry points: the lock target no
+      longer resolves as a trader (so no window opens), `handleTrade` refuses, and
+      the `NetPackageTraderData` post-trade copy refuses for an entity target. The
+      option parses through the sandbox and serverconfig arms. Gated by the `trade
+      reach` scenario's new disabled leg: an in-reach trade leaves the trader's
+      stock and the player's coins untouched (decisive: disabling the gate trades,
+      expected 9 found 8). `GlobalLootCount` (78) is the last gap the round-145
+      ordinal sweep found and stays open.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

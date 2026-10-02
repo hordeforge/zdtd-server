@@ -120,7 +120,9 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                     while (ti < n) : (ti += 1) {
                         switch (nextLockTarget(&tr) orelse break) {
                             .entity_id => |eid| if (self.sim.slotOfNetId(eid)) |ts| {
-                                if (self.sim.mask[ts].kind and self.sim.kind[ts] == .trader) {
+                                // Sandbox `TradersEnabled` off: the trader is
+                                // not an interaction target at all.
+                                if (self.traders_enabled and self.sim.mask[ts].kind and self.sim.kind[ts] == .trader) {
                                     trader_slot = ts;
                                     break;
                                 }

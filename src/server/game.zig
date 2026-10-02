@@ -394,6 +394,8 @@ pub const Game = struct {
     /// Sandbox `HungerMultiplier` / `ThirstMultiplier`.
     hunger_multiplier: f32 = 1.0,
     thirst_multiplier: f32 = 1.0,
+    /// Sandbox `TradersEnabled` (false = no trader interaction at all).
+    traders_enabled: bool = true,
     /// Sandbox loot-stage and trader-stage multipliers.
     global_ls_modifier: f32 = 1.0,
     biome_ls_modifier: f32 = 1.0,

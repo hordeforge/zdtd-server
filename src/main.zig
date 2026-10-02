@@ -801,6 +801,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .trader_buy_prices = cfg.trader_buy_prices,
         .hunger_multiplier = cfg.hunger_multiplier,
         .thirst_multiplier = cfg.thirst_multiplier,
+        .traders_enabled = cfg.traders_enabled,
         .global_ls_modifier = cfg.global_ls_modifier,
         .biome_ls_modifier = cfg.biome_ls_modifier,
         .poi_tier_ls_modifier = cfg.poi_tier_ls_modifier,

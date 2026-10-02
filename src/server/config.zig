@@ -169,6 +169,11 @@ pub const Config = struct {
     /// `introquest` is unavailable while off
     /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
     intro_quest_enabled: bool = true,
+    /// Sandbox `TradersEnabled` (yes/no, default on): `DialogRequirementCanTrade`
+    /// (IL_0000-000A) reads it, so a stock client offers no trade dialog at all
+    /// while it is off. The server mirrors the gate: no trader window opens and
+    /// no trade is applied, so a modified client cannot trade either.
+    traders_enabled: bool = true,
     /// Sandbox `HungerMultiplier` / `ThirstMultiplier` (float, default 1.0):
     /// the food/water loss scale (`PlayerEntityStats` IL_0059-0064 multiplies
     /// the negative regeneration amount by `Stat.LossSandboxModifier`, which
@@ -603,6 +608,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
             cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
+        } else if (std.mem.eql(u8, o.name, "TradersEnabled")) {
+            cfg.traders_enabled = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "HungerMultiplier")) {
             cfg.hunger_multiplier = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "ThirstMultiplier")) {
@@ -899,6 +906,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }
     if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
+    if (prop(raw, "TradersEnabled")) |v| cfg.traders_enabled = clampU8Named("TradersEnabled", v, 0, 1, @intFromBool(cfg.traders_enabled)) != 0;
     if (prop(raw, "HungerMultiplier")) |v| {
         if (xml.parseF32(v)) |f| cfg.hunger_multiplier = @max(0, f);
     }

@@ -16119,6 +16119,19 @@ test "scenario trade reach: a trader across the map cannot be traded with" {
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", trade));
     try std.testing.expectEqual(stock_before - 1, g.sim.trader_stock[ts].entries[0].count);
     try std.testing.expect(g.sim.wallet[ps].coins < coins_before);
+
+    // Sandbox `TradersEnabled` off: the same in-reach trade does nothing
+    // (`DialogRequirementCanTrade` IL_0000-000A is the client's copy of the
+    // gate; the server refuses a body that arrives anyway).
+    {
+        g.traders_enabled = false;
+        const stock_now = g.sim.trader_stock[ts].entries[0].count;
+        const coins_now = g.sim.wallet[ps].coins;
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", trade));
+        try std.testing.expectEqual(stock_now, g.sim.trader_stock[ts].entries[0].count);
+        try std.testing.expectEqual(coins_now, g.sim.wallet[ps].coins);
+        g.traders_enabled = true;
+    }
     std.debug.print("PASS trade reach: the trade needs the player standing at the trader\n", .{});
 }
 
