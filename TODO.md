@@ -846,6 +846,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `TraderMaxTier` gate). Gated by `scenario the loot tier cap clamps a rolled
       quality`: a forced quality-6 entry deposits 6 at the default, 2 at cap 2,
       and 6 again at -1 (decisive: returning the rolled value unchanged fails it).
+- [x] **The `LootBagChance` sandbox option did nothing** - closed 2026-10-02:
+      option 90 (float, default 1.0) is `LootContainer.LootBagChance`, which
+      `EntityAlive` IL_00F3-011D multiplies into `Entity.lootDropProb` after the
+      `LootDropProb` passive fold and before the roll (0 = no corpse bags, above
+      1 = more). zdtd rolled the class probability alone, so a server with bags
+      disabled still dropped them at the class rate. The sandbox code and the
+      serverconfig property (clamped 0..100) parse into `config.loot_bag_chance`
+      -> `InitOptions` -> `World.loot_bag_chance`, and the death path multiplies
+      before `rollLootDrop`. Gated by `loot bag chance scales the drop
+      probability`: a 0.5 class drops nothing at chance 0 and always drops at
+      chance 2 (decisive: dropping the multiplier fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

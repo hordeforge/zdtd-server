@@ -485,6 +485,10 @@ pub const World = struct {
     /// The sandbox `AllowZombieDigging` option (0 = the AI never digs through a
     /// blocking cell; stock `EntityMoveHelper.AllowZombieDigging`).
     allow_zombie_digging: bool = true,
+    /// The sandbox `LootBagChance` option (default 1.0): the multiplier
+    /// `EntityAlive`'s death path applies to `Entity.lootDropProb` before the
+    /// bag roll (IL_00F3-011D `lootDropProb *= LootContainer.LootBagChance`).
+    loot_bag_chance: f32 = 1.0,
     /// The sandbox `EnemySpawnMode` option (false = no spawns happen at all;
     /// stock `EntityFactory.EnemySpawnMode`).
     enemy_spawn_mode: bool = true,
@@ -2129,7 +2133,11 @@ pub const World = struct {
                 const y = self.transform[s].y;
                 const z = self.transform[s].z;
                 const loot_name = if (self.mask[s].class_id) self.class_id[s].loot_list else "";
-                const drop_prob = if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0;
+                // `EntityAlive` IL_00F3-011D: after the `LootDropProb` passive
+                // fold, the probability is multiplied by the sandbox
+                // `LootBagChance` static before the bag roll (0 disables bags,
+                // above 1 raises the drop rate).
+                const drop_prob = (if (self.mask[s].class_id) self.class_id[s].drop_prob else 1.0) * self.loot_bag_chance;
                 const nid = self.network_id[s].id;
                 // A second hit must not re-fire kill side effects (the
                 // hp <= 0 guard above already returns).

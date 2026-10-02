@@ -898,6 +898,7 @@ pub const Game = struct {
         self.sim.enemy_spawn_mode = opts.enemy_spawn_mode;
         self.max_tech_type = opts.max_tech_type;
         self.loot_max_tier = opts.loot_max_tier;
+        self.sim.loot_bag_chance = opts.loot_bag_chance;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;

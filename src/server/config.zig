@@ -152,6 +152,10 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `LootBagChance` (float, default 1.0): the multiplier the death
+    /// path applies to a corpse's `LootDropProb` before the bag roll
+    /// (`EntityAlive` IL_00FA).
+    loot_bag_chance: f32 = 1.0,
     /// Sandbox `LootMaxTier` (int 1..6, default 6, -1 = no cap): the quality
     /// tier ceiling a loot roll may land on (`LootContainer` IL_029D clamps the
     /// rolled ItemValue max down to the static, then the min down to the max).
@@ -458,6 +462,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "LootBagChance")) {
+            cfg.loot_bag_chance = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "LootMaxTier")) {
             cfg.loot_max_tier = sandbox.valueI(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "MaxTechType")) {
@@ -686,6 +692,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "LootBagChance")) |v| {
+        if (xml.parseF32(v)) |f| cfg.loot_bag_chance = std.math.clamp(f, 0, 100);
+    }
     if (prop(raw, "LootMaxTier")) |v| {
         // The stock picker is 1..6 and -1 means "no cap", so a raw -1 is legal
         // and the rest clamps (parseI32, not the u16 helper).

@@ -112,6 +112,30 @@ test "loot bag drops only on LootDropProb" {
     try std.testing.expectEqual(@as(u32, 1), w.countKind(.loot_bag));
 }
 
+test "loot bag chance scales the drop probability" {
+    // `EntityAlive` IL_00F3-011D: `lootDropProb *= LootContainer.LootBagChance`
+    // (the sandbox option, default 1) before the roll, so 0 disables bags and a
+    // value above 1 raises the drop rate.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    // 0.5 * 0 = 0: never a bag, whatever the net id hashes to.
+    w.setClassDef(1, .{ .name = "z", .kind = .zombie, .hash = 1, .drop_prob = 0.5 });
+    w.loot_bag_chance = 0;
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    try std.testing.expectEqual(@as(i32, -1), w.damage(z, 100).loot_bag_id);
+    // 0.5 * 2 = 1: always a bag (the roll short-circuits at >= 1).
+    w.setClassDef(1, .{ .name = "z", .kind = .zombie, .hash = 1, .drop_prob = 0.5 });
+    w.loot_bag_chance = 2.0;
+    const z2 = w.spawnZombie(0, 70, 0, 40).?;
+    try std.testing.expect(w.damage(z2, 100).loot_bag_id > 0);
+    // Default 1 leaves the class value alone.
+    w.loot_bag_chance = 1.0;
+    w.setClassDef(1, .{ .name = "z", .kind = .zombie, .hash = 1, .drop_prob = 1 });
+    const z3 = w.spawnZombie(0, 70, 0, 40).?;
+    try std.testing.expect(w.damage(z3, 100).loot_bag_id > 0);
+}
+
 test "spawnLootBagFrom copies a slot range into the death bag" {
     // DropOnDeath: the bag carries the victim's real inventory range (mode 1
     // toolbelt+backpack, 2 toolbelt, 3 backpack), not a placeholder unit.
