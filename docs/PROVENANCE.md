@@ -187,6 +187,7 @@ because it globs `.zig`.
 | File | B | Stock source (header-cited; R rows cite the RE doc) |
 |---|---|---|
 | `src/apm/metrics.zig` | Z | Monotonic counters and latency histograms for zdtd (not 7dtd-server-apm) |
+| `src/wire/stock_props.zig` | R | `NetPackageSetProp` + `PropChangeInfo` per `../7dtd-engine-research/docs/inventories/netpackage-bodies.md` 1692 and `PropChangeInfo.Write` IL_0000-0136: ChunkPos i32,i32, a flags byte (PropId 1, Position 2, Rotation 4, Scale 8, BlockValue 16), the present values in that order, BlockValue as u32 rawData + u16 damage; `StreamUtils.Write` Vector3/Quaternion are x,y,z / x,y,z,w f32 |
 | `src/apm/profiler.zig` | Z | Scoped monotonic sections for tick phases (zdtd-native; not 7dtd-server-apm) |
 | `src/apm/report.zig` | Z | Snapshot dump: human text or JSON lines for loadgen-side compare |
 | `src/apm/root.zig` | Z | zdtd-native metrics + profiling harness. Not 7dtd-server-apm (stock Mono). This is first-class instrumentation inside the Zig process |
@@ -654,7 +655,6 @@ field-by-field provenance.
 | `wire/stock_te.zig` `unlocked_lock_body` | 6 bytes | R | `TEFeatureLockable` state for a container with no padlock: bool locked=false, i32 allowed-user count 0, and an empty password hash string (`TEFeatureLockable::Read` IL_002D-0076) |
 | `server/game/block_ticker.zig` `torch_heat_scale` | 0.4 | R | `BlockTorchHeatMap.UpdateTick` (IL=35) feeds the AI heat map `HeatMapStrength * 0.4` (RE `docs/world/blocks.md` 799-800); a burning workstation feeds its full strength (a different source, `TileEntity.emitHeatMapEvent` IL=48) |
 | `server/persist.zig` `emitZpv18Cvars` / `zpvCvarSectionEnd` | n/a | Z | zdtd-owned save format: ZPV18 appends the per-player cvar section after the ZPV15 identity block so `EntityBuffs`/recipe-unlock variables survive a relog |
-| `wire/stock_props.zig` | `wire/stock_invtx.zig` (same ID/stack plumbing) | R | `NetPackageSetProp` + `PropChangeInfo` per `netpackage-bodies.md` 1692 and `PropChangeInfo.Write` IL_0000-0136: ChunkPos i32,i32, flags byte (PropId 1, Position 2, Rotation 4, Scale 8, BlockValue 16), present values in that order, BlockValue as u32 rawData + u16 damage; `StreamUtils.Write` Vector3/Quaternion are x,y,z / x,y,z,w f32 |
 | `wire/stock_invtx.zig` `test "parseStockInvTx reads the stock InventoryTransaction layout"` op-range leg | n/a | R | The transaction op code is a client i16 narrowed to u8; -1, 3 and 300 are rejected as `InvalidArgument` rather than trapping the cast (rule 20) |
 | `wire/stock_entity.zig` `parseSpawnRequest` requestedBy range check | n/a | R | The V3.2.0 correlation tail's `requestedBy` is a client-supplied i64 narrowed to i32; the range is checked before the cast so a malformed body is rejected instead of trapping |
 | `litenet/server.zig` `Server.joinRateBlocked` / `server/c2s/misc_lock.zig` `lockIsStale` | n/a | Z | Both time-window guards compare the forward direction explicitly: a backwards or wrapped clock counts as inside the join window (blocked) and can never expire a held lock |
