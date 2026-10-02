@@ -1372,7 +1372,8 @@ nothing here is already waived. The four gaps the same audit closed are in
       `SandboxOptionManager::GetFloat/GetInt(ordinal)` call sites, which covers the
       options the client reads by enum ordinal rather than through a named static -
       the blind spot round 136 recorded. The same pass left two more real ones for
-      later rounds: `TradersEnabled` (128) and `GlobalLootCount` (78).
+      later rounds: `TradersEnabled` (128, closed in round 146) and
+      `GlobalLootCount` (78, a false positive - see the closed entry below).
 - [x] **The `TradersEnabled` sandbox option did nothing** - closed 2026-10-02:
       option 128 (yes/no, default on). `DialogRequirementCanTrade.IsValid`
       (IL_0000-000A) is `GetBool(TradersEnabled)`, so with it off a stock client
@@ -1384,8 +1385,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       option parses through the sandbox and serverconfig arms. Gated by the `trade
       reach` scenario's new disabled leg: an in-reach trade leaves the trader's
       stock and the player's coins untouched (decisive: disabling the gate trades,
-      expected 9 found 8). `GlobalLootCount` (78) is the last gap the round-145
-      ordinal sweep found and stays open.
+      expected 9 found 8).
+- [x] **`GlobalLootCount` was reported as a gap and is not one** - checked
+      2026-10-02: the round-145 ordinal sweep flagged it because the only reader in
+      the dump is `GameStats`' own stat-to-option link table, but that link is the
+      point - `EnumGameStats.LootAbundance` has no same-named sandbox option, so
+      its sandbox source is `GlobalLootCount` (78), and `config.zig` has mapped
+      that option onto `loot_abundance` all along. The precedence is right too:
+      `applySandboxCode` runs after the serverconfig property pass, so a runtime
+      code overrides the `LootAbundance` pref, which is what the code is for.
+      Pinned by `sandbox GlobalLootCount drives the LootAbundance stat` (50 from
+      the pref, 200 after the code sets the 2.0 ladder entry; decisive: zeroing
+      the arm leaves 100).
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

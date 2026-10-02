@@ -1701,3 +1701,36 @@ test "parse ServerLoginConfirmationText and ServerVisibility" {
     // 0 public / 1 friends / 2 hidden is the stock range (pref 169).
     try std.testing.expectEqual(@as(u8, 2), clamped.server_visibility);
 }
+
+test "sandbox GlobalLootCount drives the LootAbundance stat" {
+    // The sandbox `GlobalLootCount` (option 78) is the sandbox source of
+    // `EnumGameStats.LootAbundance` (`GameStats` links the stat to the option
+    // through `SandboxOptionManager.GetOption`), so a code setting it must move
+    // the stat the loot counts scale by - and it must override the serverconfig
+    // `LootAbundance` pref, because the code is the runtime authority.
+    const xml_src =
+        \\<ServerSettings>
+        \\  <property name="LootAbundance" value="50" />
+        \\  <property name="SandboxCode" value="A" />
+        \\</ServerSettings>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/serverconfig.xml", .{dir});
+    try io_fs.writeFile(path, xml_src);
+    var cfg = try loadFromPath(std.testing.allocator, path);
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(u16, 50), cfg.loot_abundance);
+
+    // Option 78 `DAK`: group 'A' + id chars 'D','A' + ladder index 10 = 2.0.
+    var buf: [4]u8 = undefined;
+    buf[0] = 'A';
+    buf[1] = @intCast('A' + (78 / 26));
+    buf[2] = @intCast('A' + (78 % 26));
+    buf[3] = @intCast('A' + 10);
+    cfg.sandbox_code = buf[0..4];
+    applySandboxCode(&cfg);
+    try std.testing.expectEqual(@as(u16, 200), cfg.loot_abundance);
+}
