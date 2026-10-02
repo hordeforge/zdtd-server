@@ -1406,6 +1406,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       `GameManager.ChangeProps` apply (chunk required, batch bails on a miss), the
       channel-192 relay excluding the changer, the chunk-stream leg so a late joiner
       sees existing props, and persistence. Next slice: the store + apply.
+- [ ] **Verify the GameStats blob order without trusting IL line order** - the
+      claim (AGENTS rule 16's headline example: the blob is written in
+      `propertyList` slot order, and `stock_gamestats.zig` keeps the 69
+      `bPersistent` decls of 78) could not be machine-checked by parsing
+      `GameStats::initPropertyDecl` from the dump: splitting the dump at each
+      `stelem.any GameStats/PropertyDecl` yields ~70 `ldc.i4` ordinals whose first
+      entry is not the list head (`BiomeGSModifier` before `LoadScene`), so the
+      dump's *line order* is not the runtime list order - the exact trap rule 16
+      warns about ("a table proves what it is a table of"). The zdtd writer's own
+      comment says 78 decls with 9 skipped and the names it skips
+      (`EnemyCount`, `AnimalCount`, `IsSaveSupplyCrates`, `IsResetMapOnRestart`,
+      `IsVersionCheckDone`, `ZombieHordeMeter`, `GlobalMessageToShow`,
+      `UNUSED_ShowZombieCounter`) line up with the decls the extraction cannot
+      place, which is consistent with the claim but not proof. Verify the way the
+      existing golden tests do: a real captured blob (loadgen/frame capture) with
+      byte offsets, or the client's `Read` (IL=70) driven against a replayed
+      write - not the IL's line order. Needs a build, so it waited on disk space.
 - [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
       2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
       `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with
