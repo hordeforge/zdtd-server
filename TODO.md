@@ -683,6 +683,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       hear radius scale by it. Gated by `the sandbox feral sense scales the class
       sight range` and `scenario the feral sense option follows the day/night
       table` (both decisive: probing either fails its test).
+- [x] **The `AISmellMode` sandbox option did nothing** - closed 2026-10-02: the
+      picker (0..5, stock default 3) gates the AI smell leg, and picker 0 turns it
+      off, so a player who is neither seen nor heard is not sensed even inside the
+      smell radius. zdtd ignored the option, so `AISmellMode=0` servers still had
+      zombies smelling hidden players. The sandbox code and the serverconfig
+      property now parse into `config.ai_smell_mode` -> `InitOptions` ->
+      `World.ai_smell_mode`, and the sense scan uses a zero smell radius at 0.
+      Gated by `the AI smell mode gates the smell leg` (decisive: dropping the
+      gate senses the hidden player). Residual: the 1..5 ladder's per-step
+      magnitude is not pinned by the RE, so only the off position differs; the
+      picker values above 0 keep the Rules smell radius.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

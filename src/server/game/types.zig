@@ -354,6 +354,8 @@ pub const InitOptions = struct {
     zombie_feral_move: u8 = 3,
     /// Sandbox `ZombieFeralSense` (0 off, 1 day, 2 night, 3 always).
     zombie_feral_sense: u8 = 0,
+    /// Sandbox `AISmellMode` (0 disables the AI smell leg).
+    ai_smell_mode: u8 = 3,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

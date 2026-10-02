@@ -480,6 +480,8 @@ pub const World = struct {
     feral_sense_scale: f32 = 0,
     /// The sandbox `ZombieFeralSense` option (0 off, 1 day, 2 night, 3 always).
     feral_sense_option: u8 = 0,
+    /// The sandbox `AISmellMode` option (0 = the AI smell leg is off).
+    ai_smell_mode: u8 = 3,
     /// Item-mod-side PhysicalDamageResist percent summed over the entity's
     /// equipped items' installed modifiers (EffectManager layer 13) and
     /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`

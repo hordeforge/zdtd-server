@@ -544,7 +544,9 @@ pub fn nearestPlayerSnap(w: *const World, scan: *const PlayerScan, zslot: Slot, 
             // Smell passes walls (RE PlayerStealth cSmellRadius*): within the
             // player's effective smell radius the zombie senses regardless of
             // sight or hearing (a bleeding player reeks from further away).
-            const smell = smellRadiusFor(w, p.slot);
+            // The sandbox `AISmellMode` picker gates the whole smell leg: at 0
+            // a player who is neither seen nor heard is not sensed at all.
+            const smell: f32 = if (w.ai_smell_mode == 0) 0 else smellRadiusFor(w, p.slot);
             // Stealth (RE PlayerStealth NotifyNoise): a crouched player's
             // movement noise is muffled, so the hearing gate shrinks by
             // crouch_hear_scale. The AITarget player hear distance wins over
@@ -1439,4 +1441,29 @@ test "an investigate spot expires when its ticks run out" {
     var i: usize = 0;
     while (i < 20) : (i += 1) _ = ai_tasks.systemZombieAi(&w, 0.05);
     try std.testing.expect(w.zombie_ai[zs].has_spot);
+}
+
+test "the AI smell mode gates the smell leg" {
+    // Sandbox `AISmellMode` picker 0 turns the smell sense off: a player who is
+    // neither seen nor heard is not sensed even inside the smell radius.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100) orelse return error.TestUnexpectedResult;
+    const zs = w.slotOfNetId(z) orelse return error.TestUnexpectedResult;
+    w.rules.ai.smell_radius = 30;
+    w.rules.ai.smell_bleed_radius = 30;
+    // A player 20 m behind the zombie (outside its view cone) with no light.
+    const p = w.spawnPlayer(0, 70, -20, 0) orelse return error.TestUnexpectedResult;
+    const ps = w.slotOfNetId(p) orelse return error.TestUnexpectedResult;
+    w.player[ps].crouching = true;
+    w.transform[zs].yaw = 0; // facing +z, the player sits at -z
+    var scan: PlayerScan = .{};
+    _ = snapshotPlayers(&w, &scan, true);
+
+    // Default mode 3: the smell radius senses the hidden player.
+    w.ai_smell_mode = 3;
+    try std.testing.expect(nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 0).id != -1);
+    // Mode 0: no smell, no sight (behind), no hearing (quiet) -> nothing.
+    w.ai_smell_mode = 0;
+    try std.testing.expectEqual(@as(i32, -1), nearestPlayerSnap(&w, &scan, zs, 0, 70, 0, 0).id);
 }
