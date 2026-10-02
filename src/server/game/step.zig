@@ -647,17 +647,25 @@ pub fn step(self: *Game) !void {
 /// is the traders.xml root quest_tier_mod). Falls back to the party loot
 /// stage when the def has no tier or the table no quest_tier_mod.
 pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i32 {
-    if (d.difficulty_tier < 1 or peer >= self.clients.len) return self.partyLootStage();
+    if (d.difficulty_tier < 1 or peer >= self.clients.len) {
+        return traderStageFrom(self, @floatFromInt(self.partyLootStage()));
+    }
     const mods = self.traders.quest_tier_mod;
-    if (mods.len == 0) return self.partyLootStage();
+    if (mods.len == 0) return traderStageFrom(self, @floatFromInt(self.partyLootStage()));
     const idx: usize = @min(@as(usize, d.difficulty_tier - 1), mods.len - 1);
     const level: f32 = @floatFromInt(self.clients[peer].level);
-    const base = level * (1.0 + mods[idx]);
-    // Clamp before the cast: a modded quest_tier_mod can push base past the
-    // i32 range (finite), which traps @trunc.
+    return traderStageFrom(self, level * (1.0 + mods[idx]));
+}
+
+/// `GetTraderStage` IL_0052-005E: the folded stage times the sandbox
+/// `GlobalTraderStageModifier`, floored and clamped to at least 1. The cast is
+/// range-guarded first: a modded `quest_tier_mod` can push the product past the
+/// i32 range, which traps `@intFromFloat`.
+fn traderStageFrom(self: *const Game, base_in: f32) i32 {
+    const base = base_in * self.global_ts_modifier;
     if (!std.math.isFinite(base) or base < 1.0) return 1;
-    // 2^31 is exactly representable in f32; anything at or above it
-    // truncates out of i32 range.
+    // 2^31 is exactly representable in f32; anything at or above it is out of
+    // i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @floor(base)));
 }

@@ -176,6 +176,16 @@ pub const Config = struct {
     /// standing biome's `GameStageMod` by `BiomeGameStageModifier`).
     global_gs_modifier: f32 = 1.0,
     biome_gs_modifier: f32 = 1.0,
+    /// Sandbox `GlobalLSModifier` / `BiomeLSModifier` / `POITierLSModifier`
+    /// (float, default 1.0): multipliers on the loot-stage terms
+    /// (`EntityPlayer::GetLootStage` IL_0055/0071 multiply the POI tier terms,
+    /// IL_008E/00A0 the standing biome's terms, and IL_0162 the folded stage
+    /// before its floor). `GlobalTSModifier` is the same shape on
+    /// `EntityPlayer::GetTraderStage` (IL_0052).
+    global_ls_modifier: f32 = 1.0,
+    biome_ls_modifier: f32 = 1.0,
+    poi_tier_ls_modifier: f32 = 1.0,
+    global_ts_modifier: f32 = 1.0,
     /// Sandbox `VendingEnabled` (yes/no, default on): off disables the vending
     /// machine's activation command (`BlockVendingMachine` IL_006D-0190 sets
     /// `cmds[0].enabled = TraderManager.VendingEnabled`), so the machine cannot
@@ -581,6 +591,14 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
             cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
+        } else if (std.mem.eql(u8, o.name, "GlobalLSModifier")) {
+            cfg.global_ls_modifier = @max(0, sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "BiomeLSModifier")) {
+            cfg.biome_ls_modifier = @max(0, sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "POITierLSModifier")) {
+            cfg.poi_tier_ls_modifier = @max(0, sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "GlobalTSModifier")) {
+            cfg.global_ts_modifier = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "GlobalGSModifier")) {
             cfg.global_gs_modifier = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BiomeGSModifier")) {
@@ -861,6 +879,18 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }
     if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
+    if (prop(raw, "GlobalLSModifier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.global_ls_modifier = @max(0, f);
+    }
+    if (prop(raw, "BiomeLSModifier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.biome_ls_modifier = @max(0, f);
+    }
+    if (prop(raw, "POITierLSModifier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.poi_tier_ls_modifier = @max(0, f);
+    }
+    if (prop(raw, "GlobalTSModifier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.global_ts_modifier = @max(0, f);
+    }
     if (prop(raw, "GlobalGSModifier")) |v| {
         if (xml.parseF32(v)) |f| cfg.global_gs_modifier = @max(0, f);
     }

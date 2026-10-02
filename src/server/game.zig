@@ -388,6 +388,11 @@ pub const Game = struct {
     /// Sandbox `GlobalGSModifier` / `BiomeGSModifier` (gamestage multipliers).
     global_gs_modifier: f32 = 1.0,
     biome_gs_modifier: f32 = 1.0,
+    /// Sandbox loot-stage and trader-stage multipliers.
+    global_ls_modifier: f32 = 1.0,
+    biome_ls_modifier: f32 = 1.0,
+    poi_tier_ls_modifier: f32 = 1.0,
+    global_ts_modifier: f32 = 1.0,
     /// Sandbox `IntroQuestEnabled`.
     intro_quest_enabled: bool = true,
     /// Sandbox `CraftingOutput`: the craft output scale.

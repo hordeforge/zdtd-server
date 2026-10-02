@@ -1222,9 +1222,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       options parsed through the sandbox and serverconfig arms. Gated by
       `the sandbox gamestage modifiers reach the stage` (x3 scales, 0 floors to the
       clamp, 1.0 restores; decisive: dropping the multiplier fails it).
-      Residual: the sibling loot-stage and trader-stage options (`GlobalLSModifier`
-      / `BiomeLSModifier` / `POITierLSModifier` / `GlobalTSModifier`) are still
-      unparsed and are the same shape for a later round.
+      The sibling loot-stage and trader-stage options
+      (`GlobalLSModifier` 62 / `BiomeLSModifier` 63 / `POITierLSModifier` 64 /
+      `GlobalTSModifier` 65) landed the next round by the same recipe:
+      `EntityPlayer::GetLootStage` IL_0055/0071 scales its POI terms, IL_008E/00A0
+      its biome terms and IL_015F-016E the folded stage before the floor and the
+      max-1 clamp; `EntityPlayer::GetTraderStage` IL_0052-005E scales the quest
+      stage, including the `partyLootStage` fallback zdtd uses when traders.xml
+      carries no `quest_tier_mod`.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

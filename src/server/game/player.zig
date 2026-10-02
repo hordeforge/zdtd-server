@@ -616,12 +616,16 @@ pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32
     // LootStage (passive 159) multiplies the total before flooring
     // (`GetLootStage` IL_00E1); the survival tick caches the fold per entity.
     const loot_mult = if (self.sim.playerByPeer(self.clients[slot].slot)) |ps| self.sim.loot_stage_mult[ps] else 1.0;
-    return assets_gamestages.lootStage(.{
+    // Sandbox `POITierLSModifier`/`BiomeLSModifier` scale their own terms
+    // (IL_0055/0071 and IL_008E/00A0).
+    poi_mod *= self.poi_tier_ls_modifier;
+    poi_bonus *= self.poi_tier_ls_modifier;
+    const stage = assets_gamestages.lootStage(.{
         .level = self.clients[slot].level,
         .poi_tier_mod = poi_mod,
         .poi_tier_bonus = poi_bonus,
-        .biome_mod = bmods.loot_mod,
-        .biome_bonus = bmods.loot_bonus,
+        .biome_mod = bmods.loot_mod * self.biome_ls_modifier,
+        .biome_bonus = bmods.loot_bonus * self.biome_ls_modifier,
         .biome_min = bmods.loot_min,
         .biome_max = bmods.loot_max,
         .container_mod = container_mod,
@@ -629,6 +633,11 @@ pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32
         .global_modifier = global_mod,
         .loot_mult = loot_mult,
     });
+    // `GetLootStage` IL_015F-016E: the folded value times the sandbox
+    // `GlobalLootStageModifier`, floored and clamped to at least 1.
+    const scaled: f32 = @as(f32, @floatFromInt(stage)) * self.global_ls_modifier;
+    const floored: i32 = @intFromFloat(@floor(scaled));
+    return @max(1, floored);
 }
 
 /// GameStageDefinition::CalcGameStageAround (asm.il ~1093351): party stage
@@ -1767,4 +1776,34 @@ test "the sandbox gamestage modifiers reach the stage" {
     try std.testing.expectEqual(@as(i32, 1), gameStageOf(g, c.slot));
     g.global_gs_modifier = 1.0;
     try std.testing.expectEqual(base_stage, gameStageOf(g, c.slot));
+}
+
+test "the sandbox loot and trader stage modifiers reach the stage" {
+    // `EntityPlayer::GetLootStage` IL_015F-016E and `GetTraderStage` IL_0052-005E.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    var capture: @import("../../litenet/peer.zig").Capture = .{};
+    const c = try g.attachJoinedClient(&capture);
+    g.clients[c.slot].level = 10;
+    const base_ls = lootStageOf(g, c.slot);
+    try std.testing.expect(base_ls >= 1);
+    g.global_ls_modifier = 3.0;
+    try std.testing.expectEqual(@as(i32, base_ls * 3), lootStageOf(g, c.slot));
+    g.global_ls_modifier = 0;
+    try std.testing.expectEqual(@as(i32, 1), lootStageOf(g, c.slot));
+    g.global_ls_modifier = 1.0;
+
+    // GetTraderStage scales the quest-reward stage the same way.
+    const qd = ecs.quest.QuestDef{ .id = 1, .name = "tierProbe", .title = "t", .kind = .kill_zombies, .difficulty_tier = 1 };
+    const base_ts = g.questRewardStage(qd, c.slot);
+    try std.testing.expect(base_ts >= 1);
+    g.global_ts_modifier = 2.0;
+    try std.testing.expectEqual(@as(i32, base_ts * 2), g.questRewardStage(qd, c.slot));
+    g.global_ts_modifier = 0;
+    try std.testing.expectEqual(@as(i32, 1), g.questRewardStage(qd, c.slot));
+    g.global_ts_modifier = 1.0;
+    try std.testing.expectEqual(base_ts, g.questRewardStage(qd, c.slot));
 }
