@@ -24643,3 +24643,47 @@ test "scenario the feral sense option widens the sense range" {
     try std.testing.expectApproxEqAbs(@as(f32, 400.0), ecs_ai_tasks.senseDistSq(&g.sim, zs), 0.01);
     std.debug.print("PASS feral-sense: the option widens the acquisition range\n", .{});
 }
+
+test "scenario the phase gate rejects a playing-phase package before spawn" {
+    // AGENTS rule 18: a peer may only send what its join state allows. The gate's
+    // table and mapping have unit tests, but nothing proved `handlePackage`
+    // consults it - the malformed-package sweep asserts that no phase reject
+    // happens, which is the opposite direction. A pre-spawn damage claim must be
+    // rejected and counted, and must not touch health; the same body after spawn
+    // must land.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const vslot = g.sim.slotOfNetId(cb.entity_id) orelse return error.TestUnexpectedResult;
+    g.pvp_mode = 3;
+
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    const body = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 10, false, ca.entity_id);
+
+    // Back to the joined phase (the harness helper spawns them).
+    ca.joined = true;
+    ca.entered = false;
+    const hp_before = g.sim.health[vslot].hp;
+    const rejects_before = g.harness.counters.get(.phase_rejects);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", body));
+    try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.phase_rejects));
+    try std.testing.expectApproxEqAbs(hp_before, g.sim.health[vslot].hp, 0.01);
+
+    // Same body once the peer is playing.
+    ca.entered = true;
+    const rejects_now = g.harness.counters.get(.phase_rejects);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", body));
+    try std.testing.expectEqual(rejects_now, g.harness.counters.get(.phase_rejects));
+    try std.testing.expect(g.sim.health[vslot].hp < hp_before);
+    std.debug.print("PASS phase gate: a pre-spawn playing package is rejected and counted\n", .{});
+}
