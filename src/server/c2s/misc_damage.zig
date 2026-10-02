@@ -9,6 +9,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const components = @import("../../ecs/components.zig");
 const protocol = @import("../../protocol.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 const systems = @import("../../ecs/systems.zig");
@@ -216,7 +217,35 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             self.sim.mask[ts].loot_bag and self.sim.loot_bag[ts].supply_crate
         else
             false;
+        const victim_hp_before: f32 = if (self.sim.slotOfNetId(d.entity_id)) |vs0|
+            (if (self.sim.mask[vs0].health) self.sim.health[vs0].hp else 0)
+        else
+            0;
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Headshot-only / finisher gate (`EntityAlive.IsHeadshotOnly` IL_0318,
+        // `IsHeadshotFinisher` IL_0378): against an enemy victim, a player hit
+        // that is not a head hit cannot kill while the sandbox `HeadshotMode` is
+        // 1 (the response is clamped and Fatal cleared), and cannot finish the
+        // enemy while the mode is 2 (the response becomes `Health - 1`). A head
+        // hit is exempt (`HitBodyPart & 2`).
+        var killed = dmg.killed;
+        if (killed and self.headshot_mode != 0 and components.bodyPartRegion(d.body_part) != .head) {
+            if (self.sim.slotOfNetId(d.entity_id)) |vs| {
+                if (self.sim.kind[vs] != .player and self.sim.mask[vs].health) {
+                    if (self.headshot_mode == 1) {
+                        self.sim.health[vs].hp = 1;
+                        self.sim.markDirty(vs, .{ .hp = true });
+                        killed = false;
+                    } else if (victim_hp_before > 1) {
+                        // Mode 2: the response becomes Health - 1, so the enemy
+                        // survives (and heals nothing).
+                        self.sim.health[vs].hp = victim_hp_before - 1;
+                        self.sim.markDirty(vs, .{ .hp = true });
+                        killed = false;
+                    }
+                }
+            }
+        }
         // Dismember roll (RE CheckDismember IL=125): the claimed body part
         // feeds the region/leg gates; the weapon chance comes off the
         // actor's held item, 0 when it carries no DismemberChance passive;
@@ -310,7 +339,7 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
             if (self.sim.mask[vslot].transform) {
                 const vt = self.sim.transform[vslot];
                 const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, dmg.applied))), 65535));
-                if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
+                if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, killed, self.sim.network_id[actor_slot].id)) |db| {
                     // The roll's outcome rides the stock flag bits
                     // (Setup IL=235: CrippleLegs -> 0x2, Dismember -> 0x8,
                     // TurnIntoCrawler -> 0x200). Flags sit at bytes 4..8 of
@@ -326,7 +355,7 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                 } else |_| {}
             }
         }
-        if (dmg.killed) {
+        if (killed) {
             // A victim `damageFrom` destroyed outright (vehicle, turret, bag)
             // owes its observers a removal: it leaves no corpse for the sweep
             // to expire, and a freed slot is dropped from the known set

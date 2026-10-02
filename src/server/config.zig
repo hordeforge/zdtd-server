@@ -152,6 +152,12 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `HeadshotMode` (int 0..2, default 0): 1 = headshot-only (a
+    /// player's body hit cannot kill an enemy), 2 = headshot-finisher (a body
+    /// hit leaves the enemy at Health - 1). `EntityAlive.IsHeadshotOnly /
+    /// IsHeadshotFinisher` gate the response (IL_0316-03B0); a head hit is
+    /// exempt.
+    headshot_mode: u8 = 0,
     /// Sandbox `SillyLowGravity` (float 0.5..1.0, default 1.0): the world
     /// gravity multiplier (stock scales `Physics.gravity` from
     /// `originalGravity`; zdtd scales the sim's gravity rules).
@@ -481,6 +487,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "HeadshotMode")) {
+            cfg.headshot_mode = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 2);
         } else if (std.mem.eql(u8, o.name, "SillyLowGravity")) {
             cfg.silly_low_gravity = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "SkillGainRate")) {
@@ -721,6 +729,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "HeadshotMode")) |v| cfg.headshot_mode = clampU8Named("HeadshotMode", v, 0, 2, cfg.headshot_mode);
     if (prop(raw, "SillyLowGravity")) |v| {
         if (xml.parseF32(v)) |f| cfg.silly_low_gravity = std.math.clamp(f, 0, 10);
     }

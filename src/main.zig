@@ -783,6 +783,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .infection_chance = cfg.infection_chance,
         .skill_gain_rate = cfg.skill_gain_rate,
         .silly_low_gravity = cfg.silly_low_gravity,
+        .headshot_mode = cfg.headshot_mode,
         .skill_points_per_level = cfg.skill_points_per_level,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,

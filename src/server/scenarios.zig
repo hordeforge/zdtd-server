@@ -23665,3 +23665,64 @@ test "scenario the silly low gravity option scales the sim gravity" {
     try std.testing.expect(y_low > y_normal);
     std.debug.print("PASS silly-gravity: SillyLowGravity scales the sim gravity\n", .{});
 }
+
+test "scenario the headshot mode gates a non-head kill" {
+    // `EntityAlive.IsHeadshotOnly` (IL_0318) / `IsHeadshotFinisher` (IL_0378):
+    // against an enemy victim, a player hit that is not a head hit cannot kill
+    // while the sandbox `HeadshotMode` is 1 (the response is clamped and Fatal
+    // cleared) and cannot finish the enemy while the mode is 2 (the response
+    // becomes Health - 1). A head hit is exempt.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    var dmg_body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+
+    const hit = struct {
+        fn f(g2: *game_mod.Game, cl: *game_mod.Client, id: i32, part: i16, body: []u8, frame: []u8) !void {
+            const b = try packages.buildDamageBody(body, id, 0, 3, 500, true, cl.entity_id);
+            // Patch the hitBodyPart i16 (offset 4 + 4 + 1 + 1 + 2 + 1 = 13).
+            std.mem.writeInt(i16, body[13..15], part, .little);
+            _ = b;
+            try g2.injectFramed(cl, try packages.framed(frame, "NetPackageDamageEntity", body));
+        }
+    }.f;
+
+    // Mode 1: a lethal body hit leaves the zombie alive at 1 hp, a head hit
+    // kills.
+    g.headshot_mode = 1;
+    const z1 = g.sim.spawnZombie(260, 70, 260, 50).?;
+    const s1 = g.sim.slotOfNetId(z1).?;
+    try hit(g, c, z1, 1, &dmg_body, &frame_buf); // body (not the head)
+    try std.testing.expectEqual(@as(f32, 1), g.sim.health[s1].hp);
+    try std.testing.expect(g.sim.alive[s1]);
+
+    const z2 = g.sim.spawnZombie(264, 70, 260, 50).?;
+    const s2 = g.sim.slotOfNetId(z2).?;
+    try hit(g, c, z2, 2, &dmg_body, &frame_buf); // hitBodyPart 2 = head
+    try std.testing.expect(g.sim.health[s2].hp <= 0);
+
+    // Mode 2 (finisher): a lethal body hit on a 50 hp zombie becomes 49.
+    g.headshot_mode = 2;
+    const z3 = g.sim.spawnZombie(268, 70, 260, 50).?;
+    const s3 = g.sim.slotOfNetId(z3).?;
+    try hit(g, c, z3, 1, &dmg_body, &frame_buf);
+    try std.testing.expectEqual(@as(f32, 49), g.sim.health[s3].hp);
+    try std.testing.expect(g.sim.alive[s3]);
+
+    // Mode 0 (off): the same body hit kills.
+    g.headshot_mode = 0;
+    const z4 = g.sim.spawnZombie(272, 70, 260, 50).?;
+    const s4 = g.sim.slotOfNetId(z4).?;
+    try hit(g, c, z4, 1, &dmg_body, &frame_buf);
+    try std.testing.expect(g.sim.health[s4].hp <= 0);
+    std.debug.print("PASS headshot-mode: body hits cannot kill at modes 1 and 2\n", .{});
+}

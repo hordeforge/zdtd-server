@@ -913,6 +913,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       silly low gravity option scales the sim gravity`: the rules halve and a
       zombie falls visibly slower than in the default game (decisive: dropping
       the multiply leaves the rules at stock).
+- [x] **The `HeadshotMode` sandbox option did nothing** - closed 2026-10-02:
+      option 16 (int 0..2, default 0) sets `EntityAlive.HeadshotMode`; the
+      `IsHeadshotOnly` (IL_0318) and `IsHeadshotFinisher` (IL_0378) legs clamp a
+      player's NON-head response against an enemy victim - mode 1 clears `Fatal`
+      so the hit cannot kill, mode 2 turns the response into `Health - 1` so a
+      body hit cannot finish the enemy - with a head hit (`HitBodyPart == 2`)
+      exempt. zdtd applied every hit as claimed, so a headshot-only server still
+      died to body shots. `misc_damage` now clamps the applied result and clears
+      the kill when the rule fires, before the damage body and the death
+      sequence, and the `HeadshotMode` value parses through the sandbox and
+      serverconfig arms. Gated by `scenario the headshot mode gates a non-head
+      kill`: mode 1 leaves 1 hp from a lethal body hit while a head hit kills,
+      mode 2 leaves 49 hp from 50, and mode 0 kills (decisive: disabling the gate
+      leaves 0 hp). Residuals: the
+      `nohead`-tagged victim exemption (the entity XML `Tags` is not copied onto
+      `EntityClass`) and the passive-174 (`HeadShotOnly`) leg, which applies to
+      non-player attackers and does not reach this handler.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
