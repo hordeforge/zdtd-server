@@ -1244,6 +1244,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       option the client reads *by numeric index* would not show up in a
       name-based grep, so "unreferenced by name" means "no named consumer", not
       "dead"; those stay out of the work list until a consumer is found.
+- [x] **The stale note "items.xml AttackedOther rows stay unparsed"** - closed
+      2026-10-02: it was wrong. `fireHitRows` runs three passes at
+      `onSelfAttackedOther` - the buff set, the purchased perks and the held
+      item (plus its installed mods) - and the item pass reads
+      `ItemDef.triggered`, which `items.zig` parses for every
+      `triggered_effect` row through the shared scanner. The comment now says
+      that, and the pvp-gate scenario gained the missing coverage: a held item
+      with an `onSelfAttackedOther` `ModifyCVar` row bumps its cvar on the
+      landed hit and the control (no held item) stays at zero (decisive:
+      emptying the row slice fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -14824,6 +14824,30 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     try std.testing.expect(g.sim.health[vslot].hp < hp_before);
     try std.testing.expectEqual(@as(f32, 1), cb.cvars.get("$victimHits"));
     try std.testing.expectEqual(@as(f32, 1), ca.cvars.get("$attackerHits"));
+
+    // The held ITEM's own rows run in the same hit pass (the weapon procs
+    // items.xml ships as triggered_effect rows): a held item with an
+    // onSelfAttackedOther row bumps its cvar on the landed hit.
+    {
+        const held_id: u16 = 4200;
+        const idefs = [_]assets_items.ItemDef{
+            .{ .id = held_id, .name = "probeBlade", .triggered = &.{
+                .{ .trigger = .self_attacked_other, .action = .modify_cvar, .cvar = "$itemHits", .cvar_op = .add, .value = 1 },
+            } },
+        };
+        g.items = .{ .defs = &idefs, .source = .builtin };
+        const held_slot: u16 = 0;
+        g.sim.inventory[aslot].slots[held_slot] = .{ .item_id = held_id, .count = 1, .quality = 1 };
+        g.sim.inventory[aslot].holding = held_slot;
+        _ = ca.cvars.remove("$itemHits");
+        try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
+        try std.testing.expectEqual(@as(f32, 1), ca.cvars.get("$itemHits"));
+        // Control: with no item there is no item row to fire.
+        g.sim.inventory[aslot].slots[held_slot] = .{};
+        _ = ca.cvars.remove("$itemHits");
+        try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
+        try std.testing.expectEqual(@as(f32, 0), ca.cvars.get("$itemHits"));
+    }
     std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
 }
 

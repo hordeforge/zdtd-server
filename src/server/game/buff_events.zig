@@ -833,11 +833,12 @@ fn attackerId(self: *Game, attacker: ecs.Slot) i32 {
 }
 
 /// Attacker-side hit trigger: fires the attacker's `onSelfAttackedOther`
-/// buff + progression rows with `params.DamageResponse.HitBodyPart` so
-/// HitLocation gates (headshot/leg procs) evaluate. Victim tags ride
-/// `other_tags`. ponytail: items.xml AttackedOther rows stay unparsed until
-/// the item triggered surface lands; progression + buff catalogs cover the
-/// stock HitLocation gates that matter for perk behaviour.
+/// buff, progression and **held-item** rows with
+/// `params.DamageResponse.HitBodyPart` so HitLocation gates (headshot/leg
+/// procs) evaluate. Victim tags ride `other_tags`. `fireHitRows` is the three
+/// passes (buff set, purchased perks, held item plus its installed mods); the
+/// item leg carries the weapon procs stock ships as `triggered_effect` rows
+/// (torch burn, melee stuns, zombie-fist infections).
 pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
     const peer_slot = self.sim.player[ps].peer_slot;
     if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
