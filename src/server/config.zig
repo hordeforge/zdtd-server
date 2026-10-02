@@ -157,6 +157,10 @@ pub const Config = struct {
     /// the folded `CraftingOutput` (92) value by it; a recipe tagged
     /// `sandboxignore` ignores the modifier).
     crafting_output: f32 = 1.0,
+    /// Sandbox `CraftingTime` (float, default 1.0): the craft duration scale
+    /// (`XUiM_Recipes.GetRecipeCraftTime` IL=29 multiplies the folded
+    /// `CraftingTime` (90) value by it).
+    crafting_time: f32 = 1.0,
     /// Sandbox `IntroQuestEnabled` (yes/no, default on): a quest tagged
     /// `introquest` is unavailable while off
     /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
@@ -553,6 +557,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "CraftingTime")) {
+            cfg.crafting_time = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "CraftingOutput")) {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
@@ -823,6 +829,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "CraftingTime")) |v| {
+        if (xml.parseF32(v)) |f| cfg.crafting_time = std.math.clamp(f, 0, 100);
+    }
     if (prop(raw, "CraftingOutput")) |v| {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }

@@ -9,6 +9,7 @@ const std = @import("std");
 const assets_blocks = @import("../../assets/blocks.zig");
 const sandbox = @import("../../assets/sandbox.zig");
 const game_tick = @import("tick.zig");
+const game_player_mod = @import("player.zig");
 const collectors_mod = @import("../../world/collectors.zig");
 const test_tmp = @import("../../util/test_tmp.zig");
 const ecs = @import("../../ecs/root.zig");
@@ -331,16 +332,35 @@ fn foldCraftingPassive(passive_name: []const u8, passives: []const assets_buffs.
 /// from the live item table's `CraftComponentTime` sum. Passed to the
 /// workstation queue validator so a modlet's CraftTimeValue rows change the
 /// derivation with no code change.
-pub fn craftTimeFor(self: *const Game, recipe: assets_recipes.RecipeDef) f32 {
-    if (recipe.craft_time >= 0) return recipe.craft_time;
-    var total: f32 = 0;
-    var i: usize = 0;
-    while (i < recipe.ingredient_n) : (i += 1) {
-        const ing = recipe.ingredients[i];
-        const id = self.items.ecsIdByName(ing.name);
-        const per: f32 = if (id != 0) (if (self.items.byId(id)) |d| d.craft_component_time else 0) else 0;
-        total += per * @as(f32, @floatFromInt(ing.count));
+pub fn craftTimeFor(self: *Game, recipe: assets_recipes.RecipeDef) f32 {
+    return craftTimeForPlayer(self, null, recipe);
+}
+
+/// As `craftTimeFor`, but through stock's `XUiM_Recipes.GetRecipeCraftTime`
+/// (IL=29): the recipe time is folded with the player's `CraftingTime` (90)
+/// rows and scaled by the sandbox `CraftingTime`, then floored at 0. The
+/// workstation queue stores the result, so the option and the perk both change
+/// the real (server-run) duration.
+pub fn craftTimeForPlayer(self: *Game, peer_slot: ?usize, recipe: assets_recipes.RecipeDef) f32 {
+    var total: f32 = blk: {
+        if (recipe.craft_time >= 0) break :blk recipe.craft_time;
+        var sum: f32 = 0;
+        var i: usize = 0;
+        while (i < recipe.ingredient_n) : (i += 1) {
+            const ing = recipe.ingredients[i];
+            const id = self.items.ecsIdByName(ing.name);
+            const per: f32 = if (id != 0) (if (self.items.byId(id)) |d| d.craft_component_time else 0) else 0;
+            sum += per * @as(f32, @floatFromInt(ing.count));
+        }
+        break :blk sum;
+    };
+    if (peer_slot) |slot| {
+        const as = self.sim.playerByPeer(slot);
+        const delta = game_player_mod.namedPassiveFold(self, slot, as, "CraftingTime");
+        total += delta;
+        total *= self.craftingTimeScale();
     }
+    if (!(total >= 0)) return 0;
     return total;
 }
 
@@ -378,7 +398,7 @@ pub fn craftingOutputFor(self: *Game, peer_slot: usize, recipe: assets_recipes.R
     for (self.progression_table.perks) |pk| {
         foldCraftingPassive("CraftingOutputCount", pk.passives, self.skillLevelOf(peer_slot, pk.name), ctx, &v, &counts);
     }
-    const mod: f32 = if (assets_recipes.tagsContain(recipe.tags, "sandboxignore")) 1.0 else self.crafting_output;
+    const mod: f32 = if (assets_recipes.tagsContain(recipe.tags, "sandboxignore")) 1.0 else self.craftingOutputScale();
     const out: f32 = @trunc(v * mod);
     if (!(out >= 1)) return 1;
     return @intFromFloat(@min(out, 65535.0));
@@ -1424,11 +1444,13 @@ test "crafting output folds the passive and the sandbox scale" {
     const plain = assets_recipes.RecipeDef{ .name = "plainGizmo", .count = 2 };
     try std.testing.expectEqual(@as(u16, 2), craftingOutputFor(g, 0, plain));
     g.crafting_output = 2.0;
+    g.tick_n += 1; // the sandbox scales refresh on a tick boundary
     try std.testing.expectEqual(@as(u16, 4), craftingOutputFor(g, 0, plain));
     // sandboxignore keeps the authored count.
     const ignored = assets_recipes.RecipeDef{ .name = "ignoredGizmo", .count = 2, .tags = "sandboxIgnore" };
     try std.testing.expectEqual(@as(u16, 2), craftingOutputFor(g, 0, ignored));
     // 0 modifier floors at one item (the IL's max(1, …)).
     g.crafting_output = 0;
+    g.tick_n += 1;
     try std.testing.expectEqual(@as(u16, 1), craftingOutputFor(g, 0, plain));
 }

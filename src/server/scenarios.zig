@@ -7100,6 +7100,46 @@ test "scenario workstation recipe authority: count and time from recipes.xml" {
     try std.testing.expectEqual(@as(f32, 3.0), q.one_item_craft_time); // recipe time wins
     try std.testing.expectEqual(@as(f32, 3.0), q.craft_time_left);
 
+    // The queue grant and duration carry the sandbox folds too
+    // (`XUiM_Recipes.GetRecipeCraftOutputCount` IL=35 and GetRecipeCraftTime
+    // IL=29): CraftingOutput 2 doubles the granted count and CraftingTime 2
+    // doubles the run time.
+    {
+        var buf: [7]u8 = undefined;
+        const enc = struct {
+            fn f(b: []u8, off: usize, id: u32, index: u8) void {
+                b[off] = @intCast('A' + (id / 26));
+                b[off + 1] = @intCast('A' + (id % 26));
+                b[off + 2] = @intCast('A' + index);
+            }
+        }.f;
+        buf[0] = 'A'; // code group-kind byte
+        enc(&buf, 1, 99, 7); // CraftingOutput (StaminaRegen ladder) index 7 = 3.0
+        enc(&buf, 4, 97, 7); // CraftingTime (SpeedValues ladder) index 7 = 2.0
+        g.sandbox_code = buf[0..7];
+        g.tick_n += 1;
+        var queue2 = [_]ws.QueueItem{.{}} ** ws.stock_queue_len;
+        queue2[queue2.len - 1] = queue[queue2.len - 1];
+        var body2: [4096]u8 = undefined;
+        const c2s2 = try stock_te.buildWorkstationTeBody(&body2, 3, wx, wy, wz, 1301, .{
+            .fuel = fuel[0..],
+            .input = input[0..],
+            .tools = tools[0..],
+            .output = output[0..],
+            .last_input_count = ws.stock_last_input_len,
+            .last_input = liw.written(),
+            .queue = queue2[0..],
+            .melt = melt[0..],
+            .is_burning = true,
+            .burn_time_left = 30,
+        });
+        var fb2: [4096]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb2, "NetPackageTileEntity", c2s2));
+        const q2 = g.workstations.get(wx, wy, wz).?.queue[ws.stock_queue_len - 1];
+        try std.testing.expectEqual(@as(u16, 9), q2.output_count); // 3 x ladder 3.0
+        try std.testing.expectEqual(@as(f32, 6.0), q2.one_item_craft_time); // 3.0 x ladder 2.0
+    }
+
     std.debug.print("PASS workstation-authority: spoofed count/time replaced by recipe 3/3.0\n", .{});
 }
 
@@ -23315,11 +23355,13 @@ test "scenario the crafting input option scales the ingredients" {
     // Output side (`XUiM_Recipes.GetRecipeCraftOutputCount` IL=35): the same
     // craft grants `recipe.count` scaled by the sandbox `CraftingOutput`.
     g.crafting_output = 1.0;
+    g.tick_n += 1;
     g.sim.inventory[ps] = .{};
     _ = g.sim.depositItem(ps, 1102, 4); // 2x input scale still applies
     try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));
     try std.testing.expectEqual(@as(u32, 1), g.sim.inventory[ps].countItem(1101));
     g.crafting_output = 2.0;
+    g.tick_n += 1;
     g.sim.inventory[ps] = .{};
     _ = g.sim.depositItem(ps, 1102, 4);
     try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));

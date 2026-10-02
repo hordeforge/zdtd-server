@@ -352,6 +352,19 @@ pub fn sandboxFloat(groups: []const sandbox.Group, name: []const u8) f32 {
     return o.default_f;
 }
 
+/// As `sandboxFloat`, but a `name`/set miss or a code without the row falls back
+/// to the caller's own value (the init-time config/serverconfig one) instead of
+/// the option's table default.
+pub fn sandboxFloatOr(groups: []const sandbox.Group, name: []const u8, fallback: f32) f32 {
+    const o = sandbox.optionByName(name) orelse return fallback;
+    const set = sandbox.findSet(o.set_name) orelse return fallback;
+    for (groups) |g| {
+        if (g.option_id != o.id) continue;
+        return sandbox.valueF(o, set, g.index);
+    }
+    return fallback;
+}
+
 pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
     if (damage_tag.len == 0) return 0;
     if (!self.sim.mask[ps].inventory or !self.sim.mask[ps].health) return 0;

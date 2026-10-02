@@ -467,11 +467,14 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                             }
                         }
                         dst.* = q;
-                        dst.output_count = rd.count;
+                        // Same output fold as the inventory craft: the
+                        // workstation grants what the client's UI shows
+                        // (`XUiM_Recipes.GetRecipeCraftOutputCount` IL=35).
+                        dst.output_count = game_craft.craftingOutputFor(self, c.slot, rd);
                         // Stock `Recipe::Init` (IL=79): an omitted craft_time
                         // resolves through the item table, not the old 1 s
                         // default (and never the client's spoofed time).
-                        dst.one_item_craft_time = game_craft.craftTimeFor(self, rd);
+                        dst.one_item_craft_time = game_craft.craftTimeForPlayer(self, c.slot, rd);
                         dst.craft_time_left = dst.one_item_craft_time;
                         dst.craft_exp_gain = @max(rd.craft_exp_gain, 0);
                     }

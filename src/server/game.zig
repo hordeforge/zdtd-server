@@ -387,6 +387,8 @@ pub const Game = struct {
     intro_quest_enabled: bool = true,
     /// Sandbox `CraftingOutput`: the craft output scale.
     crafting_output: f32 = 1.0,
+    /// Sandbox `CraftingTime`: the craft duration scale.
+    crafting_time: f32 = 1.0,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled`.
     buried_quests_enabled: bool = true,
     poi_quests_enabled: bool = true,
@@ -509,6 +511,12 @@ pub const Game = struct {
     /// The tick's sandbox crafting-input scale (sandbox `CraftingInput`,
     /// default 1.0), cached like the harvest scales.
     crafting_input_scale: f32 = 1.0,
+    /// Sandbox `CraftingTime` cache (`XUiM_Recipes.CraftingTimeModifier`).
+    crafting_time_scale: f32 = 1.0,
+    crafting_time_scale_tick: u64 = std.math.maxInt(u64),
+    /// Sandbox `CraftingOutput` cache (`XUiM_Recipes.CraftingOutputModifier`).
+    crafting_output_scale: f32 = 1.0,
+    crafting_output_scale_tick: u64 = std.math.maxInt(u64),
     crafting_input_scale_tick: u64 = std.math.maxInt(u64),
 
     /// Interned client-supplied CVar names (`NetPackageModifyCVar`): the cvar
@@ -2527,6 +2535,30 @@ pub const Game = struct {
             self.crafting_input_scale_tick = self.tick_n;
         }
         return self.crafting_input_scale;
+    }
+
+    /// `XUiM_Recipes.GetRecipeCraftTime`'s sandbox factor
+    /// (`CraftingTimeModifier`, sandbox option `CraftingTime`).
+    pub fn craftingTimeScale(self: *Game) f32 {
+        if (self.crafting_time_scale_tick != self.tick_n) {
+            var buf: [512]sandbox.Group = undefined;
+            const groups = buf[0..sandbox.decode(self.sandbox_code, &buf)];
+            self.crafting_time_scale = game_tick.sandboxFloatOr(groups, "CraftingTime", self.crafting_time);
+            self.crafting_time_scale_tick = self.tick_n;
+        }
+        return self.crafting_time_scale;
+    }
+
+    /// `XUiM_Recipes.CraftingOutputModifier` (sandbox option `CraftingOutput`),
+    /// with the init-time config value as the fallback.
+    pub fn craftingOutputScale(self: *Game) f32 {
+        if (self.crafting_output_scale_tick != self.tick_n) {
+            var buf: [512]sandbox.Group = undefined;
+            const groups = buf[0..sandbox.decode(self.sandbox_code, &buf)];
+            self.crafting_output_scale = game_tick.sandboxFloatOr(groups, "CraftingOutput", self.crafting_output);
+            self.crafting_output_scale_tick = self.tick_n;
+        }
+        return self.crafting_output_scale;
     }
 
     pub fn takeBlockToken(self: *Game, c: *Client) bool {

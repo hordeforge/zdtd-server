@@ -1078,6 +1078,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       test plus the output half of `scenario the crafting input option scales the
       ingredients` (decisive: pinning the modifier to 1 fails the unit test and
       bypassing the helper fails the scenario).
+- [x] **The workstation queue granted the authored count and ignored
+      `CraftingTime`** - closed 2026-10-02: the round-118 output fold was only
+      wired into the inventory craft, so the workstation - the main crafting
+      path - still granted `Recipe.count` (the client's UI shows the folded
+      count), and `XUiM_Recipes.GetRecipeCraftTime` IL=29 (the `CraftingTime`
+      (90) fold times the sandbox `CraftingTime`, option 97, which zdtd did not
+      parse at all) never reached the queue's duration. `HandleRecipeQueue`
+      validation now stores `craftingOutputFor` and `craftTimeForPlayer` in the
+      queue item, and both sandbox scales resolve per tick from the synced
+      sandbox code with the init-time value as fallback. Gated by the extended
+      `scenario workstation recipe authority` (spoofed 2/0.2 replaced by the
+      recipe's 3/3.0, then 9/6.0 with the two sandbox groups encoded; decisive:
+      pinning either scale fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
