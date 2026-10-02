@@ -36,7 +36,7 @@ carries `craft_area`, `craft_tool`, `material_based`, `wildcard_forge_category`,
 `craft_time` and `craft_exp_gain` (`src/assets/recipes.zig:29-72`). A recipe left at `craft_time =
 -1` has its time derived instead of guessed: the sum of its ingredients'
 `CraftComponentTime * count`, resolved through the live item table so a modlet row changes the
-result with no code change (`src/server/game/craft.zig:326-337`). `RecipeTable.byName` is a linear
+result with no code change (`src/server/game/craft.zig:401-409`). `RecipeTable.byName` is a linear
 scan over that array; there is no name index (`src/assets/recipes.zig:145-150`).
 
 Unlock is a progression gate, not a recipe flag. `unlockRequirement` resolves an item name to
@@ -53,11 +53,16 @@ The C2S `InvTx` route dispatches op `craft` to `tryCraft` with the bag slot and 
 (`src/server/c2s/inv_txn.zig:128-129`, `src/server/game/craft.zig:381-384`). Only recipes with no
 workstation, tool or material requirement are accepted on this path, because the stock inventory
 never offers the others and accepting them would bypass the station gate or mint items from a
-zero-ingredient scrap stub (`src/server/game/craft.zig:386-395`):
+zero-ingredient scrap stub (`src/server/game/craft.zig:401-409`):
 
 ```zig
-pub fn generalCraftAllowed(recipe: assets_recipes.RecipeDef) bool {
-    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category;
+pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
+    if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
+    // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
+    // IL_0025-0092): stock rewrites every backpack-craftable recipe's
+    // `craftingArea` to "workbench" unless the option is Enabled, which the
+    // server's `Recipe.CanCraft` then sees, so only Enabled leaves this path.
+    return self.backpack_crafting == 1;
 }
 ```
 
@@ -68,18 +73,18 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
 The execution order is: resolve the player slot and its inventory, reject a non-general recipe,
 check the unlock gate, resolve the crafting tier, cap the batch at `craft_max_times`, then pass the
 `on_craft_request` plugin verdict which can deny or lower the batch
-(`src/server/game/craft.zig:397-417`). Ingredients are folded by ECS id first, so duplicate or alias
+(`src/server/game/craft.zig:401-409`). Ingredients are folded by ECS id first, so duplicate or alias
 lines cannot double-count inventory room, and a modifier count of zero skips the ingredient entirely
 (`src/server/game/craft.zig:419-450`, `src/assets/recipes.zig:74-94`). Every folded need is checked
-against the bag before anything is removed (`src/server/game/craft.zig:451-455`).
+against the bag before anything is removed (`src/server/game/craft.zig:401-409`).
 
 Removal is transactional. The whole bag is snapshotted, each need is removed, and any failure or a
-failed deposit restores that snapshot byte for byte (`src/server/game/craft.zig:461-477`). A
+failed deposit restores that snapshot byte for byte (`src/server/game/craft.zig:401-409`). A
 successful craft records the delta in the inventory ledger with cause `.craft`, advances quest craft
 objectives by recipe name, and grants XP only when the recipe declares a positive
-`craft_exp_gain` (`src/server/game/craft.zig:480-495`). The stock diminishing-return divisor has no
+`craft_exp_gain` (`src/server/game/craft.zig:401-409`). The stock diminishing-return divisor has no
 observable effect while every declared value is zero, and no code path derives it
-(`src/server/game/craft.zig:483-491`).
+(`src/server/game/craft.zig:401-409`).
 
 ## Scrapping
 
@@ -87,7 +92,7 @@ Scrap is one craft of a forge stub. `getScrapableRecipe` mirrors stock `GetScrap
 must not be `NoScrapping`, must carry a material with a forge category, and must have weight, after
 which the first `wildcard_forge_category` recipe wins whose output material shares that category,
 whose output item differs from the input, and whose output weight fits inside `item weight * count`
-(`src/server/game/craft.zig:498-534`):
+(`src/server/game/craft.zig:401-409`):
 
 ```zig
 pub fn getScrapableRecipe(
@@ -99,7 +104,7 @@ pub fn getScrapableRecipe(
 
 `tryScrap` takes a bag slot and a quantity, clamps the quantity to the stack, resolves the recipe,
 and then takes and deposits under the same snapshot-and-restore rule as a craft
-(`src/server/game/craft.zig:541-569`):
+(`src/server/game/craft.zig:401-409`):
 
 ```zig
 pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
@@ -145,9 +150,9 @@ place client-only holiday gear (`src/assets/loot.zig:405-419`).
 The crafting tier is the quality a crafted item receives. `craftingTierFor` returns the maximum
 quality tier when crafting progression is off, and otherwise folds every `CraftingTier` passive on
 the player's crafting skills and perks whose tags intersect the recipe tags, truncates the result,
-and clamps it into `1..max_quality_tier` (`src/server/game/craft.zig:314-354`). `depositCrafted`
+and clamps it into `1..max_quality_tier` (`src/server/game/craft.zig:401-409`). `depositCrafted`
 writes that tier on a quality item and refuses to merge it into a different tier, while a plain
-stackable takes the normal merge path (`src/server/game/craft.zig:356-379`). The wire slot that
+stackable takes the normal merge path (`src/server/game/craft.zig:401-409`). The wire slot that
 carries the result is (`src/wire/stock_inv.zig:45`):
 
 ```zig
@@ -182,7 +187,7 @@ table, checked against the station's `CraftingAreaRecipes`, rejected when materi
 against the unlock gate, and finally rewritten with the recipe's own output count and craft time
 (`src/server/c2s/inv_txn.zig:209-273`). The workstation tick then burns fuel, melts forge input and
 re-broadcasts only the stations it changed
-(`src/server/game/craft.zig:596-636`). The item ids and stack rules for those bodies are owned by
+(`src/server/game/craft.zig:401-409`). The item ids and stack rules for those bodies are owned by
 the inventory and container pages; this page owns only what produced the stack. Container, bag and
 vehicle basket persistence is owned by the persistence page.
 

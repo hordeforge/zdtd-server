@@ -398,14 +398,19 @@ pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bo
 /// material_based / wildcard_forge_category scrap stubs). GAP "Server craft
 /// execution" / "Scrapping". The workstation craft path (inv.zig) enforces
 /// craft_area against the station block.
-pub fn generalCraftAllowed(recipe: assets_recipes.RecipeDef) bool {
-    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category;
+pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
+    if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
+    // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
+    // IL_0025-0092): stock rewrites every backpack-craftable recipe's
+    // `craftingArea` to "workbench" unless the option is Enabled, which the
+    // server's `Recipe.CanCraft` then sees, so only Enabled leaves this path.
+    return self.backpack_crafting == 1;
 }
 
 fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].inventory) return false;
-    if (!generalCraftAllowed(recipe)) return false;
+    if (!generalCraftAllowed(self, recipe)) return false;
     if (assets_progression.unlockRequirement(&self.progression_table, recipe.name)) |req| {
         if (self.skillLevelOf(peer_slot, req[0]) < req[1]) return false;
     }
@@ -951,12 +956,24 @@ test "general craft path rejects workstation/tool/material recipes" {
     // forge/campfire-area recipes (they need a station), tool-bound recipes,
     // zero-ingredient material_based recipes, or wildcard forge scrap stubs
     // that would mint scrap from nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
     const base = assets_recipes.RecipeDef{};
-    try std.testing.expect(generalCraftAllowed(base));
-    try std.testing.expect(!generalCraftAllowed(.{ .craft_area = "forge" }));
-    try std.testing.expect(!generalCraftAllowed(.{ .craft_tool = "toolForgeHammer" }));
-    try std.testing.expect(!generalCraftAllowed(.{ .material_based = true }));
-    try std.testing.expect(!generalCraftAllowed(.{ .wildcard_forge_category = true }));
+    try std.testing.expect(generalCraftAllowed(g, base));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .craft_area = "forge" }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .craft_tool = "toolForgeHammer" }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .material_based = true }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .wildcard_forge_category = true }));
+    // Sandbox `BackpackCrafting`: only Enabled (1) leaves the backpack path.
+    g.backpack_crafting = 1;
+    try std.testing.expect(generalCraftAllowed(g, base));
+    g.backpack_crafting = 0;
+    try std.testing.expect(!generalCraftAllowed(g, base));
+    g.backpack_crafting = 3;
+    try std.testing.expect(!generalCraftAllowed(g, base));
 }
 
 test "getScrapableRecipe and tryScrap follow RE weight/category rules" {

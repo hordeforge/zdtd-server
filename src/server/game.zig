@@ -379,6 +379,8 @@ pub const Game = struct {
     quests_per_tier: u8 = 0,
     /// Sandbox `ScrappingOutput`: the scrap yield scale.
     scrapping_output: f32 = 1.0,
+    /// Sandbox `BackpackCrafting` (1 = Enabled; 0/2/3 forbid the backpack path).
+    backpack_crafting: u8 = 1,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.

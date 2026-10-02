@@ -1034,6 +1034,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       the server's own yield. Gated by `scenario the scrapping output option
       scales the scrap yield`: a 4-count recipe yields 3 untagged, 6 at scale 2,
       and 4 for a `scrap100` item (decisive: dropping the factors yields 4).
+- [x] **The `BackpackCrafting` sandbox option did nothing** - closed
+      2026-10-02: option 94 (int 0..3, default 1 = Enabled). Stock's
+      `UpdateRecipesforBackpackCrafting` rewrites the `craftingArea` of every
+      backpack-craftable recipe to "workbench" unless the option is Enabled, and
+      `CraftingManager.PostInit` skips that pass only at Enabled - so the
+      server's own `Recipe.CanCraft` sees the rewritten area and a "no backpack
+      crafting" server refuses the craft. zdtd's general inventory path accepted
+      those recipes regardless, so a spoofed or stale client could still craft
+      from the backpack. `generalCraftAllowed` now requires Enabled, with the
+      option parsing through the sandbox and serverconfig arms. Gated by the
+      existing `general craft path rejects workstation/tool/material recipes`
+      unit test, which now also asserts 0 and 3 refuse (decisive: opening the
+      gate fails it). Residual: `BasicsOnly` (2) is treated as refuse-all until
+      the item `Groups` "Limited" mark is parsed (zdtd has no item-group field),
+      so a BasicsOnly server loses the limited-item crafts stock would allow.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

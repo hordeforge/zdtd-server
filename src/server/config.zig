@@ -152,6 +152,13 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `BackpackCrafting` (int 0..3, default 1 = Enabled): stock
+    /// rewrites the `craftingArea` of every backpack-craftable recipe to
+    /// "workbench" unless the option is Enabled
+    /// (`XUiM_Recipes.UpdateRecipesforBackpackCrafting` IL_0025-0092), so 0 and
+    /// 3 forbid backpack crafting outright. 2 (BasicsOnly) keeps only
+    /// `Limited`-group outputs, which zdtd cannot mark yet, so it refuses too.
+    backpack_crafting: u8 = 1,
     /// Sandbox `ScrappingOutput` (float, default 1.0): the scale on a scrap
     /// recipe's output count (`ItemActionEntryScrap` IL_0118-0125 multiplies the
     /// count by `ScrappingOutputModifier`; an item without the `scrap100` tag
@@ -525,6 +532,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "BackpackCrafting")) {
+            cfg.backpack_crafting = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 3);
         } else if (std.mem.eql(u8, o.name, "ScrappingOutput")) {
             cfg.scrapping_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "QuestsPerTier")) {
@@ -783,6 +792,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "BackpackCrafting")) |v| cfg.backpack_crafting = clampU8Named("BackpackCrafting", v, 0, 3, cfg.backpack_crafting);
     if (prop(raw, "ScrappingOutput")) |v| {
         if (xml.parseF32(v)) |f| cfg.scrapping_output = std.math.clamp(f, 0, 100);
     }

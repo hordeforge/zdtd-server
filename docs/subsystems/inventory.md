@@ -79,7 +79,7 @@ pub const Ledger = struct {
     total: u64 = 0,
 ```
 
-`capacity` is 32 (src/ecs/inv_ledger.zig:17) and the cause set is eight values, `loot`, `craft`, `give`, `place`, `eat`, `drop`, `tx`, `unknown` (src/ecs/inv_ledger.zig:6). Deltas are clamped into `i16`, not truncated, at every call site (src/ecs/inventory.zig:180, 234, 259). All ECS-side writes funnel through `recordInv`, which narrows the peer slot to `u16` and calls `Ledger.record` (src/ecs/inventory.zig:609). The cause mapping is one per operation: `move` records `.tx` (src/ecs/inventory.zig:235), `drop` records `.drop` (src/ecs/inventory.zig:260), `useEx` records `.eat` (src/ecs/inventory.zig:407), `placeBlock` records `.place` (src/ecs/inventory.zig:557), `takeFromContainer` records `.loot` (src/ecs/inventory.zig:487), `putIntoContainer` records `.tx` (src/ecs/inventory.zig:508), and `give` records `.give` (src/ecs/inventory.zig:180). Craft bypasses `recordInv` and appends directly (src/server/game/craft.zig:479), and admin give does the same (src/server/game/step.zig:629). `collectBagFull` records only after the whole bag transferred, so a refused collect leaves no loot credit (src/ecs/inventory.zig:204).
+`capacity` is 32 (src/ecs/inv_ledger.zig:17) and the cause set is eight values, `loot`, `craft`, `give`, `place`, `eat`, `drop`, `tx`, `unknown` (src/ecs/inv_ledger.zig:6). Deltas are clamped into `i16`, not truncated, at every call site (src/ecs/inventory.zig:180, 234, 259). All ECS-side writes funnel through `recordInv`, which narrows the peer slot to `u16` and calls `Ledger.record` (src/ecs/inventory.zig:609). The cause mapping is one per operation: `move` records `.tx` (src/ecs/inventory.zig:235), `drop` records `.drop` (src/ecs/inventory.zig:260), `useEx` records `.eat` (src/ecs/inventory.zig:407), `placeBlock` records `.place` (src/ecs/inventory.zig:557), `takeFromContainer` records `.loot` (src/ecs/inventory.zig:487), `putIntoContainer` records `.tx` (src/ecs/inventory.zig:508), and `give` records `.give` (src/ecs/inventory.zig:180). Craft bypasses `recordInv` and appends directly (src/server/game/craft.zig:401), and admin give does the same (src/server/game/step.zig:629). `collectBagFull` records only after the whole bag transferred, so a refused collect leaves no loot credit (src/ecs/inventory.zig:204).
 
 The only read side wired today is the apm counter: the C2S transaction arm samples `total` before and after the apply and adds the difference to `inv_ledger_events` (src/server/c2s/inv_txn.zig:221; src/apm/metrics.zig:46). `Ledger.recent` and `Ledger.last` exist and are covered by unit tests (src/ecs/inv_ledger.zig:50, 63) but have no production caller in this reading, so the ring is written and not yet dumped or persisted; a restart starts it empty.
 
@@ -150,11 +150,16 @@ In `ecs/inventory.zig` the operation algebra is a switch over `Op` (src/ecs/inve
 
 ## Craft, scrap, and loot fill
 
-The general inventory craft path deliberately excludes recipes the player inventory never offers (src/server/game/craft.zig:392):
+The general inventory craft path deliberately excludes recipes the player inventory never offers (src/server/game/craft.zig:401):
 
 ```zig
-pub fn generalCraftAllowed(recipe: assets_recipes.RecipeDef) bool {
-    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category;
+pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
+    if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
+    // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
+    // IL_0025-0092): stock rewrites every backpack-craftable recipe's
+    // `craftingArea` to "workbench" unless the option is Enabled, which the
+    // server's `Recipe.CanCraft` then sees, so only Enabled leaves this path.
+    return self.backpack_crafting == 1;
 }
 ```
 

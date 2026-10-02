@@ -398,6 +398,8 @@ pub const InitOptions = struct {
     quests_per_tier: u8 = 0,
     /// Sandbox `ScrappingOutput`: the scrap yield scale.
     scrapping_output: f32 = 1.0,
+    /// Sandbox `BackpackCrafting` (1 = Enabled; 0/2/3 forbid the backpack path).
+    backpack_crafting: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,
