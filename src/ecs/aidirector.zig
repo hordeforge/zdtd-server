@@ -315,6 +315,10 @@ pub const Director = struct {
     /// Spawn-group kind for per-biome resolution (spawning.xml rule kind).
     pub const SpawnKind = enum(u8) { night = 0, day = 1, animal = 2 };
 
+    /// `AIDirector.HeatMapSensitivityModifier`: the sandbox `HeatMapSensitivity`
+    /// picker (default 1.0), applied to every `notifyActivity` value; <= 0 stops
+    /// the heat map (picker "Disabled").
+    heat_sensitivity: f32 = 1.0,
     /// Ambient spawn rule budgets, keyed by the spawning.xml rule index. The
     /// array is fixed-size; indices beyond it are treated as unbudgeted.
     rule_budgets: [rule_budget_cap]RuleBudgetState = [_]RuleBudgetState{.{}} ** rule_budget_cap,
@@ -1506,19 +1510,23 @@ pub const Director = struct {
     /// `value` to the region for `duration` ticks (linear decay). Gated off
     /// during blood moons; fail-closed at the region cap.
     pub fn notifyActivity(self: *Director, wx: f32, wz: f32, value: f32, duration_ticks: f32) void {
-        if (value <= 0 or self.bloodmoon_active) return;
+        // `AIDirector.NotifyActivity` IL=31 scales the value by the static
+        // `HeatMapSensitivityModifier` (sandbox `HeatMapSensitivity`) and returns
+        // immediately when it is <= 0 (picker "Disabled").
+        const scaled = value * self.heat_sensitivity;
+        if (scaled <= 0 or self.bloodmoon_active) return;
         const key = heatRegionKey(wx, wz);
-        const per_sec = value / (duration_ticks / 20.0);
+        const per_sec = scaled / (duration_ticks / 20.0);
         for (self.heat[0..self.heat_n]) |*r| {
             if (r.key == key) {
-                r.activity += value;
+                r.activity += scaled;
                 r.decay += per_sec;
                 return;
             }
         }
         if (self.heat_n >= max_heat_regions) return;
         const r = &self.heat[self.heat_n];
-        r.* = .{ .key = key, .activity = value, .decay = per_sec };
+        r.* = .{ .key = key, .activity = scaled, .decay = per_sec };
         self.heat_n += 1;
     }
 

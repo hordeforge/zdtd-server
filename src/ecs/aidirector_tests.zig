@@ -1428,3 +1428,22 @@ test "the scout drip takes its tier from the stage around the spawn" {
     // its pair rather than a flat 1.
     try std.testing.expect(w.countKind(.zombie) >= 2);
 }
+
+test "the heat map sensitivity scales and can disable activity" {
+    // `AIDirector.NotifyActivity` IL=31: value * HeatMapSensitivityModifier, and
+    // a modifier <= 0 returns before any region is touched (picker "Disabled").
+    var d: Director = .{};
+    d.notifyActivity(10, 10, 8.0, 240.0 * 20.0);
+    try std.testing.expectEqual(@as(usize, 1), d.heat_n);
+    try std.testing.expectApproxEqAbs(@as(f32, 8.0), d.heat[0].activity, 0.001);
+
+    d.heat_sensitivity = 2.0;
+    d.notifyActivity(10, 10, 8.0, 240.0 * 20.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 24.0), d.heat[0].activity, 0.001);
+
+    // Disabled: nothing accumulates, and no new region is created.
+    d.heat_sensitivity = 0;
+    d.notifyActivity(500, 500, 40.0, 240.0 * 20.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 24.0), d.heat[0].activity, 0.001);
+    try std.testing.expectEqual(@as(usize, 1), d.heat_n);
+}

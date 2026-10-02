@@ -694,6 +694,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       gate senses the hidden player). Residual: the 1..5 ladder's per-step
       magnitude is not pinned by the RE, so only the off position differs; the
       picker values above 0 keep the Rules smell radius.
+- [x] **The `HeatMapSensitivity` sandbox option did nothing** - closed 2026-10-02:
+      the float picker (default 1.0) is `AIDirector.HeatMapSensitivityModifier`,
+      and `NotifyActivity` IL=31 multiplies every incoming activity value by it,
+      returning before any region is touched when it is <= 0 (picker "Disabled").
+      zdtd ignored the option, so a server with the heat map disabled still
+      spawned scout parties from player activity. The sandbox code and the
+      serverconfig property (float, clamped 0..10) now parse into
+      `config.heat_map_sensitivity` -> `InitOptions` -> `Director.heat_sensitivity`,
+      and `notifyActivity` scales (and gates) on it. Gated by `the heat map
+      sensitivity scales and can disable activity` (decisive: pinning the factor
+      to 1 fails it). Residual: zdtd's 0..10 clamp is its own bound; the stock
+      picker's High value is not in the RE.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
