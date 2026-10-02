@@ -5326,8 +5326,10 @@ persists so little that a restart visibly damages a built base.
   per-entity CVar table, so a reported change has nothing to land in.
   `SetProp` is a world prop change (`Block.PlaceProp` IL=87 to
   `WorldBase.SetPropRPC`, sitting beside `SetBlockRPC`), sender-validated by
-  user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`;
-  zdtd has no prop layer. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
+  user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`.
+  UPDATED 2026-10-02: `wire/stock_props.zig` now carries the body contract
+  (parse + build, `PropChangeInfo.Write` IL_0000-0136 pinned), so what is missing
+  is the prop store, the apply and the relay, not the shape. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described. All
