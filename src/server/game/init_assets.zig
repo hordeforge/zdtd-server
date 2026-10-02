@@ -401,6 +401,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         const zdef = self.entities.defaultZombie();
         self.sim.setClassDef(1, .{
             .name = zdef.name,
+            .tags = zdef.tags,
             .max_hp = zdef.max_hp,
             .kind = .zombie,
             .hash = zdef.hash,
@@ -589,6 +590,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             const def = self.entities.byName(cname) orelse continue;
             self.sim.setClassDef(@intCast(zslot), .{
                 .name = def.name,
+                .tags = def.tags,
                 .max_hp = def.max_hp,
                 .kind = .zombie,
                 .hash = def.hash,

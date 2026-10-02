@@ -10,6 +10,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const components = @import("../../ecs/components.zig");
+const assets_item_parse = @import("../../assets/item_parse.zig");
 const protocol = @import("../../protocol.zig");
 const plugin_compose = @import("../game/plugin_compose.zig");
 const systems = @import("../../ecs/systems.zig");
@@ -231,7 +232,12 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         var killed = dmg.killed;
         if (killed and self.headshot_mode != 0 and components.bodyPartRegion(d.body_part) != .head) {
             if (self.sim.slotOfNetId(d.entity_id)) |vs| {
-                if (self.sim.kind[vs] != .player and self.sim.mask[vs].health) {
+                // Stock exempts a `nohead`-tagged victim (`EntityAlive.noheadTag`
+                // IL_0352-0367), so a class that opts out keeps dying to body
+                // damage under every mode.
+                const nohead = self.sim.mask[vs].class_id and
+                    assets_item_parse.tagsIntersect("nohead", self.sim.class_id[vs].tags);
+                if (self.sim.kind[vs] != .player and self.sim.mask[vs].health and !nohead) {
                     if (self.headshot_mode == 1) {
                         self.sim.health[vs].hp = 1;
                         self.sim.markDirty(vs, .{ .hp = true });

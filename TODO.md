@@ -1003,6 +1003,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       quality`: a `quality="6"` entry stocks nothing at cap 2 and stocks at
       quality 6 at the default (decisive: dropping the override stocks it at cap
       2).
+- [x] **The headshot-mode `nohead` exemption was missing** - closed 2026-10-02:
+      stock's `EntityAlive` clamp is skipped for a victim whose class carries the
+      `nohead` tag (`noheadTag` IL_0352-0367), and zdtd's round-103 gate did not
+      model it. The entityclasses `Tags` property (parsed in
+      `assets/entities.zig`) now rides `applyClassDef` onto
+      `EntityClass.tags`/`ClassId.tags`, and the clamp checks it. Gated by
+      `scenario a nohead victim ignores the headshot mode`: under mode 1 a body
+      hit still kills a tagged victim (decisive: dropping the check leaves it at
+      1 hp). Residual: the passive-174 (`HeadShotOnly`) leg still applies only to
+      players, because non-player attackers do not pass through the C2S damage
+      handler.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

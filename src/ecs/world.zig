@@ -184,6 +184,7 @@ fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void
     cid.dismember_legs = def.dismember_legs;
     cid.leg_cripple_scale = def.leg_cripple_scale;
     cid.leg_crawler_threshold = def.leg_crawler_threshold;
+    cid.tags = def.tags;
     cid.bonus_loot = false;
 }
 
@@ -192,6 +193,10 @@ pub const EntityClass = struct {
     /// data (comptime literal or binary-embedded table). Never assign an
     /// arena/allocator-owned slice.
     name: []const u8 = "zombie",
+    /// entityclasses `<property name="Tags">` list (the stock `EntityClass.Tags`
+    /// set). Read by the headshot-mode exemption: a `nohead` victim ignores
+    /// `EntityAlive.IsHeadshotOnly`/`IsHeadshotFinisher` (IL_0352-0367).
+    tags: []const u8 = "",
     max_hp: f32 = 40,
     kind: Kind = .zombie,
     /// ECD wire class (Unity Mono GetHashCode). 0 = stock zombieBoe default at encode.

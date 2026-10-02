@@ -21,6 +21,7 @@ const request_spawn_vertical_range: f32 = 8.0;
 fn entityClassFromDef(def: anytype) ecs_world_mod.EntityClass {
     return .{
         .name = def.name,
+        .tags = def.tags,
         .max_hp = def.max_hp,
         .kind = switch (def.kind) {
             .animal => .animal,

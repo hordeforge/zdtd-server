@@ -464,6 +464,7 @@ pub fn entityClassOf(self: *Game, d: assets_entities.EntityDef) ecs.world.Entity
         .explosion_bonus_cat = d.explosion.bonus_cat,
         .explosion_bonus_mult = d.explosion.bonus_mult,
         .explosion_bonus_n = d.explosion.bonus_n,
+        .tags = d.tags,
         .dismember_head = d.dismember_head,
         .dismember_arms = d.dismember_arms,
         .dismember_legs = d.dismember_legs,

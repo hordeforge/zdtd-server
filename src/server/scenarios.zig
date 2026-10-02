@@ -24015,3 +24015,39 @@ test "scenario the trader max tier option caps the rolled stock quality" {
     }
     std.debug.print("PASS trader-max-tier: the sandbox ceiling gates the stock quality\n", .{});
 }
+
+test "scenario a nohead victim ignores the headshot mode" {
+    // `EntityAlive.noheadTag` IL_0352-0367: a victim whose class carries the
+    // `nohead` tag is exempt from the HeadshotMode clamp, so a body hit still
+    // kills it under mode 1.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    var dmg_body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const hit = struct {
+        fn f(g2: *game_mod.Game, cl: *game_mod.Client, id: i32, body: []u8, frame: []u8) !void {
+            _ = try packages.buildDamageBody(body, id, 0, 3, 500, true, cl.entity_id);
+            std.mem.writeInt(i16, body[13..15], 1, .little); // body part 1 = not the head
+            try g2.injectFramed(cl, try packages.framed(frame, "NetPackageDamageEntity", body));
+        }
+    }.f;
+
+    g.headshot_mode = 1;
+    // The victim's per-entity class carries the nohead tag (the entityclasses
+    // `Tags` property lands here through `applyClassDef`).
+    const z = g.sim.spawnZombieClass(262, 70, 262, 50, 2, "").?;
+    const s = g.sim.slotOfNetId(z).?;
+    g.sim.class_id[s].tags = "entity,zombie,nohead";
+    try hit(g, c, z, &dmg_body, &frame_buf);
+    try std.testing.expect(g.sim.health[s].hp <= 0);
+    std.debug.print("PASS headshot-mode: a nohead victim is exempt from the clamp\n", .{});
+}

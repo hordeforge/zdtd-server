@@ -305,6 +305,9 @@ pub const ClassId = struct {
     /// 0 with no class data = fall back to class_table[id] then 1. The leg
     /// pair has no cctor fallback: 0 is the true stock default there too.
     dismember_head: f32 = 0,
+    /// Stock `EntityClass.Tags` for this entity (entityclasses `Tags` property),
+    /// used by the headshot-mode `nohead` exemption.
+    tags: []const u8 = "",
     dismember_arms: f32 = 0,
     dismember_legs: f32 = 0,
     leg_cripple_scale: f32 = 0,
