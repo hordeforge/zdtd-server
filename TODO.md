@@ -1360,6 +1360,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       the name grep missed these two because the client reads them through the
       manager API by enum ordinal, not a named static - exactly the limitation
       recorded in round 136.
+- [x] **The `HungerMultiplier` and `ThirstMultiplier` options did nothing** -
+      closed 2026-10-02: ids 161/162 (float, default 1.0). `EntityStats`
+      IL_002A-0034 sets `Stat.LossSandboxModifier` from them and
+      `PlayerEntityStats` IL_0059-0064 multiplies the negative regeneration amount
+      by it, so they scale the food/water drain - the survival pacing an operator
+      tunes. `tickSurvival` now applies both, parsed through the sandbox and
+      serverconfig arms. Gated by `the sandbox hunger and thirst multipliers scale
+      the depletion` (x3 triples the loss, 0 freezes it; decisive: dropping the
+      multiplier leaves the loss at the base rate). Found by a new audit pass over
+      `SandboxOptionManager::GetFloat/GetInt(ordinal)` call sites, which covers the
+      options the client reads by enum ordinal rather than through a named static -
+      the blind spot round 136 recorded. The same pass left two more real ones for
+      later rounds: `TradersEnabled` (128) and `GlobalLootCount` (78).
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

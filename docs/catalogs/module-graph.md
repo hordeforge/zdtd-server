@@ -24,10 +24,10 @@ Only imports of another package directory are counted; single-file imports
 | `server` | `apm` | 11 |
 | `server` | `assets` | 201 |
 | `server` | `ecs` | 172 |
-| `server` | `litenet` | 80 |
+| `server` | `litenet` | 81 |
 | `server` | `plugin` | 16 |
 | `server` | `server/game` | 33 |
-| `server` | `util` | 177 |
+| `server` | `util` | 178 |
 | `server` | `wire` | 155 |
 | `server` | `world` | 104 |
 | `wire` | `assets` | 13 |

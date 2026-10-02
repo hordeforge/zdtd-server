@@ -169,6 +169,12 @@ pub const Config = struct {
     /// `introquest` is unavailable while off
     /// (`DialogRequirementQuestsAvailable` IL_00AC-00B8).
     intro_quest_enabled: bool = true,
+    /// Sandbox `HungerMultiplier` / `ThirstMultiplier` (float, default 1.0):
+    /// the food/water loss scale (`PlayerEntityStats` IL_0059-0064 multiplies
+    /// the negative regeneration amount by `Stat.LossSandboxModifier`, which
+    /// `EntityStats` IL_002A-0034 sets from these two options).
+    hunger_multiplier: f32 = 1.0,
+    thirst_multiplier: f32 = 1.0,
     /// Sandbox `TraderSellPrices` / `TraderBuyPrices` (float, default 1.0,
     /// `BarterValues`): the price multipliers the trader price math applies
     /// before its `CeilToInt` (`XUiM_Trader::GetBuyPrice` IL_0228-0233 reads
@@ -597,6 +603,10 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.crafting_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "IntroQuestEnabled")) {
             cfg.intro_quest_enabled = sandbox.valueB(o, g.index);
+        } else if (std.mem.eql(u8, o.name, "HungerMultiplier")) {
+            cfg.hunger_multiplier = @max(0, sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "ThirstMultiplier")) {
+            cfg.thirst_multiplier = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "TraderSellPrices")) {
             cfg.trader_sell_prices = @max(0, sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "TraderBuyPrices")) {
@@ -889,6 +899,12 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
         if (xml.parseF32(v)) |f| cfg.crafting_output = std.math.clamp(f, 0, 100);
     }
     if (prop(raw, "IntroQuestEnabled")) |v| cfg.intro_quest_enabled = clampU8Named("IntroQuestEnabled", v, 0, 1, @intFromBool(cfg.intro_quest_enabled)) != 0;
+    if (prop(raw, "HungerMultiplier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.hunger_multiplier = @max(0, f);
+    }
+    if (prop(raw, "ThirstMultiplier")) |v| {
+        if (xml.parseF32(v)) |f| cfg.thirst_multiplier = @max(0, f);
+    }
     if (prop(raw, "TraderSellPrices")) |v| {
         if (xml.parseF32(v)) |f| cfg.trader_sell_prices = @max(0, f);
     }

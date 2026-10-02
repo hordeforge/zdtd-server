@@ -545,8 +545,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
         const water_max_was = h.water_max;
         const stamina_max_was = h.stamina_max;
         if (decay_on) {
-            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
-            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+            // Sandbox `HungerMultiplier`/`ThirstMultiplier` scale the loss
+            // (`PlayerEntityStats` IL_0059-0064 folds `Stat.LossSandboxModifier`
+            // into the negative regeneration amount).
+            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours * self.hunger_multiplier);
+            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours * self.thirst_multiplier);
         }
         // Well-fed regen and starvation: when buffs.xml is present the
         // thresholds are fractions of max (StatComparePercCurrentToMax); otherwise
@@ -1089,4 +1092,33 @@ test "per-slot look cache resets when the slot is recycled" {
     g.tickEntityLookAt();
     try std.testing.expectEqual(old_gen + 1, g.entity_look_sent[s2].gen);
     try std.testing.expect(g.entity_look_sent[s2].sent);
+}
+
+test "the sandbox hunger and thirst multipliers scale the depletion" {
+    // `EntityStats` IL_002A-0034 sets `Stat.LossSandboxModifier` from
+    // `HungerMultiplier` (161) / `ThirstMultiplier` (162), and
+    // `PlayerEntityStats` IL_0059-0064 multiplies the negative regeneration
+    // amount by it, so the per-hour loss scales.
+    const loss = struct {
+        fn f(mult: f32) !f32 {
+            var tmp = std.testing.tmpDir(.{});
+            defer tmp.cleanup();
+            const world_dir = try @import("../../util/test_tmp.zig").rootOf(&tmp);
+            const g = try Game.create(std.testing.allocator, world_dir, 0);
+            defer g.destroy();
+            var capture: @import("../../litenet/peer.zig").Capture = .{};
+            const c = try g.attachJoinedClient(&capture);
+            const ps = g.sim.playerByPeer(c.slot).?;
+            // Above any per-tick loss so the max(0, ...) floor cannot hide the
+            // rate being measured.
+            g.sim.health[ps].food = 1000;
+            g.hunger_multiplier = mult;
+            g.tickSurvival(3600.0);
+            return 1000 - g.sim.health[ps].food;
+        }
+    }.f;
+    const plain = try loss(1.0);
+    try std.testing.expect(plain > 0);
+    try std.testing.expectApproxEqAbs(plain * 3, try loss(3.0), 0.01);
+    try std.testing.expectApproxEqAbs(0, try loss(0.0), 0.01);
 }
