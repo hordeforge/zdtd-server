@@ -991,6 +991,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       Residual: `VendingResetInterval` (id 137) has no seam yet because zdtd has
       no vending-machine restock pass (vending stock is created on place/load and
       never refilled), so it is left unparsed rather than dead.
+- [x] **The `TraderMaxTier` sandbox option did nothing** - closed 2026-10-02:
+      option 136 (int 0..6, default 6, 0 = unset) is `TraderInfo.TraderMaxTier`,
+      the ceiling `TraderInfo.SpawnItem` clamps a rolled quality range to; stock
+      drops an entry whose authored minimum sits above the clamped maximum, so a
+      capped trader cannot stock high-tier gear at all. zdtd carried the ceiling
+      as a `[rules.trader] max_tier` floor only, so an operator's cap was
+      ignored. The rules value is replaced at init when the sandbox code carries
+      a non-zero tier, and the option parses through the sandbox and serverconfig
+      arms. Gated by `scenario the trader max tier option caps the rolled stock
+      quality`: a `quality="6"` entry stocks nothing at cap 2 and stocks at
+      quality 6 at the default (decisive: dropping the override stocks it at cap
+      2).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

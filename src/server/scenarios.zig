@@ -23951,3 +23951,67 @@ test "scenario the trader reset interval option overrides the per-trader value" 
     try std.testing.expectEqual(@as(i32, -1), g.sim.trader_stock[bs].reset_interval);
     std.debug.print("PASS trader-reset: the sandbox interval overrides the per-trader value\n", .{});
 }
+
+test "scenario the trader max tier option caps the rolled stock quality" {
+    // Sandbox `TraderMaxTier` (option 136, int 0..6, default 6, 0 = unset): the
+    // static `TraderInfo.SpawnItem` clamps the rolled quality to. Stock drops an
+    // entry whose authored minimum sits above the clamped maximum, so a capped
+    // trader cannot stock it at all. zdtd carries the ceiling as a rules floor,
+    // so the sandbox value replaces it.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="traderAlways" count="all">
+        \\    <item name="meleeToolSwing" count="1" quality="6"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1"><trader_items><item group="traderAlways"/></trader_items></trader_info>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var tbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tbuf, "{s}/traders_tier.xml", .{dir});
+    try io_fs.writeFile(tpath, tsrc);
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1200, .name = "meleeToolSwing", .has_quality = true, .econ = 100 },
+    };
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    // Cap 2: the authored quality 6 sits above the clamp, so the entry drops.
+    {
+        const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .trader_max_tier = 2 });
+        defer g.destroy();
+        // The Game owns the table (deinit destroys it), so each game loads its
+        // own copy.
+        g.traders.deinit();
+        g.traders = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+        g.items = .{ .defs = &idefs, .source = .builtin };
+        try std.testing.expect(g.ecsIdFromItemName("meleeToolSwing") != 0);
+        try std.testing.expectEqual(@as(i32, 2), g.sim.rules.trader.max_tier);
+        const v = g.vending.getOrCreate(.{ .x = 400, .y = 70, .z = 400 }, 1, 1) orelse
+            return error.TestUnexpectedResult;
+        replicate_te.fillVendingStore(g, v);
+        try std.testing.expectEqual(@as(u8, 0), v.stock_n);
+    }
+
+    // Default 6: the same entry stocks at quality 6.
+    {
+        const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .trader_max_tier = 6 });
+        defer g.destroy();
+        g.traders.deinit();
+        g.traders = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+        g.items = .{ .defs = &idefs, .source = .builtin };
+        // A different position: the vending store persists per pos, so the
+        // first game's empty fill would otherwise be reloaded here.
+        const v = g.vending.getOrCreate(.{ .x = 410, .y = 70, .z = 400 }, 1, 1) orelse
+            return error.TestUnexpectedResult;
+        replicate_te.fillVendingStore(g, v);
+        try std.testing.expect(v.stock_n > 0);
+        var top: u8 = 0;
+        for (v.stock[0..v.stock_n]) |e| top = @max(top, e.quality);
+        try std.testing.expectEqual(@as(u8, 6), top);
+    }
+    std.debug.print("PASS trader-max-tier: the sandbox ceiling gates the stock quality\n", .{});
+}

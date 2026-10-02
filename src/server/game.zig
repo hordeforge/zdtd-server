@@ -941,6 +941,11 @@ pub const Game = struct {
         // Sim rules (ADR 0021): defaults overlaid by the mode pack then
         // zdtd.toml in main.zig; this is the single install point.
         self.sim.rules = opts.rules;
+        // Sandbox `TraderMaxTier` (0 = unset): stock's `TraderInfo.TraderMaxTier`
+        // static is the ceil the trader stock roll clamps to, and the sim carries
+        // it as a rules floor, so the sandbox value replaces it when the code set
+        // one.
+        if (opts.trader_max_tier != 0) self.sim.rules.trader.max_tier = opts.trader_max_tier;
         // Sandbox `SillyLowGravity`: stock scales `Physics.gravity` from the
         // stored `originalGravity`, so the sim's own gravity rules scale too
         // (AI integration, hop impulse, falling blocks and the vehicle

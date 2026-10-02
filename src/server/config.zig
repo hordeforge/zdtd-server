@@ -152,6 +152,10 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `TraderMaxTier` (int 0..6, default 6): the quality-tier ceiling
+    /// the trader stock roll clamps to (`TraderInfo.TraderMaxTier` IL_0019);
+    /// 0 = unset, which keeps the `[rules.trader] max_tier` floor.
+    trader_max_tier: u8 = 0,
     /// Sandbox `TraderResetInterval` (int -1..14, default -1): the global trader
     /// restock cadence, overriding each trader_info's own `reset_interval`
     /// (`TraderInfo.get_ResetInterval` IL=4x: -1 = unset falls back to the XML,
@@ -511,6 +515,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "TraderMaxTier")) {
+            cfg.trader_max_tier = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 6);
         } else if (std.mem.eql(u8, o.name, "TraderResetInterval")) {
             cfg.trader_reset_interval = @max(-1, sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "TraderHours")) {
@@ -763,6 +769,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "TraderMaxTier")) |v| cfg.trader_max_tier = clampU8Named("TraderMaxTier", v, 0, 6, cfg.trader_max_tier);
     if (prop(raw, "TraderResetInterval")) |v| {
         if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |n| cfg.trader_reset_interval = if (n < 0) -1 else @min(n, 14);
     }
