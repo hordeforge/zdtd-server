@@ -1448,6 +1448,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       fail-closed value - a HitLocation-masked victim row cannot match None - and it
       is what the comment now says. The C2S path keeps passing the client's
       `d.body_part`, which is the case stock computes there.
+- [ ] **`ClientInfo.ping` is always 0** - measured 2026-10-03: `NetPackageClientInfo`
+      is ToClient (`get_PackageDirection` IL=2) and its `pingTimes` list is what the
+      client shows in the player list; stock's server fills it from LiteNetLib's
+      `NetPeer.Ping`. LiteNetLib measures that by sending its *own* ping packets and
+      matching the pongs, so a server that only answers the client's pings (zdtd's
+      `.ping` arm in `litenet/peer.zig` sends a pong and stops) has nothing to
+      report and sends 0 = unmeasured. Cosmetic: the field only drives the list's
+      ms column. Work if wanted: a per-peer ping timer (seq + smoothed RTT) in
+      `litenet`, the pong match, and `world_tick.zig`'s ClientInfo fill - a
+      transport change worth its own round, not a drive-by at the tail of a long
+      session.
 - [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
       2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
       `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with

@@ -13,7 +13,13 @@ const binary = @import("binary.zig");
 /// list UI + admin crowns.
 pub const ClientInfoEntry = struct {
     entity_id: i32,
-    /// Ping in ms (zdtd has no RTT measurement yet; 0 = unmeasured).
+    /// Ping in ms. Stock's server fills this from LiteNetLib's `NetPeer.Ping`,
+    /// which needs the *server* to send its own ping packets and match the pongs
+    /// (the client measures its own RTT for the same field client-side). zdtd
+    /// answers the client's pings (`litenet/peer.zig` `.ping` arm) but sends
+    /// none, so it reports 0 = unmeasured. The package is ToClient
+    /// (`get_PackageDirection` IL=2 returns 2), so a real number here is cosmetic
+    /// for the player list - see TODO.
     ping_ms: i16,
     admin: bool,
 };
