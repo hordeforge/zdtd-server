@@ -1404,6 +1404,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       lose it when the server re-encodes the slot. Widen when a stock row or a
       modlet names a second key: the parse loop already walks every entry and
       would only need a second field to keep.
+- [ ] **Two game_tests flake under the full parallel suite** - seen 2026-10-02:
+      `a generator's remaining fuel survives a restart instead of refilling` and
+      `a placed torch feeds the AI heat map once per tick rate` both failed in a
+      full `zig build test` run and both pass in isolation with the same cache.
+      They share the clock/tick coupling (the fuel test loads a save and ticks;
+      the torch test asserts a per-tick-rate cadence), so the likely cause is a
+      wall-clock or tick-base read that another test can perturb, not the code
+      paths they cover. Reproduce by running the full suite; bisect the coupling
+      before touching the assertions.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

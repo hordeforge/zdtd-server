@@ -593,7 +593,12 @@ pub fn parseSpawnRequest(body: []const u8) binary.ReadError!ParsedSpawnRequest {
     _ = try r.readF32(); // stressAmount
     // V3.2.0 requested-spawn pair (read only at file version >= 37).
     if (out.file_version >= 37) {
-        out.requested_by = @intCast(try r.readI64());
+        // Client-supplied: a value outside i32 must be a rejected body, not a
+        // trap (@intCast panics in Debug and is UB in ReleaseFast), so the range
+        // is checked before the narrowing cast.
+        const requested = try r.readI64();
+        if (requested < std.math.minInt(i32) or requested > std.math.maxInt(i32)) return error.InvalidString;
+        out.requested_by = @intCast(requested);
         if (r.remaining() < 16) return error.EndOfStream;
         @memcpy(&out.request_key, r.data[r.pos..][0..16]);
         r.pos += 16;

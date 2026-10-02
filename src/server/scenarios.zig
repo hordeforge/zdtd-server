@@ -22310,6 +22310,19 @@ test "scenario a client-requested spawn answers with its confirm" {
     try std.testing.expect(parsed.has_request_key);
     try std.testing.expectEqual(c.entity_id, parsed.requested_by);
 
+    // requestedBy is a client-supplied i64 narrowed to i32. A value outside the
+    // range must be a rejected body, not a trap: @intCast panics in Debug and is
+    // UB in ReleaseFast, so one malformed spawn request could take the server
+    // down. The field sits 24 bytes from the end (i64 + the 16-byte key).
+    {
+        var wide: [1024]u8 = undefined;
+        @memcpy(wide[0..body.len], body);
+        std.mem.writeInt(i64, wide[body.len - 24 ..][0..8], 1 << 40, .little);
+        try std.testing.expectError(error.InvalidString, stock_entity_mod.parseSpawnRequest(wide[0..body.len]));
+        std.mem.writeInt(i64, wide[body.len - 24 ..][0..8], -(@as(i64, 1) << 40), .little);
+        try std.testing.expectError(error.InvalidString, stock_entity_mod.parseSpawnRequest(wide[0..body.len]));
+    }
+
     var fb: [1024]u8 = undefined;
     cap.clear();
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageRequestToSpawnEntity", body));
