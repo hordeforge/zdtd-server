@@ -9928,6 +9928,12 @@ test "scenario quest POI selection matches stock tags/tier/bands and feeds offer
     var entries: [8]packages.stock_quest.QuestPacketEntry = undefined;
     const n = g.buildTraderQuestOffers("trader_jen_quests", c.slot, 0, 70, 0, 1, &entries);
     try std.testing.expectEqual(@as(usize, 2), n);
+    // Sandbox `QuestsPerTier` caps the window: one offer at cap 1, and the
+    // quests.xml value returns when the option is unset.
+    g.quests_per_tier = 1;
+    try std.testing.expectEqual(@as(usize, 1), g.buildTraderQuestOffers("trader_jen_quests", c.slot, 0, 70, 0, 1, &entries));
+    g.quests_per_tier = 0;
+    try std.testing.expectEqual(@as(usize, 2), g.buildTraderQuestOffers("trader_jen_quests", c.slot, 0, 70, 0, 1, &entries));
     var clear_offer: ?*const packages.stock_quest.QuestPacketEntry = null;
     var fetch_offer: ?*const packages.stock_quest.QuestPacketEntry = null;
     for (entries[0..n]) |*e| {

@@ -282,10 +282,11 @@ pub fn buildTraderQuestOffers(
     if (!self.quests_enabled) return 0;
     const list = self.sim.catalog.listById(list_id) orelse return 0;
     const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
-    // quests_per_tier (quests.xml root): stock caps how many quests of the
-    // requested tier window the trader offers at once (default 10). Applies
-    // to the whole window when tier 0 mixes tiers.
-    const qpt = self.sim.catalog.quests_per_tier;
+    // quests_per_tier (quests.xml root, overridden by the sandbox
+    // `QuestsPerTier`): stock caps how many quests of the requested tier window
+    // the trader offers at once (`Quest.QuestsPerTier`, cctor default 10).
+    // Applies to the whole window when tier 0 mixes tiers.
+    const qpt = if (self.quests_per_tier != 0) self.quests_per_tier else self.sim.catalog.quests_per_tier;
     var per_window: u8 = 0;
     var n: usize = 0;
     for (list.entries) |qid| {

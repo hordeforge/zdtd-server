@@ -1014,6 +1014,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       1 hp). Residual: the passive-174 (`HeadShotOnly`) leg still applies only to
       players, because non-player attackers do not pass through the C2S damage
       handler.
+- [x] **The `QuestsPerTier` sandbox option did nothing** - closed 2026-10-02:
+      option 122 (int, default 10 = the `Quest.QuestsPerTier` cctor value) caps
+      how many quests of the requested tier window the trader offers at once.
+      zdtd read only the quests.xml root value, so an operator's cap was ignored
+      and the trader kept offering its full window. `buildTraderQuestOffers` now
+      prefers the sandbox cap when set (0 = unset keeps the XML value), parsed
+      through the sandbox and serverconfig arms. Gated by the existing quest-POI
+      scenario, which now also asserts one offer at cap 1 and the XML window
+      again at unset (decisive: ignoring the option offers 2).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

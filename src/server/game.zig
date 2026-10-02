@@ -375,6 +375,8 @@ pub const Game = struct {
     trader_hours_preset: u8 = 0,
     /// Sandbox `TraderResetInterval` (-1 = each trader's traders.xml value).
     trader_reset_interval: i32 = -1,
+    /// Sandbox `QuestsPerTier` (0 = keep the quests.xml value).
+    quests_per_tier: u8 = 0,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.

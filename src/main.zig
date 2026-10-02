@@ -790,6 +790,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .trader_hours_preset = cfg.trader_hours_preset,
         .trader_reset_interval = cfg.trader_reset_interval,
         .trader_max_tier = cfg.trader_max_tier,
+        .quests_per_tier = cfg.quests_per_tier,
         .skill_points_per_level = cfg.skill_points_per_level,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
