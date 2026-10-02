@@ -1437,6 +1437,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       existing golden tests do: a real captured blob (loadgen/frame capture) with
       byte offsets, or the client's `Read` (IL=70) driven against a replayed
       write - not the IL's line order. Needs a build, so it waited on disk space.
+- [x] **The ECS damage hook's "no HitBodyPart yet" note was accurate but not a
+      gap** - checked 2026-10-03: the note on `attackedSelfHook` said the
+      accumulated path passes no hit location. Pinning stock
+      `DamageSource::GetEntityDamageBodyPart` (IL=24) shows why that is not
+      fixable on a dedi: the part is the attacking DamageSource's declared
+      `bodyParts` when set, else `TagToBodyPart(emodel.GetHitTransform(source).tag)`
+      on the *victim's* Unity model, else 0. zdtd has neither a Unity hit transform
+      nor attacker-side damage-source data in that path, so 0 (None) is the
+      fail-closed value - a HitLocation-masked victim row cannot match None - and it
+      is what the comment now says. The C2S path keeps passing the client's
+      `d.body_part`, which is the case stock computes there.
 - [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
       2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
       `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with

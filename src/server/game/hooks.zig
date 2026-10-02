@@ -828,7 +828,13 @@ pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) 
     const as: ecs.Slot = attacker_slot;
     if (vs >= ecs.world.max_entities or as >= ecs.world.max_entities) return;
     if (!g.sim.mask[vs].player or !g.sim.alive[as]) return;
-    // ponytail: ECS damage hook has no HitBodyPart yet; wire C2S path passes d.body_part.
+    // The accumulated (AI/environmental) path has no hit location to pass. Stock
+    // gets it from `DamageSource::GetEntityDamageBodyPart` (IL=24): the attacking
+    // DamageSource's declared `bodyParts` when set, else the *victim's* Unity hit
+    // transform tag (`emodel.GetHitTransform`), else 0. A dedi has no transform
+    // hit and no attacker-side damage-source data in this path, so 0 (None) is the
+    // fail-closed value: a HitLocation-masked victim row cannot match None. The C2S
+    // path passes the client's d.body_part, which is the case stock computes there.
     g.fireAttackedSelf(vs, as, 0);
 }
 
