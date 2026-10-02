@@ -443,14 +443,15 @@ pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bo
 /// craft_area against the station block.
 pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
     if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
-    // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
-    // IL_0025-0092): stock rewrites every backpack-craftable recipe's
-    // `craftingArea` to "workbench" unless the option is Enabled (or the option
-    // is BasicsOnly and the OUTPUT item carries the `Limited` group), which the
-    // server's `Recipe.CanCraft` then sees.
+    // Sandbox `BackpackCrafting` (`XUiM_Recipes.FilterByBackpackSandboxSetting`
+    // IL=73, the authoritative filter): Disabled (0) rejects an empty-area
+    // recipe; WorkbenchOnly (3) keeps only an `isworkbench`-tagged one
+    // (IL_0116-0120); BasicsOnly (2) keeps only an output whose group list has
+    // `limited` case-insensitively; Enabled (1) keeps all of them.
     return switch (self.backpack_crafting) {
         1 => true,
         2 => if (self.items.byName(recipe.name)) |d| assets_item_parse.isLimitedItem(d.groups) else false,
+        3 => assets_recipes.tagsContain(recipe.tags, "isworkbench"),
         else => false,
     };
 }
@@ -1025,8 +1026,9 @@ test "general craft path rejects workstation/tool/material recipes" {
     // BasicsOnly (2) keeps a `Limited`-group output craftable and refuses the
     // rest (`ItemClass.IsLimited` IL_047F-0496).
     const idefs = [_]assets_items.ItemDef{
-        .{ .id = 1400, .name = "limitedGizmo", .groups = "limited, Limited" },
+        .{ .id = 1400, .name = "limitedGizmo", .groups = "limited" },
         .{ .id = 1401, .name = "plainGizmo" },
+        .{ .id = 1402, .name = "lowerGizmo", .groups = "LIMITED" },
     };
     g.items = .{ .defs = &idefs, .source = .builtin };
     g.backpack_crafting = 2;
@@ -1034,6 +1036,13 @@ test "general craft path rejects workstation/tool/material recipes" {
     try std.testing.expect(!generalCraftAllowed(g, .{ .name = "plainGizmo" }));
     g.backpack_crafting = 1;
     try std.testing.expect(generalCraftAllowed(g, .{ .name = "plainGizmo" }));
+    // WorkbenchOnly (3) keeps an `isworkbench`-tagged recipe and refuses the rest.
+    g.backpack_crafting = 3;
+    try std.testing.expect(generalCraftAllowed(g, .{ .name = "plainGizmo", .tags = "isworkbench" }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .name = "plainGizmo" }));
+    // BasicsOnly matches the group case-insensitively (IL_0082-008C).
+    g.backpack_crafting = 2;
+    try std.testing.expect(generalCraftAllowed(g, .{ .name = "lowerGizmo" }));
 }
 
 test "getScrapableRecipe and tryScrap follow RE weight/category rules" {

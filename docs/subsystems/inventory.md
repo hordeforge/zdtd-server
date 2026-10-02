@@ -155,14 +155,15 @@ The general inventory craft path deliberately excludes recipes the player invent
 ```zig
 pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) bool {
     if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
-    // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
-    // IL_0025-0092): stock rewrites every backpack-craftable recipe's
-    // `craftingArea` to "workbench" unless the option is Enabled (or the option
-    // is BasicsOnly and the OUTPUT item carries the `Limited` group), which the
-    // server's `Recipe.CanCraft` then sees.
+    // Sandbox `BackpackCrafting` (`XUiM_Recipes.FilterByBackpackSandboxSetting`
+    // IL=73, the authoritative filter): Disabled (0) rejects an empty-area
+    // recipe; WorkbenchOnly (3) keeps only an `isworkbench`-tagged one
+    // (IL_0116-0120); BasicsOnly (2) keeps only an output whose group list has
+    // `limited` case-insensitively; Enabled (1) keeps all of them.
     return switch (self.backpack_crafting) {
         1 => true,
         2 => if (self.items.byName(recipe.name)) |d| assets_item_parse.isLimitedItem(d.groups) else false,
+        3 => assets_recipes.tagsContain(recipe.tags, "isworkbench"),
         else => false,
     };
 }
