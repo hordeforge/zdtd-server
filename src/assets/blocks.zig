@@ -313,6 +313,10 @@ pub const BlockDef = struct {
     /// feeding `TriggerHasTags` on the block-damage events (the church-bell
     /// spawn gate). "" = no tags declared.
     tags: []const u8 = "",
+    /// `Group` property (`Block.GroupNames`): a comma list the BasicsOnly
+    /// backpack-crafting filter reads for a block output
+    /// (`XUiM_Recipes.FilterByBackpackSandboxSetting` IL_005F-0070).
+    groups: []const u8 = "",
     /// Block Class property (engine class name, e.g. "VendingMachine"). 0
     /// length = not parsed / unknown.
     class: []const u8 = "",
@@ -835,6 +839,7 @@ pub fn loadFromPath(
         name: []const u8,
         class: ?[]const u8 = null,
         tags: ?[]const u8 = null,
+        groups: ?[]const u8 = null,
         hazard: HazardKind = .none,
         hazard_damage: i32 = 0,
         hazard_damage_received: i32 = 0,
@@ -1000,6 +1005,7 @@ pub fn loadFromPath(
         var trader_onoff = false;
         var block_tag: ?[]const u8 = null;
         var tags: ?[]const u8 = null;
+        var groups: ?[]const u8 = null;
         var signable = false;
         var te_features: [max_composite_features]FeatureKind = @splat(.other);
         var te_feature_n: u8 = 0;
@@ -1204,6 +1210,9 @@ pub fn loadFromPath(
                 if (xml.parseI32Prefix(xml.attr(clean, pi, "value") orelse "")) |v| fertile_level = v;
             } else if (std.mem.eql(u8, pname, "Tags")) {
                 tags = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Group")) {
+                groups = xml.attr(clean, pi, "value");
+                _ = &groups;
             } else if (std.mem.eql(u8, pname, "BlockTag")) {
                 // Stock tags the openables with `BlockTag="Door"` (bit 2 of the
                 // code-side FastTag set; `EAIBreakBlock` IL_003D,
@@ -1333,6 +1342,7 @@ pub fn loadFromPath(
             .name = kn,
             .class = class,
             .tags = if (tags) |t| try arena.dupe(u8, t) else null,
+            .groups = if (groups) |t| try arena.dupe(u8, t) else "",
             .hazard = hazard_kind,
             .hazard_damage = hazard_damage,
             .hazard_damage_received = hazard_damage_received,
@@ -1475,6 +1485,7 @@ pub fn loadFromPath(
         var own_canvas = pb.canvas;
         var own_tag = pb.block_tag;
         var own_tags = pb.tags;
+        var own_groups: ?[]const u8 = pb.groups;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
         var own_drops = pb.harvest_drops;
@@ -1603,6 +1614,8 @@ pub fn loadFromPath(
             // extends churchBell and declares no Tags of its own, so the
             // parent's `churchbell` tag must follow the chain.
             if (own_tags == null and !xml.tagListContains(p1, "Tags")) own_tags = base_p.tags;
+            // Group follows the chain like Tags.
+            if (own_groups == null and !xml.tagListContains(p1, "Group")) own_groups = base_p.groups;
             // LPHardnessScale follows the chain like every other blocks.xml
             // property the loader copies (the default is not an override).
             if (!own_lp_declared) {
@@ -1661,6 +1674,7 @@ pub fn loadFromPath(
         pb.material = own_material;
         pb.block_tag = own_tag;
         pb.tags = own_tags;
+        if (own_groups) |og| pb.groups = og;
         pb.is_door = own_tag != null and std.ascii.eqlIgnoreCase(own_tag.?, "Door");
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;

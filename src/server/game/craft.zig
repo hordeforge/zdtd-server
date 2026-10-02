@@ -498,7 +498,14 @@ pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) 
     // `limited` case-insensitively; Enabled (1) keeps all of them.
     return switch (self.backpack_crafting) {
         1 => true,
-        2 => if (self.items.byName(recipe.name)) |d| assets_item_parse.isLimitedItem(d.groups) else false,
+        // BasicsOnly reads the OUTPUT's group list: `ItemClass.Groups` for an
+        // item, `Block.GroupNames` for a block (`FilterByBackpackSandboxSetting`
+        // IL_004E-0070 splits on the output's class).
+        2 => blk: {
+            if (self.items.byName(recipe.name)) |d| break :blk assets_item_parse.isLimitedItem(d.groups);
+            if (self.blocks.byName(recipe.name)) |b| break :blk assets_item_parse.isLimitedItem(b.groups);
+            break :blk false;
+        },
         3 => assets_recipes.tagsContain(recipe.tags, "isworkbench"),
         else => false,
     };
@@ -1080,8 +1087,17 @@ test "general craft path rejects workstation/tool/material recipes" {
         .{ .id = 1402, .name = "lowerGizmo", .groups = "LIMITED" },
     };
     g.items = .{ .defs = &idefs, .source = .builtin };
+    const bdefs = [_]assets_blocks.BlockDef{
+        .{ .id = 1500, .name = "limitedBlock", .groups = "limited" },
+        .{ .id = 1501, .name = "plainBlock" },
+    };
+    g.blocks.deinit();
+    g.blocks = .{ .defs = &bdefs, .source = .builtin };
     g.backpack_crafting = 2;
     try std.testing.expect(generalCraftAllowed(g, .{ .name = "limitedGizmo" }));
+    // A block output uses Block.GroupNames (IL_005F-0070).
+    try std.testing.expect(generalCraftAllowed(g, .{ .name = "limitedBlock" }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .name = "plainBlock" }));
     try std.testing.expect(!generalCraftAllowed(g, .{ .name = "plainGizmo" }));
     g.backpack_crafting = 1;
     try std.testing.expect(generalCraftAllowed(g, .{ .name = "plainGizmo" }));

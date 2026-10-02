@@ -1055,7 +1055,10 @@ nothing here is already waived. The four gaps the same audit closed are in
       items.xml `Group` now parses into `ItemDef.groups` (with the Extends
       inheritance stock gives it) and `item_parse.isLimitedItem` mirrors
       `ItemClass.IsLimited`, so (2) keeps a `Limited`-group output craftable and
-      refuses the rest; the same unit test asserts both halves.
+      refuses the rest; a block output reads `Block.GroupNames` instead of the item
+      groups (blocks.xml `Group` now parses onto `BlockDef.groups`, with the
+      Extends chain like Tags), so a `limited`-group block recipe stays craftable
+      too; the same unit test asserts all of it.
 - [x] **The `IntroQuestEnabled` sandbox option did nothing** - closed
       2026-10-02: option 119 (yes/no, default on) gates a quest whose
       `FilterTags` carry `introquest` (`DialogRequirementQuestsAvailable`
