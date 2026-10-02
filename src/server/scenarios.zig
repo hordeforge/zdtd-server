@@ -23392,6 +23392,9 @@ test "scenario the crafting input option scales the ingredients" {
         \\<recipe name="craftIgnored" count="1" craft_time="1" tags="sandboxIgnore">
         \\  <ingredient name="scrapIron" count="2" />
         \\</recipe>
+        \\<recipe name="craftLearnable" count="1" craft_time="1" tags="learnable">
+        \\  <ingredient name="scrapIron" count="2" />
+        \\</recipe>
         \\</recipes>
     );
     // The Game owns the recipe table: `Game.deinit` calls `recipes.deinit()`.
@@ -23400,6 +23403,7 @@ test "scenario the crafting input option scales the ingredients" {
         .{ .id = 1101, .name = "craftTool" },
         .{ .id = 1102, .name = "scrapIron", .stack = 100 },
         .{ .id = 1103, .name = "craftIgnored" },
+        .{ .id = 1104, .name = "craftLearnable" },
     };
     g.items = .{ .defs = &idefs, .source = .builtin };
 
@@ -23458,6 +23462,18 @@ test "scenario the crafting input option scales the ingredients" {
     _ = g.sim.depositItem(ps, 1102, 4);
     try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));
     try std.testing.expectEqual(@as(u32, 2), g.sim.inventory[ps].countItem(1101));
+
+    // A `learnable` recipe needs its unlock CVar (`Recipe.IsUnlocked` through
+    // `Recipe.CanCraft` IL=128): refused without it, allowed once the client's
+    // `NetPackageModifyCVar` write lands one.
+    const learn_idx: u16 = for (g.recipes.defs, 0..) |d, i| {
+        if (std.mem.eql(u8, d.name, "craftLearnable")) break @intCast(i);
+    } else return error.TestUnexpectedResult;
+    g.sim.inventory[ps] = .{};
+    _ = g.sim.depositItem(ps, 1102, 4);
+    try std.testing.expect(!craft_mod.tryCraft(g, c.slot, learn_idx, 1));
+    _ = g.clients[c.slot].cvars.apply("craftLearnable", .set, 1);
+    try std.testing.expect(craft_mod.tryCraft(g, c.slot, learn_idx, 1));
     std.debug.print("PASS crafting-input: the sandbox scale reaches the ingredient check and the output\n", .{});
 }
 

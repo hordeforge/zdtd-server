@@ -475,6 +475,13 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                                 continue;
                             }
                         }
+                        // `Recipe.CanCraft` IL=128 -> `Recipe.IsUnlocked`: a
+                        // `learnable` recipe stays locked until the player's
+                        // recipe CVar is positive.
+                        if (!game_craft.craftUnlocked(self, c.slot, rd)) {
+                            dst.* = .{};
+                            continue;
+                        }
                         dst.* = q;
                         // Same output fold as the inventory craft: the
                         // workstation grants what the client's UI shows

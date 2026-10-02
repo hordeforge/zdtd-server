@@ -1133,7 +1133,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       stock's on-branch returns the folded value **unclamped** (IL_0026-0027);
       zdtd keeps a clamp to the item ceiling because the crafted quality write has
       none of its own (marked in the code as a ponytail shortcut to move).
-- [ ] **Learnable recipes (magazine unlocks) are not modelled** - located
+- [x] **Learnable recipes (magazine unlocks) are not modelled** - closed
+      2026-10-02: the gate is in. `Recipe.IsUnlocked` (IL_0000-003E) is reached
+      from `Recipe.CanCraft` (IL=128) and `CanCraftAny` (IL=134); with
+      `CraftingProgression` on, a recipe carrying the `learnable` tag is locked
+      until the player's CVar named after the recipe is positive
+      (`GetValue(RecipeTagUnlocked = 73, base = that CVar)`). `craftUnlocked`
+      implements exactly that and both craft validations call it - the inventory
+      path in `tryCraftRecipe` and the workstation queue in `HandleRecipeQueue`
+      - so a modified client cannot craft a magazine-locked recipe early. The
+      read path needs no server code: stock's client increments the CVar locally
+      and pushes it with `NetPackageModifyCVar`, which zdtd already applies to
+      the sender's store and now persists (ZPV18). Gated by the `a learnable
+      recipe needs its unlock cvar` unit test and the learnable leg of `scenario
+      the crafting input option scales the ingredients` (decisive: bypassing the
+      learnable check refuses-to-craft assertion fails). Closed entry below kept
+      for the record.
+- [ ] **Learnable recipes (magazine unlocks) were not modelled** - located
       2026-10-02, data helper landed. `Recipe.IsUnlocked` (IL_0000-003E) returns
       true when `CraftingProgression` is off or the recipe is not learnable, else
       it requires `GetValue(RecipeTagUnlocked = 73, base = the player's CVar named

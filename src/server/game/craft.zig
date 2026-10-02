@@ -364,6 +364,21 @@ pub fn craftTimeForPlayer(self: *Game, peer_slot: ?usize, recipe: assets_recipes
     return total;
 }
 
+/// `Recipe.IsUnlocked` (IL_0000-003E), called by `Recipe.CanCraft` (IL=128) and
+/// `CanCraftAny` (IL=134): with crafting progression on, a recipe carrying the
+/// `learnable` tag is locked until the player's CVar named after the recipe is
+/// positive (`GetValue(RecipeTagUnlocked = 73, base = that CVar)`). The magazine
+/// read reaches this store through `NetPackageModifyCVar`, and ZPV18 persists it.
+pub fn craftUnlocked(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) bool {
+    if (!craftingProgressionOn(self)) return true;
+    if (!assets_recipes.isLearnable(recipe.tags)) return true;
+    if (peer_slot >= self.clients.len) return false;
+    const base = self.clients[peer_slot].cvars.get(recipe.name);
+    const as = self.sim.playerByPeer(peer_slot);
+    const fold = game_player_mod.namedPassiveFold(self, peer_slot, as, "RecipeTagUnlocked");
+    return base + fold > 0;
+}
+
 pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u8 {
     const qmax = self.items.max_quality_tier;
     // `Recipe.GetCraftingTier` (IL_0000-0008): with CraftingProgression off the
@@ -469,6 +484,7 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     if (assets_progression.unlockRequirement(&self.progression_table, recipe.name)) |req| {
         if (self.skillLevelOf(peer_slot, req[0]) < req[1]) return false;
     }
+    if (!craftUnlocked(self, peer_slot, recipe)) return false;
     // Crafting tier (Recipe.GetCraftingTier): the ingredient modifier level
     // and the crafted item's quality tier.
     const craft_tier: u8 = craftingTierFor(self, peer_slot, recipe);
@@ -1449,6 +1465,31 @@ fn collectorBlocked(self: *Game, x: i32, y: i32, z: i32) bool {
     // Air does not block; anything else in the cell above does (stock's
     // `isBlocked` probe reads the block's solid/`IsTerrain` flags).
     return id != self.world.terrain_ids.air;
+}
+
+test "a learnable recipe needs its unlock cvar" {
+    // `Recipe.IsUnlocked` IL_0009-003C through `Recipe.CanCraft` IL=128.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    const learnable = assets_recipes.RecipeDef{ .name = "forgeIron", .tags = "learnable" };
+    const plain = assets_recipes.RecipeDef{ .name = "woodClub", .tags = "" };
+    try std.testing.expect(!craftUnlocked(g, 0, learnable));
+    try std.testing.expect(craftUnlocked(g, 0, plain));
+    _ = g.clients[0].cvars.apply("forgeIron", .set, 1);
+    try std.testing.expect(craftUnlocked(g, 0, learnable));
+    // CraftingProgression off unlocks everything (IL_0000-0008).
+    var buf: [4]u8 = undefined;
+    buf[0] = 'A';
+    buf[1] = @intCast('A' + (96 / 26));
+    buf[2] = @intCast('A' + (96 % 26));
+    buf[3] = @intCast('A' + 0);
+    g.sandbox_code = buf[0..4];
+    g.tick_n += 1;
+    _ = g.clients[0].cvars.remove("forgeIron");
+    try std.testing.expect(craftUnlocked(g, 0, learnable));
 }
 
 test "crafting tier is a flat 6 without crafting progression" {
