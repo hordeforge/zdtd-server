@@ -16932,6 +16932,61 @@ test "scenario draining a death bag clears the backpack marker" {
     std.debug.print("PASS backpack marker: draining a death bag reports the emptied bag\n", .{});
 }
 
+test "scenario DropOnDeath mode picks the dropped slice" {
+    // Stock `DropOnDeath`: 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete.
+    // `spawnDeathBag` maps the mode to an inventory slice, so mode 2 must leave
+    // the backpack behind and mode 3 the toolbelt. Only mode 1 was covered.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const toolbelt: usize = 0;
+    const backpack: usize = quest_mod_components.inv_bag_start;
+    const equip: usize = quest_mod_components.inv_equip_start;
+
+    // Mode 2: the toolbelt moves into the bag, the backpack and equipment stay.
+    g.drop_on_death = 2;
+    g.sim.inventory[ps] = .{};
+    g.sim.inventory[ps].slots[toolbelt] = .{ .item_id = 2, .count = 40, .quality = 1 };
+    g.sim.inventory[ps].slots[backpack] = .{ .item_id = 5, .count = 7, .quality = 1 };
+    g.sim.inventory[ps].slots[equip] = .{ .item_id = 7, .count = 1, .quality = 1 };
+    g.spawnDeathBag(ps);
+    const bags2 = g.sim.kind_groups.slice(.loot_bag);
+    const bag2 = bags2[bags2.len - 1];
+    try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[bag2].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[toolbelt].item_id);
+    try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[backpack].item_id);
+    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[equip].item_id);
+
+    // Mode 3: the backpack moves, the toolbelt and equipment stay.
+    g.drop_on_death = 3;
+    g.sim.inventory[ps] = .{};
+    g.sim.inventory[ps].slots[toolbelt] = .{ .item_id = 2, .count = 40, .quality = 1 };
+    g.sim.inventory[ps].slots[backpack] = .{ .item_id = 5, .count = 7, .quality = 1 };
+    g.sim.inventory[ps].slots[equip] = .{ .item_id = 7, .count = 1, .quality = 1 };
+    g.spawnDeathBag(ps);
+    const bags3 = g.sim.kind_groups.slice(.loot_bag);
+    const bag3 = bags3[bags3.len - 1];
+    try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[bag3].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[toolbelt].item_id);
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[backpack].item_id);
+    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[equip].item_id);
+
+    // Mode 4 (delete) drops nothing.
+    g.drop_on_death = 4;
+    const before4 = g.sim.kind_groups.slice(.loot_bag).len;
+    g.spawnDeathBag(ps);
+    try std.testing.expectEqual(before4, g.sim.kind_groups.slice(.loot_bag).len);
+    std.debug.print("PASS drop-on-death: modes 2/3/4 pick the right slice\n", .{});
+}
+
 test "scenario walking away from an open container stops the looting" {
     // openContainer range-checks ([rules.world] container_open_range), but
     // take and put trusted the stored open_container id and never re-checked.

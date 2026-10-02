@@ -1185,16 +1185,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       remains is the magazine read action that increments the CVar named after
       each unlocked recipe and the craft-validation gate - together, because
       gating without the read path would block every learnable recipe.
-- [ ] **Biome-progression recipe unlocks are not modelled** - located
-      2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
-      `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a
-      recipe marked biomeProgression is unavailable until the player has visited
-      that biome. zdtd has no visited-biome state (only the current
-      `biomeStandingOn`), no recipe-tag check, and no unlock grant on biome
-      entry, so those recipes are craftable anywhere from the start. The
-      GameStats `biome_progression` bool is already echoed. Needs: per-player
-      visited-biome bits, the `biomeprogression` tag on recipes (items.zig-style
-      parse), the craft-validation gate, and the client unlock notification.
+- [x] **Biome-progression recipe unlocks are not modelled** - closed as a
+      NON-GAP 2026-10-02: the gate is entirely client-side. `biomeprogressionTag`
+      is read only by `XUiM_Recipes` (the recipe list filters, IL_0057/0037) and
+      `World.BiomeProgressionEnabled` only by `ItemClassArmor` (armor value),
+      `PlayerMoveController` and `XUiC_CharacterFrameWindow` - no server-side
+      reader exists, and no package carries a visited-biome update, so the dedi
+      cannot know the flag and stock's own server never gates a craft on it. A
+      server mirror would have to invent the trigger, which `missing > fake`
+      forbids. Reopen only if a reader or a biome-progression package turns up.
 - [x] **The `VendingEnabled` sandbox option did nothing** - closed 2026-10-02:
       option 129 (yes/no, default on). `BlockVendingMachine` (IL_006D-0190) enables
       the machine's activation command only while `TraderManager.VendingEnabled`,
