@@ -833,6 +833,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       four now use `sandbox.valueB` (0 = No, 1 = Yes), and the serverconfig test
       asserts both index values for each. Found while adding `MaxTechType`, whose
       own arm had the same flaw.
+- [x] **The `LootMaxTier` sandbox option did nothing** - closed 2026-10-02:
+      option 77 (int 1..6, default 6, -1 = no cap) is the
+      `LootContainer.LootMaxTier` static; IL_029D clamps a rolled quality item's
+      ItemValue max tier down to it (then the min down to the max), and IL_007B
+      reads it again in the container fill. zdtd rolled the template quality and
+      deposited it unchanged, so a low-tier server still handed out tier-6 loot.
+      The sandbox code and the serverconfig property (-1 honoured, else clamped
+      1..6) parse into `config.loot_max_tier` -> `InitOptions` -> `Game.loot_max_tier`,
+      and `Game.clampLootTier` caps the rolled quality in the loot-bag fill and
+      the loot-container fill (the trader stock roll keeps its own
+      `TraderMaxTier` gate). Gated by `scenario the loot tier cap clamps a rolled
+      quality`: a forced quality-6 entry deposits 6 at the default, 2 at cap 2,
+      and 6 again at -1 (decisive: returning the rolled value unchanged fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

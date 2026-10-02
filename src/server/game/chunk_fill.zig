@@ -560,10 +560,12 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         // Stacknumber 500, so the stack heuristic silently dropped its rolled
         // quality. Quality items still never stack (addSlotStacked merges on
         // equal quality), and a stackable keeps quality 1.
-        const q = if (self.items.byId(eid)) |d|
+        // `LootContainer` IL_029D: the rolled tier is clamped to the sandbox
+        // `LootMaxTier` before the ItemValue is built.
+        const q = self.clampLootTier(if (self.items.byId(eid)) |d|
             (if (d.has_quality) stacks[i].quality else 1)
         else
-            stacks[i].quality;
+            stacks[i].quality);
         // `random_durability="true"`: the item starts worn at
         // `(int)(MaxUseTimes * RandomRange(0.2, 0.8))` (stock LootContainer).
         // Deterministic per container + stack index, like the rest of the roll.

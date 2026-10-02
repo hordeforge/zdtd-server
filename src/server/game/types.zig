@@ -368,6 +368,8 @@ pub const InitOptions = struct {
     enemy_spawn_mode: bool = true,
     /// Sandbox `MaxTechType` (the item tech-era cap).
     max_tech_type: u8 = 4,
+    /// Sandbox `LootMaxTier` (the loot quality tier cap; -1 = none).
+    loot_max_tier: i32 = 6,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

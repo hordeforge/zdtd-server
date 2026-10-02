@@ -357,6 +357,9 @@ pub const Game = struct {
     /// Sandbox `MaxTechType`: the item tech-era cap (`ItemClass.
     /// HandleSandboxTechType` IL=21 substitutes loot and trader stock).
     max_tech_type: u8 = 4,
+    /// Sandbox `LootMaxTier`: the loot quality tier ceiling (-1 = no cap).
+    loot_max_tier: i32 = 6,
+
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
     /// SandboxCode option 17 IncomingDamage flat override (0 = unset ->
@@ -894,6 +897,7 @@ pub const Game = struct {
         self.terrain_damage = opts.terrain_damage;
         self.sim.enemy_spawn_mode = opts.enemy_spawn_mode;
         self.max_tech_type = opts.max_tech_type;
+        self.loot_max_tier = opts.loot_max_tier;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;
@@ -2422,6 +2426,15 @@ pub const Game = struct {
     }
     /// The tick's sandbox harvest scales (`GameUtils.HarvestOnAttack`
     /// IL_0341-0384 reads the four statics the sandbox sets).
+    /// `LootContainer` IL_029D: clamp a rolled loot quality to the sandbox
+    /// `LootMaxTier` (stock clamps the ItemValue max, then the min to it; a
+    /// single rolled quality collapses both to this clamp).
+    pub fn clampLootTier(self: *const Game, quality: u8) u8 {
+        if (self.loot_max_tier < 0) return quality;
+        const cap: u8 = @intCast(@min(self.loot_max_tier, 255));
+        return @min(quality, cap);
+    }
+
     pub fn harvestScales(self: *Game) [4]f32 {
         if (self.harvest_scales_tick != self.tick_n) {
             var buf: [512]sandbox.Group = undefined;

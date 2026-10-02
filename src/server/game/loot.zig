@@ -60,10 +60,10 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
         // random-durability wear belong on the deposited stack.
         // Same `ItemClass.HasQuality` gate as the container fill (a tool with
         // Stacknumber 500 still carries quality).
-        const q = if (self.items.byId(eid)) |d|
+        const q = self.clampLootTier(if (self.items.byId(eid)) |d|
             (if (d.has_quality) stacks[i].quality else 1)
         else
-            stacks[i].quality;
+            stacks[i].quality);
         const use_times: f32 = if (stacks[i].random_durability)
             assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
         else

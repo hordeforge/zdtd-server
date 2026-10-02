@@ -23417,3 +23417,59 @@ test "scenario the enemy spawn mode stops sleeper volume spawns" {
     try std.testing.expect(zed_n(g) > before);
     std.debug.print("PASS enemy-spawn-mode: the option gates sleeper volume spawns\n", .{});
 }
+
+test "scenario the loot tier cap clamps a rolled quality" {
+    // Sandbox `LootMaxTier` (option 77, int 1..6, default 6, -1 = no cap):
+    // `LootContainer` IL_029D clamps the rolled ItemValue quality max down to
+    // the static, then the min down to the max. zdtd keeps one rolled quality,
+    // so the cap is a clamp on that value.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    // One container with a forced quality-6 entry (an authored `quality=` skips
+    // the template roll, so the fixture is deterministic).
+    var conts = [_]assets_loot.LootContainer{
+        .{ .name = "capTest", .size_x = 4, .size_y = 3, .pick_min = 1, .pick_max = 1, .entry_n = 1 },
+    };
+    conts[0].entries[0] = .{ .name = "qTool", .prob = 1.0, .count_min = 1, .count_max = 1, .quality = 6 };
+    g.loot = .{ .containers = &conts, .source = .xml };
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 700, .name = "qTool", .has_quality = true },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    const bag_nid = g.sim.spawnLootBag(20, 70, 20, 1, 1).?;
+    const bs = g.sim.slotOfNetId(bag_nid).?;
+    const quality_of = struct {
+        fn f(g2: *game_mod.Game, s: ecs.Slot) u8 {
+            for (g2.sim.inventory[s].slots) |sl| {
+                if (sl.item_id == 700 and sl.count > 0) return sl.quality;
+            }
+            return 0;
+        }
+    }.f;
+
+    // Default 6: the authored quality survives.
+    g.loot_max_tier = 6;
+    g.fillLootBagFromTable(bag_nid, "capTest", 7, 1);
+    try std.testing.expectEqual(@as(u8, 6), quality_of(g, bs));
+
+    // Cap 2: clamped.
+    g.sim.inventory[bs].clear();
+    g.loot_max_tier = 2;
+    g.fillLootBagFromTable(bag_nid, "capTest", 7, 1);
+    try std.testing.expectEqual(@as(u8, 2), quality_of(g, bs));
+
+    // -1 = no cap (the stock sentinel): the authored quality survives.
+    g.sim.inventory[bs].clear();
+    g.loot_max_tier = -1;
+    g.fillLootBagFromTable(bag_nid, "capTest", 7, 1);
+    try std.testing.expectEqual(@as(u8, 6), quality_of(g, bs));
+    std.debug.print("PASS loot-tier: LootMaxTier clamps the rolled quality\n", .{});
+}

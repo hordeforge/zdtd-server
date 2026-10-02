@@ -152,6 +152,10 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `LootMaxTier` (int 1..6, default 6, -1 = no cap): the quality
+    /// tier ceiling a loot roll may land on (`LootContainer` IL_029D clamps the
+    /// rolled ItemValue max down to the static, then the min down to the max).
+    loot_max_tier: i32 = 6,
     /// Sandbox `MaxTechType` (int 0..4, default 4): the highest item tech era
     /// allowed. `ItemClass.HandleSandboxTechType` (IL=21) substitutes a rolled
     /// item above the cap with its `PreviousTechType` chain, which drops
@@ -454,6 +458,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "LootMaxTier")) {
+            cfg.loot_max_tier = sandbox.valueI(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "MaxTechType")) {
             cfg.max_tech_type = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "EnemySpawnMode")) {
@@ -680,6 +686,13 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "LootMaxTier")) |v| {
+        // The stock picker is 1..6 and -1 means "no cap", so a raw -1 is legal
+        // and the rest clamps (parseI32, not the u16 helper).
+        if (std.fmt.parseInt(i32, std.mem.trim(u8, v, " \t"), 10) catch null) |t| {
+            cfg.loot_max_tier = if (t == -1) -1 else std.math.clamp(t, 1, 6);
+        }
+    }
     if (prop(raw, "MaxTechType")) |v| cfg.max_tech_type = clampU8Named("MaxTechType", v, 0, 4, cfg.max_tech_type);
     if (prop(raw, "EnemySpawnMode")) |v| cfg.enemy_spawn_mode = clampU8Named("EnemySpawnMode", v, 0, 1, @intFromBool(cfg.enemy_spawn_mode)) != 0;
     if (prop(raw, "BlockDamageAI")) |v| cfg.block_damage_ai = clampRangeNamed("BlockDamageAI", v, 0, 1000, cfg.block_damage_ai);
