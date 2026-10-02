@@ -298,10 +298,10 @@ fn craftingProgressionOn(self: *const Game) bool {
     return o.default_i != 0;
 }
 
-/// Fold one class's `CraftingTier` rows at `lvl` over the running value.
-fn foldCraftingTier(passives: []const assets_buffs.Passive, lvl: u8, ctx: assets_requirements.Ctx, v: *f32, counts: *assets_requirements.Counts) void {
+/// Fold one class's `passive_name` rows at `lvl` over the running value.
+fn foldCraftingPassive(passive_name: []const u8, passives: []const assets_buffs.Passive, lvl: u8, ctx: assets_requirements.Ctx, v: *f32, counts: *assets_requirements.Counts) void {
     for (passives) |p| {
-        if (!std.mem.eql(u8, p.name, "CraftingTier")) continue;
+        if (!std.mem.eql(u8, p.name, passive_name)) continue;
         if (!assets_buffs.tagsMatch(p.tags, ctx.tags)) continue;
         if (p.reqs.len > 0 and assets_requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
         const amount = if (p.value_cvar.len > 0)
@@ -351,14 +351,37 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
     var counts: assets_requirements.Counts = .{};
     const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
     for (self.progression_table.crafting_skills) |sk| {
-        foldCraftingTier(sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
+        foldCraftingPassive("CraftingTier", sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
     }
     for (self.progression_table.perks) |pk| {
-        foldCraftingTier(pk.passives, self.skillLevelOf(peer_slot, pk.name), ctx, &v, &counts);
+        foldCraftingPassive("CraftingTier", pk.passives, self.skillLevelOf(peer_slot, pk.name), ctx, &v, &counts);
     }
     const tier: f32 = @trunc(v);
     if (!(tier >= 1)) return 1;
     return @trunc(@min(tier, @as(f32, @floatFromInt(qmax))));
+}
+
+/// Stock `XUiM_Recipes.GetRecipeCraftOutputCount` (IL=35): the per-craft output
+/// is `GetValue(CraftingOutput = 92, base = recipe.count, player, recipe,
+/// recipe.tags)` truncated and floored at 1, times the sandbox
+/// `CraftingOutput` modifier - except for a recipe carrying the `sandboxignore`
+/// tag, which ignores the modifier. The server grants what that helper makes the
+/// client's UI show, so a `CraftingOutput` perk cannot silently cost the player
+/// items.
+pub fn craftingOutputFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u16 {
+    var v: f32 = @floatFromInt(if (recipe.count == 0) 1 else recipe.count);
+    var counts: assets_requirements.Counts = .{};
+    const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
+    for (self.progression_table.crafting_skills) |sk| {
+        foldCraftingPassive("CraftingOutputCount", sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
+    }
+    for (self.progression_table.perks) |pk| {
+        foldCraftingPassive("CraftingOutputCount", pk.passives, self.skillLevelOf(peer_slot, pk.name), ctx, &v, &counts);
+    }
+    const mod: f32 = if (assets_recipes.tagsContain(recipe.tags, "sandboxignore")) 1.0 else self.crafting_output;
+    const out: f32 = @trunc(v * mod);
+    if (!(out >= 1)) return 1;
+    return @intFromFloat(@min(out, 65535.0));
 }
 
 /// Deposit a crafted output. A HasQuality item carries the crafting tier as its
@@ -484,7 +507,7 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     }
     const out_id = self.ecsIdFromItemName(recipe.name);
     if (out_id == 0) return false;
-    const out_u32: u32 = @as(u32, recipe.count) * n;
+    const out_u32: u32 = @as(u32, craftingOutputFor(self, peer_slot, recipe)) * n;
     if (out_u32 == 0 or out_u32 > std.math.maxInt(u16)) return false;
     const out_count: u16 = @intCast(out_u32);
     // Snapshot so any remove/add failure restores the exact pre-craft bag.
@@ -1387,4 +1410,25 @@ fn collectorBlocked(self: *Game, x: i32, y: i32, z: i32) bool {
     // Air does not block; anything else in the cell above does (stock's
     // `isBlocked` probe reads the block's solid/`IsTerrain` flags).
     return id != self.world.terrain_ids.air;
+}
+
+test "crafting output folds the passive and the sandbox scale" {
+    // `XUiM_Recipes.GetRecipeCraftOutputCount` IL=35: output =
+    // trunc(GetValue(92, base recipe.count) * CraftingOutputModifier), floored
+    // at 1, with `sandboxignore` recipes ignoring the modifier.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    const plain = assets_recipes.RecipeDef{ .name = "plainGizmo", .count = 2 };
+    try std.testing.expectEqual(@as(u16, 2), craftingOutputFor(g, 0, plain));
+    g.crafting_output = 2.0;
+    try std.testing.expectEqual(@as(u16, 4), craftingOutputFor(g, 0, plain));
+    // sandboxignore keeps the authored count.
+    const ignored = assets_recipes.RecipeDef{ .name = "ignoredGizmo", .count = 2, .tags = "sandboxIgnore" };
+    try std.testing.expectEqual(@as(u16, 2), craftingOutputFor(g, 0, ignored));
+    // 0 modifier floors at one item (the IL's max(1, …)).
+    g.crafting_output = 0;
+    try std.testing.expectEqual(@as(u16, 1), craftingOutputFor(g, 0, plain));
 }

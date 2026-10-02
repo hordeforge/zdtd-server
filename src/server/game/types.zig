@@ -405,6 +405,8 @@ pub const InitOptions = struct {
     /// Sandbox `IntroQuestEnabled` (false = the trader stops offering
     /// `introquest`-tagged quests).
     intro_quest_enabled: bool = true,
+    /// Sandbox `CraftingOutput`: the craft output scale.
+    crafting_output: f32 = 1.0,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled` (false = the trader
     /// stops offering quests tagged `buried` / `poi`).
     buried_quests_enabled: bool = true,

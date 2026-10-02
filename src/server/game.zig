@@ -385,6 +385,8 @@ pub const Game = struct {
     vending_reset_interval: i32 = -1,
     /// Sandbox `IntroQuestEnabled`.
     intro_quest_enabled: bool = true,
+    /// Sandbox `CraftingOutput`: the craft output scale.
+    crafting_output: f32 = 1.0,
     /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled`.
     buried_quests_enabled: bool = true,
     poi_quests_enabled: bool = true,

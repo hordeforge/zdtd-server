@@ -23311,7 +23311,20 @@ test "scenario the crafting input option scales the ingredients" {
     g.sim.inventory[ps] = .{};
     _ = g.sim.depositItem(ps, 1102, 2);
     try std.testing.expect(craft_mod.tryCraft(g, c.slot, ig_idx, 1));
-    std.debug.print("PASS crafting-input: the sandbox scale reaches the ingredient check\n", .{});
+
+    // Output side (`XUiM_Recipes.GetRecipeCraftOutputCount` IL=35): the same
+    // craft grants `recipe.count` scaled by the sandbox `CraftingOutput`.
+    g.crafting_output = 1.0;
+    g.sim.inventory[ps] = .{};
+    _ = g.sim.depositItem(ps, 1102, 4); // 2x input scale still applies
+    try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));
+    try std.testing.expectEqual(@as(u32, 1), g.sim.inventory[ps].countItem(1101));
+    g.crafting_output = 2.0;
+    g.sim.inventory[ps] = .{};
+    _ = g.sim.depositItem(ps, 1102, 4);
+    try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));
+    try std.testing.expectEqual(@as(u32, 2), g.sim.inventory[ps].countItem(1101));
+    std.debug.print("PASS crafting-input: the sandbox scale reaches the ingredient check and the output\n", .{});
 }
 
 test "scenario terrain and non-terrain blocks use their own damage scale" {

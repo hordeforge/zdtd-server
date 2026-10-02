@@ -1065,6 +1065,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       that disables intro quests stops offering them. Gated by the
       `sandbox buried/poi quest gates` unit test, which now also asserts the
       intro leg (decisive: dropping the check offers the intro quest).
+- [x] **The `CraftingOutput` sandbox option did nothing, and the
+      `CraftingOutputCount` fold was missing** - closed 2026-10-02:
+      `XUiM_Recipes.GetRecipeCraftOutputCount` IL=35 computes per-craft output
+      as `trunc(GetValue(CraftingOutput = 92, base recipe.count) * modifier)`
+      floored at 1, with a `sandboxignore` recipe exempt. zdtd granted the
+      authored `recipe.count`, so a `CraftingOutputCount` perk (a `base_add` or
+      `perc_add` row the client's UI does show) silently cost the player items,
+      and the operator's scale was ignored. `craftingOutputFor` folds the passive
+      over the recipe and applies the sandbox scale; `tryCraftRecipe` grants it.
+      Gated by the `crafting output folds the passive and the sandbox scale` unit
+      test plus the output half of `scenario the crafting input option scales the
+      ingredients` (decisive: pinning the modifier to 1 fails the unit test and
+      bypassing the helper fails the scenario).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
