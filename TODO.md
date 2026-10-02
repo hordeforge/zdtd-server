@@ -961,9 +961,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       `acceptQuestFor` refuses when the option is off (the authoritative half of
       a gate whose dialog side is client-side). Gated by `scenario quests off
       starts none`: the same accept is refused at off and starts at on
-      (decisive: disabling the gate starts it). Residuals: `POIQuestsEnabled` and
-      `BuriedQuestsEnabled` need a per-quest POI/buried predicate that zdtd's
-      catalog does not carry yet.
+      (decisive: disabling the gate starts it). The `POIQuestsEnabled` and
+      `BuriedQuestsEnabled` residuals closed in a later round: `QuestEntry`
+      IL_0000-003F drops an entry whose QuestClass `FilterTags` intersect the
+      `buried` or `poi` tag while the matching option is off, both tags are now
+      parsed from the quest XML `tags=` attribute, and `sandboxAllowsQuest` gates
+      the offer list.
 - [x] **The `TraderHours` sandbox option did nothing** - closed 2026-10-02:
       option 127 (int 0..6, default 0) is the global trader-hours preset:
       `TraderInfo.set_TraderHoursPreset` IL=81 sets `GlobalOpenTime`/

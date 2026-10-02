@@ -544,7 +544,7 @@ fn parseQuestDefBody(
         .gamestage_bonus = if (xml.propertyValue(body, "gamestage_bonus")) |v| std.fmt.parseFloat(f32, v) catch 0 else 0,
         .turn_in = turn_in,
         .category = try dupe(arena, cat),
-        .quest_tags = meta.tags_mask,
+        .quest_tags = meta.tags_mask | quest.tagsMask(xml.attr(body, 0, "tags") orelse ""),
         .poi_select = meta.poi_select,
         .biome_filter_type = meta.biome_type,
         .biome_filter = meta.biome_filter,

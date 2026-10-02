@@ -34,6 +34,11 @@ pub const QuestTag = enum(u32) {
     infested = 1 << 7,
     bandit = 1 << 8,
     hidden_cache = 1 << 9,
+    /// `QuestEntry.buriedTag` IL_0000-001E (quests toggled by
+    /// `BuriedQuestsEnabled`).
+    buried = 1 << 10,
+    /// `QuestEntry.poiTag` IL_0020-003F (quests toggled by `POIQuestsEnabled`).
+    poi = 1 << 11,
 };
 
 /// Map a stock tag string ("clear", "fetch", ...) to its bit; null when the

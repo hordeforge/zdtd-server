@@ -381,6 +381,9 @@ pub const Game = struct {
     scrapping_output: f32 = 1.0,
     /// Sandbox `BackpackCrafting` (1 = Enabled; 0/2/3 forbid the backpack path).
     backpack_crafting: u8 = 1,
+    /// Sandbox `BuriedQuestsEnabled` / `POIQuestsEnabled`.
+    buried_quests_enabled: bool = true,
+    poi_quests_enabled: bool = true,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.

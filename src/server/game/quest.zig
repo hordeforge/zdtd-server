@@ -266,6 +266,17 @@ pub fn traderQuestList(self: *const Game, npc_entity_id: i32) []const u8 {
     return "trader_jen_quests";
 }
 
+/// `QuestEntry` IL_0000-003F: a quest whose `FilterTags` carry `buried` is
+/// dropped while `BuriedQuestsEnabled` is off, and one tagged `poi` while
+/// `POIQuestsEnabled` is off.
+pub fn sandboxAllowsQuest(self: *const Game, d: ecs.quest.QuestDef) bool {
+    const buried = @intFromEnum(ecs.quest.QuestTag.buried);
+    const poi = @intFromEnum(ecs.quest.QuestTag.poi);
+    if (!self.buried_quests_enabled and (d.quest_tags & buried) != 0) return false;
+    if (!self.poi_quests_enabled and (d.quest_tags & poi) != 0) return false;
+    return true;
+}
+
 pub fn buildTraderQuestOffers(
     self: *Game,
     list_id: []const u8,
@@ -293,6 +304,7 @@ pub fn buildTraderQuestOffers(
         if (n >= out.len) break;
         const d = self.sim.catalog.byId(qid) orelse continue;
         if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
+        if (!sandboxAllowsQuest(self, d)) continue;
         // Stock filters the trader's quest list by DifficultyTier == the
         // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
         if (tier != 0 and d.difficulty_tier != tier) continue;
@@ -439,4 +451,27 @@ pub fn isStockClientQuestName(self: *Game, name: []const u8) bool {
     if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
     if (std.mem.startsWith(u8, name, "treasure_")) return true;
     return false;
+}
+
+test "sandbox buried/poi quest gates" {
+    // `QuestEntry` IL_0000-003F: a quest whose FilterTags carry `buried` is
+    // dropped while `BuriedQuestsEnabled` is off; one tagged `poi` is dropped
+    // while `POIQuestsEnabled` is off.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const test_tmp = @import("../../util/test_tmp.zig");
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    const buried = ecs.quest.QuestDef{ .id = 1, .name = "q_buried", .title = "b", .kind = .kill_zombies, .quest_tags = @intFromEnum(ecs.quest.QuestTag.buried) };
+    const poi = ecs.quest.QuestDef{ .id = 2, .name = "q_poi", .title = "p", .kind = .kill_zombies, .quest_tags = @intFromEnum(ecs.quest.QuestTag.poi) };
+    const plain = ecs.quest.QuestDef{ .id = 3, .name = "q_plain", .title = "x", .kind = .kill_zombies };
+    try std.testing.expect(sandboxAllowsQuest(g, buried));
+    try std.testing.expect(sandboxAllowsQuest(g, poi));
+    g.buried_quests_enabled = false;
+    try std.testing.expect(!sandboxAllowsQuest(g, buried));
+    try std.testing.expect(sandboxAllowsQuest(g, poi));
+    g.poi_quests_enabled = false;
+    try std.testing.expect(!sandboxAllowsQuest(g, poi));
+    try std.testing.expect(sandboxAllowsQuest(g, plain));
 }
