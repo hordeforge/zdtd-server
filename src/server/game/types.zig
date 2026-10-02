@@ -396,6 +396,8 @@ pub const InitOptions = struct {
     trader_max_tier: u8 = 0,
     /// Sandbox `QuestsPerTier` (0 = keep the quests.xml value).
     quests_per_tier: u8 = 0,
+    /// Sandbox `ScrappingOutput`: the scrap yield scale.
+    scrapping_output: f32 = 1.0,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
     skill_points_per_level: i32 = -1,
     zombie_bm_move: u8 = 3,

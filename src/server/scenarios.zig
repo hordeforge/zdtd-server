@@ -25,6 +25,7 @@ const quest_mod = @import("../ecs/quest.zig");
 const quest_mod_components = @import("../ecs/components.zig");
 const systems = @import("../ecs/systems.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
+const arena_util = @import("../util/arena.zig");
 const sensing_mod = @import("../ecs/sensing.zig");
 const components_mod = @import("../ecs/components.zig");
 const collectors_mod = @import("../world/collectors.zig");
@@ -24056,4 +24057,66 @@ test "scenario a nohead victim ignores the headshot mode" {
     try hit(g, c, z, &dmg_body, &frame_buf);
     try std.testing.expect(g.sim.health[s].hp <= 0);
     std.debug.print("PASS headshot-mode: a nohead victim is exempt from the clamp\n", .{});
+}
+
+test "scenario the scrapping output option scales the scrap yield" {
+    // `ItemActionEntryScrap` IL_010A-0133: the yield is the scrap recipe's count
+    // times 0.75 for an item without the `scrap100` tag (1.0 with it), times the
+    // sandbox `ScrappingOutput`, truncated and floored at 1. The server computes
+    // the same yield for its InvTx scrap op.
+    const rsrc =
+        \\<recipes>
+        \\  <recipe name="scrapIron" count="4" craft_time="1" tags="forge">
+        \\    <wildcard_forge_category>iron</wildcard_forge_category>
+        \\    <ingredient name="meleeToolSwing" count="1" />
+        \\  </recipe>
+        \\</recipes>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var rbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const rpath = try std.fmt.bufPrint(&rbuf, "{s}/recipes_scrap.xml", .{dir});
+    try io_fs.writeFile(rpath, rsrc);
+
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1300, .name = "meleeToolSwing", .material = "MscrapIron", .weight = 10 },
+        .{ .id = 1301, .name = "scrapIron", .material = "MscrapIron", .weight = 1 },
+        .{ .id = 1302, .name = "scrap100Tool", .material = "MscrapIron", .weight = 10, .tags = "scrap100" },
+    };
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    g.items = .{ .defs = &idefs, .source = .builtin };
+    g.recipes = try assets_recipes.loadFromPath(gpa, rpath);
+
+    {
+        const arena = try arena_util.newArenaHolder(gpa);
+        var mt: assets_maxdamage.Table = .{ .arena_ptr = arena };
+        try mt.material_forge_category.put(arena.allocator(), "MscrapIron", "iron");
+        g.maxdamage.deinit();
+        g.maxdamage = mt;
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const scrap = struct {
+        fn f(g2: *game_mod.Game, slot: ecs.Slot, item_id: u16, scale: f32) u16 {
+            g2.scrapping_output = scale;
+            g2.sim.inventory[slot].slots[0] = .{ .item_id = item_id, .count = 1, .quality = 1 };
+            g2.sim.inventory[slot].slots[1] = .{};
+            if (!g2.tryScrap(0, 0, 1)) return 0;
+            var out: u16 = 0;
+            for (g2.sim.inventory[slot].slots) |sl| {
+                if (sl.item_id == 1301 and sl.count > 0) out += sl.count;
+            }
+            return out;
+        }
+    }.f;
+    try std.testing.expectEqual(@as(u16, 3), scrap(g, ps, 1300, 1.0)); // 4 * 0.75
+    try std.testing.expectEqual(@as(u16, 6), scrap(g, ps, 1300, 2.0)); // doubled
+    try std.testing.expectEqual(@as(u16, 4), scrap(g, ps, 1302, 1.0)); // scrap100 = full
+    std.debug.print("PASS scrapping-output: the sandbox scale and scrap100 factor reach the yield\n", .{});
 }

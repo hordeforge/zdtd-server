@@ -20,6 +20,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const assets_items = @import("../../assets/items.zig");
 const assets_recipes = @import("../../assets/recipes.zig");
+const assets_item_parse = @import("../../assets/item_parse.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_requirements = @import("../../assets/requirements.zig");
 const requirements = assets_requirements;
@@ -568,7 +569,19 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
     const recipe = getScrapableRecipe(self, slot.item_id, n) orelse return false;
     const out_id = self.ecsIdFromItemName(recipe.name);
     if (out_id == 0) return false;
-    const out_count: u16 = if (recipe.count == 0) 1 else recipe.count;
+    // `ItemActionEntryScrap` IL_010A-0133: the yield is the recipe count times
+    // 0.75 for an item without the `scrap100` tag (1.0 with it) times the
+    // sandbox `ScrappingOutput`, truncated and floored at 1.
+    const base_count: f32 = @floatFromInt(if (recipe.count == 0) 1 else recipe.count);
+    const scrap_factor: f32 = if (self.items.byId(slot.item_id)) |idef|
+        (if (assets_item_parse.tagsIntersect("scrap100", idef.tags)) 1.0 else 0.75)
+    else
+        0.75;
+    const scaled = base_count * scrap_factor * self.scrapping_output;
+    // IL_0127-012D floors the TRUNCATED value at 1, so a scrap always yields at
+    // least one unit.
+    const truncated: i64 = if (scaled > 0) @intFromFloat(@min(scaled, 65535.0)) else 0;
+    const out_count: u16 = if (truncated <= 0) 1 else @intCast(truncated);
 
     const inventory_before = self.sim.inventory[ps];
     if (self.sim.inventory[ps].takeFromSlot(bag_slot, n) == null) {

@@ -1023,6 +1023,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       through the sandbox and serverconfig arms. Gated by the existing quest-POI
       scenario, which now also asserts one offer at cap 1 and the XML window
       again at unset (decisive: ignoring the option offers 2).
+- [x] **The `ScrappingOutput` sandbox option did nothing, and the `scrap100`
+      0.75 factor was missing** - closed 2026-10-02: `ItemActionEntryScrap`
+      IL_010A-0133 computes the scrap yield as
+      `(int)(base_count * (scrap100 tag ? 1 : 0.75) * ScrappingOutputModifier)`
+      floored at 1. zdtd's InvTx scrap op deposited the raw recipe count, so it
+      over-yielded by a third on every non-`scrap100` item and ignored the
+      operator's scale. `tryScrap` now applies both factors, with
+      `config.scrapping_output` (sandbox and serverconfig arms; default 1.0) on
+      the server's own yield. Gated by `scenario the scrapping output option
+      scales the scrap yield`: a 4-count recipe yields 3 untagged, 6 at scale 2,
+      and 4 for a `scrap100` item (decisive: dropping the factors yields 4).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

@@ -152,6 +152,11 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `ScrappingOutput` (float, default 1.0): the scale on a scrap
+    /// recipe's output count (`ItemActionEntryScrap` IL_0118-0125 multiplies the
+    /// count by `ScrappingOutputModifier`; an item without the `scrap100` tag
+    /// already yields only 0.75 of it).
+    scrapping_output: f32 = 1.0,
     /// Sandbox `QuestsPerTier` (int, default 10): how many quests of the
     /// requested tier window the trader offers at once (`Quest.QuestsPerTier`,
     /// cctor default 10, read by the journal and the trader offer list); 0 =
@@ -520,6 +525,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "ScrappingOutput")) {
+            cfg.scrapping_output = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 100);
         } else if (std.mem.eql(u8, o.name, "QuestsPerTier")) {
             cfg.quests_per_tier = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "TraderMaxTier")) {
@@ -776,6 +783,9 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "ScrappingOutput")) |v| {
+        if (xml.parseF32(v)) |f| cfg.scrapping_output = std.math.clamp(f, 0, 100);
+    }
     if (prop(raw, "QuestsPerTier")) |v| cfg.quests_per_tier = clampU8Named("QuestsPerTier", v, 0, 100, cfg.quests_per_tier);
     if (prop(raw, "TraderMaxTier")) |v| cfg.trader_max_tier = clampU8Named("TraderMaxTier", v, 0, 6, cfg.trader_max_tier);
     if (prop(raw, "TraderResetInterval")) |v| {

@@ -377,6 +377,8 @@ pub const Game = struct {
     trader_reset_interval: i32 = -1,
     /// Sandbox `QuestsPerTier` (0 = keep the quests.xml value).
     quests_per_tier: u8 = 0,
+    /// Sandbox `ScrappingOutput`: the scrap yield scale.
+    scrapping_output: f32 = 1.0,
     /// Sandbox `SkillGainRate`: every Nth level grants skill points.
     skill_gain_rate: u8 = 1,
     /// Sandbox `SkillPointsPerLevel`; -1 = keep progression.xml's value.
