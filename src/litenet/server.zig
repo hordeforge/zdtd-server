@@ -39,6 +39,14 @@ pub const Server = struct {
     /// Stock ConnectionRequestCheck rate gate: false allows the ConnectRequest
     /// through, true rejects it with a LiteNet Disconnect (reject_rate_limit).
     /// Loopback is exempt (local tooling never collides with itself).
+    /// Pure join-flood comparison: true when `now_ms` is inside the window a
+    /// previous join opened. A backwards or wrapped clock counts as inside (fail
+    /// closed) - `now -% last` alone would read it as a huge gap and let the
+    /// flood through.
+    pub fn joinRateBlocked(now_ms: u64, last_ms: u64, limit_ms: u64) bool {
+        return now_ms < last_ms or now_ms -% last_ms < limit_ms;
+    }
+
     pub fn rateLimited(self: *Server, ip: u32) bool {
         if (self.join_rate_limit_ms == 0) return false;
         if (ip == 0 or ip == 0x7f000001) return false;
@@ -46,8 +54,8 @@ pub const Server = struct {
         var i: usize = 0;
         while (i < self.join_ip_n) : (i += 1) {
             if (self.join_ip[i] != ip) continue;
-            if (now_ms -% self.join_ip_ms[i] < self.join_rate_limit_ms) return true;
-            self.join_ip_ms[i] = now_ms;
+            if (joinRateBlocked(now_ms, self.join_ip_ms[i], self.join_rate_limit_ms)) return true;
+            if (now_ms > self.join_ip_ms[i]) self.join_ip_ms[i] = now_ms;
             return false;
         }
         if (self.join_ip_n < self.join_ip.len) {
@@ -302,3 +310,14 @@ pub const Server = struct {
         return error.TooManyPeers;
     }
 };
+
+test "the join rate limit fails closed on a backwards clock" {
+    // Inside the window, and anything at or before the stored stamp (a backwards
+    // or wrapped clock), is blocked.
+    try std.testing.expect(Server.joinRateBlocked(10_400, 10_000, 500));
+    try std.testing.expect(Server.joinRateBlocked(10_000, 10_000, 500));
+    try std.testing.expect(Server.joinRateBlocked(10, 10_000, 500));
+    // Past the window it opens.
+    try std.testing.expect(!Server.joinRateBlocked(10_500, 10_000, 500));
+    try std.testing.expect(!Server.joinRateBlocked(20_000, 10_000, 500));
+}

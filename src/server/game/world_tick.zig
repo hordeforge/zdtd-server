@@ -8,6 +8,9 @@
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
+// The lock staleness rule is shared with the grant path so both agree on a
+// backwards clock (via the c2s facade, which owns the lock helpers).
+const c2s_misc_lock = @import("../c2s/misc_lock.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
@@ -271,7 +274,7 @@ pub fn reapStaleLocks(self: *Game) void {
         if (h < 0) continue;
         const g = self.lock_granted_ns[i];
         if (g == 0) continue;
-        if (now -% g >= self.lock_stale_ns) self.clearLockSlot(i);
+        if (c2s_misc_lock.lockIsStale(now, g, self.lock_stale_ns)) self.clearLockSlot(i);
     }
 }
 

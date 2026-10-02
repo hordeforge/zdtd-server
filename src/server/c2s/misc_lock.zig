@@ -80,7 +80,7 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
             // Stale holder on this channel before grant check.
             if (self.lock_channel[ch] >= 0 and self.lock_granted_ns[ch] != 0) {
                 const now = clock.monoNs();
-                if (now -% self.lock_granted_ns[ch] >= self.lock_stale_ns) self.clearLockSlot(ch);
+                if (lockIsStale(now, self.lock_granted_ns[ch], self.lock_stale_ns)) self.clearLockSlot(ch);
             }
             const pos_key: u64 = if (firstLockTargetPos(req.targets_blob)) |p|
                 packLockPos(p.x, p.y, p.z)
@@ -282,4 +282,21 @@ test "VendingEnabled gates the vending lock target" {
     try std.testing.expect(vendingTargetAt(g, 7, 70, 8) == null);
     g.vending_enabled = true;
     try std.testing.expect(vendingTargetAt(g, 7, 70, 8) != null);
+}
+
+/// Pure staleness comparison for a held lock: only a forward clock can expire
+/// one. A backwards or wrapped clock would otherwise read as a huge age and free
+/// a live holder's slot, letting another player grab the container.
+pub fn lockIsStale(now_ns: u64, granted_ns: u64, stale_ns: u64) bool {
+    return now_ns >= granted_ns and now_ns -% granted_ns >= stale_ns;
+}
+
+test "a backwards clock does not expire a lock" {
+    const granted: u64 = 10_000_000_000;
+    const stale: u64 = 10_000_000_000; // 10 s
+    try std.testing.expect(!lockIsStale(granted, granted, stale));
+    try std.testing.expect(!lockIsStale(granted - 1, granted, stale));
+    try std.testing.expect(!lockIsStale(10, granted, stale));
+    try std.testing.expect(!lockIsStale(granted + stale - 1, granted, stale));
+    try std.testing.expect(lockIsStale(granted + stale, granted, stale));
 }

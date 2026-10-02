@@ -5729,8 +5729,13 @@ test "scenario inventory keep-open refreshes the lock stale window" {
     try lockOne(g, c, &rb, &fb);
     try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
 
-    // Baseline: a stamp older than the window is reaped.
-    g.lock_granted_ns[0] -%= g.lock_stale_ns + 1_000_000_000;
+    // Baseline: a stamp older than the window is reaped. The stamp is set to 1
+    // and the window to half a second rather than backdating by wrapping the
+    // stamp: a wrap lands in the future, which the reaper must not treat as old
+    // (a backwards clock cannot expire a live holder's lock).
+    const stock_stale = g.lock_stale_ns;
+    g.lock_stale_ns = 500_000_000;
+    g.lock_granted_ns[0] = 1;
     g.reapStaleLocks();
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
 
@@ -5738,10 +5743,11 @@ test "scenario inventory keep-open refreshes the lock stale window" {
     // refreshed to now, so the reaper leaves the live window alone.
     try lockOne(g, c, &rb, &fb);
     try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
-    g.lock_granted_ns[0] -%= g.lock_stale_ns + 1_000_000_000;
+    g.lock_granted_ns[0] = 1;
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryKeepOpen", &[_]u8{}));
     g.reapStaleLocks();
     try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
+    g.lock_stale_ns = stock_stale;
 
     std.debug.print("PASS lock-keepopen: keep-open refreshes the stale window\n", .{});
 }
