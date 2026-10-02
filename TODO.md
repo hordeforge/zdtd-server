@@ -1448,6 +1448,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       fail-closed value - a HitLocation-masked victim row cannot match None - and it
       is what the comment now says. The C2S path keeps passing the client's
       `d.body_part`, which is the case stock computes there.
+- [ ] **Junk drones have no server surface** - scoped 2026-10-03 from
+      `../7dtd-engine-research/docs/gameplay/vehicles-drones-turrets.md`:
+      `EntityDrone` "runs a real server-side state machine" (section 4.2c line 577,
+      `updateState` called from the manager update), so this is a real gap and not
+      a client-side cosmetic like projectiles. The RE gives the shape: a
+      `DroneManager` registry (`dronesActive`/`dronesUnloaded`/
+      `dronesWithoutOwner`, `DroneManager.Update` sharing the vehicle update
+      skeleton, `drones.dat` saved on `cSaveTime` = 120 s), spawn on join
+      (`SpawnFollowingDronesForPLayer`), waypoint following
+      (`UpdateWaypointsForPlayer` builds a list of (id, pos) pairs), teleport of far
+      followers, and per-player control (`ConsoleCmdJunkDrone` /
+      `ConsoleCmdServerJunkDrone` operate on the same registry from either side).
+      `src/server/c2s/join_enter.zig` notes "drones have no zdtd surface yet" at the
+      spot where a join would spawn one. First slice: entity + registry + join
+      spawn, no waypoints, with a scenario asserting the drone is streamed to its
+      owner and dies with the session.
 - [ ] **`ClientInfo.ping` is always 0** - measured 2026-10-03: `NetPackageClientInfo`
       is ToClient (`get_PackageDirection` IL=2) and its `pingTimes` list is what the
       client shows in the player list; stock's server fills it from LiteNetLib's
