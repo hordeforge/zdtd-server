@@ -433,8 +433,20 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
         // tier, truncated; a non-positive result means the ingredient is not
         // required at all - IL_0083 skips the scan before the item is ever
         // resolved - while a positive one is floored to 1 by FastMax (IL_0097).
-        const mod_count = assets_recipes.ingredientCount(recipe, ing.name, ing.count, craft_tier);
+        var mod_count = assets_recipes.ingredientCount(recipe, ing.name, ing.count, craft_tier);
         if (mod_count == 0) continue;
+        // `Recipe.CanCraft` IL_0087-0097: a positive count is multiplied by
+        // `XUiM_Recipes.GetCraftingInputModifier(recipe)` (the sandbox
+        // `CraftingInput`, default 1.0) and floored to 1 by FastMax. A recipe
+        // carrying the `sandboxIgnore` tag keeps its authored count
+        // (`GetCraftingInputModifier` returns 1 for it).
+        const input_scale = if (assets_recipes.tagsContain(recipe.tags, "sandboxIgnore"))
+            1.0
+        else
+            self.craftingInputScale();
+        if (input_scale != 1.0) {
+            mod_count = @intFromFloat(@max(@as(f32, @floatFromInt(mod_count)) * input_scale, 1.0));
+        }
         const id = self.ecsIdFromItemName(ing.name);
         if (id == 0) return false;
         const need_count = @max(1, mod_count);

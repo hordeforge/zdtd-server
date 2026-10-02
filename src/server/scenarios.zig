@@ -23228,3 +23228,81 @@ test "scenario the sandbox abundance scales block harvest drops" {
     try std.testing.expectEqual(@as(u32, 0), chunk_fill.tryBlockHarvestDrop(g, c.slot, 308, 70, 300, crop.id));
     std.debug.print("PASS harvest-abundance: the per-type sandbox scales reach the drops\n", .{});
 }
+
+test "scenario the crafting input option scales the ingredients" {
+    // `Recipe.CanCraft` IL_0087-0097 multiplies a positive ingredient count by
+    // `XUiM_Recipes.GetCraftingInputModifier(recipe)` (the sandbox
+    // `CraftingInput`, default 1.0) and floors it to 1; a recipe tagged
+    // `sandboxIgnore` is exempt.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var rc_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const rc = try std.fmt.bufPrint(&rc_buf, "{s}/recipes_input.xml", .{dir});
+    try io_fs.writeFile(rc,
+        \\<recipes>
+        \\<recipe name="craftTool" count="1" craft_time="1" tags="tool">
+        \\  <ingredient name="scrapIron" count="2" />
+        \\</recipe>
+        \\<recipe name="craftIgnored" count="1" craft_time="1" tags="sandboxIgnore">
+        \\  <ingredient name="scrapIron" count="2" />
+        \\</recipe>
+        \\</recipes>
+    );
+    // The Game owns the recipe table: `Game.deinit` calls `recipes.deinit()`.
+    g.recipes = try assets_recipes.loadFromPath(gpa, rc);
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1101, .name = "craftTool" },
+        .{ .id = 1102, .name = "scrapIron", .stack = 100 },
+        .{ .id = 1103, .name = "craftIgnored" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    _ = g.sim.depositItem(ps, 1102, 10);
+
+    const encode = struct {
+        fn group(id: u32, index: u8) [3]u8 {
+            return .{ @intCast('A' + (id / 26)), @intCast('A' + (id % 26)), @intCast('A' + index) };
+        }
+    }.group;
+    // CraftingInput (id 98) shares `SpeedValues`, where index 7 = 2.0.
+    const a = encode(98, 7);
+    g.sandbox_code = &[_]u8{ 'A', a[0], a[1], a[2] };
+    g.tick_n += 1;
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), g.craftingInputScale(), 0.001);
+
+    // 2x input: the recipe needs 4 scrapIron, so a `tryCraftRecipe` with only 3
+    // in the bag fails (and consumes nothing) and one with 4 succeeds.
+    const r_idx: u16 = for (g.recipes.defs, 0..) |d, i| {
+        if (std.mem.eql(u8, d.name, "craftTool")) break @intCast(i);
+    } else return error.TestUnexpectedResult;
+    const ig_idx: u16 = for (g.recipes.defs, 0..) |d, i| {
+        if (std.mem.eql(u8, d.name, "craftIgnored")) break @intCast(i);
+    } else return error.TestUnexpectedResult;
+    // The fixture started with 10; take the bag down to 3 by crafting nothing:
+    // depositItem adds, so instead drain via repeated `takeFromSlot` is not
+    // needed - place exactly 3 by starting from a fresh inventory.
+    const craft_mod = @import("game/craft.zig");
+    g.sim.inventory[ps] = .{};
+    _ = g.sim.depositItem(ps, 1102, 3);
+    try std.testing.expect(!craft_mod.tryCraft(g, c.slot, r_idx, 1));
+    _ = g.sim.depositItem(ps, 1102, 1);
+    try std.testing.expect(craft_mod.tryCraft(g, c.slot, r_idx, 1));
+
+    // A `sandboxIgnore` recipe keeps its authored 2: two more units are enough
+    // for its own craft (a non-exempt 2x scale would demand 4).
+    g.sim.inventory[ps] = .{};
+    _ = g.sim.depositItem(ps, 1102, 2);
+    try std.testing.expect(craft_mod.tryCraft(g, c.slot, ig_idx, 1));
+    std.debug.print("PASS crafting-input: the sandbox scale reaches the ingredient check\n", .{});
+}

@@ -763,6 +763,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       yields 2 instead of 4). The same round fixed the two collector test codes
       that wrote the sandbox grammar wrong (`'A'` once, then 3-byte groups), which
       had made the apiary case pass on defaults.
+- [x] **The `CraftingInput` sandbox option did nothing** - closed 2026-10-02:
+      `Recipe.CanCraft` IL_0087-0097 multiplies a positive ingredient count by
+      `XUiM_Recipes.GetCraftingInputModifier(recipe)` (the sandbox `CraftingInput`,
+      id 98, default 1.0) and floors it to 1; a recipe whose tags intersect
+      `sandboxIgnore` is exempt (IL_0000-0017). zdtd's craft validation used the
+      authored count, so `CraftingInput=2` servers charged half the ingredients
+      stock would. `tryCraftRecipe` now scales `need` per ingredient (skipping the
+      `sandboxIgnore` recipes) through `Game.craftingInputScale`, cached per tick
+      like the harvest scales. Gated by `scenario the crafting input option scales
+      the ingredients`: at scale 2 the recipe needs 4 scrap (3 fails, 4 crafts) and
+      the `sandboxIgnore` recipe still crafts from its authored 2 (decisive:
+      dropping the factor crafts with 3). `CraftingOutput`/`CraftingTime` were
+      checked in the same read and are **UI-only** in this assembly (their only
+      reader is `XUiM_Recipes` itself), so they are not server-side gaps.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

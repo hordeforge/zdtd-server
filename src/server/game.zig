@@ -463,6 +463,11 @@ pub const Game = struct {
     harvest_scales: [4]f32 = .{ 1, 1, 1, 1 },
     harvest_scales_tick: u64 = std.math.maxInt(u64),
 
+    /// The tick's sandbox crafting-input scale (sandbox `CraftingInput`,
+    /// default 1.0), cached like the harvest scales.
+    crafting_input_scale: f32 = 1.0,
+    crafting_input_scale_tick: u64 = std.math.maxInt(u64),
+
     /// Interned client-supplied CVar names (`NetPackageModifyCVar`): the cvar
     /// store holds slices, and a packet's name does not outlive the frame, so a
     /// bounded pool owns them for the session (no heap on the packet path).
@@ -2422,6 +2427,18 @@ pub const Game = struct {
             self.harvest_scales_tick = self.tick_n;
         }
         return self.harvest_scales;
+    }
+
+    /// `Recipe.CanCraft`'s ingredient multiplier (`XUiM_Recipes.
+    /// CraftingInputModifier`), refreshed once per tick from the sandbox code.
+    pub fn craftingInputScale(self: *Game) f32 {
+        if (self.crafting_input_scale_tick != self.tick_n) {
+            var buf: [512]sandbox.Group = undefined;
+            const groups = buf[0..sandbox.decode(self.sandbox_code, &buf)];
+            self.crafting_input_scale = game_tick.sandboxFloat(groups, "CraftingInput");
+            self.crafting_input_scale_tick = self.tick_n;
+        }
+        return self.crafting_input_scale;
     }
 
     pub fn takeBlockToken(self: *Game, c: *Client) bool {

@@ -84,6 +84,18 @@ pub const RecipeDef = struct {
 /// is charged. The query tags are the ingredient name; `perc_add` /
 /// `perc_subtract` are fractions (+0.25 = +25%, the non-loot passive
 /// convention) and `perc_set` replaces the accumulator rather than adding.
+/// Does a recipe's `tags` comma list contain `tag` (case-insensitive)? Used by
+/// the sandbox `CraftingInput` exemption (`Recipe.CanCraft` IL_0097 consults
+/// `XUiM_Recipes.GetCraftingInputModifier`, which returns 1 for a recipe whose
+/// tags intersect `sandboxIgnore`).
+pub fn tagsContain(tags_csv: []const u8, tag: []const u8) bool {
+    var it = std.mem.splitScalar(u8, tags_csv, ',');
+    while (it.next()) |raw| {
+        if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, raw, " \t"), tag)) return true;
+    }
+    return false;
+}
+
 pub fn ingredientCount(
     recipe: RecipeDef,
     ing_name: []const u8,
