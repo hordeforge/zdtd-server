@@ -152,6 +152,12 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `MaxTechType` (int 0..4, default 4): the highest item tech era
+    /// allowed. `ItemClass.HandleSandboxTechType` (IL=21) substitutes a rolled
+    /// item above the cap with its `PreviousTechType` chain, which drops
+    /// high-tech loot out of `LootContainer` (IL_008A) and trader stock
+    /// (IL_0022) on a stone-age server.
+    max_tech_type: u8 = 4,
     /// Sandbox `EnemySpawnMode` (yes/no, default on). Stock sets
     /// `EntityFactory.EnemySpawnMode`, which `EntitySpawner.
     /// ModifySpawnCountByGameDifficulty` (IL=6) reads to return 0, and the
@@ -448,14 +454,16 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "MaxTechType")) {
+            cfg.max_tech_type = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 4);
         } else if (std.mem.eql(u8, o.name, "EnemySpawnMode")) {
-            cfg.enemy_spawn_mode = sandbox.valueI(o, set, g.index) != 0;
+            cfg.enemy_spawn_mode = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "TerrainDamage")) {
             cfg.terrain_damage = sandboxPct(sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "CropGrowthSpeed")) {
             cfg.crop_growth_speed = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 1000);
         } else if (std.mem.eql(u8, o.name, "AllowZombieDigging")) {
-            cfg.allow_zombie_digging = sandbox.valueI(o, set, g.index) != 0;
+            cfg.allow_zombie_digging = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "HeatMapSensitivity")) {
             cfg.heat_map_sensitivity = std.math.clamp(sandbox.valueF(o, set, g.index), 0, 10);
         } else if (std.mem.eql(u8, o.name, "AISmellMode")) {
@@ -482,9 +490,9 @@ fn applySandboxCode(cfg: *Config) void {
         } else if (std.mem.eql(u8, o.name, "DropOnQuit")) {
             cfg.drop_on_quit = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "AirDropMarker")) {
-            cfg.air_drop_marker = sandbox.valueI(o, set, g.index) != 0;
+            cfg.air_drop_marker = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "BiomeProgression")) {
-            cfg.biome_progression = sandbox.valueI(o, set, g.index) != 0;
+            cfg.biome_progression = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "DeathPenalty")) {
             cfg.death_penalty = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 3);
         } else if (std.mem.eql(u8, o.name, "ZombieMove")) {
@@ -672,6 +680,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "MaxTechType")) |v| cfg.max_tech_type = clampU8Named("MaxTechType", v, 0, 4, cfg.max_tech_type);
     if (prop(raw, "EnemySpawnMode")) |v| cfg.enemy_spawn_mode = clampU8Named("EnemySpawnMode", v, 0, 1, @intFromBool(cfg.enemy_spawn_mode)) != 0;
     if (prop(raw, "BlockDamageAI")) |v| cfg.block_damage_ai = clampRangeNamed("BlockDamageAI", v, 0, 1000, cfg.block_damage_ai);
     if (prop(raw, "BlockDamageAIBM")) |v| cfg.block_damage_ai_bm = clampRangeNamed("BlockDamageAIBM", v, 0, 1000, cfg.block_damage_ai_bm);
@@ -785,6 +794,35 @@ test "parse config fixture" {
     // IncomingDamage -> the flat zombie->player override).
     try std.testing.expectEqual(@as(u16, 150), cfg.block_damage_player);
     try std.testing.expectApproxEqAbs(@as(f32, 0.75), cfg.incoming_damage_modifier, 1e-4);
+    // Options 74 (`MaxTechType`, index 1 = 1) and 30 (`EnemySpawnMode`, index 0
+    // = off) in the same stock code grammar: 'A' once, then 3-byte groups of
+    // (option id base-26 pair, value index).
+    const group = struct {
+        fn g(id: u32, index: u8) [3]u8 {
+            return .{ @intCast('A' + (id / 26)), @intCast('A' + (id % 26)), @intCast('A' + index) };
+        }
+    }.g;
+    var code_buf: [16]u8 = undefined;
+    var n: usize = 0;
+    code_buf[n] = 'A';
+    n += 1;
+    inline for ([_]struct { u32, u8 }{ .{ 74, 1 }, .{ 30, 1 }, .{ 40, 0 }, .{ 53, 1 }, .{ 55, 0 } }) |pair| {
+        const g3 = comptime group(pair[0], pair[1]);
+        @memcpy(code_buf[n..][0..3], &g3);
+        n += 3;
+    }
+    cfg.sandbox_code = code_buf[0..n];
+    applySandboxCode(&cfg);
+    // Bool options decode through `sandbox.valueB` (0 = No, 1 = Yes): the four
+    // YesNo arms read the index, where `valueI` would fall through to the
+    // option's stock default (1) and treat "No" as "Yes".
+    try std.testing.expectEqual(@as(u8, 1), cfg.max_tech_type);
+    // 30 (EnemySpawnMode) index 1 = Yes, 40 (AllowZombieDigging) index 0 = No,
+    // 53 (AirDropMarker) index 1 = Yes, 55 (BiomeProgression) index 0 = No.
+    try std.testing.expect(cfg.enemy_spawn_mode);
+    try std.testing.expect(!cfg.allow_zombie_digging);
+    try std.testing.expect(cfg.air_drop_marker);
+    try std.testing.expect(!cfg.biome_progression);
     // Unset gameplay options keep stock defaults.
     try std.testing.expectEqual(@as(u8, 1), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);

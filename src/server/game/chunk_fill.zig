@@ -545,7 +545,11 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     var si: usize = 0;
     var i: usize = 0;
     while (i < n and si < cont.slot_count) : (i += 1) {
-        const eid = self.ecsIdFromItemName(stacks[i].item_name);
+        // Sandbox `MaxTechType`: `LootContainer` IL_008A runs every rolled
+        // class through `ItemClass.HandleSandboxTechType` before it is stored,
+        // substituting an item above the server's tech cap with its
+        // previous-tech chain (a null result drops the row).
+        const eid = self.items.techSubstitute(self.ecsIdFromItemName(stacks[i].item_name), self.max_tech_type);
         if (eid == 0) continue;
         // The template rolls quality for every stack; only quality items
         // (stock ItemClass.HasQuality = tiered effect controller, which

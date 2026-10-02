@@ -805,6 +805,34 @@ nothing here is already waived. The four gaps the same audit closed are in
       the IL shows the static read only by `SleeperVolume`, `EntitySpawner` and
       `QuestClass`, so ambient/biome and director spawns are deliberately left
       alone (an earlier draft gated the director and was removed as unfounded).
+- [x] **The `MaxTechType` sandbox option did nothing** - closed 2026-10-02:
+      option 74 (int 0..4, default 4) is the `ItemClass.MaxTechType` static that
+      `HandleSandboxTechType` (IL=21) applies by walking an item's
+      `PreviousTechType` chain (`GetPreviousTechItem` IL=73) until the item's
+      `ItemTechType` fits, returning null when the chain dead-ends. The IL shows
+      two callers: `LootContainer` (IL_008A) and `TraderInfo` (IL_0022). zdtd
+      parsed neither property, so a "stone age" server still rolled steel out of
+      loot containers and trader stock. items.xml `ItemTechType` /
+      `PreviousTechType` are collected at load (`stock_tech_types` /
+      `stock_prev_tech`, index-aligned with `stock_names`) and
+      `ItemTable.techSubstitute` implements the chain with a 16-hop cycle guard;
+      the loot-bag fill, the loot-container fill and the trader stock roll all
+      resolve through it. Gated by `tech substitute walks the previous tech
+      chain` (cap 2 gives iron, cap 1 gives stone, cap 0 and a dead-end chain
+      give 0) plus the serverconfig test's `MaxTechType=1` decode (decisive:
+      pinning the cap open returns the original item). Residual: no shipped loot
+      list in the fixtures carries an above-cap item, so the substitution is
+      proven at the table and config level rather than through a full loot roll.
+- [x] **Bool sandbox options decoded through the int accessor** - closed
+      2026-10-02: `sandbox.valueI` falls through to `default_i` for a `.boolean`
+      (`YesNo`) set, so the four `!= 0` arms read every boolean as its stock
+      default (1 = Yes) whatever the code said: `EnemySpawnMode=0`,
+      `AllowZombieDigging=0`, `BiomeProgression=0` and `AirDropMarker=0` all
+      decoded as on. That silently broke the round-88 digging option on the
+      sandbox path (the sim gate was right; the parse never turned it off). All
+      four now use `sandbox.valueB` (0 = No, 1 = Yes), and the serverconfig test
+      asserts both index values for each. Found while adding `MaxTechType`, whose
+      own arm had the same flaw.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

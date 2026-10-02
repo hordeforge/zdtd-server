@@ -354,6 +354,9 @@ pub const Game = struct {
     block_damage_player: u16 = 100,
     /// Sandbox `TerrainDamage` percent (`ItemActionAttack` IL_0306-0329).
     terrain_damage: u16 = 100,
+    /// Sandbox `MaxTechType`: the item tech-era cap (`ItemClass.
+    /// HandleSandboxTechType` IL=21 substitutes loot and trader stock).
+    max_tech_type: u8 = 4,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
     /// SandboxCode option 17 IncomingDamage flat override (0 = unset ->
@@ -890,6 +893,7 @@ pub const Game = struct {
         self.sim.crop_growth_speed = opts.crop_growth_speed;
         self.terrain_damage = opts.terrain_damage;
         self.sim.enemy_spawn_mode = opts.enemy_spawn_mode;
+        self.max_tech_type = opts.max_tech_type;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;

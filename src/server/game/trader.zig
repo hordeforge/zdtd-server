@@ -225,7 +225,11 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     const qmax = tt.quality_max_mod;
     for (rolled[0..rn]) |r| {
         if (n >= ecs.components.max_stock) break;
-        const iid = self.ecsIdFromItemName(r.name);
+        // Sandbox `MaxTechType`: `TraderInfo` IL_0022 runs every stocked class
+        // through `ItemClass.HandleSandboxTechType`, substituting an item above
+        // the server's tech cap with its previous-tech chain (null drops the
+        // row).
+        const iid = self.items.techSubstitute(self.ecsIdFromItemName(r.name), self.max_tech_type);
         if (iid == 0) continue;
         // Stock `TraderInfo::SpawnItem` IL_022F calls `AddGSStats` with stage
         // -1 (derived from the first row of the entry's quality) on every

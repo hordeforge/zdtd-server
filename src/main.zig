@@ -776,6 +776,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .crop_growth_speed = cfg.crop_growth_speed,
         .terrain_damage = cfg.terrain_damage,
         .enemy_spawn_mode = cfg.enemy_spawn_mode,
+        .max_tech_type = cfg.max_tech_type,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
         .player_killing_mode = cfg.player_killing_mode,

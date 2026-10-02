@@ -49,7 +49,11 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     if (n == 0) return;
     var i: usize = 0;
     while (i < n) : (i += 1) {
-        const eid = ecsIdFromItemName(self, stacks[i].item_name);
+        // Sandbox `MaxTechType`: `LootContainer` IL_008A runs every rolled
+        // class through `ItemClass.HandleSandboxTechType`, which substitutes an
+        // item above the server's tech cap with its previous-tech chain (a null
+        // result drops the row).
+        const eid = self.items.techSubstitute(ecsIdFromItemName(self, stacks[i].item_name), self.max_tech_type);
         if (eid == 0) continue;
         // Carry the rolled ItemValue fields, like the container fill: a death
         // bag is a stock LootContainer roll, so quality and the

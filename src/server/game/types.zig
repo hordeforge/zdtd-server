@@ -366,6 +366,8 @@ pub const InitOptions = struct {
     terrain_damage: u16 = 100,
     /// Sandbox `EnemySpawnMode` (false = nothing spawns).
     enemy_spawn_mode: bool = true,
+    /// Sandbox `MaxTechType` (the item tech-era cap).
+    max_tech_type: u8 = 4,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

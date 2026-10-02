@@ -105,6 +105,13 @@ pub const ItemDef = struct {
     /// RE items.md §7 + ItemValue.get_PercentUsesLeft (IL=17).
     degradation_min: u32 = 0,
     degradation_max: u32 = 0,
+    /// items.xml `ItemTechType` (stock `ItemClass.ItemTechType`, `ItemTechTypes`
+    /// 0..4): the era the item belongs to, used by the sandbox `MaxTechType` cap
+    /// (`ItemClass.HandleSandboxTechType` IL=21).
+    tech_type: u8 = 0,
+    /// items.xml `PreviousTechType`: the comma-separated lower-tech substitute
+    /// chain (`ItemClass.GetPreviousTechItem` IL=73 walks it).
+    previous_tech: []const u8 = "",
     /// Stock `ItemClass.HasQuality` (IL=9): true when any `<effect_group>` is
     /// owner-tiered. `MinEffectGroup.OwnerTiered` defaults to true in the ctor
     /// and stock items.xml only ever writes `tiered="false"`, so an item has
@@ -330,6 +337,10 @@ pub const ItemTable = struct {
     stock_stacks: []const u16 = &.{},
     /// Per-item EconomicSellScale (stock ItemClass field, default 1.0; A39).
     stock_econ_scales: []const f32 = &.{},
+    /// Per `stock_names` row `ItemTechType` (0..4) and the `PreviousTechType`
+    /// chain, for the sandbox `MaxTechType` substitution.
+    stock_tech_types: []const u8 = &.{},
+    stock_prev_tech: []const []const u8 = &.{},
     /// Sandbox `MaxStackSize` option (163 `StackSizeMultiplier`, default 1.0):
     /// stock's `ItemClass.MaxStackSizeModifier` static, which
     /// `ItemClass.get_MaxCount()` (IL=10) multiplies into the Stacknumber for
@@ -380,6 +391,48 @@ pub const ItemTable = struct {
             const sn = builtinStockName(id) orelse continue;
             if (!std.mem.eql(u8, sn, name)) continue;
             if (self.byId(id)) |d| return d;
+        }
+        return null;
+    }
+
+    /// `ItemClass.HandleSandboxTechType` (IL=21): an item whose `ItemTechType`
+    /// exceeds the sandbox `MaxTechType` is replaced by its `PreviousTechType`
+    /// chain until one fits; 0 when the chain dead-ends (stock returns null and
+    /// the caller drops the row). Stock walks the chain by class pointer; zdtd
+    /// resolves by name with a hop cap so a modded cycle cannot spin.
+    pub fn techSubstitute(self: *const ItemTable, item_id: u16, max_tech: u8) u16 {
+        if (max_tech >= 4) return item_id;
+        var id = item_id;
+        var hops: usize = 0;
+        while (hops < 16) : (hops += 1) {
+            const idx = self.stockIndexOf(id) orelse return id;
+            if (self.stock_tech_types.len <= idx) return id;
+            if (self.stock_tech_types[idx] <= max_tech) return id;
+            if (self.stock_prev_tech.len <= idx) return 0;
+            const prev = self.stock_prev_tech[idx];
+            if (prev.len == 0) return 0;
+            var it = std.mem.splitScalar(u8, prev, ',');
+            var next_id: u16 = 0;
+            while (it.next()) |raw| {
+                const nm = std.mem.trim(u8, raw, " \t");
+                if (nm.len == 0) continue;
+                const d = self.byName(nm) orelse continue;
+                if (d.id == no_item_id) continue;
+                next_id = d.id;
+                break;
+            }
+            if (next_id == 0 or next_id == id) return 0;
+            id = next_id;
+        }
+        return 0;
+    }
+
+    /// Index into `stock_names` for an item id, or null when the id is not a
+    /// stock XML row (builtin/unknown).
+    fn stockIndexOf(self: *const ItemTable, id: u16) ?usize {
+        const d = self.byId(id) orelse return null;
+        for (self.stock_names, 0..) |n, i| {
+            if (std.mem.eql(u8, n, d.name)) return i;
         }
         return null;
     }
@@ -766,6 +819,7 @@ const boolProp = item_parse.boolProp;
 const itemStatsBody = item_parse.itemStatsBody;
 pub const tryLoad = item_parse.tryLoad;
 const rootMaxQualityTier = item_parse.rootMaxQualityTier;
+const test_tmp = @import("../util/test_tmp.zig");
 const max_scaled_stack = item_parse.max_scaled_stack;
 pub const item_builtin = @import("item_builtin.zig");
 pub const builtin_defs = item_builtin.builtin_defs;
@@ -800,6 +854,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer own_stacks.deinit(allocator);
     var ext_names: std.ArrayList([]const u8) = .empty;
     defer ext_names.deinit(allocator);
+    var stock_tech: std.ArrayList(u8) = .empty;
+    defer stock_tech.deinit(allocator);
+    var stock_prev: std.ArrayList([]const u8) = .empty;
+    defer stock_prev.deinit(allocator);
     var stock_econs: std.ArrayList(f32) = .empty;
     defer stock_econs.deinit(allocator);
     var stock_econ_declared: std.ArrayList(bool) = .empty;
@@ -983,6 +1041,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 stack = xml.parseU16(v) orelse stock_default_stack;
             }
             try own_stacks.append(allocator, if (stack_own != null) stack else 0);
+            const tech_v = xml.propertyValue(clean[ii..item_end], "ItemTechType");
+            try stock_tech.append(allocator, if (tech_v) |tv| @as(u8, @truncate(xml.parseU16(tv) orelse 0)) else 0);
+            const prev_v = xml.propertyValue(clean[ii..item_end], "PreviousTechType");
+            try stock_prev.append(allocator, if (prev_v) |pv| try arena.dupe(u8, pv) else "");
             const ext = xml.propertyValue(clean[ii..item_end], "Extends");
             try ext_names.append(allocator, if (ext) |e| try arena.dupe(u8, e) else "");
             // Single, not an integer: stock fields EconomicValue as `Single`
@@ -2188,6 +2250,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     @memcpy(ss, stock_stacks.items);
     const ssc = try arena.alloc(f32, stock_econ_scales.items.len);
     @memcpy(ssc, stock_econ_scales.items);
+    // Sandbox `MaxTechType`: `ItemTechType` / `PreviousTechType` per stock name
+    // (`ItemClass.HandleSandboxTechType` IL=21). Index-aligned with
+    // `stock_names`, so the lookup is a scan of that row set.
+    const stt = try arena.alloc(u8, stock_tech.items.len);
+    @memcpy(stt, stock_tech.items);
+    const spt = try arena.alloc([]const u8, stock_prev.items.len);
+    @memcpy(spt, stock_prev.items);
 
     return .{
         .defs = defs,
@@ -2197,6 +2266,47 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .stock_types = st,
         .stock_stacks = ss,
         .stock_econ_scales = ssc,
+        .stock_tech_types = stt,
+        .stock_prev_tech = spt,
         .max_quality_tier = rootMaxQualityTier(clean),
     };
+}
+
+test "tech substitute walks the previous tech chain" {
+    // `ItemClass.HandleSandboxTechType` IL=21: an item whose `ItemTechType`
+    // exceeds the sandbox `MaxTechType` becomes its `PreviousTechType` chain
+    // entry, and a chain that dead-ends yields 0 (the caller drops the row).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "{s}/items_tech.xml", .{dir});
+    try @import("../util/io_fs.zig").writeFile(path,
+        \\<items>
+        \\<item name="steelGizmo"><property name="ItemTechType" value="3" /><property name="PreviousTechType" value="ironGizmo" /></item>
+        \\<item name="ironGizmo"><property name="ItemTechType" value="2" /><property name="PreviousTechType" value="stoneGizmo" /></item>
+        \\<item name="stoneGizmo"><property name="ItemTechType" value="1" /></item>
+        \\<item name="orphanGizmo"><property name="ItemTechType" value="4" /></item>
+        \\</items>
+    );
+    var t = try loadFromPath(gpa, path);
+    defer t.deinit();
+    const steel = t.byName("steelGizmo").?.id;
+    const iron = t.byName("ironGizmo").?.id;
+    const stone = t.byName("stoneGizmo").?.id;
+    const orphan = t.byName("orphanGizmo").?.id;
+    // Cap 4 (the default) leaves everything alone.
+    try std.testing.expectEqual(steel, t.techSubstitute(steel, 4));
+    // Cap 2: steel becomes iron.
+    try std.testing.expectEqual(iron, t.techSubstitute(steel, 2));
+    // Cap 1: the chain runs down to stone, the lowest era in the fixture.
+    try std.testing.expectEqual(stone, t.techSubstitute(steel, 1));
+    // Cap 0: even stone is above the cap and its chain dead-ends, so the row is
+    // dropped (stock returns null).
+    try std.testing.expectEqual(@as(u16, 0), t.techSubstitute(steel, 0));
+    // A chain that dead-ends drops the item.
+    try std.testing.expectEqual(@as(u16, 0), t.techSubstitute(orphan, 1));
 }
