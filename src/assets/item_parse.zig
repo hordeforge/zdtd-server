@@ -270,6 +270,16 @@ pub fn writeDotNetString(buf: []u8, pos: *usize, s: []const u8) error{Overflow}!
 /// list: an untagged passive applies to every drop; a tagged passive needs
 /// a shared tag with the drop (an untagged drop is only matched by
 /// untagged passives).
+/// Stock `ItemClass.IsLimited` (`ItemClass` IL_047F-0496): true when the item's
+/// `Group` list carries an entry equal to `Limited` (exact, after trimming).
+pub fn isLimitedItem(groups_csv: []const u8) bool {
+    var it = std.mem.splitScalar(u8, groups_csv, ',');
+    while (it.next()) |raw| {
+        if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t"), "Limited")) return true;
+    }
+    return false;
+}
+
 pub fn tagsIntersect(row_tags: []const u8, drop_tags: []const u8) bool {
     if (row_tags.len == 0) return true;
     if (drop_tags.len == 0) return false;

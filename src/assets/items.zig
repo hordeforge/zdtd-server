@@ -106,6 +106,10 @@ pub const ItemDef = struct {
     /// RE items.md §7 + ItemValue.get_PercentUsesLeft (IL=17).
     degradation_min: u32 = 0,
     degradation_max: u32 = 0,
+    /// items.xml `Group` (a comma list; stock `ItemClass.Groups`) - the
+    /// `Limited` entry marks the item `IsLimited`, which the sandbox
+    /// `BackpackCrafting=BasicsOnly` keeps craftable from the backpack.
+    groups: []const u8 = "",
     /// items.xml `ItemTechType` (stock `ItemClass.ItemTechType`, `ItemTechTypes`
     /// 0..4): the era the item belongs to, used by the sandbox `MaxTechType` cap
     /// (`ItemClass.HandleSandboxTechType` IL=21).
@@ -958,6 +962,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_smelt_curves.deinit(allocator);
     var stock_smelt_n: std.ArrayList(u8) = .empty;
     defer stock_smelt_n.deinit(allocator);
+    var stock_groups: std.ArrayList([]const u8) = .empty;
+    defer stock_groups.deinit(allocator);
     var stock_tags: std.ArrayList([]const u8) = .empty;
     defer stock_tags.deinit(allocator);
     var stock_armor_group: std.ArrayList([]const u8) = .empty;
@@ -1443,6 +1449,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // Tags property: the mod-attachment tag surface (comma list).
             const tags = xml.propertyValue(body, "Tags") orelse "";
             try stock_tags.append(allocator, tags);
+            try stock_groups.append(allocator, xml.propertyValue(body, "Group") orelse "");
             try stock_armor_group.append(allocator, xml.propertyValue(body, "ArmorGroup") orelse "");
             // DegradationPerUse (base_set): the per-use durability wear.
             // The 3 perc_add rows are the modifier form - recorded.
@@ -1721,6 +1728,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         defer own_range_map.deinit(allocator);
         var own_dmgblock_map: std.StringHashMapUnmanaged(f32) = .empty;
         defer own_dmgblock_map.deinit(allocator);
+        var own_groups_map: std.StringHashMapUnmanaged([]const u8) = .empty;
+        defer own_groups_map.deinit(allocator);
         var own_tags_map: std.StringHashMapUnmanaged([]const u8) = .empty;
         defer own_tags_map.deinit(allocator);
         var ext_map: std.StringHashMapUnmanaged([]const u8) = .empty;
@@ -1742,6 +1751,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (stock_melee_ranges.items[idx] != 0) try own_range_map.put(allocator, n, stock_melee_ranges.items[idx]);
             if (stock_dmg_blocks.items[idx] != 0) try own_dmgblock_map.put(allocator, n, stock_dmg_blocks.items[idx]);
             if (stock_tags.items[idx].len > 0) try own_tags_map.put(allocator, n, stock_tags.items[idx]);
+            if (stock_groups.items[idx].len > 0) try own_groups_map.put(allocator, n, stock_groups.items[idx]);
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
         const max_hops: usize = 24;
@@ -1857,6 +1867,20 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             while (hops < max_hops) : (hops += 1) {
                 if (own_tags_map.get(cur)) |t| {
                     stock_tags.items[idx] = t;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Groups inherit through Extends like Tags (the `Limited` mark rides a
+        // parent row on stock's schematic masters).
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_groups.items[idx].len > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_groups_map.get(cur)) |t| {
+                    stock_groups.items[idx] = t;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -2220,6 +2244,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .passives = item_passives[stock_passive_ranges.items[idx][0] .. stock_passive_ranges.items[idx][0] + stock_passive_ranges.items[idx][1]],
             .triggered = item_triggered[stock_triggered_ranges.items[idx][0] .. stock_triggered_ranges.items[idx][0] + stock_triggered_ranges.items[idx][1]],
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
+            .groups = try arena.dupe(u8, stock_groups.items[idx]),
             .armor_group = try arena.dupe(u8, stock_armor_group.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],
             .mod_slots_n = stock_mslots_n.items[idx],

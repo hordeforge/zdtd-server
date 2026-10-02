@@ -402,9 +402,14 @@ pub fn generalCraftAllowed(self: *const Game, recipe: assets_recipes.RecipeDef) 
     if (!(recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category)) return false;
     // Sandbox `BackpackCrafting` (`XUiM_Recipes.UpdateRecipesforBackpackCrafting`
     // IL_0025-0092): stock rewrites every backpack-craftable recipe's
-    // `craftingArea` to "workbench" unless the option is Enabled, which the
-    // server's `Recipe.CanCraft` then sees, so only Enabled leaves this path.
-    return self.backpack_crafting == 1;
+    // `craftingArea` to "workbench" unless the option is Enabled (or the option
+    // is BasicsOnly and the OUTPUT item carries the `Limited` group), which the
+    // server's `Recipe.CanCraft` then sees.
+    return switch (self.backpack_crafting) {
+        1 => true,
+        2 => if (self.items.byName(recipe.name)) |d| assets_item_parse.isLimitedItem(d.groups) else false,
+        else => false,
+    };
 }
 
 fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
@@ -974,6 +979,18 @@ test "general craft path rejects workstation/tool/material recipes" {
     try std.testing.expect(!generalCraftAllowed(g, base));
     g.backpack_crafting = 3;
     try std.testing.expect(!generalCraftAllowed(g, base));
+    // BasicsOnly (2) keeps a `Limited`-group output craftable and refuses the
+    // rest (`ItemClass.IsLimited` IL_047F-0496).
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 1400, .name = "limitedGizmo", .groups = "limited, Limited" },
+        .{ .id = 1401, .name = "plainGizmo" },
+    };
+    g.items = .{ .defs = &idefs, .source = .builtin };
+    g.backpack_crafting = 2;
+    try std.testing.expect(generalCraftAllowed(g, .{ .name = "limitedGizmo" }));
+    try std.testing.expect(!generalCraftAllowed(g, .{ .name = "plainGizmo" }));
+    g.backpack_crafting = 1;
+    try std.testing.expect(generalCraftAllowed(g, .{ .name = "plainGizmo" }));
 }
 
 test "getScrapableRecipe and tryScrap follow RE weight/category rules" {
