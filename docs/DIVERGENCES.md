@@ -450,11 +450,12 @@ None of the 29 is a live gap, for one of three reasons:
   table, so there is nothing for a reported change to land in. `SetProp` is a
   world prop change (`Block.PlaceProp` IL=87 to `WorldBase.SetPropRPC`, beside
   `SetBlockRPC`), sender-validated by user id and entity id, then fanned by
-  `GameManager.SetPropsOnClients`. UPDATED 2026-10-02: the wire contract landed
-  (`wire/stock_props.zig` parses and builds the body, `PropChangeInfo.Write`
-  pinned), but there is still no prop store or relay, so an arriving change has
-  nowhere to land and the package stays unhandled; the apply and the channel-192
-  fan-out are the next slice (`TODO.md`). `SimpleRPC` (IL=17) carries the holding-item
+  `GameManager.SetPropsOnClients`. UPDATED 2026-10-03: handled. The wire contract
+  (`wire/stock_props.zig`, `PropChangeInfo.Write` pinned), the store
+  (`world/props.zig`) and the relay (`c2s/blocks_props.zig`: chunk required per
+  change, batch abandoned on a miss, body fanned out excluding the changer) all
+  land. Still missing: the chunk-stream leg, so a late joiner does not receive
+  props placed before it arrived, and persistence. `SimpleRPC` (IL=17) carries the holding-item
   hooks - type 0 `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset` -
   which are client-side item callbacks with no server state to change. All
   three are unhandled: the package reaches the dispatch chain, raises the

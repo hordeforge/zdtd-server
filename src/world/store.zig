@@ -4,6 +4,7 @@
 //! for heights only (blocks regenerate from DTM+TTS). See ADR 0011.
 
 const std = @import("std");
+const props_mod = @import("props.zig");
 const dtm = @import("dtm.zig");
 const prefabs_mod = @import("prefabs.zig");
 pub const prefabs = prefabs_mod;
@@ -708,6 +709,12 @@ pub const World = struct {
     /// so eviction can pick the coldest resident. Driven purely by access
     /// order, which DST replay reproduces exactly.
     touch_seq: u64 = 0,
+
+    /// Applied `NetPackageSetProp` tuples, keyed by (chunk, prop id). Fixed
+    /// capacity, overwrite by key: no allocation on the packet path. The
+    /// chunk-stream leg that would hand these to a late joiner does not exist
+    /// yet, so this is the live-edit state only.
+    props: props_mod.Store = .{},
 
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
         // Fail closed: a world dir we cannot create would only surface later as

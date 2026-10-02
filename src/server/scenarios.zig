@@ -24706,3 +24706,55 @@ test "scenario the phase gate rejects a playing-phase package before spawn" {
     try std.testing.expect(g.sim.health[vslot].hp < hp_before);
     std.debug.print("PASS phase gate: a pre-spawn playing package is rejected and counted\n", .{});
 }
+
+test "scenario a prop edit applies locally and relays to the others" {
+    // Stock `GameManager.ChangeProps` requires the chunk and bails the batch on a
+    // miss, then `SetPropsOnClients` fans the same package out excluding the
+    // changer. Both halves are observable: the editor's own store gains the
+    // record and does NOT get the echo, the other peer gets the untouched body.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    // A resident chunk (0,0): the store must hold it for the batch to apply.
+    _ = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+
+    const changes = [_]packages.PropChange{
+        .{ .chunk_x = 0, .chunk_y = 0, .prop_id = 5, .position = .{ 1, 2, 3 } },
+    };
+    var body_buf: [512]u8 = undefined;
+    var fbuf: [1024]u8 = undefined;
+    const body = try packages.buildSetPropBody(&body_buf, null, &changes, ca.entity_id);
+
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSetProp", body));
+    // Applied: the record exists with the position the change named.
+    const idx = g.world.props.indexOf(0, 0, 5) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 3), g.world.props.records[idx].position[2]);
+    try std.testing.expectEqual(@as(u8, 1 | 2), g.world.props.records[idx].set_flags);
+    // Relayed to B, not echoed to A.
+    const setprop_id = packages.idOf("NetPackageSetProp").?;
+    try std.testing.expect(cap_b.indexOfPkgId(setprop_id) != null);
+    try std.testing.expect(cap_a.indexOfPkgId(setprop_id) == null);
+
+    // A change in a chunk the world does not hold abandons the batch: nothing is
+    // stored and nothing is relayed (stock's GetChunkSync miss).
+    const far = [_]packages.PropChange{.{ .chunk_x = 4000, .chunk_y = 4000, .prop_id = 9, .position = .{ 1, 1, 1 } }};
+    const far_body = try packages.buildSetPropBody(&body_buf, null, &far, ca.entity_id);
+    const n_before = g.world.props.n;
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSetProp", far_body));
+    try std.testing.expectEqual(n_before, g.world.props.n);
+    try std.testing.expect(g.world.props.indexOf(4000, 4000, 9) == null);
+    try std.testing.expect(cap_b.indexOfPkgId(setprop_id) == null);
+    std.debug.print("PASS setprop: apply + relay, batch dropped on a chunk miss\n", .{});
+}

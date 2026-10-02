@@ -1397,7 +1397,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       Pinned by `sandbox GlobalLootCount drives the LootAbundance stat` (50 from
       the pref, 200 after the code sets the 2.0 ladder entry; decisive: zeroing
       the arm leaves 100).
-- [ ] **`NetPackageSetProp` is parsed but not applied** - started 2026-10-02:
+- [ ] **`NetPackageSetProp` has no chunk-stream leg or persistence** - updated
+      2026-10-03: the wire contract, the store (`src/world/props.zig`, keyed by
+      (chunk, prop id), fixed capacity, overwrite by key), the apply and the
+      channel-192 relay (`src/server/c2s/blocks_props.zig`, chunk required per
+      change and the batch abandoned on a miss like stock `ChangeProps`) are in and
+      covered by `scenario a prop edit applies locally and relays to the others`.
+      What remains: the chunk-stream leg so a late joiner sees props placed before
+      it arrived, and persistence in the world store. Superseded note:
       `wire/stock_props.zig` is the wire contract (`PropChangeInfo.Write`
       IL_0000-0136 pinned: ChunkPos i32,i32, a flags byte with PropId 1 / Position 2
       / Rotation 4 / Scale 8 / BlockValue 16, the present values in that order, and
