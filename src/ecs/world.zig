@@ -482,6 +482,9 @@ pub const World = struct {
     feral_sense_option: u8 = 0,
     /// The sandbox `AISmellMode` option (0 = the AI smell leg is off).
     ai_smell_mode: u8 = 3,
+    /// The sandbox `AllowZombieDigging` option (0 = the AI never digs through a
+    /// blocking cell; stock `EntityMoveHelper.AllowZombieDigging`).
+    allow_zombie_digging: bool = true,
     /// Item-mod-side PhysicalDamageResist percent summed over the entity's
     /// equipped items' installed modifiers (EffectManager layer 13) and
     /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`

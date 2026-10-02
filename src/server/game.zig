@@ -872,6 +872,7 @@ pub const Game = struct {
         self.sim.feral_sense_option = opts.zombie_feral_sense;
         self.sim.ai_smell_mode = opts.ai_smell_mode;
         self.sim.director.heat_sensitivity = opts.heat_map_sensitivity;
+        self.sim.allow_zombie_digging = opts.allow_zombie_digging;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;

@@ -970,7 +970,7 @@ pub fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) voi
                 ai.vy = @sqrt(2.0 * g * w.rules.ai.jump_height);
                 ai.jump_cd = w.rules.ai.jump_delay_s;
                 ai.jumping = true;
-            } else if (!ai.digging and w.solid_fn != null) {
+            } else if (!ai.digging and w.solid_fn != null and w.allow_zombie_digging) {
                 ai.digging = true;
                 ai.dig_x = bx;
                 ai.dig_y = by;

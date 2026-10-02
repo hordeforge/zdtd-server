@@ -706,6 +706,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       sensitivity scales and can disable activity` (decisive: pinning the factor
       to 1 fails it). Residual: zdtd's 0..10 clamp is its own bound; the stock
       picker's High value is not in the RE.
+- [x] **The `AllowZombieDigging` sandbox option did nothing** - closed 2026-10-02:
+      the option (default on) is `EntityMoveHelper.AllowZombieDigging`, which gates
+      the dig branch when a blocked AI cannot jump the obstacle (IL_02E3). zdtd
+      ignored it, so an operator who turned digging off still had zombies chewing
+      through walls. The sandbox code and the serverconfig property (0/1) now
+      parse into `config.allow_zombie_digging` -> `InitOptions` ->
+      `World.allow_zombie_digging`, and the `stepToward` dig decision reads it.
+      Gated by the dig case in `move helper: a blocked grounded zombie digs the
+      blocking block`, which now walks the same wall with the option off and
+      asserts no dig starts (decisive: forcing the gate open fails it).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

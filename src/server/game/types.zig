@@ -358,6 +358,8 @@ pub const InitOptions = struct {
     ai_smell_mode: u8 = 3,
     /// Sandbox `HeatMapSensitivity` (the director's activity multiplier).
     heat_map_sensitivity: f32 = 1.0,
+    /// Sandbox `AllowZombieDigging` (false = the AI never digs).
+    allow_zombie_digging: bool = true,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

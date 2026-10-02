@@ -3027,6 +3027,17 @@ test "move helper: a blocked grounded zombie digs the blocking block" {
         }
     }
     try std.testing.expect(pushed);
+
+    // `AllowZombieDigging` off (sandbox): the same blocked walk never starts a
+    // dig (`EntityMoveHelper.AllowZombieDigging`, IL_02E3 gates the branch).
+    w.allow_zombie_digging = false;
+    w.zombie_ai[s].digging = false;
+    w.zombie_ai[s].jump_cd = 0;
+    for (0..120) |_| {
+        stepToward(&w, s, 15.0, 5.0, 2.2, 0.05);
+        applyGravity(&w, s, 0.05);
+    }
+    try std.testing.expect(!w.zombie_ai[s].digging);
 }
 
 test "move helper: a submerged body floats instead of dropping" {

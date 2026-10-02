@@ -772,6 +772,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .zombie_feral_sense = cfg.zombie_feral_sense,
         .ai_smell_mode = cfg.ai_smell_mode,
         .heat_map_sensitivity = cfg.heat_map_sensitivity,
+        .allow_zombie_digging = cfg.allow_zombie_digging,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
         .player_killing_mode = cfg.player_killing_mode,
