@@ -366,7 +366,9 @@ pub fn craftTimeForPlayer(self: *Game, peer_slot: ?usize, recipe: assets_recipes
 
 pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u8 {
     const qmax = self.items.max_quality_tier;
-    if (!craftingProgressionOn(self)) return qmax;
+    // `Recipe.GetCraftingTier` (IL_0000-0008): with CraftingProgression off the
+    // tier is a flat 6, not the item table's ceiling.
+    if (!craftingProgressionOn(self)) return 6;
     var v: f32 = 1;
     var counts: assets_requirements.Counts = .{};
     const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
@@ -378,6 +380,10 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
     }
     const tier: f32 = @trunc(v);
     if (!(tier >= 1)) return 1;
+    // Stock's GetCraftingTier returns the folded value unclamped (IL_0026-0027);
+    // zdtd clamps to the item table's MaxQualityTier here because the crafted
+    // ItemValue write has no clamp of its own yet. ponytail: move this to the
+    // quality write when that path grows one.
     return @trunc(@min(tier, @as(f32, @floatFromInt(qmax))));
 }
 
@@ -1443,6 +1449,29 @@ fn collectorBlocked(self: *Game, x: i32, y: i32, z: i32) bool {
     // Air does not block; anything else in the cell above does (stock's
     // `isBlocked` probe reads the block's solid/`IsTerrain` flags).
     return id != self.world.terrain_ids.air;
+}
+
+test "crafting tier is a flat 6 without crafting progression" {
+    // `Recipe.GetCraftingTier` IL_0000-0008.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer g.destroy();
+    const r = assets_recipes.RecipeDef{ .name = "tierProbe", .count = 1 };
+    // A ceiling other than 6 makes the assertion decisive: stock's flat 6 is not
+    // the item table's value.
+    g.items.max_quality_tier = 3;
+    // CraftingProgression (sandbox id 96) off: group-kind byte, then the
+    // option id and the No index.
+    var buf: [4]u8 = undefined;
+    buf[0] = 'A';
+    buf[1] = @intCast('A' + (96 / 26));
+    buf[2] = @intCast('A' + (96 % 26));
+    buf[3] = @intCast('A' + 0);
+    g.sandbox_code = buf[0..4];
+    g.tick_n += 1;
+    try std.testing.expectEqual(@as(u8, 6), craftingTierFor(g, 0, r));
 }
 
 test "crafting output folds the passive and the sandbox scale" {

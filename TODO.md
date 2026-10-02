@@ -1122,6 +1122,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `Tags`/`Group`. Pinned by `test "the stock item property path and Extends
       inheritance work offline"`, which also records the attribute-form caveat so
       the next round does not repeat it.
+- [x] **`craftingTierFor` used the item table's ceiling when progression
+      was off** - fixed 2026-10-02: `Recipe.GetCraftingTier` IL_0000-0008 returns
+      a **flat 6** with `CraftingProgression` off; zdtd returned
+      `items.max_quality_tier`, so an operator or mod that moved that table value
+      changed the tier of every craft on a progression-off server. The off branch
+      now returns 6. Gated by `crafting tier is a flat 6 without crafting
+      progression`, which pins the item table's ceiling to 3 first so the
+      assertion is decisive (reverting returns 3). Also verified this round:
+      stock's on-branch returns the folded value **unclamped** (IL_0026-0027);
+      zdtd keeps a clamp to the item ceiling because the crafted quality write has
+      none of its own (marked in the code as a ponytail shortcut to move).
 - [ ] **Learnable recipes (magazine unlocks) are not modelled** - located
       2026-10-02, data helper landed. `Recipe.IsUnlocked` (IL_0000-003E) returns
       true when `CraftingProgression` is off or the recipe is not learnable, else
@@ -1133,11 +1144,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       item properties `Unlocks`/`UnlockedBy` (`ItemClass.PropUnlocks` /
       `PropUnlockedBy`, IL_0C46-0C72) are not parsed, no magazine read action
       increments the CVar, and per-player CVars are not part of the sim.
-      The item side is now in place (`ItemDef.unlocks` parses and inherits, see
-      the closed entry above); what remains is per-player CVar storage, the
-      magazine read action that increments the CVar named after each unlocked
-      recipe, and the craft-validation gate - all together, because gating
-      without the read path would block every learnable recipe.
+      The item side is in place (`ItemDef.unlocks` parses and inherits) and
+      per-player CVars exist (`ecs/cvars.zig`, `World.cvarsMut`), but they are
+      **not persisted**: `players.zsv` (ZPV17) carries no cvar section, so a
+      relog loses every cvar, including the recipe-name CVars this gate would read
+      and the buff cvars. Plan for the round that lands it: bump to ZPV18 (magic
+      'I'), append `n:u8 | n x (name_len:u8, name, value:f32)` after the ZPV15
+      identity section (`persist.zpvRecordSpan` gains `cvars_off`, the migration
+      paths emit an empty section for older records), restore with
+      `Set.apply(name, .set, value)` and dupe names into stable storage (the store
+      requires names that outlive it), then the read action and the craft gate -
+      all together, because gating without the read path would block every
+      learnable recipe.
 - [ ] **Biome-progression recipe unlocks are not modelled** - located
       2026-10-02: `XUiM_Recipes.FilterRecipesByWorkstation` IL_004A checks
       `World.BiomeProgressionEnabled` and the `biomeprogression` recipe tag, so a
