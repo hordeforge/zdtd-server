@@ -381,7 +381,6 @@ pub const EntityClass = struct {
 };
 
 pub const World = struct {
-
     const no_player_slot = std.math.maxInt(Slot);
 
     /// Monotonic sim tick (incremented in beginTick; the drain and systems
