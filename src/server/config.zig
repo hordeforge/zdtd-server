@@ -152,6 +152,11 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `EnemySpawnMode` (yes/no, default on). Stock sets
+    /// `EntityFactory.EnemySpawnMode`, which `EntitySpawner.
+    /// ModifySpawnCountByGameDifficulty` (IL=6) reads to return 0, and the
+    /// sleeper-volume and quest spawn paths bail on - no enemies spawn at all.
+    enemy_spawn_mode: bool = true,
     /// Sandbox `TerrainDamage` percent: the scale a PLAYER applies to a terrain
     /// block (ids 2..239), where `block_damage_player` covers everything else
     /// (`ItemActionAttack` IL_0306-0329 picks one by `BlockValue.isTerrain`).
@@ -443,6 +448,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "EnemySpawnMode")) {
+            cfg.enemy_spawn_mode = sandbox.valueI(o, set, g.index) != 0;
         } else if (std.mem.eql(u8, o.name, "TerrainDamage")) {
             cfg.terrain_damage = sandboxPct(sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "CropGrowthSpeed")) {
@@ -665,6 +672,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "EnemySpawnMode")) |v| cfg.enemy_spawn_mode = clampU8Named("EnemySpawnMode", v, 0, 1, @intFromBool(cfg.enemy_spawn_mode)) != 0;
     if (prop(raw, "BlockDamageAI")) |v| cfg.block_damage_ai = clampRangeNamed("BlockDamageAI", v, 0, 1000, cfg.block_damage_ai);
     if (prop(raw, "BlockDamageAIBM")) |v| cfg.block_damage_ai_bm = clampRangeNamed("BlockDamageAIBM", v, 0, 1000, cfg.block_damage_ai_bm);
     if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRangeNamed("MaxSpawnedAnimals", v, 0, 2048, cfg.max_spawned_animals);

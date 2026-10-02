@@ -23367,3 +23367,53 @@ test "scenario terrain and non-terrain blocks use their own damage scale" {
     try std.testing.expectEqual(@as(u16, 30), g.getBlockHp(324, 70, 320));
     std.debug.print("PASS terrain-damage: the terrain cell reads TerrainDamage\n", .{});
 }
+
+test "scenario the enemy spawn mode stops sleeper volume spawns" {
+    // Stock sets `EntityFactory.EnemySpawnMode` from sandbox option 30 (yes/no,
+    // default on). `SleeperVolume` reads it (IL_01B8 / IL_042A) so a triggered
+    // volume spawns nothing while it is off, and `EntitySpawner.
+    // ModifySpawnCountByGameDifficulty` IL=6 returns 0 for POI/quest spawners.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const vols = try gpa.alloc(sleepers_mod.Volume, 1);
+    defer gpa.free(vols);
+    defer g.sleepers.volumes = &.{};
+    vols[0] = .{ .x0 = 100, .y0 = 70, .z0 = 100, .x1 = 108, .y1 = 76, .z1 = 108, .group_n = 1 };
+    vols[0].groups[0] = .{ .class_name = "GroupGenericZombie", .min_count = 2, .max_count = 4 };
+    g.sleepers.volumes = vols;
+
+    const zed_n = struct {
+        fn f(g2: *game_mod.Game) usize {
+            return g2.sim.kind_groups.slice(.zombie).len;
+        }
+    }.f;
+
+    // Option off: the noise wakes the volume but its group does not spawn.
+    const before = zed_n(g);
+    g.sim.enemy_spawn_mode = false;
+    g.sim.pushNoise(104, 72, 104, 10);
+    g.triggerSleeperVolumesByNoise();
+    // The volume does not even latch: the stock bail happens before TouchGroup
+    // marks it triggered.
+    try std.testing.expect(!g.sleepers.volumes[0].triggered);
+    try std.testing.expectEqual(before, zed_n(g));
+
+    // Option on: the same wake spawns the group.
+    g.sleepers.volumes[0].triggered = false;
+    g.sleepers.volumes[0].spawned_alive = 0;
+    g.sim.enemy_spawn_mode = true;
+    g.sim.pushNoise(104, 72, 104, 10);
+    g.triggerSleeperVolumesByNoise();
+    try std.testing.expect(g.sleepers.volumes[0].triggered);
+    try std.testing.expect(zed_n(g) > before);
+    std.debug.print("PASS enemy-spawn-mode: the option gates sleeper volume spawns\n", .{});
+}

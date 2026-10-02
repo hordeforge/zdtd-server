@@ -775,6 +775,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .allow_zombie_digging = cfg.allow_zombie_digging,
         .crop_growth_speed = cfg.crop_growth_speed,
         .terrain_damage = cfg.terrain_damage,
+        .enemy_spawn_mode = cfg.enemy_spawn_mode,
         .blood_moon_enemy_count = cfg.blood_moon_enemy_count,
         .blood_moon_range = cfg.blood_moon_range,
         .player_killing_mode = cfg.player_killing_mode,

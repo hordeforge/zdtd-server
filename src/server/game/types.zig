@@ -364,6 +364,8 @@ pub const InitOptions = struct {
     crop_growth_speed: f32 = 1.0,
     /// Sandbox `TerrainDamage` percent (the player's terrain-block damage scale).
     terrain_damage: u16 = 100,
+    /// Sandbox `EnemySpawnMode` (false = nothing spawns).
+    enemy_spawn_mode: bool = true,
     zombie_bm_move: u8 = 3,
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,

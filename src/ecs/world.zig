@@ -485,6 +485,9 @@ pub const World = struct {
     /// The sandbox `AllowZombieDigging` option (0 = the AI never digs through a
     /// blocking cell; stock `EntityMoveHelper.AllowZombieDigging`).
     allow_zombie_digging: bool = true,
+    /// The sandbox `EnemySpawnMode` option (false = no spawns happen at all;
+    /// stock `EntityFactory.EnemySpawnMode`).
+    enemy_spawn_mode: bool = true,
     /// The sandbox `CropGrowthSpeed` option = `BlockPlantGrowing.CropGrowthModifier`
     /// (`GetTickRate` IL=10 multiplies the growth delay by it).
     crop_growth_speed: f32 = 1.0,

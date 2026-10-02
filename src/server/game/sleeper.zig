@@ -109,6 +109,10 @@ fn rearmIfExpired(self: *Game, vi: usize) bool {
 /// Spawn a sleeper volume's group (stock TouchGroup). Shared by the
 /// player-entry scan and the noise scan (CheckSleeperVolumeNoise).
 fn triggerVolume(self: *Game, vi: usize) void {
+    // Sandbox `EnemySpawnMode` off: SleeperVolume's spawn paths bail (IL_01B8 /
+    // IL_042A read `EntityFactory.EnemySpawnMode`), so a triggered volume stays
+    // empty (the volume still marks itself triggered, as stock's does).
+    if (!self.sim.enemy_spawn_mode) return;
     if (vi >= self.sleepers.volumes.len) return;
     if (!rearmIfExpired(self, vi)) return;
     var vol = &self.sleepers.volumes[vi];

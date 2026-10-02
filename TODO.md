@@ -791,6 +791,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       prop still does (decisive: using one scale for both fails it). Note the
       wire value is CUMULATIVE damage, so a repeat of the same value is a no-op
       (the test sends rising values).
+- [x] **The `EnemySpawnMode` sandbox option did nothing** - closed 2026-10-02:
+      option 30 (yes/no, default on) sets `EntityFactory.EnemySpawnMode`, which
+      `SleeperVolume` reads (IL_01B8 / IL_042A) and
+      `EntitySpawner.ModifySpawnCountByGameDifficulty` (IL=6) turns into a 0
+      spawn count. zdtd ignored it, so a server set to "no enemies" still had
+      every POI sleeper volume spawn its group. The sleeper-volume trigger now
+      bails before latching when the option is off (matching stock: the volume
+      does not even mark itself triggered). Gated by `scenario the enemy spawn
+      mode stops sleeper volume spawns`: the same noise wake spawns nothing and
+      leaves `triggered` false with the option off and spawns the group with it
+      on (decisive: dropping the gate fails it). Scoped to the RE-backed paths:
+      the IL shows the static read only by `SleeperVolume`, `EntitySpawner` and
+      `QuestClass`, so ambient/biome and director spawns are deliberately left
+      alone (an earlier draft gated the director and was removed as unfounded).
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

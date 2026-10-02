@@ -889,6 +889,7 @@ pub const Game = struct {
         self.sim.allow_zombie_digging = opts.allow_zombie_digging;
         self.sim.crop_growth_speed = opts.crop_growth_speed;
         self.terrain_damage = opts.terrain_damage;
+        self.sim.enemy_spawn_mode = opts.enemy_spawn_mode;
         self.sim.director.zombie_move_bm = opts.zombie_bm_move;
         self.sim.director.enemy_difficulty = opts.enemy_difficulty;
         self.sim.director.clock.bloodmoon_frequency = opts.blood_moon_frequency;
