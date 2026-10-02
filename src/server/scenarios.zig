@@ -24746,6 +24746,19 @@ test "scenario a prop edit applies locally and relays to the others" {
     try std.testing.expect(cap_b.indexOfPkgId(setprop_id) != null);
     try std.testing.expect(cap_a.indexOfPkgId(setprop_id) == null);
 
+    // ProcessPackage validates the changer entity id first (IL_0011-001E): a
+    // body naming another player is dropped, not stored and not relayed.
+    {
+        const spoof = [_]packages.PropChange{.{ .chunk_x = 0, .chunk_y = 0, .prop_id = 6, .position = .{ 9, 9, 9 } }};
+        const spoof_body = try packages.buildSetPropBody(&body_buf, null, &spoof, 0);
+        const rejects_before = g.harness.counters.get(.ownership_rejects);
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSetProp", spoof_body));
+        try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.ownership_rejects));
+        try std.testing.expect(g.world.props.indexOf(0, 0, 6) == null);
+        try std.testing.expect(cap_b.indexOfPkgId(setprop_id) == null);
+    }
+
     // A change in a chunk the world does not hold abandons the batch: nothing is
     // stored and nothing is relayed (stock's GetChunkSync miss).
     const far = [_]packages.PropChange{.{ .chunk_x = 4000, .chunk_y = 4000, .prop_id = 9, .position = .{ 1, 1, 1 } }};

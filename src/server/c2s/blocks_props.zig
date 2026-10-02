@@ -34,6 +34,25 @@ pub fn handle(
         self.harness.counters.inc(.c2s_malformed);
         return true;
     };
+    // `NetPackageSetProp::ProcessPackage` IL_0002-001E validates the claimed
+    // identity before anything else: the persistent player id must be the
+    // sender's (ValidUserIdForSender) and the changer entity id must be one the
+    // sender owns (ValidEntityIdForSender). Both drop the package silently.
+    const ps = self.sim.playerByPeer(c.slot) orelse return true;
+    if (parsed.local_player_that_changed != self.sim.network_id[ps].id) {
+        self.harness.counters.inc(.ownership_rejects);
+        return true;
+    }
+    if (parsed.persistent_player) |sent| {
+        if (!c.puid_primary.matches(sent) and !c.puid_native.matches(sent)) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+    } else if (c.puid_primary.get() != null or c.puid_native.get() != null) {
+        self.harness.counters.inc(.ownership_rejects);
+        return true;
+    }
+
     // Stock requires the chunk for every change and drops the batch on a miss.
     for (parsed.changes) |ch| {
         if (self.world.chunkAt(.{ .x = ch.chunk_x, .z = ch.chunk_y }) == null) return true;

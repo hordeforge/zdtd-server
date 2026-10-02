@@ -450,7 +450,10 @@ None of the 29 is a live gap, for one of three reasons:
   table, so there is nothing for a reported change to land in. `SetProp` is a
   world prop change (`Block.PlaceProp` IL=87 to `WorldBase.SetPropRPC`, beside
   `SetBlockRPC`), sender-validated by user id and entity id, then fanned by
-  `GameManager.SetPropsOnClients`. UPDATED 2026-10-03: handled. The wire contract
+  `GameManager.SetPropsOnClients`. UPDATED 2026-10-03: handled. ProcessPackage's two
+  sender checks (IL_0002-001E) are in: the changer entity id must be the sender's
+  and the claimed player id must match the sender's identity, both silent drops
+  counted as ownership rejects. The wire contract
   (`wire/stock_props.zig`, `PropChangeInfo.Write` pinned), the store
   (`world/props.zig`) and the relay (`c2s/blocks_props.zig`: chunk required per
   change, batch abandoned on a miss, body fanned out excluding the changer) all
