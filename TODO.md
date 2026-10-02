@@ -1397,6 +1397,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       Pinned by `sandbox GlobalLootCount drives the LootAbundance stat` (50 from
       the pref, 200 after the code sets the 2.0 ladder entry; decisive: zeroing
       the arm leaves 100).
+- [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
+      2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
+      `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with
+      in stock data) and skips the rest, so an item carrying another key would
+      lose it when the server re-encodes the slot. Widen when a stock row or a
+      modlet names a second key: the parse loop already walks every entry and
+      would only need a second field to keep.
 - [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

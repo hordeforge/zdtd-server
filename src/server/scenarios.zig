@@ -14833,15 +14833,31 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
         const idefs = [_]assets_items.ItemDef{
             .{ .id = held_id, .name = "probeBlade", .triggered = &.{
                 .{ .trigger = .self_attacked_other, .action = .modify_cvar, .cvar = "$itemHits", .cvar_op = .add, .value = 1 },
+                // The stun-baton shape: a row gated on the held item's `charge`
+                // metadata, which the hit ctx fills from the slot (the supply
+                // was only unit-tested at the evaluator).
+                .{ .trigger = .self_attacked_other, .action = .modify_cvar, .cvar = "$chargeHits", .cvar_op = .add, .value = 1, .reqs = &.{
+                    .{ .kind = .compare_item_meta_float, .op = .ge, .value = 2 },
+                } },
+                .{ .trigger = .self_attacked_other, .action = .modify_cvar, .cvar = "$chargeMiss", .cvar_op = .add, .value = 1, .reqs = &.{
+                    .{ .kind = .compare_item_meta_float, .op = .le, .value = 1 },
+                } },
             } },
         };
         g.items = .{ .defs = &idefs, .source = .builtin };
         const held_slot: u16 = 0;
-        g.sim.inventory[aslot].slots[held_slot] = .{ .item_id = held_id, .count = 1, .quality = 1 };
+        g.sim.inventory[aslot].slots[held_slot] = .{ .item_id = held_id, .count = 1, .quality = 1, .meta_charge = 2.0 };
         g.sim.inventory[aslot].holding = held_slot;
         _ = ca.cvars.remove("$itemHits");
+        _ = ca.cvars.remove("$chargeHits");
+        _ = ca.cvars.remove("$chargeMiss");
         try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
         try std.testing.expectEqual(@as(f32, 1), ca.cvars.get("$itemHits"));
+        // The held slot carries charge 2, so the `>= 2` row fires and the
+        // `<= 1` row does not: the charge the hit ctx reads is the slot's, not a
+        // default.
+        try std.testing.expectEqual(@as(f32, 1), ca.cvars.get("$chargeHits"));
+        try std.testing.expectEqual(@as(f32, 0), ca.cvars.get("$chargeMiss"));
         // Control: with no item there is no item row to fire.
         g.sim.inventory[aslot].slots[held_slot] = .{};
         _ = ca.cvars.remove("$itemHits");
