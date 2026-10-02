@@ -33,14 +33,35 @@ fn traderMinutes(v: []const u8) ?u32 {
     return h * 60 + m;
 }
 
+/// The global trader-hours window one `TraderHours` preset selects
+/// (`TraderInfo.set_TraderHoursPreset` IL=81 arm 1..4:
+/// `DayTimeToWorldTime(1, hour, minute)`), in minutes past midnight. Preset 0
+/// sets no global window, so each trader keeps its traders.xml hours.
+fn traderHoursPresetWindow(preset: u8) ?struct { open: u32, close: u32 } {
+    return switch (preset) {
+        1 => .{ .open = 4 * 60 + 1, .close = 11 * 60 + 50 },
+        2 => .{ .open = 10 * 60 + 1, .close = 17 * 60 + 50 },
+        3 => .{ .open = 16 * 60 + 1, .close = 21 * 60 + 50 },
+        4 => .{ .open = 22 * 60 + 1, .close = 3 * 60 + 50 },
+        else => null,
+    };
+}
+
 pub fn traderIsOpen(self: *const Game, ts: ecs.Slot) bool {
     const info_id = self.sim.trader_stock[ts].trader_info_id;
     if (info_id == 0) return true;
     const info = self.traders.traderInfo(info_id) orelse return true;
-    if (info.is_vending or info.open_time.len == 0) return true;
+    if (info.is_vending) return true;
+    const now = (@as(u32, @intCast(self.sim.director.clock.worldTimeBits() % 24000)) * 3) / 50;
+    // Sandbox `TraderHours`: a preset 1..4 window replaces every trader's own
+    // hours (stock's global `GlobalOpenTime`/`GlobalCloseTime`).
+    if (traderHoursPresetWindow(self.trader_hours_preset)) |w| {
+        if (w.close > w.open) return now >= w.open and now < w.close;
+        return now >= w.open or now < w.close;
+    }
+    if (info.open_time.len == 0) return true;
     const open = traderMinutes(info.open_time) orelse return true;
     const close = traderMinutes(info.close_time) orelse return true;
-    const now = (@as(u32, @intCast(self.sim.director.clock.worldTimeBits() % 24000)) * 3) / 50;
     if (close > open) return now >= open and now < close;
     return now >= open or now < close;
 }

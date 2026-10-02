@@ -964,6 +964,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       (decisive: disabling the gate starts it). Residuals: `POIQuestsEnabled` and
       `BuriedQuestsEnabled` need a per-quest POI/buried predicate that zdtd's
       catalog does not carry yet.
+- [x] **The `TraderHours` sandbox option did nothing** - closed 2026-10-02:
+      option 127 (int 0..6, default 0) is the global trader-hours preset:
+      `TraderInfo.set_TraderHoursPreset` IL=81 sets `GlobalOpenTime`/
+      `GlobalCloseTime` for presets 1..4 (04:01-11:50, 10:01-17:50, 16:01-21:50,
+      22:01-03:50), while preset 0 sets no global window so each trader keeps its
+      traders.xml hours. zdtd only ever used the per-trader XML hours, so an
+      operator's chosen window was ignored. `traderIsOpen` now takes the preset
+      window when one is set. Gated by `scenario the trader hours preset overrides
+      the trader's own hours`: a trader authored 20:00-23:00 is closed at noon
+      under preset 0, open under preset 2, closed under preset 4 and open again at
+      23:00 (decisive: pinning the lookup to preset 0 closes it at noon).
+      Residuals: preset 5 (dawn/dusk from the DayLightLength stat) and preset 6
+      (no pinned times in the IL) keep the XML path.
 - [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
       not yet implemented. The package is `m_persistentPlayerId` +
       `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,

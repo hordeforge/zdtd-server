@@ -23850,3 +23850,53 @@ test "scenario quests off starts none" {
     try std.testing.expect(g.acceptQuestFor(c, 1));
     std.debug.print("PASS quests-enabled: the option gates the accept path\n", .{});
 }
+
+test "scenario the trader hours preset overrides the trader's own hours" {
+    // Sandbox `TraderHours` (option 127, int 0..6, default 0) replaces every
+    // trader's hours with a global window (`TraderInfo.set_TraderHoursPreset`
+    // IL=81 arms: preset 1 04:01-11:50, 2 10:01-17:50, 3 16:01-21:50,
+    // 4 22:01-03:50); preset 0 keeps the traders.xml hours.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="groupCasino">
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1" open_time="20:00" close_time="23:00"/>
+        \\  <traderAlways>
+        \\    <item name="casinoCoin" count="1"/>
+        \\  </traderAlways>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var tbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tbuf, "{s}/traders_hours.xml", .{dir});
+    try io_fs.writeFile(tpath, tsrc);
+    const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+
+    const trader_mod = @import("game/trader.zig");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    g.traders.deinit();
+    g.traders = tt;
+
+    const trader_id = g.sim.spawnTrader("traderHours", 0, 70, 0, 1, 500).?;
+    const ts = g.sim.slotOfNetId(trader_id).?;
+    // Noon: the fixture's own 20:00-23:00 window is closed.
+    g.sim.director.clock.hours = 12.0;
+    g.trader_hours_preset = 0;
+    try std.testing.expect(!trader_mod.traderIsOpen(g, ts));
+    // Preset 2 (10:01-17:50) opens the same trader at noon.
+    g.trader_hours_preset = 2;
+    try std.testing.expect(trader_mod.traderIsOpen(g, ts));
+    // Preset 4 (22:01-03:50) closes it at noon and opens it at 23:00.
+    g.trader_hours_preset = 4;
+    try std.testing.expect(!trader_mod.traderIsOpen(g, ts));
+    g.sim.director.clock.hours = 23.0;
+    try std.testing.expect(trader_mod.traderIsOpen(g, ts));
+    std.debug.print("PASS trader-hours: the preset window replaces the trader's own hours\n", .{});
+}

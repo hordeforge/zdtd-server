@@ -152,6 +152,11 @@ pub const Config = struct {
     /// (`VendingItemAbundance`, default 1.0). Same scale note as above.
     vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
+    /// Sandbox `TraderHours` (int 0..6, default 0): the global trader-hours
+    /// preset (`TraderInfo.set_TraderHoursPreset` IL=81, values 1..4 pinned to
+    /// fixed windows; 0 keeps each trader's own traders.xml hours). Presets 5
+    /// (dusk/dawn) and 6 are not modelled yet.
+    trader_hours_preset: u8 = 0,
     /// Sandbox `QuestsEnabled` (yes/no, default on): with quests off the trader
     /// offers none and the server refuses to start one
     /// (`DialogRequirementQuestsAvailable` gates its requirement on the option).
@@ -501,6 +506,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.trader_item_abundance = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "VendingItemAbundance")) {
             cfg.vending_item_abundance = sandbox.valueF(o, set, g.index);
+        } else if (std.mem.eql(u8, o.name, "TraderHours")) {
+            cfg.trader_hours_preset = sandboxClampU8(sandbox.valueI(o, set, g.index), 0, 6);
         } else if (std.mem.eql(u8, o.name, "QuestsEnabled")) {
             cfg.quests_enabled = sandbox.valueB(o, g.index);
         } else if (std.mem.eql(u8, o.name, "ItemDegradation")) {
@@ -749,6 +756,7 @@ pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Config {
     if (prop(raw, "XPMultiplier")) |v| cfg.xp_multiplier = clampRangeNamed("XPMultiplier", v, 1, 1000, cfg.xp_multiplier);
     if (prop(raw, "BlockDamagePlayer")) |v| cfg.block_damage_player = clampRangeNamed("BlockDamagePlayer", v, 1, 1000, cfg.block_damage_player);
     if (prop(raw, "TerrainDamage")) |v| cfg.terrain_damage = clampRangeNamed("TerrainDamage", v, 0, 1000, cfg.terrain_damage);
+    if (prop(raw, "TraderHours")) |v| cfg.trader_hours_preset = clampU8Named("TraderHours", v, 0, 6, cfg.trader_hours_preset);
     if (prop(raw, "QuestsEnabled")) |v| cfg.quests_enabled = clampU8Named("QuestsEnabled", v, 0, 1, @intFromBool(cfg.quests_enabled)) != 0;
     if (prop(raw, "ItemDegradation")) |v| {
         if (xml.parseF32(v)) |f| cfg.item_degradation = std.math.clamp(f, 0, 10);
