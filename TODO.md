@@ -1485,8 +1485,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       and the replication gate - `is_spawnable_extra` now includes drones, so the
       ECD goes out only once the class resolved and a drone cannot be dressed as
       the zombie fallback. `scenario a spawned drone streams to the observers` pins
-      the spawn, the `entityJunkDrone` hash (-866611929) and the announce. Step 3
-      is next: (2) registry + join spawn through the existing
+      the spawn, the `entityJunkDrone` hash (-866611929) and the announce.
+      **Step 2b landed 2026-10-03**: the owner rides the ECD tail
+      (`belongsPlayerId`, read from a new `entity_owner_slot` column), so the stock
+      client can attribute the drone to the player - `DroneManager` only shows a
+      player their own drones. The scenario now finds the class hash in the emitted
+      frame and asserts the owner i32 plus the neutral order state follow it
+      (decisive: disabling the wiring loses the tail). Still open:
+      (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with
       the staged `transitionState` commit); (4) `NetPackageDroneDataSync` for order

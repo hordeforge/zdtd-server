@@ -24794,17 +24794,35 @@ test "scenario a spawned drone streams to the observers" {
     // Both peers near the spawn point so interest covers the drone.
     g.sim.transform[vs] = g.sim.transform[ps];
 
-    const did = g.sim.spawnDrone(g.sim.transform[ps].x + 2, g.sim.transform[ps].y, g.sim.transform[ps].z, 500).?;
+    const did = g.sim.spawnDrone(g.sim.transform[ps].x + 2, g.sim.transform[ps].y, g.sim.transform[ps].z, 500, @intCast(ps)).?;
     const ds = g.sim.slotOfNetId(did).?;
     try std.testing.expectEqual(components_mod.Kind.drone, g.sim.kind[ds]);
     try std.testing.expectEqual(@as(i32, -866611929), g.sim.class_id[ds].hash);
+    // The owner rides the ECD tail (`belongsPlayerId`), which is how the client
+    // attributes the drone: DroneManager only shows a player their own drones.
+    try std.testing.expectEqual(@as(i16, @intCast(ps)), g.sim.entity_owner_slot[ds]);
 
     cap_b.clear();
     // Two ticks: the first settles the fresh peer's interest set (the drone was
     // spawned after both joins), the second announces it.
     _ = g.step() catch {};
     _ = g.step() catch {};
-    try std.testing.expect(cap_b.indexOfPkgId(packages.idOf("NetPackageEntitySpawn").?) != null);
+    const spawn_pkg = packages.idOf("NetPackageEntitySpawn").?;
+    try std.testing.expect(cap_b.indexOfPkgId(spawn_pkg) != null);
     try std.testing.expect(g.clients[cb.slot].known_entities.isSet(ds));
+    // The ECD must carry the owner tail, not just the sim column: find the
+    // drone class hash in the frame and check the belongsPlayerId i32 after it.
+    {
+        const at = cap_b.indexOfPkgId(spawn_pkg).?;
+        const bytes = cap_b.slots[at].data[0..cap_b.slots[at].len];
+        var hash_le: [4]u8 = undefined;
+        std.mem.writeInt(i32, &hash_le, -866611929, .little);
+        const hoff = std.mem.indexOf(u8, bytes, &hash_le) orelse return error.TestUnexpectedResult;
+        var owner_le: [4]u8 = undefined;
+        std.mem.writeInt(i32, &owner_le, ca.entity_id, .little);
+        const tail = std.mem.indexOf(u8, bytes[hoff..], &owner_le) orelse return error.TestUnexpectedResult;
+        // followed by the neutral order state 0.
+        try std.testing.expectEqual(@as([4]u8, .{ 0, 0, 0, 0 }), bytes[hoff + tail + 4 ..][0..4].*);
+    }
     std.debug.print("PASS drone: spawned, classed and streamed to the other peer\n", .{});
 }

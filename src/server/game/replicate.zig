@@ -217,6 +217,14 @@ pub fn replicate(self: *Game) !void {
             if (packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
                 .entity_id = self.sim.network_id[i].id,
                 .entity_class = eclass,
+                // Drone tail: the owner's entity id (the client attributes the
+                // drone from it) and a neutral order state until the machine
+                // lands. Ignored for every other class.
+                .belongs_player_id = if (self.sim.kind[i] == .drone and self.sim.entity_owner_slot[i] >= 0 and
+                    self.sim.mask[@intCast(self.sim.entity_owner_slot[i])].player)
+                    self.sim.network_id[@intCast(self.sim.entity_owner_slot[i])].id
+                else
+                    -1,
                 .x = self.sim.transform[i].x,
                 .y = self.sim.transform[i].y,
                 .z = self.sim.transform[i].z,

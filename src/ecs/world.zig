@@ -102,7 +102,8 @@ fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
 /// `id` (kind-default or table index). Rolls day chase once via rollChaseDay.
 /// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
 /// Builtin class-table index for a kind. Positional: the `class_table` literal
-/// must keep the rows in this order, which `classIndexMatchesTable` pins.
+/// must keep the rows in this order, which `the builtin class-table rows agree
+/// with classIndexOf` pins.
 fn classIndexOf(kind: Kind) u16 {
     return switch (kind) {
         .player => 0,
@@ -909,6 +910,12 @@ pub const World = struct {
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.
+    /// Owner client slot for entities that belong to a player (today only
+    /// drones). -1 = unowned. Replication reads it to fill the ECD's
+    /// `belongsPlayerId`, which is how the stock client attributes a drone to
+    /// its owner (`DroneManager` only shows a player the drones they own).
+    entity_owner_slot: [max_entities]i16 = [_]i16{-1} ** max_entities,
+
     class_table: [17]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
         .{ .name = "zombie", .max_hp = 40, .kind = .zombie, .hash = 948863590, .loot_list = "EntityLootContainerRegular" },
@@ -1671,9 +1678,12 @@ pub const World = struct {
     /// Player-owned junk drone (`EntityDrone`). No AI tasks yet: the kind exists
     /// so the entity spawns, streams to observers and can be despawned; the stock
     /// Idle/Sentry/Follow/Heal/Attack/Shutdown machine is the next slice.
-    pub fn spawnDrone(self: *World, x: f32, y: f32, z: f32, hp: f32) ?NetId {
+    pub fn spawnDrone(self: *World, x: f32, y: f32, z: f32, hp: f32, owner_slot: i16) ?NetId {
         const s = self.spawnBase(.drone, x, y, z, hp) orelse return null;
         self.mask[s].inventory = false;
+        // `DroneManager` only shows a player the drones they own, and the client
+        // learns the owner from the ECD's belongsPlayerId tail.
+        self.entity_owner_slot[s] = owner_slot;
         return self.network_id[s].id;
     }
 
