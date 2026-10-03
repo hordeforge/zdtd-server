@@ -32,6 +32,13 @@ pub const max_triggered_total: usize = 8192;
 /// goes nowhere. Same fail-closed rule as every unhandled trigger; the row
 /// stays in the table so a later engine change can consume it without
 /// re-parsing.
+///
+/// The ordinals are *zdtd's own*, not stock's: this enum lists the 34 triggers
+/// the engine consumes, while stock's `MinEventTypes` has 115 values
+/// (`../7dtd-engine-research/workspace/outputs/baseline/enums.txt`). Every use
+/// here switches on the name, so the mismatch is harmless today - but a plugin
+/// boundary that wanted to pass a trigger as an integer would have to map
+/// through the stock values first, not `@intFromEnum`.
 pub const Trigger = enum(u8) {
     start,
     update,
