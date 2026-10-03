@@ -1705,11 +1705,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       field and in the STATUS entry. Pinned by `scenario a quest is turned in at its
       giver, not any trader`: another trader leaves it active, its own completes it, and
       an unstamped quest stays permissive. Decisive: disabling the comparison fails it.
-      The first attempt asserted the accept path instead and could not get an accept to
-      succeed in the harness (def 1 exists, the journal mask is set, yet
-      `questAcceptWithCode` still returns false), so the scenario places the slot
-      directly the way the accept path leaves it - recorded because "the accept path
-      denies in a bare harness" is worth knowing before someone writes the next such test.
+      The first attempt asserted the accept path instead and got `false` from
+      `questAcceptWithCode`. Root-caused 2026-10-03: the harness's join already grants the
+      starter quest, and that quest is def 1, so the second accept failed stock's
+      `hasActive(def_id)` guard. Every other guard passes in a bare Game (catalog entry
+      present, journal mask settable, a free slot, the plugin verdict returning 0), so
+      the scenario places the slot directly the way the accept path leaves it - and a
+      future test that wants the accept path should use a def the join does not hand out.
 - [ ] **Stock console command names are only partly accepted** - measured 2026-10-03 by extracting the typed
       names from every `ConsoleCmd*::getCommands()` in the dump (177 commands, 259 names/aliases; the RE prose
       table lists class names and effects, not the strings a client types). Four were stock names for commands
