@@ -109,8 +109,8 @@ if [[ $found_eq -eq 0 ]]; then
   ok
 fi
 
-note "wire builders with no caller, and pinned names that must resolve (tools/check_wire_builders.py)"
-if ! python3 "$ROOT/tools/check_wire_builders.py"; then
+note "wire surface: builders/parsers with no caller, pinned idOf names (tools/check_wire_surface.py)"
+if ! python3 "$ROOT/tools/check_wire_surface.py"; then
   fail=1
 fi
 

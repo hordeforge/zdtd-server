@@ -13,8 +13,12 @@ Two checks:
 2. Every literal name a runtime `idOf("<name>").?` unwraps must exist in
    `default_mappings`: that `.?` is a panic path, and the only way it can fail is a
    typo or an edit in the table, which no other gate sees.
+3. Every `pub fn parse*` / `read*` in `src/wire` must be referenced somewhere in
+   `src`, the mirror of check 1: a body the server can decode but nothing decodes is a
+   package shape that is written down and never handled.
 
-Baseline 2026-10-03: 135 builders, all referenced; 3 unwrap sites, all resolving.
+Baseline 2026-10-03 (as `check_wire_builders.py`): 135 builders and 94 parsers, all
+referenced; 3 unwrap sites, all resolving.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ WIRE = os.path.join(ROOT, "src", "wire")
 SRC = os.path.join(ROOT, "src")
 
 BUILDER = re.compile(r"pub fn (build[A-Za-z0-9_]*)\(")
+PARSER = re.compile(r"pub fn ((?:parse|read)[A-Za-z0-9_]*)\(")
 
 
 def zig_files(path: str) -> list[str]:
@@ -42,6 +47,22 @@ def zig_files(path: str) -> list[str]:
 ID_OF_UNWRAP = re.compile(r'idOf\("([^"]+)"\)\.\?')
 MAPPINGS = re.compile(r'pub const default_mappings = \[_\]\[\]const u8\{([^}]*)\}', re.S)
 NAME_LITERAL = re.compile(r'"([^"]+)"')
+
+
+def unreferenced(sources: dict[str, str], defined: dict[str, str]) -> list[str]:
+    out: list[str] = []
+    for name, path in sorted(defined.items()):
+        found = False
+        for q, text in sources.items():
+            count = text.count(name)
+            if q == path:
+                count -= 1  # the definition line itself
+            if count > 0:
+                found = True
+                break
+        if not found:
+            out.append(f"{name} ({os.path.relpath(path, ROOT)})")
+    return out
 
 
 def check_pinned_names() -> list[str]:
@@ -77,28 +98,28 @@ def main() -> int:
 
     sources = {p: open(p, errors="ignore").read() for p in zig_files(SRC)}
 
-    unreferenced: list[str] = []
-    for name, path in sorted(defined.items()):
-        found = False
-        for q, text in sources.items():
-            count = text.count(name)
-            if q == path:
-                count -= 1  # the definition line itself
-            if count > 0:
-                found = True
-                break
-        if not found:
-            unreferenced.append(f"{name} ({os.path.relpath(path, ROOT)})")
+    parsers: dict[str, str] = {}
+    for path in zig_files(WIRE):
+        text = sources[path]
+        for m in PARSER.finditer(text):
+            parsers.setdefault(m.group(1), path)
+
+    unref_builders = unreferenced(sources, defined)
+    unref_parsers = unreferenced(sources, parsers)
 
     if dupes:
         print(f"FAIL: duplicate wire builder names ({len(dupes)}):", file=sys.stderr)
         for d in dupes:
             print("  " + d, file=sys.stderr)
-    if unreferenced:
-        print(f"FAIL: wire builders nothing calls ({len(unreferenced)}):", file=sys.stderr)
-        for u in unreferenced:
+    if unref_builders:
+        print(f"FAIL: wire builders nothing calls ({len(unref_builders)}):", file=sys.stderr)
+        for u in unref_builders:
             print("  " + u, file=sys.stderr)
-    if dupes or unreferenced:
+    if unref_parsers:
+        print(f"FAIL: wire parsers nothing calls ({len(unref_parsers)}):", file=sys.stderr)
+        for u in unref_parsers:
+            print("  " + u, file=sys.stderr)
+    if dupes or unref_builders or unref_parsers:
         return 1
 
     pinned_bad = check_pinned_names()
@@ -111,7 +132,7 @@ def main() -> int:
     if pinned_bad:
         return 1
 
-    print(f"wire builders: {len(defined)} defined, all referenced; idOf unwrap names all resolve")
+    print(f"wire surface: {len(defined)} builders and {len(parsers)} parsers, all referenced; idOf unwrap names all resolve")
     return 0
 
 
