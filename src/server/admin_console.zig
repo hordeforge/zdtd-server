@@ -11,6 +11,11 @@
 
 const std = @import("std");
 const persist_players = @import("persist_players.zig");
+const game_chunk_stream = @import("game/chunk_stream.zig");
+/// Stock refuses an oversized `chunkreset` with "area too big". The stock cap is
+/// not pinned in the RE set, so this is zdtd's own ceiling: 32x32 chunks keeps the
+/// regeneration bounded inside one tick of work.
+const max_chunkreset_chunks: i64 = 32 * 32;
 const config_mod = @import("config.zig");
 const game_mod = @import("game.zig");
 const Game = game_mod.Game;
@@ -1356,6 +1361,40 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 },
             ) catch return;
             self.adminReply(s);
+        },
+        .chunkreset => |r| {
+            // Stock's own refusals: "area too big" and "Can not reset chunks on
+            // this game"; the reply names the area and the chunk range.
+            const c1x = @divFloor(@min(r.x1, r.x2), 16);
+            const c1z = @divFloor(@min(r.z1, r.z2), 16);
+            const c2x = @divFloor(@max(r.x1, r.x2), 16);
+            const c2z = @divFloor(@max(r.z1, r.z2), 16);
+            const nx: i64 = @as(i64, c2x) - @as(i64, c1x) + 1;
+            const nz: i64 = @as(i64, c2z) - @as(i64, c1z) + 1;
+            if (nx * nz > max_chunkreset_chunks) {
+                var eb: [64]u8 = undefined;
+                const e = std.fmt.bufPrint(&eb, "area too big (max {d} chunks)\n", .{max_chunkreset_chunks}) catch return;
+                self.adminReply(e);
+                return;
+            }
+            var done: u32 = 0;
+            var cz = c1z;
+            while (cz <= c2z) : (cz += 1) {
+                var cx = c1x;
+                while (cx <= c2x) : (cx += 1) {
+                    const pos: world_store.ChunkPos = .{ .x = cx, .z = cz };
+                    if (self.world.regenChunk(pos) catch false) done += 1;
+                    // A reset chunk must be resent: drop it from every client's
+                    // streamed set so the per-client streamer sends the fresh one.
+                    for (&self.clients) |*cl| {
+                        if (!cl.joined) continue;
+                        game_chunk_stream.clientRemoveStreamed(cl, @bitCast(pos.hash()));
+                    }
+                }
+            }
+            var rb: [224]u8 = undefined;
+            const out = std.fmt.bufPrint(&rb, "Reset chunks covering area {d}/{d} to {d}/{d} (chunk coordinates {d} to {d}). {d} resident chunk(s) regenerated.\n", .{ r.x1, r.z1, r.x2, r.z2, c1x, c2x, done }) catch return;
+            self.adminReply(out);
         },
         .spawnwandering => |which| {
             const w = which orelse {

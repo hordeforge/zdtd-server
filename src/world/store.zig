@@ -970,6 +970,42 @@ pub const World = struct {
         self.allocator.destroy(c);
     }
 
+    /// Console `chunkreset`: discard a chunk's edited state and re-derive it from
+    /// the world provider (TTS paint, prefab stamp, heightmap, biome layers or the
+    /// flat plane), then re-save it so the next load cannot resurrect the old one.
+    ///
+    /// Stock's shape (ConsoleCmdChunkReset__execute_d__5): unlock, remove from the
+    /// provider, `GenerateSingleChunk`, then resend. zdtd's equivalent is a file
+    /// delete plus `getOrCreate`: the store loads a disk record first
+    /// ("Disk load first: a v3 save with blocks is authoritative for every chunk"),
+    /// so the saved record is what has to lose. Unlike `evictOneChunk` this never
+    /// saves the chunk it drops - saving is the opposite of a reset.
+    ///
+    /// Returns false when the chunk is not resident and has no saved record, which
+    /// means it was already in its authored state.
+    pub fn regenChunk(self: *World, pos: ChunkPos) !bool {
+        const key = pos.hash();
+        var had_state = false;
+        if (self.chunks.get(key)) |c| {
+            had_state = true;
+            // A queued payload for this key would land after the delete.
+            self.flush.waitKey(key);
+            c.deinitBlocks();
+            _ = self.chunks.remove(key);
+            self.allocator.destroy(c);
+        }
+        var path_buf: [512]u8 = undefined;
+        const path = try self.chunkPath(pos, &path_buf);
+        if (io_fs.fileExists(path)) {
+            had_state = true;
+            self.flush.waitKey(key);
+            io_fs.deleteFile(path);
+        }
+        if (!had_state) return false;
+        _ = try self.getOrCreate(pos);
+        return true;
+    }
+
     pub fn getOrCreate(self: *World, pos: ChunkPos) !*Chunk {
         const k = pos.hash();
         if (self.chunks.count() >= max_resident_chunks and !self.chunks.contains(k)) {

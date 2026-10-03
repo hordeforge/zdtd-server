@@ -25333,3 +25333,49 @@ test "scenario the admin console spawns a wandering horde" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "spawned") != null);
     std.debug.print("PASS spawnwandering: h spawns, b refused by name, no argument prints the help\n", .{});
 }
+
+test "scenario chunkreset restores a chunk to its authored state" {
+    // Stock `chunkreset` (ConsoleCmdChunkReset__execute_d__5): remove the chunks
+    // covering the area and regenerate them, then resend. A block the player
+    // placed must be gone afterwards - the store loads a disk record first, so
+    // the saved record is what a reset has to discard.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    const x: i32 = 8;
+    const z: i32 = 8;
+    const y: i32 = 100; // above the flat surface, so the authored cell is air
+    const authored = g.world.getOrCreate(.{ .x = 0, .z = 0 }) catch |e| return e;
+    const before = authored.blockAt(x, y, z);
+    try g.world.setBlockWorld(x, y, z, 1); // stone, guaranteed != before on a flat air cell
+    const placed = g.world.chunkAt(.{ .x = 0, .z = 0 }).?.blockAt(x, y, z);
+    try std.testing.expect(placed != before);
+    // Land it on disk: that record is exactly what the reset must beat.
+    try g.world.saveChunk(g.world.chunkAt(.{ .x = 0, .z = 0 }).?);
+    g.world.flush.waitKey(g.world.chunkAt(.{ .x = 0, .z = 0 }).?.pos.hash());
+
+    var sink: [512]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("chunkreset 0 0 15 15", "admin_tcp");
+    g.admin_reply_sink = null;
+    const reply = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, reply, "Reset chunks covering area") != null);
+
+    const after = (g.world.chunkAt(.{ .x = 0, .z = 0 }) orelse return error.TestUnexpectedResult).blockAt(x, y, z);
+    try std.testing.expectEqual(before, after);
+
+    // The oversized area is refused with stock's wording.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("cr 0 0 5000 5000", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "area too big") != null);
+    std.debug.print("PASS chunkreset: restores authored state, refuses an oversized area\n", .{});
+}

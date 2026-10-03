@@ -1711,6 +1711,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       and (d) already exists. Console surface: `chunkreset <x1> <z1> <x2> <z2>` in
       block coordinates with stock's "area too big" / "Can not reset chunks on this
       game" refusals and its "Reset chunks covering area ..." reply.
+      **Landed 2026-10-03**: `World.regenChunk` drops the resident chunk without
+      saving it, waits out any queued payload for the key, deletes the saved chunk
+      file, re-derives through `getOrCreate` and leaves the fresh chunk resident;
+      `chunkreset|cr <x1> <z1> <x2> <z2>` maps block coords to chunk coords, caps
+      the area at zdtd's own 32x32 (stock's cap is not in the RE set) with stock's
+      "area too big" wording, calls it per chunk and drops each key from every
+      client's streamed set so the streamer resends. Pinned by `scenario chunkreset
+      restores a chunk to its authored state`: a block placed above the surface and
+      saved to disk reads as authored again after the command, and the oversized
+      area is refused. Decisive: skipping the file delete leaves the placed block in
+      place and fails the test (`expected 0, found 1`).
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
