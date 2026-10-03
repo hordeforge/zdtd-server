@@ -1712,6 +1712,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       present, journal mask settable, a free slot, the plugin verdict returning 0), so
       the scenario places the slot directly the way the accept path leaves it - and a
       future test that wants the accept path should use a def the join does not hand out.
+- [ ] **Fetch objectives still ignore *which* item came from *which* container** - scoped
+      2026-10-03, with the first leg landed: `questOnFetchItemAt` now refuses a container
+      outside the quest's placed POI (a pure `pointInPoi` helper, decisively tested), which
+      is the position half of stock's `ObjectiveBaseFetchContainer` setup. What is left is
+      the identity half. Concrete plan: the container branch of `c2s/inv_txn.zig` (the
+      `open`/`take`/`put` arm around lines 137-192, which already reads the open container's
+      position for the backpack marker) should capture the *source slot's item id before*
+      `invsys.applyTransactionEx` runs, and hand it to a new `questOnFetchItemFrom(w,
+      peer_slot, item_id)` that compares it against the objective's target - the same shape as
+      the turn-in giver gate. The parsed kind merges `FetchKeep`/`FetchFromContainer`/
+      `FetchFromTreasure`/`TreasureChest` into `.fetch_item`, so the target (or its absence,
+      meaning "any item") is the only discriminator available. Testing needs a fetch def:
+      the builtin catalog is kill/goto, so use `assets/fixtures/` or a synthetic def, the way
+      the phase-graph tests do.
 - [ ] **Stock console command names are only partly accepted** - measured 2026-10-03 by extracting the typed
       names from every `ConsoleCmd*::getCommands()` in the dump (177 commands, 259 names/aliases; the RE prose
       table lists class names and effects, not the strings a client types). Four were stock names for commands
