@@ -1621,6 +1621,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       one-pass order, which is the wrong trade for a server that should look like stock under a crash. The
       only faithful way to keep both is a worker that waits, which is the same stall. Revisit only with a
       quiet-disk measurement showing stock's own dedi holding 50 ms through a save (it does not).
+- [ ] **`make check` cannot complete in this environment (webui-ts needs a network)** -
+      measured 2026-10-03: `make check` runs `release-check` (ok: product=0.13.0-dev.1,
+      stock_wire=V3.2.0 b10, zig=0.16.0) and then dies inside `make lint` at
+      `lint-webui` with `FileNotFoundError: /home/maci/.cache/zdtd/webui-ts/project/
+      shell.html` and "could not install preact@10.29.8 + clsx@2.1.1 + ... (offline and
+      not cached?)". The TypeScript toolchain cache lives under `~/.cache`, which this
+      session's sandbox cannot write, and npm cannot reach the network, so the step
+      cannot build the webui TS. Nothing in this session touched `src/server/webui/`, so
+      the failure is environmental rather than a regression; the gates that do run
+      offline (release-check, architecture, cycles, wire, plugins, docs, config keys,
+      provenance, catalogs, xml, build, test) are run individually instead, and
+      `zig build test` plus the four lint scripts are green. Re-run `make check` where
+      the cache is writable and npm is reachable.
 - [ ] **A live loadgen smoke is not obtainable in this environment** - measured 2026-10-03: `../7dtd-loadgen`
       ships a 2026-09-28 Release binary, and run against `zdtd --port 27100` it never sends a packet
       (`sent=0`, `ConnectionFailed` after ~5.8 s, repeatedly), while zdtd's own APM dump for the same window
