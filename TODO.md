@@ -1694,6 +1694,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       cannot drift out of date again. Both clauses now state the mechanism.
 - [x] **`PersistentPlayerProfiles`** - closed 2026-09-28: the profile persists in `profiles.zpf`, so the key
       has its surface and only the two out-of-scope keys and one unmapped cap stay open (below).
+- [ ] **Turn-in is not gated on the offering trader** - the gap ledger's row says
+      "any trader open", and the RE says the dialog action "finds active quest `ID` for
+      the giver faction" (npc-dialog.md 158), so stock turns a quest in at the faction
+      that gave it while zdtd accepts any trader. Scoped 2026-10-03: `QuestProgress`
+      needs a `giver_trader` (or faction) field, `questAccept`/`questAcceptWithCode`
+      need it threaded from the offer site, and the turn-in path in
+      `ecs/quest_trade.zig` needs to compare it. The blocker is that the offer path does
+      not see the trader entity today (`questOnTraderOpen(w, peer_slot)` takes no
+      entity id), so the callers (dialog/C2S) have to pass it - two or three rounds of
+      signature work, not a drive-by. A second stack-clamp audit the same day found
+      nothing to fix: every add site passes `maxStack`, which is why the "Stacking / bag
+      size" row was re-scored to WORKS.
 - [ ] **Stock console command names are only partly accepted** - measured 2026-10-03 by extracting the typed
       names from every `ConsoleCmd*::getCommands()` in the dump (177 commands, 259 names/aliases; the RE prose
       table lists class names and effects, not the strings a client types). Four were stock names for commands

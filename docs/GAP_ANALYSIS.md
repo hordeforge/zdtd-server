@@ -6893,7 +6893,7 @@ not stock:
 | Recipes / crafting queue | PARTIAL (`assets/recipes.zig` + workstation) |
 | Loot containers / `loot.xml` | HAVE (`assets/loot.zig`) |
 | Quality / mods / durability | PARTIAL (quality/meta persist; mods shallow) |
-| Stacking / bag size | PARTIAL (items.xml Stacknumber) |
+| Stacking / bag size | WORKS (2026-10-03 re-audit: the caps come from `items.xml` `Stacknumber` through `World.maxStack(item_id)`, and every add path passes it - nine call sites covering the fifteen `addItemStacked`/`addSlotStacked` uses - so an unclamped grant, which would let a stack exceed the catalog maximum, has no path left. The bag/toolbelt sizes ride the join body and are pinned by the inventory tests. The PARTIAL label was stale) |
 | Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see wire/WIRE_WORKSTATION) |
 | Schematic unlocks | PARTIAL (always_unlocked recipe list on join) |
 | Trader buy against real item defs | PARTIAL (traderAlways + EconomicValue; group rolls deferred) |
