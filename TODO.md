@@ -1574,6 +1574,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       re-narrated"), so shipping server pings without that check risks a client that
       ignores them, or worse treats the pair oddly. The RE was checked 2026-10-03 for
       a ping/pong symmetry note and has none.
+- [ ] **A live loadgen smoke is not obtainable in this environment** - measured 2026-10-03: `../7dtd-loadgen`
+      ships a 2026-09-28 Release binary, and run against `zdtd --port 27100` it never sends a packet
+      (`sent=0`, `ConnectionFailed` after ~5.8 s, repeatedly), while zdtd's own APM dump for the same window
+      reports `net_packets_in: 0` - so the server side is not at fault and the failure is loadgen-side. The
+      checkout cannot be rebuilt to test that: this session's sandbox is workspace-write over `zdtd-server`
+      only, and `dotnet build` fails with `Read-only file system` on `../7dtd-loadgen/src/LoadGen/obj` and the
+      NuGet http-cache. Re-try when the sibling is writable (rebuild, then `--join --host 127.0.0.1 --port
+      <server+2> --count 2 --actions 20`); rule 5's live evidence for join/spawn/chunk stays uncollected until
+      then, so join-path changes rest on the scenario suite alone.
+      Side observation from the same run: `save_io` means 0.4-1.0 s per save on this host (max 990 ms) with
+      tick overruns, so wall-clock/timing evidence from this machine is not trustworthy either.
 - [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
       2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
       `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with
