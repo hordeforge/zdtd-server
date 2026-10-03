@@ -1681,6 +1681,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       quietly spawning the `h` wave, because zdtd's single wandering spawner has no
       blood-moon spawn type. Pinned by `scenario the admin console spawns a wandering
       horde`.
+      Two candidates from the same list were checked and closed as non-gaps the same
+      day. `damagereset` (ConsoleCmdDamageReset) is editor-only: its Execute gates on
+      `GameManager.IsEditMode()` plus `PrefabEditModeManager.IsActive()` and prints
+      "Command has to be run while in Prefab Editor!" otherwise (DamageReset.il
+      IL_000B-001E and IL_002A), so a dedicated server never runs it and zdtd needs
+      no surface. `chunkreset` (`chunkreset`/`cr`, 4 block coords, "area too big",
+      "Can not reset chunks on this game") is a real dedi command and stays open: the
+      IL pins its shape (`LockManager.ForceUnlockByChunk`, `ChunkProviderGenerateWorld.
+      RemoveChunks`, per-chunk `GenerateSingleChunk`, then `ChunkManager.
+      ResendChunksToClients`, printing "Reset chunks covering area ..."), but zdtd has
+      neither a chunk-invalidation entry that re-derives a chunk from the world
+      provider nor a resend-after-reset path - `clientRemoveStreamed` plus
+      `streamChunksForClient` re-sends, yet nothing regenerates the block state the
+      reset is for. Implementing the resend half alone would be fake, so it waits for
+      the regeneration entry.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
