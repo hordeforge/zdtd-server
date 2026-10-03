@@ -1448,6 +1448,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       fail-closed value - a HitLocation-masked victim row cannot match None - and it
       is what the comment now says. The C2S path keeps passing the client's
       `d.body_part`, which is the case stock computes there.
+- [ ] **Drone orders and states wait on a wire the RE does not pin** - measured
+      2026-10-03: stock dispatches the player-facing drone verbs
+      (`drone_command_stay`/`follow` -> `ToggleOrderState`, `heal`, `light`,
+      `silent`, `attack_mode`) from `EntityDrone.startInteraction`
+      (vehicles-drones-turrets.md 826-845), and the in-game console covers
+      `junkdrone`/`jds` which is already implemented. What is missing is the
+      client-to-server mirror for those interaction verbs: the RE set names the
+      client dispatch but not the package that carries it, and zdtd has no
+      `NetPackageEntityInteract` builder, so adding one would be invention. The
+      server-local states (`Attack` via `DroneSensors`, `Heal` with its beam) need
+      the drone's weapon/storage layer first, which is the same order of work as
+      the item path. Next honest step: dump the interact package from the client
+      DLL in `../7dtd-engine-research` and pin its body, then the order toggle is
+      a small addition on top of the follow tick.
 - [ ] **Junk drones have no server surface** - scoped 2026-10-03 from
       `../7dtd-engine-research/docs/gameplay/vehicles-drones-turrets.md`:
       `EntityDrone` "runs a real server-side state machine" (section 4.2c line 577,
