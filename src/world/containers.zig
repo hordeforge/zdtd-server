@@ -112,6 +112,15 @@ pub const ContainerStore = struct {
     /// Once: warn when getOrCreate drops a container because the table is full.
     cap_warned: bool = false,
 
+    /// Live containers, for the console `bents info` row.
+    pub fn liveCount(self: *const ContainerStore) usize {
+        var k: usize = 0;
+        for (self.used) |u| {
+            if (u) k += 1;
+        }
+        return k;
+    }
+
     pub fn deinit(self: *ContainerStore) void {
         self.* = .{};
     }

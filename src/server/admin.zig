@@ -450,6 +450,10 @@ pub const Command = union(enum) {
     nets_no_sub: void,
     /// `nets <sub>` with a subcommand zdtd does not implement.
     nets_unknown: void,
+    /// Stock `bents on|off|info` (ConsoleCmdBents). `on`/`off` toggle block-entity
+    /// rendering, which a dedicated server does not do; `info` counts them. Only
+    /// `info` is implemented, so the toggle shapes are refused by name.
+    bents_info: bool,
     /// Stock `weather` (ConsoleCmdWeather): dumps the per-biome weather state.
     /// Stock also has mutator subcommands; those are not implemented, so an
     /// argument is refused instead of ignored.
@@ -590,6 +594,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
     if (std.mem.eql(u8, verb, "networkserver") or std.mem.eql(u8, verb, "nets"))
         return "networkserver|nets ls (latencysim/pls/packetlosssim are not implemented)";
+    if (std.mem.eql(u8, verb, "bents")) return "bents info (the on/off rendering toggles are not implemented)";
     if (std.mem.eql(u8, verb, "weather")) return "weather (dumps state; mutators are not implemented)";
     if (std.mem.eql(u8, verb, "loggamestate")) return "loggamestate|lgs";
     if (std.mem.eql(u8, verb, "getsandboxoptions"))
@@ -679,6 +684,12 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "bents")) {
+        const a = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        if (std.mem.eql(u8, a, "info")) return .{ .bents_info = true };
+        return .{ .bents_info = false };
+    }
     if (std.mem.eql(u8, cmd, "networkserver") or std.mem.eql(u8, cmd, "nets")) {
         const sub = it.next() orelse return .{ .nets_no_sub = {} };
         if (it.next() != null) return .{ .bad_args = cmd };

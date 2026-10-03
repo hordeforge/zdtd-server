@@ -1746,7 +1746,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       `off` are rendering toggles and `info` counts block entities by type, and zdtd
       has no central TE registry (`bents info` would have to sum per-subsystem maps
       and would report a partial count as if it were the total). `loot` and `config`
-      remain from the shortlist.
+      remain from the shortlist. `bents info` landed 2026-10-03 after all: the three
+      stores gained a `liveCount` (`containers`, `signs`, `workstations`, plus
+      `vending.count`), and the verb prints one row per store then `Total:`, which is
+      honest because each row names its subsystem instead of implying a full TE
+      census; `bents on|off` are refused as client rendering toggles. `loot` was
+      checked and left open with its shape pinned: `loot c|container <list>` rolls a
+      container and prints "Loot Container {0}, unique items {1}, empties {2}" plus
+      "#{0} {1}, q{2}, count {3}" rows, but zdtd's `rollContainer` needs a
+      `LootGateCtx` built from a container/TE with an opener (treasure, player, buff,
+      prob and qty sinks), so a console inspector needs a containerless roll helper
+      first.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

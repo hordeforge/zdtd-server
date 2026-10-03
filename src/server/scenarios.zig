@@ -25496,3 +25496,36 @@ test "scenario the admin console lists network peers" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "Commands: ls") != null);
     std.debug.print("PASS networkserver: ls lists peers, sim subcommands refused\n", .{});
 }
+
+test "scenario the admin console counts block entities" {
+    // Stock `bents info` counts block entities by type (" {0,3}. {1} = {2}" rows,
+    // then "Total:"). zdtd has no central TE registry, so the rows name the stores
+    // that exist instead of pretending to be a full census; the on/off rendering
+    // toggles are refused.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    var sink: [1024]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("bents info", "admin_tcp");
+    g.admin_reply_sink = null;
+    const info = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, info, "containers = ") != null);
+    try std.testing.expect(std.mem.find(u8, info, "Total: ") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("bents off", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "rendering toggles") != null);
+    std.debug.print("PASS bents: info counts per store, on/off refused\n", .{});
+}

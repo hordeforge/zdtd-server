@@ -671,7 +671,17 @@ pub const Workstation = struct {
 
 pub const WorkstationStore = struct {
     items: [max_workstations]Workstation = undefined,
+
     used: [max_workstations]bool = .{false} ** max_workstations,
+
+    /// Live workstations, for the console `bents info` row.
+    pub fn liveCount(self: *const WorkstationStore) usize {
+        var k: usize = 0;
+        for (self.used) |u| {
+            if (u) k += 1;
+        }
+        return k;
+    }
 
     pub fn get(self: *WorkstationStore, x: i32, y: i32, z: i32) ?*Workstation {
         for (self.items[0..], self.used[0..]) |*w, u| {

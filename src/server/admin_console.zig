@@ -1363,6 +1363,31 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .bents_info => |info| {
+            // Stock `bents info` counts block entities by type (" {0,3}. {1} = {2}"
+            // rows then "Total:"). zdtd has no central TE registry, so the rows name
+            // the stores that exist rather than pretending to be a full census.
+            if (!info) {
+                self.adminReply("bents on/off are client rendering toggles, not implemented on a dedicated server; use `bents info`");
+                return;
+            }
+            const rows = [_]struct { name: []const u8, n: usize }{
+                .{ .name = "containers", .n = self.containers.liveCount() },
+                .{ .name = "signs", .n = self.sign_texts.liveCount() },
+                .{ .name = "workstations", .n = self.workstations.liveCount() },
+                .{ .name = "vending", .n = self.vending.count() },
+            };
+            var total: usize = 0;
+            for (rows) |r| {
+                var b: [96]u8 = undefined;
+                const text = std.fmt.bufPrint(&b, "{s} = {d}\n", .{ r.name, r.n }) catch continue;
+                self.adminReply(text);
+                total += r.n;
+            }
+            var tb: [48]u8 = undefined;
+            const t = std.fmt.bufPrint(&tb, "Total: {d}\n", .{total}) catch return;
+            self.adminReply(t);
+        },
         .networkserver_ls => {
             // ConsoleCmdNetworkServer `ls`: peer slot, entity id, remote address.
             var n: usize = 0;

@@ -48,6 +48,15 @@ pub const SignStore = struct {
     n: usize = 0,
     cap_warned: bool = false,
 
+    /// Live signs, for the console `bents info` row.
+    pub fn liveCount(self: *const SignStore) usize {
+        var k: usize = 0;
+        for (self.used) |u| {
+            if (u) k += 1;
+        }
+        return k;
+    }
+
     pub fn deinit(self: *SignStore) void {
         self.* = .{};
     }
