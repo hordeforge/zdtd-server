@@ -1696,6 +1696,21 @@ nothing here is already waived. The four gaps the same audit closed are in
       `streamChunksForClient` re-sends, yet nothing regenerates the block state the
       reset is for. Implementing the resend half alone would be fake, so it waits for
       the regeneration entry.
+      Narrowed 2026-10-03 after reading the store: the missing piece is not
+      "generation" but the *order*. `getOrCreate` loads the disk record first and
+      only regenerates from the provider when there is none ("Disk load first: a v3
+      save with blocks is authoritative for every chunk"), and a reset is exactly
+      the case where the saved record must lose. `evictOneChunk` already shows the
+      drop mechanics (`saveChunk`, `deinitBlocks`, map remove, `destroy`) but it
+      saves before dropping, which is the opposite of a reset. So the slice is a
+      `regenChunk(pos)` that (a) drops the resident chunk without saving it, (b)
+      generates from the provider *ignoring* the disk record, (c) saves the fresh
+      state so the next load does not resurrect the old one, (d) re-streams by
+      dropping the key from every client's streamed set. (b) is the new API - the
+      generate path inside `getOrCreate` has to be factored out to skip the load -
+      and (d) already exists. Console surface: `chunkreset <x1> <z1> <x2> <z2>` in
+      block coordinates with stock's "area too big" / "Can not reset chunks on this
+      game" refusals and its "Reset chunks covering area ..." reply.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
