@@ -6896,7 +6896,7 @@ not stock:
 | Stacking / bag size | WORKS (2026-10-03 re-audit: the caps come from `items.xml` `Stacknumber` through `World.maxStack(item_id)`, and every add path passes it - nine call sites covering the fifteen `addItemStacked`/`addSlotStacked` uses - so an unclamped grant, which would let a stack exceed the catalog maximum, has no path left. The bag/toolbelt sizes ride the join body and are pinned by the inventory tests. The PARTIAL label was stale) |
 | Workstation / forge / chemistry | PARTIAL (TE type 12 full body + stock queue/craft-complete semantics; see wire/WIRE_WORKSTATION) |
 | Schematic unlocks | PARTIAL (always_unlocked recipe list on join) |
-| Trader buy against real item defs | PARTIAL (traderAlways + EconomicValue; group rolls deferred) |
+| Trader buy against real item defs | WORKS (2026-10-03 re-audit of both clauses: prices are the real item defs - `EconomicValue` x `EconomicSellScale` x SellMarkdown for the sell base (`game/trader.zig`, `game.zig`, `game/hooks.zig`) and base `EconomicValue` for the stock rows - and group rolls are not deferred at all: `TraderTable.spawnItemsFromGroup` expands a `group=` ref with stock's `SpawnItemsFromList` semantics, including the group's own count roll, weighted picks by `prob`, `unique_only`, `count_all`, and an 8-deep recursion guard, all RE-cited. `traderAlways` remains the fallback only for an unresolved trader_info row, which is stock's own behaviour) |
 
 **Largest remaining “feels like a game” gaps:** AI path A*, quest objective
 type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
