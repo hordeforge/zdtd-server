@@ -58,7 +58,7 @@ pub const player_console_help = [_][]const u8{
     "zdtd console commands:",
     " gettime|gt  listplayers|lp  listplayerids|lpi  listents|le  version",
     " say|s <msg>",
-    " dm|cm|settempunit|debugmenu (client-side)",
+    " dm|cm|creativemenu|settempunit|stu|debugmenu",
     " junkdrone|jds",
 };
 
@@ -417,7 +417,7 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         }
     } else if (eqAny(verb, &.{"version"})) {
         out.line("zdtd " ++ version.product ++ " (" ++ version.stock_wire ++ " wire)");
-    } else if (eqAny(verb, &.{ "dm", "cm", "settempunit", "debugmenu" })) {
+    } else if (eqAny(verb, &.{ "dm", "cm", "creativemenu", "settempunit", "stu", "debugmenu" })) {
         out.line("ok (client-side toggle)");
     } else {
         out.linef("unknown command '{s}'; try 'help'", .{verb});

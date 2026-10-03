@@ -1640,6 +1640,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       cannot drift out of date again. Both clauses now state the mechanism.
 - [x] **`PersistentPlayerProfiles`** - closed 2026-09-28: the profile persists in `profiles.zpf`, so the key
       has its surface and only the two out-of-scope keys and one unmapped cap stay open (below).
+- [ ] **Stock console command names are only partly accepted** - measured 2026-10-03 by extracting the typed
+      names from every `ConsoleCmd*::getCommands()` in the dump (177 commands, 259 names/aliases; the RE prose
+      table lists class names and effects, not the strings a client types). Four were stock names for commands
+      zdtd already had under a sibling alias, and all four now work: `teleport` and `teleportplayer` join
+      `tele|tp` on the admin path, `creativemenu` joins `cm`, and `stu` joins `settempunit` on the player path
+      (the usage string, help line and their tests moved with them). The rest of the diff needs a real pass
+      rather than the crude one: matching the extractor's output against zdtd's literals overcounts badly
+      (`settime`, `mem`, `killall`, `spawnentity` and `saveworld` all flagged although zdtd accepts them, and
+      `AccDecay`-style CamelCase names differ by case). A proper pass should mark each stock command as having a
+      server effect or being client-only (the RE table's effect column says which) and then list only the
+      server-effect ones zdtd lacks - `cvar`, `buff`, `chunkreset`, `damagereset`, `spawnairdrop`,
+      `spawnwandering` and `spawnscouts` are the candidates whose feature zdtd already has.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

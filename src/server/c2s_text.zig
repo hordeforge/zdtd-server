@@ -82,7 +82,7 @@ pub fn chatMsgOk(msg: []const u8) bool {
 pub const player_console_allowlist = [_][]const u8{
     "help",        "commands",  "?",             "gettime", "gt",      "listplayers", "lp",
     "listents",    "le",        "say",           "s",       "version", "dm",          "cm",
-    "settempunit", "debugmenu", "listplayerids", "lpi", "junkdrone", "jds",
+    "settempunit", "stu", "debugmenu", "listplayerids", "lpi", "junkdrone", "jds", "creativemenu",
 };
 
 pub fn playerConsoleAllowlist() []const []const u8 {

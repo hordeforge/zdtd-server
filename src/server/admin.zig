@@ -550,8 +550,8 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "junkdrone") or std.mem.eql(u8, verb, "jds"))
         return "junkdrone|jds <log|unstuck|clear>";
     if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> [count]";
-    if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp"))
-        return "tele|tp <slot> <x> <y> <z>";
+    if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp") or std.mem.eql(u8, verb, "teleport") or std.mem.eql(u8, verb, "teleportplayer"))
+        return "tele|tp|teleport|teleportplayer <slot> <x> <y> <z>";
     if (std.mem.eql(u8, verb, "say")) return "say <msg>";
     if (std.mem.eql(u8, verb, "kill")) return "kill <entityId>";
     if (std.mem.eql(u8, verb, "inv")) return "inv <slot>";
@@ -772,7 +772,7 @@ pub fn parseCommand(line: []const u8) Command {
         } };
     }
     // `tp` matches in-game console / WEBUI docs; same args as `tele`.
-    if (std.mem.eql(u8, cmd, "tele") or std.mem.eql(u8, cmd, "tp")) {
+    if (std.mem.eql(u8, cmd, "tele") or std.mem.eql(u8, cmd, "tp") or std.mem.eql(u8, cmd, "teleport") or std.mem.eql(u8, cmd, "teleportplayer")) {
         const p = it.next() orelse return .{ .bad_args = cmd };
         const xs = it.next() orelse return .{ .bad_args = cmd };
         const ys = it.next() orelse return .{ .bad_args = cmd };
@@ -899,7 +899,12 @@ test "parse tp alias for tele" {
     try std.testing.expectEqual(@as(f32, 10), c.tele.x);
     try std.testing.expectEqual(@as(f32, 70), c.tele.y);
     try std.testing.expectEqual(@as(f32, -5), c.tele.z);
-    try std.testing.expectEqualStrings("tele|tp <slot> <x> <y> <z>", usageFor("tp").?);
+    // Stock's primary name for the same command (ConsoleCmdTeleportsAbs
+    // getCommands: "teleport", "tp"; ConsoleCmdTeleportPlayer: "teleportplayer",
+    // "tele") - the aliases zdtd was missing.
+    try std.testing.expect(parseCommand("teleport 0 10 70 -5") == .tele);
+    try std.testing.expect(parseCommand("teleportplayer 0 10 70 -5") == .tele);
+    try std.testing.expectEqualStrings("tele|tp|teleport|teleportplayer <slot> <x> <y> <z>", usageFor("tp").?);
 }
 
 test "parse kill" {
