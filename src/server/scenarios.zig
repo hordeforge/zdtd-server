@@ -24813,16 +24813,56 @@ test "scenario a spawned drone streams to the observers" {
     // The ECD must carry the owner tail, not just the sim column: find the
     // drone class hash in the frame and check the belongsPlayerId i32 after it.
     {
-        const at = cap_b.indexOfPkgId(spawn_pkg).?;
-        const bytes = cap_b.slots[at].data[0..cap_b.slots[at].len];
+        // Several EntitySpawn frames can be in flight (the session drones for
+        // both peers), so scan every captured frame for the pair rather than
+        // assuming the first one is this drone's.
+        var found_tail = false;
         var hash_le: [4]u8 = undefined;
         std.mem.writeInt(i32, &hash_le, -866611929, .little);
-        const hoff = std.mem.indexOf(u8, bytes, &hash_le) orelse return error.TestUnexpectedResult;
         var owner_le: [4]u8 = undefined;
         std.mem.writeInt(i32, &owner_le, ca.entity_id, .little);
-        const tail = std.mem.indexOf(u8, bytes[hoff..], &owner_le) orelse return error.TestUnexpectedResult;
-        // followed by the neutral order state 0.
-        try std.testing.expectEqual(@as([4]u8, .{ 0, 0, 0, 0 }), bytes[hoff + tail + 4 ..][0..4].*);
+        for (cap_b.slots[0..cap_b.n]) |slot_rec| {
+            const bytes = slot_rec.data[0..slot_rec.len];
+            const hoff = std.mem.indexOf(u8, bytes, &hash_le) orelse continue;
+            const tail = std.mem.indexOf(u8, bytes[hoff..], &owner_le) orelse continue;
+            try std.testing.expectEqual(@as([4]u8, .{ 0, 0, 0, 0 }), bytes[hoff + tail + 4 ..][0..4].*);
+            found_tail = true;
+        }
+        try std.testing.expect(found_tail);
     }
     std.debug.print("PASS drone: spawned, classed and streamed to the other peer\n", .{});
+}
+
+test "scenario a session spawns its own drone and takes it down on drop" {
+    // Drone step 3: the join spawn (stock
+    // `DroneManager.SpawnFollowingDronesForPLayer`) and the session-end teardown
+    // (stock `RemoveAllDronesFromMap` for the dropped owner). The drone belongs
+    // to the client slot, so the ECD tail names that player and the drone dies
+    // with the session instead of lingering as an unowned ghost.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    try std.testing.expect(c.drone_net_id != 0);
+    const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+    try std.testing.expectEqual(components_mod.Kind.drone, g.sim.kind[ds]);
+    try std.testing.expectEqual(@as(i16, @intCast(c.slot)), g.sim.entity_owner_slot[ds]);
+    // Spawned at the player's own spawn point (one block and a half up).
+    try std.testing.expectApproxEqAbs(g.sim.transform[ps].z, g.sim.transform[ds].z, 1.0);
+    const before = g.sim.countKind(.drone);
+    const drone_nid = c.drone_net_id;
+
+    g.dropClientSlot(c.slot, "test-drop");
+    try std.testing.expectEqual(@as(i32, 0), c.drone_net_id);
+    try std.testing.expectEqual(before - 1, g.sim.countKind(.drone));
+    try std.testing.expect(g.sim.slotOfNetId(drone_nid) == null);
+    std.debug.print("PASS drone-session: spawned with its owner and destroyed on drop\n", .{});
 }

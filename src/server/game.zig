@@ -25,6 +25,7 @@ const game_bot = @import("game/bot.zig");
 const game_world = @import("game/world.zig");
 const game_player = @import("game/player.zig");
 const game_join = @import("game/join.zig");
+const game_join_spawn = @import("c2s/join_spawn.zig");
 const game_quest = @import("game/quest.zig");
 const game_social = @import("game/social.zig");
 const game_trader = @import("game/trader.zig");
@@ -2627,6 +2628,17 @@ pub const Game = struct {
 
     pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy: i32, sz: i32, eid: i32) !void {
         return game_join.sendJoinBundle(self, c, peer, sx, sy, sz, eid);
+    }
+
+    /// Builtin drone HP (the offline class-table row; a resolved class from
+    /// entityclasses.xml overrides the entity's stats, not this spawn value).
+    pub fn droneDefaultHp(self: *const Game) f32 {
+        return self.sim.classTableHp(.drone);
+    }
+
+    /// One junk drone per session, spawned at the player's spawn point.
+    pub fn spawnSessionDrone(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+        return game_join_spawn.spawnSessionDrone(self, c, x, y, z);
     }
 
     /// Stock NetPackageGameStats: full bPersistent propertyList blob (RE).

@@ -831,6 +831,10 @@ pub const Client = struct {
     /// hp-replicate detector both see the same corpse), which is what this
     /// guards. `has_backpack` cannot: it stays set until the bag is
     /// collected, so gating on it made a second death drop nothing at all.
+    /// Net id of this client's junk drone, 0 = none. Spawned once per session
+    /// near the player and destroyed with the session (stock `DroneManager`
+    /// shutdown on owner loss; persistence in `drones.dat` is a later slice).
+    drone_net_id: i32 = 0,
     bagged_this_death: bool = false,
     /// Latched with `deaths` so the hp-replicate drain cannot count the same
     /// corpse twice. Cleared on respawn alongside `bagged_this_death`.

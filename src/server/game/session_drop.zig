@@ -105,6 +105,18 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
         self.fireLeaveGame(ps);
         self.sim.destroy(ps);
     }
+    // The session's junk drone goes with its owner (stock `DroneManager`
+    // shutdown on owner loss; `drones.dat` persistence is a later slice).
+    {
+        const c = &self.clients[slot];
+        if (c.drone_net_id != 0) {
+            if (self.sim.slotOfNetId(c.drone_net_id)) |ds| {
+                self.sim.entity_owner_slot[ds] = -1;
+                self.sim.destroy(ds);
+            }
+            c.drone_net_id = 0;
+        }
+    }
     // Turrets hold the owning client slot, and slots are recycled, so a
     // turret still naming this one would pay its trap kills to whoever joins
     // next. The owner name stays: it is what the login re-map matches on.

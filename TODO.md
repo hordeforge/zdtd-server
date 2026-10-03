@@ -1492,6 +1492,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       player their own drones. The scenario now finds the class hash in the emitted
       frame and asserts the owner i32 plus the neutral order state follow it
       (decisive: disabling the wiring loses the tail). Still open:
+      **Step 3 landed 2026-10-03**: the join spawn (stock
+      `DroneManager.SpawnFollowingDronesForPLayer`) and the session-end teardown
+      (stock `RemoveAllDronesFromMap` for the dropped owner) are in.
+      `spawnSessionDrone` spawns one drone per session at the player's spawn
+      point, owned by that client slot and idempotent across respawns;
+      `session_drop` destroys it with the session. `scenario a session spawns its
+      own drone and takes it down on drop` pins the spawn, the owner and the
+      teardown (decisive: skipping the drop leaves the drone at 1). Remaining:
       (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with

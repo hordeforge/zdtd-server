@@ -1678,6 +1678,12 @@ pub const World = struct {
     /// Player-owned junk drone (`EntityDrone`). No AI tasks yet: the kind exists
     /// so the entity spawns, streams to observers and can be despawned; the stock
     /// Idle/Sentry/Follow/Heal/Attack/Shutdown machine is the next slice.
+    /// Builtin class-table HP for a kind, through the same positional mapping
+    /// `spawnBase` uses, so callers never hardcode a table index.
+    pub fn classTableHp(self: *const World, kind: Kind) f32 {
+        return self.class_table[classIndexOf(kind)].max_hp;
+    }
+
     pub fn spawnDrone(self: *World, x: f32, y: f32, z: f32, hp: f32, owner_slot: i16) ?NetId {
         const s = self.spawnBase(.drone, x, y, z, hp) orelse return null;
         self.mask[s].inventory = false;

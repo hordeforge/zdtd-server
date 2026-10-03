@@ -220,6 +220,12 @@ pub fn handleSpawnPlayer(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []c
         const owns_bundle_budget = peer.armCriticalBudget(game_mod.critical_retry_budget_ns);
         defer peer.releaseCriticalBudget(owns_bundle_budget);
         try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
+        // The player's junk drone. Stock does this on join
+        // (`DroneManager.SpawnFollowingDronesForPLayer`), spawning from the
+        // saved EntityCreationData; zdtd has no drone save yet, so a fresh
+        // session gets a fresh drone at the spawn point and it dies with the
+        // session (see session_drop). Idempotent: a respawn keeps the same drone.
+        self.spawnSessionDrone(c, @floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z));
         return true;
     }
     return false;
@@ -237,4 +243,15 @@ test "spawn chunk view clamp follows the stock pref, not a hardcoded 8" {
     try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(0, 4, 7));
     // A pref outside the stock range cannot widen the clamp.
     try std.testing.expectEqual(@as(i32, 4), clampSpawnChunkViewDim(9, 0, 7));
+}
+
+/// One junk drone per session, spawned at the player's own spawn point and
+/// owned by their client slot. No state machine or orders yet (next slice), so
+/// it hovers where it was placed; the owner attribution is what makes the stock
+/// client list it under `DroneManager`.
+pub fn spawnSessionDrone(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+    if (c.drone_net_id != 0) return; // a respawn keeps the drone it already has
+    const hp: f32 = @max(1, self.droneDefaultHp());
+    const nid = self.sim.spawnDrone(x, y + 1.5, z, hp, @intCast(c.slot)) orelse return;
+    c.drone_net_id = nid;
 }
