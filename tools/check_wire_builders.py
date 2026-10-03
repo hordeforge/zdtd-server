@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every `pub fn build*Body` in src/wire must be referenced somewhere in src.
+"""Wire-surface checks: builders must have callers, pinned names must resolve.
 
 A stock body builder that nothing calls is either dead code or a wire path that
 was never wired up - both are the kind of gap this project treats as a defect
@@ -7,7 +7,14 @@ was never wired up - both are the kind of gap this project treats as a defect
 `packages.zig` count as references, which is correct: the facade is how callers
 reach the builder.
 
-Baseline 2026-10-03: 135 builders, 0 unreferenced.
+Two checks:
+
+1. Every `pub fn build*Body` in `src/wire` must be referenced somewhere in `src`.
+2. Every literal name a runtime `idOf("<name>").?` unwraps must exist in
+   `default_mappings`: that `.?` is a panic path, and the only way it can fail is a
+   typo or an edit in the table, which no other gate sees.
+
+Baseline 2026-10-03: 135 builders, all referenced; 3 unwrap sites, all resolving.
 """
 
 from __future__ import annotations
@@ -30,6 +37,29 @@ def zig_files(path: str) -> list[str]:
             if n.endswith(".zig"):
                 out.append(os.path.join(dirpath, n))
     return out
+
+
+ID_OF_UNWRAP = re.compile(r'idOf\("([^"]+)"\)\.\?')
+MAPPINGS = re.compile(r'pub const default_mappings = \[_\]\[\]const u8\{([^}]*)\}', re.S)
+NAME_LITERAL = re.compile(r'"([^"]+)"')
+
+
+def check_pinned_names() -> list[str]:
+    """Literal `idOf(..).?` names must exist in the package id table."""
+    ids_path = os.path.join(WIRE, "stock_ids.zig")
+    text = open(ids_path, errors="ignore").read()
+    m = MAPPINGS.search(text)
+    if not m:
+        return ["default_mappings not found in src/wire/stock_ids.zig"]
+    known = set(NAME_LITERAL.findall(m.group(1)))
+    bad: list[str] = []
+    for path in zig_files(SRC):
+        for i, line in enumerate(open(path, errors="ignore"), 1):
+            for hit in ID_OF_UNWRAP.finditer(line):
+                name = hit.group(1)
+                if name not in known:
+                    bad.append(f"{name} ({os.path.relpath(path, ROOT)}:{i})")
+    return bad
 
 
 def main() -> int:
@@ -71,7 +101,17 @@ def main() -> int:
     if dupes or unreferenced:
         return 1
 
-    print(f"wire builders: {len(defined)} defined, all referenced")
+    pinned_bad = check_pinned_names()
+
+    if pinned_bad:
+        print(f"FAIL: idOf(..).? names missing from default_mappings ({len(pinned_bad)}):", file=sys.stderr)
+        for b in pinned_bad:
+            print("  " + b, file=sys.stderr)
+
+    if pinned_bad:
+        return 1
+
+    print(f"wire builders: {len(defined)} defined, all referenced; idOf unwrap names all resolve")
     return 0
 
 

@@ -2,7 +2,7 @@
   "_note": "Word ceilings for standing docs and the checked doc trees. Ceilings are guardrails, not reduction targets: a doc at its ceiling must relocate or condense before it grows again, and raising a ceiling is part of the change that needs the space. tools/check_docs.py (make lint) enforces this file, including a row for every page under docs/subsystems, docs/catalogs, docs/cookbook and docs/postmortem.",
   "docs": {
     "AGENTS.md": 4030,
-    "docs/AGENTS.md": 1050,
+    "docs/AGENTS.md": 1100,
     "docs/APM.md": 2050,
     "docs/ARCHITECTURE.md": 4800,
     "docs/ASSETS.md": 1300,
