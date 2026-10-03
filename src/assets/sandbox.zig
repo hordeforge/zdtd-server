@@ -213,3 +213,36 @@ test "bool options decode from index" {
     try std.testing.expectEqual(true, valueB(optionByName("NewbieCoat").?, 5));
     try std.testing.expectEqual(false, valueB(optionByName("SillySounds").?, 5));
 }
+
+test "the option table resolves every value set and its ids are sane" {
+    // `valueI`/`valueF` dereference `findSet(o.set_name).?` in two arms, so a row
+    // naming a set that does not exist would panic at decode time rather than
+    // silently mis-reading an option. The generated tables are machine-written,
+    // so the guard lives here with the decoder rather than in
+    // `sandbox_data.zig` (which says "do not hand-edit").
+    for (data.options) |o| {
+        if (findSet(o.set_name) == null) {
+            std.debug.print("option {d} '{s}' names missing value set '{s}'\n", .{ o.id, o.name, o.set_name });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // Ids are the wire ordinals: unique, and contiguous from 0 so a gap cannot
+    // hide a dropped option.
+    var i: usize = 0;
+    while (i < data.options.len) : (i += 1) {
+        try std.testing.expectEqual(@as(u32, @intCast(i)), data.options[i].id);
+        var k: usize = i + 1;
+        while (k < data.options.len) : (k += 1) {
+            try std.testing.expect(!std.mem.eql(u8, data.options[i].name, data.options[k].name));
+        }
+    }
+    // A duplicate value-set name would shadow the later row for every option
+    // that names it.
+    i = 0;
+    while (i < data.value_sets.len) : (i += 1) {
+        var k: usize = i + 1;
+        while (k < data.value_sets.len) : (k += 1) {
+            try std.testing.expect(!std.mem.eql(u8, data.value_sets[i].name, data.value_sets[k].name));
+        }
+    }
+}
