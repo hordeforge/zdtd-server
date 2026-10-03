@@ -96,14 +96,15 @@ union above.
 
 | Verbs (aliases grouped) | Line |
 |---|---|
-| `help`, `commands`, `?` | 361 |
-| `gettime`, `gt` | 366 |
-| `listplayers`, `lp` | 373 |
-| `listplayerids`, `lpi` | 381 |
-| `listents`, `le` | 391 |
-| `say`, `s` | 395 |
-| `version` | 406 |
-| `dm`, `cm`, `settempunit`, `debugmenu` | 408 |
+| `help`, `commands`, `?` | 362 |
+| `gettime`, `gt` | 367 |
+| `junkdrone`, `jds`, `serverjunkdrone` | 374 |
+| `listplayers`, `lp` | 385 |
+| `listplayerids`, `lpi` | 393 |
+| `listents`, `le` | 403 |
+| `say`, `s` | 407 |
+| `version` | 418 |
+| `dm`, `cm`, `settempunit`, `debugmenu` | 420 |
 
 
 ## Player console allowlist (`src/server/c2s_text.zig`)
@@ -131,6 +132,8 @@ permission level (`src/server/admin_console.zig:307`).
 | `debugmenu` | 85 |
 | `listplayerids` | 85 |
 | `lpi` | 85 |
+| `junkdrone` | 85 |
+| `jds` | 85 |
 
 
 ## Bot verbs (`src/server/game/bot.zig`)
