@@ -1732,7 +1732,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       by `scenario the admin console dumps the sandbox options` (decisive: inverting
       the filter prints everything for the bare form and fails). Still open from the
       verified shortlist, in rough cost order: `loggamestate` (a state dump),
-      `weather` (a weather dump), `networkserver`, `bents`, `loot`, `config`.
+      `networkserver`, `bents`, `loot`, `config`. Two more landed 2026-10-03:
+      `weather` (ConsoleCmdWeather) dumps the per-biome weather state from
+      `World.weather` (biome, group, remaining seconds, storm state and the storm
+      tick) and refuses an argument, because stock's mutator subcommands are not
+      implemented; `loggamestate`/`lgs` (ConsoleCmdLogGameState) routes to zdtd's
+      own `status` line, which carries the same picture. Pinned by `scenario the
+      admin console dumps the weather and the game state`.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

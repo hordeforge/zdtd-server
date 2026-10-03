@@ -1363,6 +1363,28 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .weather => |with_args| {
+            if (with_args) {
+                self.adminReply("weather mutators are not implemented; only the state dump is");
+                return;
+            }
+            const wx = &self.world.weather;
+            var hb: [64]u8 = undefined;
+            const head = std.fmt.bufPrint(&hb, "weather biomes={d}\n", .{wx.n}) catch return;
+            self.adminReply(head);
+            for (wx.states[0..wx.n]) |st| {
+                var lb: [160]u8 = undefined;
+                const text = if (st.storm_world_time) |at|
+                    std.fmt.bufPrint(&lb, "biome={d} group={d} remaining={d}s storm={d} storm_at={d}\n", .{ st.biome_id, st.group_index, st.remaining_seconds, st.storm_state, at }) catch continue
+                else
+                    std.fmt.bufPrint(&lb, "biome={d} group={d} remaining={d}s storm={d} storm_at=none\n", .{ st.biome_id, st.group_index, st.remaining_seconds, st.storm_state }) catch continue;
+                self.adminReply(text);
+            }
+        },
+        .loggamestate => {
+            // Stock's state dump; zdtd's `status` line is the same picture.
+            self.runAdminLine("status", "admin_tcp");
+        },
         .getsandboxoptions => |show_all| {
             // Stock's `gso [show all]`: the bare form lists only non-default
             // options, the flag lists every row. Values come from the decoded

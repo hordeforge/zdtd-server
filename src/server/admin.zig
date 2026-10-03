@@ -441,6 +441,13 @@ pub const Command = union(enum) {
     /// form takes `-p <player>`; a dedicated server has no sender player, so the
     /// flag is required there.
     cvar: CvarSub,
+    /// Stock `weather` (ConsoleCmdWeather): dumps the per-biome weather state.
+    /// Stock also has mutator subcommands; those are not implemented, so an
+    /// argument is refused instead of ignored.
+    weather: bool,
+    /// Stock `loggamestate` / `lgs` (ConsoleCmdLogGameState): the server state dump.
+    /// zdtd's `status` line is the same information, so the stock name routes there.
+    loggamestate,
     /// Stock `getsandboxoptions` / `gso [show all]` (ConsoleCmdGetSandboxOptions):
     /// dumps the sandbox options; the bare form shows only the ones that differ
     /// from their table default, an argument shows all.
@@ -572,6 +579,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
+    if (std.mem.eql(u8, verb, "weather")) return "weather (dumps state; mutators are not implemented)";
+    if (std.mem.eql(u8, verb, "loggamestate")) return "loggamestate|lgs";
     if (std.mem.eql(u8, verb, "getsandboxoptions"))
         return "getsandboxoptions|gso [show all]";
     if (std.mem.eql(u8, verb, "chunkreset"))
@@ -659,6 +668,12 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "loggamestate") or std.mem.eql(u8, cmd, "lgs"))
+        return if (it.next() == null) .loggamestate else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "weather")) {
+        if (it.next() == null) return .{ .weather = false };
+        return .{ .weather = true };
+    }
     if (std.mem.eql(u8, cmd, "getsandboxoptions") or std.mem.eql(u8, cmd, "gso")) {
         const a = it.next() orelse return .{ .getsandboxoptions = false };
         if (it.next() != null) return .{ .bad_args = cmd };

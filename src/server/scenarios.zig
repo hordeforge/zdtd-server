@@ -25422,3 +25422,39 @@ test "scenario the admin console dumps the sandbox options" {
     try std.testing.expect(std.mem.find(u8, sink[0..all_len], "ZombieFeralSense") != null);
     std.debug.print("PASS sandboxoptions: non-default listed bare, all listed with the flag\n", .{});
 }
+
+test "scenario the admin console dumps the weather and the game state" {
+    // Stock `weather` (ConsoleCmdWeather) dumps per-biome weather state; stock
+    // `loggamestate`/`lgs` (ConsoleCmdLogGameState) dumps the server state. zdtd
+    // routes the latter to its own `status` line, which carries the same picture.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var sink: [4096]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("weather", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "weather biomes=") != null);
+
+    // A mutator argument is refused by name rather than ignored.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("weather storm", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "not implemented") != null);
+
+    // loggamestate answers with the status picture.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("lgs", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "tick=") != null);
+    std.debug.print("PASS weather/loggamestate: state dumps answer, mutators refused\n", .{});
+}
