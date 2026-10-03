@@ -1320,7 +1320,7 @@ nothing here is already waived. The four gaps the same audit closed are in
       The crawler/cripple rules (`LegCrawlerThreshold`, `LegCrippleScale`, the
       0.05 floor and the per-side flags) are implemented in `rollDismember`; the
       open part is the walk-type/animation setup, which is client-side.
-- [ ] **Sandbox `EntityIncomingDamage` (42) is client-side by design** - NOT a
+- [x] **Sandbox `EntityIncomingDamage` (42) is client-side by design** - NOT a
       gap: stock's client applies the multiplier to the damage it claims and
       the server trusts the claimed strength (sandbox-options.md 274-292), which
       is what `Director.damageScale` documents. Recording it so the audit does
@@ -1420,15 +1420,9 @@ nothing here is already waived. The four gaps the same audit closed are in
       `Chunk::read(..., _bNetworkRead)` (IL=775) contain no prop reference at all,
       and neither does the disk path (`Chunk::save`/`write(stream)`), so props live
       in memory and come from the client's own prefab data - a server-side stream or
-      save of them would be invention. Superseded note:
-      `wire/stock_props.zig` is the wire contract (`PropChangeInfo.Write`
-      IL_0000-0136 pinned: ChunkPos i32,i32, a flags byte with PropId 1 / Position 2
-      / Rotation 4 / Scale 8 / BlockValue 16, the present values in that order, and
-      BlockValue as `rawData` u32 + `damage` u16), with a round-trip test for the
-      full and coordinate-only shapes. Missing: the per-chunk prop store, the
-      `GameManager.ChangeProps` apply (chunk required, batch bails on a miss), the
-      channel-192 relay excluding the changer, the chunk-stream leg so a late joiner
-      sees existing props, and persistence. Next slice: the store + apply.
+      save of them would be invention. Superseded note, closed 2026-10-03: the note below the first
+      SetProp entry described the same gap a second time and was stale the same way - the store, the apply,
+      the relay and the ownership check all shipped in rounds 163-165 (see the closed entry above).
 - [ ] **Verify the GameStats blob order without trusting IL line order** - the
       claim (AGENTS rule 16's headline example: the blob is written in
       `propertyList` slot order, and `stock_gamestats.zig` keeps the 69
@@ -1437,7 +1431,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       `stelem.any GameStats/PropertyDecl` yields ~70 `ldc.i4` ordinals whose first
       entry is not the list head (`BiomeGSModifier` before `LoadScene`), so the
       dump's *line order* is not the runtime list order - the exact trap rule 16
-      warns about ("a table proves what it is a table of"). The zdtd writer's own
+      warns about ("a table proves what it is a table of"). Checked 2026-10-03
+      against the RE's resolved parity census: it cannot settle it either, because
+      `NetPackageGameStats`'s own write sequence is `NetPackage.write; Write;
+      get_BaseStream` - the body is copied wholesale as a length-prefixed blob, so
+      the artifact records nothing about the inner slot order. The zdtd writer's own
       comment says 78 decls with 9 skipped and the names it skips
       (`EnemyCount`, `AnimalCount`, `IsSaveSupplyCrates`, `IsResetMapOnRestart`,
       `IsVersionCheckDone`, `ZombieHordeMeter`, `GlobalMessageToShow`,
@@ -1636,7 +1634,9 @@ nothing here is already waived. The four gaps the same audit closed are in
       `require_eval.zig` (64) shows every kind has an evaluator, and that switch
       has no `else` arm, so exhaustiveness is compiler-enforced and a hand count
       cannot drift out of date again. Both clauses now state the mechanism.
-- [ ] **Remaining serverconfig keys with no surface**: `ServerAllowCrossplay`
+- [x] **`PersistentPlayerProfiles`** - closed 2026-09-28: the profile persists in `profiles.zpf`, so the key
+      has its surface and only the two out-of-scope keys and one unmapped cap stay open (below).
+- [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
       is what the stock client uses off EOS, so disabling it would leave no
