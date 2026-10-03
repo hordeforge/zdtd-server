@@ -25458,3 +25458,41 @@ test "scenario the admin console dumps the weather and the game state" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "tick=") != null);
     std.debug.print("PASS weather/loggamestate: state dumps answer, mutators refused\n", .{});
 }
+
+test "scenario the admin console lists network peers" {
+    // Stock `networkserver|nets ls` (ConsoleCmdNetworkServer) lists the connected
+    // peers. The latencysim / pls / packetlosssim development subcommands are not
+    // implemented, so they are refused by name rather than silently doing nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    var sink: [1024]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("nets ls", "admin_tcp");
+    g.admin_reply_sink = null;
+    const ls = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, ls, "slot=0") != null);
+    try std.testing.expect(std.mem.find(u8, ls, "Total: 1") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("networkserver pls", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "not implemented") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("nets", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "Commands: ls") != null);
+    std.debug.print("PASS networkserver: ls lists peers, sim subcommands refused\n", .{});
+}

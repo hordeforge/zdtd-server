@@ -1363,6 +1363,25 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .networkserver_ls => {
+            // ConsoleCmdNetworkServer `ls`: peer slot, entity id, remote address.
+            var n: usize = 0;
+            for (&self.clients, 0..) |*cl, i| {
+                if (!cl.joined) continue;
+                const ps = self.sim.playerByPeer(i);
+                const eid: i32 = if (ps) |p| self.sim.network_id[p].id else 0;
+                var b: [160]u8 = undefined;
+                const text = std.fmt.bufPrint(&b, "slot={d} entity={d} name={s}\n", .{ i, eid, cl.name[0..cl.name_len] }) catch continue;
+                self.adminReply(text);
+                n += 1;
+            }
+            var tb: [64]u8 = undefined;
+            const total = std.fmt.bufPrint(&tb, "Total: {d}\n", .{n}) catch return;
+            self.adminReply(total);
+        },
+        .nets_no_sub, .nets_unknown => {
+            self.adminReply("Commands: ls (latencysim, pls and packetlosssim are not implemented)");
+        },
         .weather => |with_args| {
             if (with_args) {
                 self.adminReply("weather mutators are not implemented; only the state dump is");

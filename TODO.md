@@ -1738,7 +1738,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       tick) and refuses an argument, because stock's mutator subcommands are not
       implemented; `loggamestate`/`lgs` (ConsoleCmdLogGameState) routes to zdtd's
       own `status` line, which carries the same picture. Pinned by `scenario the
-      admin console dumps the weather and the game state`.
+      admin console dumps the weather and the game state`. A third landed the same
+      day: `networkserver|nets ls` (ConsoleCmdNetworkServer) lists the connected
+      peers (slot, entity, name, then `Total:`), while `latencysim`, `pls` and
+      `packetlosssim` are refused by name - they are stock's development tools and
+      not implemented. `bents` was checked and left open rather than faked: `on`/
+      `off` are rendering toggles and `info` counts block entities by type, and zdtd
+      has no central TE registry (`bents info` would have to sum per-subsystem maps
+      and would report a partial count as if it were the total). `loot` and `config`
+      remain from the shortlist.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
