@@ -447,6 +447,10 @@ pub const Command = union(enum) {
     /// the same one the daytime scout drip uses), so a count here means the
     /// caller asked for a shape zdtd does not have yet.
     spawnscouts: usize,
+    /// Stock `spawnwandering b|h` (ConsoleCmdAIDirectorSpawnHorde): `h` is the
+    /// normal wandering horde, `b` the blood-moon spawn type; null = no argument,
+    /// which stock answers with its `Commands:` help.
+    spawnwandering: ?u8,
     /// Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer,
     /// console-commands.md 302): applies a buff to a player by name or id.
     buffplayer: struct { target: Target, buff: []const u8 },
@@ -561,6 +565,7 @@ fn badSubCommand(sub: ?[]const u8) Command {
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
+    if (std.mem.eql(u8, verb, "spawnwandering")) return "spawnwandering <b|h>";
     if (std.mem.eql(u8, verb, "cvar"))
         return "cvar get|set|list ... [-p <player>]";
     if (std.mem.eql(u8, verb, "buffplayer"))
@@ -643,6 +648,13 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "spawnwandering") or std.mem.eql(u8, cmd, "spawnw")) {
+        const a = it.next() orelse return .{ .spawnwandering = null };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        if (std.ascii.eqlIgnoreCase(a, "h")) return .{ .spawnwandering = 'h' };
+        if (std.ascii.eqlIgnoreCase(a, "b")) return .{ .spawnwandering = 'b' };
+        return .{ .bad_args = cmd };
+    }
     if (std.mem.eql(u8, cmd, "spawnscouts")) {
         var n: usize = 0;
         while (it.next()) |_| n += 1;

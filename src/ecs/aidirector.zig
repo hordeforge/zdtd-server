@@ -1453,6 +1453,14 @@ pub const Director = struct {
     /// `UpdateSpawn` IL_006D spawns the resolved stage row's `group` `num`
     /// times. Without a ladder (offline or builtin tables, or a wrapped stage
     /// below the first row) it falls back to the rules-sized biome-group pack.
+    /// Console `spawnwandering h`: the normal wandering horde, the same spawner
+    /// the daytime/wandering drip runs. Stock's `b` asks for the blood-moon
+    /// *spawn type* of the same component, which zdtd's single wandering spawner
+    /// cannot express, so that shape is refused at the console rather than faked.
+    pub fn spawnWanderingHordeNow(self: *Director, w: *ecs_world.World) u32 {
+        return self.spawnWanderingHorde(w);
+    }
+
     fn spawnWanderingHorde(self: *Director, w: *ecs_world.World) u32 {
         for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;

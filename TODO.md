@@ -1674,6 +1674,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       (parse arm, dispatch, `forceAirDrop`, its own test and a verb-table row), so
       re-check each candidate by grep before trusting the extractor - the literal
       match misses verbs whose names live in `constants.zig`'s table.
+      A fourth landed 2026-10-03: `spawnwandering b|h` (ConsoleCmdAIDirectorSpawnHorde,
+      whose IL pins `b` -> SpawnType 0 and `h` -> SpawnType 1). `h` runs the normal
+      wandering horde through the same spawner the drip uses, the no-argument form
+      prints stock's `Commands: b h` help, and `b` is refused by name rather than
+      quietly spawning the `h` wave, because zdtd's single wandering spawner has no
+      blood-moon spawn type. Pinned by `scenario the admin console spawns a wandering
+      horde`.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

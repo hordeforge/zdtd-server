@@ -1357,6 +1357,20 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .spawnwandering => |which| {
+            const w = which orelse {
+                self.adminReply("Commands: b h");
+                return;
+            };
+            if (w == 'b') {
+                self.adminReply("spawnwandering b needs the blood-moon spawn type, which zdtd's wandering spawner does not have yet");
+                return;
+            }
+            const n = self.sim.director.spawnWanderingHordeNow(&self.sim);
+            var sb: [96]u8 = undefined;
+            const out = std.fmt.bufPrint(&sb, "spawned {d} wandering\n", .{n}) catch return;
+            self.adminReply(out);
+        },
         .spawnscouts => |argc| {
             // Stock's own refusal for the shapes zdtd does not implement
             // ("Wrong number of arguments, expected none, 1 or 3, found N").

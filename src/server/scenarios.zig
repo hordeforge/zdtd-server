@@ -25296,3 +25296,40 @@ test "scenario the admin console spawns a scout wave" {
     try std.testing.expect(g.sim.kind_groups.count(.zombie) >= before);
     std.debug.print("PASS spawnscouts: no-arg form runs, other shapes refused with stock's message\n", .{});
 }
+
+test "scenario the admin console spawns a wandering horde" {
+    // Stock `spawnwandering b|h` (ConsoleCmdAIDirectorSpawnHorde): `h` is the
+    // normal wandering horde. `b` is the blood-moon *spawn type* of the same
+    // component, which zdtd's single wandering spawner cannot express, so it is
+    // refused with a message instead of quietly spawning the `h` wave.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    var sink: [512]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("spawnw", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "Commands: b h") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("spawnwandering b", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "blood-moon spawn type") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("spawnwandering h", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "spawned") != null);
+    std.debug.print("PASS spawnwandering: h spawns, b refused by name, no argument prints the help\n", .{});
+}
