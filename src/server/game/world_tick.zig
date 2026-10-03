@@ -729,3 +729,51 @@ test "the airdrop schedule replays stock in both modes" {
     g.air_drop_interval_hours = 24;
     try std.testing.expectEqual(@as(u64, 124), nextAirdropHour(g, 100));
 }
+
+/// Per-tick drone follow. Stock `EntityDrone` steers through its own flood-fill
+/// pathing (vehicles-drones-turrets.md section 5); zdtd moves in a straight line
+/// at `cMaxSpeedFlying` = 15 m/s toward the owner's chest, which is the same
+/// destination without the path search - a documented approximation, not the
+/// machine (states, sentry, attack and heal are later slices). The out-of-range
+/// rule is stock's exactly: a drone further than 32 m from its owner's chest is
+/// yanked back (`TeleportOutOfRange`), unless it is parked.
+pub fn tickDrones(self: *Game, dt: f32) void {
+    const follow_distance: f32 = 5; // cBaseFollowDistance
+    const teleport_distance: f32 = 32; // TeleportOutOfRange
+    const max_speed: f32 = 15; // cMaxSpeedFlying
+    const hover: f32 = 1.5; // chest height above the owner's feet
+    for (self.sim.kind_groups.slice(.drone)) |d| {
+        const owner_slot = self.sim.entity_owner_slot[d];
+        if (owner_slot < 0) continue;
+        const os: usize = @intCast(owner_slot);
+        if (os >= self.clients.len) continue;
+        const owner = self.sim.playerByPeer(os) orelse continue;
+        const t = self.sim.transform[d];
+        const o = self.sim.transform[owner];
+        const dx = o.x - t.x;
+        const dy = (o.y + hover) - t.y;
+        const dz = o.z - t.z;
+        const flat = @sqrt(dx * dx + dz * dz);
+        // The 7 m band only *starts* the follow; it settles at the 5 m follow
+        // distance, so a drone does not park just outside the band.
+        if (flat <= follow_distance and @abs(dy) <= follow_distance) continue;
+        if (flat > teleport_distance) {
+            self.sim.transform[d] = .{ .x = o.x, .y = o.y + hover, .z = o.z, .yaw = t.yaw };
+        } else {
+            const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist <= 0.001) continue;
+            // Stop at the follow distance rather than on the owner's head.
+            const travel = @min(dist, max_speed * dt);
+            // Stop on the follow distance instead of overshooting the owner.
+            const step_len = @min(travel, dist - follow_distance);
+            self.sim.transform[d] = .{
+                .x = t.x + dx / dist * step_len,
+                .y = t.y + dy / dist * step_len,
+                .z = t.z + dz / dist * step_len,
+                .yaw = std.math.atan2(dz, dx),
+            };
+        }
+        self.sim.dirty[d].pos = true;
+        self.sim.dirty_bits.set(d);
+    }
+}

@@ -24866,3 +24866,42 @@ test "scenario a session spawns its own drone and takes it down on drop" {
     try std.testing.expect(g.sim.slotOfNetId(drone_nid) == null);
     std.debug.print("PASS drone-session: spawned with its owner and destroyed on drop\n", .{});
 }
+
+test "scenario a drone follows its owner and snaps back from out of range" {
+    // Stock `followState` steers toward the owner's chest once they are past
+    // FollowDistance+2 (7 m) and `TeleportOutOfRange` yanks a drone further than
+    // 32 m back. zdtd walks the same destination in a straight line (the path
+    // search is the machine's, a later slice), so the owner can never leave the
+    // drone behind without it moving.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+
+    // Within the follow distance: at rest (no jitter on a parked owner).
+    const parked = g.sim.transform[ds];
+    _ = g.step() catch {};
+    try std.testing.expectApproxEqAbs(parked.x, g.sim.transform[ds].x, 0.001);
+
+    // Owner walks 10 m away: the drone closes the gap but stops at 5 m.
+    g.sim.transform[ps].x += 10;
+    var i: usize = 0;
+    while (i < 40) : (i += 1) _ = g.step() catch {};
+    const gap = g.sim.transform[ps].x - g.sim.transform[ds].x;
+    try std.testing.expect(gap > 4.9 and gap < 5.5);
+
+    // Owner teleports far away: the out-of-range rule snaps the drone back.
+    g.sim.transform[ps].x += 100;
+    _ = g.step() catch {};
+    try std.testing.expectApproxEqAbs(g.sim.transform[ps].x, g.sim.transform[ds].x, 0.01);
+    try std.testing.expectApproxEqAbs(g.sim.transform[ps].y + 1.5, g.sim.transform[ds].y, 0.01);
+    std.debug.print("PASS drone-follow: closes to 5 m and snaps back past 32 m\n", .{});
+}

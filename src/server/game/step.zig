@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const apm = @import("../../apm/root.zig");
 const clock = @import("../../util/clock.zig");
+const game_world_tick = @import("world_tick.zig");
 const protocol = @import("../../protocol.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
@@ -429,6 +430,7 @@ pub fn step(self: *Game) !void {
                 }
             }
         }
+        game_world_tick.tickDrones(self, @as(f32, @floatFromInt(@import("../../protocol.zig").tick_ns)) / 1_000_000_000.0);
         if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
         if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
         plugin_compose.onTick(self);

@@ -1500,6 +1500,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       `session_drop` destroys it with the session. `scenario a session spawns its
       own drone and takes it down on drop` pins the spawn, the owner and the
       teardown (decisive: skipping the drop leaves the drone at 1). Remaining:
+      **Step 4 landed 2026-10-03**: the drone now follows. `world_tick.tickDrones`
+      runs every tick: within 5 m of the owner's chest it sits still; past that
+      it walks toward the chest at `cMaxSpeedFlying` 15 m/s and settles on the
+      5 m `cBaseFollowDistance`; past 32 m stock's `TeleportOutOfRange` snaps it
+      back. Straight-line travel is a documented approximation of the drone's own
+      flood-fill pathing, and the pose rides the generic `NetPackageEntityPosAndRot`
+      channel (dirty-flagged), so the client sees the movement.
+      `scenario a drone follows its owner and snaps back from out of range` pins
+      all three bands. Still open:
       (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with
