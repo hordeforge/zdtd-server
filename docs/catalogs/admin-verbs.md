@@ -105,7 +105,7 @@ union above.
 | `listents`, `le` | 403 |
 | `say`, `s` | 407 |
 | `version` | 418 |
-| `dm`, `cm`, `settempunit`, `debugmenu` | 420 |
+| `dm`, `cm`, `creativemenu`, `settempunit`, `stu`, `debugmenu` | 420 |
 
 
 ## Player console allowlist (`src/server/c2s_text.zig`)
@@ -130,11 +130,13 @@ permission level (`src/server/admin_console.zig:307`).
 | `dm` | 84 |
 | `cm` | 84 |
 | `settempunit` | 85 |
+| `stu` | 85 |
 | `debugmenu` | 85 |
 | `listplayerids` | 85 |
 | `lpi` | 85 |
 | `junkdrone` | 85 |
 | `jds` | 85 |
+| `creativemenu` | 85 |
 
 
 ## Bot verbs (`src/server/game/bot.zig`)
