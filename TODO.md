@@ -1652,6 +1652,11 @@ nothing here is already waived. The four gaps the same audit closed are in
       server effect or being client-only (the RE table's effect column says which) and then list only the
       server-effect ones zdtd lacks - `cvar`, `buff`, `chunkreset`, `damagereset`, `spawnairdrop`,
       `spawnwandering` and `spawnscouts` are the candidates whose feature zdtd already has.
+      One of them landed 2026-10-03: `buffplayer <name|entityId|slot> <buffName>`
+      (ConsoleCmdBuffPlayer, console-commands.md 302), resolving the target through
+      the same `resolveAdminTarget` the other admin verbs use and applying through
+      the game-event buff path, with an unknown name refused as stock refuses it.
+      Pinned by `scenario the admin console applies a buff by name`.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

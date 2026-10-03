@@ -437,6 +437,9 @@ pub const Command = union(enum) {
     getgamestat: []const u8,
     /// Stock `setgamepref` / `sg <name> <value>` (asm.il 251176).
     setgamepref: struct { name: []const u8, value: []const u8 },
+    /// Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer,
+    /// console-commands.md 302): applies a buff to a player by name or id.
+    buffplayer: struct { target: Target, buff: []const u8 },
     /// Stock `chunkcache` / `cc` (asm.il 213107).
     chunkcache,
     /// Stock `mem` (asm.il 234965).
@@ -547,6 +550,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
 /// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
+    if (std.mem.eql(u8, verb, "buffplayer"))
+        return "buffplayer <name|entityId|slot> <buffName>";
     if (std.mem.eql(u8, verb, "junkdrone") or std.mem.eql(u8, verb, "jds"))
         return "junkdrone|jds <log|unstuck|clear>";
     if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> [count]";
@@ -617,6 +622,12 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "buffplayer") or std.mem.eql(u8, cmd, "bp")) {
+        const who = it.next() orelse return .{ .bad_args = cmd };
+        const buff = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .buffplayer = .{ .target = parseTarget(who), .buff = buff } };
+    }
     if (std.mem.eql(u8, cmd, "junkdrone") or std.mem.eql(u8, cmd, "jds") or std.mem.eql(u8, cmd, "serverjunkdrone")) {
         const sub = it.next() orelse return .{ .junkdrone = .log };
         if (it.next() != null) return .{ .bad_args = cmd };

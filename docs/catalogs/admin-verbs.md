@@ -29,37 +29,38 @@ permission semantics live on [subsystems/admin.md](../subsystems/admin.md).
 | `getgamepref` | `[]const u8` | 434 | Stock `getgamepref` / `gg [filter]` (asm.il 220877). |
 | `getgamestat` | `[]const u8` | 437 | Stock `getgamestat` / `ggs [filter]` (ConsoleCmdGetGameStats, asm.il 224074): the GameStats the sim tracks, as `GameStat.X = value`. |
 | `setgamepref` | `struct { name: []const u8, value: []const u8 }` | 439 | Stock `setgamepref` / `sg <name> <value>` (asm.il 251176). |
-| `chunkcache` | `-` | 441 | Stock `chunkcache` / `cc` (asm.il 213107). |
-| `mem` | `-` | 443 | Stock `mem` (asm.il 234965). |
-| `list` | `-` | 444 | - |
-| `tele` | `struct { peer: usize, x: f32, y: f32, z: f32 }` | 452 | - |
-| `say` | `[]const u8` | 453 | - |
-| `kill` | `i32` | 455 | Force-kill entity by net id (EntityRemove + loot path). |
-| `inv` | `usize` | 457 | Dump a joined peer's inventory slots (debug/parity probe). |
-| `gettime` | `-` | 459 | Stock `gettime` (day + HH:MM). |
-| `settime` | `u64` | 463 | Stock `settime day\|night\|<worldtime>\|<day> <hour> <minute>`, already reduced to the world time stock computes (ConsoleCmdSetTime, asm.il 251838; GameUtils::DayTimeToWorldTime, asm.il 1926175). |
-| `spawnentity` | `struct { peer: usize, name_off: usize, name_len: usize }` | 465 | Stock `spawnentity <peerSlot> <entityClassName>` (near player). |
-| `gamestage` | `?usize` | 467 | Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player. |
-| `listents` | `-` | 469 | Stock `listents` (alive entity table). |
-| `listplayers` | `-` | 471 | Stock `listplayers` / `lp` (joined peers with entity ids). |
-| `killall` | `-` | 473 | Stock `killall` (non-player AI). |
-| `storm` | `-` | 475 | zdtd-only: force every storm-capable biome into an active storm. |
-| `clearweather` | `-` | 477 | zdtd-only: end any active storm (`clearweather` / `stormoff`). |
-| `spawnairdrop` | `-` | 479 | zdtd-only: trigger an air drop immediately. |
-| `saveworld` | `-` | 481 | Stock `saveworld`. |
-| `shutdown` | `-` | 483 | Stock `shutdown` (graceful stop). |
-| `version` | `-` | 485 | Stock `version`. |
-| `getoptions` | `-` | 487 | Stock `getoptions`: dump the known option names and current values. |
-| `exportcurrentconfigs` | `-` | 489 | Stock `exportcurrentconfigs`: write the effective options to disk. |
-| `loglevel` | `?[]const u8` | 492 | Stock `loglevel [n]`: read (no arg) or set the runtime log level. Arg is a slice of the input line. |
-| `listthreads` | `-` | 494 | Stock `listthreads` / `lt`: summary of the server's logical threads. |
-| `guardreport` | `-` | 498 | zdtd-only `guardreport`: the anti-cheat dry-run diff - per peer, which detector would trip the kick ladder (or already did), the window counts, and the enforcement rung state (T23). |
-| `commandpermission` | `struct { level: ?u8, verb: []const u8 }` | 503 | Stock `commandpermission` / `cp`: per-command required permission level. `cp <command>` reports; `cp <level> <command>` sets (levels run 0 = highest .. 255; the caller must be at least as privileged). `verb` is a slice of the input line. |
-| `wipeplayer` | `[]const u8` | 506 | Erase a player record from players.zsv by login name (operator right-to-erasure). Name is a slice into the original command line (must outlive the Command). |
-| `bad_args` | `[]const u8` | 510 | Known verb, missing or malformed arguments (slice of the input line). zdtd-only verbs use this; stock verbs use `err_text` / `wrong_args` so the reply matches what stock prints. |
-| `err_text` | `struct { prefix: []const u8, token: []const u8 = "", suffix: []const u8 = "" }` | 513 | Verbatim stock console error, printed as `{prefix}{token}{suffix}`. The literals come from the IL; `token` is a slice of the input line. |
-| `wrong_args` | `struct { expected: []const u8, found: usize }` | 516 | Stock "Wrong number of arguments, expected {expected}, found {found}." `expected` is one of the literal shapes stock uses ("at least 1", "1 or 3", ...). |
-| `unknown` | `-` | 517 | - |
+| `buffplayer` | `struct { target: Target, buff: []const u8 }` | 442 | Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer, console-commands.md 302): applies a buff to a player by name or id. |
+| `chunkcache` | `-` | 444 | Stock `chunkcache` / `cc` (asm.il 213107). |
+| `mem` | `-` | 446 | Stock `mem` (asm.il 234965). |
+| `list` | `-` | 447 | - |
+| `tele` | `struct { peer: usize, x: f32, y: f32, z: f32 }` | 455 | - |
+| `say` | `[]const u8` | 456 | - |
+| `kill` | `i32` | 458 | Force-kill entity by net id (EntityRemove + loot path). |
+| `inv` | `usize` | 460 | Dump a joined peer's inventory slots (debug/parity probe). |
+| `gettime` | `-` | 462 | Stock `gettime` (day + HH:MM). |
+| `settime` | `u64` | 466 | Stock `settime day\|night\|<worldtime>\|<day> <hour> <minute>`, already reduced to the world time stock computes (ConsoleCmdSetTime, asm.il 251838; GameUtils::DayTimeToWorldTime, asm.il 1926175). |
+| `spawnentity` | `struct { peer: usize, name_off: usize, name_len: usize }` | 468 | Stock `spawnentity <peerSlot> <entityClassName>` (near player). |
+| `gamestage` | `?usize` | 470 | Stock `gamestage [slot]` (ConsoleCmdGameStage): stage inputs per player. |
+| `listents` | `-` | 472 | Stock `listents` (alive entity table). |
+| `listplayers` | `-` | 474 | Stock `listplayers` / `lp` (joined peers with entity ids). |
+| `killall` | `-` | 476 | Stock `killall` (non-player AI). |
+| `storm` | `-` | 478 | zdtd-only: force every storm-capable biome into an active storm. |
+| `clearweather` | `-` | 480 | zdtd-only: end any active storm (`clearweather` / `stormoff`). |
+| `spawnairdrop` | `-` | 482 | zdtd-only: trigger an air drop immediately. |
+| `saveworld` | `-` | 484 | Stock `saveworld`. |
+| `shutdown` | `-` | 486 | Stock `shutdown` (graceful stop). |
+| `version` | `-` | 488 | Stock `version`. |
+| `getoptions` | `-` | 490 | Stock `getoptions`: dump the known option names and current values. |
+| `exportcurrentconfigs` | `-` | 492 | Stock `exportcurrentconfigs`: write the effective options to disk. |
+| `loglevel` | `?[]const u8` | 495 | Stock `loglevel [n]`: read (no arg) or set the runtime log level. Arg is a slice of the input line. |
+| `listthreads` | `-` | 497 | Stock `listthreads` / `lt`: summary of the server's logical threads. |
+| `guardreport` | `-` | 501 | zdtd-only `guardreport`: the anti-cheat dry-run diff - per peer, which detector would trip the kick ladder (or already did), the window counts, and the enforcement rung state (T23). |
+| `commandpermission` | `struct { level: ?u8, verb: []const u8 }` | 506 | Stock `commandpermission` / `cp`: per-command required permission level. `cp <command>` reports; `cp <level> <command>` sets (levels run 0 = highest .. 255; the caller must be at least as privileged). `verb` is a slice of the input line. |
+| `wipeplayer` | `[]const u8` | 509 | Erase a player record from players.zsv by login name (operator right-to-erasure). Name is a slice into the original command line (must outlive the Command). |
+| `bad_args` | `[]const u8` | 513 | Known verb, missing or malformed arguments (slice of the input line). zdtd-only verbs use this; stock verbs use `err_text` / `wrong_args` so the reply matches what stock prints. |
+| `err_text` | `struct { prefix: []const u8, token: []const u8 = "", suffix: []const u8 = "" }` | 516 | Verbatim stock console error, printed as `{prefix}{token}{suffix}`. The literals come from the IL; `token` is a slice of the input line. |
+| `wrong_args` | `struct { expected: []const u8, found: usize }` | 519 | Stock "Wrong number of arguments, expected {expected}, found {found}." `expected` is one of the literal shapes stock uses ("at least 1", "1 or 3", ...). |
+| `unknown` | `-` | 520 | - |
 
 
 ## `BanSub` (`src/server/admin.zig`)

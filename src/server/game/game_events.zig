@@ -313,7 +313,7 @@ fn requirementHolds(self: *Game, peer_slot: usize, a: assets_gameevents.Action) 
     };
 }
 
-fn applyBuff(self: *Game, peer_slot: usize, ps: ecs.Slot, buff_name: []const u8) void {
+pub fn applyBuff(self: *Game, peer_slot: usize, ps: ecs.Slot, buff_name: []const u8) void {
     const def_id = self.buffs.indexOfName(buff_name) orelse return;
     const def = self.buffs.byId(def_id) orelse return;
     const set = self.sim.buffsMut(ps);

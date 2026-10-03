@@ -25150,3 +25150,51 @@ test "scenario the admin console commands the drone registry" {
     try std.testing.expect(g.sim.slotOfNetId(ds) == null);
     std.debug.print("PASS drone-admin: unstuck/log/clear through the parsed Command union\n", .{});
 }
+
+test "scenario the admin console applies a buff by name" {
+    // Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer,
+    // console-commands.md 302): the server console's buff surface. An unknown
+    // buff name is refused the way stock refuses it instead of silently doing
+    // nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    const name = if (g.buffs.byId(1)) |d| d.name else return error.TestUnexpectedResult;
+    var line_buf: [128]u8 = undefined;
+    const line = try std.fmt.bufPrint(&line_buf, "buffplayer {d} {s}", .{ c.slot, name });
+
+    var sink: [2048]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine(line, "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "applied buff") != null);
+
+    // Unknown buff: refused with a message, and no buff lands.
+    const set0 = g.sim.buffsMut(ps);
+    var before: usize = 0;
+    for (&set0.slots) |*b| {
+        if (b.active) before += 1;
+    }
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("buffplayer 0 noSuchBuffName", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "unknown buff") != null);
+    const set1 = g.sim.buffsMut(ps);
+    var after: usize = 0;
+    for (&set1.slots) |*b| {
+        if (b.active) after += 1;
+    }
+    try std.testing.expectEqual(before, after);
+    std.debug.print("PASS buffplayer: applies a stock buff, refuses an unknown name\n", .{});
+}

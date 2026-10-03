@@ -2637,6 +2637,13 @@ pub const Game = struct {
     }
 
     /// One junk drone per session, spawned at the player's spawn point.
+    /// Apply a stock buff by name to a player's sim slot, with the client relay.
+    /// Stock's `buffplayer <target> <buffName>` (console-commands.md 302) and the
+    /// game-event path share this.
+    pub fn applyBuffToPlayer(self: *Game, peer_slot: usize, ps: ecs.Slot, buff_name: []const u8) void {
+        game_game_events.applyBuff(self, peer_slot, ps, buff_name);
+    }
+
     /// Re-send every owner's drone marker (the map marker tracks a moving drone).
     pub fn broadcastDroneWaypoints(self: *Game) !void {
         return game_vehicle.broadcastDroneWaypoints(self);

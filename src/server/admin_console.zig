@@ -1356,6 +1356,30 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .buffplayer => |b| {
+            // Stock: "Invalid arguments, requires a target player and a buff name"
+            // then the available-name list; an unknown buff is refused the same way.
+            switch (self.resolveAdminTarget(b.target)) {
+                .slot => |slot| {
+                    const ps = self.sim.playerByPeer(slot) orelse {
+                        self.adminReply("target has no live player entity");
+                        return;
+                    };
+                    if (self.buffs.indexOfName(b.buff) == null) {
+                        var ub: [192]u8 = undefined;
+                        const s2 = std.fmt.bufPrint(&ub, "unknown buff '{s}'\n", .{b.buff}) catch return;
+                        self.adminReply(s2);
+                        return;
+                    }
+                    self.applyBuffToPlayer(slot, ps, b.buff);
+                    var ob: [128]u8 = undefined;
+                    const s3 = std.fmt.bufPrint(&ob, "applied buff {s} to slot {d}\n", .{ b.buff, slot }) catch return;
+                    self.adminReply(s3);
+                },
+                .none => self.adminReply("Could not find player matching target"),
+                .ambiguous => self.adminReply("target name is ambiguous"),
+            }
+        },
         .junkdrone => |sub| {
             // The admin path has no caller slot, so this is the server's view of
             // the whole registry (stock's `serverjunkdrone`).
