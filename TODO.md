@@ -1583,8 +1583,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       50 ms tick budget cannot hold through a save tick. The obvious fix (stagger the stores across ticks, or
       move them off the tick) is NOT a drive-by: the comment above the block pins the order to
       `persist.saveAllStores` for crash consistency, so staggering changes which set is durable at an
-      arbitrary crash point and needs a decision rather than a patch. Measure again on a quiet disk before
-      choosing; this host's numbers are not representative.
+      arbitrary crash point and needs a decision rather than a patch. **Decision 2026-10-03, from the IL:
+      keep it as it is.** Stock's save blocks too - `ChunkProviderDisc::SaveAll` calls
+      `RegionFileManager::MakePersistent(...)` and then `WaitSaveDone()` on both branches
+      (ChunkProviderDisc.il IL_0099/IL_00A5 and IL_00E2/IL_00EE) - so the encode is threaded but the caller
+      waits for it, exactly the observable stall zdtd has. A stagger would buy budget by diverging from the
+      one-pass order, which is the wrong trade for a server that should look like stock under a crash. The
+      only faithful way to keep both is a worker that waits, which is the same stall. Revisit only with a
+      quiet-disk measurement showing stock's own dedi holding 50 ms through a save (it does not).
 - [ ] **A live loadgen smoke is not obtainable in this environment** - measured 2026-10-03: `../7dtd-loadgen`
       ships a 2026-09-28 Release binary, and run against `zdtd --port 27100` it never sends a packet
       (`sent=0`, `ConnectionFailed` after ~5.8 s, repeatedly), while zdtd's own APM dump for the same window
