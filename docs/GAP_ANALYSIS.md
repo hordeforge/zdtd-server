@@ -155,7 +155,13 @@ counting the `- **name** \`TAG\`` bullets in sections 4-12 whose marker is
 exactly `WORKS`, `PARTIAL` or `MISSING`; a date inside the marker or a
 `(waived)` suffix makes the label ad-hoc and uncounted, as does a looser count
 that would read 341): the canonical set
-is **327 features (325 WORKS, 2 PARTIAL, 0 MISSING)** after later rescores
+is **327 features (325 WORKS, 2 PARTIAL, 0 MISSING)** after later rescores.
+Re-counted 2026-10-03 with a machine rule that matches this paragraph: every
+`- **name** \`TAG\`` bullet in sections 4-12 whose tag is exactly `WORKS`, `PARTIAL` or
+`MISSING`, trailing prose after the tag allowed (the strict "tag at end of line" reading
+finds only 138, because most bullets carry text after the marker). That gives 327 bullets,
+325 WORKS, 2 PARTIAL, 0 MISSING - the headline is reproducible from the file rather than a
+hand tally.
 (death/kill counters WORKS on 2026-09-08; client-accrued accumulators remain in
 [DIVERGENCES](DIVERGENCES.md) §2). An earlier pass wrote
 297/299 and two area headers (World systems 45, Net and ops 49) that the
