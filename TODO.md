@@ -1474,7 +1474,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       ms column. Work if wanted: a per-peer ping timer (seq + smoothed RTT) in
       `litenet`, the pong match, and `world_tick.zig`'s ClientInfo fill - a
       transport change worth its own round, not a drive-by at the tail of a long
-      session.
+      session. Precondition before writing it: confirm the stock *client* answers a
+      server-initiated ping with a pong. That behaviour lives in LiteNetLib's managed
+      code, which this RE set does not narrate (network.md 485 lists the managed
+      internals as verified for ordinals/consts only, "third-party algo set not
+      re-narrated"), so shipping server pings without that check risks a client that
+      ignores them, or worse treats the pair oddly. The RE was checked 2026-10-03 for
+      a ping/pong symmetry note and has none.
 - [ ] **ItemValue metadata keys beyond `charge` are skipped** - measured
       2026-10-02: `stock_inv.zig` parses the TypedMetadataValue tail and keeps
       `charge` (the one key `SetItemMetaFloat`/`CompareItemMetaFloat` is used with
