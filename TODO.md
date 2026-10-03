@@ -1764,7 +1764,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       <n>`, and an absent list prints stock's "Unknown container". The header says
       `stage` instead of stock's `empties` count, because the empty-slot figure needs
       the list's slot size, which the roll API does not expose. Only `config` remains
-      from the shortlist.
+      from the shortlist - and `config` is a non-gap: `ConsoleCmdConfig` imports and
+      exports `GameOptionsControls` (the local player's keybinds and options; the IL
+      is `File.ReadAllText` -> `GameOptionsControls.Import` and `Export()` ->
+      `File.WriteAllText`), which a dedicated server has no object for. Checked
+      2026-10-03. With that, the verified server-effect shortlist from the console
+      audit is empty: every candidate is either implemented, a documented refusal
+      (the dev/rendering subcommands), or a client/editor-side command that a dedi
+      never runs. The audit's method is worth repeating for any future stock command:
+      typed names from `ConsoleCmd*::getCommands()`, cross-checked with zdtd's
+      literals and `constants.zig`, then classified by the prose table's effect
+      column, then verified by grep before it is trusted.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
