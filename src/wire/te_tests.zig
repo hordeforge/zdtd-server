@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const stock_te = @import("stock_te.zig");
+const te_types = @import("te_types.zig");
 const buildPoweredTriggerTeBodyToServer = stock_te.buildPoweredTriggerTeBodyToServer;
 const testWorkstationBody = stock_te.testWorkstationBody;
 const binary = @import("binary.zig");
@@ -851,4 +852,29 @@ test "composite payload carries the block's declared modules in order" {
     const bad = [_]blocks_mod.FeatureKind{ .storage, .door };
     const fallback = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null, &bad);
     try std.testing.expectEqual(@as(u8, 1), fallback[modules]);
+}
+
+test "the TE type table matches the resolved stock enum" {
+    // Cross-checked 2026-10-03 against the resolved census in the RE checkout
+    // (`../7dtd-engine-research/workspace/outputs/parity/parity_b10.json`,
+    // `enums.TileEntityType`), which lists the enum with explicit values rather
+    // than the IL's declaration order. All 23 entries agree; pinning them here
+    // means the hand-cited IL comment in `te_types.zig` cannot drift silently.
+    const expected = [_][2]u32{
+        .{ 0, te_types.none },        .{ 3, te_types.collector },
+        .{ 4, te_types.land_claim },  .{ 5, te_types.loot },
+        .{ 6, te_types.trader },      .{ 7, te_types.vending },
+        .{ 8, te_types.forge },       .{ 9, te_types.campfire },
+        .{ 10, te_types.secure_loot }, .{ 11, te_types.secure_door },
+        .{ 12, te_types.workstation }, .{ 13, te_types.sign },
+        .{ 14, te_types.gore_block }, .{ 15, te_types.powered },
+        .{ 16, te_types.power_source }, .{ 17, te_types.power_range_trap },
+        .{ 18, te_types.light },      .{ 19, te_types.trigger },
+        .{ 20, te_types.sleeper },    .{ 21, te_types.power_melee_trap },
+        .{ 22, te_types.secure_loot_signed }, .{ 25, te_types.composite },
+        .{ 27, te_types.taskboard },
+    };
+    for (expected) |pair| try std.testing.expectEqual(pair[0], @as(u32, pair[1]));
+    // The gaps are stock's: 1, 2, 23, 24, 26 are not TE types in b10.
+    try std.testing.expectEqual(@as(u32, 23), expected.len);
 }
