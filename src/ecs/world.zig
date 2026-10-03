@@ -926,7 +926,8 @@ pub const World = struct {
         // Offline fallback only: entityclasses.xml supplies the real row when a
         // game dir is present. HP is a placeholder until the drone slice reads
         // its class data.
-        .{ .name = "junkDrone", .max_hp = 500, .kind = .drone },
+        // Hash = `unity_hash.class_junk_drone`, i.e. GetStableHashCode("entityJunkDrone").
+        .{ .name = "entityJunkDrone", .max_hp = 500, .kind = .drone, .hash = -866611929 },
         // A40: the old "zombieFeral" builtin row was an invented class (0 hits
         // in stock entityclasses.xml; no stock group names it). Repointed to
         // the real feral variant zombieBoeFeral (Unity hash computed; max_hp =
@@ -1664,6 +1665,15 @@ pub const World = struct {
             }
         }
 
+        return self.network_id[s].id;
+    }
+
+    /// Player-owned junk drone (`EntityDrone`). No AI tasks yet: the kind exists
+    /// so the entity spawns, streams to observers and can be despawned; the stock
+    /// Idle/Sentry/Follow/Heal/Attack/Shutdown machine is the next slice.
+    pub fn spawnDrone(self: *World, x: f32, y: f32, z: f32, hp: f32) ?NetId {
+        const s = self.spawnBase(.drone, x, y, z, hp) orelse return null;
+        self.mask[s].inventory = false;
         return self.network_id[s].id;
     }
 

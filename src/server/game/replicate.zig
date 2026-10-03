@@ -168,7 +168,8 @@ pub fn replicate(self: *Game) !void {
         // invisible. Only announced when the class resolves, because the ECD
         // fallback class is a zombie and would dress a turret as one.
         const is_spawnable_extra = self.sim.mask[i].kind and
-            (self.sim.kind[i] == .vehicle or self.sim.kind[i] == .turret) and
+            (self.sim.kind[i] == .vehicle or self.sim.kind[i] == .turret or
+                self.sim.kind[i] == .drone) and
             self.sim.mask[i].class_id and self.sim.class_id[i].hash != 0;
         var spawn_mask: game_mod.ObsMask = 0;
         // Set when the ECD below actually reached at least one client, so the

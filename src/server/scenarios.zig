@@ -24771,3 +24771,40 @@ test "scenario a prop edit applies locally and relays to the others" {
     try std.testing.expect(cap_b.indexOfPkgId(setprop_id) == null);
     std.debug.print("PASS setprop: apply + relay, batch dropped on a chunk miss\n", .{});
 }
+
+test "scenario a spawned drone streams to the observers" {
+    // Drone step 2: the kind exists, its builtin row carries the stock
+    // `entityJunkDrone` hash, and replication announces it like a vehicle or
+    // turret (only when the class resolved, so the ECD cannot dress it as a
+    // zombie). The state machine is a later slice; this pins spawn + stream.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    const vs = g.sim.playerByPeer(cb.slot).?;
+    // Both peers near the spawn point so interest covers the drone.
+    g.sim.transform[vs] = g.sim.transform[ps];
+
+    const did = g.sim.spawnDrone(g.sim.transform[ps].x + 2, g.sim.transform[ps].y, g.sim.transform[ps].z, 500).?;
+    const ds = g.sim.slotOfNetId(did).?;
+    try std.testing.expectEqual(components_mod.Kind.drone, g.sim.kind[ds]);
+    try std.testing.expectEqual(@as(i32, -866611929), g.sim.class_id[ds].hash);
+
+    cap_b.clear();
+    // Two ticks: the first settles the fresh peer's interest set (the drone was
+    // spawned after both joins), the second announces it.
+    _ = g.step() catch {};
+    _ = g.step() catch {};
+    try std.testing.expect(cap_b.indexOfPkgId(packages.idOf("NetPackageEntitySpawn").?) != null);
+    try std.testing.expect(g.clients[cb.slot].known_entities.isSet(ds));
+    std.debug.print("PASS drone: spawned, classed and streamed to the other peer\n", .{});
+}

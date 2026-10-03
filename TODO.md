@@ -1481,7 +1481,13 @@ nothing here is already waived. The four gaps the same audit closed are in
       class table is the falling block, which had no row at all and silently took
       the feral zombie's hash, loot list and 550 HP, so a collapsing structure
       spawned as the wrong entity class. Step 2 is next:
-      (2) registry + join spawn through the existing `EntityCreationData` builder;
+      **Step 2 landed 2026-10-03**: `spawnDrone` (kind + stock class hash, no AI yet)
+      and the replication gate - `is_spawnable_extra` now includes drones, so the
+      ECD goes out only once the class resolved and a drone cannot be dressed as
+      the zombie fallback. `scenario a spawned drone streams to the observers` pins
+      the spawn, the `entityJunkDrone` hash (-866611929) and the announce. Step 3
+      is next: (2) registry + join spawn through the existing
+      `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with
       the staged `transitionState` commit); (4) `NetPackageDroneDataSync` for order
       changes; (5) `drones.dat` save on `cSaveTime` 120 s. Slice (1) alone leaves the
