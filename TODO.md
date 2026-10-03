@@ -1461,9 +1461,23 @@ nothing here is already waived. The four gaps the same audit closed are in
       followers, and per-player control (`ConsoleCmdJunkDrone` /
       `ConsoleCmdServerJunkDrone` operate on the same registry from either side).
       `src/server/c2s/join_enter.zig` notes "drones have no zdtd surface yet" at the
-      spot where a join would spawn one. First slice: entity + registry + join
-      spawn, no waypoints, with a scenario asserting the drone is streamed to its
-      owner and dies with the session.
+      spot where a join would spawn one. Two facts pinned 2026-10-03 make the slice
+      cheaper and clearer than it looked:
+      (a) **no new wire**: `DroneManager.GetAllDronesECD` (IL_0000-0032) builds each
+      drone's payload with the generic `new EntityCreationData(droneEntity, false)`,
+      the same shape `wire/stock_entity.zig` already builds, so a drone rides the
+      normal entity-spawn path - `wire/stock_drone.zig` would be invention;
+      (b) **the cost is the entity kind**: `.vehicle` alone appears in 146 non-test
+      places across at least 8 files (`ecs/components.zig` Kind, `ecs/world.zig`
+      class table, `replicate.zig`, `interest`, `lifecycle.zig`, the vehicle C2S and
+      wire modules), so a `drone` variant is its own round of exhaustiveness work,
+      not a bolt-on. Plan: (1) `drone` kind + class-table row + the switches;
+      (2) registry + join spawn through the existing `EntityCreationData` builder;
+      (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with
+      the staged `transitionState` commit); (4) `NetPackageDroneDataSync` for order
+      changes; (5) `drones.dat` save on `cSaveTime` 120 s. Slice (1) alone leaves the
+      tree green and the client seeing nothing new, which is the honest way into a
+      subsystem this size.
 - [ ] **`ClientInfo.ping` is always 0** - measured 2026-10-03: `NetPackageClientInfo`
       is ToClient (`get_PackageDirection` IL=2) and its `pingTimes` list is what the
       client shows in the player list; stock's server fills it from LiteNetLib's
