@@ -35,6 +35,11 @@ BUILDER = re.compile(r"pub fn (build[A-Za-z0-9_]*)\(")
 PARSER = re.compile(r"pub fn ((?:parse|read)[A-Za-z0-9_]*)\(")
 
 
+def read_text(path: str) -> str:
+    with open(path, errors="ignore") as fh:
+        return fh.read()
+
+
 def zig_files(path: str) -> list[str]:
     out = []
     for dirpath, _dirs, names in os.walk(path):
@@ -45,7 +50,7 @@ def zig_files(path: str) -> list[str]:
 
 
 ID_OF_UNWRAP = re.compile(r'idOf\("([^"]+)"\)\.\?')
-MAPPINGS = re.compile(r'pub const default_mappings = \[_\]\[\]const u8\{([^}]*)\}', re.S)
+MAPPINGS = re.compile(r"pub const default_mappings = \[_\]\[\]const u8\{([^}]*)\}", re.S)
 NAME_LITERAL = re.compile(r'"([^"]+)"')
 
 
@@ -76,16 +81,15 @@ def check_reply_packages() -> list[str]:
     hangs or reads a timeout) or the table grew a name nothing answers.
     """
     ids_path = os.path.join(WIRE, "stock_ids.zig")
-    text = open(ids_path, errors="ignore").read()
+    with open(ids_path, errors="ignore") as fh:
+        text = fh.read()
     m = MAPPINGS.search(text)
     if not m:
         return ["default_mappings not found in src/wire/stock_ids.zig"]
     names = [n for n in NAME_LITERAL.findall(m.group(1)) if n.endswith(REPLY_SUFFIX)]
     server_dir = os.path.join(ROOT, "src", "server")
     server_text = "\n".join(
-        open(p, errors="ignore").read()
-        for p in zig_files(server_dir)
-        if not p.endswith("scenarios.zig")
+        read_text(p) for p in zig_files(server_dir) if not p.endswith("scenarios.zig")
     )
     return [n for n in names if n not in server_text]
 
@@ -93,14 +97,17 @@ def check_reply_packages() -> list[str]:
 def check_pinned_names() -> list[str]:
     """Literal `idOf(..).?` names must exist in the package id table."""
     ids_path = os.path.join(WIRE, "stock_ids.zig")
-    text = open(ids_path, errors="ignore").read()
+    with open(ids_path, errors="ignore") as fh:
+        text = fh.read()
     m = MAPPINGS.search(text)
     if not m:
         return ["default_mappings not found in src/wire/stock_ids.zig"]
     known = set(NAME_LITERAL.findall(m.group(1)))
     bad: list[str] = []
     for path in zig_files(SRC):
-        for i, line in enumerate(open(path, errors="ignore"), 1):
+        with open(path, errors="ignore") as fh:
+            lines = fh.readlines()
+        for i, line in enumerate(lines, 1):
             for hit in ID_OF_UNWRAP.finditer(line):
                 name = hit.group(1)
                 if name not in known:
@@ -113,7 +120,9 @@ def main() -> int:
     defined: dict[str, str] = {}
     dupes: list[str] = []
     for path in zig_files(WIRE):
-        text = open(path, errors="ignore").read()
+        with open(path, errors="ignore") as fh:
+
+            text = fh.read()
         # Skip the test blocks: a builder defined only in a test is not the wire.
         for m in BUILDER.finditer(text):
             name = m.group(1)
@@ -121,7 +130,7 @@ def main() -> int:
                 dupes.append(f"{name} in {os.path.relpath(path, ROOT)} and {os.path.relpath(defined[name], ROOT)}")
             defined[name] = path
 
-    sources = {p: open(p, errors="ignore").read() for p in zig_files(SRC)}
+    sources = {p: read_text(p) for p in zig_files(SRC)}
 
     parsers: dict[str, str] = {}
     for path in zig_files(WIRE):

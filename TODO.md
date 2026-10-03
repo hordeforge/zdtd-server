@@ -1630,6 +1630,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       assets/fixtures` now exits 0 and the suite is unchanged at 2149/2394. The lesson is
       recorded with the `make check` entry below: run the formatter by hand when the full
       target cannot run.
+- [ ] **Zig gates need a writable `ZIG_GLOBAL_CACHE_DIR` here** - measured 2026-10-03:
+      `zig build fuzz` without it dies with `unable to load 'std.zig':
+      ReadOnlyFileSystem` (same as `lint-plugins`), and with
+      `ZIG_GLOBAL_CACHE_DIR=$PWD/.zcache/g` it runs to `EXIT=0`. The default global cache
+      under `~/.cache/zig` is outside this session's writable workspace, so every Zig
+      invocation in this environment has to pass the env var and `--cache-dir .zcache/o`.
 - [ ] **`lint-plugins` can only verify the Zig core plugins here** - measured
       2026-10-03: with a writable `ZIG_GLOBAL_CACHE_DIR` the gate reports that the core
       plugins match their sources and that 12 committed `.wasm` files are unverified
