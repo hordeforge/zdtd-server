@@ -450,6 +450,9 @@ pub const Command = union(enum) {
     nets_no_sub: void,
     /// `nets <sub>` with a subcommand zdtd does not implement.
     nets_unknown: void,
+    /// Stock `loot c|container <listName>` (ConsoleCmdLoot): rolls a loot list and
+    /// prints what came out. Only that subcommand is implemented.
+    loot_container: []const u8,
     /// Stock `bents on|off|info` (ConsoleCmdBents). `on`/`off` toggle block-entity
     /// rendering, which a dedicated server does not do; `info` counts them. Only
     /// `info` is implemented, so the toggle shapes are refused by name.
@@ -594,6 +597,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
     if (std.mem.eql(u8, verb, "networkserver") or std.mem.eql(u8, verb, "nets"))
         return "networkserver|nets ls (latencysim/pls/packetlosssim are not implemented)";
+    if (std.mem.eql(u8, verb, "loot")) return "loot c|container <listName>";
     if (std.mem.eql(u8, verb, "bents")) return "bents info (the on/off rendering toggles are not implemented)";
     if (std.mem.eql(u8, verb, "weather")) return "weather (dumps state; mutators are not implemented)";
     if (std.mem.eql(u8, verb, "loggamestate")) return "loggamestate|lgs";
@@ -684,6 +688,13 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "loot")) {
+        const sub = it.next() orelse return .{ .bad_args = cmd };
+        if (!std.mem.eql(u8, sub, "c") and !std.mem.eql(u8, sub, "container")) return .{ .bad_args = cmd };
+        const list = it.next() orelse return .{ .bad_args = cmd };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        return .{ .loot_container = list };
+    }
     if (std.mem.eql(u8, cmd, "bents")) {
         const a = it.next() orelse return .{ .bad_args = cmd };
         if (it.next() != null) return .{ .bad_args = cmd };

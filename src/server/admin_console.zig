@@ -43,6 +43,7 @@ const eqAny = c2s_text.eqAny;
 const apm = @import("../apm/root.zig");
 const world_store = @import("../world/store.zig");
 const sandbox_mod = @import("../assets/sandbox.zig");
+const assets_loot = @import("../assets/loot.zig");
 const evidence_mod = @import("evidence.zig");
 const chatMsgOk = c2s_text.chatMsgOk;
 const ecs = @import("../ecs/root.zig");
@@ -1362,6 +1363,28 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 },
             ) catch return;
             self.adminReply(s);
+        },
+        .loot_container => |list| {
+            // Stock `loot container <list>` (ConsoleCmdLoot): roll the list and
+            // print it. The gate context is all-optional, so a console roll needs
+            // no opener; the plugin verdict is skipped because this is an
+            // inspection, not a gameplay roll (nothing is granted).
+            var stacks: [64]assets_loot.Stack = undefined;
+            const stage: i32 = if (self.countJoined() > 0) self.lootStageForPlayer(0) else 1;
+            const seed: u32 = @truncate(self.tick_n);
+            const n = self.loot.rollContainer(list, stage, seed, stacks[0..], .{});
+            if (n == 0) {
+                self.adminReply("Unknown container");
+                return;
+            }
+            var hb: [192]u8 = undefined;
+            const head = std.fmt.bufPrint(&hb, "Loot Container {s}, unique items {d}, stage {d}\n", .{ list, n, stage }) catch return;
+            self.adminReply(head);
+            for (stacks[0..n], 0..) |st, i| {
+                var b: [160]u8 = undefined;
+                const text = std.fmt.bufPrint(&b, "#{d} {s}, q{d}, count {d}\n", .{ i, st.item_name, st.quality, st.count }) catch continue;
+                self.adminReply(text);
+            }
         },
         .bents_info => |info| {
             // Stock `bents info` counts block entities by type (" {0,3}. {1} = {2}"

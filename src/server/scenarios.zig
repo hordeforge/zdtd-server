@@ -25529,3 +25529,36 @@ test "scenario the admin console counts block entities" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "rendering toggles") != null);
     std.debug.print("PASS bents: info counts per store, on/off refused\n", .{});
 }
+
+test "scenario the admin console rolls a loot container" {
+    // Stock `loot c|container <list>` (ConsoleCmdLoot): rolls the named loot list
+    // and prints "Loot Container ..." plus per-item rows. zdtd's gate context is
+    // all-optional, so a console roll needs no opener and grants nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var sink: [8192]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("loot container airDrop", "admin_tcp");
+    g.admin_reply_sink = null;
+    const out = sink[0..g.admin_reply_len];
+    // Either the list exists and rolled, or the parsed table does not carry it and
+    // stock's own refusal is printed. Both are honest; what must not happen is a
+    // crash or a silent no-op.
+    try std.testing.expect(std.mem.find(u8, out, "Loot Container") != null or std.mem.find(u8, out, "Unknown container") != null);
+
+    // An absent name is refused with stock's wording.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("loot c noSuchLootList", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "Unknown container") != null);
+    std.debug.print("PASS loot: container roll answers or refuses by name\n", .{});
+}

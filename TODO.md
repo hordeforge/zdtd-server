@@ -1756,7 +1756,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       "#{0} {1}, q{2}, count {3}" rows, but zdtd's `rollContainer` needs a
       `LootGateCtx` built from a container/TE with an opener (treasure, player, buff,
       prob and qty sinks), so a console inspector needs a containerless roll helper
-      first.
+      first. That turned out to be no helper at all: every `LootGateCtx` field is
+      optional, so the console arm rolls with `.{}` and grants nothing (no opener, no
+      plugin verdict - it is an inspection, not a gameplay roll). `loot c|container
+      <listName>` landed 2026-10-03: it prints `Loot Container <list>, unique items
+      <n>, stage <s>` then stock's per-item rows `#<i> <item>, q<quality>, count
+      <n>`, and an absent list prints stock's "Unknown container". The header says
+      `stage` instead of stock's `empties` count, because the empty-slot figure needs
+      the list's slot size, which the roll API does not expose. Only `config` remains
+      from the shortlist.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which
