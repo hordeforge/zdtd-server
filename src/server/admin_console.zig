@@ -42,6 +42,7 @@ const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
 const eqAny = c2s_text.eqAny;
 const apm = @import("../apm/root.zig");
 const world_store = @import("../world/store.zig");
+const sandbox_mod = @import("../assets/sandbox.zig");
 const evidence_mod = @import("evidence.zig");
 const chatMsgOk = c2s_text.chatMsgOk;
 const ecs = @import("../ecs/root.zig");
@@ -1361,6 +1362,34 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 },
             ) catch return;
             self.adminReply(s);
+        },
+        .getsandboxoptions => |show_all| {
+            // Stock's `gso [show all]`: the bare form lists only non-default
+            // options, the flag lists every row. Values come from the decoded
+            // sandbox code, so what the client sees is what is printed.
+            var groups: [256]sandbox_mod.Group = undefined;
+            const gn = sandbox_mod.decode(self.sandbox_code, &groups);
+            var i: u32 = 0;
+            while (i < sandbox_mod.options.len) : (i += 1) {
+                const o = &sandbox_mod.options[i];
+                var index: u8 = 0;
+                for (groups[0..gn]) |g| {
+                    if (g.option_id == o.id) index = g.index;
+                }
+                const non_default = switch (o.kind) {
+                    .float => sandbox_mod.valueF(o, sandbox_mod.findSet(o.set_name) orelse continue, index) != o.default_f,
+                    .int => sandbox_mod.valueI(o, sandbox_mod.findSet(o.set_name) orelse continue, index) != o.default_i,
+                    .boolean => index != 0,
+                };
+                if (!show_all and !non_default) continue;
+                var lb: [160]u8 = undefined;
+                const text = switch (o.kind) {
+                    .float => std.fmt.bufPrint(&lb, "{s} = {d}\n", .{ o.name, sandbox_mod.valueF(o, sandbox_mod.findSet(o.set_name).?, index) }) catch continue,
+                    .int => std.fmt.bufPrint(&lb, "{s} = {d}\n", .{ o.name, sandbox_mod.valueI(o, sandbox_mod.findSet(o.set_name).?, index) }) catch continue,
+                    .boolean => std.fmt.bufPrint(&lb, "{s} = {s}\n", .{ o.name, if (index != 0) "true" else "false" }) catch continue,
+                };
+                self.adminReply(text);
+            }
         },
         .chunkreset => |r| {
             // Stock's own refusals: "area too big" and "Can not reset chunks on

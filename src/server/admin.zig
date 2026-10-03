@@ -441,6 +441,10 @@ pub const Command = union(enum) {
     /// form takes `-p <player>`; a dedicated server has no sender player, so the
     /// flag is required there.
     cvar: CvarSub,
+    /// Stock `getsandboxoptions` / `gso [show all]` (ConsoleCmdGetSandboxOptions):
+    /// dumps the sandbox options; the bare form shows only the ones that differ
+    /// from their table default, an argument shows all.
+    getsandboxoptions: bool,
     /// Stock `chunkreset` / `cr` (ConsoleCmdChunkReset): reset the chunks covering
     /// a block-coordinate rectangle to their authored state.
     chunkreset: struct { x1: i32, z1: i32, x2: i32, z2: i32 },
@@ -568,6 +572,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
+    if (std.mem.eql(u8, verb, "getsandboxoptions"))
+        return "getsandboxoptions|gso [show all]";
     if (std.mem.eql(u8, verb, "chunkreset"))
         return "chunkreset|cr <x1> <z1> <x2> <z2> (block coordinates)";
     if (std.mem.eql(u8, verb, "spawnwandering")) return "spawnwandering <b|h>";
@@ -653,6 +659,14 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "getsandboxoptions") or std.mem.eql(u8, cmd, "gso")) {
+        const a = it.next() orelse return .{ .getsandboxoptions = false };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        // Stock's usage is "gso [show all]": any argument means show everything.
+        if (std.ascii.eqlIgnoreCase(a, "all") or std.mem.eql(u8, a, "1") or std.ascii.eqlIgnoreCase(a, "true"))
+            return .{ .getsandboxoptions = true };
+        return .{ .bad_args = cmd };
+    }
     if (std.mem.eql(u8, cmd, "chunkreset") or std.mem.eql(u8, cmd, "cr")) {
         const p1 = it.next() orelse return .{ .bad_args = cmd };
         const p2 = it.next() orelse return .{ .bad_args = cmd };

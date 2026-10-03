@@ -1722,6 +1722,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       saved to disk reads as authored again after the command, and the oversized
       area is refused. Decisive: skipping the file delete leaves the placed block in
       place and fails the test (`expected 0, found 1`).
+      The proper coverage pass round 208 asked for then ran: typed names from every
+      `ConsoleCmd*::getCommands()` (177 classes) against zdtd's accepted literals
+      plus the verb table in `constants.zig`, classified by the prose table's effect
+      column. It confirms the closed four and adds `getsandboxoptions|gso [show all]`
+      (ConsoleCmdGetSandboxOptions, landed 2026-10-03): the bare form prints only the
+      options that differ from their table default, an argument prints all 165, and
+      the values come from the same decoded sandbox code the client receives. Pinned
+      by `scenario the admin console dumps the sandbox options` (decisive: inverting
+      the filter prints everything for the bare form and fails). Still open from the
+      verified shortlist, in rough cost order: `loggamestate` (a state dump),
+      `weather` (a weather dump), `networkserver`, `bents`, `loot`, `config`.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

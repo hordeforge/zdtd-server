@@ -22,7 +22,7 @@ Only imports of another package directory are counted; single-file imports
 | `litenet` | `wire` | 1 |
 | `plugin` | `util` | 6 |
 | `server` | `apm` | 11 |
-| `server` | `assets` | 201 |
+| `server` | `assets` | 202 |
 | `server` | `ecs` | 172 |
 | `server` | `litenet` | 82 |
 | `server` | `plugin` | 16 |

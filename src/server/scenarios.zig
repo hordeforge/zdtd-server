@@ -25379,3 +25379,46 @@ test "scenario chunkreset restores a chunk to its authored state" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "area too big") != null);
     std.debug.print("PASS chunkreset: restores authored state, refuses an oversized area\n", .{});
 }
+
+test "scenario the admin console dumps the sandbox options" {
+    // Stock `gso [show all]` (ConsoleCmdGetSandboxOptions): the bare form lists the
+    // options that differ from their table default, an argument lists all. zdtd
+    // decodes the same code the client gets, so what is printed is what the sim
+    // applies.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    var sink: [8192]u8 = undefined;
+    // Encode one non-default option into the server's sandbox code: option 0 is
+    // RangedDamage (DamageValues), index 1 = the second value.
+    var code_buf: [8]u8 = undefined;
+    code_buf[0] = 'A';
+    code_buf[1] = 'A';
+    code_buf[2] = 'A';
+    code_buf[3] = 'B';
+    g.sandbox_code = code_buf[0..4];
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("gso", "admin_tcp");
+    g.admin_reply_sink = null;
+    const bare = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, bare, "RangedDamage") != null);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("getsandboxoptions all", "admin_tcp");
+    g.admin_reply_sink = null;
+    const all_len = g.admin_reply_len;
+    try std.testing.expect(all_len > bare.len);
+    // The option that owns the LootAbundanceValues set is LootAbundanceValues
+    // itself; ZombieFeralSense is an unrelated row that only the full list shows.
+    try std.testing.expect(std.mem.find(u8, sink[0..all_len], "ZombieFeralSense") != null);
+    std.debug.print("PASS sandboxoptions: non-default listed bare, all listed with the flag\n", .{});
+}
