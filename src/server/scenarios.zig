@@ -24916,3 +24916,50 @@ test "scenario a drone follows its owner and snaps back from out of range" {
     try std.testing.expectApproxEqAbs(g.sim.transform[ps].y + 1.5, g.sim.transform[ds].y, 0.01);
     std.debug.print("PASS drone-follow: closes to 5 m and snaps back past 32 m\n", .{});
 }
+
+test "scenario a player console commands their own drone" {
+    // Stock `ConsoleCmdJunkDrone` (console-commands.md 157): a player's console
+    // reaches their drone through `junkdrone` / `jds`. The arm is scoped to the
+    // caller, so `clear` cannot touch anyone else's drone, and `unstuck`
+    // teleports it back to its owner.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    const ds = g.sim.slotOfNetId(ca.drone_net_id).?;
+
+    const run = struct {
+        fn call(gg: *game_mod.Game, cc: *game_mod.Client, line: []const u8) !void {
+            var fbuf: [256]u8 = undefined;
+            var body: [256]u8 = undefined;
+            var w: binary.Writer = .{ .buf = &body };
+            try w.writeString(line);
+            try gg.injectFramed(cc, try packages.framed(&fbuf, "NetPackageConsoleCmdServer", w.written()));
+        }
+    }.call;
+
+    // unstuck: the drone snaps back to its owner's chest.
+    g.sim.transform[ds].x += 12;
+    try run(g, ca, "junkdrone unstuck");
+    try std.testing.expectApproxEqAbs(g.sim.transform[ps].x, g.sim.transform[ds].x, 0.01);
+
+    // log: the owner sees their drone listed and nothing else.
+    try run(g, ca, "jds log");
+
+    // clear: A's command removes A's drone only; B's is untouched.
+    const b_drone = cb.drone_net_id;
+    try run(g, ca, "junkdrone clear");
+    try std.testing.expectEqual(@as(i32, 0), ca.drone_net_id);
+    try std.testing.expect(g.sim.slotOfNetId(ds) == null);
+    try std.testing.expect(b_drone != 0 and g.sim.slotOfNetId(b_drone) != null);
+    std.debug.print("PASS drone-console: unstuck/log/clear scoped to the caller\n", .{});
+}

@@ -1513,7 +1513,19 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`sendDroneWaypoints`, `NetPackageEntityWaypointList` listType Drone 1 - the
       sibling of the vehicle list type 0), sent from the join bundle next to the
       vehicle leg, and asserted in the session scenario by reading the captured
-      body's listType and count (decisive: sending listType 0 fails it). Still open:
+      body's listType and count (decisive: sending listType 0 fails it).
+      **Step 6 landed 2026-10-03**: the stock console verbs. `junkdrone`/`jds` are
+      allowlisted for players (`c2s_text.player_console_allowlist` + the help
+      line, whose cross-check test forced the line to hold verbs only) and scoped
+      to the caller's own player slot, so `clear` cannot touch another player's
+      drone. `log` lists the registry, `unstuck` snaps the drone back to its owner
+      and marks the pose dirty, `clear` destroys it and zeroes the client's net id.
+      `scenario a player console commands their own drone` drives all three through
+      `NetPackageConsoleCmdServer` and asserts A's drone goes while B's stays.
+      Open on the admin side: the telnet/webui console reaches verbs through the
+      parsed `admin.Command` enum, which has no drone verb yet, and stock's
+      `debuglog` toggle is client-side debug drawing with no server effect
+      (deliberately not offered). Still open:
       (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with

@@ -59,6 +59,7 @@ pub const player_console_help = [_][]const u8{
     " gettime|gt  listplayers|lp  listplayerids|lpi  listents|le  version",
     " say|s <msg>",
     " dm|cm|settempunit|debugmenu (client-side)",
+    " junkdrone|jds",
 };
 
 pub fn pollAdmin(self: *Game) void {
@@ -370,6 +371,17 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         out.linef("Day {d}, {d:0>2}:{d:0>2}  (bloodmoon in {d} days)", .{
             clk.day, hh, mm, self.daysToBloodMoon(),
         });
+    } else if (eqAny(verb, &.{ "junkdrone", "jds", "serverjunkdrone" })) {
+        // Stock `ConsoleCmdJunkDrone` / `ConsoleCmdServerJunkDrone` over one
+        // registry (RE console-commands.md 157-158): `log` lists the active
+        // drones, `unstuck` teleports them back to their owner, `clear` removes
+        // them (clearDronesForPlayer). A player console is scoped to its own
+        // drone; the server console sees every drone.
+        // Always scoped to the caller: a player may command their own drone
+        // (stock ConsoleCmdJunkDrone) but never anyone else's. The admin/telnet
+        // console reaches verbs through the parsed Command enum, so this arm is
+        // the player path today; extending that enum is the admin-side TODO.
+        consoleJunkDrone(self, self.sim.playerByPeer(c.slot), &it, &out);
     } else if (eqAny(verb, &.{ "listplayers", "lp" })) {
         var i: usize = 0;
         for (&self.clients) |*cl| {
@@ -413,6 +425,64 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
 
     const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], out.lines[0..out.n], false);
     try self.sendGame(peer, "NetPackageConsoleCmdClient", resp);
+}
+
+/// `junkdrone <log|unstuck|clear>` (aliases `jds`, `serverjunkdrone`). `player`
+/// is the calling player's slot from a player console (then only their drone is
+/// touched) or null from the server console (every drone). Stock's `debuglog`
+/// subcommand toggles client debug drawing and has no server effect, so it is
+/// not offered.
+pub fn consoleJunkDrone(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
+    const sub = it.next() orelse "log";
+    if (std.mem.eql(u8, sub, "help") or std.mem.eql(u8, sub, "?")) {
+        out.line("junkdrone|jds <log|unstuck|clear>  (player console: your drone only)");
+        return;
+    }
+    const list = std.mem.eql(u8, sub, "log") or std.mem.eql(u8, sub, "list");
+    const unstuck = std.mem.eql(u8, sub, "unstuck");
+    const clear = std.mem.eql(u8, sub, "clear");
+    if (!list and !unstuck and !clear) {
+        out.line("junkdrone|jds <log|unstuck|clear>");
+        return;
+    }
+    // Collect first: `clear` mutates the group the loop would walk.
+    var ids: [ecs.max_entities]i32 = undefined;
+    var owners: [ecs.max_entities]i16 = undefined;
+    var n: usize = 0;
+    for (ecs.groupSlice(&self.sim, .drone)) |d| {
+        if (n >= ids.len) break;
+        const owner_slot = self.sim.entity_owner_slot[d];
+        if (owner_slot < 0 or owner_slot >= self.clients.len) continue;
+        if (player) |ps| {
+            const owner = self.sim.playerByPeer(@intCast(owner_slot)) orelse continue;
+            if (owner != ps) continue;
+        }
+        ids[n] = self.sim.network_id[d].id;
+        owners[n] = owner_slot;
+        n += 1;
+    }
+    if (n == 0) {
+        out.line("no junk drones");
+        return;
+    }
+    for (ids[0..n], owners[0..n]) |nid, owner_slot| {
+        const d = self.sim.slotOfNetId(nid) orelse continue;
+        const owner = self.sim.playerByPeer(@intCast(owner_slot)) orelse continue;
+        const o = self.sim.transform[owner];
+        if (list) {
+            out.linef("drone {d} owner {d} pos {d},{d},{d}", .{ nid, self.sim.network_id[owner].id, @as(i32, @intFromFloat(o.x)), @as(i32, @intFromFloat(o.y)), @as(i32, @intFromFloat(o.z)) });
+            continue;
+        }
+        if (unstuck) {
+            self.sim.transform[d] = .{ .x = o.x, .y = o.y + 1.5, .z = o.z, .yaw = 0 };
+            self.sim.dirty[d].pos = true;
+            self.sim.dirty_bits.set(d);
+            continue;
+        }
+        self.sim.entity_owner_slot[d] = -1;
+        self.clients[@intCast(owner_slot)].drone_net_id = 0;
+        self.sim.destroy(d);
+    }
 }
 
 pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
