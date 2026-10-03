@@ -1461,7 +1461,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       the drone's weapon/storage layer first, which is the same order of work as
       the item path. Next honest step: dump the interact package from the client
       DLL in `../7dtd-engine-research` and pin its body, then the order toggle is
-      a small addition on top of the follow tick.
+      a small addition on top of the follow tick. Narrowed the same day: the server
+      would receive a plain `EntityLockContext(command, bag)` pair
+      (`Entity_EntityLockContext.il`), and every construction site this dump set
+      exposes is client-local (`EntityDrone.OpenStorageFromDialog` takes a
+      `LocalPlayerUI`; `EntityItem`, `EntitySupplyCrate` and `EntityVehicle` build
+      theirs the same way), so the sender is not a named class here.
 - [ ] **Junk drones have no server surface** - scoped 2026-10-03 from
       `../7dtd-engine-research/docs/gameplay/vehicles-drones-turrets.md`:
       `EntityDrone` "runs a real server-side state machine" (section 4.2c line 577,
