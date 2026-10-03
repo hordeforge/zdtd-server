@@ -431,7 +431,11 @@ pub fn step(self: *Game) !void {
             }
         }
         game_world_tick.tickDrones(self, @as(f32, @floatFromInt(@import("../../protocol.zig").tick_ns)) / 1_000_000_000.0);
-        if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) try self.broadcastVehiclePositions();
+        if (self.tick_n % self.vehicle_pos_send_ticks == 0 and !self.loadShedding()) {
+            try self.broadcastVehiclePositions();
+            // Same cadence: a following drone's marker has to move with it.
+            try self.broadcastDroneWaypoints();
+        }
         if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
         plugin_compose.onTick(self);
         // Pending commands are withdrawn immediately before drainCommands

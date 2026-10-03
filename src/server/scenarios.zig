@@ -24866,9 +24866,11 @@ test "scenario a session spawns its own drone and takes it down on drop" {
         try g.sendDroneWaypoints(c.peer.?, c.slot);
         const pkg = packages.idOf("NetPackageEntityWaypointList").?;
         const body = cap.findPkgId(pkg) orelse return error.TestUnexpectedResult;
-        // The channel body: listType i16 = Drone (1), count i16 = 1.
+        // The channel body: listType i16 = Drone (1), then an i32 count of 1.
+        // (The count is i32, not i16: reading two bytes happened to pass with
+        // count 1 and would have hidden a wrong width.)
         try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[0..2], .little));
-        try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[2..4], .little));
+        try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[2..6], .little));
     }
 
     g.dropClientSlot(c.slot, "test-drop");
@@ -24954,6 +24956,18 @@ test "scenario a player console commands their own drone" {
 
     // log: the owner sees their drone listed and nothing else.
     try run(g, ca, "jds log");
+
+    // The map marker follows the drone: the periodic re-send carries the
+    // drone's current position, so an owner walking away sees the marker move.
+    {
+        const pkg = packages.idOf("NetPackageEntityWaypointList").?;
+        g.sim.transform[ds].x += 20;
+        cap_a.clear();
+        try g.broadcastDroneWaypoints();
+        const body = cap_a.findPkgId(pkg) orelse return error.TestUnexpectedResult;
+        const x: f32 = @bitCast(std.mem.readInt(u32, body[10..14], .little));
+        try std.testing.expectApproxEqAbs(g.sim.transform[ds].x, x, 0.01);
+    }
 
     // clear: A's command removes A's drone only; B's is untouched.
     const b_drone = cb.drone_net_id;

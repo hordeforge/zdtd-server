@@ -118,6 +118,18 @@ pub fn sendDroneWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
     try self.sendGame(peer, "NetPackageEntityWaypointList", body);
 }
 
+/// Re-send every owner's drone marker on the same cadence as the vehicle
+/// positions, so the map marker follows a drone that moves: stock re-runs
+/// `DroneManager.UpdateWaypointsForPlayer` (`VehicleManager`'s sibling) whenever
+/// the list changes, and a following drone changes constantly.
+pub fn broadcastDroneWaypoints(self: *Game) !void {
+    for (&self.clients) |*c| {
+        if (!c.joined) continue;
+        const p = c.peer orelse continue;
+        try self.sendDroneWaypoints(p, c.slot);
+    }
+}
+
 pub fn broadcastVehiclePositions(self: *Game) !void {
     // Do not flood pre-enter stock clients (World still null / reader dies on short bodies).
     if (!weather_mod.anyEnteredClient(self)) return;

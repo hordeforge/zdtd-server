@@ -1528,11 +1528,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       channel (dirty-flagged), so the client sees the movement.
       `scenario a drone follows its owner and snaps back from out of range` pins
       all three bands.
-      **Step 5 landed 2026-10-03**: the owner's map marker
+      **Step 5 landed 2026-10-03 and refreshed 2026-10-03**: the owner's map marker
       (`sendDroneWaypoints`, `NetPackageEntityWaypointList` listType Drone 1 - the
       sibling of the vehicle list type 0), sent from the join bundle next to the
       vehicle leg, and asserted in the session scenario by reading the captured
-      body's listType and count (decisive: sending listType 0 fails it).
+      body's listType and count (decisive: sending listType 0 fails it), and the
+      marker is re-sent on the vehicle-position cadence so it tracks a moving
+      drone (stock re-runs `DroneManager.UpdateWaypointsForPlayer` on list
+      changes; a following drone changes constantly). That leg also caught a weak
+      assertion: the waypoint body's count is an i32, and reading only two bytes
+      passed by luck with count 1.
       **Step 6 landed 2026-10-03**: the stock console verbs. `junkdrone`/`jds` are
       allowlisted for players (`c2s_text.player_console_allowlist` + the help
       line, whose cross-check test forced the line to hold verbs only) and scoped
