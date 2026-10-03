@@ -17,7 +17,7 @@
     "docs/GAP_ANALYSIS.md": 73200,
     "docs/IMPLEMENTATION_PLAN.md": 2850,
     "docs/IMPLEMENTATION_PLAN_BOTS.md": 1300,
-    "docs/INDEX.md": 1300,
+    "docs/INDEX.md": 1360,
     "docs/MAPS.md": 700,
     "docs/MODLETS_PLAN.md": 100,
     "docs/MODLETS_PRD.md": 100,
@@ -31,7 +31,7 @@
     "docs/RULES_CONFIG.md": 1200,
     "docs/SCALE.md": 6200,
     "docs/STATE_MACHINES.md": 4200,
-    "docs/STATUS.md": 60000,
+    "docs/STATUS.md": 35877,
     "docs/STD_ABSTRACTIONS.md": 650,
     "docs/THREAT_MODEL.md": 2400,
     "docs/WEBUI.md": 4100,
@@ -92,6 +92,7 @@
     "docs/subsystems/wire.md": 2250,
     "docs/subsystems/world-store.md": 2850,
     "docs/subsystems/worldgen.md": 1850,
-    "docs/testing.md": 1150
+    "docs/testing.md": 1150,
+    "docs/archive/STATUS_HISTORY.md": 26252
   }
 }

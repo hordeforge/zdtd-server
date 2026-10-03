@@ -26,7 +26,7 @@ Spot-check summary vs the prior audit claims:
 
 | Claim in prior audit | Result |
 |---|---|
-| "Zombie HP from XML" (STATUS.md:547 `entityclasses.xml → HP`) | **Wrong.** `assets/entities.zig` parses only `<property>` elements; stock ships HP as `<passive_effect name="HealthMax">` (185 uses) + `<replace_passive_effect>` variables. All classes fall to `defaultHp` floors (zombie 40, animal 30, trader 9999) |
+| "Zombie HP from XML" (../STATUS_HISTORY.md `entityclasses.xml → HP`) | **Wrong.** `assets/entities.zig` parses only `<property>` elements; stock ships HP as `<passive_effect name="HealthMax">` (185 uses) + `<replace_passive_effect>` variables. All classes fall to `defaultHp` floors (zombie 40, animal 30, trader 9999) |
 | "class_table speeds/damage from XML; Rules floors only when field 0" (A11) | Correct for speeds/damage/sight on the rows that are filled; see A35 for which rows are reachable |
 | "trader pricing fixed (A29)" | Buy side correct (econ × BuyMarkup, root 3 from traders.xml). Sell side still missing the stock `EconomicSellScale` factor (GAP_ANALYSIS 957), P3 |
 | "builtin leakage loud warns" | Present and gated on game-dir (game.zig:1241-1254) for blocks/items/recipes/entities/loot/entitygroups/quests; secondary catalogs log load failure via `paths.logCatalogLoadFail` |

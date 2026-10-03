@@ -25,7 +25,8 @@ number, which drifts by roughly 3500 lines in the NetPackage region.
 New to the project, or picking up work:
 
 1. [../CONTRIBUTING.md](../CONTRIBUTING.md) clone → `make help` → edit-test → PR gate.
-2. [STATUS.md](STATUS.md) what works now, with the current gates.
+2. [STATUS.md](STATUS.md) what works now, with the current gates. Dated snapshots from the waves and
+   batches before it are in [archive/STATUS_HISTORY.md](archive/STATUS_HISTORY.md).
 3. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 300 features scored
    WORKS / PARTIAL / MISSING with anchors (298 / 2 / 0).
 4. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
