@@ -1894,7 +1894,20 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       own inventory; the wire type is u16-bounded so no huge-type crash
       vector exists. Remaining: the client-chosen KNOWN item id at max stack
       (server-sanctioned grants / full stock-transaction ledger) - the core
-      of T18.
+      of T18. Measured 2026-10-03: the ledger half exists but nothing reads it.
+      `ecs/inv_ledger.zig` records every append with `record(peer, item_id,
+      delta, cause)` and exposes `recent()`/`last()`, and `inv_txn.zig` counts
+      the per-package delta into `inv_ledger_events` - but no caller anywhere in
+      `src/` uses `recent()` or `last()`, no plugin hook carries an inventory
+      transaction (`src/plugin/api.zig` has `on_craft_request`, `on_loot_roll`,
+      `on_stat_changed` and no inventory event), and no admin verb prints it. So
+      the evidence is collected and unreachable, which is exactly the gap ADR
+      0022's "readable evidence" half names. Two bounded paths, both bigger than
+      a drive-by: add an inventory-transaction hook and ship the verdict as a
+      core plugin (rule 29/30 - the boundary extension is the ADR-worthy part),
+      or print `recent()` from the admin console (operator forensics; the admin
+      path needs the parsed `Command` enum extended, which is the same step the
+      drone `junkdrone` verb is waiting on).
 - [x] T19: make `observe` mode honest. **DONE 2026-08-30**: observe stays
       permissive (applies client pos, never denies - documented) but
       `movement_rejects` now counts ENFORCED rejections only (correct mode);
