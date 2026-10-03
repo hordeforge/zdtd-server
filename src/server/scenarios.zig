@@ -24977,3 +24977,94 @@ test "scenario a player console commands their own drone" {
     try std.testing.expect(b_drone != 0 and g.sim.slotOfNetId(b_drone) != null);
     std.debug.print("PASS drone-console: unstuck/log/clear scoped to the caller\n", .{});
 }
+
+test "scenario every explicitly client-to-server package reaches a handler" {
+    // The direction census (`../7dtd-engine-research/workspace/outputs/parity/
+    // parity_b10.json`, `packages[..].dir`) marks 40 packages explicitly
+    // ToServer or Both. The malformed-body sweep pins a *floor* on how many
+    // registered ids reach a handler; this pins the claim itself for that list,
+    // so a package that stops reaching a handler fails by name.
+    //
+    // Two documented exceptions, both from the GAP_ANALYSIS "no-handler names"
+    // note: `NetPackageDebug` has no ProcessPackage server branch at all, and
+    // `NetPackageDynamicMesh` returns immediately unless
+    // `DynamicMeshManager.CONTENT_ENABLED`, so a server without the dynamic-mesh
+    // content has nothing to answer.
+    const explicit_c2s = [_][]const u8{
+        "NetPackageAllyRequest",
+        "NetPackageBag",
+        "NetPackageBlockTrigger",
+        "NetPackageConsoleCmdServer",
+        "NetPackageDebug",
+        "NetPackageDropItemsContainer",
+        "NetPackageDynamicClientArrive",
+        "NetPackageDynamicMesh",
+        "NetPackageEditorAddVolumeFromClient",
+        "NetPackageEntityAddExpServer",
+        "NetPackageEntityAddScoreServer",
+        "NetPackageEntityAddVelocity",
+        "NetPackageEntitySetSkillLevelServer",
+        "NetPackageEntityStealth",
+        "NetPackageExplosionInitiate",
+        "NetPackageGameEventRequest",
+        "NetPackageGameEventResponse",
+        "NetPackageInventoryDataRequest",
+        "NetPackageInventoryKeepOpen",
+        "NetPackageInventoryTransactionRequest",
+        "NetPackageItemDrop",
+        "NetPackageLobbyRegisterClient",
+        "NetPackageLockRequest",
+        "NetPackageMapPosition",
+        "NetPackagePOIMetadataRequest",
+        "NetPackagePlayerData",
+        "NetPackagePlayerDisconnect",
+        "NetPackagePlayerInventory",
+        "NetPackagePlayerInventoryForAI",
+        "NetPackagePlayerLogin",
+        "NetPackagePlayerQuestPositions",
+        "NetPackagePlayerSpawnedInWorld",
+        "NetPackageQuestEntitySpawn",
+        "NetPackageRequestToEnterGame",
+        "NetPackageRequestToSpawnEntity",
+        "NetPackageRequestToSpawnPlayer",
+        "NetPackageSignDataRequest",
+        "NetPackageTraderData",
+        "NetPackageWorldFolder",
+        "NetPackageWorldInitInfoRequest",
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ca = &g.clients[c.slot];
+
+    for (explicit_c2s) |name| {
+        // A disconnect-style body (NetPackagePlayerDisconnect is one of these)
+        // tears the session down, so re-attach rather than inject into a peer
+        // that no longer exists.
+        if (ca.peer == null) {
+            cap.clear();
+            _ = try g.attachJoinedClient(&cap);
+        }
+        const id = packages.idOf(name) orelse {
+            std.debug.print("explicit C2S package missing from the id table: {s}\n", .{name});
+            return error.TestUnexpectedResult;
+        };
+        const before = g.harness.counters.get(.c2s_unhandled);
+        g.handlePackage(ca, ca.peer orelse continue, id, &.{}) catch {};
+        const after = g.harness.counters.get(.c2s_unhandled);
+        if (std.mem.eql(u8, name, "NetPackageDebug") or
+            std.mem.eql(u8, name, "NetPackageDynamicMesh")) continue;
+        if (after != before) {
+            std.debug.print("explicit C2S package reached no handler: {s}\n", .{name});
+            return error.TestUnexpectedResult;
+        }
+    }
+    std.debug.print("PASS c2s-explicit: {d} packages reach a handler (2 documented exceptions)\n", .{explicit_c2s.len});
+}
