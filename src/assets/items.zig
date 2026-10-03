@@ -2410,5 +2410,4 @@ test "the stock item property path and Extends inheritance work offline" {
     try std.testing.expectEqualStrings("recipeA,recipeB", c2.unlocks);
     try std.testing.expectEqualStrings("recipeA,recipeB", d.unlocks);
     try std.testing.expectEqualStrings("Mwood", w.material);
-
 }

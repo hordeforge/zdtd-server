@@ -149,7 +149,7 @@ permission level (`src/server/admin_console.zig:307`).
 | `lpi` | 85 |
 | `junkdrone` | 85 |
 | `jds` | 85 |
-| `creativemenu` | 85 |
+| `creativemenu` | 86 |
 
 
 ## Bot verbs (`src/server/game/bot.zig`)

@@ -80,9 +80,10 @@ pub fn chatMsgOk(msg: []const u8) bool {
 /// console's cross-check test (player_console_help) asserts the in-game help
 /// shows exactly these verbs.
 pub const player_console_allowlist = [_][]const u8{
-    "help",        "commands",  "?",             "gettime", "gt",      "listplayers", "lp",
-    "listents",    "le",        "say",           "s",       "version", "dm",          "cm",
-    "settempunit", "stu", "debugmenu", "listplayerids", "lpi", "junkdrone", "jds", "creativemenu",
+    "help",         "commands", "?",         "gettime",       "gt",      "listplayers", "lp",
+    "listents",     "le",       "say",       "s",             "version", "dm",          "cm",
+    "settempunit",  "stu",      "debugmenu", "listplayerids", "lpi",     "junkdrone",   "jds",
+    "creativemenu",
 };
 
 pub fn playerConsoleAllowlist() []const []const u8 {

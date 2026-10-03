@@ -1621,6 +1621,22 @@ nothing here is already waived. The four gaps the same audit closed are in
       one-pass order, which is the wrong trade for a server that should look like stock under a crash. The
       only faithful way to keep both is a worker that waits, which is the same stall. Revisit only with a
       quiet-disk measurement showing stock's own dedi holding 50 ms through a save (it does not).
+- [x] **`zig fmt --check` was failing on four files** - closed 2026-10-03. The session had
+      been running the individual lint scripts but never the formatter stage of
+      `make lint`, and four files had drifted: `src/server/c2s_text.zig`,
+      `src/server/scenarios.zig`, `src/assets/items.zig` and `src/wire/te_tests.zig`
+      (one stray blank line in `items.zig`, the rest wrapped literals in test blocks).
+      Formatted; `zig fmt --check build.zig build.zig.zon src mods plugins
+      assets/fixtures` now exits 0 and the suite is unchanged at 2149/2394. The lesson is
+      recorded with the `make check` entry below: run the formatter by hand when the full
+      target cannot run.
+- [ ] **`lint-plugins` can only verify the Zig core plugins here** - measured
+      2026-10-03: with a writable `ZIG_GLOBAL_CACHE_DIR` the gate reports that the core
+      plugins match their sources and that 12 committed `.wasm` files are unverified
+      because the pinned clang for the C guests (`fps_bot`, `example_chat_filter`) is
+      absent. Without that env var the gate cannot even load `std.zig` (read-only global
+      cache), which is how a missing toolchain turns into a confusing failure. Re-run
+      where the pinned clang exists.
 - [ ] **`make check` cannot complete in this environment (webui-ts needs a network)** -
       measured 2026-10-03: `make check` runs `release-check` (ok: product=0.13.0-dev.1,
       stock_wire=V3.2.0 b10, zig=0.16.0) and then dies inside `make lint` at

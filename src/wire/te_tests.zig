@@ -861,16 +861,16 @@ test "the TE type table matches the resolved stock enum" {
     // than the IL's declaration order. All 23 entries agree; pinning them here
     // means the hand-cited IL comment in `te_types.zig` cannot drift silently.
     const expected = [_][2]u32{
-        .{ 0, te_types.none },        .{ 3, te_types.collector },
-        .{ 4, te_types.land_claim },  .{ 5, te_types.loot },
-        .{ 6, te_types.trader },      .{ 7, te_types.vending },
-        .{ 8, te_types.forge },       .{ 9, te_types.campfire },
-        .{ 10, te_types.secure_loot }, .{ 11, te_types.secure_door },
-        .{ 12, te_types.workstation }, .{ 13, te_types.sign },
-        .{ 14, te_types.gore_block }, .{ 15, te_types.powered },
-        .{ 16, te_types.power_source }, .{ 17, te_types.power_range_trap },
-        .{ 18, te_types.light },      .{ 19, te_types.trigger },
-        .{ 20, te_types.sleeper },    .{ 21, te_types.power_melee_trap },
+        .{ 0, te_types.none },                .{ 3, te_types.collector },
+        .{ 4, te_types.land_claim },          .{ 5, te_types.loot },
+        .{ 6, te_types.trader },              .{ 7, te_types.vending },
+        .{ 8, te_types.forge },               .{ 9, te_types.campfire },
+        .{ 10, te_types.secure_loot },        .{ 11, te_types.secure_door },
+        .{ 12, te_types.workstation },        .{ 13, te_types.sign },
+        .{ 14, te_types.gore_block },         .{ 15, te_types.powered },
+        .{ 16, te_types.power_source },       .{ 17, te_types.power_range_trap },
+        .{ 18, te_types.light },              .{ 19, te_types.trigger },
+        .{ 20, te_types.sleeper },            .{ 21, te_types.power_melee_trap },
         .{ 22, te_types.secure_loot_signed }, .{ 25, te_types.composite },
         .{ 27, te_types.taskboard },
     };
