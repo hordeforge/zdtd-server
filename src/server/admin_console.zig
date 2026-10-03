@@ -1357,6 +1357,21 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .spawnscouts => |argc| {
+            // Stock's own refusal for the shapes zdtd does not implement
+            // ("Wrong number of arguments, expected none, 1 or 3, found N").
+            if (argc != 0) {
+                var eb: [128]u8 = undefined;
+                const e = std.fmt.bufPrint(&eb, "Wrong number of arguments, expected none, 1 or 3, found {d}.", .{argc}) catch return;
+                self.adminReply(e);
+                return;
+            }
+            const d = self.sim.rules.director;
+            const n = self.sim.director.spawnScoutWave(&self.sim, d.enemy_spawn_ring_min, d.enemy_spawn_ring_max);
+            var sb: [96]u8 = undefined;
+            const out = std.fmt.bufPrint(&sb, "spawned {d} scouts\n", .{n}) catch return;
+            self.adminReply(out);
+        },
         .cvar => |sub| {
             // Stock reply strings (ConsoleCmdCVar IL): "Player {0} has cvar {1}:
             // {2}. Value: {3}" and "Player {0} cvar {1} set from {2} to {3}".

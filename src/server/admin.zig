@@ -441,6 +441,12 @@ pub const Command = union(enum) {
     /// form takes `-p <player>`; a dedicated server has no sender player, so the
     /// flag is required there.
     cvar: CvarSub,
+    /// Stock `spawnscouts [args]` (ConsoleCmdAIDirectorSpawnScouts): the command
+    /// takes none, 1 or 3 arguments; only the no-argument form is implemented
+    /// (stock anchors it on the primary player, and the position-anchored form is
+    /// the same one the daytime scout drip uses), so a count here means the
+    /// caller asked for a shape zdtd does not have yet.
+    spawnscouts: usize,
     /// Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer,
     /// console-commands.md 302): applies a buff to a player by name or id.
     buffplayer: struct { target: Target, buff: []const u8 },
@@ -554,6 +560,7 @@ fn badSubCommand(sub: ?[]const u8) Command {
 /// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
+    if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
     if (std.mem.eql(u8, verb, "cvar"))
         return "cvar get|set|list ... [-p <player>]";
     if (std.mem.eql(u8, verb, "buffplayer"))
@@ -636,6 +643,11 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "spawnscouts")) {
+        var n: usize = 0;
+        while (it.next()) |_| n += 1;
+        return .{ .spawnscouts = n };
+    }
     if (std.mem.eql(u8, cmd, "cvar") or std.mem.eql(u8, cmd, "cv")) {
         const sub = it.next() orelse return .{ .bad_args = cmd };
         // `-p <target>` may follow any form, in the tail.

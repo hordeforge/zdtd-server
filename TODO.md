@@ -1665,7 +1665,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       interns the name into `Client.cvar_name_pool` first, because the CVar store
       borrows the slice and a console line is transient - pinned by asserting the
       stored name's address lies inside the pool, plus `scenario the admin console
-      reads and writes a player cvar` for the values.
+      reads and writes a player cvar` for the values. A third landed 2026-10-03:
+      `spawnscouts` in the no-argument form (ConsoleCmdAIDirectorSpawnScouts), which
+      routes to the position-anchored scout wave the daytime drip already uses, so
+      it needs no primary player; the 1- and 3-argument shapes are refused with
+      stock's own message and stay open. The same pass corrected the audit that
+      produced this list: `spawnairdrop` was reported missing but is implemented
+      (parse arm, dispatch, `forceAirDrop`, its own test and a verb-table row), so
+      re-check each candidate by grep before trusting the extractor - the literal
+      match misses verbs whose names live in `constants.zig`'s table.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

@@ -25259,3 +25259,40 @@ test "scenario the admin console reads and writes a player cvar" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "-p <player>") != null);
     std.debug.print("PASS cvar: set/get/list with -p, and the name is interned\n", .{});
 }
+
+test "scenario the admin console spawns a scout wave" {
+    // Stock `spawnscouts` (ConsoleCmdAIDirectorSpawnScouts): no arguments spawns
+    // a scout wave; 1 or 3 arguments are other shapes, and stock's own refusal
+    // names them. zdtd implements the no-argument form.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    var sink: [512]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("spawnscouts 5", "admin_tcp");
+    g.admin_reply_sink = null;
+    const refused = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, refused, "expected none, 1 or 3") != null);
+
+    const before = g.sim.kind_groups.count(.zombie);
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("spawnscouts", "admin_tcp");
+    g.admin_reply_sink = null;
+    const ok = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, ok, "spawned") != null);
+    // The ring/party-stage ladder can legitimately wave nothing through, so the
+    // assertion is that the call ran and answered, plus that it never *removed*
+    // an entity (a wrong count passed as a cap would).
+    try std.testing.expect(g.sim.kind_groups.count(.zombie) >= before);
+    std.debug.print("PASS spawnscouts: no-arg form runs, other shapes refused with stock's message\n", .{});
+}

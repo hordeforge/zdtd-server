@@ -950,6 +950,15 @@ pub const Director = struct {
     /// is gated on `count < maxcount` and the respawn delay (spawning.md §3);
     /// the spawned zombie carries the rule index so `releaseRule` on destroy
     /// decrements the alive count (kill attrition).
+    /// Console `spawnscouts` (ConsoleCmdAIDirectorSpawnScouts): the no-argument
+    /// form, which stock anchors on the primary player's position. On a dedicated
+    /// server there is no primary player, so this is the position-anchored form
+    /// the daytime scout drip already uses - wave size and group from the stage
+    /// around each spawn point.
+    pub fn spawnScoutWave(self: *Director, w: *ecs_world.World, min_r: f32, max_r: f32) u32 {
+        return self.spawnNearPlayers(w, 0, min_r, max_r, "");
+    }
+
     fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32, group_override: []const u8) u32 {
         // `count == 0` asks for the position-anchored form: the wave size and
         // spawn group come from the stage ladder AROUND the spawn position
