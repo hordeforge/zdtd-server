@@ -44,8 +44,8 @@ the client.
 | Connect + auto-join | `7dtd-fastconnect` | IP join, skip intro/news/Discord/EULA, boot uncap |
 | Spawn heartbeat | `SpawnStateHeartbeat.cs` | Overlay gates (CGO, fixedSize, xuiReady) |
 | Hardcoded play driver | `PlayTestDriver.cs` | 11 steps when `PLAYTEST=1` |
-| Pair launch | `restart_pair.sh` | Kill Proton/wineserver, start zdtd + client |
-| One-shot join | `one_shot_join.sh` | Join cycle + log scrape + kill client |
+| Pair launch | `7dtd-fastconnect/scripts/restart_pair.sh` | Kill Proton/wineserver, start zdtd + client |
+| One-shot join | `7dtd-fastconnect/scripts/one_shot_join.sh` | Join cycle + log scrape + kill client |
 | Server admin TCP | zdtd `--admin-port` | `give`, `tele`, `kill`, `inv`, `spawnentity`, … |
 | Unit / loadgen | zdtd + `7dtd-loadgen` | Fast gates |
 
@@ -447,7 +447,7 @@ uv run playtest report path/to/client.log
 3. start zdtd: --admin-port, fixture world, map Navezgane, log path
 4. wait: server "tick=20Hz" or listen ready
 5. admin setup: settime day; optional tele pad prep
-6. launch client: 7DTD_CONNECT + PLAYTEST_SUITE=… via launch_client.sh
+6. launch client: 7DTD_CONNECT + PLAYTEST_SUITE=… via `7dtd-fastconnect/scripts/launch_client.sh`
 7. watch: tail client log for JSONL / DONE; enforce suite timeout
 8. score: parse results; optional server log NRE/WRN scan; admin post-checks
 9. teardown: shutdown admin or kill; kill Proton stack; write report.json
@@ -556,7 +556,7 @@ The playtest **system** is done for Phase A when:
 
 | Risk | Mitigation |
 |---|---|
-| Proton/wine process leaks | Reuse aggressive kill list from `restart_pair.sh` |
+| Proton/wine process leaks | Reuse aggressive kill list from `7dtd-fastconnect/scripts/restart_pair.sh` |
 | Game update breaks Harmony | Pin game version in suite README; parity tooling for wire; soft-skip unknown UI names |
 | Flaky timing | Wait predicates + timeouts, not fixed sleep-only steps |
 | Suite becomes client "fix" for server gaps | Code review against AGENTS #10; ban list in playtest AGENTS |
