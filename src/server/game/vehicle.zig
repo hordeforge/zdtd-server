@@ -96,6 +96,28 @@ pub fn sendVehicleWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void
     try self.sendGame(peer, "NetPackageEntityWaypointList", body);
 }
 
+/// Ship one player their own junk drone for the map, the sibling of the vehicle
+/// list: `NetPackageEntityWaypointList` with listType Drone (1)
+/// (`eWayPointListType` Vehicle=0 / Drone=1, RE vehicles-drones-turrets.md 1173).
+/// A drone is per-session and owned by exactly one client slot, so the owner is
+/// the only recipient; nothing is sent when there is no drone.
+pub fn sendDroneWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
+    if (slot >= self.clients.len) return;
+    const c = &self.clients[slot];
+    if (c.drone_net_id == 0) return;
+    const ds = self.sim.slotOfNetId(c.drone_net_id) orelse return;
+    if (!self.sim.mask[ds].transform) return;
+    var entries: [1]packages.WaypointEntry = undefined;
+    entries[0] = .{
+        .entity_id = c.drone_net_id,
+        .x = self.sim.transform[ds].x,
+        .y = self.sim.transform[ds].y,
+        .z = self.sim.transform[ds].z,
+    };
+    const body = packages.buildEntityWaypointListBody(self.body_buf[0..4096], 1, entries[0..1]) catch return;
+    try self.sendGame(peer, "NetPackageEntityWaypointList", body);
+}
+
 pub fn broadcastVehiclePositions(self: *Game) !void {
     // Do not flood pre-enter stock clients (World still null / reader dies on short bodies).
     if (!weather_mod.anyEnteredClient(self)) return;

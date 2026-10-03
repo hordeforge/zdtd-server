@@ -259,6 +259,7 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
         // The owner's parked vehicles for their map (stock
         // UpdateVehicleWaypointsForPlayer; no-op without owned vehicles).
         try self.sendVehicleWaypoints(peer, c.slot);
+        try self.sendDroneWaypoints(peer, c.slot);
         // This player's dropped-bag markers. They only ever went out on
         // the events that change them (a death, a collect), so a marker
         // restored from the player record never reached anyone and the

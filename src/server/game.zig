@@ -2637,6 +2637,11 @@ pub const Game = struct {
     }
 
     /// One junk drone per session, spawned at the player's spawn point.
+    /// The owner's drone map marker (listType Drone).
+    pub fn sendDroneWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
+        return game_vehicle.sendDroneWaypoints(self, peer, slot);
+    }
+
     pub fn spawnSessionDrone(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
         return game_join_spawn.spawnSessionDrone(self, c, x, y, z);
     }

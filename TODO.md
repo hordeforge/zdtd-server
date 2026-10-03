@@ -1508,7 +1508,12 @@ nothing here is already waived. The four gaps the same audit closed are in
       flood-fill pathing, and the pose rides the generic `NetPackageEntityPosAndRot`
       channel (dirty-flagged), so the client sees the movement.
       `scenario a drone follows its owner and snaps back from out of range` pins
-      all three bands. Still open:
+      all three bands.
+      **Step 5 landed 2026-10-03**: the owner's map marker
+      (`sendDroneWaypoints`, `NetPackageEntityWaypointList` listType Drone 1 - the
+      sibling of the vehicle list type 0), sent from the join bundle next to the
+      vehicle leg, and asserted in the session scenario by reading the captured
+      body's listType and count (decisive: sending listType 0 fails it). Still open:
       (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with

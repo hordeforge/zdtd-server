@@ -24860,6 +24860,17 @@ test "scenario a session spawns its own drone and takes it down on drop" {
     const before = g.sim.countKind(.drone);
     const drone_nid = c.drone_net_id;
 
+    // The owner's map marker: listType Drone (1), one entry, carrying the drone.
+    {
+        cap.clear();
+        try g.sendDroneWaypoints(c.peer.?, c.slot);
+        const pkg = packages.idOf("NetPackageEntityWaypointList").?;
+        const body = cap.findPkgId(pkg) orelse return error.TestUnexpectedResult;
+        // The channel body: listType i16 = Drone (1), count i16 = 1.
+        try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[0..2], .little));
+        try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[2..4], .little));
+    }
+
     g.dropClientSlot(c.slot, "test-drop");
     try std.testing.expectEqual(@as(i32, 0), c.drone_net_id);
     try std.testing.expectEqual(before - 1, g.sim.countKind(.drone));
