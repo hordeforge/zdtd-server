@@ -1185,6 +1185,20 @@ nothing here is already waived. The four gaps the same audit closed are in
       remains is the magazine read action that increments the CVar named after
       each unlocked recipe and the craft-validation gate - together, because
       gating without the read path would block every learnable recipe.
+      Narrowed 2026-10-03 from the IL: the *gate* half is client-side, so a
+      server-side craft gate would be stricter than stock and must not be
+      added. Every `Recipe::IsUnlocked` caller in the dump is a UI path -
+      `XUiM_Recipes::GetRecipeIsUnlocked` from `ItemActionEntryCraft`,
+      `ItemActionEntryAssemble` and `ItemActionEntryUse`, plus `RecipeUnlocked`
+      - and no server craft validation consults it. What is genuinely
+      server-side is the CVar the client's gate reads, since the dedi owns
+      per-player CVars and syncs them; the open question is which package tells
+      the server a magazine was read. `ItemActionLearnRecipe` is an inventory
+      UI action with a `Recipes_to_learn` property, and the only C2S item-use
+      path in the dump is `SimpleRPC` type 0 (`ItemClass::OnHoldingItemActivated`),
+      which is the *hold* use, not the inventory read. Same shape as the drone
+      order verbs: the client-side half is pinned, the mirror that would tell
+      the server is not in this RE set. Do not invent it.
 - [x] **Biome-progression recipe unlocks are not modelled** - closed as a
       NON-GAP 2026-10-02: the gate is entirely client-side. `biomeprogressionTag`
       is read only by `XUiM_Recipes` (the recipe list filters, IL_0057/0037) and
@@ -1266,22 +1280,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       lightmap lands: the fill is one line in `PlayerCtx.build`. Gated by
       `the player Ctx leaves IsIndoors unknown rather than false` (decisive:
       restoring `false` fails it).
-- [ ] **`NetPackageSetProp` (prop/land edits) is dropped** - located 2026-10-01,
-      not yet implemented. The package is `m_persistentPlayerId` +
-      `m_propChanges` (counted `PropChangeInfo` rows: x, y, HasValue, Value,
-      Value, Value, Value, rawData, damage) + `m_localPlayerThatChanged`
-      (protocol-packages.md section 5.5 "Prop/land edits"; `PropChangeInfo.Write`
-      IL=107). Stock's `ProcessPackage` gates it with `ValidUserIdForSender` and
-      `ValidEntityIdForSender(localPlayerThatChanged)`, fans it to other clients
-      (`SetPropsOnClients(-1, pkg)`, channel 192) and applies it through
-      `GameManager.ChangeProps(persistentPlayerId, changes)` -> per change
-      `GetChunkSync` then `ChunkCluster.SetProp(ChunkPos, PropId, Position,
-      Rotation, Scale, BlockValue)` with the touched cluster's delayed-regen pair
-      (world-chunks.md 930-946). Implementing it needs: the PropChangeInfo reader,
-      the persistent-player-id ownership check against the claim/offline-owner
-      table, a per-cell prop store (position/rotation/scale/rawData/damage) on the
-      chunk world, the relay, and the chunk-stream leg. Nothing in the sim reads
-      props yet, so the apply has to land with the store, not before it.
+- [x] **`NetPackageSetProp` (prop/land edits) shipped** - closed 2026-10-03.
+      The entry said "dropped, not yet implemented" long after it landed: rounds 163-165 shipped the whole path -
+      `src/wire/stock_props.zig` (`PropChange` reader/writer, `buildSetPropBody`/`parseSetPropBody`, unknown flag bit
+      fails closed), `src/world/props.zig` (a keyed store with `apply`), `src/server/c2s/blocks_props.zig`
+      (`handle`: sender identity check against `parsed.local_player_that_changed` and the persistent player, every
+      chunk must exist, then apply and `broadcastExcept`), routed from `c2s/dispatch.zig`. Pinned by
+      `scenario a prop edit applies locally and relays to the others` (apply, relay, no self-echo, spoofed identity
+      dropped, batch abandoned on a chunk miss). What the entry called out as missing - the per-cell store and the
+      chunk-stream leg - landed with it: the store keeps position/rotation/scale/block value per the flag bits, and
+      `Chunk::write/read` carry no props, so there is no chunk-stream leg to build.
+      Found stale by grepping each open TODO for its own feature; the code was already there.
 - [ ] **`NetPackageEventPrefab` has no send site** - the sender is real
       (`EventPrefabs.TryPlaceAt` IL_0105 and `Remove` IL_0091), so the gap is
       the dynamic event-prefab subsystem, not the package: zdtd places no event
