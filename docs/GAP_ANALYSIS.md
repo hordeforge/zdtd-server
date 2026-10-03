@@ -6509,7 +6509,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Item | Status |
 |---|---|
 | Entity class system (`entityclasses.xml`) | HAVE (`assets/entities.zig`) |
-| Archetypes / gamestages / spawning.xml | PARTIAL (`assets/gamestages.zig` + spawning.xml `<biome>`/`<entityspawner>`; archetypes MISSING) |
+| Archetypes / gamestages / spawning.xml | PARTIAL (gamestages and spawning.xml are implemented - `assets/gamestages.zig` plus the `<biome>`/`<entityspawner>` chain. On archetypes the row needed sharpening 2026-10-03: the *name* is not missing, it rides two surfaces already - `archetypes.xml` is in the client LoadClientFile list (`config_files.zig`) and the player profile carries an `archetype` string that persists and defaults to `BaseFemale` (`profiles.zig`). What is missing is the archetype's stat block: stock's `archetypes.xml` grants starting attributes/perks, and nothing applies those on spawn) |
 | Animals / special infected / bosses | PARTIAL (animals spawner + cap; Demolition zombieCop prime-and-explode WORKS 2026-08-20 - primes below max*ExplodeHealthThreshold, two-countdown blast, entity + block AoE via the addBlockDamage choke point, RE entity-ai.md EntityZombieCop; ExplosionData values data-driven from entityclasses.xml, rules floors bound the AoE. Missing: death-time explosion (not IL-verified), other special infected variants (crawler/spider/fat) behaviors) |
 | EAI task graphs | PARTIAL (see 5.2.1) |
 | Sleeper AI volumes | PARTIAL (prefab .tts/.nim markers) |
