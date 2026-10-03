@@ -205,7 +205,10 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             // A player looting a container is the server-side trigger for
             // FetchFromContainer quests (stock's quest object observes the
             // container TE); advance fetch phases so they can reach turn-in.
-            systems.questOnFetchItem(&self.sim, c.slot, 1);
+            // Position-scoped: a fetch objective binds its container to the
+            // quest's POI, so looting an unrelated container elsewhere must not
+            // advance it (stock's ObjectiveBaseFetchContainer setup).
+            systems.questOnFetchItemAt(&self.sim, c.slot, @floatFromInt(parsed.world_x), @floatFromInt(parsed.world_z));
             // Echo stock TE to nearby clients. Stock applies the client's whole
             // composite to its own TE and resends it, so when the received body
             // carries more than the storage module (a writable crate's sign text

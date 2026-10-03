@@ -475,6 +475,39 @@ pub fn questOnTraderOpenFrom(w: *World, peer_slot: usize, trader_net_id: i32) vo
     }
 }
 
+/// Fetch advance for a *container* at a world position. Stock binds the fetch
+/// container to the quest at setup (`ObjectiveBaseFetchContainer` /
+/// `HandleContainerPositions`), so looting an unrelated container must not
+/// advance a from-container objective. A quest with no placed POI stays
+/// permissive, because there is nothing to compare against.
+/// Is (x, z) inside the placed POI rect? Stock's fetch container lives inside
+/// the quest's POI, so the containment test is the whole gate.
+pub fn pointInPoi(poi: c.PoiRect, x: f32, z: f32) bool {
+    const half_x = poi.size_x * 0.5;
+    const half_z = poi.size_z * 0.5;
+    if (x < poi.x - half_x or x > poi.x + half_x) return false;
+    if (z < poi.z - half_z or z > poi.z + half_z) return false;
+    return true;
+}
+
+pub fn questOnFetchItemAt(w: *World, peer_slot: usize, x: f32, z: f32) void {
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    if (!w.mask[ps].journal) return;
+    var j = &w.journal[ps];
+    for (&j.slots) |*s| {
+        if (!s.active or s.completed or s.ready_turn_in) continue;
+        const d = w.catalog.byId(s.def_id) orelse continue;
+        if (d.phases.len == 0 and d.kind != .fetch_item) continue;
+        if (s.poi.valid() and !pointInPoi(s.poi, x, z)) continue;
+        if (d.phases.len > 0) {
+            bumpPhase(w, ps, s, d, .fetch_item, 1);
+            continue;
+        }
+        s.progress +|= 1;
+        markProgress(w, ps, s, d);
+    }
+}
+
 pub fn questOnFetchItem(w: *World, peer_slot: usize, count: u16) void {
     const ps = w.playerByPeer(peer_slot) orelse return;
     if (!w.mask[ps].journal) return;
@@ -2248,4 +2281,12 @@ test "completed starter quest is not granted again on the next login" {
     // A fresh player on a different peer still gets the starter.
     _ = w.spawnPlayer(0, 70, 5, 1);
     try std.testing.expect(questAcceptStarter(&w, 1));
+}
+
+test "the POI containment gate answers inside and outside" {
+    const rect: c.PoiRect = .{ .x = 100, .y = 0, .z = -50, .size_x = 20, .size_y = 20, .size_z = 20 };
+    try std.testing.expect(pointInPoi(rect, 100, -50));
+    try std.testing.expect(pointInPoi(rect, 109, -41));
+    try std.testing.expect(!pointInPoi(rect, 111, -50));
+    try std.testing.expect(!pointInPoi(rect, 100, -39));
 }

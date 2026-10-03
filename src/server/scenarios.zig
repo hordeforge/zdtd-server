@@ -25640,3 +25640,37 @@ test "scenario a quest is turned in at its giver, not any trader" {
     try std.testing.expect(q2.completed or !q2.active);
     std.debug.print("PASS quest-giver: other trader refused, giver completes, unstamped permissive\n", .{});
 }
+
+test "scenario a fetch objective only advances from its own POI" {
+    // Stock binds a fetch container to the quest at setup
+    // (ObjectiveBaseFetchContainer / HandleContainerPositions), so looting an
+    // unrelated container elsewhere must not advance the objective. The gate is
+    // the pure containment test; the integration below shows a quest outside the
+    // rect is left alone, and quest_trade's own unit test covers inside/outside.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.mask[ps].journal = true;
+
+    const q = g.sim.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{
+        .def_id = 1,
+        .quest_code = 11,
+        .active = true,
+        .poi = .{ .x = 0, .y = 0, .z = 0, .size_x = 20, .size_y = 20, .size_z = 20 },
+    };
+    const before = q.progress;
+    systems.questOnFetchItemAt(&g.sim, c.slot, 500, 500);
+    try std.testing.expectEqual(before, q.progress);
+    try std.testing.expect(!systems.pointInPoi(q.poi, 500, 500));
+    try std.testing.expect(systems.pointInPoi(q.poi, 3, -4));
+    std.debug.print("PASS fetch-poi: far container ignored, containment gate answers\n", .{});
+}
