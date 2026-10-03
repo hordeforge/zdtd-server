@@ -25566,3 +25566,33 @@ test "scenario the admin console rolls a loot container" {
     try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "Unknown container") != null);
     std.debug.print("PASS loot: container roll answers or refuses by name\n", .{});
 }
+
+test "scenario the admin console reads the inventory ledger" {
+    // ADR 0022's readable-evidence half: the ledger recorded every inventory
+    // mutation but nothing read it. `invledger [n]` now prints the ring, oldest
+    // first, with the cause.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+
+    g.sim.inv_ledger.record(0, 1234, 5, .give);
+    g.sim.inv_ledger.record(0, 1234, -2, .tx);
+
+    var sink: [2048]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("invledger 2", "admin_tcp");
+    g.admin_reply_sink = null;
+    const out = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, out, "item=1234 delta=5 cause=give") != null);
+    // Oldest first: the give row precedes the transaction row.
+    const give_at = std.mem.find(u8, out, "cause=give").?;
+    const tx_at = std.mem.find(u8, out, "cause=tx").?;
+    try std.testing.expect(give_at < tx_at);
+    std.debug.print("PASS invledger: the ledger ring is readable, oldest first\n", .{});
+}

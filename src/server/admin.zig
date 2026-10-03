@@ -450,6 +450,9 @@ pub const Command = union(enum) {
     nets_no_sub: void,
     /// `nets <sub>` with a subcommand zdtd does not implement.
     nets_unknown: void,
+    /// zdtd-only: print the recent inventory-mutation ledger (ADR 0022's "readable
+    /// evidence" half). `invledger [n]` shows up to the ring's capacity, oldest first.
+    invledger: usize,
     /// Stock `loot c|container <listName>` (ConsoleCmdLoot): rolls a loot list and
     /// prints what came out. Only that subcommand is implemented.
     loot_container: []const u8,
@@ -597,6 +600,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "spawnscouts")) return "spawnscouts (no arguments)";
     if (std.mem.eql(u8, verb, "networkserver") or std.mem.eql(u8, verb, "nets"))
         return "networkserver|nets ls (latencysim/pls/packetlosssim are not implemented)";
+    if (std.mem.eql(u8, verb, "invledger")) return "invledger [n] (recent inventory mutations, oldest first)";
     if (std.mem.eql(u8, verb, "loot")) return "loot c|container <listName>";
     if (std.mem.eql(u8, verb, "bents")) return "bents info (the on/off rendering toggles are not implemented)";
     if (std.mem.eql(u8, verb, "weather")) return "weather (dumps state; mutators are not implemented)";
@@ -688,6 +692,12 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "invledger") or std.mem.eql(u8, cmd, "ilv")) {
+        const a = it.next() orelse return .{ .invledger = 32 };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        const n = std.fmt.parseInt(usize, a, 10) catch return .{ .bad_args = cmd };
+        return .{ .invledger = @min(n, 32) };
+    }
     if (std.mem.eql(u8, cmd, "loot")) {
         const sub = it.next() orelse return .{ .bad_args = cmd };
         if (!std.mem.eql(u8, sub, "c") and !std.mem.eql(u8, sub, "container")) return .{ .bad_args = cmd };

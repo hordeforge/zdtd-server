@@ -1364,6 +1364,22 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             ) catch return;
             self.adminReply(s);
         },
+        .invledger => |want| {
+            // ADR 0022's readable-evidence half: the ledger was written but nothing
+            // read it. Oldest first, with the cause so a duplicate grant is visible
+            // as `dx`/`give` rows rather than a bare count.
+            var evs: [32]@import("../ecs/inv_ledger.zig").Event = undefined;
+            const n = self.sim.inv_ledger.recent(evs[0..@min(want, evs.len)]);
+            var hb: [96]u8 = undefined;
+            const head = std.fmt.bufPrint(&hb, "invledger {d} of {d} recorded\n", .{ n, self.sim.inv_ledger.total }) catch return;
+            self.adminReply(head);
+            for (evs[0..n]) |e| {
+                var b: [128]u8 = undefined;
+                const cause = @tagName(e.cause);
+                const text = std.fmt.bufPrint(&b, "peer={d} item={d} delta={d} cause={s}\n", .{ e.peer, e.item_id, e.delta, cause }) catch continue;
+                self.adminReply(text);
+            }
+        },
         .loot_container => |list| {
             // Stock `loot container <list>` (ConsoleCmdLoot): roll the list and
             // print it. The gate context is all-optional, so a console roll needs

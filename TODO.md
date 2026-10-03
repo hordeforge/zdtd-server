@@ -2100,7 +2100,13 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       core plugin (rule 29/30 - the boundary extension is the ADR-worthy part),
       or print `recent()` from the admin console (operator forensics; the admin
       path needs the parsed `Command` enum extended, which is the same step the
-      drone `junkdrone` verb is waiting on).
+      drone `junkdrone` verb is waiting on). **The second path landed 2026-10-03**:
+      the `Command` union now carries `invledger [n]` (alias `ilv`), which prints the
+      ring oldest-first as `peer=<d> item=<d> delta=<d> cause=<give|tx|loot|...>` after
+      an `invledger <n> of <total> recorded` header. Pinned by `scenario the admin
+      console reads the inventory ledger`, which also asserts the chronology. What is
+      still open is the *verdict* half (an inventory-transaction hook plus a core
+      plugin), not the reading.
 - [x] T19: make `observe` mode honest. **DONE 2026-08-30**: observe stays
       permissive (applies client pos, never denies - documented) but
       `movement_rejects` now counts ENFORCED rejections only (correct mode);
