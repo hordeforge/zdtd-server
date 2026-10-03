@@ -190,6 +190,7 @@ because it globs `.zig`.
 | `src/server/game/vehicle.zig` `sendDroneWaypoints` | R | `NetPackageEntityWaypointList` with `eWayPointListType` Drone (1), the sibling of the vehicle list (0) (`VehicleManager`/`DroneManager` waypoint updates, RE vehicles-drones-turrets.md 1173) |
 | `src/world/props.zig` | Z | Prop tuple store for `NetPackageSetProp`, keyed by (chunk, prop id), fixed capacity, overwrite by key (no packet-path allocation) |
 | `src/server/c2s/blocks_props.zig` | R | `NetPackageSetProp::ProcessPackage` IL_0002-001E (ValidUserIdForSender then ValidEntityIdForSender, both silent drops) plus `GameManager.ChangeProps`/`SetPropsOnClients` (RE world-chunks.md 925-945): require the chunk per change, abandon the batch on a miss, relay the untouched body excluding the changer |
+| `tools/check_wire_builders.py` | Z | zdtd-owned gate: a `build*Body` in `src/wire` with no caller is dead code or an unwired path, so it fails `make lint` |
 | `src/wire/stock_props.zig` | R | `NetPackageSetProp` + `PropChangeInfo` per `../7dtd-engine-research/docs/inventories/netpackage-bodies.md` 1692 and `PropChangeInfo.Write` IL_0000-0136: ChunkPos i32,i32, a flags byte (PropId 1, Position 2, Rotation 4, Scale 8, BlockValue 16), the present values in that order, BlockValue as u32 rawData + u16 damage; `StreamUtils.Write` Vector3/Quaternion are x,y,z / x,y,z,w f32 |
 | `src/apm/profiler.zig` | Z | Scoped monotonic sections for tick phases (zdtd-native; not 7dtd-server-apm) |
 | `src/apm/report.zig` | Z | Snapshot dump: human text or JSON lines for loadgen-side compare |

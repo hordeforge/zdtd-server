@@ -109,6 +109,11 @@ if [[ $found_eq -eq 0 ]]; then
   ok
 fi
 
+note "wire builders with no caller (tools/check_wire_builders.py)"
+if ! python3 "$ROOT/tools/check_wire_builders.py"; then
+  fail=1
+fi
+
 note "fidelity smell phrases in wire/server"
 smell_hits="$(
   rg_hits -n --glob '*.zig' -i \
