@@ -1431,7 +1431,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       `stelem.any GameStats/PropertyDecl` yields ~70 `ldc.i4` ordinals whose first
       entry is not the list head (`BiomeGSModifier` before `LoadScene`), so the
       dump's *line order* is not the runtime list order - the exact trap rule 16
-      warns about ("a table proves what it is a table of"). Checked 2026-10-03
+      warns about ("a table proves what it is a table of"). **Half of it is settled
+      2026-10-03 from a cleaner anchor**: `GameStats::Write` (GameStats.il IL_0000-00AB)
+      walks `propertyList` in array order, skips non-`bPersistent` decls and switches on
+      `PropertyDecl.type` to call `GetInt`/`GetFloat`/`GetString`/`GetBool` and write
+      Int32/Float/String/Boolean; `GameStats::Read` has the mirror switch
+      (`ReadInt32`/...). That proves the blob follows the *list*, not the enum, and it
+      verifies zdtd's type map (0=i32, 1=float, 2=string, 3=bool) against both sides.
+      What remains is only the list order itself: it is built by the `stelem` sequence
+      in `initPropertyDecl`, which is what defeated the earlier parse. Checked 2026-10-03
       against the RE's resolved parity census: it cannot settle it either, because
       `NetPackageGameStats`'s own write sequence is `NetPackage.write; Write;
       get_BaseStream` - the body is copied wholesale as a length-prefixed blob, so
