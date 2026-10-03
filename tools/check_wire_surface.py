@@ -65,6 +65,31 @@ def unreferenced(sources: dict[str, str], defined: dict[str, str]) -> list[str]:
     return out
 
 
+REPLY_SUFFIX = ("Response", "Answer", "Confirmation", "ConfirmSpawnEntity")
+
+
+def check_reply_packages() -> list[str]:
+    """Every reply-shaped package the id table knows must be sent by the server.
+
+    A stock `*Response` / `*Answer` / `*Confirmation` package exists because the client
+    waits for it. If the server never names one, either the reply was dropped (the client
+    hangs or reads a timeout) or the table grew a name nothing answers.
+    """
+    ids_path = os.path.join(WIRE, "stock_ids.zig")
+    text = open(ids_path, errors="ignore").read()
+    m = MAPPINGS.search(text)
+    if not m:
+        return ["default_mappings not found in src/wire/stock_ids.zig"]
+    names = [n for n in NAME_LITERAL.findall(m.group(1)) if n.endswith(REPLY_SUFFIX)]
+    server_dir = os.path.join(ROOT, "src", "server")
+    server_text = "\n".join(
+        open(p, errors="ignore").read()
+        for p in zig_files(server_dir)
+        if not p.endswith("scenarios.zig")
+    )
+    return [n for n in names if n not in server_text]
+
+
 def check_pinned_names() -> list[str]:
     """Literal `idOf(..).?` names must exist in the package id table."""
     ids_path = os.path.join(WIRE, "stock_ids.zig")
@@ -123,16 +148,22 @@ def main() -> int:
         return 1
 
     pinned_bad = check_pinned_names()
+    reply_bad = check_reply_packages()
 
     if pinned_bad:
         print(f"FAIL: idOf(..).? names missing from default_mappings ({len(pinned_bad)}):", file=sys.stderr)
         for b in pinned_bad:
             print("  " + b, file=sys.stderr)
 
-    if pinned_bad:
+    if reply_bad:
+        print(f"FAIL: reply packages no server path names ({len(reply_bad)}):", file=sys.stderr)
+        for r in reply_bad:
+            print("  " + r, file=sys.stderr)
+
+    if pinned_bad or reply_bad:
         return 1
 
-    print(f"wire surface: {len(defined)} builders and {len(parsers)} parsers, all referenced; idOf unwrap names all resolve")
+    print(f"wire surface: {len(defined)} builders and {len(parsers)} parsers, all referenced; idOf unwrap names all resolve; every reply package has a server path")
     return 0
 
 
