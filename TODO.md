@@ -1656,7 +1656,16 @@ nothing here is already waived. The four gaps the same audit closed are in
       (ConsoleCmdBuffPlayer, console-commands.md 302), resolving the target through
       the same `resolveAdminTarget` the other admin verbs use and applying through
       the game-event buff path, with an unknown name refused as stock refuses it.
-      Pinned by `scenario the admin console applies a buff by name`.
+      Pinned by `scenario the admin console applies a buff by name`. A second
+      landed the same day: `cvar get|set|list ... [-p <player>]`
+      (ConsoleCmdCVar, console-commands.md 153) with stock's reply strings
+      ("Player {0} has cvar {1}: {2}. Value: {3}" / "... cvar {1} set from {2} to
+      {3}"), resolving `-p` through `resolveAdminTarget` and requiring it on the
+      server console, which has no sender player to fall back on. The write leg
+      interns the name into `Client.cvar_name_pool` first, because the CVar store
+      borrows the slice and a console line is transient - pinned by asserting the
+      stored name's address lies inside the pool, plus `scenario the admin console
+      reads and writes a player cvar` for the values.
 - [ ] **Three serverconfig keys with no surface, reviewed 2026-10-03**: `ServerAllowCrossplay`
       (would advertise a capability crossplay needs EOS for),
       `ServerDisabledNetworkProtocols` (zdtd runs one transport: LiteNet, which

@@ -10,6 +10,7 @@
 //! unchanged.
 
 const std = @import("std");
+const persist_players = @import("persist_players.zig");
 const config_mod = @import("config.zig");
 const game_mod = @import("game.zig");
 const Game = game_mod.Game;
@@ -1355,6 +1356,69 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 },
             ) catch return;
             self.adminReply(s);
+        },
+        .cvar => |sub| {
+            // Stock reply strings (ConsoleCmdCVar IL): "Player {0} has cvar {1}:
+            // {2}. Value: {3}" and "Player {0} cvar {1} set from {2} to {3}".
+            const target: ?admin_mod.Target = switch (sub) {
+                .get => |g| g.player,
+                .set => |st| st.player,
+                .list => |l| l,
+            };
+            const who = target orelse {
+                self.adminReply("cvar needs -p <player> on the server console (no sender player)");
+                return;
+            };
+            const slot = switch (self.resolveAdminTarget(who)) {
+                .slot => |sl| sl,
+                .none => {
+                    self.adminReply("Could not find player matching ID");
+                    return;
+                },
+                .ambiguous => {
+                    self.adminReply("target name is ambiguous");
+                    return;
+                },
+            };
+            const c = &self.clients[slot];
+            switch (sub) {
+                .get => |g| {
+                    if (g.name.len == 0) {
+                        self.adminReply("Not enough arguments supplied.");
+                        return;
+                    }
+                    var b: [256]u8 = undefined;
+                    const out = std.fmt.bufPrint(&b, "Player {d} has cvar {s}: {s}. Value: {d}\n", .{ c.entity_id, g.name, g.name, c.cvars.get(g.name) }) catch return;
+                    self.adminReply(out);
+                },
+                .set => |st| {
+                    if (st.name.len == 0) {
+                        self.adminReply("Not enough arguments supplied.");
+                        return;
+                    }
+                    // The store borrows the name, so it must outlive the console
+                    // line: intern it first, the way the restore path does.
+                    const interned = persist_players.internCvarName(c, st.name) orelse {
+                        self.adminReply("cvar name pool is full");
+                        return;
+                    };
+                    const old = c.cvars.get(interned);
+                    _ = c.cvars.apply(interned, .set, st.value);
+                    var b: [256]u8 = undefined;
+                    const out = std.fmt.bufPrint(&b, "Player {d} cvar {s} set from {d} to {d}\n", .{ c.entity_id, interned, old, st.value }) catch return;
+                    self.adminReply(out);
+                },
+                .list => {
+                    var b: [1024]u8 = undefined;
+                    var w: std.Io.Writer = .fixed(&b);
+                    w.print("Player {d} cvars:", .{c.entity_id}) catch return;
+                    for (c.cvars.items()) |e| {
+                        w.print(" {s}={d}", .{ e.name, e.value }) catch break;
+                    }
+                    w.writeByte('\n') catch return;
+                    self.adminReply(w.buffered());
+                },
+            }
         },
         .buffplayer => |b| {
             // Stock: "Invalid arguments, requires a target player and a buff name"

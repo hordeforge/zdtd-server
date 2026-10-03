@@ -541,7 +541,7 @@ pub fn savePlayers(self: *Game) !void {
 /// Copy a restored cvar name into the client's name pool so the store's borrowed
 /// slice outlives the file buffer. Null when the pool is full (the entry is then
 /// skipped, matching how an unresolvable skill name is dropped).
-fn internCvarName(c: *Client, name: []const u8) ?[]const u8 {
+pub fn internCvarName(c: *Client, name: []const u8) ?[]const u8 {
     if (c.cvar_name_pool_used + name.len > c.cvar_name_pool.len) return null;
     const at = c.cvar_name_pool_used;
     @memcpy(c.cvar_name_pool[at..][0..name.len], name);

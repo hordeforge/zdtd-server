@@ -437,6 +437,10 @@ pub const Command = union(enum) {
     getgamestat: []const u8,
     /// Stock `setgamepref` / `sg <name> <value>` (asm.il 251176).
     setgamepref: struct { name: []const u8, value: []const u8 },
+    /// Stock `cvar get|set|list` (ConsoleCmdCVar, console-commands.md 153): each
+    /// form takes `-p <player>`; a dedicated server has no sender player, so the
+    /// flag is required there.
+    cvar: CvarSub,
     /// Stock `buffplayer <target> <buffName>` (ConsoleCmdBuffPlayer,
     /// console-commands.md 302): applies a buff to a player by name or id.
     buffplayer: struct { target: Target, buff: []const u8 },
@@ -550,6 +554,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
 /// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
+    if (std.mem.eql(u8, verb, "cvar"))
+        return "cvar get|set|list ... [-p <player>]";
     if (std.mem.eql(u8, verb, "buffplayer"))
         return "buffplayer <name|entityId|slot> <buffName>";
     if (std.mem.eql(u8, verb, "junkdrone") or std.mem.eql(u8, verb, "jds"))
@@ -613,6 +619,14 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
 
 pub const JunkSub = enum { log, unstuck, clear, help };
 
+/// `ConsoleCmdCVar` subcommands. `player` is the `-p` target; stock's
+/// `Usages` line allows it on every form.
+pub const CvarSub = union(enum) {
+    get: struct { name: []const u8, player: ?Target },
+    set: struct { name: []const u8, value: f32, player: ?Target },
+    list: ?Target,
+};
+
 pub fn parseCommand(line: []const u8) Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const cmd = it.next() orelse return .unknown;
@@ -622,6 +636,39 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "cvar") or std.mem.eql(u8, cmd, "cv")) {
+        const sub = it.next() orelse return .{ .bad_args = cmd };
+        // `-p <target>` may follow any form, in the tail.
+        if (std.mem.eql(u8, sub, "list")) {
+            const rest = std.mem.trim(u8, it.rest(), " ");
+            if (rest.len == 0) return .{ .cvar = .{ .list = null } };
+            var rit = std.mem.tokenizeAny(u8, rest, " \t");
+            if (!std.mem.eql(u8, rit.next() orelse "", "-p")) return .{ .bad_args = cmd };
+            const who = rit.next() orelse return .{ .bad_args = cmd };
+            if (rit.next() != null) return .{ .bad_args = cmd };
+            return .{ .cvar = .{ .list = parseTarget(who) } };
+        }
+        if (std.mem.eql(u8, sub, "get") or std.mem.eql(u8, sub, "set")) {
+            const name = it.next() orelse return .{ .bad_args = cmd };
+            var value: f32 = 0;
+            if (std.mem.eql(u8, sub, "set")) {
+                const raw = it.next() orelse return .{ .bad_args = cmd };
+                value = std.fmt.parseFloat(f32, raw) catch return .{ .bad_args = cmd };
+            }
+            const rest = std.mem.trim(u8, it.rest(), " ");
+            var player: ?Target = null;
+            if (rest.len != 0) {
+                var rit = std.mem.tokenizeAny(u8, rest, " \t");
+                if (!std.mem.eql(u8, rit.next() orelse "", "-p")) return .{ .bad_args = cmd };
+                const who = rit.next() orelse return .{ .bad_args = cmd };
+                if (rit.next() != null) return .{ .bad_args = cmd };
+                player = parseTarget(who);
+            }
+            if (std.mem.eql(u8, sub, "get")) return .{ .cvar = .{ .get = .{ .name = name, .player = player } } };
+            return .{ .cvar = .{ .set = .{ .name = name, .value = value, .player = player } } };
+        }
+        return .{ .bad_args = cmd };
+    }
     if (std.mem.eql(u8, cmd, "buffplayer") or std.mem.eql(u8, cmd, "bp")) {
         const who = it.next() orelse return .{ .bad_args = cmd };
         const buff = it.next() orelse return .{ .bad_args = cmd };

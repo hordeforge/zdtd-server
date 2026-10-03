@@ -25198,3 +25198,64 @@ test "scenario the admin console applies a buff by name" {
     try std.testing.expectEqual(before, after);
     std.debug.print("PASS buffplayer: applies a stock buff, refuses an unknown name\n", .{});
 }
+
+test "scenario the admin console reads and writes a player cvar" {
+    // Stock `ConsoleCmdCVar` (console-commands.md 153): `get`/`set`/`list` with
+    // `-p <player>` on a server console, which has no sender player of its own.
+    // The store borrows the name slice, so the console line must be interned
+    // first - the leg this pins besides the values.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    var sink: [2048]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("cvar set probeVar 3.5 -p 0", "admin_tcp");
+    g.admin_reply_sink = null;
+    const set_reply = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, set_reply, "set from") != null);
+    try std.testing.expectEqual(@as(f32, 3.5), c.cvars.get("probeVar"));
+
+    // The stored name must be the interned copy, not the console line: pin the
+    // address the store holds inside the client's name pool.
+    {
+        const pool_lo = @intFromPtr(&c.cvar_name_pool);
+        const pool_hi = pool_lo + c.cvar_name_pool.len;
+        var found = false;
+        for (c.cvars.items()) |e| {
+            const a = @intFromPtr(e.name.ptr);
+            if (a >= pool_lo and a < pool_hi) found = true;
+        }
+        try std.testing.expect(found);
+    }
+    // Read it back through a fresh line that has already been overwritten.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("cvar get probeVar -p 0", "admin_tcp");
+    g.admin_reply_sink = null;
+    const get_reply = sink[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.find(u8, get_reply, "Value: 3.5") != null);
+
+    // `list` answers for the same player.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("cvar list -p 0", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "probeVar=3.5") != null);
+
+    // Without -p a server console has no player to act on.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("cvar get probeVar", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(std.mem.find(u8, sink[0..g.admin_reply_len], "-p <player>") != null);
+    std.debug.print("PASS cvar: set/get/list with -p, and the name is interned\n", .{});
+}
