@@ -95,7 +95,13 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeI16(0);
     const payload_start = w.pos;
 
-    // propertyList order, bPersistent only (78 decls, 9 skipped). Types: 0=i32 2=string 3=bool.
+    // propertyList order, bPersistent only (78 decls, 9 skipped -> 69 rows, GameState
+    // first). Verified 2026-10-03 by extracting the constructor arguments of every
+    // `newobj GameStats/PropertyDecl::.ctor` in `GameStats::initPropertyDecl`
+    // (GameStats.il IL=702) and mapping the EnumGameStats values through the resolved
+    // census: the emitted order matches this sequence, and `GameStats::Write`
+    // (IL_0000-00AB) walks that same array order. Types: 0=i32 1=float 2=string 3=bool,
+    // from the `PropertyDecl.type` switch on both the Write and Read sides.
     // EnumGameState.Running. Not cosmetic: PlayerMoveController.Update runs
     // updateRespawn() only while GameStats[GameState] == 1, else it calls
     // stopMoving() and returns. Sending 0 (Loading) freezes the client's

@@ -1439,7 +1439,18 @@ nothing here is already waived. The four gaps the same audit closed are in
       (`ReadInt32`/...). That proves the blob follows the *list*, not the enum, and it
       verifies zdtd's type map (0=i32, 1=float, 2=string, 3=bool) against both sides.
       What remains is only the list order itself: it is built by the `stelem` sequence
-      in `initPropertyDecl`, which is what defeated the earlier parse. Checked 2026-10-03
+      in `initPropertyDecl`, which is what defeated the earlier parse.
+      **Resolved 2026-10-03**: the list order was extracted after all, by parsing the
+      constructor arguments of every `newobj GameStats/PropertyDecl::.ctor` in
+      `initPropertyDecl` rather than the `stelem` ordinals - the entries pass
+      (index, EnumGameStats, bPersistent, EnumType, default) on the stack, and the
+      string entries take their default from `ldsfld String::Empty`, which is what made
+      the first attempt slide out of step and report five phantom missing indices. The
+      corrected parse yields all 78 entries, 69 of them persistent, and the emitted
+      order matches zdtd's writer line for line (GameState, GameModeId, TimeLimitActive,
+      TimeLimitThisRound, FragLimitActive, ... ShowWindow, LoadScene, CurrentRoundIx,
+      ShowAllPlayersOnMap, ...). The writer's own comment in `stock_gamestats.zig` now
+      cites the extraction instead of leaving the claim unverifiable. Checked 2026-10-03
       against the RE's resolved parity census: it cannot settle it either, because
       `NetPackageGameStats`'s own write sequence is `NetPackage.write; Write;
       get_BaseStream` - the body is copied wholesale as a length-prefixed blob, so
