@@ -5347,9 +5347,15 @@ persists so little that a restart visibly damages a built base.
   until 2026-09-06; the IL does not support that either. `DroneDataSync`
   (ProcessPackage IL=106) resolves the `EntityDrone` and syncs its stored
   state, and `DroneParticleEffect` (IL=78) fans the effect from the server on
-  the `!IsRemote` branch. Neither is cosmetic-only. The reason zdtd does not
-  handle them is simpler and larger: there is no `EntityDrone` in the sim at
-  all, so the whole junk-drone subsystem is absent rather than deferred.
+  the `!IsRemote` branch. Neither is cosmetic-only. UPDATED 2026-10-03: the premise
+  changed - the sim now has a `drone` kind with a session spawn, owner-tagged
+  ECD, follow tick, map marker, console verbs and session teardown (STATUS, drone
+  steps 1-6), so the subsystem is partially present rather than absent. The two
+  packages stay unhandled for the pinned reasons: `DroneParticleEffect` fanned a
+  client-rendered effect with nothing server-side to drive it, and
+  `DroneDataSync` syncs stored drone state whose input is the player-facing
+  interaction mirror, which this RE set does not name (TODO "Drone orders and
+  states wait on a wire the RE does not pin").
   Re-audited 2026-08-22: ragdolls **do** relay - the owner's client forces
   its local ragdoll and the server re-broadcasts the verbatim body to the
   entity's other tracked players (stock SendPacketToTrackedPlayersAndTracked

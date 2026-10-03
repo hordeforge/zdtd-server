@@ -37,7 +37,10 @@ T21 the on_evidence guest observer, T22 void-rescue suppression, T23 the
 guardreport dry-run diff verb. The remaining T18 core (server-sanctioned
 grants / a full stock-transaction ledger) stays recorded in the task text.
 Still open / recorded, not wired: T30 (drone companion - zero stock AITask
-uses, deferred). T38 (always-on radius effects) shipped 2026-08-26; T35
+uses). Partly landed 2026-10-03: the entity, session spawn, owner-tagged ECD,
+follow tick, map marker, console verbs and session teardown ship (STATUS, drone
+steps 1-6); the states (sentry/attack/heal) and orders wait on the interaction
+mirror package this RE set does not name, and on the weapon/storage layer. T38 (always-on radius effects) shipped 2026-08-26; T35
 (air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
 bag's EntityRemove). The per-task "Why" text below is historical; GAP/STATUS
 win on conflict.
