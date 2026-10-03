@@ -1472,6 +1472,15 @@ nothing here is already waived. The four gaps the same audit closed are in
       class table, `replicate.zig`, `interest`, `lifecycle.zig`, the vehicle C2S and
       wire modules), so a `drone` variant is its own round of exhaustiveness work,
       not a bolt-on. Plan: (1) `drone` kind + class-table row + the switches;
+      **Step 1 landed 2026-10-03**: the `drone` Kind, its class-table row
+      (`junkDrone`, offline fallback) and the three exhaustive switches
+      (`interest.zig` tracking distance 80 with the reasoning, the class-index
+      mapping, `wasm_host.zig`'s bot snapshot where drones stay excluded until a
+      bucket exists) are in, with `classIndexOf` extracted so the positional
+      mapping can be asserted. That work also fixed a real bug: index 2 of the
+      class table is the falling block, which had no row at all and silently took
+      the feral zombie's hash, loot list and 550 HP, so a collapsing structure
+      spawned as the wrong entity class. Step 2 is next:
       (2) registry + join spawn through the existing `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with
       the staged `transitionState` commit); (4) `NetPackageDroneDataSync` for order

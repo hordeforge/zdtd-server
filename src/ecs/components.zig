@@ -15,6 +15,10 @@ pub const Kind = enum(u8) {
     /// carries the fallen cells as one EntityFallingBlock, falls under
     /// gravity, dies on landing (no re-placement).
     falling_block,
+    /// Player-owned junk drone (`EntityDrone`). Streamed like any other entity;
+    /// its server state machine (Idle/Sentry/Follow/Heal/Attack/Shutdown) is the
+    /// next slice, so today the kind only carries spawn/stream/despawn.
+    drone,
 };
 
 pub const Transform = struct {

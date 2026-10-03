@@ -435,7 +435,9 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, src: i16, out: []u8) usize {
             // Zombies and animals share the hostile bucket in the guest.
             .zombie, .animal => 1,
             // Non-combat world objects are not combat candidates; omit.
-            .trader, .vehicle, .turret, .loot_bag, .falling_block => continue,
+            // Drones are combat-capable in stock but this snapshot carries no
+            // drone bucket yet, so bots ignore them rather than mis-tagging one.
+            .trader, .vehicle, .turret, .loot_bag, .falling_block, .drone => continue,
         };
         const base = sense_header_len + n * rec_len;
         const r = out[base .. base + rec_len];

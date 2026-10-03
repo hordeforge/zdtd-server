@@ -58,6 +58,11 @@ pub fn trackingBlocksFor(kind: ?components.Kind, supply_crate: bool) i32 {
         .player, .vehicle => always_tracked,
         .zombie, .trader, .animal => 80,
         .turret => 60,
+        // A drone follows its owner, so it lives in the ordinary 80-block
+        // bucket. Stock's own trackingBlocks for EntityDrone is not pinned in
+        // this RE set; 80 over-replicates at worst, where a smaller number could
+        // hide the drone from its owner.
+        .drone => 80,
         .falling_block => 120,
         .loot_bag => if (supply_crate) 1200 else 64,
     };

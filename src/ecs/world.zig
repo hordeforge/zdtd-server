@@ -101,6 +101,22 @@ fn rollJumpMax(def: EntityClass, x: f32, z: f32) f32 {
 /// Copy resolved EntityClass stats onto a live entity ClassId (A35). Keeps
 /// `id` (kind-default or table index). Rolls day chase once via rollChaseDay.
 /// Shared by spawnZombieDef / spawnAnimalDef so the field lists cannot drift.
+/// Builtin class-table index for a kind. Positional: the `class_table` literal
+/// must keep the rows in this order, which `classIndexMatchesTable` pins.
+fn classIndexOf(kind: Kind) u16 {
+    return switch (kind) {
+        .player => 0,
+        .zombie => 1,
+        .falling_block => 2,
+        .trader => 3,
+        .vehicle => 4,
+        .turret => 5,
+        .loot_bag => 6,
+        .animal => 7,
+        .drone => 8,
+    };
+}
+
 fn applyEntityClassStats(cid: *c.ClassId, def: EntityClass, x: f32, z: f32) void {
     cid.hash = def.hash;
     cid.stomps_spikes = def.stomps_spikes;
@@ -893,21 +909,32 @@ pub const World = struct {
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.
-    class_table: [16]EntityClass = [_]EntityClass{
+    class_table: [17]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
         .{ .name = "zombie", .max_hp = 40, .kind = .zombie, .hash = 948863590, .loot_list = "EntityLootContainerRegular" },
-        // A40: the old "zombieFeral" builtin row was an invented class (0 hits
-        // in stock entityclasses.xml; no stock group names it). Repointed to
-        // the real feral variant zombieBoeFeral (Unity hash computed; max_hp =
-        // its stock HealthMax ^healthNormalFeral). Offline fallback only: live
-        // spawns resolve per-class via the director class_resolve_fn hook (A35).
-        .{ .name = "zombieBoeFeral", .max_hp = 550, .kind = .zombie, .hash = -272178566, .loot_list = "EntityLootContainerRegular" },
+        // Row order is positional (`classIndexOf`), so each mapped index must
+        // hold its own kind: index 2 is the falling block, which previously had
+        // no row at all and silently took this zombie row's hash, loot list and
+        // 550 HP. `the builtin class-table rows agree with classIndexOf` keeps
+        // the two in step.
+        .{ .name = "fallingBlock", .max_hp = 1, .kind = .falling_block },
         .{ .name = "trader", .max_hp = 9999, .kind = .trader },
         .{ .name = "vehicle", .max_hp = 200, .kind = .vehicle },
         .{ .name = "turret", .max_hp = 150, .kind = .turret },
         .{ .name = "lootBag", .max_hp = 1, .kind = .loot_bag },
         .{ .name = "animal", .max_hp = 30, .kind = .animal },
-    } ++ [_]EntityClass{.{}} ** 8,
+        // Offline fallback only: entityclasses.xml supplies the real row when a
+        // game dir is present. HP is a placeholder until the drone slice reads
+        // its class data.
+        .{ .name = "junkDrone", .max_hp = 500, .kind = .drone },
+        // A40: the old "zombieFeral" builtin row was an invented class (0 hits
+        // in stock entityclasses.xml; no stock group names it). Repointed to
+        // the real feral variant zombieBoeFeral (Unity hash computed; max_hp =
+        // its stock HealthMax ^healthNormalFeral). Offline fallback only: live
+        // spawns resolve per-class via the director class_resolve_fn hook (A35).
+        // Past the mapped rows: nothing indexes a feral row by position.
+        .{ .name = "zombieBoeFeral", .max_hp = 550, .kind = .zombie, .hash = -272178566, .loot_list = "EntityLootContainerRegular" },
+    } ++ [_]EntityClass{.{}} ** 7,
 
     /// Catalog stack cap: `stack_fn` (items.xml Stacknumber) or offline builtins.
     /// Single source for deposit paths; do not hardcode 60000 at call sites.
@@ -1395,16 +1422,10 @@ pub const World = struct {
         self.flags[s] = .{ .bits = c.flag_spawned };
         self.dirty[s] = .{ .pos = true };
         self.dirty_bits.set(s);
-        const cid: u16 = switch (kind) {
-            .player => 0,
-            .zombie => 1,
-            .falling_block => 2,
-            .trader => 3,
-            .vehicle => 4,
-            .turret => 5,
-            .loot_bag => 6,
-            .animal => 7,
-        };
+        // Builtin rows are positional (`classIndexOf`); at runtime the class
+        // table may be repopulated from entityclasses.xml, so the guard lives in
+        // the unit test over the literal rather than as an assert here.
+        const cid: u16 = classIndexOf(kind);
         const ct = self.class_table[cid];
         self.class_id[s] = .{
             .id = cid,
@@ -2363,3 +2384,21 @@ pub const World = struct {
         }
     }
 };
+
+test "the builtin class-table rows agree with classIndexOf" {
+    // The mapping is positional, so a row inserted in the wrong place hands a
+    // kind another kind's stats - the falling block used to take the feral
+    // zombie's hash, loot list and 550 HP that way. Every index `classIndexOf`
+    // claims must hold that kind; rows past the mapped block (the feral
+    // variant) are allowed, since nothing indexes them.
+    const w: World = .{};
+    const mapped = [_]Kind{ .player, .zombie, .falling_block, .trader, .vehicle, .turret, .loot_bag, .animal, .drone };
+    for (mapped, 0..) |kind, i| {
+        try std.testing.expectEqual(kind, w.class_table[i].kind);
+        try std.testing.expectEqual(@as(u16, @intCast(i)), classIndexOf(kind));
+    }
+    // A mapped row may never be padding, or a kind would silently get the empty
+    // row's stats.
+    for (w.class_table[0..mapped.len]) |row| try std.testing.expect(row.name.len > 0);
+    try std.testing.expectEqual(@as(usize, 17), w.class_table.len);
+}
