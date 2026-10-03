@@ -224,7 +224,13 @@ pub fn sendJoinBundle(self: *Game, c: *Client, peer: *ln_peer.Peer, sx: i32, sy:
         // client shows GMSG "Player '' joined" and party UI has no names.
         // Shared with the disconnect row (reason 2), which is the same body
         // with entityId -1.
-        try game_player.sendPersistentPlayerState(self, c, eid, packages.stock_inv.persistent_reason_login);
+        // Stock distinguishes a join that created the player's
+        // `PersistentPlayerData` (reason 1, `GameManager` IL_056A on the create
+        // branch) from one that found it (reason 0, IL_053D). The profile store
+        // is this server's record for that: it is written at spawn, so an absent
+        // row here means this join is the player's first.
+        const ppd_new = self.persistent_player_profiles and self.profiles.get(c.puid_primary.get()) == null;
+        try game_player.sendPersistentPlayerState(self, c, eid, if (ppd_new) packages.stock_inv.persistent_reason_new else packages.stock_inv.persistent_reason_login);
         try self.sendQuestNavObjects(peer, c.slot, eid);
         // Stock re-registers the live crates per joining player
         // (RefreshCrates, join step 11); the crate marker is a server push,

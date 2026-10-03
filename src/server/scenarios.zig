@@ -7497,7 +7497,9 @@ test "scenario ally invite accept and identity spoof reject" {
         const pps_id = packages.idOf("NetPackagePersistentPlayerState").?;
         const pps = cap_b.findPkgId(pps_id) orelse return error.NoPersistentPlayerState;
         var r: binary.Reader = .{ .data = pps };
-        try std.testing.expectEqual(packages.stock_inv.persistent_reason_login, try r.readByte());
+        // Reason 1 (New): this client's profile row does not exist yet, so the
+        // join is creating the record (GameManager IL_056A).
+        try std.testing.expectEqual(packages.stock_inv.persistent_reason_new, try r.readByte());
         var plat: [platform_user.max_platform_len]u8 = undefined;
         var pid: [platform_user.max_id_len]u8 = undefined;
         const primary = (try platform_user.read(&r, &plat, &pid)).?;
@@ -25067,4 +25069,42 @@ test "scenario every explicitly client-to-server package reaches a handler" {
         }
     }
     std.debug.print("PASS c2s-explicit: {d} packages reach a handler (2 documented exceptions)\n", .{explicit_c2s.len});
+}
+
+test "scenario a join that creates the player record says so" {
+    // Stock sends `EnumPersistentPlayerDataReason` 1 (New) when the join creates
+    // the player's `PersistentPlayerData` and 0 (Login) when it already existed
+    // (GameManager IL_056A vs IL_053D). zdtd always sent 0, so a first-ever join
+    // looked like a returning player to the client. The profile store is this
+    // server's record for it: absent at the enter bundle means a first join.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    try std.testing.expect(g.persistent_player_profiles);
+
+    const pkg = packages.idOf("NetPackagePersistentPlayerState").?;
+    var cap_a: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_a);
+    // First join: reason 1. The body starts with the reason byte.
+    {
+        const body = cap_a.findPkgId(pkg) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(packages.stock_inv.persistent_reason_new, body[0]);
+    }
+    // With the profile now on record, the same identity reads as a returning
+    // player. The harness attaches without replaying the C2S spawn flow, so the
+    // row is seeded the way the profile tests do rather than assumed.
+    const returning: platform_user.Id = .{ .platform = "Steam", .id = "76561198000000099" };
+    g.profiles.put(returning, .{});
+    {
+        var cap_b: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClientAs(&cap_b, returning);
+        const body = cap_b.findPkgId(pkg) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(packages.stock_inv.persistent_reason_login, body[0]);
+    }
+    std.debug.print("PASS ppd-reason: first join says New, a returning one says Login\n", .{});
 }

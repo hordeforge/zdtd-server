@@ -1030,6 +1030,10 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 /// save-persistence.md) and Disconnect = 2 (`GameManager.PlayerDisconnected`
 /// broadcasts `Setup(data, 2)`, server-lifecycle.md 6.1 step 3).
 pub const persistent_reason_login: u8 = 0;
+/// Sent when the join created the player's `PersistentPlayerData`
+/// (`GameManager` IL_056A passes 1 on the create branch, IL_053D passes 0 when
+/// the record already existed).
+pub const persistent_reason_new: u8 = 1;
 pub const persistent_reason_disconnect: u8 = 2;
 
 /// Longest name the join path keeps (`Client.name` is a fixed 32-byte field),
@@ -1077,7 +1081,7 @@ pub const persistent_player_state_max_len: usize = blk: {
 /// player is labelled EOS rather than mislabelled Steam.
 pub fn buildPersistentPlayerState(
     buf: []u8,
-    /// `EnumPersistentPlayerDataReason`: login 0, disconnect 2.
+    /// `EnumPersistentPlayerDataReason`: login 0, new 1, disconnect 2.
     reason: u8,
     entity_id: i32,
     name: []const u8,
