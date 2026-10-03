@@ -318,6 +318,15 @@ pub fn clientByEntityId(self: *Game, entity_id: i32) ?*Client {
     return null;
 }
 
+/// Accept and record the offering NPC, so `questOnTraderOpenFrom` can hold
+/// stock's giver rule at turn-in.
+pub fn acceptQuestForFrom(self: *Game, c: *Client, def_id: u16, giver_trader: i32) bool {
+    if (!self.quests_enabled) return false;
+    if (!systems.questAcceptFromGiver(&self.sim, c.slot, def_id, giver_trader)) return false;
+    shareQuestWithParty(self, c, def_id);
+    return true;
+}
+
 pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
     // Sandbox `QuestsEnabled` off: a quest the server never offered cannot be
     // started either (the client's dialog is gated client-side; this is the

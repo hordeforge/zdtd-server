@@ -25596,3 +25596,47 @@ test "scenario the admin console reads the inventory ledger" {
     try std.testing.expect(give_at < tx_at);
     std.debug.print("PASS invledger: the ledger ring is readable, oldest first\n", .{});
 }
+
+test "scenario a quest is turned in at its giver, not any trader" {
+    // Stock's turn-in dialog action finds the active quest "for the giver
+    // faction" (npc-dialog.md 158); zdtd has no faction on the quest path, so the
+    // offering NPC's net id stands in for it. A quest stamped to one trader must
+    // not complete at another, and it does complete at its own. The slot is placed
+    // directly, the way the accept path leaves it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.mask[ps].journal = true;
+
+    const trader_a: i32 = 7301;
+    const trader_b: i32 = 7302;
+    const q = g.sim.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{
+        .def_id = 1,
+        .quest_code = 7,
+        .active = true,
+        .ready_turn_in = true,
+        .giver_trader = trader_a,
+    };
+
+    systems.questOnTraderOpenFrom(&g.sim, c.slot, trader_b);
+    try std.testing.expect(!q.completed);
+
+    systems.questOnTraderOpenFrom(&g.sim, c.slot, trader_a);
+    try std.testing.expect(q.completed);
+
+    // An unstamped quest (giver 0) stays permissive at any trader.
+    const q2 = g.sim.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q2.* = .{ .def_id = 1, .quest_code = 8, .active = true, .ready_turn_in = true, .giver_trader = 0 };
+    systems.questOnTraderOpenFrom(&g.sim, c.slot, trader_b);
+    try std.testing.expect(q2.completed or !q2.active);
+    std.debug.print("PASS quest-giver: other trader refused, giver completes, unstamped permissive\n", .{});
+}

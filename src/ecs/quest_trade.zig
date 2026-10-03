@@ -276,6 +276,22 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     return questAcceptWithCode(w, peer_slot, def_id, 0, .{});
 }
 
+/// Accept with the offering NPC recorded as the quest's giver. Stock's turn-in
+/// dialog action matches the *giver faction* (npc-dialog.md 158); zdtd has no
+/// faction on the quest path, so the NPC net id is the identity it can check.
+pub fn questAcceptFromGiver(w: *World, peer_slot: usize, def_id: u16, giver_trader: i32) bool {
+    const ok = questAcceptWithCode(w, peer_slot, def_id, 0, .{});
+    if (!ok or giver_trader == 0) return ok;
+    const ps = w.playerByPeer(peer_slot) orelse return ok;
+    for (&w.journal[ps].slots) |*slot| {
+        if (slot.active and !slot.completed and slot.def_id == def_id) {
+            slot.giver_trader = giver_trader;
+            break;
+        }
+    }
+    return ok;
+}
+
 /// Accept `def_id` into `peer_slot`'s journal with an explicit stock quest
 /// code and POI placement.
 ///
@@ -412,11 +428,20 @@ pub fn questOnZombieKilled(w: *World, peer_slot: usize, x: f32, z: f32) void {
 }
 
 pub fn questOnTraderOpen(w: *World, peer_slot: usize) void {
+    questOnTraderOpenFrom(w, peer_slot, 0);
+}
+
+/// `trader_net_id` is the NPC whose window opened, or 0 when the caller cannot
+/// see one. A quest stamped with a different giver is not turned in here: stock's
+/// dialog action matches the giver faction, and 0 stays permissive so an
+/// unknown caller never locks a quest by accident.
+pub fn questOnTraderOpenFrom(w: *World, peer_slot: usize, trader_net_id: i32) void {
     const ps = w.playerByPeer(peer_slot) orelse return;
     if (!w.mask[ps].journal) return;
     var j = &w.journal[ps];
     for (&j.slots) |*s| {
         if (!s.active or s.completed) continue;
+        if (s.giver_trader != 0 and trader_net_id != 0 and s.giver_trader != trader_net_id) continue;
         const d = w.catalog.byId(s.def_id) orelse continue;
         if (d.phases.len > 0) {
             if (currentPhaseSpec(d, s)) |spec| {

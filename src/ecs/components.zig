@@ -926,6 +926,12 @@ pub const QuestProgress = struct {
     active: bool = false,
     completed: bool = false,
     ready_turn_in: bool = false,
+    /// Net id of the trader/NPC that offered this quest, stamped at accept.
+    /// Stock's turn-in dialog action matches "the giver faction" (npc-dialog.md
+    /// 158); zdtd has no faction on the quest path, so the offering NPC is the
+    /// closest faithful identity. 0 = unknown, and unknown stays permissive:
+    /// a caller that cannot see a trader must not lock a quest by accident.
+    giver_trader: i32 = 0,
     /// Failed by a ForcePhaseFinish objective left incomplete (stock
     /// Quest.CloseQuest(Failed)): the slot stays visible to the client as a
     /// failed quest and is never re-offered while present.

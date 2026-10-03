@@ -179,11 +179,13 @@ pub fn handleTrade(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
                 }
             }
         }
-        systems.questOnTraderOpen(&self.sim, c.slot);
+        systems.questOnTraderOpenFrom(&self.sim, c.slot, npc_id);
         // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
+        // The offering NPC is stamped on the quest so the turn-in gate can hold
+        // stock's "giver faction" rule (npc-dialog.md 158).
         if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
             for (list.entries) |qid| {
-                if (self.acceptQuestFor(c, qid)) break;
+                if (self.acceptQuestForFrom(c, qid, npc_id)) break;
             }
         }
         try self.sendTraderSnapshot(peer, null);

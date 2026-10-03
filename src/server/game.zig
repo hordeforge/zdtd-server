@@ -3510,6 +3510,11 @@ pub const Game = struct {
         return game_social.handlePartyActions(self, c, body);
     }
 
+    /// Accept a quest and record the offering NPC as its giver.
+    pub fn acceptQuestForFrom(self: *Game, c: *Client, def_id: u16, giver_trader: i32) bool {
+        return game_social.acceptQuestForFrom(self, c, def_id, giver_trader);
+    }
+
     pub fn acceptQuestFor(self: *Game, c: *Client, def_id: u16) bool {
         return game_social.acceptQuestFor(self, c, def_id);
     }

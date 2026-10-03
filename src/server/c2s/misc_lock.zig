@@ -185,7 +185,10 @@ pub fn handleLock(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
                     // for a trade body); some clients signal the open with a
                     // minimal TraderData package, but the LockResponse path is
                     // the reliable one, so fire here too.
-                    systems.questOnTraderOpen(&self.sim, c.slot);
+                    // The trader entity id makes the turn-in gate hold stock's
+                    // giver rule; `ts` is the stock trader slot, and the entity
+                    // is the NPC the client opened.
+                    systems.questOnTraderOpenFrom(&self.sim, c.slot, self.sim.network_id[ts].id);
                     var ent_buf: [50]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(ts, &ent_buf);
                     const resp = try packages.buildLockResponseTrader(&self.body_buf, req, .{
