@@ -101,6 +101,8 @@ pub const ParsedSetProp = struct {
 };
 
 /// Caller owns `changes_buf`; the returned slice points into it.
+///
+/// RE: `NetPackageSetProp.Read` / `PropChangeInfo.Read` (`../7dtd-engine-research/docs/network/protocol-packages.md` "Prop/land edits", §5.5) - `m_persistentPlayerId`, the counted `m_propChanges` rows, then `m_localPlayerThatChanged`.
 pub fn parseSetPropBody(
     body: []const u8,
     plat_buf: []u8,
