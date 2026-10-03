@@ -417,6 +417,12 @@ pub const Command = union(enum) {
     ban: BanSub,
     /// zdtd-only: drop a raw IPv4 ban recorded by `ban add` on a connected peer.
     unban: u32,
+    /// Stock `junkdrone` / `jds` / `serverjunkdrone` (ConsoleCmdJunkDrone and its
+    /// server twin, console-commands.md 157-158): `log` lists the drone registry,
+    /// `unstuck` teleports a drone back to its owner, `clear` removes it. The
+    /// server console has no caller slot, so it sees every drone, which is the
+    /// `serverjunkdrone` view.
+    junkdrone: JunkSub,
     /// Stock `admin add|remove|list` (ConsoleCmdAdmin, asm.il 204593). zdtd has no
     /// Steam group concept, so addgroup/removegroup are deliberately absent.
     admin: AdminSub,
@@ -541,6 +547,8 @@ fn badSubCommand(sub: ?[]const u8) Command {
 /// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
+    if (std.mem.eql(u8, verb, "junkdrone") or std.mem.eql(u8, verb, "jds"))
+        return "junkdrone|jds <log|unstuck|clear>";
     if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> [count]";
     if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp"))
         return "tele|tp <slot> <x> <y> <z>";
@@ -598,6 +606,8 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     return null;
 }
 
+pub const JunkSub = enum { log, unstuck, clear, help };
+
 pub fn parseCommand(line: []const u8) Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const cmd = it.next() orelse return .unknown;
@@ -607,6 +617,15 @@ pub fn parseCommand(line: []const u8) Command {
         return .{ .help = topic };
     }
     if (std.mem.eql(u8, cmd, "status")) return if (it.next() == null) .status else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "junkdrone") or std.mem.eql(u8, cmd, "jds") or std.mem.eql(u8, cmd, "serverjunkdrone")) {
+        const sub = it.next() orelse return .{ .junkdrone = .log };
+        if (it.next() != null) return .{ .bad_args = cmd };
+        if (std.mem.eql(u8, sub, "log") or std.mem.eql(u8, sub, "list")) return .{ .junkdrone = .log };
+        if (std.mem.eql(u8, sub, "unstuck")) return .{ .junkdrone = .unstuck };
+        if (std.mem.eql(u8, sub, "clear")) return .{ .junkdrone = .clear };
+        if (std.mem.eql(u8, sub, "help") or std.mem.eql(u8, sub, "?")) return .{ .junkdrone = .help };
+        return .{ .bad_args = cmd };
+    }
     if (std.mem.eql(u8, cmd, "guardstats") or std.mem.eql(u8, cmd, "gs")) return if (it.next() == null) .guardstats else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "guardclear") or std.mem.eql(u8, cmd, "gc")) {
         const p = it.next() orelse return .{ .bad_args = cmd };

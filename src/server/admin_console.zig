@@ -379,8 +379,8 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         // drone; the server console sees every drone.
         // Always scoped to the caller: a player may command their own drone
         // (stock ConsoleCmdJunkDrone) but never anyone else's. The admin/telnet
-        // console reaches verbs through the parsed Command enum, so this arm is
-        // the player path today; extending that enum is the admin-side TODO.
+        // console has its own arm on the parsed Command union (no caller slot, so
+        // it sees the whole registry, which is stock's serverjunkdrone view).
         consoleJunkDrone(self, self.sim.playerByPeer(c.slot), &it, &out);
     } else if (eqAny(verb, &.{ "listplayers", "lp" })) {
         var i: usize = 0;
@@ -1355,6 +1355,20 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 },
             ) catch return;
             self.adminReply(s);
+        },
+        .junkdrone => |sub| {
+            // The admin path has no caller slot, so this is the server's view of
+            // the whole registry (stock's `serverjunkdrone`).
+            const sub_text = switch (sub) {
+                .log => "log",
+                .unstuck => "unstuck",
+                .clear => "clear",
+                .help => "help",
+            };
+            var it2 = std.mem.tokenizeAny(u8, sub_text, " ");
+            var out2: ConsoleOut = .{};
+            consoleJunkDrone(self, null, &it2, &out2);
+            for (out2.lines[0..out2.n]) |ln| self.adminReply(ln);
         },
         .guardstats => {
             var sb: [384]u8 = undefined;

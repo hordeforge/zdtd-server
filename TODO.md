@@ -1553,10 +1553,14 @@ nothing here is already waived. The four gaps the same audit closed are in
       and marks the pose dirty, `clear` destroys it and zeroes the client's net id.
       `scenario a player console commands their own drone` drives all three through
       `NetPackageConsoleCmdServer` and asserts A's drone goes while B's stays.
-      Open on the admin side: the telnet/webui console reaches verbs through the
-      parsed `admin.Command` enum, which has no drone verb yet, and stock's
-      `debuglog` toggle is client-side debug drawing with no server effect
-      (deliberately not offered). Still open:
+      **Admin side landed 2026-10-03**: the telnet/webui console reaches verbs
+      through the parsed `admin.Command` union, which now carries `junkdrone`/
+      `jds`/`serverjunkdrone` with the same `log|unstuck|clear` surface, scoped to
+      the whole registry because the server console has no caller slot - stock's
+      `ConsoleCmdServerJunkDrone` view. Pinned by `scenario the admin console
+      commands the drone registry` (decisive: breaking the `unstuck` parse arm
+      fails it). Stock's `debuglog` toggle stays out: it is client-side debug
+      drawing with no server effect. Still open:
       (2) registry + join spawn through the existing
       `EntityCreationData` builder;
       (3) the `updateState` machine (Idle/Sentry/Follow/Heal/Attack/Shutdown with

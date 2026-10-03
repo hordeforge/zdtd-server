@@ -25108,3 +25108,45 @@ test "scenario a join that creates the player record says so" {
     }
     std.debug.print("PASS ppd-reason: first join says New, a returning one says Login\n", .{});
 }
+
+test "scenario the admin console commands the drone registry" {
+    // Stock ships ConsoleCmdServerJunkDrone beside the player one
+    // (console-commands.md 157-158). The admin/telnet console reaches verbs
+    // through the parsed `Command` union, so this pins that path end to end:
+    // `junkdrone unstuck` moves the drone to its owner and `clear` removes it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ds = g.sim.slotOfNetId(c.drone_net_id).?;
+    g.sim.transform[ds].x += 15;
+
+    var sink: [4096]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("junkdrone unstuck", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expectApproxEqAbs(g.sim.transform[ps].x, g.sim.transform[ds].x, 0.01);
+
+    // `log` lists it, `clear` removes it.
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("jds log", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expect(g.admin_reply_len > 0);
+
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine("serverjunkdrone clear", "admin_tcp");
+    g.admin_reply_sink = null;
+    try std.testing.expectEqual(@as(i32, 0), c.drone_net_id);
+    try std.testing.expect(g.sim.slotOfNetId(ds) == null);
+    std.debug.print("PASS drone-admin: unstuck/log/clear through the parsed Command union\n", .{});
+}
