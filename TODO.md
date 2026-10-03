@@ -1574,6 +1574,17 @@ nothing here is already waived. The four gaps the same audit closed are in
       re-narrated"), so shipping server pings without that check risks a client that
       ignores them, or worse treats the pair oddly. The RE was checked 2026-10-03 for
       a ping/pong symmetry note and has none.
+- [ ] **The periodic store save runs ~15 stores in one tick** - measured 2026-10-03 from the smoke run: `save_io`
+      p50 ~0.40 s, mean 0.46-0.49 s, max 0.99 s, with 11-23 tick overruns per 1200-2400 ticks. The chunk
+      drain is already budgeted (`save_chunks_per_tick` 32, the fix for the old 3.9 s stall), but the
+      `save_interval_due` branch in `step.zig` (every `save_interval_ticks`, default 100) calls the whole store
+      set in one tick: containers, sign texts, workstations, vending, claims, entities, traders, sleepers,
+      allies, block meta, weather, clock, then players. On this host each landed save is ~0.4-1.0 s, so the
+      50 ms tick budget cannot hold through a save tick. The obvious fix (stagger the stores across ticks, or
+      move them off the tick) is NOT a drive-by: the comment above the block pins the order to
+      `persist.saveAllStores` for crash consistency, so staggering changes which set is durable at an
+      arbitrary crash point and needs a decision rather than a patch. Measure again on a quiet disk before
+      choosing; this host's numbers are not representative.
 - [ ] **A live loadgen smoke is not obtainable in this environment** - measured 2026-10-03: `../7dtd-loadgen`
       ships a 2026-09-28 Release binary, and run against `zdtd --port 27100` it never sends a packet
       (`sent=0`, `ConnectionFailed` after ~5.8 s, repeatedly), while zdtd's own APM dump for the same window
