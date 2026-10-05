@@ -6796,12 +6796,14 @@ tracking landed and is tested):
 - **UnlockPOI is an action, not an objective.** Stock resolves `<action>` via
   the `QuestAction` prefix (asm.il 1390609), so `QuestActionUnlockPOI`
   (asm.il 956062) never was a phase. Its server half is the POI lockout table:
-  the `UnlockPOI` quest event releases the lock. `<action>` elements are still
-  not parsed from quests.xml, so nothing triggers an unlock but the client.
+  the `UnlockPOI` quest event releases the lock. `<action>` elements are parsed
+  (`quests.zig`) and `firePhaseActions` fires UnlockPOI and SpawnGSEnemy.
+  **2026-10-05**: the note that nothing but the client triggers an unlock was stale.
 - **POI lockout reasons are partial.** `questCheckPoiLockout` reports
   `QuestLock` (live lock in `ecs/poi_lock.zig`) and `PlayerInside` (another
-  player standing in the prefab rect). `Bedroll` and `LandClaim` need home /
-  claim tracking the server does not have, so they never fire. Party members
+  player standing in the prefab rect). `Bedroll` and `LandClaim` fire through
+  `home_fn` (the Game wires the bed and the claims store). **2026-10-05**: the
+  note that they never fire was stale. Party members
   are exempt from `PlayerInside` (stock CheckForPOILockouts, asm.il 998957)
   via the `World.party_same_fn` hook wired to `Game.parties`.
 - **Objective-type coverage.** Executed: ClearSleepers/EntityKill/AnimalKill
@@ -7131,9 +7133,10 @@ is on main and gated; what follows "Open:" is the honest remainder.
    (2026-08-09): a census of the shipped quests.xml (16 objective types, 119
    objectives) shows every type is classified to an executing phase kind,
    POIStayWithin now uses the bound POI rect as its zone, and template
-   inheritance is resolved by the two-pass T6 merge (tests load the real
-   quests.xml: 262 defs, starter + tier quests resolve). Open: `<action>`
-   kinds beyond UnlockPOI are parsed but not fired (SetCVar / ShowMessageWindow
+    quests.xml: 262 defs, starter + tier quests resolve). Open: SetCVar and
+    ShowMessageWindow stay client-side. SpawnGSEnemy fires through `quest_spawn_fn`.
+    **2026-10-05**: the note that every kind beyond UnlockPOI is not fired was stale.
+    A MOD quest with an unclassified
    are client-side by stock design), and a MOD quest with an unclassified
    objective type still auto-completes (see GAP_ANALYSIS section 4).
 5. **Power trigger TE wire** SHIPPED: Switch meta gate on SetBlock, delay and
