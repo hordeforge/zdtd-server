@@ -6928,7 +6928,6 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | traders.xml | HAVE (groups + expand) |
 | vehicles.xml | WORKS (2026-10-05 re-audit: the row named the load, not a residual. `assets/vehicles.zig` reads `velocityMax`/`velocityMax_turbo`, `motorTorque_turbo` and the `fuelTank` capacity per vehicle, measured against V3.2.0 `Data/Config`, and the spawn path uses those for the entity's HP and speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
-| buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
 | buffs / progression | WORKS (typed catalog + stack/duration/update_rate + the tracked passive-effects VM over active buffs + survival stage buffs + progression perk/attribute passive rows as data; triggered_effect actions beyond ModifyStats and untracked effect classes stay recorded) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | PARTIAL - non-client-visible (documented 2026-08-21: client-side content - the client ships its own Localization.txt and resolves the keys the server sends) |
