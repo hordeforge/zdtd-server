@@ -2558,12 +2558,10 @@ can walk into every POI but none of them is the building TFP authored.
 
 ## 8. Entities and AI
 
-**Headline.** A player joining zdtd today sees real zombies spawn, chase around
-walls with A*, chew cover, die and drop loot, and POI sleepers wake on entry (all
-six of those are PASS in the 83-case real-client playtest), but the population
-behind them is a thin approximation: one hardcoded pair of entity groups for the
-whole map, five zombie classes, one animal species (a stag that hunts you), no
-gamestage, no wandering hordes, and no screamers.
+**Headline.** Zombies spawn per biome group, chase with A*, and drop loot.
+POI sleepers wake on entry. Gamestage ladders drive the blood moon and the
+wandering horde. **2026-10-05**: the "one group pair, no gamestage, no hordes"
+note was the pre-fix audit. Still open: the screamer summon loop.
 
 **40 WORKS · 0 PARTIAL · 0 MISSING**
 
