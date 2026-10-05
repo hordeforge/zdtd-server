@@ -6440,8 +6440,9 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   so `removeParentAt` drops all edges incident to the node. Matches the common
   single-wire case; multi-parent topologies differ.
 - *TileEntity wire-data persistence / SendWires visual path*
-  (`CreateWireDataFromPowerItem`/`SendWireData`, asm.il:842993) is client visual;
-  zdtd does not persist per-TE wire lists, only rebroadcasts the raw package.
+  (`CreateWireDataFromPowerItem`/`SendWireData`, asm.il:842993): the edges
+  persist by endpoint position (`persist_entities.zig`). **2026-10-05**: the
+  "does not persist" note was stale. SendWires stays a client visual rebroadcast.
 - *AssignIds version skew*: the bundled `assignids_v314.txt` is V3.1.4 while the
   target client is V3.1.0(b14). If block ids differ, registry lookup silently
   no-ops (blocks place normally, just not power-registered). Supply a V3.1.0 b14
