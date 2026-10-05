@@ -6826,8 +6826,9 @@ tracking landed and is tested):
   progress genuinely needs more than a byte, `ObjectiveTime`, carries it in its
   own `UInt16` body instead (`ObjectiveTime.il.txt:126`) - now mapped, see the
   per-objective Write shape row.
-- **No fail / optional tracking.** `ForcePhaseFinish` → quest Failed and Optional
-  `OptionalComplete` are not modeled; quests never auto-fail on phase timeout.
+- **Fail / optional tracking.** `ForcePhaseFinish` fails the quest while the phase
+  is incomplete (`quest_trade.zig`), and an `Optional` objective does not block it.
+  **2026-10-05**: the "not modeled" note was stale. Residual: no auto-fail on phase timeout.
 
 ### Trader UI parity (stock `NetPackageTraderData`) honest gaps
 
