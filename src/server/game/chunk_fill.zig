@@ -975,6 +975,9 @@ fn tryPlaceStuckDrop(
 /// stick rows re-place the debris block, others bag at the cell).
 pub fn fallBlocksLanded(ctx: ?*anyopaque, cells: []const ecs.components.FallingCell) void {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return));
+    // GamePrefs 148 defaults off. Dropping without the gate puts debris where
+    // stock leaves the cell empty.
+    if (!g.sim.rules.ai.fall_spawn_blocks) return;
     for (cells) |cell| {
         const tid: u16 = world_store.typeId(cell.raw);
         if (tid == 0) continue;

@@ -282,6 +282,10 @@ pub const Ai = struct {
     /// (the stock 0.98 drag already self-caps around -3.9; this bounds a
     /// pathological tick so a long drop cannot outrun the per-tick probes).
     fall_max_vy: f32 = -30.0,
+    /// Stock `OptionsStabSpawnBlocksOnGround` (GamePrefs 148) defaults off.
+    /// The server never sees the client pref, so the stock outcome is no
+    /// Fall-event drops unless an operator turns this on.
+    fall_spawn_blocks: bool = false,
     /// Swim physics (RE entity-ai.md EntityAlive cctor: cSwimGravityPer 0.025,
     /// cSwimDragY 0.91): a submerged AI body falls with gravity*0.025 and the
     /// 0.91 y-drag, so it sinks slowly instead of dropping - a float.
@@ -916,6 +920,7 @@ pub const AiOverlay = struct {
     leap_arc_height: ?f32 = null,
     gravity: ?f32 = null,
     fall_max_vy: ?f32 = null,
+    fall_spawn_blocks: ?bool = null,
     swim_gravity_per: ?f32 = null,
     swim_drag_y: ?f32 = null,
     swim_speed_frac: ?f32 = null,
@@ -1212,6 +1217,10 @@ test "mergeOverlay applies non-null subset in precedence order" {
     try std.testing.expectEqual(@as(f32, 20.0), r.combat.attack_damage);
     try std.testing.expectEqual(@as(f32, 100.0), r.ai.sense_dist_sq);
     // Untouched defaults survive both overlays.
+    try std.testing.expect(!r.ai.fall_spawn_blocks);
+    var on: RulesOverlay = .{ .ai = .{ .fall_spawn_blocks = true } };
+    mergeOverlay(&r, &on);
+    try std.testing.expect(r.ai.fall_spawn_blocks);
     try std.testing.expectEqual(@as(u32, 8), r.bloodmoon.max_parties);
     try std.testing.expectEqual(@as(u32, 30), r.bloodmoon.party_enemy_max);
     try std.testing.expectEqual(@as(f32, 1.0), r.combat.attack_cooldown_s);

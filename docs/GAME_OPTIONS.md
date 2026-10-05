@@ -264,6 +264,7 @@ test, so a retune cannot land silently).
 | `leap_speed` | 7.0 | Horizontal flight speed, blocks/s: sets the arc duration from the launch distance (`leap_dur = leap_dist / leap_speed`) |
 | `leap_arc_height` | 0.9 | Extra apex height above the straight launch-to-landing line, blocks (the pounce parabola over the stock leapV.y line) |
 | `fall_max_vy` | -30.0 | Hard terminal fall velocity cap, blocks/s (safety bound; the stock 0.98 y-drag already self-caps ~ -3.9) |
+| `fall_spawn_blocks` | false | Fall-event debris drops on landing. Stock `OptionsStabSpawnBlocksOnGround` (GamePrefs 148) defaults off and is a client pref the server never sees, so the default matches stock |
 | `swim_gravity_per` | 0.025 | Swim gravity fraction (stock cSwimGravityPer): a submerged AI body falls with gravity*0.025 |
 | `swim_drag_y` | 0.91 | Swim y-drag (stock cSwimDragY): the vertical drag while submerged |
 | `swim_speed_frac` | 0.5 | Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed) |
