@@ -6885,8 +6885,10 @@ not stock:
 | Schematic unlocks | PARTIAL (2026-10-03: the join-side list is implemented - `join.zig` fills `unlocked_recipes` from the always-unlocked set - so what stays PARTIAL is the *learn* half: a schematic that unlocks a recipe when read needs the client-to-server trigger for the read action, and that package is not in this RE set (the same blocker the learnable-recipes TODO records). No server-side gate was added either, because the RE shows every `Recipe::IsUnlocked` caller is a UI path) |
 | Trader buy against real item defs | WORKS (2026-10-03 re-audit of both clauses: prices are the real item defs - `EconomicValue` x `EconomicSellScale` x SellMarkdown for the sell base (`game/trader.zig`, `game.zig`, `game/hooks.zig`) and base `EconomicValue` for the stock rows - and group rolls are not deferred at all: `TraderTable.spawnItemsFromGroup` expands a `group=` ref with stock's `SpawnItemsFromList` semantics, including the group's own count roll, weighted picks by `prob`, `unique_only`, `count_all`, and an 8-deep recursion guard, all RE-cited. `traderAlways` remains the fallback only for an unresolved trader_info row, which is stock's own behaviour) |
 
-**Largest remaining “feels like a game” gaps:** AI path A*, quest objective
-type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
+**Largest remaining gaps:** quest objective kinds that still map to `auto`,
+trap and light actuation, deco/AssignIds pin, M11 serialize-once.
+**2026-10-05**: grid A* and generator fuel were already shipped, so naming
+them here was stale.
 
 ---
 
