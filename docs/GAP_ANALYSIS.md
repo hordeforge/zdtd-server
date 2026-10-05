@@ -4703,7 +4703,9 @@ a finer server encoding.
   9.6 s, with `join_ok` 6 / `join_fail` 0, so the stall is boot and stream work
   rather than a refused join. The section breakdown names what it can and
   clears the rest: the save path was the one measured offender and is now capped
-  at `save_chunks_per_tick` per tick (`save_io` max **3.9 s -> 0.95 s**,
+  at `save_chunks_per_tick` per tick (`save_io` max **3.9 s -> 0.95 s** (2026-10-06 fresh-build idle bench reads
+  `save_io` max **5.2 s** over 2 saves on a Debug build, so the 0.95 s figure is
+  ReleaseFast and Debug is higher),
   `save_encode` 3.4 s -> 0.51 s, pinned by `a budgeted save drains across calls
   and loses nothing`), while `join_drain` 320 ms, `chunk_stream` 78 ms,
   `te_scan` 0.5 ms and the ECS under 6 ms. The join-time deco burst, the last
