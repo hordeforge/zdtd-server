@@ -96,6 +96,36 @@ class ScopeTest(unittest.TestCase):
         self.assertEqual(1, len(failures))
         self.assertIn("dead anchor #not-a-heading", failures[0])
 
+    def test_cross_file_anchor_checks_target_headings(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        (root / "sub").mkdir()
+        target = root / "sub" / "target.md"
+        target.write_text("## Real heading\n", encoding="utf-8")
+        page = root / "page.md"
+        page.write_text(
+            "## Own heading\n\nsee [a](sub/target.md#real-heading)\n"
+            "and [b](#own-heading)\n",
+            encoding="utf-8",
+        )
+        failures: list[str] = []
+        check_docs.check_links(page.read_text(encoding="utf-8"), page, failures)
+        self.assertEqual([], failures)
+
+    def test_cross_file_dead_anchor_fails(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        target = root / "target.md"
+        target.write_text("## Real heading\n", encoding="utf-8")
+        page = root / "page.md"
+        page.write_text("see [a](target.md#nope)\n", encoding="utf-8")
+        failures: list[str] = []
+        check_docs.check_links(page.read_text(encoding="utf-8"), page, failures)
+        self.assertEqual(1, len(failures))
+        self.assertIn("dead anchor target.md#nope", failures[0])
+
     def test_live_anchor_passes(self):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)

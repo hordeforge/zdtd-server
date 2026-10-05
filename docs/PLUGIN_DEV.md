@@ -232,7 +232,7 @@ module importing `wasi_snapshot_preview1` fails to instantiate.
 
 The `bot <verb>` family (`spawn` / `remove` / `move` / `look` / `shoot` /
 `count`, ADR 0026) is handled host-side by `BotManager`, not through this
-buffer, and carries its own attribution ([PLUGIN_API.md:54](PLUGIN_API.md#L54)).
+buffer, and carries its own attribution ([PLUGIN_API.md:54](PLUGIN_API.md#implementation-status-2026-08-06)).
 
 Commands are applied by the sim on a later tick's drain (the fixed 64-slot
 command buffer; a full buffer drops new commands). Unknown or malformed

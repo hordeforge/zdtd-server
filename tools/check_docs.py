@@ -152,12 +152,23 @@ def check_links(text: str, path: Path, failures: list[str]) -> int:
                 failures.append(f"{rel(path)}: dead anchor {target}")
             continue
         total += 1
-        target = target.split("#", 1)[0]
-        if not target:
+        # A cross-file link may carry an anchor (docs/foo.md#bar). The path is
+        # checked first; the anchor is checked against that file's headings, the
+        # same rule as the intra-page branch above.
+        file_part, _, anchor = target.partition("#")
+        if not file_part:
             continue
-        resolved = (path.parent / target).resolve()
+        resolved = (path.parent / file_part).resolve()
+        # Out-of-repo targets (sibling checkouts) are not asserted to exist.
         if resolved.is_relative_to(ROOT) and not resolved.exists():
-            failures.append(f"{rel(path)}: dead link {target}")
+            failures.append(f"{rel(path)}: dead link {file_part}")
+            continue
+        if anchor and resolved.suffix == ".md" and resolved.exists():
+            # Separate set: reusing `slugs` here would replace this page's
+            # heading set and make a later intra-page anchor check the wrong file.
+            target_slugs = heading_slugs(read_text(resolved))
+            if anchor not in target_slugs:
+                failures.append(f"{rel(path)}: dead anchor {target}")
     return total
 
 
