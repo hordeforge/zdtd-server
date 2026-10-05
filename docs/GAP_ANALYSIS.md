@@ -6682,9 +6682,9 @@ Honest gaps:
   (`Data/Config/entityclasses.xml`); zombieTemplateMale's list is
   `BreakBlock | DestroyArea | Territorial | ApproachDistraction |
   ApproachAndAttackTarget | ApproachSpot | Look | Wander`, i.e. priorities
-  1..8 in that order. Parsing it per class is unimplemented for scope reasons,
-  not for lack of data: priority/MutexBits/executeDelay/continuous are
-  hardcoded in the comptime `zombie_tasks` table. That table compresses
+  1..8 in that order. The class list is parsed and gates every task
+  (`entities.zig`, `aiTaskAllowed`). **2026-10-05**: the "unimplemented"
+  sentence was stale. The comptime `zombie_tasks` table still compresses
   priorities to {1,1,1,2,2,2,2} (same pairwise `isBestTask` relations for the
   implemented subset), orders Territorial *after* Approach, and adds a "no
   sensed player" clause to `territorialCanExecute` that stock's
