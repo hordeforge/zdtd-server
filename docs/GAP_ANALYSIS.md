@@ -6479,7 +6479,7 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; name remap if tables diverge |
 | prefabs.xml footprints | HAVE | AABB flatten + TTS interior paint |
 | `.tts` full block paint | PARTIAL | types + density/damage/TE/water/texture planes; prefab-local ids remapped by name via `<name>.blocks.nim` (`Prefab::loadIdMapping`), pre-18 files converted from `BlockValueV3` |
-| water_info.xml | PARTIAL | height hints only |
+| water_info.xml | WORKS (2026-10-05 re-audit: the row said "height hints only", but the file is a list of point sources and that is what zdtd reads. `world/water.zig` parses every `<Water pos="x, y, z"/>` and `World.fillLakeWater` raises the local water table from those sources. `fuzz water_info.xml parser` covers the reader. Stock has no per-source height in this file) |
 | biomes.png / radiation | WORKS (2026-08-20: biomes.png color→biomemap + radiated biome damage, Rules knobs) |
 | RWG / procedural gen | PARTIAL | W0–W2: on-the-fly per-chunk 3D density gen (`y_clamped_gradient` + coarse-cell interp, real overhangs) via `--worldgen-seed`; W3: multi-biome surface (low-freq biome field → per-biome surface stacks from biome_layers, `procBiomeAt` feeds chunk biome ids for biome-keyed spawns/weather) and terrain tiles (a low-frequency mountainness blend of the Plains/Hills/Mountains amplitudes - RE world-generation.md 86 weights - so regions run flat, rolling or ridged); W4 water table: basins below the stock water level (`Block.cWaterLevel` 62.88, surface cell 62) fill as lakes, world-constant surface so chunks cannot seam. MISSING: the stock 6-axis temperature/moisture climate model (the biome field is a simplified fBm, not the 6-octave climate), run-aware surfacing (overhang undersides expose stone), per-lake waterRect sources/shore falloff, carved caves, POI/WFC placement, async gen workers. Not stock RWG host |
 | Full block columns (16×256×16) | HAVE | dirt/stone/bedrock from height + TTS paint + ZCH3 `.zch` |
@@ -6916,7 +6916,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | entityclasses / entitygroups | HAVE (`assets/entities.zig`, `entitygroups.zig`) |
 | biomes.xml / biomes.png | HAVE (colors + layers + biomes.png) |
 | traders.xml | HAVE (groups + expand) |
-| vehicles.xml | PARTIAL (load + spawn HP/speed) |
+| vehicles.xml | WORKS (2026-10-05 re-audit: the row named the load, not a residual. `assets/vehicles.zig` reads `velocityMax`/`velocityMax_turbo`, `motorTorque_turbo` and the `fuelTank` capacity per vehicle, measured against V3.2.0 `Data/Config`, and the spawn path uses those for the entity's HP and speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
 | buffs / progression | WORKS (typed catalog + stack/duration/update_rate + the tracked passive-effects VM over active buffs + survival stage buffs + progression perk/attribute passive rows as data; triggered_effect actions beyond ModifyStats and untracked effect classes stay recorded) |
@@ -6941,7 +6941,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Stock region `.ttc` | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, out of scope; ZCH3 `.zch` + blockmeta are the zdtd store) |
 | Player profile / inventory save | HAVE (players.zsv **ZPV12**: quality/meta + journal + level/XP/food/water/buffs + skill tail; ZPV2 still read) |
 | Bedroll / last logout pos | WORKS (2026-08-20: bedroll respawn point + logout pos) |
-| Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
+| Map ownership / claims | WORKS (2026-10-05 re-audit: the row named the three parts and no residual. Placing the `keystoneBlock` (AssignIds) creates a claim of `LandClaimSize` centered on the block, a build inside another player's claim is refused, and `claims.zlc` restores the claims across a restart with the owner re-mapped on login) |
 | AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
 | Quest journal save | HAVE (players.zsv ZPV12) |
 | Vehicle / turret persistence | WORKS (`entities.zen`; power wire edges persist by position; trader quest offers are derived from quest_list + journal, see appendix "Vehicle, turret, power and quest-NPC persistence") |
