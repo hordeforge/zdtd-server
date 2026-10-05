@@ -7379,7 +7379,7 @@ LANDED (real, IL-grounded):
   the join snapshot (`PersistentPlayerList.NetworkCloneRelevantForPlayer`, RE
   ../../7dtd-engine-research/docs/admin/server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
 
-HONEST GAPS:
+MIXED: one open gap (party scope), the rest are closed or doc notes, kept for the record:
 - **Party shared scope (partial).** `NetPackagePartyActions` (asm.il 829049)
   is decoded and dispatched to a real `Party`/`PartyManager` state machine
   (`src/ecs/party.zig`; RE parties-factions.md §2.2): AcceptInvite creates /
@@ -7435,7 +7435,7 @@ HONEST GAPS:
 `components.Vehicle.seats` is a fixed `[6]i32` of rider net ids; seat 0 is the
 driver (`EntityVehicle::AttachEntityToSelf` sets `hasDriver` only for slot 0,
 asm.il:542176) and 1..n-1 are passengers. Seat allocation in
-`systems.vehicleAttach` mirrors `Entity::AttachEntityToSelf` (asm.il:406554): a
+`vehicleAttach` (`src/ecs/vehicle.zig`) mirrors `Entity::AttachEntityToSelf` (asm.il:406554): a
 negative request takes the lowest free seat, re-requesting the held seat is a
 no-op, an out-of-range request fails. `seat_count` comes from the contiguous
 `seatN` classes in vehicles.xml (`Vehicle::SetSeats`, asm.il:1344168), giving
