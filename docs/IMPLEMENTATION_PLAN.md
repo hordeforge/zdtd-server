@@ -301,6 +301,7 @@ Chunk stream: named caps shipped; async workers still open.
   NPCQuestList FetchList + SharedQuest - the journal body is stock-shaped, not zdtd-native.
   The 2026-07 "Phases/rally still shallow" note is stale: the phase graph and rally
   markers are WORKS in the ledger (see M13.2 for the objective-runners side).
+#### M13.2 Objective runners
 - Per-kind systems: ClearSleepers (volume empty), FetchFromContainer, Goto POI, ReturnToNPC.  
 - Keep Catalog from quests.xml; stop collapsing all phases.  
 
