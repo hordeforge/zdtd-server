@@ -1,6 +1,6 @@
 # Gap analysis: what a player can and cannot do on Navezgane
 
-> **What this is:** the full 300-feature inventory for the V3.2.0 b10 stock-client play path (IL citations still name the V3.1.0 dump), with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
+> **What this is:** the full 327-feature inventory for the V3.2.0 b10 stock-client play path (IL citations still name the V3.1.0 dump), with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
 
 > **Related:** hub [STATUS.md](STATUS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md)
 
@@ -46,7 +46,7 @@ MISSING_FEATURES.md. [WORK_PLAN.md](WORK_PLAN.md) owns the tasks and
 
 ### What a player can do today
 
-Join a zdtd server over direct IP with an unmodified V3.1.0 client and reach
+Join a zdtd server over direct IP with an unmodified V3.2.0 b10 client and reach
 Playing with zero NullReferenceExceptions (live gate 23/23 on a fresh world).
 Walk real Navezgane terrain built from the shipped DTM heightmap and the shipped
 biome layer stacks. Enter POIs stamped from the real `.tts` prefab files, with
