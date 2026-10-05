@@ -142,7 +142,8 @@ pub fn handleHolding(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                 // the basket is Entity.bag, synced as a Bag.Write blob. Apply
                 // to the vehicle's fixed basket array (item ids validated by
                 // the reverse resolver) and echo the raw body to the other
-                // clients, since the stock S2C broadcast sender is unpinned.
+                // clients. The named server-side Setup caller is still unpinned;
+                // the echo is the pin's own instruction until it surfaces.
                 var wire_slots: [ecs.components.max_basket_slots]packages.stock_inv.StockSlot = undefined;
                 const parsed = packages.stock_inv.parseBagBody(body, wire_slots[0..]) catch {
                     self.harness.counters.inc(.c2s_malformed);
