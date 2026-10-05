@@ -5317,7 +5317,7 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described.
-  SimpleRPC and Debug remain unhandled. ModifyCVar and SetProp do not.
+  `Debug` remains unhandled. `SimpleRPC`, `ModifyCVar` and `SetProp` do not: the SimpleRPC handler owner-gates the sender and relays to tracked peers (`c2s/quest_buff.zig`, stock IL=17).
   EAC/encryption waivers (`EAC`,
   `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
   (`EditorUpdateVolume`), Twitch integration
