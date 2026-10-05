@@ -6947,7 +6947,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 
 | Item | Status |
 |---|---|
-| Broadcast all transforms | PARTIAL (except owner for PosAndRot; broadcastNear 160) |
+| Broadcast all transforms | PARTIAL (except owner for PosAndRot; `broadcastNear` uses `interest_range`, default 160 and set by `authority.interest_range_blocks`) |
 | Spatial interest (chunk/grid) | PARTIAL (32-block grid cells, `interest.zig` `cellOf`; no cell-to-entity hash) |
 | Serialize-once shared buffers | HAVE (`Game.replicate` is entity-outer: encode + frame once, memcpy fan-out per interested peer; docs/adr/0008) |
 | Dirty flags (POS/ROT/FLAGS/HP) | HAVE (`World.dirty_bits` mirrors `dirty[]` through `markDirty`; off-heartbeat replicate visits dirty ∪ mobs only. Mob motion stays heartbeat-only by design: marking `stepToward` dirty would take mob PosAndRot from tick%10 to tick%2) |
