@@ -7081,7 +7081,7 @@ kick with a stock 0.5 s delayed drop, a load-shed valve, and zdtd.toml
 
 | Item | Status |
 |---|---|
-| Unit / scenario tests | HAVE (**434** total; see STATUS for pass/fail pin) |
+| Unit / scenario tests | HAVE (2129/2374 green on 2026-10-03; STATUS carries the pass/fail pin. **2026-10-05**: the 434 count was stale) |
 | Loadgen join bots | PARTIAL (join + walk + actions; stock chunk stream when `wire_chunks`) |
 | Stock client join + stand | **PASS** (live gate **23/23** on a fresh world; see STATUS) |
 | Golden wire size checks | PARTIAL (some packages) |
