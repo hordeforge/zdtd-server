@@ -7111,7 +7111,8 @@ is on main and gated; what follows "Open:" is the honest remainder.
 3. **Path A\*** SHIPPED: grid A* over a body-aware step predicate (step-up, drop
    and headroom), 8-cell waypoint buffer, deterministic per-tick node budget. EAI
    gained RunawayWhenHurt and the SetAsTargetIfHurt revenge target. Open: navmesh,
-   jump and climb, data-driven per-class task graphs (5.2.1).
+   climb. The jump ships (MoveHelper) and the class task lists parse (5.2.1).
+   **2026-10-05**: listing jump and the per-class graphs as open was stale.
 4. **Quest objective coverage** SHIPPED for the stock V3.1.0 catalog
    (2026-08-09): a census of the shipped quests.xml (16 objective types, 119
    objectives) shows every type is classified to an executing phase kind,
