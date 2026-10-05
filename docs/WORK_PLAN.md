@@ -533,6 +533,9 @@ did not implement.
 
 ## T28. Resolve armor mitigation from items.xml instead of a flat 10%/piece
 
+
+**Status: half landed 2026-10-06.** The physical half is done: `armorMitigation` sums per-item `PhysicalDamageResist` at quality through `armor_pdr_fn`, with `armorMitigationVs` applying held-item `TargetArmor` penetration (`inventory.zig`, tests "armorMitigation folds equipped PDR including zero; floor only without hook" and "degradeUse wears the item's DegradationPerUse; armorMitigationVs applies held-item penetration"). The flat per-piece rate is now a fallback only when no hook is set. **Still open: the elemental half** - `armorMitigation` sums only physical, so a physical-only set does not yet leave elemental damage untouched.
+
 **Why:** [HARDCODE_AUDIT A35](archive/HARDCODE_AUDIT_2026-08-08.md). `armorMitigation`
 credits every equipped armor item the same flat 10%, capped at 50%, regardless
 of the item, its tier, or its quality, and does not distinguish physical from
