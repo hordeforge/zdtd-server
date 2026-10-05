@@ -3880,8 +3880,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `the survival pass resolves a sandbox-gated row` reads 149 instead of 150,
     because with `PlayerLevelBonusApplied` on, check01's update rows set
     `$PlayerLevelBonus = $LastPlayerLevel(0) - 1 = -1` and its own `HealthMax`
-    row folds that (stock refreshes `$LastPlayerLevel` from
-    `buffLevelUpTracking`, which zdtd does not apply yet).
+    row folds that. `buffLevelUpTracking` refreshes `$LastPlayerLevel`
+    (`game_tests.zig`). **2026-10-05**: the "does not apply" note was stale.
   - **Buff lifecycle: entered-game is data-driven (round 24, 2026-09-11).**
     `onSelfEnteredGame` now fires per active buff instance instead of being
     called for `buffStatusCheck01`/`buffStatusCheck02` by id: the class
