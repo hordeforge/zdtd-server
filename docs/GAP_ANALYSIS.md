@@ -2987,10 +2987,10 @@ gamestage, no wandering hordes, and no screamers.
   new heat (NotifyActivity gate). Noise-to-heat wired 2026-08-26: the
   movement-noise model folds sounds.xml `<Noise>` rows (heat_map_strength on
   gunfire/auger/explosions, 1312 rows) into notifyActivity via the stealth
-  system (RE AIDirector.NotifyNoise heat leg). Residual: static
-  torch/campfire placed heat (only burning workstations feed now - the
-  block-driven HeatMapStrength feed for placed torches/campfires is not yet
-  modeled), and the screamer's scream-summons-more loop.
+  system (RE AIDirector.NotifyNoise heat leg). The block feed landed: an
+  active block adds its `HeatMapStrength` times 0.4 each tick
+  (`block_ticker.zig`). **2026-10-05**: the "not yet modeled" note was stale.
+  Residual: the screamer's scream-summons-more loop.
   *Anchors:* `src/ecs/aidirector.zig` (`heat`, `notifyActivity`, `tickHeat`,
   `heatSpawnRolls`, `spawnHeatScouts`), `src/server/game.zig` (workstation heat
   feed), `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
