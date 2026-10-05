@@ -6784,9 +6784,11 @@ tracking landed and is tested):
   via the `World.party_same_fn` hook wired to `Game.parties`.
 - **Objective-type coverage.** Executed: ClearSleepers/EntityKill/AnimalKill
   (kill), Goto family (goto/trader), Fetch family + TreasureChest (fetch),
-  InteractWithNPC/ReturnToNPC (trader-interact). Mapped to `auto` or ignored:
-  Craft, Assemble, BlockPlace/Pickup/Activate/Upgrade, Repair, Scrap, Buff, Wear,
-  Time, SkillsPurchased, GameEvent, TwitchVote, ExchangeItemFrom, OpenWindow.
+  InteractWithNPC/ReturnToNPC (trader-interact). Craft advances (`questOnCraft`)
+  and BlockActivate advances (`questObjectiveEvent`). **2026-10-05**: both were
+  listed as ignored. Still mapped to `auto` or ignored: Assemble,
+  BlockPlace/Pickup/Upgrade, Repair, Scrap, Buff, Wear, Time,
+  SkillsPurchased, GameEvent, TwitchVote, ExchangeItemFrom, OpenWindow.
 - ~~**Completed-phase wire value.**~~ **NOT A DIVERGENCE** (re-verified
   2026-09-08). The row worried that sending `CurrentValue=255` for completed
   objectives would misdisplay objectives whose required value exceeds 255.
