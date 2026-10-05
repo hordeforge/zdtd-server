@@ -100,8 +100,9 @@ channel, so they render too. Still open: the flowing-water sim.
 LootList (a gun safe rolls `smallSafes`, a chest rolls `woodenChest`), and
 zombie bags resolve the stock chain (`LootDropEntityClass` → the bag class's
 `LootList=zPackReg`) and only drop on `LootDropProb` (.04), so most kills drop
-nothing like stock. Still open: crafting is instant and unvalidated (loot container slot
-counts now come from the `lootcontainer` size attribute).
+nothing like stock. Station craft waits the recipe time (`craft.zig` `craftTimeForPlayer`, stored
+on the workstation queue). **2026-10-05**: the "instant and unvalidated" note
+was stale. Loot container slot counts come from the `lootcontainer` size attribute.
 
 **What you are is mostly saved now.** Level, XP, survival stats (food/water)
 and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
