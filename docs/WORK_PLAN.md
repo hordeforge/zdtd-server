@@ -661,6 +661,8 @@ than inventing a stock-looking number.
 
 ## T31. Stop citing `game.zig` line numbers that do not exist
 
+**Status: re-checked 2026-10-06, mostly resolved.** The file is now 3559 lines and only 4 citations exceed it, all in `docs/archive/HARDCODE_AUDIT_2026-08-08.md` (frozen, excluded from citation checking). The "100 of 130" figure below predates the extraction sweep; live pages are clean, so the standing instruction is to re-anchor after any further `game.zig` split.
+
 **Why:** the `game.zig` decomposition (this doc's own T-series history, and
 several sessions of extraction into `src/server/game/*.zig` and
 `src/server/c2s/*.zig`) left `docs/GAP_ANALYSIS.md` citing 130 distinct
