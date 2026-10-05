@@ -117,12 +117,11 @@ fn skipAutoPhases(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) v
     }
 }
 
-/// Fire quest actions for the phase the quest just entered. Only UnlockPOI is
-/// server-side: it releases the quest's POI lock (stock QuestActionUnlockPOI,
-/// asm.il 1390421-1390429), which is why the phase-4 action on turn-in quests
-/// must not sit ignored. The other kinds run on the owning client (SetCVar,
-/// ShowMessageWindow) or need a subsystem zdtd does not have (SpawnGSEnemy,
-/// GameEvent), so they are parsed and recorded but not fired here.
+/// Fire quest actions for the phase the quest just entered. UnlockPOI releases
+/// the quest's POI lock (stock QuestActionUnlockPOI, asm.il 1390421-1390429).
+/// SpawnGSEnemy fires through `quest_spawn_fn` when the hook is set. SetCVar
+/// and ShowMessageWindow run on the owning client. GameEvent has no stock
+/// quest uses. Those three are parsed and recorded, not fired here.
 fn firePhaseActions(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
     var i: usize = 0;
     while (i < @min(@as(usize, d.action_n), quest.max_actions)) : (i += 1) {
