@@ -78,7 +78,7 @@ the malformed `"V 3.1.0"` note was stale.
 **Traders spawn from the world.** `spawnPoiTraders` places each prefab that
 carries a trader tag, and `fillTraderFromXml` loads that trader's list.
 Restock rolls on open and quests are offered from the journal. **2026-10-05**:
-the "demo spawn only" note was stale. Still open: mods/modChance on the stock roll.
+the "demo spawn only" note was stale. **2026-10-06: mods/modChance closed.**
 
 **POIs are built right, but not finished.** Ids, rotation and height were all
 wrong and are fixed (2026-08-06): ids remap through the prefab's `.blocks.nim`
@@ -1492,7 +1492,11 @@ mods/modChance on the stock roll.
   and regenerates the money pool (stock HandleFullReset, loot-economy.md §3).
   The `TraderMaxTier` clamp landed (`traders.zig`, test "TraderMaxTier clamps
   the roll and gates the spawn"). **2026-10-05**: the clamp half of this note
-  was stale. Still open: mods/modChance.
+  was stale. **2026-10-06: mods/modChance closed** - `ItemRef`/`Group` parse
+  `modsToInstall` and `modChance`, `spawnItem` rolls the descending-chance
+  install (items.md 324), and `StockEntry.mods` carries the resolved ids.
+  Test `modsToInstall rolls with the descending chance halving after each
+  install` pins the order and the inert zero-chance case.
   *Anchors:* `src/assets/traders.zig` rollAllRefs/spawnLootItemsFromList,
   `src/server/game/trader.zig` rollStockRefs / maybeRestockTrader,
   `asm.il:862758-863520`
