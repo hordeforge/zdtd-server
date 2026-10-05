@@ -270,9 +270,10 @@ Do not plan these as product features of zdtd:
    surface (health/food/water/stamina values + change-over-time, resist
    percents) folds revertibly over active buffs (assets/buffs.zig
    trackedDeltas/effectTotals) and drives the survival stage buffs; the
-   full triggered-effect engine (onSelf* actions beyond ModifyStats,
-   per-requirement eval, the untracked effect classes like
-   RecipeTagUnlocked/LootProb/CraftingTier) stays out of scope.
+   full triggered-effect engine. AddBuff, RemoveBuff, ModifyCVar and the
+   requirement checks apply (`triggered.zig`, `requirements.zig`).
+   **2026-10-05**: the "only ModifyStats" sentence was stale. What stays out:
+   the untracked effect classes like RecipeTagUnlocked/LootProb/CraftingTier.
 6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
@@ -6907,7 +6908,7 @@ them here was stale.
 | traders.xml | HAVE (groups + expand) |
 | vehicles.xml | WORKS (2026-10-05 re-audit: the row named the load, not a residual. `assets/vehicles.zig` reads `velocityMax`/`velocityMax_turbo`, `motorTorque_turbo` and the `fuelTank` capacity per vehicle, measured against V3.2.0 `Data/Config`, and the spawn path uses those for the entity's HP and speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
-| buffs / progression | WORKS (typed catalog + stack/duration/update_rate + the tracked passive-effects VM over active buffs + survival stage buffs + progression perk/attribute passive rows as data; triggered_effect actions beyond ModifyStats and untracked effect classes stay recorded) |
+| buffs / progression | WORKS (typed catalog + stack/duration/update_rate + the tracked passive-effects VM over active buffs + survival stage buffs + progression perk/attribute passive rows as data; AddBuff, RemoveBuff, ModifyCVar and the requirement checks apply too (`triggered.zig`). **2026-10-05**: the "only ModifyStats" sentence was stale. Untracked effect classes stay recorded) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | PARTIAL - non-client-visible (documented 2026-08-21: client-side content - the client ships its own Localization.txt and resolves the keys the server sends) |
 | materials / physicsbodies | WORKS (2026-10-05 re-audit: the row named one field. `assets/maxdamage.zig` reads materials.xml `MaxDamage`, `Experience`, `Hardness`, `Mass`, `damage_category`, `forge_category`, `StabilitySupport`, `explosionresistance`, `collidable`, `CanDestroy`, `IsGroundCover`, `FertileLevel`, `movement_factor` and `lightopacity` per material, and blocks.xml `Material` resolves into them. `physicsbodies.xml` is client collision geometry the server never executes) |
