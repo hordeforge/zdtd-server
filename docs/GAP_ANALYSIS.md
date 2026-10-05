@@ -76,13 +76,10 @@ discovery, so a typed IP is the only route in, and the one thing that is
 advertised is malformed: `ServerVersion "V 3.1.0"` fails the client's
 `TryParseSerializedString`, which wants `"V.3.10.14"`.
 
-**Traders are half there.** The trader NPC now replicates to the client with a
-real `npcTraderJen` class hash, and `TraderData` rides both stock S2C paths:
-`EntityCreationData.hasTraderData` on spawn and the channel-1 LockResponse
-context on open (wire-tested; stock-client visual check pending). Still open:
-placing traders in the five Navezgane POIs (only the demo
-`spawnTrader("Trader Jen", ...)` exists), restock rolls, per-trader item lists,
-and quest offering, so the full economy loop is not reachable yet.
+**Traders spawn from the world.** `spawnPoiTraders` places each prefab that
+carries a trader tag, and `fillTraderFromXml` loads that trader's list.
+Restock rolls on open and quests are offered from the journal. **2026-10-05**:
+the "demo spawn only" note was stale. Still open: mods/modChance on the stock roll.
 
 **POIs are built right, but not finished.** Ids, rotation and height were all
 wrong and are fixed (2026-08-06): ids remap through the prefab's `.blocks.nim`
