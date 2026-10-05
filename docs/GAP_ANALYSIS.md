@@ -6183,10 +6183,10 @@ nobody re-opens a closed row from a stale one.
 |---|---|
 | Earlier `GAP_ANALYSIS.md` trader-window note and `docs/archive/STATUS_HISTORY.md`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
 | Earlier `GAP_ANALYSIS.md` note: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
-| `docs/GAP_ANALYSIS.md:6470`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` src/ecs/world.zig:891), a placed bedroll records the respawn point (src/server/c2s/inv_txn.zig:315-322) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
-| `docs/GAP_ANALYSIS.md:6471`: "Death / backpack" | WORKS, refreshed 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths. The single-scrap placeholder and the refused backpack request are both gone. The quoted text above still said PARTIAL, which this row has not said since that refresh |
+| `docs/GAP_ANALYSIS.md:6517`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` src/ecs/world.zig:891), a placed bedroll records the respawn point (src/server/c2s/inv_txn.zig:315-322) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
+| `docs/GAP_ANALYSIS.md:6518`: "Death / backpack" | WORKS, refreshed 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths. The single-scrap placeholder and the refused backpack request are both gone. The quoted text above still said PARTIAL, which this row has not said since that refresh |
 | `docs/archive/STATUS_HISTORY.md`: "Player death → respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
-| `docs/GAP_ANALYSIS.md:7221`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
+| `docs/GAP_ANALYSIS.md:7286`: NetPackageHordeEvent line range 818538-818735 | Corrected 2026-10-06: the row now cites asm.il:822185-822359 (the 2026-08-05 dump), which is what this table row recorded |
 | `src/ecs/quest.zig` comment: `Quest::AdvancePhase` at 982816 | CLOSED: comments now cite AdvancePhase ending at asm.il 986686 |
 | `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | CLOSED 2026-09-08. Was correct: StayWithin was missing (fell through to Base) and ObjectiveTime was unmapped. The enum now carries `time` and the XML mapping routes both `StayWithin` and `POIStayWithin` to the zero-byte shape |
 
@@ -7283,7 +7283,7 @@ IL class/method they came from.
 ### Honest gaps
 
 - **`NetPackageHordeEvent` has no stock server sender (vestigial).** All 26 IL
-  occurrences are inside the class body (818538-818735); there is no
+  occurrences are inside the class body (822185-822359 on the 2026-08-05 dump); there is no
   `GetPackage<NetPackageHordeEvent>()` anywhere in the assembly. The builder and
   client handler are real, but stock never emits the package. Auto-broadcasting
   it on the blood-moon edge would be **non-stock server behavior**, so it is
