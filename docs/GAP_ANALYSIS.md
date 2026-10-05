@@ -72,8 +72,7 @@ are unloaded instead of standing frozen in your world forever.
 0 MISSING); the bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
-discovery, so a typed IP is the only route in, and the one thing that is
-advertised version is stock form `V.3.20.10` (`version.zig`). **2026-10-05**:
+discovery, so a typed IP is the only route in, and the advertised version is stock form `V.3.20.10` (`version.zig`). **2026-10-05**:
 the malformed `"V 3.1.0"` note was stale.
 
 **Traders spawn from the world.** `spawnPoiTraders` places each prefab that
@@ -106,7 +105,7 @@ on the workstation queue). **2026-10-05**: the "instant and unvalidated" note
 was stale. Loot container slot counts come from the `lootcontainer` size attribute.
 
 **What you are is mostly saved now.** Level, XP, survival stats (food/water)
-and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
+and active buffs survive a restart via `players.zsv` ZPV18 (the server-side ledger
 `awardXp` feeds it; keyed on the owner's platform identity per ADR 0038,
 login name as legacy fallback). Progression ships
 2026-08-26: `NetPackagePlayerStats` S2C snapshots go to every peer (join +
@@ -117,7 +116,7 @@ the S2C client echo; the 23 crafting skills are magazine-driven in stock
 (A21+ book system, RE residual) and their magazine advancement stays
 recorded.
 
-**The world is still stepped.** The join deco burst produced 3 objects for
+**Terrain sampling drops the sub-block fraction.** The join deco burst produced 3 objects for
 an entire 13x13-chunk window. The DTM stores gameY times 256 and the chunk
 height plane keeps the whole block, so the sub-block fraction is discarded.
 Collapse is shipped: the stability plane removes unsupported blocks.
