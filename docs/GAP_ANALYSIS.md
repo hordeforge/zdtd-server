@@ -5886,7 +5886,7 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   *Anchors:* `src/server/serverinfo_tcp.zig`, `$game/serverconfig.xml` line 16
 
 - **serverconfig.xml property coverage** `WORKS` `(2026-08-21)`
-  41 property names are applied and unknown ones are ignored with an edit-distance
+  63 property names are applied (`known_serverconfig_names`, enforced equal to the applied-key count by its test) and unknown ones are ignored with an edit-distance
   typo hint. The stock difficulty knobs (GameDifficulty, BloodMoonFrequency,
   DayNightLength, XPMultiplier, LootAbundance, BlockDamage*, DropOnDeath,
   AirDropFrequency, Zombie*Move, ViewRadius, AdminPort) do not exist as
