@@ -259,12 +259,12 @@ Do not plan these as product features of zdtd:
 3. EAC-signed multiplayer.  
 4. Shipping TFP DLLs, prefab binaries, or bulk decompiled C#.  
 5. Bit-identical blood-moon festivities / full Unity FX parity.  
-7. Stock navmesh pathfinding parity (grid A* is the research-clone
+6. Stock navmesh pathfinding parity (grid A* is the research-clone
    equivalent; Unity navmesh format RE + full rewrite out of scope).
-8. Procedural worldgen fidelity beyond the deterministic demo fallback
+7. Procedural worldgen fidelity beyond the deterministic demo fallback
    (aquifers, caves, multi-biome, per-column surfacing; stock RWG maps load
    as DTM).
-9. The full EffectManager passive-effects VM over progression.xml /
+8. The full EffectManager passive-effects VM over progression.xml /
    buffs.xml effect chains. **A bounded VM landed 2026-08-25**: the tracked
    surface (health/food/water/stamina values + change-over-time, resist
    percents) folds revertibly over active buffs (assets/buffs.zig
@@ -273,7 +273,7 @@ Do not plan these as product features of zdtd:
    requirement checks apply (`triggered.zig`, `requirements.zig`).
    **2026-10-05**: the "only ModifyStats" sentence was stale. What stays out:
    the untracked effect classes like RecipeTagUnlocked/LootProb/CraftingTier.
-6. Twitch integration, editor packages, dynamic mesh as required path.
+9. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
 
