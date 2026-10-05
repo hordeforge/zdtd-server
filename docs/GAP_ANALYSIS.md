@@ -5927,7 +5927,7 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   *Anchors:* `src/world/store.zig:694-695`, `:702-727`, `:736-780`
 
 - **Player save (players.zsv)** `WORKS` `(non-client-visible, 2026-09-11 re-audit)`
-  **ZPV17** records (ZPV2-16 still read and upgraded in place) keyed by the
+  **ZPV18** records (ZPV2-17 still read and upgraded in place) keyed by the
   owner's **platform identity** (`puid_primary`, ZPV15 tail) per ADR 0038, with
   the login name as a legacy fallback for rows saved before ZPV15. Each record
   holds position, coins, inventory
