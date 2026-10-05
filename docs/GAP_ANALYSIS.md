@@ -6831,10 +6831,10 @@ not stock:
   written u8 count + WriteItemStack per group, asm.il 857562-857587) unlocks
   deeper stock as trader tier rises. zdtd always writes 0 groups: only the flat
   `traderAlways` PrimaryInventory shows, no tier-gated restock depth.
-- **Trader wallet / economy**: `AvailableMoney` is a fixed placeholder pool
-  (`trader_wallet_dukes = 5000`) that does not regenerate per stock-day, is not
-  persisted, and is not spent on player sells (`trade()` credits the player
-  wallet directly).
+- **Trader wallet / economy**: the pool debits on a player sell, regenerates
+  toward `wallet_default` on restock, and survives restart
+  (`persist_traders.zig`, scenario "trader-persist"). **2026-10-05**: the
+  "fixed placeholder, not spent, not persisted" note was stale.
 - **Restock depth**: `systems.traderRestock` grows every entry +10/day toward a
   flat cap of 50, ignoring stock per-item count ranges (`count="a,b"`) and
   marketTier/tender rules.
