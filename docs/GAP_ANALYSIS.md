@@ -7233,12 +7233,13 @@ Implemented (`src/world/sleepers.zig`, `Game.tickSleeperVolumes`):
 Honest gaps (no data path in zdtd, not faked):
 - Per-volume gamestage adjust byte (zdtd's .tts/.nim reader does not carry it),
   and `maxAlive` is a per-burst cap rather than a live per-player population cap.
-- Sleeper respawn (`respawnMap`/`respawnTime`/`cRespawnNever`); one-shot `triggered`.
-- Trigger types (`ETriggerType`) and volume-to-volume wake cascade
-  (`SleeperVolumeTriggeredBy`); zdtd wakes purely on player-inside-AABB.
-- Quest / boss / loot volume flags (`SleeperIsBossVolume`/`SleeperIsLootVolume`/
-  `isQuestExclude`/`isPriority`/`SleeperVolumeGroupId`).
-- Sleeper pose / rotation / look / `spawnMode` (Normal/Bandit/Infested) and
+- Sleeper respawn is `rearmIfExpired` (`sleeper.zig`). **2026-10-05**: the
+  "one-shot" note was stale.
+- The wake cascade is `TouchGroup` (`sleeper.zig`). **2026-10-05**: the
+  "player-inside-AABB only" note was stale.
+- The boss group flag is parsed (`VolumeGroup.is_boss`). Still open:
+  `SleeperIsLootVolume`, `isQuestExclude`, `isPriority`, and the spawn path
+  does not act on the boss flag yet.
   `MinScript` (`SVS<i>`): only the marker position + entity class are wired.
 - `spawnCountMin/Max < 0 -> 5,6` runtime reset: malformed-data only, not modeled.
 
