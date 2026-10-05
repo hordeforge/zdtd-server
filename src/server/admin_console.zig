@@ -533,6 +533,8 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
         // slot, but only after this cast, and @intCast traps on a negative.
         const peer_i = self.sim.player[ps].peer_slot;
         if (peer_i >= 0) self.resetMoveEnvelopePeer(@intCast(peer_i), cx, cy, cz);
+        // Admin `tp` is a deliberate teleport (minevents.md:100).
+        self.fireTeleported(ps);
     }
     const entity_id = self.sim.netId(ps);
     // Sim already moved above; encode failure must not look like a successful
