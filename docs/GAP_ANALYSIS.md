@@ -2144,11 +2144,10 @@ the pre-fix audit.
 
 ## 7. POIs and prefabs
 
-**Headline.** Navezgane's POIs are present, stamped from the real stock `.tts`
-files and reach a stock client, but they are built from the wrong block ids
-(~21% of cells), placed at the wrong height (46% of POIs ignore YOffset) and
-rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
-can walk into every POI but none of them is the building TFP authored.
+**Headline.** Navezgane's POIs stamp from the real `.tts` files with remapped
+ids, stock rotation and `YOffset`. **2026-10-05**: the "wrong ids, wrong height,
+wrong rotation" note was the pre-fix audit. Still open: per-block facing uses
+one remap table.
 
 **30 WORKS · 0 PARTIAL · 0 MISSING**
 
