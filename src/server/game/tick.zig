@@ -606,6 +606,18 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     if (eg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg.truncated);
                     applyTriggeredBuffs(self, c.entity_id, ps, &eg, c.entity_id);
                 }
+                // onSelfFirstSpawn (minevents.md:100) - once per session, on the
+                // first spawn only. Distinct from entered_game: a later respawn
+                // does not re-fire it.
+                if (!c.first_spawn_fired) {
+                    c.first_spawn_fired = true;
+                    life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+                    for (life_buf[0..life_ids_n]) |id| {
+                        const fs = assets_buffs.evaluateTriggered(&self.buffs, id, .first_spawn, req_ctx, &req_counts);
+                        if (fs.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, fs.truncated);
+                        applyTriggeredBuffs(self, c.entity_id, ps, &fs, c.entity_id);
+                    }
+                }
             }
             // onSelfBuffStart / onSelfBuffRemove for every active buff, now that
             // the engine applies add/remove requests as the rows pass (so a

@@ -738,6 +738,9 @@ pub const Client = struct {
     /// onSelfEnteredGame fired for this client (stock fires it when the player
     /// entity enters the game; the buff catalog's check buffs carry the rows).
     entered_game_fired: bool = false,
+    /// onSelfFirstSpawn fired for this client (minevents.md:100). Once per
+    /// session, on the first spawn only - a later respawn does not re-fire it.
+    first_spawn_fired: bool = false,
     /// Same-tick dedup for gameevent sequences that SpawnEntity: a redelivered
     /// NetPackageGameEventRequest (or a second CallGameEvent in the same tick)
     /// must not spawn another horde. Hash is of the sequence name; tick is
