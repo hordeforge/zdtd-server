@@ -599,16 +599,10 @@ area and the concrete work.
     (`PlayerEntityStats` GetValue(115/123) * dt → Stat.regenAmount). Negative
     regen is scaled by `Stat.LossSandboxModifier` (`UpdateSandboxOptions`
     IL=21: Food=161 HungerMultiplier, Water=162 ThirstMultiplier).
-    Residual: `Stat.Tick` regen coupling (IL_0194: positive stamina/health
-    gains drain food/water regen x GetValue(119/127/120/126), base 1.0) is
-    not wired: with zdtd's 8/s stamina floor a 1:1 coupling would empty both
-    bars in seconds of regen, which contradicts observed stock drain, so the
-    stock stamina regen rate and food/water scale need pinning before the
-    proven mechanism ships (athletic -.1, nomad tiered, SlowMetabolism,
-    moonshine rows surveyed and ready). The 119/127/120/126 rows scale the
-    Food/Water **RegenerationAmount** staging inside `Stat.Tick`, not the
-    current value, so with zdtd's direct-to-value OT path there is no
-    separate coupling to wire (applying it to value double-counts the OT).
+    The `Stat.Tick` regen coupling (IL_0194) is not a second wire. The
+    119/127/120/126 rows scale the RegenerationAmount staging, and zdtd's OT
+    path writes the value directly, so applying the coupling again would
+    double-count. **2026-10-05**: the "not wired" residual was stale.
     Anchors for the live A/B that would settle the scale:
     `../7dtd-engine-research/il/full-v3.1.0/_global/Stat.il.txt:48` holds
     `Stat::Tick` (the 127/119 pair at IL_01C1/IL_0209 with base 1.0, run when
