@@ -5339,8 +5339,8 @@ persists so little that a restart visibly damages a built base.
   arrived, and the store is not persisted. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
-  server branch at all) is the developer surface the old label described. All
-  SetProp, SimpleRPC and Debug remain unhandled. ModifyCVar does not.
+  server branch at all) is the developer surface the old label described.
+  SimpleRPC and Debug remain unhandled. ModifyCVar and SetProp do not.
   EAC/encryption waivers (`EAC`,
   `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
   (`EditorUpdateVolume`), Twitch integration
