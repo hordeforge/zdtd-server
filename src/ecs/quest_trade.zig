@@ -551,6 +551,26 @@ pub fn questOnTreasureOpened(w: *World, peer_slot: usize, block_name: []const u8
     }
 }
 
+/// ObjectiveTreasureChest.Current_ContainerOpened: the objective completes
+/// when the opened container is the dug cell. The cell arrives on
+/// NetPackageQuestTreasurePoint action 2. A chest objective that is not the
+/// dug cell stays open.
+pub fn questOnTreasureChestOpened(w: *World, peer_slot: usize, x: i32, y: i32, z: i32) void {
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    if (!w.mask[ps].journal) return;
+    for (&w.journal[ps].slots) |*s| {
+        if (!s.active or s.completed or !s.treasure_set) continue;
+        if (s.treasure_x != x or s.treasure_y != y or s.treasure_z != z) continue;
+        const d = w.catalog.byId(s.def_id) orelse continue;
+        var chest = false;
+        for (d.objective_kinds) |k| {
+            if (k == .treasure_chest) chest = true;
+        }
+        if (!chest) continue;
+        completeQuest(w, ps, s);
+    }
+}
+
 fn bagHolds(w: *const World, ps: Slot, item_id: u16) bool {
     for (w.inventory[ps].slots[0..c.inv_equip_start]) |slot| {
         if (slot.item_id == item_id and slot.count > 0) return true;
@@ -2414,6 +2434,32 @@ test "a named fetch objective counts only its own item" {
 
     questOnFetchItemFrom(&w, 0, 42, 0, 0);
     try std.testing.expect(q.obj_progress[0] > 0 or q.ready_turn_in or q.completed);
+}
+
+test "opening the dug cell completes the treasure chest" {
+    // ObjectiveTreasureChest.Current_ContainerOpened completes only when the
+    // opened cell is the one the client reported as the dig.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].journal = true;
+    const kinds = [_]quest.ObjectiveWireKind{.treasure_chest};
+    const def = quest.QuestDef{
+        .id = 9,
+        .kind = .fetch_item,
+        .title = "dig",
+        .objective_kinds = &kinds,
+    };
+    w.catalog.defs = &.{def};
+    const q = w.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{ .def_id = 9, .active = true, .treasure_set = true, .treasure_x = 4, .treasure_y = 60, .treasure_z = 8 };
+
+    questOnTreasureChestOpened(&w, 0, 4, 60, 7);
+    try std.testing.expect(q.active);
+
+    questOnTreasureChestOpened(&w, 0, 4, 60, 8);
+    try std.testing.expect(q.completed);
 }
 
 test "opening the named treasure chest grants the item once" {

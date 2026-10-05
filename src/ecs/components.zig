@@ -968,6 +968,13 @@ pub const QuestProgress = struct {
     giver_x: f32 = 0,
     giver_y: f32 = 0,
     giver_z: f32 = 0,
+    /// The dug chest cell (NetPackageQuestTreasurePoint action 2). Opening
+    /// this cell completes ObjectiveTreasureChest. Unset until the client
+    /// reports the dig.
+    treasure_set: bool = false,
+    treasure_x: i32 = 0,
+    treasure_y: i32 = 0,
+    treasure_z: i32 = 0,
 };
 
 pub const Journal = struct {

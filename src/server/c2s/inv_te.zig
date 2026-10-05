@@ -241,6 +241,7 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             if (self.blocks.byId(bid)) |bd| {
                 systems.questOnTreasureOpened(&self.sim, c.slot, bd.name, fx, fz);
             }
+            systems.questOnTreasureChestOpened(&self.sim, c.slot, parsed.world_x, parsed.world_y, parsed.world_z);
             // Echo stock TE to nearby clients. Stock applies the client's whole
             // composite to its own TE and resends it, so when the received body
             // carries more than the storage module (a writable crate's sign text

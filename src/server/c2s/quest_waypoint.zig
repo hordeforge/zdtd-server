@@ -43,7 +43,19 @@ pub fn handleWaypoint(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []cons
         switch (req.action) {
             // The client telling us where it dug, and the derived
             // blocks-per-reduction step. Nothing to answer.
-            packages.quest_point_update_treasure, packages.quest_point_update_blocks => return true,
+            packages.quest_point_update_treasure, packages.quest_point_update_blocks => {
+                // Action 2 is the dug chest cell. ObjectiveTreasureChest
+                // completes only when that cell is opened.
+                if (req.action == packages.quest_point_update_treasure) {
+                    if (systems.questFindByCode(&self.sim, c.slot, req.quest_code)) |s| {
+                        s.treasure_set = true;
+                        s.treasure_x = req.x;
+                        s.treasure_y = req.y;
+                        s.treasure_z = req.z;
+                    }
+                }
+                return true;
+            },
             packages.quest_point_get_treasure => {},
             // GetGotoPoint rides the same package; zdtd already ships the
             // Location marker in the journal, so the client does not ask.
