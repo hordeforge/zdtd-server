@@ -3111,9 +3111,10 @@ note was the pre-fix audit. Still open: the screamer summon loop.
 
 ## 9. Items, crafting and loot
 
-**Headline.** A player can open zdtd chests and see items, and a workstation TE
-round-trips, but loot content is wrong at the source, crafting is instant and
-unvalidated, and durability, mods and repair do not exist.
+**Headline.** Chests roll their own loot list, station craft waits the recipe
+time, and tool durability round-trips. **2026-10-05**: the "wrong loot, instant
+craft, no durability" note was the pre-fix audit. Still open: repair-kit
+consumption has no pinned C2S shape.
 
 **28 WORKS · 0 PARTIAL · 0 MISSING**
 
