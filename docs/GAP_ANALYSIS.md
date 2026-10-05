@@ -4275,8 +4275,9 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 - **Buff runtime: apply, tick, expire, stack** `WORKS` (2026-08-06)
   A buff component, per-entity buff list and a `systemBuffs` pass now run in the
   ECS with stack rules and 20 Hz timers, and buff changes reach the client over
-  the stock wire. Open: the triggered_effect VM, cvar sync, immunity and
-  damage-type gates, and persistence across sessions (see WORK_PLAN T5).
+  the stock wire. The remainder named here already shipped: the triggered-effect
+  VM, cvar sync (`NetPackageModifyCVar`), the immunity and damage-type gates, and
+  persistence across sessions (ZPV3).
   *Anchors:* `src/ecs/components.zig:527-549`, `src/assets/buffs.zig:57-69`,
   `output_log_client_zdtd_connect.txt:21110`, `:27206`
 
@@ -7159,9 +7160,9 @@ query (M11.1) and the 32-128 bot apm gate (M11.5). See IMPLEMENTATION_PLAN M11.
 
 SHIPPED this wave: full stock telnet console surface, party PlatformUserId,
 gamestages (inputs below), buffs depth, vehicle multi-seat.
-Open: Steam server browser registration, the buffs remainder (triggered_effect
-VM, cvar sync, immunity and damage-type gates, buff persistence across sessions),
-Encryption* (optional).
+Open: Steam server browser registration and Encryption* (optional). The buff
+remainder named here already shipped: the triggered-effect VM, cvar sync,
+the immunity and damage-type gates, and buff persistence (ZPV3).
 
 #### Gamestage: what is in and what is still missing
 
