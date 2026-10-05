@@ -38,7 +38,7 @@ every move (`src/server/c2s/move_state.zig:40-45`). `NetPackageEntityRelPosAndRo
 as movement (`src/server/c2s/move_state.zig:129-149`). Both packages must name the sender's own
 entity id (`src/server/c2s/move.zig:30-33`, `src/server/c2s/move_state.zig:124-128`).
 
-Motion claims are relayed, never applied. `NetPackageEntityAliveFlags` stores the client
+The alive-flags word is relayed, never applied. `NetPackageEntityAliveFlags` stores the client
 word verbatim and fans a re-encoded body rather than the raw one, because the parsers
 accept a minimum while stock's bodies are exactly i32+u16 and 13 bytes, so trailing bytes
 must not be forwarded (`src/server/c2s/move_state.zig:42-52`). `NetPackageEntitySpeeds` sets
