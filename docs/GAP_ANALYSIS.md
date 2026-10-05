@@ -90,7 +90,12 @@ triggers" notes were stale. Still open: `rotateRawY` (tts.zig) is the single
 `BlockShapeNew` 24-orientation permutation, which is right for cubes and models
 but not for every family. `BlockShapeBillboardPlant` masks `rotation & 3` and
 renders 20 degree steps (block-shapes.md 2), so a plant in a rotated POI takes a
-90 degree cube rotation instead of its own pose.
+90 degree cube rotation instead of its own pose. **Fix shape (2026-10-06):** the
+paint path writes raw and holds no name, so the branch needs a type-id to name to
+shape lookup at stamp time. `maxdamage` has the name-keyed flag already
+(`shape45` precedent, `isShapePlant`); `blockplaceholders.zig:72` shows the
+callback wiring (`Shape45Fn`). Close it with a reverse id to name map in the
+store plus a `shape_plant` branch in `rotateRawY`.
 
 **Water is in lakes and POIs.** Lake and river water now writes from the
 `water_info.xml` sources at chunk generation (water blocks below the surface),
