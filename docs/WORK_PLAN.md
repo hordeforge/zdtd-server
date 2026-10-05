@@ -622,6 +622,8 @@ AI, not the client display of it.
 
 ## T30. Drone companion AI (`EntityDrone`)
 
+**Status: open; the 9-state premise re-verified 2026-10-06.** `../../7dtd-engine-research/docs/entities/raycast-pathing.md:471-479` tables all 9 (`Idle`0/`Sentry`1/`Follow`2/`Heal`3/`Attack`4/`Shutdown`5/`NoClip`6/`Teleport`7/`None`8), matching this task. zdtd has the `drone` Kind (session spawn, owner-tagged ECD, follow tick, map marker, console verbs, teardown) but no state machine at all, so the 6-state shortcut would still strand `NoClip`/`Teleport` - the stuck-recovery path this task names. `NetPackageDroneDataSync` / `DroneParticleEffect` also remain unhandled.
+
 **Why:** `../../7dtd-engine-research/docs/entities/raycast-pathing.md` section 6b is the
 authoritative source for the drone state machine (`vehicles-drones-turrets.md`
 section 5 covers persistence/sync only, and defers the state machine itself
