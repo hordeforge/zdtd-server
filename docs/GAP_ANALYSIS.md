@@ -6381,7 +6381,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
 `SendWires` (op 2) is a visual no-op. Grounded in
 `NetPackageWireActions::read`/`ProcessPackage` (asm.il:842779, 842922, 843021).
 
-**Honest gaps (documented, not faked):**
+**Power and block-id notes (two corrected, rest are gaps):**
 - *Generator fuel*: `PowerGenerator` ramps output via
   `CurrentFuel`/`MaxFuel`/`OutputPerFuel`/`TickPowerGeneration` (asm.il:892750).
   a running generator burns its fuel and turns off when empty (`electric.zig`,
@@ -6429,7 +6429,7 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   persist by endpoint position (`persist_entities.zig`). **2026-10-05**: the
   "does not persist" note was stale. SendWires stays a client visual rebroadcast.
 - *AssignIds version skew*: the bundled `assignids_v314.txt` is V3.1.4 while the
-  target client is V3.1.0(b14). If block ids differ, registry lookup silently
+  target client is V3.2.0 b10. If block ids differ, registry lookup silently
   no-ops (blocks place normally, just not power-registered). Supply a V3.1.0 b14
   assignids dump for exact id parity. Registry also needs `blocks.xml` loaded.
 - *Power accounting*: watts feed only the existing `resolve()` demand>gen
