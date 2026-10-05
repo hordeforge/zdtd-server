@@ -685,9 +685,9 @@ pub fn nearestBotSnap(w: *const World, zx: f32, zz: f32, range_sq: f32, exact: i
 /// collapses that list into `nearestPlayerSnap`, so the revenge target is
 /// applied here instead of as a second task table. Kept from CanExecute: the
 /// attacker must still exist and must not share the victim's entity type (a
-/// zombie clawed by another zombie does not retarget). The class= filter
-/// (entityclasses AITarget-1 `class=EntityPlayer`) is not modeled: zdtd damage
-/// attribution only ever carries a player or turret attacker.
+/// zombie clawed by another zombie does not retarget). The `class=` filter
+/// (entityclasses AITarget-1) is applied below from
+/// `class_id.hurt_target_classes`.
 /// `pos` is the tick-start transform snapshot: the target's slot is owned by
 /// another parallel AI worker, so its live transform must not be read here.
 pub fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) TargetSnap {

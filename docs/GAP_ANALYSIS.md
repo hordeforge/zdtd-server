@@ -6592,8 +6592,8 @@ revenge target and `applyRevengeTarget` overrides the nearest-player pick while
 it is fresh, keeping CanExecute's "attacker is a different entity type" gate. It
 is applied as a target-selection override rather than a second task table,
 because zdtd collapses the whole AITarget list into `nearestPlayerSnap`. The
-`class=` filter is not modeled: zdtd damage attribution only ever names a player
-or a turret.
+`class=` filter is applied from `class_id.hurt_target_classes` (`sensing.zig`).
+**2026-10-05**: the note that attribution only names a player or a turret was stale.
 
 `Reset()` and a `Continue() != CanExecute()` split are both modeled, because
 Look needs them: `EAITaskList::OnUpdateTasks` calls `action.Reset()` on the same
