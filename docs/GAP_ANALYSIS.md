@@ -3835,7 +3835,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     Measured: the gated tracked-row split moves from 24 resolve / 19 refuse to
     **31 / 12** (the 7 `CVarCompare` rows resolve), 884 `CVarCompare` gates sit
     on loaded triggered rows, and 58 passive rows carry an `@cvar` value.
-    **Not sent on the wire:** stock's `MinEventActionModifyCVar` passes
+    **Min-event CVar writes stay off the wire:** stock's `MinEventActionModifyCVar`
     `_netSync = IsLocal` (IL_0163), which is false on a dedicated server because
     the owning client runs the same XML locally, so the server does not push
     min-event CVar writes. `NetPackageModifyCVar` is handled, relayed and saved
