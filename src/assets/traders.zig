@@ -41,6 +41,12 @@ pub const ItemRef = struct {
     quality_hi: i16 = -1,
     unique_only: bool = false,
     group: bool = false,
+    /// `modsToInstall` (TraderItemGroup, loot-economy.md 196): mod names or
+    /// tags rolled into the stocked ItemValue. `modChance` is the install
+    /// probability; `createDefaultModItems` halves it after every regular
+    /// install (items.md 324).
+    mods_to_install: []const []const u8 = &.{},
+    mod_chance: f32 = 0,
 };
 
 /// traders.xml `<trader_item_group>`: the refs and the group-level count
@@ -56,6 +62,10 @@ pub const Group = struct {
     /// count="all": every group item spawns each round (-1 sentinel in stock).
     count_all: bool = false,
     unique_only: bool = false,
+    /// Same `modsToInstall` / `modChance` pair as `ItemRef`; a group ref rolls
+    /// its own list (TraderItemGroup is the group record).
+    mods_to_install: []const []const u8 = &.{},
+    mod_chance: f32 = 0,
 };
 
 /// Result of a stock roll: one concrete stack to put in a trader window.
@@ -63,7 +73,20 @@ pub const RolledItem = struct {
     name: []const u8 = "",
     count: u16 = 0,
     quality: u8 = 1,
+    /// Rolled pre-installed mods (`createDefaultModItems`, items.md 324):
+    /// resolved mod item ids, in install order, already the descending-chance
+    /// survivors. Filled by the trader step, which owns the item table.
+    mods: [max_mods]u16 = .{0} ** max_mods,
+    mod_n: u8 = 0,
+    /// Unresolved names from `modsToInstall`, parallel to `mods`. The roll
+    /// cannot turn a name into an id - `TraderTable` has no item table - so it
+    /// records the names and the Game resolves them at the stock step.
+    mod_names: [max_mods][]const u8 = .{""} ** max_mods,
 };
+
+/// Stock ItemValue.Modifications holds 4 (InvSlot.mods covers the stock slot
+/// counts). Traders roll at most that many.
+pub const max_mods: usize = 4;
 
 /// `ItemClass.HasQuality` for an items.xml name. The Game backs this with the
 /// items table; null in offline tests means no item has quality, which keeps
@@ -315,7 +338,31 @@ pub const TraderTable = struct {
             const span: u32 = @intCast(q_max - q_min + 1);
             quality = @intCast(q_min + @as(i32, @intCast(rng.nextBounded(span))));
         }
-        out[n.*] = .{ .name = r.name, .count = @intCast(count), .quality = quality };
+        // `createDefaultModItems` (items.md 324): each requested mod rolls
+        // `RandomFloat <= chance`, regular installs fill the next free
+        // Modifications slot and halve the chance after each one. Names stay
+        // unresolved here - only the Game owns the item table to turn a mod
+        // name into an id, so the roll records names and the trader step
+        // resolves them exactly as it resolves `name`.
+        const mods: [max_mods]u16 = .{0} ** max_mods;
+        var mod_names: [max_mods][]const u8 = .{""} ** max_mods;
+        var mod_n: u8 = 0;
+        if (r.mods_to_install.len > 0 and r.mod_chance > 0) {
+            var chance = r.mod_chance;
+            for (r.mods_to_install) |mname| {
+                if (mod_n >= max_mods) break;
+                if (chance <= 0) break;
+                if (rngFloat(rng) <= chance) {
+                    mod_names[mod_n] = mname;
+                    mod_n += 1;
+                    // Regular mods halve the chance; the first cosmetic goes to
+                    // CosmeticMods[0] and does not, but the trader stock path
+                    // has no cosmetic slot, so treat every install as regular.
+                    chance *= 0.5;
+                }
+            }
+        }
+        out[n.*] = .{ .name = r.name, .count = @intCast(count), .quality = quality, .mods = mods, .mod_n = mod_n, .mod_names = mod_names };
         n.* += 1;
     }
 };
@@ -409,6 +456,7 @@ fn parseItemRefNamed(arena: std.mem.Allocator, body: []const u8, ii: usize, ref_
     const mm = parseMinMax(xml.attr(body, ii, "count") orelse "", 1);
     const q = parseQuality(xml.attr(body, ii, "quality") orelse "");
     const unique = xml.attr(body, ii, "unique_only") orelse "";
+    const mods = parseModList(arena, xml.attr(body, ii, "modsToInstall") orelse "");
     return .{
         .name = arena.dupe(u8, ref_name) catch return null,
         .count_min = mm[0],
@@ -418,7 +466,28 @@ fn parseItemRefNamed(arena: std.mem.Allocator, body: []const u8, ii: usize, ref_
         .quality_hi = q[1],
         .unique_only = std.mem.eql(u8, unique, "true") or std.mem.eql(u8, unique, "True"),
         .group = is_group,
+        .mods_to_install = mods,
+        .mod_chance = parseProb(xml.attr(body, ii, "modChance") orelse ""),
     };
+}
+
+/// `modsToInstall` is a comma-separated list of mod names or tags
+/// (TraderItemGroup, loot-economy.md 196). Empty when the attribute is absent.
+fn parseModList(arena: std.mem.Allocator, v: []const u8) []const []const u8 {
+    if (v.len == 0) return &.{};
+    var out: [max_mods][]const u8 = .{""} ** max_mods;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, v, ',');
+    while (it.next()) |part| {
+        const s = std.mem.trim(u8, part, " \t");
+        if (s.len == 0) continue;
+        if (n >= max_mods) break;
+        out[n] = arena.dupe(u8, s) catch return &.{};
+        n += 1;
+    }
+    const sl = arena.alloc([]const u8, n) catch return &.{};
+    @memcpy(sl, out[0..n]);
+    return sl;
 }
 
 pub fn parseRefsBody(arena: std.mem.Allocator, gpa: std.mem.Allocator, body: []const u8) ![]const ItemRef {
@@ -473,6 +542,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
             .count_max = mm[1],
             .count_all = count_all,
             .unique_only = std.mem.eql(u8, uniq, "true") or std.mem.eql(u8, uniq, "True"),
+            .mods_to_install = parseModList(arena, xml.attr(clean, gi, "modsToInstall") orelse ""),
+            .mod_chance = parseProb(xml.attr(clean, gi, "modChance") orelse ""),
         });
         i = close + 20;
     }

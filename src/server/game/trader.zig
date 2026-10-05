@@ -260,6 +260,18 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         // row).
         const iid = self.items.techSubstitute(self.ecsIdFromItemName(r.name), self.max_tech_type);
         if (iid == 0) continue;
+        // `createDefaultModItems` (items.md 324) rolls the mod names; only the
+        // item table can turn a name into an id, so the resolution happens here
+        // rather than in the pure `traders.zig` roll.
+        var mods: [4]u16 = .{0} ** 4;
+        var mod_n: u8 = 0;
+        for (r.mod_names[0..r.mod_n]) |mname| {
+            if (mod_n >= mods.len) break;
+            const mid = self.ecsIdFromItemName(mname);
+            if (mid == 0) continue;
+            mods[mod_n] = mid;
+            mod_n += 1;
+        }
         // Stock `TraderInfo::SpawnItem` IL_022F calls `AddGSStats` with stage
         // -1 (derived from the first row of the entry's quality) on every
         // stocked stack. Deterministic per trader + day + entry index, like
@@ -294,6 +306,8 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             .sell = if (econ > 0) @max(1, ecs.systems.clampDukesUnitPrice(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle * @as(f64, self.trader_sell_prices), 1)) else 1,
             .stats = srolled.stats,
             .stats_n = srolled.n,
+            .mods = mods,
+            .mod_n = mod_n,
         };
         n += 1;
     }

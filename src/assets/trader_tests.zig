@@ -197,6 +197,44 @@ test "unique_only group picks distinct refs" {
     try std.testing.expect(seen[0] and seen[1] and seen[2]);
 }
 
+test "modsToInstall rolls with the descending chance halving after each install" {
+    // createDefaultModItems (items.md 324): each requested mod rolls
+    // `RandomFloat <= chance`, regular installs fill the next free slot and
+    // halve the chance. A 1.0 chance installs every requested mod in order;
+    // the names stay unresolved here because the TraderTable has no item table.
+    const refs = [_]ItemRef{
+        .{ .name = "gunA", .quality_lo = 1, .quality_hi = 6,
+           .mods_to_install = &.{ "modScope", "modBarrel", "modStock" },
+           .mod_chance = 1.0 },
+        .{ .name = "ammoA", .count_min = 1, .count_max = 1 },
+    };
+    const quality_names = TestQualityNames{ .names = &.{"gunA"} };
+    const policy = quality_names.policy();
+    var t = TraderTable.empty();
+    var out: [16]RolledItem = undefined;
+    var rng = rng_util.XorShift32.init(7);
+    const n = t.rollAllRefs(&refs, &rng, policy, 1.0, &out);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    // Chance 1.0: at least the first mod installs, and any that follow keep
+    // the declared order (the halving chance decides how many, not which).
+    // The seed picks one here; a lower seed would install more.
+    try std.testing.expect(out[0].mod_n >= 1);
+    try std.testing.expectEqualStrings("modScope", out[0].mod_names[0]);
+    if (out[0].mod_n > 1) try std.testing.expectEqualStrings("modBarrel", out[0].mod_names[1]);
+    if (out[0].mod_n > 2) try std.testing.expectEqualStrings("modStock", out[0].mod_names[2]);
+    // An item with no modsToInstall leaves the list empty.
+    try std.testing.expectEqual(@as(u8, 0), out[1].mod_n);
+    // Chance 0: nothing installs (the attribute is present but inert).
+    const refs_zero = [_]ItemRef{
+        .{ .name = "gunA", .mods_to_install = &.{"modScope"}, .mod_chance = 0 },
+    };
+    var out2: [16]RolledItem = undefined;
+    var rng2 = rng_util.XorShift32.init(7);
+    const n2 = t.rollAllRefs(&refs_zero, &rng2, policy, 1.0, &out2);
+    try std.testing.expectEqual(@as(usize, 1), n2);
+    try std.testing.expectEqual(@as(u8, 0), out2[0].mod_n);
+}
+
 test "traderInfo fails closed on unset and out-of-range TraderIDs" {
     const infos = [_]TraderInfo{ .{ .id = 5, .rentable = true }, .{ .id = 0 } };
     const t: TraderTable = .{ .trader_infos = &infos };

@@ -1357,6 +1357,12 @@ pub const StockEntry = struct {
     /// the buy path deposits the whole value.
     stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
     stats_n: u8 = 0,
+    /// Pre-installed mod item ids (stock ItemValue.Modifications from
+    /// `createDefaultModItems`, items.md 324). Same shape as `InvSlot.mods`
+    /// so the buy path deposits the whole value. 0 = empty slot.
+    mods: [4]u16 = .{0} ** 4,
+    /// Active mod count (<= mods.len). See `InvSlot.mod_n`.
+    mod_n: u8 = 0,
 };
 
 fn defaultStock() [max_stock]StockEntry {
