@@ -51,6 +51,7 @@ pub const Class = enum {
     /// `SpawnEntity`: spawn a stock entity group near the player (the
     /// church-bell horde: SleeperGSList x4, aggressive, 10-20 m).
     spawn_entity,
+    poi_reset,
     /// `RageZombies`: alert nearby zombies and scale chase speed (bell phase 2).
     rage_zombies,
 };
@@ -139,6 +140,10 @@ fn classOf(name: []const u8) ?Class {
     if (std.mem.eql(u8, name, "AddItems")) return .add_items;
     if (std.mem.eql(u8, name, "SpawnEntity")) return .spawn_entity;
     if (std.mem.eql(u8, name, "RageZombies")) return .rage_zombies;
+    // ActionPOIReset (sequence-actions.md 173): resets the containing POI via
+    // a staged coroutine. Server leg is `Game.resetPoiBlocks`, the same call
+    // the quest-dedication path makes.
+    if (std.mem.eql(u8, name, "POIReset")) return .poi_reset;
     return null;
 }
 
@@ -150,7 +155,7 @@ fn classOf(name: []const u8) ?Class {
 pub fn isClientAction(c: Class) bool {
     return switch (c) {
         .modify_entity_stat, .modify_cvar, .add_xp_deficit, .remove_items, .add_starting_items, .add_items => true,
-        .remove_death_buffs, .add_buff, .spawn_entity, .rage_zombies => false,
+        .remove_death_buffs, .add_buff, .spawn_entity, .rage_zombies, .poi_reset => false,
     };
 }
 
@@ -337,6 +342,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                     }
                 },
                 .add_xp_deficit, .remove_items, .add_starting_items, .add_items => {},
+                // ActionPOIReset takes no attributes; the coroutine stages the
+                // block rebuild the server leg drives.
+                .poi_reset => {},
                 .modify_cvar => {
                     a.cvar = try arena.dupe(u8, xml.propertyValue(abody, "cvar") orelse "");
                     a.cvar_op = try arena.dupe(u8, xml.propertyValue(abody, "operation") orelse "");

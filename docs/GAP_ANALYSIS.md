@@ -2399,7 +2399,12 @@ one remap table.
   changed block broadcasts the authoritative SetBlock; textures/densities ride
   the world raw+tex path. Residual: stock resets only quest-tagged blocks (a
   base built inside a POI survives stock's reset); zdtd re-paints the full
-  prefab footprint, and lockout-expiry reset is not wired (only dedication).
+  prefab footprint. **2026-10-06: ActionPOIReset closed** - the game-event
+  action parses (`gameevents.zig` `classOf`) and its server leg calls
+  `resetPoiBlocks` at the player position, so a sequence can reset the POI
+  outside dedication (RE `../../7dtd-engine-research/docs/inventories/sequence-actions.md:173`,
+  `../../7dtd-engine-research/docs/admin/server-browser-prefabs.md:390`).
+  Test `POIReset parses as a server action with no attributes` pins the mapping.
   Until 2026-09-10 the reset repainted blocks without touching the stores keyed
   by world position, so a cell whose block changed kept the previous occupant's
   tile entity: a power node with no block still feeding the grid, a looted

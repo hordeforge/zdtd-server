@@ -112,6 +112,33 @@ test "gameevents respawn sequences parse into runnable actions" {
     try std.testing.expect(t.find("nope") == null);
 }
 
+test "POIReset parses as a server action with no attributes" {
+    // ActionPOIReset (sequence-actions.md 173) resets the containing POI via a
+    // staged coroutine. The server leg is `Game.resetPoiBlocks`; the action
+    // takes no attributes, so the parse is a bare class mapping.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/gameevents.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<gameevents>
+        \\  <action_sequence name="poi_reset_test">
+        \\    <property name="allow_user_trigger" value="false" />
+        \\    <action class="POIReset" />
+        \\  </action_sequence>
+        \\</gameevents>
+    );
+
+    var table = try loadFromPath(std.testing.allocator, path);
+    defer table.deinit();
+    const seq = table.find("poi_reset_test").?;
+    try std.testing.expectEqual(@as(usize, 1), seq.actions.len);
+    try std.testing.expectEqual(gameevents.Class.poi_reset, seq.actions[0].class);
+    // No attributes, so the sequence stays supported.
+    try std.testing.expect(seq.supported);
+}
+
 test "stock gameevents.xml respawn family parses when present" {
     const p = stock_paths.configFile("gameevents.xml");
     if (!io_fs.fileExists(p)) return error.SkipZigTest;

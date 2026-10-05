@@ -101,6 +101,14 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
             },
             .spawn_entity => spawnEventGroup(self, ps, a),
             .rage_zombies => rageNearbyZombies(self, ps, a),
+            // ActionPOIReset (sequence-actions.md 173): reset the POI the
+            // player is inside, the same call the quest-dedication path makes.
+            // The coroutine staged nothing visible on the dedi; the block
+            // rebuild is the whole server leg.
+            .poi_reset => {
+                const t2 = &self.sim.transform[ps];
+                self.resetPoiBlocks(@trunc(t2.x), @trunc(t2.z));
+            },
             // Item actions and AddXPDeficit have no server-side work; the
             // response above is the whole server leg.
             .remove_items, .add_starting_items, .add_items, .add_xp_deficit => {},
