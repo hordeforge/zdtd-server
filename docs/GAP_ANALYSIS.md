@@ -7137,8 +7137,9 @@ is on main and gated; what follows "Open:" is the honest remainder.
    gate is block-derived (non-burning workbench / cement mixer advance,
    2026-08-08); no live-client playtest of the forge UI. Since 2026-09-10 the
    station's current state also rides the chunk stream: it persists and is
-   rebroadcast on change, but a joining client was never sent the state it
-   walked into, so a burning forge read as idle until its next change. The
+   rebroadcast on change. **2026-10-05**: the "a joining client was never sent
+   the state" note was stale - `chunk_stream.zig` sends the workstation TE with
+   its chunk, so a burning forge no longer reads as idle on join. The
    geometry gate still applies, so a station whose real array lengths are
    unknown stays unsent rather than resizing the client's grids.
 
