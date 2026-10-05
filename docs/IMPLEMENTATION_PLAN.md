@@ -88,7 +88,7 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 - Optional: semi-auto “client alive N seconds” probe if available.  
 
 ### Acceptance
-- [ ] Stock client reaches “in world” without disconnect.  
+- [x] Stock client reaches “in world” without disconnect. (STATUS: live gate 23/23, PASS 2026-08-06.)  
 - [ ] Terrain visible or at least non-void; player not permanently falling.  
 - [ ] Existing loadgen join scenarios still green (compat flag OK).  
 
@@ -198,9 +198,9 @@ Holding: item_id / slot index
 - Not blocking if custom disk + stock wire works.  
 
 ### Acceptance
-- [ ] Dig/build → restart → same blocks.  
-- [ ] Inventory and position restore.  
-- [ ] Corruption-safe save (kill -9 mid-write → previous good).  
+- [x] Dig/build → restart → same blocks. (ZCH3 `.zch` full column save.)  
+- [x] Inventory and position restore. (ZPV18 player save; `persist_players_tests.zig` round-trip.)  
+- [x] Corruption-safe save (kill -9 mid-write → previous good). (Atomic temp+rename on every store; the ledger scores it WORKS.)  
 
 ---
 
