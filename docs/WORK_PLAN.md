@@ -452,6 +452,7 @@ evaluator, not a rewrite.
 
 ## T26. `resolveEffect`'s progression and buffs layers, upgrade the A34 floor
 
+**Status: landed 2026-10-06 (layers landed as the named folds, not a single `resolveEffect`).** The Done-when is met by `scenarios.zig:4752-4785`: with `trap_kill_xp_frac` forced to 0 and `perkAdvancedEngineering` granted at level 3 on the stock `.45` curve, the turret kill still credits XP - "the real perk fold wins over the floor". The floor itself is `rules.progression.kill_xp_fallback` (`player.zig:181`), unchanged from A34. The aggregation lives in the folds T26 named as the model (`buffs.passiveValue`, `namedPassiveFold`, `effectTotals`) rather than a new `resolveEffect` signature; the item/equipment layer that T28 depends on is filled via `armor_pdr_fn` (`inventory.zig:158`).
 **Why:** ADR 0023 decision 3, refined by [ADR 0024](adr/0024-passive-effect-stack-layers.md):
 A34 fixed one kill-XP call site with a flat `Rules` floor because no
 per-player resolver existed. Stock's own `EffectManager.GetValue` computes
