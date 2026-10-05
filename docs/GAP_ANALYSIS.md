@@ -5212,11 +5212,10 @@ a finer server encoding.
 
 ## 12. Net and ops
 
-**Headline.** A player can join and play today over direct IP with a correct
-191-name package map and a working reliable/fragmented LiteNet channel, but the
-server is invisible to every server browser, drops the block id mapping on every
-single join, silently ignores 32 packages the stock client actually sends, and
-persists so little that a restart visibly damages a built base.
+**Headline.** A player joins over direct IP with the 191-name package map,
+the block and item id mappings, and chunk persistence. **2026-10-05**: the
+"drops the mapping, ignores 32 packages, persists nothing" note was the
+pre-fix audit. Still open: no Steam or EOS server-browser registration.
 
 **48 WORKS · 0 PARTIAL · 0 MISSING**
 
