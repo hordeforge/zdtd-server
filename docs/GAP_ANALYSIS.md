@@ -6948,7 +6948,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Atomic save / backup rotation | WORKS (temp+rename on stores; `scripts/backup-world.sh` rotates dated copies; wipe deletes leftover `players.zsv.bak`) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | WORKS (platform identity per ZPV15; stock `PrimaryId.CombinedString`, asm.il 1884842. A legacy name-only row is matched once by name and re-keyed on save) |
-| Ally relationships | PARTIAL (`src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
+| Ally relationships | WORKS (2026-10-05 re-audit: `src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
 | World clock | HAVE (`clock.zcl` ZCL1) |
 | Weather storm SM | HAVE (`weather.zwt` ZWTH1) |
 
