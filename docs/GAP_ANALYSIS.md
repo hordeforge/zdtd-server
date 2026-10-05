@@ -1496,7 +1496,9 @@ parsed, and quest offering is unwired.
   calls `maybeRestockTrader` - when the trader_info ResetInterval elapsed it
   re-runs the seeded roll (fresh counts/qualities), advances the restock day
   and regenerates the money pool (stock HandleFullReset, loot-economy.md §3).
-  Still open: the `TraderMaxTier` clamp and mods/modChance.
+  The `TraderMaxTier` clamp landed (`traders.zig`, test "TraderMaxTier clamps
+  the roll and gates the spawn"). **2026-10-05**: the clamp half of this note
+  was stale. Still open: mods/modChance.
   *Anchors:* `src/assets/traders.zig` rollAllRefs/spawnLootItemsFromList,
   `src/server/game/trader.zig` rollStockRefs / maybeRestockTrader,
   `asm.il:862758-863520`
