@@ -7239,7 +7239,8 @@ Implemented (`src/world/sleepers.zig`, `Game.tickSleeperVolumes`):
   groups (`GroupGenericZombie`, `S_-Group_Generic_Zombie`) that entitygroups.xml
   does not contain.
 
-Honest gaps (no data path in zdtd, not faked):
+Honest gaps (verified 2026-10-05; the first bullet is a data gap, the next
+three record stale notes that used to read as gaps, and the last two are not modelled):
 - Per-volume gamestage adjust byte (zdtd's .tts/.nim reader does not carry it),
   and `maxAlive` is a per-burst cap rather than a live per-player population cap.
 - Sleeper respawn is `rearmIfExpired` (`sleeper.zig`). **2026-10-05**: the
