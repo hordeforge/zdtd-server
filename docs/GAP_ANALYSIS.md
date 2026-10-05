@@ -6366,7 +6366,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Wired powered state (BFS flood from generators) | HAVE |
 | `NetPackageWireToolActions` (visual handshake) | WORKS (2026-08-26 re-audit: peer rebroadcast IS the stock behavior - ProcessPackage IL=254 has zero power-graph mutation (pure re-Setup + SendPackage to peers); the graph edits ride NetPackageWireActions, which the server applies via applyWireActionsStock (SetParent/RemoveParent) + rebroadcast) |
 | Powered door / light / trap blocks | PARTIAL (registered as consumers; powered DOOR actuation SHIPPED 2026-08-26 - a consumer door opens while its circuit delivers power and closes when the power drops (load shed/fuel out/switch off), the open meta bit + SetBlock broadcast reused from the zombie door-open path, driven by the per-node net_powered flip (RE tile-entities-power.md PowerConsumer.HandlePowerUpdate → Block.ActivateBlock isPowered); light on/off and trap firing stay recorded) |
-| Battery charge state | P2 |
+| Battery charge state | HAVE (charge on surplus, discharge on shortfall; `electric.zig`, test "battery charges on surplus and discharges on shortfall") |
 
 **Landed (Electrical block placement parity):** when a player `SetBlock`s a
 stock electrical block (`generatorbank`, `solarbank`, `batterybank`,
