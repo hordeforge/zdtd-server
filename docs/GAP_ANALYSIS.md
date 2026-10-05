@@ -4988,8 +4988,8 @@ a finer server encoding.
   flow sim: it is the client-originated water *edit* (jar fill and empty, the
   water-cube tool), and stock's `ProcessPackage` relays it to every other peer
   and then applies it (`NetPackageWaterSet.il.txt:163`). **2026-10-05**: the
-  "dropped as unhandled" sentence described the pre-fix bug. The handler below
-  is the current path. The handler validates sender ownership, edit reach and land claims,
+  "dropped as unhandled" sentence described the pre-fix bug.
+  The handler validates sender ownership, edit reach and land claims,
   applies each accepted cell through the normal block path, and relays only
   the accepted set. Body: `senderEntityId` i32 | `changes.Count` u16 |
   (`Vector3i` + `WaterValue` u16 mass) per entry, `Full` = 19500
