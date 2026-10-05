@@ -953,11 +953,14 @@ Recorded because they are easy to mistake for one:
 
 - **Clean-room internals.** SoA ECS, serialize-once interest, the plugin host:
   all deliberate design (AGENTS rule 8), not behavioural divergence.
-- **Unimplemented EAI tasks** (Dodge, Leap, RangedAttackTarget). These are
-  blocked on missing subsystems (client animator state, MoveHelper physics, item
-  actions) and are tracked as gaps in [GAP_ANALYSIS](GAP_ANALYSIS.md), not as
-  decisions to behave differently. Per-class XML lists now omit them rather
-  than mapping them onto ApproachAndAttackTarget.
+- **Unimplemented EAI task** (Dodge). **2026-10-06: Leap and
+  RangedAttackTarget shipped** - `ai_tasks.zig` `leapCanExecute` and the
+  vomit projectile, and `ranged_attack_target` with the projectile body.
+  Dodge stays blocked on client animator state (`avatarController
+  .IsAnimationToDodge`), which the server does not have. It is tracked as a
+  gap in [GAP_ANALYSIS](GAP_ANALYSIS.md), not as a decision to behave
+  differently. Per-class XML lists still omit Dodge rather than mapping it
+  onto ApproachAndAttackTarget.
 - **`NetPackagePlayerId` carries a populated player file, stock's carries an
   empty one.** Stock's `GameManager.RequestToSpawnPlayer` builds a fresh
   `PlayerDataFile` (`GameManager.il.txt:4371`), `Load` returns early when no
