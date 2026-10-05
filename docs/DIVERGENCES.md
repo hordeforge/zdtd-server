@@ -173,7 +173,7 @@ identity on the next save, and is identity-only after that
 (`persist.zig:459` `matchesClient`). **Residual:** a row that has never been re-saved
 since the upgrade is still name-matchable for exactly one join.
 
-## 1a2. Two relays still forward the raw client body
+## 1a2. Relay body lengths are parsed before forwarding (2026-09-09)
 
 Most cosmetic relays now parse the body and forward `body[0..wire_len]`, so a
 peer cannot append bytes and have the server fan them out
