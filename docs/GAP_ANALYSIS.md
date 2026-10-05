@@ -310,12 +310,9 @@ area and the concrete work.
    asm.il:928850).
 
 4. **DONE 2026-08-06.** POIs: rotation direction and `YOffset`.
-   zdtd rotates +90*r where stock rotates -90*r, so rotations 1 and 3 are swapped
-   for 709 of 1559 decorations (`src/world/tts.zig:310` vs
-   `Prefab::offsetToCoordRotated` asm.il:915424). Separately, `paintDecoration`
-   never reads the prefab `YOffset`, so 679 of 1487 POIs sit too high and every
-   cave, mine, quarry and bunker is stamped at the surface
-   (`src/world/prefabs.zig:224`, stock at asm.il:902414).
+   Rotation is stock clockwise (`tts.zig` `rotateLocalXZ`) and `stampY` adds
+   the prefab `YOffset` (`prefabs.zig`, test "parse YOffset property from prefab xml").
+   **2026-10-05**: the body still described the pre-fix bug. Caves stamp below the surface.
 
 5. **DONE 2026-08-06.** Loot: make containers and bags roll the right table.
    (a) `maxdamage` now carries each block's `blocks.xml` `LootList` (resolved
