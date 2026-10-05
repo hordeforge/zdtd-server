@@ -7203,8 +7203,10 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
   `LootWanderingBonusScale`)~~ **SHIPPED**: parsed into `Config`, pushed into
   the director via `pushBloodMoonBonus` / `step.zig` wander refresh (stock
   `12,25` remains only as a pre-ladder fallback when XML cadence is unset).
-- Cross-session persistence of days survived: `game_stage_born_world_time` is
-  per-session Client state, so the streak restarts on reconnect.
+- ~~Cross-session persistence of days survived~~ **SHIPPED**:
+  `game_stage_born_world_time` rides the PlayerId PDF and the `players.zsv` tail
+  (`persist_players.zig`), so the streak survives a relog. **2026-10-05**: the
+  "per-session" note was stale.
 - Party grouping ignores stock's same-`PrefabInstance` requirement (zdtd has no
   per-player POI tracking); distance alone decides.
 
