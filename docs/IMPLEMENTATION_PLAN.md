@@ -296,11 +296,11 @@ Chunk stream: named caps shipped; async workers still open.
 
 ### Work packages
 
-#### M13.1 Stock quest wire packages
-- **PARTIAL (2026-07):** Quest.Write + NPCQuestList FetchList + SharedQuest +
-  stock TraderData v2 (`stock_quest.zig`). Phases/rally still shallow.
-
-#### M13.2 Objective runners
+#### M13.1 Stock quest wire packages **[shipped 2026-08-21]**
+- `stock_quest.zig` matches QuestJournal.Write v5 + Quest.Write (FileVersion 8) +
+  NPCQuestList FetchList + SharedQuest - the journal body is stock-shaped, not zdtd-native.
+  The 2026-07 "Phases/rally still shallow" note is stale: the phase graph and rally
+  markers are WORKS in the ledger (see M13.2 for the objective-runners side).
 - Per-kind systems: ClearSleepers (volume empty), FetchFromContainer, Goto POI, ReturnToNPC.  
 - Keep Catalog from quests.xml; stop collapsing all phases.  
 
