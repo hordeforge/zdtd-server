@@ -175,7 +175,7 @@ and the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x11 open)
+Twenty-seven feature bullets use ad-hoc status labels (`PARTIAL (waived)` x11 open)
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
