@@ -475,6 +475,17 @@ pub fn questOnTraderOpenFrom(w: *World, peer_slot: usize, trader_net_id: i32) vo
     }
 }
 
+/// Does this take satisfy a fetch objective? A named target
+/// (ObjectiveBaseFetch.itemName, the quests.xml objective `id`) counts only
+/// when the taken item resolves to that name. An empty name counts any item.
+/// A named target whose name the catalog cannot resolve counts nothing: a
+/// wrong item must not advance the objective.
+fn fetchItemMatches(w: *World, want: []const u8, item_id: u16) bool {
+    if (want.len == 0) return true;
+    const f = w.quest_item_fn orelse return false;
+    return f(w.quest_item_ctx, want) == item_id and item_id != 0;
+}
+
 /// Fetch advance for a *container* at a world position. Stock binds the fetch
 /// container to the quest at setup (`ObjectiveBaseFetchContainer` /
 /// `HandleContainerPositions`), so looting an unrelated container must not
@@ -491,6 +502,13 @@ pub fn pointInPoi(poi: c.PoiRect, x: f32, z: f32) bool {
 }
 
 pub fn questOnFetchItemAt(w: *World, peer_slot: usize, x: f32, z: f32) void {
+    questOnFetchItemFrom(w, peer_slot, 0, x, z);
+}
+
+/// Fetch advance for a specific item taken from a container at (x, z).
+/// `item_id` 0 means the caller does not know the item (the container-open
+/// path): a named objective then does not advance, an unnamed one does.
+pub fn questOnFetchItemFrom(w: *World, peer_slot: usize, item_id: u16, x: f32, z: f32) void {
     const ps = w.playerByPeer(peer_slot) orelse return;
     if (!w.mask[ps].journal) return;
     var j = &w.journal[ps];
@@ -499,6 +517,7 @@ pub fn questOnFetchItemAt(w: *World, peer_slot: usize, x: f32, z: f32) void {
         const d = w.catalog.byId(s.def_id) orelse continue;
         if (d.phases.len == 0 and d.kind != .fetch_item) continue;
         if (s.poi.valid() and !pointInPoi(s.poi, x, z)) continue;
+        if (!fetchPhaseMatches(w, s, d, item_id)) continue;
         if (d.phases.len > 0) {
             bumpPhase(w, ps, s, d, .fetch_item, 1);
             continue;
@@ -506,6 +525,19 @@ pub fn questOnFetchItemAt(w: *World, peer_slot: usize, x: f32, z: f32) void {
         s.progress +|= 1;
         markProgress(w, ps, s, d);
     }
+}
+
+/// The current phase has a fetch objective, and the taken item satisfies it.
+fn fetchPhaseMatches(w: *World, s: *const c.QuestProgress, d: quest.QuestDef, item_id: u16) bool {
+    if (d.objectives.len == 0) return true;
+    var saw = false;
+    for (d.objectives) |o| {
+        if (o.kind != .fetch_item) continue;
+        if (o.phase != s.phase and o.phase != 0) continue;
+        saw = true;
+        if (fetchItemMatches(w, o.item_name, item_id)) return true;
+    }
+    return !saw;
 }
 
 pub fn questOnFetchItem(w: *World, peer_slot: usize, count: u16) void {
@@ -2281,6 +2313,50 @@ test "completed starter quest is not granted again on the next login" {
     // A fresh player on a different peer still gets the starter.
     _ = w.spawnPlayer(0, 70, 5, 1);
     try std.testing.expect(questAcceptStarter(&w, 1));
+}
+
+test "a named fetch objective counts only its own item" {
+    // ObjectiveBaseFetch.itemName (quests.xml objective `id`): taking the
+    // wrong item must not advance the phase, and the right item must.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].journal = true;
+
+    const fetch_phase = [_]quest.PhaseSpec{.{ .kind = .fetch_item, .required = 1 }};
+    const fetch_obj = [_]quest.FlatObjective{.{
+        .phase = 1,
+        .kind = .fetch_item,
+        .required = 1,
+        .item_name = "foodCanChili",
+    }};
+    const def = quest.QuestDef{
+        .id = 9,
+        .kind = .fetch_item,
+        .title = "fetch",
+        .target_count = 1,
+        .phases = &fetch_phase,
+        .objectives = &fetch_obj,
+    };
+    w.catalog.defs = &.{def};
+
+    const Hook = struct {
+        fn item(_: ?*anyopaque, name: []const u8) u16 {
+            if (std.mem.eql(u8, name, "foodCanChili")) return 42;
+            return 0;
+        }
+    };
+    w.quest_item_fn = &Hook.item;
+
+    const q = w.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{ .def_id = 9, .quest_code = 3, .active = true, .phase = 1 };
+
+    questOnFetchItemFrom(&w, 0, 7, 0, 0);
+    try std.testing.expectEqual(@as(u16, 0), q.obj_progress[0]);
+
+    questOnFetchItemFrom(&w, 0, 42, 0, 0);
+    try std.testing.expect(q.obj_progress[0] > 0 or q.ready_turn_in or q.completed);
 }
 
 test "the POI containment gate answers inside and outside" {

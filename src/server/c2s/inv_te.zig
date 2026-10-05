@@ -185,6 +185,18 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                 cont.size_x = @intCast(parsed.size_x);
                 cont.size_y = @intCast(parsed.size_y);
             }
+            // Items the player took out of this container: the snapshot before
+            // the write minus the snapshot after it. A fetch objective counts
+            // the removed item, not the container being opened.
+            var before: [containers_mod.max_container_slots]u16 = undefined;
+            var before_n: [containers_mod.max_container_slots]u16 = undefined;
+            var bn: usize = 0;
+            for (cont.slots[0..cont.slot_count]) |sl| {
+                if (sl.item_id == 0 or sl.count == 0 or bn >= before.len) continue;
+                before[bn] = sl.item_id;
+                before_n[bn] = sl.count;
+                bn += 1;
+            }
             inv_apply.applyParsedToContainer(&parsed, cont, reverseItemType, self);
             self.clampStackSlots(cont.slots[0..cont.slot_count]);
             // TEFeatureLockable: the client's padlock change becomes server
@@ -204,11 +216,25 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             }
             // A player looting a container is the server-side trigger for
             // FetchFromContainer quests (stock's quest object observes the
-            // container TE); advance fetch phases so they can reach turn-in.
-            // Position-scoped: a fetch objective binds its container to the
-            // quest's POI, so looting an unrelated container elsewhere must not
-            // advance it (stock's ObjectiveBaseFetchContainer setup).
-            systems.questOnFetchItemAt(&self.sim, c.slot, @floatFromInt(parsed.world_x), @floatFromInt(parsed.world_z));
+            // container TE). Count only items whose count fell, and only when
+            // the container sits inside the quest's POI.
+            var taken_ids: [containers_mod.max_container_slots]u16 = undefined;
+            var tn: usize = 0;
+            for (before[0..bn], before_n[0..bn]) |id, cnt| {
+                var left: u16 = 0;
+                for (cont.slots[0..cont.slot_count]) |sl| {
+                    if (sl.item_id == id) left +|= sl.count;
+                }
+                if (left < cnt and tn < taken_ids.len) {
+                    taken_ids[tn] = id;
+                    tn += 1;
+                }
+            }
+            const fx: f32 = @floatFromInt(parsed.world_x);
+            const fz: f32 = @floatFromInt(parsed.world_z);
+            for (taken_ids[0..tn]) |id| {
+                systems.questOnFetchItemFrom(&self.sim, c.slot, id, fx, fz);
+            }
             // Echo stock TE to nearby clients. Stock applies the client's whole
             // composite to its own TE and resends it, so when the received body
             // carries more than the storage module (a writable crate's sign text

@@ -1130,6 +1130,10 @@ pub const Game = struct {
         self.sim.quest_clear_fn = &game_hooks.questClearSleepers;
         self.sim.quest_sleeper_count_ctx = self;
         self.sim.quest_sleeper_count_fn = &game_hooks.questSleeperCount;
+        self.sim.quest_item_ctx = self;
+        self.sim.quest_item_fn = &game_hooks.questItemId;
+        self.sim.quest_fetch_ctx = self;
+        self.sim.quest_fetch_fn = &game_hooks.questOnContainerTake;
         // QuestActionSpawnGSEnemy spawns gamestage-scaled enemies on phase
         // entry (stock SpawnQuestEntity placement).
         self.sim.quest_spawn_ctx = self;

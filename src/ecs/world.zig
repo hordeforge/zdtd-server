@@ -879,6 +879,17 @@ pub const World = struct {
     /// the def's required count (audit B25).
     quest_sleeper_count_ctx: ?*anyopaque = null,
     quest_sleeper_count_fn: ?*const fn (?*anyopaque, c.PoiRect) u16 = null,
+    /// Fetch objective item name -> item id (quests.xml objective `id`,
+    /// ObjectiveBaseFetch.itemName). The Game resolves against items.xml;
+    /// unset or 0 = the item is not in the catalog, so the objective does not
+    /// advance on it (fail closed rather than count any item).
+    quest_item_ctx: ?*anyopaque = null,
+    quest_item_fn: ?*const fn (?*anyopaque, []const u8) u16 = null,
+    /// A container take happened (item id + container position). The Game
+    /// routes it to questOnFetchItemFrom; unset = no fetch tracking (test
+    /// worlds that drive the quest path directly).
+    quest_fetch_ctx: ?*anyopaque = null,
+    quest_fetch_fn: ?*const fn (?*anyopaque, peer: usize, item_id: u16, x: f32, z: f32) void = null,
     /// QuestActionSpawnGSEnemy: the Game spawns `count` gamestage-scaled
     /// enemies around the player on phase entry (stock SpawnQuestEntity:
     /// player position + random direction × (12 + rand*12) metres). Unset =

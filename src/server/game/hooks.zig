@@ -606,6 +606,21 @@ pub fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
 /// population. Stock counts the volume spawns at quest start; sum the
 /// authored group population of every volume whose AABB intersects the quest
 /// rect (falls back to the def required when the hook returns 0).
+/// Fetch objective target (ObjectiveBaseFetch.itemName): the quests.xml
+/// objective `id` resolved through items.xml. 0 = the name is not in the
+/// catalog, so the objective never counts that take.
+/// Container take -> fetch objective (ObjectiveBaseFetch counts the item
+/// removed from the bound container, not the container being opened).
+pub fn questOnContainerTake(ctx: ?*anyopaque, peer: usize, item_id: u16, x: f32, z: f32) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    ecs.systems.questOnFetchItemFrom(&g.sim, peer, item_id, x, z);
+}
+
+pub fn questItemId(ctx: ?*anyopaque, name: []const u8) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return (g.items.byName(name) orelse return 0).id;
+}
+
 pub fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const r0x = rect.x;

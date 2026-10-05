@@ -487,6 +487,13 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16, out_e
     }
     const d: i16 = @intCast(@min(taken.count, std.math.maxInt(i16)));
     recordInv(w, peer, taken.item_id, d, .loot);
+    // A take is the fetch trigger: the objective counts this item only when
+    // it is the one the quest names (ObjectiveBaseFetch.itemName). The bag
+    // has no POI, so the position gate stays permissive.
+    if (w.quest_fetch_fn) |f| {
+        const t = if (w.mask[cs].transform) w.transform[cs] else c.Transform{};
+        f(w.quest_fetch_ctx, peer, taken.item_id, t.x, t.z);
+    }
     return true;
 }
 

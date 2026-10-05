@@ -374,6 +374,9 @@ pub const FlatObjective = struct {
     /// ClearSleepers objectives gate kills to the bound POI (stock
     /// ObjectiveClearSleepers counts the volume spawns as the target).
     poi_gated: bool = false,
+    /// Fetch objective's required item name (quests.xml objective `id`,
+    /// ObjectiveBaseFetch.itemName). Empty = any item counts.
+    item_name: []const u8 = "",
 };
 
 /// Objective Write subclass (Quest.Write CreateQuest). Stock has exactly four
