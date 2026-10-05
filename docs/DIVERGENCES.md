@@ -222,6 +222,15 @@ whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
   `_allButAttachedToEntityId = entityId`, so stock excludes the *named*
   entity's client while zdtd excluded the *sender's*. Those agree only when
   the id is the sender's own, which the gate now requires.
+- **Party quests share on accept.** Stock shares when the player shares,
+  gated by the client's `AutoShare` flag (`PartyQuests.ShareQuestWithParty`,
+  quests-challenges.md:832). zdtd calls `shareQuestWithParty` from both accept
+  paths (`social.zig` `acceptQuestFor` and `acceptQuestForFrom`) and from the
+  join bundle for the starter quest, so every accepted quest is shared with the
+  party whether or not the player asked. Cost: a party member receives a quest
+  the owner did not choose to share. Fix when the client `AutoShare` flag is
+  read off the profile.
+
 - **`NetPackageSharedQuest` share, unreachable target.** zdtd fell back to a
   full broadcast when no peer held `sharedWithEntityID`.
   `GameManager.QuestShareServer` (IL=37) sends with
