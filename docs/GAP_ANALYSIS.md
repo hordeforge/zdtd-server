@@ -7276,6 +7276,10 @@ IL class/method they came from.
   banks, no custom assets). `ProcessPackage` fires only if
   `(localPos - m_pos).sqrMagnitude <= m_maxDist^2`.
 
+- **`NetPackageBloodmoonMusic` is per party.** `playerBloodMoonMusic` decides
+  each client and the tick sends that edge (`step.zig`). The scenario
+  "blood-moon music is per-party, not global" pins it. **2026-10-05**: the
+  global-bool note was stale.
 ### Honest gaps
 
 - **`NetPackageHordeEvent` has no stock server sender (vestigial).** All 26 IL
@@ -7295,10 +7299,6 @@ IL class/method they came from.
   `GameEventManager` boss-group system (senders at IL 582104-584753, all inside
   `GameEventManager`), keyed on `BossEventTypes`. Out of scope; hooking it to the
   blood-moon edge would fabricate boss groups with no backing sim. Not wired.
-- **`NetPackageBloodmoonMusic` is per party.** `playerBloodMoonMusic` decides
-  each client and the tick sends that edge (`step.zig`). The scenario
-  "blood-moon music is per-party, not global" pins it. **2026-10-05**: the
-  global-bool note was stale.
 
 ### Vehicle physics (terrain-follow + collision)
 
