@@ -6674,7 +6674,7 @@ Honest gaps:
   same rate law, different integration. `MaxTurnSpeed` is pinned to the
   zombieTemplateMale value 250 deg/s because `World.EntityClass` carries no
   per-class turn speed; stock values span 100-420 across classes.
-- **No data-driven per-class task graphs.** Stock builds the list from
+- **Task priorities stay in the comptime table.** The class list is data-driven (below). Stock builds the list from
   `entityclasses.xml` `AITask-N`/`AITarget-N` strings via
   `EAIManager::ParseTasks`/`CreateInstance` (asm.il:430620), and
   `EAITaskList::AddTask` (asm.il:430495) uses the 1-based list index as the
