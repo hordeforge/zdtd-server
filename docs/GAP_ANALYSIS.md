@@ -7133,12 +7133,12 @@ is on main and gated; what follows "Open:" is the honest remainder.
    (2026-08-09): a census of the shipped quests.xml (16 objective types, 119
    objectives) shows every type is classified to an executing phase kind,
    POIStayWithin now uses the bound POI rect as its zone, and template
-    quests.xml: 262 defs, starter + tier quests resolve). Open: SetCVar and
-    ShowMessageWindow stay client-side. SpawnGSEnemy fires through `quest_spawn_fn`.
-    **2026-10-05**: the note that every kind beyond UnlockPOI is not fired was stale.
-    A MOD quest with an unclassified
-   are client-side by stock design), and a MOD quest with an unclassified
-   objective type still auto-completes (see GAP_ANALYSIS section 4).
+    inheritance is resolved by the two-pass T6 merge (tests load the real
+    quests.xml: 262 defs, starter + tier quests resolve). SpawnGSEnemy fires
+    through `quest_spawn_fn`. SetCVar and ShowMessageWindow stay client-side.
+    **2026-10-05**: the note that every kind beyond UnlockPOI is not fired was
+    stale. A MOD quest with an unclassified objective type still auto-completes
+    (see GAP_ANALYSIS section 4).
 5. **Power trigger TE wire** SHIPPED: Switch meta gate on SetBlock, delay and
    duration from ClientTriggerData, edge-triggered meta broadcast of grid state.
    Open: TimerRelay hour semantics, Motion TargetTypes filtering, and a
