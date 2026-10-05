@@ -4572,7 +4572,7 @@ table size up front, `ZENT` relies on every field read returning `Truncated`, an
 
 | Format | What the loader guards, and how |
 |---|---|
-| `ZENT` (entities) | **Had a real bug, now fixed**: the type-1 record cast a raw disk byte to the exhaustive `VehicleKind`, so a corrupt file panicked on load. Type 2 assigns bounded scalars; type 3's `edges` count is a `u16` but `addPendingWire` caps at `max_wires` and dedupes; every field read is a bounds-checked `Reader` call. |
+| `ZEN2` (entities; `ZENT` still loads) | **Had a real bug, now fixed**: the type-1 record cast a raw disk byte to the exhaustive `VehicleKind`, so a corrupt file panicked on load. Type 2 assigns bounded scalars; type 3's `edges` count is a `u16` but `addPendingWire` caps at `max_wires` and dedupes; every field read is a bounds-checked `Reader` call. |
 | `ZCLC` (claims) | Fixed 49-byte stride pre-checked against the buffer, `name_len` rejected above 32 before the `@memcpy`, loop bounded by `max_land_claims`. |
 | `ZBM2` (block meta) | Total size pre-validated (`rn * 12`), write index clamped to the array, and the loop deliberately walks the full on-disk count so a clamped record cannot desync the tail - with that reasoning already commented at the site. |
 | `ZCL2` (clock) | Fixed offsets, each guarded by an explicit length check before the read; no counts, no variable-length fields, no enum casts. |
@@ -5982,7 +5982,7 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   *Anchors:* `src/server/persist.zig:517-580`
 
 - **Vehicle, turret, power and quest-NPC persistence** `WORKS` `(2026-08-22)`
-  Spawned vehicles and turrets now survive restart via `entities.zen` (ZENT1,
+  Spawned vehicles and turrets now survive restart via `entities.zen` (ZEN2, the writer; the reader also accepts the legacy ZENT,
   zdtd-owned like claims.zlc): `saveEntities` writes kind/position/yaw/fuel/
   seats for vehicles and position/range/damage/ammo for turrets on the periodic
   and shutdown saves; `loadEntities` restores them at init, re-deriving turret
