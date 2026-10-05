@@ -5533,8 +5533,9 @@ persists so little that a restart visibly damages a built base.
   Every emitted package from stock's `get_Compress()=true` set is deflated:
   Chunk, ConfigFile, IdMapping, SignDataResponse, and (3.2.0)
   POIMetadataResponse - the POIAround replacement, itself removed in 3.2.0
-  (DynamicClientArrive, DynamicMesh, MapChunks are not yet emitted - see the
-  S2C coverage row). IdMapping + ConfigFile now ride the DeflateFramer (raw
+  (MapChunks is sent and compressed, `game/map.zig`. DynamicClientArrive and
+  DynamicMesh stay unemitted: stock returns unless dynamic-mesh content is
+  enabled. **2026-10-05**: the note that MapChunks is not emitted was stale). IdMapping + ConfigFile now ride the DeflateFramer (raw
   DEFLATE, compressed envelope flag) like Chunk, cutting the join cost (one
   flat-world join was 6.4 MB out with an uncompressed 250 KiB mapping through
   a shared reliable window) and relieving the window saturation the
