@@ -4717,7 +4717,10 @@ a finer server encoding.
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
   `.join_deco`, `.save_io`), the three-client Pregen06k01 bench, the 62-join
   `join_fail=0` cycle, the ReleaseFast 36-join cycle, and the scenario "join
-  spawn area paces through the stream budget".
+  spawn area paces through the stream budget". **2026-10-06: the loadgen re-run
+  is harness-blocked here** (`7dtd-loadgen --self-test-join` passes, but the
+  loadgen binds a random 127.x.x.x loopback alias and reaches no server), so
+  the 2026-09-28 numbers stay the measurement of record.
 
 - **Chunk pointer stability across re-entrant store access** `WORKS` `(2026-08-30)`
   The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)
