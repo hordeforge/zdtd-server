@@ -5333,9 +5333,10 @@ persists so little that a restart visibly damages a built base.
   `SetProp` is a world prop change (`Block.PlaceProp` IL=87 to
   `WorldBase.SetPropRPC`, sitting beside `SetBlockRPC`), sender-validated by
   user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`.
-  UPDATED 2026-10-02: `wire/stock_props.zig` now carries the body contract
-  (parse + build, `PropChangeInfo.Write` IL_0000-0136 pinned), so what is missing
-  is the prop store, the apply and the relay, not the shape. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
+  The handler stores the tuple per chunk and prop id and relays the body
+  (`c2s/blocks_props.zig`). **2026-10-05**: the "store, apply and relay missing"
+  note was stale. Residual: a late joiner does not get props placed before it
+  arrived, and the store is not persisted. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described. All
