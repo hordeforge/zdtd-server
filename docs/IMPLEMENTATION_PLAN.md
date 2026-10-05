@@ -210,7 +210,12 @@ Holding: item_id / slot index
 
 ### Work packages
 
-#### M11.1 Spatial hash interest
+#### M11.1 Spatial hash interest **[partial 2026-10-06]**
+The grid half ships: `interest.zig` `cellOf`/`cellsInRange` and the per-type
+`observerMask` / `observerMaskBlocks` word mask. **Still open:** the per-client
+entity-id set keyed on cell and the rebuild-on-cell-change only pass - there is
+no cell-to-entity index, so `observerMaskBlocks` still tests every entity
+against every observer in range (the ledger residual "no cell-to-entity hash").
 - Grid cell = chunk or 16–32 m.  
 - Per-client set of entity ids in radius (view dim).  
 - Rebuild on cell change only.  
