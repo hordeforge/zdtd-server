@@ -754,7 +754,7 @@ blockers; ClearSleepers is a real volume clear (questClearSleepers ->
 markClearedRect, persisted in sleepers_cleared.zsc, so a cleared POI never
 re-arms) with the population count as the quest target.
 
-**34 WORKS · 0 PARTIAL · 0 MISSING**
+**36 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -1245,7 +1245,7 @@ fill from the per-trader XML list. Restock rolls on open. **2026-10-05**: the
 "no placement, no restock, no lists" note was the pre-fix audit. Still open:
 mods/modChance on the stock roll.
 
-**20 WORKS · 0 PARTIAL · 0 MISSING**
+**27 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -1770,7 +1770,7 @@ schedule. The wave size and group come from the frozen party gamestage.
 **2026-10-05**: the "flat trickle, ends at midnight, wrong night" note was
 the pre-fix audit.
 
-**25 WORKS · 0 PARTIAL · 0 MISSING**
+**28 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -2556,7 +2556,7 @@ POI sleepers wake on entry. Gamestage ladders drive the blood moon and the
 wandering horde. **2026-10-05**: the "one group pair, no gamestage, no hordes"
 note was the pre-fix audit. Still open: the screamer summon loop.
 
-**40 WORKS · 0 PARTIAL · 0 MISSING**
+**42 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances at the stock real rate: `time_of_day_inc_per_sec` =
@@ -3117,7 +3117,7 @@ time, and tool durability round-trips. **2026-10-05**: the "wrong loot, instant
 craft, no durability" note was the pre-fix audit. Still open: repair-kit
 consumption has no pinned C2S shape.
 
-**28 WORKS · 0 PARTIAL · 0 MISSING**
+**32 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -3579,7 +3579,7 @@ survive a restart (ZPV18 tail, server-side ledger). Spend is server-validated
 blob is still dropped by design, so the server relays its own ledger rather
 than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
-**27 WORKS · 1 PARTIAL · 0 MISSING**
+**33 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -4597,7 +4597,7 @@ retired 2026-08-25: stock's surface density is binary and the wire heightmaps
 are `byte[256]`, so the client's smooth surface comes from its meshers, not from
 a finer server encoding.
 
-**47 WORKS · 0 PARTIAL · 0 MISSING**
+**48 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -5217,7 +5217,7 @@ the block and item id mappings, and chunk persistence. **2026-10-05**: the
 "drops the mapping, ignores 32 packages, persists nothing" note was the
 pre-fix audit. Still open: no Steam or EOS server-browser registration.
 
-**48 WORKS · 0 PARTIAL · 0 MISSING**
+**49 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **PackageIds name table (191 stock names, exact set)** `WORKS`
   `default_mappings` holds 191 entries: every class transitively extending
