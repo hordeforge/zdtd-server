@@ -85,9 +85,10 @@ the "demo spawn only" note was stale. Still open: mods/modChance on the stock ro
 wrong and are fixed (2026-08-06): ids remap through the prefab's `.blocks.nim`
 including pre-v18 BlockValue layouts, prefabs turn clockwise like stock with the
 matching per-block facing, and `YOffset` places caves, mines and bunkers below
-the surface. Still open: `part_*` decorations are not painted, sleeper triggers
-are partial, and per-block facing uses one remap table where stock resolves it
-virtually per BlockShape.
+the surface. Parts paint up to 24 cubed (`prefabs.zig`) and sleeper volumes trigger on
+entry, noise and re-arm. **2026-10-05**: the "not painted" and "partial
+triggers" notes were stale. Still open: per-block facing uses one remap table
+where stock resolves it per BlockShape.
 
 **Water is in lakes and POIs.** Lake and river water now writes from the
 `water_info.xml` sources at chunk generation (water blocks below the surface),
