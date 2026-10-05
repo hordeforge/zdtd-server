@@ -7027,9 +7027,9 @@ Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
 **Not done, on purpose.**
 
 `admin addgroup` / `removegroup` and the whitelist pair need a Steam group,
-which zdtd does not have. **2026-10-05**: "not yet done" overstated a non-goal.`
+which zdtd does not have. **2026-10-05**: "not yet done" overstated a non-goal.
 
-Landed 2026-08-21: `commandpermission`/`cp` (per-command
+**Landed 2026-08-21:** `commandpermission`/`cp` (per-command
 required permission level, enforced at the in-game console boundary; levels run
 0 = highest, matching the stock direction), `loglevel` (stock Log.Level 0..4
 gating `debug`/`info`/`warn`/`err`/`crit`), `listthreads`/`lt`, `getoptions` (all known
