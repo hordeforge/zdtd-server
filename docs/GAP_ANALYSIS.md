@@ -5452,9 +5452,10 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   rides EntitySpawn flags); the sleeper trio wake path is wired (SleeperWakeup
   on proximity/noise/damage wake, passive spawn flags). Turrets do not
   animate.
+  `EntitySetSkillLevelClient` is sent on a valid spend (`misc_progress.zig`).
+  **2026-10-05**: the "no skill system" note was stale.
   Never-sent non-goals (2026-08-21, all cited from the V3.1.0 b14 dump):
-  EntitySetSkillLevelClient (perk/skill progression sync - zdtd has no skill
-  system; the progression area tracks it), WallVolume (prefab wallvolume
+  WallVolume (prefab wallvolume
   data + World.AddWallVolume broadcast - zdtd does not load wallvolume
   definitions, so there is nothing to send and the sim does not repel with
   them), Light (LightManager/NetPackageLight Setup(entityId, level) - dynamic
