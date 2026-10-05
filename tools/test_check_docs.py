@@ -85,6 +85,29 @@ class ScopeTest(unittest.TestCase):
         self.assertEqual(1, len(failures))
         self.assertIn("dead link docs/gone.md", failures[0])
 
+    def test_dead_anchor_fails(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        page = root / "page.md"
+        page.write_text("## Real heading\n\nsee [x](#not-a-heading)\n", encoding="utf-8")
+        failures: list[str] = []
+        check_docs.check_links(page.read_text(encoding="utf-8"), page, failures)
+        self.assertEqual(1, len(failures))
+        self.assertIn("dead anchor #not-a-heading", failures[0])
+
+    def test_live_anchor_passes(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        page = root / "page.md"
+        page.write_text(
+            "## 2. Scorecard\n\nsee [x](#2-scorecard)\n", encoding="utf-8"
+        )
+        failures: list[str] = []
+        check_docs.check_links(page.read_text(encoding="utf-8"), page, failures)
+        self.assertEqual([], failures)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(exit=False).result.wasSuccessful() else 1)

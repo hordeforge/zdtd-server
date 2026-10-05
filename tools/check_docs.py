@@ -70,6 +70,7 @@ RESEARCH_ROOT = ROOT.parent / "7dtd-engine-research"
 RESEARCH_PATH_RE = re.compile(r"\.\./7dtd-engine-research/[A-Za-z0-9_./-]+")
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 CITATION_RE = re.compile(
     r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:zig|zon|md|toml|xml|json|sh|py|html|ts|c|h))"
     r":(\d+)(?:-(\d+))?"
@@ -124,11 +125,31 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _slug(heading: str) -> str:
+    """GitHub-style heading anchor: lowercase, word chars and hyphens only."""
+    return re.sub(r"[^\w\s-]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def heading_slugs(text: str) -> set[str]:
+    return {_slug(h) for h in HEADING_RE.findall(text)}
+
+
 def check_links(text: str, path: Path, failures: list[str]) -> int:
     total = 0
+    slugs: set[str] | None = None
     for match in LINK_RE.finditer(text):
         target = match.group(1)
-        if target.startswith(("http://", "https://", "mailto:", "#", "<")):
+        if target.startswith(("http://", "https://", "mailto:", "<")):
+            continue
+        if target.startswith("#"):
+            # Intra-page anchor: must match one of this page's headings. The
+            # path half is skipped above, so without this branch anchor-only
+            # links were never validated at all (a dead #slug passed silently).
+            total += 1
+            if slugs is None:
+                slugs = heading_slugs(text)
+            if target[1:] not in slugs:
+                failures.append(f"{rel(path)}: dead anchor {target}")
             continue
         total += 1
         target = target.split("#", 1)[0]
