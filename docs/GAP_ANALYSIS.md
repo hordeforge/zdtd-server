@@ -6624,12 +6624,9 @@ Honest gaps:
     `StartAnimationDodge` - client animator state the server does not have.
     Independently dead data: no entity in stock `entityclasses.xml` or
     `npc.xml` declares a Dodge AITask.
-  - *EAILeap* (asm.il:429498, MutexBits 3, executeDelay 1+rand): needs
-    `jumpMaxDistance`, `moveHelper.BlockedFlags`, `navigator.getPath()`,
-    `BodyDamage::IsAnyLegMissing`, a capsule `Physics.Raycast` (mask
-    0x40810000) and `moveHelper.StartJump`. zdtd has no vertical movement
-    integration (see "MoveHelper physics / collision" above). Users:
-    zombieSpider, animalMountainLion.
+  - *EAILeap* is implemented (`ai_tasks.zig` `leapCanExecute`, the corridor ray
+    and the flight). **2026-10-05**: the "no vertical movement" note was stale.
+    Users: zombieSpider, animalMountainLion.
   - *EAIRangedAttackTarget* (asm.il:433404, MutexBits 0b1011, cooldown 3,
     attackDuration 20, minRange 4, maxRange 25): sequences anim states then
     calls `UseHoldingItem`/`IsHoldingItemInUse`; the projectile comes from the
