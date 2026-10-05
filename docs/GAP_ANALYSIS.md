@@ -73,8 +73,8 @@ are unloaded instead of standing frozen in your world forever.
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
 discovery, so a typed IP is the only route in, and the one thing that is
-advertised is malformed: `ServerVersion "V 3.1.0"` fails the client's
-`TryParseSerializedString`, which wants `"V.3.10.14"`.
+advertised version is stock form `V.3.20.10` (`version.zig`). **2026-10-05**:
+the malformed `"V 3.1.0"` note was stale.
 
 **Traders spawn from the world.** `spawnPoiTraders` places each prefab that
 carries a trader tag, and `fillTraderFromXml` loads that trader's list.
