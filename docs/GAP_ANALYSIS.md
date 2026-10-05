@@ -2345,9 +2345,10 @@ one remap table.
   `RandomRoll ... value="@$perkBookwormChance"`, entry prob 1.0) put a book in
   every Working Stiffs crate. The recorded residual is the player-state
   evaluator: once the roller carries cvars/levels/sandbox/quest tags, those rows
-  resolve and their entries roll again; the `$perkBookwormChance` cvar is
-  written by a `onSelfProgressionUpdate` triggered row that zdtd does not fire
-  yet, so even with the evaluator a perk owner would read 0. Underneath that is
+  resolve and their entries roll again. `fireProgressionUpdate` fires the
+  `onSelfProgressionUpdate` rows and writes `$perkBookwormChance` (`player.zig`).
+  **2026-10-05**: the "does not fire" note was stale. Residual: the rows'
+  returned stat and buff lists are not applied. Underneath that is
   a timing difference that is now fixed (2026-09-12): the chunk/prefab scan
   sizes the grid only and the roll happens on the open path with the **opener's**
   loot stage (`LootManager.LootContainerOpened`, `bTouched` + `worldTimeTouched`
