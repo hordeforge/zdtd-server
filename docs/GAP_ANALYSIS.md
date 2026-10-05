@@ -6625,11 +6625,10 @@ Honest gaps:
   - *EAILeap* is implemented (`ai_tasks.zig` `leapCanExecute`, the corridor ray
     and the flight). **2026-10-05**: the "no vertical movement" note was stale.
     Users: zombieSpider, animalMountainLion.
-  - *EAIRangedAttackTarget* (asm.il:433404, MutexBits 0b1011, cooldown 3,
-    attackDuration 20, minRange 4, maxRange 25): sequences anim states then
-    calls `UseHoldingItem`/`IsHoldingItemInUse`; the projectile comes from the
-    held `ItemActionRanged`. zdtd has neither item actions nor projectiles.
-    Users: zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
+  - *EAIRangedAttackTarget* is implemented (`ai_tasks.zig`
+    `ranged_attack_target`) and the vomit projectile flies (`spawnSpit`).
+    **2026-10-05**: the "no projectiles" note was stale. Users:
+    zombieRancher/PlagueSpitter, zombieChuck, mutated/vulture classes.
   - *EAIRunawayFromEntity* (asm.il:435190, base EAIRunAway asm.il:434778):
     **DONE 2026-08-07** - the `.runaway` task now covers both AITask-1
     (RunawayWhenHurt, revenge) and AITask-2 (RunawayFromEntity, proximity): a
