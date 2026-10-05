@@ -580,6 +580,8 @@ on it.
 
 ## T29. Stealth, noise and smell
 
+**Status: largely landed; remainder is the light legs.** `systemStealth` (src/ecs/stealth.zig) runs the noise/event model with geometric decay, the noise table loads from `sounds.xml` (`assets/sound_noise.zig`), and smell is live (`rules.ai.smell_radius` / `smell_bleed_radius`, the bleeding extension at `sensing.zig:480`). The ledger scores the surface `PARTIAL` (Stealth/crouch) and `WORKS` (LOS / hearing / smell). **Still open:** block light and moving lights (clone-side chunk light grid + light-entity dictionary, RE-documented and not RE-blocked), and the light-refined groan threshold.
+
 **Why:** `../../7dtd-engine-research/docs/entities/stealth-smell.md` documents a
 server-authoritative per-tick system (ambient/held-light level, a noise-event
 queue with geometric decay, a smell radius driven by carried items, blood and
