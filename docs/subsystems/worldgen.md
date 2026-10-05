@@ -48,7 +48,7 @@ The per-chunk generation runs synchronously inside `sendSpawnChunk`, wrapped in
 the apm `chunk_gen` section, and is paced by `chunk_adds_per_stream_tick`
 (src/server/game/chunk_fill.zig:40, src/server/game/types.zig:67). No worker
 pool is involved: the async gen queue is the parked W2b milestone
-(docs/GAP_ANALYSIS.md:657).
+(docs/GAP_ANALYSIS.md:702).
 
 ## Seeding and determinism
 
@@ -250,7 +250,7 @@ lava lakes and water flow (W4), run-aware surfacing so overhang undersides do
 not expose stone (W3), the real-DEM blend policy (W6) and far-terrain LOD
 (W7). The stock RWG C# pipeline is not a host target, and `rwgmixer.xml` is
 listed as `-`, so the stock tile weights are not driven by that file
-(docs/GAP_ANALYSIS.md:6381, docs/GAP_ANALYSIS.md:4546).
+(docs/GAP_ANALYSIS.md:6469).
 
 ## See also
 
