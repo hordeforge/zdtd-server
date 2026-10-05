@@ -248,6 +248,8 @@ pub fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kin
         force: bool = false,
         /// Fetch objective item name (objective `id` attribute).
         item_name: []const u8 = "",
+        /// ObjectiveFetch.KeepItems. Only FetchKeep sets it.
+        keep_items: bool = false,
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
@@ -263,6 +265,7 @@ pub fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kin
         const typ = xml.attr(body, oi, "type") orelse continue;
         const oid = xml.attr(body, oi, "id");
         const item_name: []const u8 = if (oid) |name| arena.dupe(u8, name) catch "" else "";
+        const keep_items = std.mem.eql(u8, typ, "FetchKeep");
         const phase = objectivePhase(body, oi, elem_end);
         const kind = classifyPhaseKind(kinds, typ, oid);
         var target = objectiveTarget(body, oi, elem_end);
@@ -306,6 +309,7 @@ pub fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kin
             .optional = objectiveFlag(el, "optional"),
             .force = objectiveFlag(el, "force_phase_finish"),
             .item_name = item_name,
+            .keep_items = keep_items,
         };
         obj_phase_bytes[n] = phase;
         obj_kind_bytes[n] = objectiveWireKind(typ);
@@ -350,6 +354,7 @@ pub fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kin
             .force = o.force,
             .poi_gated = o.poi_gated,
             .item_name = o.item_name,
+            .keep_items = o.keep_items,
         };
     }
     return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds, .objectives = flat };

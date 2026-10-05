@@ -377,6 +377,10 @@ pub const FlatObjective = struct {
     /// Fetch objective's required item name (quests.xml objective `id`,
     /// ObjectiveBaseFetch.itemName). Empty = any item counts.
     item_name: []const u8 = "",
+    /// ObjectiveFetch.KeepItems. FetchKeep sets it. A false flag means
+    /// turn-in removes `required` of `item_name` from the bag
+    /// (ObjectiveFetch.RemoveObjectives).
+    keep_items: bool = false,
 };
 
 /// Objective Write subclass (Quest.Write CreateQuest). Stock has exactly four

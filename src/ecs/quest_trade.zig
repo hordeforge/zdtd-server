@@ -19,6 +19,10 @@ const max_entities = @import("world.zig").max_entities;
 
 fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
     if (s.completed) return;
+    // ObjectiveFetch.RemoveObjectives: a fetch that does not KeepItems takes
+    // the named count out of the bag on turn-in. FetchKeep sets the flag and
+    // the bag is left alone. An unresolved name removes nothing.
+    if (w.catalog.byId(s.def_id)) |d| consumeFetchItems(w, ps, d);
     s.completed = true;
     s.active = false;
     s.ready_turn_in = false;
@@ -32,6 +36,28 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
         }
     }
     w.completed_quests +%= 1;
+}
+
+/// Take the fetch objective's items out of the bag. Stock walks the backpack
+/// with Bag.DecItem; this walks the same slots. A short bag still completes:
+/// stock's DecItem returns the removed count and does not abort the turn-in.
+fn consumeFetchItems(w: *World, ps: Slot, d: quest.QuestDef) void {
+    if (!w.mask[ps].inventory) return;
+    const f = w.quest_item_fn orelse return;
+    for (d.objectives) |o| {
+        if (o.kind != .fetch_item or o.keep_items or o.item_name.len == 0) continue;
+        const want = f(w.quest_item_ctx, o.item_name);
+        if (want == 0) continue;
+        var left: u16 = o.required;
+        for (w.inventory[ps].slots[0..c.inv_equip_start]) |*slot| {
+            if (left == 0) break;
+            if (slot.item_id != want or slot.count == 0) continue;
+            const take = @min(left, slot.count);
+            slot.count -= take;
+            left -= take;
+            if (slot.count == 0) slot.* = .{};
+        }
+    }
 }
 
 fn markProgress(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef) void {
@@ -2357,6 +2383,65 @@ test "a named fetch objective counts only its own item" {
 
     questOnFetchItemFrom(&w, 0, 42, 0, 0);
     try std.testing.expect(q.obj_progress[0] > 0 or q.ready_turn_in or q.completed);
+}
+
+test "turn-in keeps the item only for FetchKeep" {
+    // ObjectiveFetch.RemoveObjectives removes the named count unless
+    // KeepItems is set. FetchKeep sets it. A short bag still completes.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].journal = true;
+    w.mask[ps].inventory = true;
+    w.inventory[ps].slots[0] = .{ .item_id = 42, .count = 3 };
+
+    const phase = [_]quest.PhaseSpec{.{ .kind = .auto, .required = 1 }};
+    const take = [_]quest.FlatObjective{.{
+        .kind = .fetch_item,
+        .required = 2,
+        .item_name = "foodCanChili",
+    }};
+    const keep = [_]quest.FlatObjective{.{
+        .kind = .fetch_item,
+        .required = 2,
+        .item_name = "foodCanChili",
+        .keep_items = true,
+    }};
+    const take_def = quest.QuestDef{
+        .id = 9,
+        .kind = .fetch_item,
+        .title = "fetch",
+        .phases = &phase,
+        .objectives = &take,
+    };
+    const keep_def = quest.QuestDef{
+        .id = 10,
+        .kind = .fetch_item,
+        .title = "keep",
+        .phases = &phase,
+        .objectives = &keep,
+    };
+    w.catalog.defs = &.{ take_def, keep_def };
+    const Hook = struct {
+        fn item(_: ?*anyopaque, name: []const u8) u16 {
+            if (std.mem.eql(u8, name, "foodCanChili")) return 42;
+            return 0;
+        }
+    };
+    w.quest_item_fn = &Hook.item;
+
+    const q = w.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{ .def_id = 9, .active = true };
+    completeQuest(&w, ps, q);
+    try std.testing.expect(q.completed);
+    try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[0].count);
+
+    w.inventory[ps].slots[0] = .{ .item_id = 42, .count = 3 };
+    const q2 = w.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q2.* = .{ .def_id = 10, .active = true };
+    completeQuest(&w, ps, q2);
+    try std.testing.expectEqual(@as(u16, 3), w.inventory[ps].slots[0].count);
 }
 
 test "the POI containment gate answers inside and outside" {
