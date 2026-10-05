@@ -6703,7 +6703,8 @@ Honest gaps:
   (EAISetNearestEntityAsTarget / corpse / SetAsTargetIfHurt sorter,
   asm.il:430171) is folded into the existing single-nearest-player sense
   (`nearestPlayerSnap`, `sense_dist_sq`). No multi-candidate sorting, corpse
-  targeting, feralSense range scaling, or group/ally awareness.
+  targeting, or group/ally awareness. Feral sense scales sight and hearing
+   (`ai_tasks.zig`). **2026-10-05**: the "no feralSense" clause was stale.
 - **Timing approximated.** The stock fixed 0.05s/20Hz tick and
   `executeWaitTime` accumulation are replaced by zdtd's variable
   `dt*active_scale` LOD throttle on `decision_cd`; `executeDelayScale` is fixed
