@@ -7240,7 +7240,7 @@ Honest gaps (no data path in zdtd, not faked):
 - The boss group flag is parsed (`VolumeGroup.is_boss`). Still open:
   `SleeperIsLootVolume`, `isQuestExclude`, `isPriority`, and the spawn path
   does not act on the boss flag yet.
-  `MinScript` (`SVS<i>`): only the marker position + entity class are wired.
+- Sleeper pose, look and `spawnMode` (Normal/Bandit/Infested) stay unwired. The marker rotation is a spawn yaw. `MinScript` (`SVS<i>`) is not wired.
 - `spawnCountMin/Max < 0 -> 5,6` runtime reset: malformed-data only, not modeled.
 
 ### Blood-moon festivities client FX packages
