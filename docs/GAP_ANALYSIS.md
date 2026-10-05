@@ -6734,7 +6734,7 @@ Honest gaps:
 
 | Item | Status |
 |---|---|
-| World clock + blood moon day%7 | PARTIAL |
+| World clock + blood moon day%7 | WORKS (2026-10-05 re-audit: the row had no note. The clock advances on the stock 24000 ticks/day scale (`worldTimeBits` encodes day 1 as zero offset, pinned by `worldTimeBits encodes stock day 1 as zero offset`), persists as `clock.zcl`, and the blood moon spans dusk to dawn across the midnight rollover (`clock advances and bloodmoon spans dusk to dawn across rollover`) on the persisted `CalcNextDay` schedule with `BloodMoonFrequency` and `BloodMoonRange` jitter. `scenario blood moon day re-send fires on the day roll` covers the stat re-send) |
 | Night horde near players | PARTIAL (simple spawn) |
 | Scout daytime | PARTIAL |
 | Gamestage scaling | PARTIAL (player/party stage, scout tier, blood-moon stage, sleeper groups, loot prob bands; see 5.x gamestage gaps) |
