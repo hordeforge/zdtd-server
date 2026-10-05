@@ -5329,8 +5329,10 @@ persists so little that a restart visibly damages a built base.
   the old label was wrong. `ModifyCVar` is the buff CVar sync
   (`EntityBuffs.SetCustomVarNetwork` IL=33 forwards to the server when
   `!IsServer`), and stock's ProcessPackage (IL=26) applies it to the target's
-  `EntityBuffs`; zdtd reads CVars out of the XML effect groups and keeps no
-  per-entity CVar table, so a reported change has nothing to land in.
+  `EntityBuffs`; zdtd keeps the per-entity table in `ecs/cvars.zig` and applies
+  the client write (`c2s/quest_buff.zig`, ProcessPackage IL=26). **2026-10-05**:
+  the "nothing to land in" note was stale. The store is per session; stock
+  saves CVars with the entity.
   `SetProp` is a world prop change (`Block.PlaceProp` IL=87 to
   `WorldBase.SetPropRPC`, sitting beside `SetBlockRPC`), sender-validated by
   user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`.
@@ -5340,8 +5342,8 @@ persists so little that a restart visibly damages a built base.
   runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described. All
-  four remain unhandled; the difference is that the reason is now the real
-  one. EAC/encryption waivers (`EAC`,
+  SetProp, SimpleRPC and Debug remain unhandled. ModifyCVar does not.
+  EAC/encryption waivers (`EAC`,
   `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
   (`EditorUpdateVolume`), Twitch integration
   (`PlayerTwitchStats`, `TwitchAccess`, `TwitchVoteScheduling`), headless mesh
