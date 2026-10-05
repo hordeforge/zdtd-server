@@ -7021,10 +7021,10 @@ Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
 `teleport`/`tp` in its stock form (stock `tp` moves the *local* player and replies
 "Command can only be used on clients", asm.il 259294).
 
-**MISSING (server-side, not yet done)**
+**Not done, on purpose.**
 
-`admin addgroup` / `removegroup` and `whitelist addgroup` / `removegroup` (zdtd has
-no Steam group concept). Landed 2026-08-21: `commandpermission`/`cp` (per-command
+`admin addgroup` / `removegroup` and the whitelist pair need a Steam group,
+which zdtd does not have. **2026-10-05**: "not yet done" overstated a non-goal. Landed 2026-08-21: `commandpermission`/`cp` (per-command
 required permission level, enforced at the in-game console boundary; levels run
 0 = highest, matching the stock direction), `loglevel` (stock Log.Level 0..4
 gating `debug`/`info`/`warn`/`err`/`crit`), `listthreads`/`lt`, `getoptions` (all known
