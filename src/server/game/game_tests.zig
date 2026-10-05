@@ -5350,6 +5350,28 @@ test "the check buffs' entered-game rows set their CVars and add their buffs" {
     try std.testing.expectApproxEqAbs(@as(f32, 25200), cl.cvars.get("$infectionMaxDuration"), 0.001);
 }
 
+test "first_spawn fires once per session beside entered-game" {
+    // `onSelfFirstSpawn` (minevents.md:100) is the one-shot sibling of
+    // `onSelfEnteredGame`. The flag is on the client, so a second step must
+    // not re-fire it - the same edge the entered-game test asserts.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const gpa = std.testing.allocator;
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer g.destroy();
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    try std.testing.expect(!cl.first_spawn_fired);
+    try g.step();
+    try std.testing.expect(cl.first_spawn_fired);
+    // One-shot: a later step leaves the flag set.
+    try g.step();
+    try std.testing.expect(cl.first_spawn_fired);
+}
+
 test "the survival stage buff tracks the thresholds and clears on recovery" {
     // buffStatusCheck01's stage rows are gated on their own stage buff
     // (`!HasBuff buffStatusThirsty03,...`), so the active stage cannot be read
