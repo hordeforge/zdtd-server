@@ -167,6 +167,7 @@ classifies those.
 
 ## T20. Classify every detector under the severity ceiling rule
 
+**Status: landed.** `evidence.zig:136` carries the exhaustive test this task calls for: `inline for` over every `Detector` field pins the decision-input class (`bounds`/`movement` = `client_informed`, everything else `server_only`), so a new detector forces a classification decision at compile time. `guard_policy.zig` implements the rungs with tests ("weak signals never trip any gate", "hard repeat trips exactly at the threshold", "kick rung requires enforce, no dry_run, and correct mode").
 **Why:** ADR 0022 decision 4 makes severity a checkable property rather than a
 judgement: a detector may be `hard` only when every **decision** input is
 server-derived. The existing detectors in `evidence.zig` (`phase`, `ownership`,
