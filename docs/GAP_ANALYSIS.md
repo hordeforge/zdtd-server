@@ -6995,7 +6995,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | CLI port/world/map/game-dir | HAVE |
 | serverconfig.xml stock | HAVE (`config.zig`; GAME_OPTIONS.md) |
 | Telnet / web admin | PARTIAL (stock greeting + login + bind rule; see §12.1) |
-| Console commands (kick, ban, admin, …) | PARTIAL (stock verbs and output shapes below; client-side verbs MISSING) |
+| Console commands (kick, ban, admin, …) | PARTIAL (stock verbs and output shapes below; client-side verbs have no meaning on a dedicated server (§12.1)) |
 | Steam server browser listing | PARTIAL - non-client-visible (lobby listing; direct-IP join works, EAC-off) |
 | Query protocol | PARTIAL - non-client-visible (lobby query; direct-IP join works) |
 | Logs / log rotation | PARTIAL (stdio) |
