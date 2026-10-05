@@ -4951,7 +4951,7 @@ a finer server encoding.
   `asm.il:1926175-1926208`, `asm.il:1925943-1925956`
 
 - **World clock persistence across restart** `WORKS`
-  `clock.zcl` (magic ZCL1, stock-shaped `worldTime` u64) is saved on the periodic
+  `clock.zcl` (magic ZCL2: world time plus the blood-moon schedule; ZCL1 still loads) is saved on the periodic
   save path and at deinit, and restored over the fresh clock at init. The
   blood-moon calendar derives from the day, so a save keeps its horde schedule.
   (Duplicate of the blood-moon schedule persistence entry above; kept here so the
@@ -6937,7 +6937,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
 | Player save key | WORKS (platform identity per ZPV15; stock `PrimaryId.CombinedString`, asm.il 1884842. A legacy name-only row is matched once by name and re-keyed on save) |
 | Ally relationships | WORKS (2026-10-05 re-audit: `src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
-| World clock | HAVE (`clock.zcl` ZCL1) |
+| World clock | HAVE (`clock.zcl` ZCL2: world time plus the blood-moon schedule. ZCL1 still loads) |
 | Weather storm SM | HAVE (`weather.zwt` ZWTH1) |
 
 ---
