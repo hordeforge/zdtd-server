@@ -270,11 +270,11 @@ Chunk stream: named caps shipped; async workers still open.
 - Grid A* (own impl).  
 - Queue + drain ≤N paths/tick; results applied in sim.  
 
-#### M12.3 Prefab `.tts` block paint
-- **PARTIAL (2026-07):** type plane painted on chunk create (`src/world/tts.zig`).  
-- Remaining: density/texture, TE lists, name→id remap, `part_*` policy.  
-- See [STATUS.md](STATUS.md), [MAPS.md](MAPS.md).
-
+#### M12.3 Prefab `.tts` block paint **[shipped 2026-10-06]**
+- `paintDecoration` (`src/world/tts.zig:414`) writes type, texture, density and damage
+  plus authored water; prefab-local ids remap through `<name>.blocks.nim`; TE lists ride
+  `prefabs.foreachTeInChunk`. The 2026-07 "type plane only" note is stale (the ledger
+  scores `.tts` full block paint **HAVE**).
 #### M12.4 Sleeper volumes
 - From prefab metadata / sleeper XML if available.  
 - Component `SleeperVolume`; wake on player enter.  
