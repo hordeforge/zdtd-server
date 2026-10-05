@@ -358,6 +358,8 @@ state the next one needs.
 
 ## T24. Persist per-player attribute and perk levels
 
+**Status: landed 2026-08-26 (round 23).** Attribute and perk levels persist via the ZPV11 skill tail (`skill_points:u32 | skill_n:u8 | skill_n x (name, level)`), with round-trip tests in `persist_players_tests.zig`.
+
 **Why:** nothing tracks a player's attribute or perk level today; the catalog
 loads but no instance state exists. Every task after this one needs it.
 
@@ -395,6 +397,8 @@ rather than erroring.
 ---
 
 ## T25. A requirement evaluator for `ProgressionLevel` and `PlayerLevel`
+
+**Status: landed 2026-09-16.** `require_eval.zig` resolves `ProgressionLevel` and `PlayerLevel` comparisons against the player's stored levels (and `other_levels` / `instigator_levels` for foreign-target rows).
 
 **Why:** ADR 0023 decision 2. The only decision this system has to make is
 "can this attribute or perk go up one level."
@@ -491,6 +495,8 @@ That is T28's body, this task's stub.
 ---
 
 ## T27. C2S perk and attribute spend, behind the S2C push
+
+**Status: landed 2026-08-26.** `NetPackageEntitySetSkillLevelServer` is server-validated in `misc_progress.zig` and the S2C `NetPackageEntitySetSkillLevelClient` echo goes back on success.
 
 **Why:** ADR 0023 decision 4. Landing the spend request before the server can
 correctly echo state back would let a client believe a point was spent that
