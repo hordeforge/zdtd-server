@@ -7180,9 +7180,9 @@ Still missing (inputs zdtd does not parse; all are fed as zero/absent, never fak
 - ~~quests.xml `GameStageMod` / `GameStageBonus`~~ **SHIPPED**: `gameStageOf` reads the active journal quest's `gamestage_mod`/`gamestage_bonus` (parsed on `QuestDef` from quests.xml).
 - ~~Prefab `DifficultyTier` / loot.xml `loot_settings poi_tier_mod` /
   `poi_tier_bonus`~~ **SHIPPED**: `lootStageOf` applies POITierMod/Bonus when
-  `sim.poi_tier_fn` resolves a DifficultyTier (indexed tier-1). Residual is
-  wiring a live prefab DifficultyTier lookup into `poi_tier_fn` for every
-  world XZ (tests cover the math; production hook may still be null).
+  `sim.poi_tier_fn` resolves a DifficultyTier (indexed tier-1). The production
+  hook is `poiTierAtWorld` (`game.zig`). **2026-10-05**: the "hook may still
+  be null" note was stale.
 - loot.xml `<lootqualitytemplates>`: item quality by loot stage. **SHIPPED
   2026-08-08** (`Stack.quality` rides the container fill and the wire); the
   remaining gap is quality display data (`qualityinfo.xml` forwarded only).
