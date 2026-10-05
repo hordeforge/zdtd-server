@@ -203,6 +203,7 @@ detector to earn the old label.
 
 ## T21. Ship the guest detector feed
 
+**Status: half landed 2026-10-06.** The host clamp is done: `PluginHost.evidence` (`src/plugin/host.zig:106-110`) is a `void`, read-only observer and the guest return is discarded, so the T20 ceiling already applied stands and a module cannot raise its own severity. The hook is wired end to end (`api.zig:66`, `wasm.zig:43` + `:713`). **Still open: the sample detector** - no `.wasm` under `mods/` or `plugins/` implements `on_evidence` yet.
 **Why:** ADR 0022 decision 3. Heuristics are the part operators most want to
 tune per server and the part that should never be able to stall a tick, which
 makes the detector layer the one place a guest belongs.
@@ -242,6 +243,7 @@ the gate and policy layer, and ADR 0022 keeps guests out of both.
 
 ## T22. Attribution and suppression
 
+**Status: half landed 2026-10-06.** Suppression is real: the void-rescue path (`move_position.zig:25`, `move_state.zig:132`) resets the movement envelope so the server correction is not counted as a movement reject against a legit player, with the reason recorded in the code. **Still open: the attribution half** - every `noteEvidence` call site passes `peer.local_id`, the reporting peer, so a finding induced by a second player does not attribute to the inducer.
 **Why:** ADR 0022 decision 7. Without these two rules the anti-cheat becomes a
 grief weapon: a player who can shove someone off a roof farms movement findings
 against them, which is a worse outcome than the cheat being caught.
@@ -284,6 +286,7 @@ first; decay is tuning on top of them.
 
 ## T23. Measure the false-positive rate before any enforcement rung
 
+**Status: landed 2026-10-06.** The `guardstats` body is commented "T23: the anti-cheat dry-run diff" and reports, per peer, the strong-detector mask, hard counts, `tripped`, `det=<detector>@tick` and `kick_at`, plus totals with `would_kicks` - all from the dry-run side, since `guard_policy.dry_run` defaults to `true`. `guardpolicy` prints the full policy line (enforce / dry_run / quarantine / load_shed / would_kicks), and the `evidence` verb dumps the ring behind the counts.
 **Why:** every rung in `guard_policy.zig` defaults off and has to be switched on
 by an operator. Nothing currently tells that operator what switching it on would
 have done. ADR 0022 records the asymmetry that makes this matter: a wrongly
