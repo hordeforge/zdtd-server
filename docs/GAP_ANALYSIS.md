@@ -7280,6 +7280,7 @@ IL class/method they came from.
   each client and the tick sends that edge (`step.zig`). The scenario
   "blood-moon music is per-party, not global" pins it. **2026-10-05**: the
   global-bool note was stale.
+
 ### Honest gaps
 
 - **`NetPackageHordeEvent` has no stock server sender (vestigial).** All 26 IL
