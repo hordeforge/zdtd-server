@@ -224,7 +224,7 @@ whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
   the id is the sender's own, which the gate now requires.
 - **Party quests share on accept.** Stock shares when the player shares,
   gated by the client's `AutoShare` flag (`PartyQuests.ShareQuestWithParty`,
-  quests-challenges.md:832). zdtd calls `shareQuestWithParty` from both accept
+  ../7dtd-engine-research/docs/content/quests-challenges.md:832). zdtd calls `shareQuestWithParty` from both accept
   paths (`social.zig` `acceptQuestFor` and `acceptQuestForFrom`) and from the
   join bundle for the starter quest, so every accepted quest is shared with the
   party whether or not the player asked. Cost: a party member receives a quest
