@@ -2665,10 +2665,10 @@ gamestage, no wandering hordes, and no screamers.
   ledger waiver.
 
 - **Chunk-area spawn ledger** `PARTIAL (waived)`
-  Stock keeps per-group counts, DecMaxCount/IncCount and `OnEntityUnloaded`
-  ledger; zdtd uses one global alive + fixed cooldowns. Per-area density needs
-  the chunk-group state machine - waived as spawn-balance polish.
-  *Anchors:* `asm.il:1093735-1093863`, `src/ecs/aidirector.zig:159-178`
+  Stock keeps per-chunk-area counts. zdtd keeps one count and one respawn time
+  per spawning.xml rule (`Director.rule_budgets`, `aidirector.zig`
+  `RuleBudgetState`). **2026-10-05**: the "one global alive" note and the
+  blood-moon-clock anchor were stale. Residual: counts are not split per chunk area.
 
 - **entitygroups.xml weighted group table** `WORKS` `(2026-08-22 re-audit)`
   The 512-group cap is gone: the table is now a flat arena slice and the parse
