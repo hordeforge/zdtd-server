@@ -196,14 +196,10 @@ pub fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16
 /// fold is exact for stock data.
 /// One item's tracked deltas: its own `<passive_effect>` rows plus each
 /// installed mod's rows (`EffectManager.GetValue` layer 13: a modifier item's
-/// effects apply alongside the item's own, at the mod's tier). Stock's
-/// server-relevant modifier rows (armour resistances, max stats,
-/// HealthChangeOT) are flat, so folding them on the item's quality axis is
-/// exact; a tiered modifier row would need the mod's own quality, which the
-/// wire ItemValue carries but zdtd does not store yet (recorded residual), so
-/// those rows are approximated at the item's quality like the rest.
-/// Attacker-side rows (`EntityDamage` and friends) are not consumed here: the
-/// client's damage packet already carries the finished number.
+/// effects apply alongside the item's own, at the mod's tier). Each mod folds
+/// on its own quality (`InvSlot.mod_qualities`; a stored 0 falls back to tier
+/// 1). Attacker-side rows (`EntityDamage` and friends) are not consumed here:
+/// the client's damage packet already carries the finished number.
 fn itemTrackedDeltas(
     self: *Game,
     def: *const assets_items.ItemDef,
