@@ -1875,7 +1875,7 @@ the pre-fix audit.
   never emits it either. No player impact relative to stock. The repo doc cites a
   stale line range.
   *Anchors:* `src/wire/stock_horde.zig:27`, `asm.il:822185`, `asm.il:518546`,
-  `docs/GAP_ANALYSIS.md:889`
+  `docs/GAP_ANALYSIS.md:7286`
 
 - **Blood-moon weather override** `WORKS`
   `Manager.tick` pushes every biome's next storm at least 5000 ticks past now and
