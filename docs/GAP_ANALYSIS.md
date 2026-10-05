@@ -4987,9 +4987,9 @@ a finer server encoding.
   **`NetPackageWaterSet` is now handled** (2026-09-08). It is not part of the
   flow sim: it is the client-originated water *edit* (jar fill and empty, the
   water-cube tool), and stock's `ProcessPackage` relays it to every other peer
-  and then applies it (`NetPackageWaterSet.il.txt:163`). zdtd dropped it as
-  unhandled, so a jar edit stayed local to the acting client and was lost on
-  relog. The handler validates sender ownership, edit reach and land claims,
+  and then applies it (`NetPackageWaterSet.il.txt:163`). **2026-10-05**: the
+  "dropped as unhandled" sentence described the pre-fix bug. The handler below
+  is the current path. The handler validates sender ownership, edit reach and land claims,
   applies each accepted cell through the normal block path, and relays only
   the accepted set. Body: `senderEntityId` i32 | `changes.Count` u16 |
   (`Vector3i` + `WaterValue` u16 mass) per entry, `Full` = 19500
