@@ -1125,6 +1125,15 @@ pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
     // Grandpa's Forgetting Elixir: `ResetProgression` resets skills and
     // refunds points server-side (the client's respec UI reads the result).
     if (res.reset_progression) self.resetProgression(@intCast(peer_slot));
+    // `CallGameEvent` rows run a named gameevents.xml sequence
+    // (MinEventActionCallGameEvent; Dentist silver/gold grants). The result
+    // carries the names; the sequence is the server leg.
+    if (res.game_event_n > 0) {
+        const gev = @import("game_events.zig");
+        for (res.game_events[0..res.game_event_n]) |gname| {
+            _ = gev.runGameEventSequence(self, @intCast(peer_slot), gname);
+        }
+    }
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
 }
