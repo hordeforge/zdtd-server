@@ -3838,11 +3838,10 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     **Not sent on the wire:** stock's `MinEventActionModifyCVar` passes
     `_netSync = IsLocal` (IL_0163), which is false on a dedicated server because
     the owning client runs the same XML locally, so the server does not push
-    min-event CVar writes; `NetPackageModifyCVar` stays unbuilt (the package id
-    is in the table, and the prefix rule above is what the sender will need for
-    the `%`/netSync paths such as `PlayerEntityStats`). Residual: CVars are
-    player-scoped (stock attaches them to any `EntityAlive`), they are not
-    persisted (stock saves them with the entity), `randomint`/`randomfloat` and
+    min-event CVar writes. `NetPackageModifyCVar` is handled, relayed and saved
+    in the ZPV18 tail (`c2s/quest_buff.zig`, `persist.zig`). **2026-10-05**: the
+    "unbuilt" and "not persisted" notes were stale. Residual: CVars are
+    player-scoped (stock attaches them to any `EntityAlive`), `randomint`/`randomfloat` and
     valueList operands are unimplemented, and the bulk of the 2915
     `ModifyCVar`/`RemoveCVar` rows still need the buff/item lifecycle events
     that drive them (item `onSelfEquipStart`/`onSelfPrimaryActionEnd`, every
