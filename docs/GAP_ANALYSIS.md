@@ -5312,10 +5312,13 @@ pre-fix audit. Still open: no Steam or EOS server-browser registration.
   movement/falling-block/vehicle sims are server-authoritative, and the
   EntityRagdoll impulse relays to the other clients - the owner already
   ragdolled locally (SendPacketToTrackedPlayersAndTrackedEntity)).
-  Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends (independently reproduced
-  2026-09-06 over the v3.2.0 dump, same 98); 16 have no handler,
-  categorized by scope (protocol-packages.md 5.14). Reclassified 2026-09-06:
+  Scanning the v3.2.0 corpus for `GetPackage<X>` with `SendToServer` *after*
+  it (the strict form; the loose "immediately preceding" window also catches
+  the server's own send in the same method and overcounts) yields **85**
+  names the stock client actually sends. **2026-10-06**: the earlier 98 and
+  the "16 have no handler" figure are stale - 78 of the 85 have a handler and
+  the remaining 7 are the documented waivers (Debug, DynamicMesh, EAC,
+  EditorUpdateVolume, KeyExchangeComplete, TwitchAccess, TwitchVoteScheduling). Reclassified 2026-09-06:
   three of the four "mod API surface" names are ordinary gameplay paths and
   the old label was wrong. `ModifyCVar` is the buff CVar sync
   (`EntityBuffs.SetCustomVarNetwork` IL=33 forwards to the server when
