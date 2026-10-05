@@ -607,7 +607,12 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
     const dz = w.transform[hs].z - 0.0;
     const dist = @sqrt(dx * dx + dz * dz);
     try std.testing.expect(dist > 70.0 and dist < 115.0);
-    try std.testing.expect(w.zombie_ai[hs].state == .chase);
+    // The pack walks to the player position at spawn. It does not chase yet.
+    try std.testing.expect(w.zombie_ai[hs].has_spot);
+    try std.testing.expectEqual(@as(f32, 0), w.zombie_ai[hs].spot_x);
+    try std.testing.expectEqual(@as(f32, 0), w.zombie_ai[hs].spot_z);
+    try std.testing.expect(w.zombie_ai[hs].target_id < 0);
+    try std.testing.expect(!w.zombie_ai[hs].alert);
 }
 
 test "a wandering horde waits out a blood moon" {

@@ -1475,9 +1475,17 @@ pub const Director = struct {
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.groundY(x, z) orelse w.transform[p].y;
                 const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .wandering) orelse continue;
-                w.zombie_ai[slot].state = .chase;
-                w.zombie_ai[slot].target_id = w.network_id[p].id;
-                w.zombie_ai[slot].alert = true;
+                // Stock AIWanderingHordeSpawner walks to a pit stop before it
+                // investigates the player (UpdateHorde Walk leg). A live chase
+                // target here skips that walk. The spot is the player position
+                // at spawn, so the pack crosses the ring first and only then
+                // picks the player up by sense.
+                w.zombie_ai[slot].spot_x = w.transform[p].x;
+                w.zombie_ai[slot].spot_z = w.transform[p].z;
+                w.zombie_ai[slot].has_spot = true;
+                w.zombie_ai[slot].state = .wander;
+                w.zombie_ai[slot].target_id = -1;
+                w.zombie_ai[slot].alert = false;
                 n += 1;
             }
             return n;
