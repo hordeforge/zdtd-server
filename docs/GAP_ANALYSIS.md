@@ -3626,7 +3626,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   (was 10000, a 1.1024x undercharge), clamp at 60 freezes the cost at 186791.
   Award/join/stats callers pass the current level so exp_to_next matches stock.
   *Anchors:* `src/assets/progression.zig:33-45`, `src/server/game/player.zig:34,39,54`,
-  `src/server/game/join.zig:540`, `Progression.il.txt:1083482`, `:1083513`
+  `src/server/game/join.zig:540`, `asm.il:1083482`, `asm.il:1083513`
 
 - **XPMultiplier server option** `WORKS`
   Parsed, applied to awards, reported in the GameStats blob. Client log confirms
