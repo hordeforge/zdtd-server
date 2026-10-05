@@ -2366,7 +2366,7 @@ one remap table.
   shapes the grid 2xN (cell COUNT is correct; the exact x/y column layout is
   cosmetic).
   *Anchors:* `src/server/game.zig` fillContainerFromLoot,
-  `src/world/containers.zig:33`, `Data/Config/loot.xml`
+  `src/world/containers.zig:53`, `Data/Config/loot.xml`
 
 - **Loot respawn (LootRespawnDays / LootTimer)** `WORKS` `(2026-08-07)`
   `serverconfig.xml LootRespawnDays` (default 7, 0 disables) drives a lazy
@@ -2378,7 +2378,7 @@ one remap table.
   on load; older saves read 0 and do not respawn immediately). World containers
   are marked `player_storage=false` at materialization so they are eligible;
   player-placed storage never respawns (stock `bPlayerStorage`).
-  *Anchors:* `src/world/containers.zig:33`, `src/server/game.zig`
+  *Anchors:* `src/world/containers.zig:53`, `src/server/game.zig`
 
 - **POI reset / rebuild** `WORKS` (quest-tag filter residual)
   `resetPoiBlocks` re-paints a POI's baked .tts blocks over the area
