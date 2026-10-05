@@ -381,6 +381,10 @@ pub const FlatObjective = struct {
     /// turn-in removes `required` of `item_name` from the bag
     /// (ObjectiveFetch.RemoveObjectives).
     keep_items: bool = false,
+    /// ObjectiveFetchFromTreasure.containerName. Opening a container whose
+    /// block name matches grants one of `item_name` when the bag holds none
+    /// (Current_ContainerOpened). Empty = not a treasure fetch.
+    container_name: []const u8 = "",
 };
 
 /// Objective Write subclass (Quest.Write CreateQuest). Stock has exactly four

@@ -235,6 +235,12 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
             for (taken_ids[0..tn]) |id| {
                 systems.questOnFetchItemFrom(&self.sim, c.slot, id, fx, fz);
             }
+            // ObjectiveFetchFromTreasure grants the quest item when its named
+            // chest is opened and the bag holds none.
+            const bid = self.blockIdAtWorld(parsed.world_x, parsed.world_y, parsed.world_z);
+            if (self.blocks.byId(bid)) |bd| {
+                systems.questOnTreasureOpened(&self.sim, c.slot, bd.name, fx, fz);
+            }
             // Echo stock TE to nearby clients. Stock applies the client's whole
             // composite to its own TE and resends it, so when the received body
             // carries more than the storage module (a writable crate's sign text

@@ -527,6 +527,37 @@ pub fn pointInPoi(poi: c.PoiRect, x: f32, z: f32) bool {
     return true;
 }
 
+/// ObjectiveFetchFromTreasure.Current_ContainerOpened: opening the named
+/// chest grants one of the quest item when the bag holds none. A chest whose
+/// block name does not match, or a bag that already holds the item, grants
+/// nothing. The position gate is the same POI test as the take.
+pub fn questOnTreasureOpened(w: *World, peer_slot: usize, block_name: []const u8, x: f32, z: f32) void {
+    if (block_name.len == 0) return;
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    if (!w.mask[ps].journal or !w.mask[ps].inventory) return;
+    const f = w.quest_item_fn orelse return;
+    for (&w.journal[ps].slots) |*s| {
+        if (!s.active or s.completed or s.ready_turn_in) continue;
+        if (s.poi.valid() and !pointInPoi(s.poi, x, z)) continue;
+        const d = w.catalog.byId(s.def_id) orelse continue;
+        for (d.objectives) |o| {
+            if (o.container_name.len == 0 or !std.mem.eql(u8, o.container_name, block_name)) continue;
+            if (o.item_name.len == 0) continue;
+            const want = f(w.quest_item_ctx, o.item_name);
+            if (want == 0) continue;
+            if (bagHolds(w, ps, want)) continue;
+            _ = w.inventory[ps].addSlotStacked(.{ .item_id = want, .count = 1 }, w.maxStack(want));
+        }
+    }
+}
+
+fn bagHolds(w: *const World, ps: Slot, item_id: u16) bool {
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |slot| {
+        if (slot.item_id == item_id and slot.count > 0) return true;
+    }
+    return false;
+}
+
 pub fn questOnFetchItemAt(w: *World, peer_slot: usize, x: f32, z: f32) void {
     questOnFetchItemFrom(w, peer_slot, 0, x, z);
 }
@@ -2383,6 +2414,57 @@ test "a named fetch objective counts only its own item" {
 
     questOnFetchItemFrom(&w, 0, 42, 0, 0);
     try std.testing.expect(q.obj_progress[0] > 0 or q.ready_turn_in or q.completed);
+}
+
+test "opening the named treasure chest grants the item once" {
+    // ObjectiveFetchFromTreasure.Current_ContainerOpened: the named chest
+    // grants one quest item when the bag holds none. A different chest, or a
+    // bag that already holds it, grants nothing.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].journal = true;
+    w.mask[ps].inventory = true;
+
+    const obj = [_]quest.FlatObjective{.{
+        .kind = .fetch_item,
+        .item_name = "questItem",
+        .container_name = "cntBuriedChest",
+    }};
+    const def = quest.QuestDef{
+        .id = 9,
+        .kind = .fetch_item,
+        .title = "treasure",
+        .objectives = &obj,
+    };
+    w.catalog.defs = &.{def};
+    const Hook = struct {
+        fn item(_: ?*anyopaque, name: []const u8) u16 {
+            // Item 5 stacks to 1 offline, so a second grant cannot hide in
+            // the same slot.
+            if (std.mem.eql(u8, name, "questItem")) return 5;
+            return 0;
+        }
+    };
+    w.quest_item_fn = &Hook.item;
+    const q = w.journal[ps].findFree() orelse return error.TestUnexpectedResult;
+    q.* = .{ .def_id = 9, .active = true };
+
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |*slot| slot.* = .{};
+    questOnTreasureOpened(&w, 0, "cntChest", 0, 0);
+    try std.testing.expectEqual(@as(u16, 0), w.inventory[ps].slots[0].count);
+
+    questOnTreasureOpened(&w, 0, "cntBuriedChest", 0, 0);
+    try std.testing.expectEqual(@as(u16, 5), w.inventory[ps].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[0].count);
+
+    questOnTreasureOpened(&w, 0, "cntBuriedChest", 0, 0);
+    var held: u16 = 0;
+    for (w.inventory[ps].slots[0..c.inv_equip_start]) |slot| {
+        if (slot.item_id == 5) held += slot.count;
+    }
+    try std.testing.expectEqual(@as(u16, 1), held);
 }
 
 test "turn-in keeps the item only for FetchKeep" {

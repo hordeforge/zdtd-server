@@ -54,6 +54,7 @@ pub const questOnTraderOpenFrom = quest_trade.questOnTraderOpenFrom;
 pub const questAcceptFromGiver = quest_trade.questAcceptFromGiver;
 pub const questOnFetchItemAt = quest_trade.questOnFetchItemAt;
 pub const questOnFetchItemFrom = quest_trade.questOnFetchItemFrom;
+pub const questOnTreasureOpened = quest_trade.questOnTreasureOpened;
 pub const pointInPoi = quest_trade.pointInPoi;
 pub const questOnFetchItem = quest_trade.questOnFetchItem;
 pub const questOnCraft = quest_trade.questOnCraft;
