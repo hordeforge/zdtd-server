@@ -4710,8 +4710,10 @@ a finer server encoding.
   unpaced block in the phase, has a `join_deco` section and a per-chunk yield and
   measures **0.08 ms** over three joins, which retires it as the cause. What
   remains is unattributed inside the `join` handler and is high-variance run to
-  run (7.6 s and 23.5 s on identical benches, both `join_fail` 0), so the next
-  step is finer sections inside `join` before any behaviour change, not a guess.
+  run (7.6 s and 23.5 s on identical benches, both `join_fail` 0). **2026-10-06:
+  the finer sections already landed** (`join_login`, `join_enter`,
+  `join_worldinfo`, `join_spawn` in `src/apm/profiler.zig`), so the next step is
+  a bench that attributes the residual to one of the four, not more sections.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
