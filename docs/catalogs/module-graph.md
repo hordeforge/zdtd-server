@@ -36,7 +36,7 @@ Only imports of another package directory are counted; single-file imports
 | `wire` | `world` | 4 |
 | `world` | `assets` | 23 |
 | `world` | `ecs` | 6 |
-| `world` | `util` | 40 |
+| `world` | `util` | 41 |
 
 
 ## Enforced edges (`scripts/lint-architecture.sh`)
