@@ -6400,10 +6400,13 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
 **Honest gaps (documented, not faked):**
 - *Generator fuel*: `PowerGenerator` ramps output via
   `CurrentFuel`/`MaxFuel`/`OutputPerFuel`/`TickPowerGeneration` (asm.il:892750).
-  zdtd treats a generator as constant `MaxPower` while `.on`. No fuel burn, no
-  `ShouldAutoTurnOff`, no ramp.
+  a running generator burns its fuel and turns off when empty (`electric.zig`,
+  test "generator fuel burn empties and unpowers"). **2026-10-05**: the
+  constant-`MaxPower` note was stale.
 - *Battery charge state*: `PowerItemTypes.BatteryBank` state-of-charge /
-  charge-discharge is not modeled; `.battery` is a passive passthrough node.
+  a battery charges on surplus and discharges on shortfall (`electric.zig`,
+  test "battery charges on surplus and discharges on shortfall"). **2026-10-05**:
+  the passthrough note was stale.
 - *Trigger/timer/toggle actuation*: PARTIAL. PressurePlate / TripWire /
   MotionSensor / Trigger are `is_trigger` gates: BFS powers the plate when
   wired, but does not flood past until `activateTriggerAt` (player step via
