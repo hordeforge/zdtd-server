@@ -6198,6 +6198,13 @@ nobody re-opens a closed row from a stale one.
   against older repo comments is real and, in the NetPackage region, about 3500
   lines.
 - No zdtd source was modified by any auditor; `git status --porcelain` was clean
+- The single-file `asm.il` dump that every `asm.il:NNNN` citation resolves
+  against (2,818,835 lines, MD5 `2e95dd525785cd95d0c2a4fcee7445fb`) is no
+  longer on this machine at the path the research README records
+  (`$HOME/.cache/zdtd-scratch/asm.il`). The citations stay identified by that
+  MD5 but are **not locally re-verifiable**; the per-class `il/full-v3.1.0/`
+  and `il/full-v3.2.0/` trees are the regenerable substitute. Checked
+  2026-10-06.
   after each audit. Probes were built in scratchpad copies and deleted.
 
 ---
