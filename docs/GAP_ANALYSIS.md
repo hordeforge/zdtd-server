@@ -86,16 +86,16 @@ including pre-v18 BlockValue layouts, prefabs turn clockwise like stock with the
 matching per-block facing, and `YOffset` places caves, mines and bunkers below
 the surface. Parts paint up to 24 cubed (`prefabs.zig`) and sleeper volumes trigger on
 entry, noise and re-arm. **2026-10-05**: the "not painted" and "partial
-triggers" notes were stale. Still open: `rotateRawY` (tts.zig) is the single
-`BlockShapeNew` 24-orientation permutation, which is right for cubes and models
-but not for every family. `BlockShapeBillboardPlant` masks `rotation & 3` and
-renders 20 degree steps (block-shapes.md 2), so a plant in a rotated POI takes a
-90 degree cube rotation instead of its own pose. **Fix shape (2026-10-06):** the
-paint path writes raw and holds no name, so the branch needs a type-id to name to
-shape lookup at stamp time. `maxdamage` has the name-keyed flag already
-(`shape45` precedent, `isShapePlant`); `blockplaceholders.zig:72` shows the
-callback wiring (`Shape45Fn`). Close it with a reverse id to name map in the
-store plus a `shape_plant` branch in `rotateRawY`.
+triggers" notes were stale. **2026-10-06: per-block facing closed.**
+`rotateRawY` was the single `BlockShapeNew` 24-orientation permutation, right
+for cubes and models but wrong for `BlockShapeBillboardPlant`, which masks
+`rotation & 3` and renders 20 degree steps (block-shapes.md 2). A plant in a
+rotated POI took a 90 degree cube rotation instead of its own pose. The paint
+path writes raw and holds no name, so `rotateRawYPlant(raw, steps, plant)`
+takes the shape flag and `PlaceholderCtx.is_plant_id` resolves it through the
+store (`maxdamage.idName` -> `isShapePlant`, wired from `init_assets` beside
+the `shape45` hook). Test `rotateRawYPlant masks a billboard plant to its own
+0..3 pose` pins the mask and the four-turn cycle.
 
 **Water is in lakes and POIs.** Lake and river water now writes from the
 `water_info.xml` sources at chunk generation (water blocks below the surface),

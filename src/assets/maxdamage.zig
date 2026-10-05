@@ -136,6 +136,11 @@ pub const Table = struct {
     /// whose `BlockShape::Has45DegreeRotations` is true, which makes a random
     /// placeholder rotation use stock's eight-way band.
     shape45_names: std.StringHashMapUnmanaged(void) = .empty,
+    /// `Shape == "BillboardPlant"` names after Extends resolution: the shape
+    /// whose rotation is masked to 0..3 and rendered at 20 degree steps
+    /// (block-shapes.md 2), so a rotated POI stamp must not give it the
+    /// 24-orientation cube step.
+    shape_plant_names: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .empty,
@@ -363,6 +368,12 @@ pub const Table = struct {
     /// eight-way band (BlockPlaceholderMap IL_027D-02AD).
     pub fn has45Rotations(self: *const Table, name: []const u8) bool {
         return self.shape45_names.contains(name);
+    }
+
+    /// True when the block's resolved `Shape` is `BillboardPlant`, whose
+    /// rotation is masked to 0..3 at 20 degree steps (block-shapes.md 2).
+    pub fn isShapePlant(self: *const Table, name: []const u8) bool {
+        return self.shape_plant_names.contains(name);
     }
 
     /// Falling-block massKg for a block name (RE EntityFallingBlock IL=232-250):
@@ -877,6 +888,9 @@ const DecoFacts = struct {
     /// (BlockPlaceholderMap IL_027D-02AD). Resolved through Extends (treeMaster
     /// declares the shape; every tree inherits it).
     shape45: ?bool = null,
+    /// `Shape == "BillboardPlant"`: rotation is `& 3` at 20 degree steps
+    /// (BlockShapeBillboardPlant). Resolved through Extends like `shape45`.
+    shape_plant: ?bool = null,
 };
 
 /// Resolve a per-block value through the Extends chain, honoring the `param1`
@@ -947,9 +961,11 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         if (out.stability_ignore == null and !xml.tagListContains(p1, "StabilityIgnore")) out.stability_ignore = f.stability_ignore;
         if (out.show_model_on_fall == null and !xml.tagListContains(p1, "ShowModelOnFall")) out.show_model_on_fall = f.show_model_on_fall;
         if (out.shape45 == null and !xml.tagListContains(p1, "Shape")) out.shape45 = f.shape45;
+        if (out.shape_plant == null and !xml.tagListContains(p1, "Shape")) out.shape_plant = f.shape_plant;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
-            out.show_model_on_fall != null and out.shape45 != null) break;
+            out.show_model_on_fall != null and out.shape45 != null and
+            out.shape_plant != null) break;
         cur = f.extends orelse break;
     }
     return out;
@@ -1245,7 +1261,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
             facts.show_model_on_fall = parseBool(sm);
         }
         if (xml.propertyValue(body, "Shape")) |sh| {
-            facts.shape45 = std.ascii.eqlIgnoreCase(std.mem.trim(u8, sh, " \t"), "DistantDecoTree");
+            const shape = std.mem.trim(u8, sh, " \t");
+            facts.shape45 = std.ascii.eqlIgnoreCase(shape, "DistantDecoTree");
+            facts.shape_plant = std.ascii.eqlIgnoreCase(shape, "BillboardPlant");
         }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
@@ -1283,6 +1301,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .empty;
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .empty;
     var shape45_names: std.StringHashMapUnmanaged(void) = .empty;
+    var shape_plant_names: std.StringHashMapUnmanaged(void) = .empty;
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -1397,6 +1416,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
         if (r.shape45 orelse false) try shape45_names.put(arena, e.key_ptr.*, {});
+        if (r.shape_plant orelse false) try shape_plant_names.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -1445,6 +1465,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .stability_ignore_names = stability_ignore_names,
         .no_show_model_on_fall = no_show_model_on_fall,
         .shape45_names = shape45_names,
+        .shape_plant_names = shape_plant_names,
         .upgrade_to = upgrade_to_names,
         .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,

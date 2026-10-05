@@ -375,9 +375,23 @@ const rot_y_step = [24]u8{
 /// CalcRotation's separate loop for `_rotation >= 24`. Anything above that is
 /// left alone rather than guessed at.
 pub fn rotateRawY(raw: u32, steps: u8) u32 {
+    return rotateRawYPlant(raw, steps, false);
+}
+
+/// `rotateRawY`, with the `BlockShapeBillboardPlant` rule: that family masks
+/// `rotation & 3` and renders 20 degree steps (block-shapes.md 2), so a plant
+/// must not take the 24-orientation cube step a rotated POI would give it.
+pub fn rotateRawYPlant(raw: u32, steps: u8, plant: bool) u32 {
     const n: u8 = steps & 3;
     if (n == 0) return raw;
     const rot: u8 = @intCast((raw >> rotation_shift) & rotation_mask);
+    if (plant) {
+        // Stock BlockShapeBillboardPlant masks to 0..3; the cube table would
+        // hand it a 24-orientation value it cannot interpret.
+        const out: u8 = (rot & 3) +% n;
+        return (raw & ~(rotation_mask << rotation_shift)) |
+            (@as(u32, out) << rotation_shift);
+    }
     var out: u8 = rot;
     if (rot < 24) {
         var i: u8 = 0;
@@ -409,6 +423,11 @@ pub const PlaceholderCtx = struct {
     world_seed: i32,
     biome_name: *const fn (ctx: ?*anyopaque, wx: i32, wz: i32) []const u8,
     biome_ctx: ?*anyopaque = null,
+    /// True when the runtime block id is a `BlockShapeBillboardPlant`
+    /// (block-shapes.md 2). Optional: callers without a block table get the
+    /// cube rule, which is what every non-plant shape wants anyway.
+    is_plant_id: ?*const fn (?*anyopaque, u16) bool = null,
+    plant_ctx: ?*anyopaque = null,
 };
 
 pub fn paintDecoration(
@@ -496,7 +515,16 @@ pub fn paintDecoration(
         // replaces _rotCount with 4 - _rotCount on the left-turn path
         // (asm.il ~181926). Using r directly leaves the building internally
         // coherent but 180 degrees off stock at r=1 and r=3.
-        set_block(ctx, wx, wy, wz, rotateRawY(raw, 4 -% (rot & 3)), tex, dens, dmg);
+        // Billboard plants mask rotation & 3 (block-shapes.md 2); the cube
+        // table would hand them a 24-orientation value they cannot interpret.
+        // The shape is a blocks.xml fact, resolved through the block table the
+        // caller owns (maxdamage.idName -> isShapePlant).
+        const cell_id = typeId(raw);
+        const plant = if (ph) |p|
+            (if (p.is_plant_id) |f| f(p.plant_ctx, cell_id) else false)
+        else
+            false;
+        set_block(ctx, wx, wy, wz, rotateRawYPlant(raw, 4 -% (rot & 3), plant), tex, dens, dmg);
     }
 }
 
@@ -531,6 +559,29 @@ test "rotateRawY cycles the 45 degree band and leaves unknown rotations alone" {
     try std.testing.expectEqual(band_base, rotateRawY(band_base, 4));
     const unknown: u32 = 30 << rotation_shift;
     try std.testing.expectEqual(unknown, rotateRawY(unknown, 1));
+}
+
+test "rotateRawYPlant masks a billboard plant to its own 0..3 pose" {
+    // BlockShapeBillboardPlant masks `rotation & 3` and renders 20 degree steps
+    // (block-shapes.md 2). The cube table would hand it a 24-orientation value
+    // it cannot interpret, so a plant must cycle its own four poses.
+    const raw: u32 = 0x0AB3_0042; // type 0x42, rotation 3, high meta bits set
+    try std.testing.expectEqual(raw, rotateRawYPlant(raw, 0, true));
+    const r1 = rotateRawYPlant(raw, 1, true);
+    // Non-rotation bits survive.
+    try std.testing.expectEqual(raw & ~(rotation_mask << rotation_shift), r1 & ~(rotation_mask << rotation_shift));
+    // Four quarter turns land back on the original pose.
+    try std.testing.expectEqual(raw, rotateRawYPlant(raw, 4, true));
+    // A plant with a cube-table rotation value masks to its low two bits
+    // rather than being handed a 24-orientation result: rot 20 -> 20 & 3 = 0,
+    // then one step gives 1, not the cube table's 21.
+    const cube: u32 = 20 << rotation_shift;
+    const plant = rotateRawYPlant(cube, 1, true);
+    try std.testing.expectEqual(@as(u32, 1) << rotation_shift, plant);
+    // The same cell under the cube rule takes the 24-orientation table instead.
+    // rot_y_step[20] is 17 (the table row `17 18 19 16` maps 20 to 17).
+    try std.testing.expectEqual(@as(u32, 17) << rotation_shift, rotateRawY(cube, 1));
+    try std.testing.expect(rotateRawY(cube, 1) != plant);
 }
 
 test "tts load abandoned_house block types if present" {

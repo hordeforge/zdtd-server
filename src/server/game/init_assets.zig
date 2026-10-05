@@ -269,8 +269,18 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
                 return self_t.t.has45Rotations(name);
             }
+            /// `BlockShapeBillboardPlant` after Extends resolution (block-shapes.md
+            /// 2): rotation is `& 3` at 20 degree steps, so a rotated POI stamp
+            /// must not give a plant the cube step.
+            fn isPlantBlock(ctx: ?*anyopaque, id: u16) bool {
+                const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+                const name = self_t.t.idName(id) orelse return false;
+                return self_t.t.isShapePlant(name);
+            }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
+        self.world.is_plant_block = IdCtx.isPlantBlock;
+        self.world.plant_ctx = &id_ctx;
         // blockplaceholders.xml: the prefab paint pass resolves these names per
         // cell (BlockPlaceholderMap::Replace). Loaded before the first prefab so
         // the remap can record the placeholder slots; the sandbox gate is a

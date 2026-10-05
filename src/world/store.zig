@@ -697,6 +697,11 @@ pub const World = struct {
     water_fill_fn: ?*const fn (?*anyopaque, i32, i32, i32, u16) void = null,
     /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
     terrain_ids: TerrainIds = .{},
+    /// Resolved `BlockShapeBillboardPlant` names (block-shapes.md 2): rotation
+    /// is `& 3` at 20 degree steps, so a rotated POI stamp must not give a
+    /// plant the 24-orientation cube step. Injected like `terrain_ids`.
+    is_plant_block: ?*const fn (?*anyopaque, u16) bool = null,
+    plant_ctx: ?*anyopaque = null,
     /// Hand chunk writes to the background flusher ([perf] async_chunk_flush).
     /// Default off: every existing save-then-reload path stays synchronous.
     async_flush: bool = false,
@@ -1143,6 +1148,8 @@ pub const World = struct {
                             .world_seed = @truncate(@as(i64, @bitCast(if (self.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed))),
                             .biome_name = biomeNameAt,
                             .biome_ctx = self,
+                            .is_plant_id = self.is_plant_block,
+                            .plant_ctx = self.plant_ctx,
                         };
                         break :blk &ph_here;
                     } else null;
