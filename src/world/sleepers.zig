@@ -17,6 +17,9 @@ pub const VolumeGroup = struct {
     class_name: []const u8 = "",
     min_count: u8 = 0,
     max_count: u8 = 1,
+    /// The group row ends in `boss` (stock `SleeperVolume.Group.isBoss`).
+    /// The spawn path does not act on it yet.
+    is_boss: bool = false,
 };
 
 /// Authored sleeper spawn point (world space, after prefab rotation).
@@ -496,6 +499,7 @@ pub fn loadFromPrefabs(
         // IL_022d..02a0). vol_count == start-segment count decides the form:
         //   tokens == vol_count      → name-only, spawnCountMin/Max default 5,5
         //   tokens == vol_count*3    → triple (name, min, max) per volume
+        //   tokens == vol_count*4    → quadruple (name, min, max, boss) per volume
         //   otherwise                → groupName "???", 5,5
         const vol_count = segCount(start_s);
         var group_toks: std.ArrayList([]const u8) = .empty;
@@ -506,6 +510,7 @@ pub fn loadFromPrefabs(
         }
         const name_only = group_toks.items.len == vol_count;
         const triple = group_toks.items.len == vol_count * 3;
+        const quadruple = group_toks.items.len == vol_count * 4;
 
         // Authored spawn points come from Class=Sleeper marker blocks in the
         // voxel data, not XML (asm.il Prefab block-scan ~919380: Block.IsSleeperBlock
@@ -595,13 +600,17 @@ pub fn loadFromPrefabs(
                 .class_name = group_toks.items[cur_vol],
                 .min_count = 5,
                 .max_count = 5,
-            } else if (triple and cur_vol * 3 + 2 < group_toks.items.len) blk: {
-                const mn = parseCount(group_toks.items[cur_vol * 3 + 1]);
-                const mx = parseCount(group_toks.items[cur_vol * 3 + 2]);
+            } else if ((triple or quadruple) and cur_vol * 3 + 2 < group_toks.items.len) blk: {
+                const stride: usize = if (quadruple) 4 else 3;
+                const base = cur_vol * stride;
+                const mn = parseCount(group_toks.items[base + 1]);
+                const mx = parseCount(group_toks.items[base + 2]);
+                const boss = quadruple and std.mem.eql(u8, group_toks.items[base + 3], "boss");
                 break :blk VolumeGroup{
-                    .class_name = group_toks.items[cur_vol * 3],
+                    .class_name = group_toks.items[base],
                     .min_count = mn,
                     .max_count = @max(mn, mx),
+                    .is_boss = boss,
                 };
             } else VolumeGroup{ .class_name = "???", .min_count = 5, .max_count = 5 };
             vol.group_n = 1;
@@ -693,6 +702,37 @@ test "abandoned_house authored sleeper spawn points inside volumes if present" {
         }
     }
     try std.testing.expect(total >= 1);
+}
+
+test "a quadruple group row carries the boss flag" {
+    // Stock SleeperVolume.Group reads a fourth token: "boss" marks the group
+    // (Group.isBoss). A triple row stays non-boss, and any other fourth token
+    // does not set the flag.
+    const dec = [_]PrefabRef{.{ .name = "house", .x = 0, .y = 60, .z = 0, .rot = 0, .size_x = 16, .size_y = 8, .size_z = 16 }};
+    const body =
+        \\<prefab>
+        \\<property name="SleeperVolumeSize" value="4, 4, 4#4, 4, 4"/>
+        \\<property name="SleeperVolumeStart" value="0, 0, 0#6, 0, 6"/>
+        \\<property name="SleeperVolumeGroup" value="zombieBoss,1,1,boss,zombieGrunt,2,3,grunt"/>
+        \\</prefab>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try @import("../util/test_tmp.zig").rootOf(&tmp);
+    var path_buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/POIs/house.xml", .{dir});
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, path[0 .. path.len - "house.xml".len]);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = body });
+
+    var store = try loadFromPrefabs(std.testing.allocator, dir, &dec, null, null);
+    defer store.deinit();
+    try std.testing.expectEqual(@as(usize, 2), store.volumes.len);
+    try std.testing.expect(store.volumes[0].groups[0].is_boss);
+    try std.testing.expectEqualStrings("zombieBoss", store.volumes[0].groups[0].class_name);
+    try std.testing.expect(!store.volumes[1].groups[0].is_boss);
+    try std.testing.expectEqualStrings("zombieGrunt", store.volumes[1].groups[0].class_name);
+    try std.testing.expectEqual(@as(u8, 2), store.volumes[1].groups[0].min_count);
+    try std.testing.expectEqual(@as(u8, 3), store.volumes[1].groups[0].max_count);
 }
 
 test "sleeper volume group forms: name-only vs triple" {
