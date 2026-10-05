@@ -1765,13 +1765,10 @@ mods/modChance on the stock roll.
 
 ## 6. Blood moon
 
-**Headline.** A blood moon does fire on the server every Nth day and the client
-hears the blood-moon music and sees the biome forced to its `bloodMoon` weather
-group, but the horde is a flat 4-zombie-every-6s trickle from the ordinary night
-spawn group with no gamestage escalation, it ends at midnight instead of dawn,
-and the red moon and red HUD warning clock the client draws from
-`GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
-encoding is one day high.
+**Headline.** The blood moon runs from dusk to dawn on the persisted
+schedule. The wave size and group come from the frozen party gamestage.
+**2026-10-05**: the "flat trickle, ends at midnight, wrong night" note was
+the pre-fix audit.
 
 **25 WORKS · 0 PARTIAL · 0 MISSING**
 
