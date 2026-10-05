@@ -7303,7 +7303,7 @@ IL class/method they came from.
 
 ### Vehicle physics (terrain-follow + collision)
 
-zdtd's server-authoritative vehicle sim (`src/ecs/vehicle.zig `systemVehicles``)
+zdtd's server-authoritative vehicle sim (`src/ecs/vehicle.zig`, `systemVehicles`)
 is a zdtd extension: stock does NOT simulate vehicles server-side. Stock
 `EntityVehicle` is Unity client-side (VPEngine, WheelColliders, Rigidbody);
 `NetPackageVehiclePositions::ProcessPackage` (asm.il:841203-841225) only feeds
