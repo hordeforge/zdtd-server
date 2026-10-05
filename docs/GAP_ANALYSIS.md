@@ -296,14 +296,12 @@ area and the concrete work.
    `src/wire/packages.zig` `buildLockResponseTrader`). Proven by a wire test and
    the trader scenario (`server/scenarios.zig`); live stock-client visual check
    still open. POI placement has since landed (see the Traders WORKS row);
-   restock rolls and quest offering remain.
+   restock rolls and quest offering have since landed too.
 
-3. **DONE 2026-08-06.** POIs: remap prefab block ids through `<name>.blocks.nim` (also converts pre-v18 BlockValue layouts).
-   `applyTtsPaintToChunk` stamps the raw `.tts` type id and assumes it is in the
-   runtime `AssignIds` range; it is not. 203350 of 952260 painted cells (21.4%)
-   over a 120-POI sample are the wrong block, live-confirmed on the client
-   (`src/world/prefabs.zig:224`, stock does it at `Prefab::loadIdMapping`,
-   asm.il:928850).
+3. **DONE 2026-08-06.** POIs: remap prefab block ids through `<name>.blocks.nim`.
+   `applyTtsPaintToChunk` resolves each cell through the prefab's `.blocks.nim`
+   (`prefabs.zig`, test "prefab type ids remap through blocks.nim into runtime ids").
+   **2026-10-05**: the body still said 21% of cells were the wrong block.
 
 4. **DONE 2026-08-06.** POIs: rotation direction and `YOffset`.
    Rotation is stock clockwise (`tts.zig` `rotateLocalXZ`) and `stampY` adds
