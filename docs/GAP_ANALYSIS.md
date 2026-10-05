@@ -7449,13 +7449,13 @@ and the server answers everyone with type 1 carrying the RESOLVED seat or type 3
 (`EntityVehicle::GetAttachedToInfo`, asm.il:542503), so the seat index is the
 only thing the server has to get right for a passenger to render in place.
 
-HONEST GAPS:
+GAPS AND DELIBERATE REFUSALS:
 - **No `VehicleSeats` mod budget.** `Vehicle::SetSeats` allows extra seats when
   `EffectManager.GetValue(PassiveEffects::VehicleSeats, ...)` (asm.il:733849) is
   non-zero. zdtd has no vehicle mod slots, so the budget is fixed at 0 and only
   base seats count: a Truck4x4 is 4 seats, never 6.
 - **Occupancy is not persisted.** A restart leaves every seat empty.
-- **Explicit requests for an occupied seat are refused, not honoured.** Stock
+- **Explicit requests for an occupied seat are refused, not honoured (deliberate).** Stock
   overwrites the array entry (asm.il:406554 IL_005d), which would unseat another
   player on a client's say-so. The stock client never sends a positive slot.
 - **`NetPackageVehicleDataSync` payload stays opaque.** The framing is parsed
