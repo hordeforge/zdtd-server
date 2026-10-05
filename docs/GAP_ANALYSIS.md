@@ -283,13 +283,9 @@ Ranked across all areas by player impact, highest first. Each entry names the
 area and the concrete work.
 
 1. **DONE 2026-08-06.** Player progression / entities: replicate AI-inflicted damage.
-   `applyDeferredDamage` subtracts from `health[].hp` and never sets or emits
-   anything; `Dirty.hp` is written in one place and read in none. Emit
-   `NetPackageEntityStatChanged` for player HP from the tick replicate pass, the
-   way stock's `EntityStats::SendStatChangePacket` does (asm.il:199650). Until
-   this lands, combat has no stakes and a "dead" player is a ghost who cannot
-   fight back (`src/ecs/damage_apply.zig:58-140`,
-   `src/server/game.zig`).
+   The replicate pass drains the hp dirty bit into `EntityStatChanged`
+   (`replicate_health.zig`). **2026-10-05**: the body still said `applyDeferredDamage`
+   never emits.
 
 2. **DONE 2026-08-06 (POI placement closed after).** Traders: replicate the trader entity, then deliver
    `TraderData`. Unfiltered `.trader` from both spawn paths
@@ -452,10 +448,8 @@ area and the concrete work.
     already-active quests.
 
 17. **DONE 2026-08-06.** Entities / blood moon / progression: parse `gamestages.xml`.
-    It is only a filename in `xml_patch.zig:99`. Without it `GroupGenericZombie`
-    (4781 uses in prefab XML) falls through to `zombieBoe`, the `BloodMoonHorde`
-    spawner's wave structure does not exist, and the world never escalates. The
-    whole surface needed is visible at asm.il:955240 and :416434.
+    `assets/gamestages.zig` loads the ladders and resolves `GroupGenericZombie`
+    to a spawner. **2026-10-05**: the body still said the file was only a filename.
 
 18. **DONE 2026-08-07.** World: sample subbiome deco lists. `decoSpeciesAt`
     now resolves each cell through a port of stock `GetBiomeOrSubAt`
