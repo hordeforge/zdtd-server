@@ -116,9 +116,11 @@ the S2C client echo; the 23 crafting skills are magazine-driven in stock
 (A21+ book system, RE residual) and their magazine advancement stays
 recorded.
 
-**The world is bald, dry and stepped.** The join deco burst produced 3 objects for
-an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
-sub-block byte is discarded. Nothing ever collapses.
+**The world is still stepped.** The join deco burst produced 3 objects for
+an entire 13x13-chunk window. The DTM stores gameY times 256 and the chunk
+height plane keeps the whole block, so the sub-block fraction is discarded.
+Collapse is shipped: the stability plane removes unsupported blocks.
+**2026-10-05**: the "nothing ever collapses" note was stale.
 
 **Progression is nearly complete.** The 57 perks, 8 attributes and 23 crafting
 skills parse from `progression.xml` with their 648 `passive_effect` rows (the
