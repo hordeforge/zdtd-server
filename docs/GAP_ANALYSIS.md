@@ -7297,7 +7297,9 @@ IL class/method they came from.
   deliberately NOT wired into game.zig. The builder is shipped for parity/opt-in
   use; wiring it is left as a documented, clearly-labeled hook, not stock parity.
 - **`NetPackageHordeArmageddon` does not exist.** Grep of the IL for
-  "Armageddon" finds no `NetPackage`; the name is absent from stock through V3.1.0 b14. Not
+  "Armageddon" finds no `NetPackage`; a case-insensitive grep of the whole research
+  corpus (both the V3.1.0 and V3.2.0 `il/` trees) returns zero hits, so the name
+  is absent from stock through V3.2.0 b10 as well as V3.1.0 b14. Not
   implemented.
 - **Feral sense is not an FX package.** It is `EAIManager.feralSense: float32`
   plus the `EnumGamePrefs.ZombieFeralSense` gamepref, applied at world/entity
