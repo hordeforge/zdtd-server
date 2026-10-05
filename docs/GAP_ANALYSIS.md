@@ -1630,7 +1630,8 @@ mods/modChance on the stock roll.
   (`ForceUnlockLockTarget`, channel 0) so an open window shuts, and walks the
   POI's `IndexName="TraderOnOff"` blocks to toggle them (BlockLight meta bit
   0x2 via SetBlockRPC; door close/lock via composite TEFeatureDoor/TEFeature
-  Lockable and speaker sounds are residuals - zdtd has no door TE yet).
+  Lockable). The door TE exists (`world/doors.zig`). **2026-10-05**: the "no
+  door TE" note was stale. Residual: speaker sounds.
   *Anchors:* `src/server/game.zig` (`traderIsOpen` `:8765`, `tickTraderAreas`
   `:8793`, `toggleTraderGates` `:8811`), `src/assets/blocks.zig`
   (`IndexName=TraderOnOff`), `asm.il:862122-862230`,
