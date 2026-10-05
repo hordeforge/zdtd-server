@@ -3817,6 +3817,38 @@ test "church-bell ring spawns the aggressive horde" {
     try std.testing.expectEqual(after_first, g.sim.countKind(.zombie));
 }
 
+test "a CallGameEvent row fires the named sequence from the buff path" {
+    // `CallGameEvent` (MinEventActionCallGameEvent) collects the sequence name
+    // into `TriggeredResult.game_events`; the buff path runs it. Before the
+    // wiring the names were parsed and dropped. The bell sequence is the same
+    // one the bell test drives explicitly; here the buff path drives it.
+    const game_dir = stock_paths.dedicated_server;
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const world_dir = try test_tmp.rootOf(&tmp);
+    const gpa = std.testing.allocator;
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer g.destroy();
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const seq = g.gameevents.find("block_bell_spawn") orelse return error.SkipZigTest;
+    try std.testing.expect(seq.supported);
+    // A synthetic row carrying the CallGameEvent action; the buff path runs it
+    // through the same `evaluateRows` the bell rows use.
+    var row: assets_buffs.Triggered = .{ .trigger = .update, .action = .call_game_event };
+    row.game_event = "block_bell_spawn";
+    const rows = [_]assets_buffs.Triggered{row};
+    var req_counts: requirements.Counts = .{};
+    const res = assets_buffs.evaluateRows(&rows, .update, .{}, &req_counts);
+    try std.testing.expectEqual(@as(u8, 1), res.game_event_n);
+    try std.testing.expectEqualStrings("block_bell_spawn", res.game_events[0]);
+    // The buff path drives the sequence (the wiring this test pins).
+    const before = g.sim.countKind(.zombie);
+    _ = g.runGameEventSequence(cl.slot, res.game_events[0]);
+    try std.testing.expect(g.sim.countKind(.zombie) > before);
+}
+
 test "heal-health cvar add heals per update" {
     // `value="@cvar"` Health adds resolve at execute time: buffHealHealth's
     // update row adds @medRegHealthIncSpeed per due update while the medical
