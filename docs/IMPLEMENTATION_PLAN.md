@@ -128,9 +128,9 @@ Dependencies: do not start planet shards before M11 in-process interest wins.
 **Files:** `src/assets/entities.zig`, `src/ecs/components.zig`, `src/ecs/world.zig`, wire packages, game join path.
 
 ### Acceptance
-- [ ] Second client sees first move (already partial; must use spawn packages).  
+- [x] Second client sees first move (interest `observerMask` + spawn packages; `broadcastNear` on every motion pass).  
 - [ ] Zombie visible; kill updates HP/remove on both clients.  
-- [ ] Unit tests for spawn/stat golden sizes.  
+- [x] Unit tests for spawn/stat golden sizes. (`wire/deco_tests.zig` "golden layout", `chunk_tests.zig` exact `body.len`.)  
 
 ---
 
@@ -284,8 +284,8 @@ Chunk stream: named caps shipped; async workers still open.
 - Open/close packages.  
 
 ### Acceptance
-- [ ] Zombie paths around a wall (not through).  
-- [ ] Enter POI → sleepers wake.  
+- [x] Zombie paths around a wall (not through). (`ai_tasks.zig:2083` "system zombie paths around solid wall via A*", `:2100` wandering variant.)  
+- [x] Enter POI → sleepers wake. (`TouchGroup` cascade, `world/sleepers.zig:60`; noise wake too.)  
 - [ ] Open chest → items appear in client.  
 
 ---
@@ -331,7 +331,7 @@ Chunk stream: named caps shipped; async workers still open.
 #### M14.5 Turret as placeable + ammo items  
 
 ### Acceptance
-- [ ] Client places generator, wires consumer, powers turret, kills zombie.  
+- [x] Client places generator, wires consumer, powers turret, kills zombie. (`scenarios.zig:4613` "vehicle enter drive and turret kills with power"; power BFS + wire actions.)  
 - [ ] Drive vehicle across 100 m without falling through terrain.  
 
 ---
@@ -350,8 +350,8 @@ Chunk stream: named caps shipped; async workers still open.
 #### M15.6 Password / basic auth packages  
 
 ### Acceptance
-- [ ] Cold start from config only (no long CLI).  
-- [ ] Admin can kick and give item.  
+- [x] Cold start from config only (no long CLI). (`config.zig` serverconfig subset + `zdtd_config.zig` `zdtd.toml` binders; `main.zig:617` effective config.)  
+- [x] Admin can kick and give item. (`consoleKickBan`/`runBanCommand`, `.give` arm `admin_console.zig:2031`.)  
 
 ---
 
