@@ -71,6 +71,8 @@ Shared context for all five tasks:
 
 ## T18. Own the player inventory
 
+**Status: hardening landed; the authority change is still open.** ADR 0007 is still `accepted` as a client-trusting interim, and its 2026-08-22 amendment resolved only decision point 4 (full stock wire width, 67 slots). On top of the interim, `inv_txn.zig` now rejects beyond-edit-range writes, non-empty client stacks over the cap, and unresolvable item ids (T18 hardening comments on the reject sites). The server-computed-authority change this task calls for is not in place.
+
 **Why:** [ADR 0007](adr/0007-player-inventory-c2s-trust.md) records the interim
 decision that player inventory is client-trusting: the stock UI path applies C2S
 hold and bag pushes into ECS with no server echo. AUTHORITY.md says the same.
