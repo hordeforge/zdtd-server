@@ -4880,7 +4880,7 @@ a finer server encoding.
   *Anchors:* `src/world/weather.zig:104-284`, `asm.il:2048930`, `asm.il:2049128`,
   `asm.il:1250209`, `asm.il:1249300`
 
-- **Blood-moon weather override** `WORKS`: see [the §6 row](#6-blood-moon-weather-override)
+- **Blood-moon weather override** `WORKS`: see [the §6 row](#6-blood-moon)
   for the full note; this entry exists only because the weather catalog lists it.
 
 - **NetPackageWeather broadcast** `WORKS`
