@@ -1241,14 +1241,10 @@ re-arms) with the population count as the quest target.
 
 ## 5. Traders
 
-**Headline.** A player on a stock V3.1.0 client can now see and reach a trader:
-the `.trader` kind replicates with a real `npcTraderJen` class hash and
-`TraderData` arrives on both stock S2C paths, `EntityCreationData.hasTraderData`
-at spawn and the channel-1 `LockResponse` context on open (wire-tested
-2026-08-06; stock-client visual check pending). What is still missing is the
-economy around the NPC: no trader is placed in the five Navezgane POIs, no
-restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
-parsed, and quest offering is unwired.
+**Headline.** Traders spawn in their POIs, replicate with a class hash, and
+fill from the per-trader XML list. Restock rolls on open. **2026-10-05**: the
+"no placement, no restock, no lists" note was the pre-fix audit. Still open:
+mods/modChance on the stock roll.
 
 **20 WORKS · 0 PARTIAL · 0 MISSING**
 
