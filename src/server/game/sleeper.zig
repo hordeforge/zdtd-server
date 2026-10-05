@@ -183,13 +183,16 @@ fn triggerVolume(self: *Game, vi: usize) void {
             // Sandbox 43 `MaxEnemyTier` (stock clamps every create): a sleeper
             // class above the cap degrades down its PreviousTier ladder, and a
             // ladder that cannot satisfy the cap skips the spawn.
-            _ = self.sim.spawnSleeperDef(
+            const id = self.sim.spawnSleeperDef(
                 @floatFromInt(sp.x),
                 @floatFromInt(sp.y),
                 @floatFromInt(sp.z),
                 self.clampSpawnClass(def) orelse continue,
                 @intCast(vi + 1),
-            );
+            ) orelse continue;
+            // The marker block's facing is the sleeper's spawn yaw (BlockValue
+            // rotation bits 16..20, plus the prefab's own rotation).
+            if (self.sim.slotOfNetId(id)) |ss| self.sim.transform[ss].yaw = sp.yaw;
         }
         vol.spawned_alive = @intCast(@min(cap, 255));
         return;

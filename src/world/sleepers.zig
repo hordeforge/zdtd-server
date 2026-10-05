@@ -28,6 +28,9 @@ pub const SpawnPos = struct {
     x: i32,
     y: i32,
     z: i32,
+    /// Marker block rotation (BlockValue bits 16..20), as a yaw in degrees.
+    /// 0 when the marker has no rotation.
+    yaw: f32 = 0,
 };
 
 pub const Volume = struct {
@@ -555,7 +558,17 @@ pub fn loadFromPrefabs(
                     if (!f(sleeper_ctx, name)) continue;
                 } else if (!std.mem.startsWith(u8, name, "sleeper")) continue;
                 const c = tb.offsetToCoord(bi);
-                try sleeper_local.append(allocator, .{ .x = c.x, .y = c.y, .z = c.z });
+                // BlockValue.rotation is bits 16..20. The marker's facing is
+                // the sleeper's spawn yaw; the prefab's own rotation is added
+                // when the point is rotated into world space below.
+                const raw = tb.types[@intCast(bi)];
+                const rot_bits: u8 = @intCast((raw >> 16) & 31);
+                try sleeper_local.append(allocator, .{
+                    .x = c.x,
+                    .y = c.y,
+                    .z = c.z,
+                    .yaw = @as(f32, @floatFromInt(rot_bits & 3)) * 90,
+                });
             }
         };
 
@@ -623,7 +636,12 @@ pub fn loadFromPrefabs(
                 if (lp.y < st.y or lp.y >= st.y + sz.y) continue;
                 if (lp.z < st.z or lp.z >= st.z + sz.z) continue;
                 const r = rotLocal(lp.x, lp.z, psx, psz, d.rot);
-                try vspawns.append(allocator, .{ .x = d.x + r.x, .y = d.y + lp.y, .z = d.z + r.z });
+                try vspawns.append(allocator, .{
+                    .x = d.x + r.x,
+                    .y = d.y + lp.y,
+                    .z = d.z + r.z,
+                    .yaw = lp.yaw + @as(f32, @floatFromInt(d.rot & 3)) * 90,
+                });
             }
             if (vspawns.items.len > 0) vol.spawns = try arena.dupe(SpawnPos, vspawns.items);
 
@@ -702,6 +720,21 @@ test "abandoned_house authored sleeper spawn points inside volumes if present" {
         }
     }
     try std.testing.expect(total >= 1);
+}
+
+test "a marker rotation becomes a spawn yaw" {
+    // BlockValue.rotation is bits 16..20. The low two bits are the 90 degree
+    // facing, and the prefab's own rotation adds to it.
+    const raw: u32 = 2 << 16;
+    const rot_bits: u8 = @intCast((raw >> 16) & 31);
+    const yaw: f32 = @as(f32, @floatFromInt(rot_bits & 3)) * 90;
+    try std.testing.expectEqual(@as(f32, 180), yaw);
+    const prefab_rot: u8 = 1;
+    try std.testing.expectEqual(@as(f32, 270), yaw + @as(f32, @floatFromInt(prefab_rot & 3)) * 90);
+    // A rotation above the four facings does not invent a fifth.
+    const raw_hi: u32 = 6 << 16;
+    const hi: u8 = @intCast((raw_hi >> 16) & 31);
+    try std.testing.expectEqual(@as(f32, 180), @as(f32, @floatFromInt(hi & 3)) * 90);
 }
 
 test "a quadruple group row carries the boss flag" {
