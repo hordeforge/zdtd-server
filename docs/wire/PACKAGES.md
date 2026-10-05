@@ -155,7 +155,7 @@ grounded in `7dtd-engine-research/docs/releases/changelog-3.2.0.md`:
 | NetPackagePackageIds | ToClient |  | sent | `VersionInformation.Read;ReadInt32;ReadString;ReadBoolean;Rea` |
 | NetPackageParticleEffect | ? |  |  | `ParticleEffect.Read;ReadInt32;ReadBoolean;ReadBoolean;` |
 | NetPackagePartyActions | ? | handled |  | `ReadByte;ReadInt32;ReadInt32;ReadString;` |
-| NetPackagePartyData | ToClient | handled |  | `ReadInt32;ReadByte;ReadString;ReadInt32;ReadInt32;ReadInt32;` |
+| NetPackagePartyData | ToClient |  | sent | `ReadInt32;ReadByte;ReadString;ReadInt32;ReadInt32;ReadInt32;` |
 | NetPackagePartyQuestChange | ? | handled |  | `ReadInt32;ReadByte;ReadBoolean;ReadInt32;` |
 | NetPackagePersistentPlayerPositions | ToClient |  |  | `ReadInt32;SU.ReadVector3i;` |
 | NetPackagePersistentPlayerState | ToClient |  | sent | `ReadByte;PersistentPlayerData.Read;` |
