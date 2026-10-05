@@ -103,6 +103,9 @@ pub fn syncEquipSlot(
         // Removed piece's installed mods stop rows (RemoveCVar cleanup
         // like $crippleChance); mod ids snapshot before the overwrite.
         fireSeenModRows(self, c, ps, &prev_mods, .equip_stop, req_counts);
+        // `onReloadStop`: holstering the weapon abandons an in-flight reload
+        // (minevents.md:99). The held item changed, so any reload is over.
+        buff_events.fireReloadStop(self, ps);
     }
     if (cur_id != 0) {
         // Installed mods' own equip rows fire even when the host item has

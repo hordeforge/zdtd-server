@@ -1119,6 +1119,8 @@ pub fn fireItemUseBuffs(self: *Game, ps: ecs.Slot, item_id: u16) void {
         _ = c.cvars.apply(entry.name, .set, entry.value);
     }
     applyTriggeredBuffsFull(self, c.entity_id, ps, &res, c.entity_id, false);
+    // `onReloadStop`: the next action ends an in-flight reload (minevents.md:99).
+    fireReloadStop(self, ps);
     // Gated `GiveExp` rows sum here (bandage 10 + Physician tier bonus);
     // this replaces the flat first-GiveExp award, which ignored the gates.
     if (res.give_exp > 0) self.awardXp(@intCast(peer_slot), res.give_exp);
@@ -1338,6 +1340,34 @@ pub fn fireFallImpact(self: *Game, ps: ecs.Slot, impact_speed: f32) void {
     const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
     for (buff_ids[0..n]) |id| {
         const res = assets_buffs.evaluateTriggered(&self.buffs, id, .fall_impact, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+/// `onReloadStop` (minevents.md:99). The RE raises it from item-action code
+/// (`minevents.md:329`) but pins no server-side reload duration, so this fires
+/// on the two events that unambiguously end a reload: the weapon is holstered
+/// (`equip_stop`) or the next action starts (`primary_action_end`). The reload
+/// is abandoned in both cases in stock.
+pub fn fireReloadStop(self: *Game, ps: ecs.Slot) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.held_tags = heldItemTags(self, ps);
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .reload_stop, ctx, &req_counts);
         if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
         applyTriggeredBuffs(self, c.entity_id, ps, &res, c.entity_id);
     }
