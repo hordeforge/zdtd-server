@@ -93,6 +93,22 @@ pub const BlockTrigger = struct {
         return if (self.triggered_by_n == 0) 1 else 0;
     }
 
+    /// `BlockHazard.SetHazardState` / `BlockLight.SetLightState`
+    /// (block-shapes.md 7.3): the shared state bit. `(meta & ~3) | (isOn ? 2
+    /// : 0)` writes meta bit 1 as the on/off flag for trigger, light and
+    /// hazard alike. `meta` is the block word's meta bits; the return is the
+    /// new meta.
+    pub fn setOnState(meta: u32, is_on: bool) u32 {
+        const bit: u32 = if (is_on) 2 else 0;
+        return (meta & ~@as(u32, 3)) | bit;
+    }
+
+    /// `BlockHazard.IsHazardOn` / `BlockLight.IsLightOn`
+    /// (block-shapes.md 7.3): meta bit 1 is the shared on/off flag.
+    pub fn isOnState(meta: u32) bool {
+        return (meta & 2) != 0;
+    }
+
     /// `BlockActivateSwitch.OnTriggered` (IL=24, block-shapes.md 7.3): the
     /// switch toggle. `(meta & ~2) | 1` clears bit 1 and sets bit 0, so a
     /// trigger firing flips the switch to "on" regardless of its prior state.
@@ -216,6 +232,20 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "the shared on/off state bit is meta bit 1" {
+    // `BlockHazard.SetHazardState` / `BlockLight.SetLightState`
+    // (block-shapes.md 7.3): `(meta & ~3) | (isOn ? 2 : 0)`. `IsHazardOn` /
+    // `IsLightOn` test `(meta & 2) != 0`. Trigger, light and hazard share the
+    // bit.
+    try std.testing.expectEqual(@as(u32, 2), BlockTrigger.setOnState(0, true));
+    try std.testing.expectEqual(@as(u32, 0), BlockTrigger.setOnState(2, false));
+    // Bits above the two low ones survive.
+    try std.testing.expectEqual(@as(u32, 0xC | 2), BlockTrigger.setOnState(0xC, true));
+    try std.testing.expect(BlockTrigger.isOnState(2));
+    try std.testing.expect(!BlockTrigger.isOnState(1));
+    try std.testing.expect(BlockTrigger.isOnState(0xC | 2));
 }
 
 test "the switch toggle sets meta bit 0 and clears bit 1" {
