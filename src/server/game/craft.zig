@@ -17,6 +17,8 @@ const components = @import("../../ecs/components.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const game_mod = @import("../game.zig");
 const packages = @import("../../wire/packages.zig");
+const wire_binary = @import("../../wire/binary.zig");
+const stock_inv = @import("../../wire/stock_inv.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const assets_items = @import("../../assets/items.zig");
@@ -803,10 +805,15 @@ pub fn handItemRange(self: *Game, hand_item: []const u8) f32 {
 /// `ItemValue.type`; `amount` is `AmountToRepair`. The player's matching slot
 /// gets its `use_times` lowered (stock resets it toward zero). Returns false
 /// when the item is not found, so the entry is dropped rather than faked.
-fn applyQueueRepair(ctx: ?*anyopaque, entity_id: i32, item_type: i32, amount: u16) bool {
+fn applyQueueRepair(ctx: ?*anyopaque, entity_id: i32, blob: []const u8, amount: u16) bool {
     const self: *Game = @ptrCast(@alignCast(ctx.?));
-    if (item_type <= 0 or item_type > std.math.maxInt(u16)) return false;
-    const iid: u16 = @intCast(item_type);
+    // `blob` is the `ItemValue.Write` frame from `RecipeQueueItem.RepairItem`
+    // (crafting-recipes.md:216). The decode lives here, at the wire boundary:
+    // world/workstations.zig must not import wire.
+    var rr = wire_binary.Reader{ .data = blob };
+    const sv = stock_inv.readItemValue(&rr) catch return false;
+    if (sv.type_id <= 0 or sv.type_id > std.math.maxInt(u16)) return false;
+    const iid: u16 = @intCast(sv.type_id);
     // `StartingEntityId` names the player the repair belongs to; fall back to
     // every inventory when it is unset so an offline queue still resolves.
     for (&self.sim.inventory, 0..) |*inv, i| {

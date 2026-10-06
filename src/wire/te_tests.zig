@@ -140,7 +140,7 @@ test "a repair queue entry lowers the item use_times through the applier" {
     // Game's inventory leg; here it is a counter so the test pins the call.
     const Applier = struct {
         var n: u32 = 0;
-        fn f(_: ?*anyopaque, _: i32, _: i32, _: u16) bool {
+        fn f(_: ?*anyopaque, _: i32, _: []const u8, _: u16) bool {
             n += 1;
             return true;
         }

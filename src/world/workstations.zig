@@ -9,8 +9,6 @@ const std = @import("std");
 const test_tmp = @import("../util/test_tmp.zig");
 const components = @import("../ecs/components.zig");
 const io_fs = @import("../util/io_fs.zig");
-const binary = @import("../wire/binary.zig");
-const stock_inv = @import("../wire/stock_inv.zig");
 
 /// Persisted workstation record caps (mirror the in-memory arrays).
 const save_slots = slots_per_group;
@@ -262,7 +260,11 @@ pub const OutputResolver = *const fn (ctx: ?*anyopaque, stock_type: i32) Resolve
 /// `RecipeQueueItem.StartingEntityId`; `amount` is `AmountToRepair`. The
 /// callback resolves the player's matching slot and lowers its `use_times`.
 /// Returns false when the item is not found (the entry is then dropped).
-pub const RepairApplier = *const fn (ctx: ?*anyopaque, entity_id: i32, item_type: i32, amount: u16) bool;
+/// Apply one finished repair. `blob` is the `ItemValue.Write` frame from
+/// `RecipeQueueItem.RepairItem` (crafting-recipes.md:216); decoding it is a
+/// wire concern, so the callback owns that (world must not import wire).
+/// `amount` is `AmountToRepair`. Returns false when the item is not found.
+pub const RepairApplier = *const fn (ctx: ?*anyopaque, entity_id: i32, blob: []const u8, amount: u16) bool;
 
 pub const Workstation = struct {
     x: i32 = 0,
@@ -575,11 +577,11 @@ pub const Workstation = struct {
         // has no output stack: its work is lowering the item's `use_times` on
         // the owning player. The applier is the Game's inventory leg.
         if (q.repair_blob_len != 0) {
+            // The blob is an `ItemValue.Write` frame (crafting-recipes.md:216);
+            // decoding it is a wire concern, so the caller passes the resolved
+            // type in via `RepairApplier` and world stays wire-free.
             if (repair) |f| {
-                var rr = binary.Reader{ .data = q.repair_blob[0..q.repair_blob_len] };
-                if (stock_inv.readItemValue(&rr)) |sv| {
-                    _ = f(repair_ctx, q.starting_entity_id, sv.type_id, q.amount_to_repair);
-                } else |_| {}
+                _ = f(repair_ctx, q.starting_entity_id, q.repair_blob[0..q.repair_blob_len], q.amount_to_repair);
             }
             return true;
         }
