@@ -743,6 +743,11 @@ pub fn tickDrones(self: *Game, dt: f32) void {
     const max_speed: f32 = 15; // cMaxSpeedFlying
     const hover: f32 = 1.5; // chest height above the owner's feet
     for (self.sim.kind_groups.slice(.drone)) |d| {
+        // T30: the state machine is the policy layer. A spawned drone starts
+        // at `Idle`; `Follow` is the state this tick drives. `Shutdown` and
+        // `Teleport` are the recovery legs the RE names.
+        if (self.sim.drone_state[d] == .none) self.sim.drone_state[d] = .idle;
+        self.sim.drone_state_ticks[d] +|= 1;
         const owner_slot = self.sim.entity_owner_slot[d];
         if (owner_slot < 0) continue;
         const os: usize = @intCast(owner_slot);

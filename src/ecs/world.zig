@@ -1,6 +1,7 @@
 //! ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers.
 
 const std = @import("std");
+const drone_state_mod = @import("drone_state.zig");
 const rng_util = @import("../util/rng.zig");
 const ent = @import("entity.zig");
 const c = @import("components.zig");
@@ -931,6 +932,13 @@ pub const World = struct {
     /// `belongsPlayerId`, which is how the stock client attributes a drone to
     /// its owner (`DroneManager` only shows a player the drones they own).
     entity_owner_slot: [max_entities]i16 = [_]i16{-1} ** max_entities,
+    /// Drone companion state machine (stock `EntityDrone.State`,
+    /// raycast-pathing.md 6b). `none` is the unset sentinel; a spawned drone
+    /// starts at `idle`.
+    drone_state: [max_entities]drone_state_mod.State = [_]drone_state_mod.State{.none} ** max_entities,
+    /// Ticks the drone has been in its current state (`updateState` advances
+    /// `stateTime` on a 0.05 s cadence).
+    drone_state_ticks: [max_entities]u32 = [_]u32{0} ** max_entities,
 
     class_table: [17]EntityClass = [_]EntityClass{
         .{ .name = "player", .max_hp = 100, .kind = .player, .hash = 2001454542 },
