@@ -40,6 +40,7 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
         const bx = std.mem.readInt(i32, body[0..4], .little);
         const by = std.mem.readInt(i32, body[4..8], .little);
         const bz = std.mem.readInt(i32, body[8..12], .little);
+        const raw = std.mem.readInt(u32, body[12..16], .little);
         if (!game_mod.coordInRange(@floatFromInt(bx)) or
             !game_mod.coordInRange(@floatFromInt(by)) or
             !game_mod.coordInRange(@floatFromInt(bz)))
@@ -73,6 +74,19 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     return true;
                 }
                 wire.clearLatched();
+                // `Block.OnTriggered` -> `BlockTriggerDowngrade` (IL=15,
+                // block-shapes.md 7.3): `HandleDowngrade` - the block
+                // downgrades itself to its blocks.xml `DowngradeBlock`. The
+                // switch and door mutations are the other two classes; this is
+                // the one with a world write the relay can make.
+                const cur_id: u16 = @truncate(raw);
+                if (self.maxdamage.idName(cur_id)) |cname| {
+                    if (self.maxdamage.downgradeTarget(cname)) |target| {
+                        if (self.maxdamage.idByName(target)) |nid| {
+                            self.world.setBlockWorld(bx, by, bz, nid) catch {};
+                        }
+                    }
+                }
             }
         }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
