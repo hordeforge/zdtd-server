@@ -89,7 +89,17 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     const tick_s: f32 = @as(f32, @floatFromInt(protocol.tick_ns)) / 1_000_000_000.0;
     const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
     const cap = self.max_horizontal_speed_mps;
-    const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, cap);
+    // Carry weight (the Perk PARTIAL's fifth unmodelled stat): above the
+    // comfortable band the player is encumbered and moves slower. The cap is
+    // the movement envelope's own, scaled by the penalty.
+    var hcap = cap;
+    if (self.sim.playerByPeer(c.slot)) |ps| {
+        const over = self.sim.player[ps].carry_weight - self.sim.rules.progression.carry_comfort_kg;
+        if (over > 0) {
+            hcap = @max(1.0, cap * (1.0 - over * self.sim.rules.progression.carry_speed_penalty_per_kg));
+        }
+    }
+    const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, hcap);
     // Vertical cap: the horizontal clamp cannot see Y-only teleports (fly
     // hacking), so the Y delta is bounded the same way with its own cap.
     // Glide (ADR 0037): while the player's glide flag is armed the server

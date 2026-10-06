@@ -3769,7 +3769,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `namedPassiveFold`. Closing it is a **sim-completeness** question, not a
   passive-coverage one: the VM folds every stat the sim models (13+10), and
   a new stat needs a sim consumer first. The remaining stock rows are stats
-  the sim does not model (CoreTemp, carry weight, bleed, poison, infection).
+  **2026-10-06: all five landed** - infection, bleeding and poison each feed
+  a negative `HealthChangeOT` with their own rate floor; CoreTemp drains HP
+  outside a comfort band scaled by the distance from the nearest edge; and
+  carry weight scales the movement envelope cap above a comfort threshold.
+  Each is a counter on `Player` with a `Rules` floor and a `GAME_OPTIONS.md`
+  row.
   **Each needs its own subsystem**: CoreTemp a temperature-survival loop
   (biome temp exists at `src/world/weather.zig:45`, player state does not),
   carry weight an encumbrance effect, and bleed/poison/infection a per-player

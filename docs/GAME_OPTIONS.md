@@ -335,6 +335,8 @@ test, so a retune cannot land silently).
 | `bleeding_hp_per_second` | 0.2 | **Floor**: the HP per second a bleeding level of 1.0 drains, folded into `HealthChangeOT` beside the other DoTs (`tickSurvival`). 0 disables it. |
 | `temp_comfort_low` | 50 | **Floor**: the cold edge of the core-temperature comfort band (degrees F). Below it the player loses HP scaled by the distance. |
 | `temp_comfort_high` | 90 | **Floor**: the hot edge of the core-temperature comfort band (degrees F). Above it the player loses HP scaled by the distance. |
+| `carry_comfort_kg` | 30 | **Floor**: the carry weight above which the player is encumbered (kg). Below it there is no movement penalty. |
+| `carry_speed_penalty_per_kg` | 0.02 | **Floor**: the fraction of movement speed lost per kg over `carry_comfort_kg`, scaling the movement envelope cap (`movement_helpers.zig`). |
 | `temperature_hp_per_second` | 0.05 | **Floor**: HP lost per second per degree outside the comfort band (`tickSurvival`). 0 disables the temperature drain entirely. |
 | `poison_hp_per_second` | 0.15 | **Floor**: the HP per second a poison level of 1.0 drains, folded into `HealthChangeOT` beside the other DoTs (`tickSurvival`). 0 disables it. |
 | `infection_hp_per_second` | 0.1 | **Floor**: the HP per second an infection level of 1.0 drains, folded into `HealthChangeOT` beside the perk/buff/item sources (`tickSurvival`). 0 disables the drain entirely. The `Player.infection` counter is the source; `infection_chance` (the sandbox scale) gates its rise. |

@@ -84,6 +84,9 @@ pub const Player = struct {
     /// wire). Driven by the biome temperature (`world/weather.zig:45`); the
     /// survival loop drains HP when it leaves the comfort band.
     core_temp: f32 = 70,
+    /// Carried weight in kg (the sum of the bag and toolbelt item weights).
+    /// Above the comfortable band it slows movement (the encumbrance effect).
+    carry_weight: f32 = 0,
     peer_slot: i32 = -1,
     /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
     /// active blood moon, cleared on respawn. Horde zombies skip these players

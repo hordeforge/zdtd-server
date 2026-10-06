@@ -566,6 +566,12 @@ pub const Progression = struct {
     /// HP per second lost per degree outside the comfort band (scaled by the
     /// distance from the nearest edge). 0 disables the temperature drain.
     temperature_hp_per_second: f32 = 0.05,
+    /// Carry weight above which the player is encumbered (kg). Below it there
+    /// is no movement penalty.
+    carry_comfort_kg: f32 = 30,
+    /// Fraction of the movement speed lost per kg over the comfortable carry.
+    /// 1.0 would mean a full stop at 2x the comfort weight.
+    carry_speed_penalty_per_kg: f32 = 0.02,
     /// V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
     /// skips the party XP share when `bTrapKillXP` is set. True = depart from
     /// stock and let trap kills party-share like normal kills.
@@ -1035,6 +1041,8 @@ pub const ProgressionOverlay = struct {
     temp_comfort_low: ?f32 = null,
     temp_comfort_high: ?f32 = null,
     temperature_hp_per_second: ?f32 = null,
+    carry_comfort_kg: ?f32 = null,
+    carry_speed_penalty_per_kg: ?f32 = null,
     trap_xp_party_share: ?bool = null,
 };
 
