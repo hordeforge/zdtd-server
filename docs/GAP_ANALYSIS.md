@@ -4740,7 +4740,9 @@ a finer server encoding.
   is on stock Pregen06k01 with a real map, so the two are not comparable: the
   4 ms is the no-world case. A loadgen bench on a real map is still needed.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
-  tick).
+  tick). **The 402 ms p99 is a measurement, not a missing feature**: the four
+  sections attribute it and `join_spawn` is the phase. Closing the PARTIAL is
+  W2b, a design change, not a parity gap.
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
   `.join_deco`, `.save_io`), the three-client Pregen06k01 bench, the 62-join
   `join_fail=0` cycle, the ReleaseFast 36-join cycle, and the scenario "join
