@@ -4753,7 +4753,12 @@ a finer server encoding.
   is on stock Pregen06k01 with a real map, so the two are not comparable: the
   4 ms is the no-world case. A loadgen bench on a real map is still needed.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
-  tick). **The 402 ms p99 is a measurement, not a missing feature**: the four
+  tick). **2026-10-06: te_scan is already optimized** ("skipped for clean
+  proc chunks", the 19.7 M -> 262 K reduction), and `sendSpawnArea` is
+  already paced (core rings synchronous, outer rings budgeted). What
+  remains is proc gen off the tick: `getOrCreate` generating a chunk on the
+  join path is the synchronous work the four sections attribute to
+  `join_spawn`. **The 402 ms p99 is a measurement, not a missing feature**: the four
   sections attribute it and `join_spawn` is the phase. Closing the PARTIAL is
   W2b, a design change, not a parity gap.
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
