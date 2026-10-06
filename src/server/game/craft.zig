@@ -797,6 +797,32 @@ pub fn handItemRange(self: *Game, hand_item: []const u8) f32 {
     return 0;
 }
 
+/// Apply one finished repair to the owning player's inventory (stock
+/// `AddRepairItemToQueue` -> the crafting queue's repair leg). `entity_id` is
+/// `RecipeQueueItem.StartingEntityId`; `item_type` is the repaired item's
+/// `ItemValue.type`; `amount` is `AmountToRepair`. The player's matching slot
+/// gets its `use_times` lowered (stock resets it toward zero). Returns false
+/// when the item is not found, so the entry is dropped rather than faked.
+fn applyQueueRepair(ctx: ?*anyopaque, entity_id: i32, item_type: i32, amount: u16) bool {
+    const self: *Game = @ptrCast(@alignCast(ctx.?));
+    if (item_type <= 0 or item_type > std.math.maxInt(u16)) return false;
+    const iid: u16 = @intCast(item_type);
+    // `StartingEntityId` names the player the repair belongs to; fall back to
+    // every inventory when it is unset so an offline queue still resolves.
+    for (&self.sim.inventory, 0..) |*inv, i| {
+        if (!self.sim.mask[i].inventory) continue;
+        if (entity_id != 0 and self.sim.netId(@intCast(i)) != entity_id) continue;
+        for (&inv.slots) |*sl| {
+            if (sl.count == 0 or sl.item_id != iid) continue;
+            // `use_times` is the remaining wear; a repair lowers it toward 0
+            // (items.md:1829). The stack stays present as a repairable item.
+            sl.use_times = @max(0, sl.use_times - @as(f32, @floatFromInt(amount)));
+            return true;
+        }
+    }
+    return false;
+}
+
 /// One workstation step: burn/craft, then re-broadcast the stations it changed.
 pub fn tickWorkstations(self: *Game, dt: f32) !void {
     // Material-input module is block-derived (not in ZWS1); refresh each tick
@@ -807,7 +833,7 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
             w.has_material_input = self.blocks.hasMaterialInput(@intCast(w.block_id));
         }
     }
-    self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{
+    self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, applyQueueRepair, self, .{
         .max_crafts_per_tick = self.workstation_crafts_per_tick,
         .max_craft_backlog = self.workstation_craft_backlog,
         .fuel_resolve = &resolveWorkstationFuel,

@@ -9,6 +9,8 @@ const std = @import("std");
 const test_tmp = @import("../util/test_tmp.zig");
 const components = @import("../ecs/components.zig");
 const io_fs = @import("../util/io_fs.zig");
+const binary = @import("../wire/binary.zig");
+const stock_inv = @import("../wire/stock_inv.zig");
 
 /// Persisted workstation record caps (mirror the in-memory arrays).
 const save_slots = slots_per_group;
@@ -255,6 +257,13 @@ pub const ResolvedOutput = struct {
 /// still advances but nothing is materialized.
 pub const OutputResolver = *const fn (ctx: ?*anyopaque, stock_type: i32) ResolvedOutput;
 
+/// Apply one finished repair to the owning player's inventory (stock
+/// `AddRepairItemToQueue` -> the crafting queue's repair leg). `entity_id` is
+/// `RecipeQueueItem.StartingEntityId`; `amount` is `AmountToRepair`. The
+/// callback resolves the player's matching slot and lowers its `use_times`.
+/// Returns false when the item is not found (the entry is then dropped).
+pub const RepairApplier = *const fn (ctx: ?*anyopaque, entity_id: i32, item_type: i32, amount: u16) bool;
+
 pub const Workstation = struct {
     x: i32 = 0,
     y: i32 = 0,
@@ -306,15 +315,15 @@ pub const Workstation = struct {
     /// Advance burn + craft; completed crafts land in output[] when the
     /// resolver maps the recipe's stock output type to a sim item.
     pub fn tick(self: *Workstation, dt: f32) void {
-        self.tickResolved(dt, null, null, .{});
+        self.tickResolved(dt, null, null, null, null, .{});
     }
 
-    pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
+    pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, repair: ?RepairApplier, repair_ctx: ?*anyopaque, caps: Caps) void {
         if (dt <= 0) return;
         self.handleFuel(dt, caps);
         // Stock UpdateTick order: HandleFuel → HandleMaterialInput → HandleRecipeQueue.
         self.handleMaterialInput(dt, caps);
-        if (self.handleRecipeQueue(dt, resolve, ctx, caps)) {
+        if (self.handleRecipeQueue(dt, resolve, ctx, repair, repair_ctx, caps)) {
             // Produced at least one item this tick: stock TileEntityForge
             // dings once per completion tick (asm.il ~IL_02E6/02F9).
             if (caps.on_craft_done) |f| f(caps.craft_done_ctx, self.x, self.y, self.z, @intCast(self.block_id));
@@ -511,7 +520,7 @@ pub const Workstation = struct {
     /// slot, a full output array stalls the craft, and each finished item records
     /// a CraftCompleteData before the multiplier drops. Returns true when at
     /// least one craft completed this tick.
-    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) bool {
+    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, repair: ?RepairApplier, repair_ctx: ?*anyopaque, caps: Caps) bool {
         if (self.queue_len == 0) return false;
         // Stock gate (asm.il 1331687): only stations with a fuel module wait
         // for isBurning; workbench / cement mixer / table saw advance without
@@ -536,7 +545,7 @@ pub const Workstation = struct {
             if (steps >= caps.max_crafts_per_tick) break;
             steps += 1;
             if (active.multiplier > 0) {
-                if (!self.completeOneCraft(active, resolve, ctx)) return produced; // output full → stall
+                if (!self.completeOneCraft(active, resolve, ctx, repair, repair_ctx)) return produced; // output full → stall
                 produced = true;
                 active.multiplier -= 1;
                 active.craft_time_left += active.one_item_craft_time;
@@ -559,7 +568,21 @@ pub const Workstation = struct {
         q: *const QueueItem,
         resolve: ?OutputResolver,
         ctx: ?*anyopaque,
+        repair: ?RepairApplier,
+        repair_ctx: ?*anyopaque,
     ) bool {
+        // A repair entry (RecipeQueueItem.RepairItem, crafting-recipes.md:216)
+        // has no output stack: its work is lowering the item's `use_times` on
+        // the owning player. The applier is the Game's inventory leg.
+        if (q.repair_blob_len != 0) {
+            if (repair) |f| {
+                var rr = binary.Reader{ .data = q.repair_blob[0..q.repair_blob_len] };
+                if (stock_inv.readItemValue(&rr)) |sv| {
+                    _ = f(repair_ctx, q.starting_entity_id, sv.type_id, q.amount_to_repair);
+                } else |_| {}
+            }
+            return true;
+        }
         if (q.output_type == 0 or q.output_count <= 0) return true;
         const count: u16 = @intCast(@min(q.output_count, std.math.maxInt(u16)));
         const res: ResolvedOutput = if (resolve) |rv| rv(ctx, q.output_type) else .{};
@@ -608,7 +631,10 @@ pub const Workstation = struct {
     /// Stock `hasRecipeInQueue` (asm.il ~1332461).
     fn hasRecipeInQueue(self: *const Workstation) bool {
         for (self.queue[0..self.queue_len]) |q| {
-            if (q.multiplier > 0 and q.hasRecipe()) return true;
+            // A repair entry (RecipeQueueItem.RepairItem) has no recipe and no
+            // output type: its work is the `RepairItem` pair. It counts as
+            // active work so the tick reaches `completeOneCraft`.
+            if (q.multiplier > 0 and (q.hasRecipe() or q.repair_blob_len != 0)) return true;
         }
         return false;
     }
@@ -961,12 +987,12 @@ pub const WorkstationStore = struct {
     }
 
     pub fn tickAll(self: *WorkstationStore, dt: f32) void {
-        self.tickAllResolved(dt, null, null, .{});
+        self.tickAllResolved(dt, null, null, null, null, .{});
     }
 
-    pub fn tickAllResolved(self: *WorkstationStore, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
+    pub fn tickAllResolved(self: *WorkstationStore, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, repair: ?RepairApplier, repair_ctx: ?*anyopaque, caps: Caps) void {
         for (self.items[0..], self.used[0..]) |*w, u| {
-            if (u) w.tickResolved(dt, resolve, ctx, caps);
+            if (u) w.tickResolved(dt, resolve, ctx, repair, repair_ctx, caps);
         }
     }
 };
@@ -1041,14 +1067,14 @@ test "workstation store holds past the old 64 cap (GAP 12)" {
 
 test "workstation craft materializes output and records a craft complete" {
     var w = testStation(2, 0.4);
-    w.tickResolved(0.5, testResolve, null, .{}); // first craft
+    w.tickResolved(0.5, testResolve, null, null, null, .{}); // first craft
     try std.testing.expectEqual(@as(u16, 9), w.output[0].item_id);
     try std.testing.expectEqual(@as(u16, 3), w.output[0].count);
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     try std.testing.expectEqual(@as(i32, 171), w.craft_complete[0].crafter_entity_id);
     try std.testing.expectEqual(@as(i32, 12), w.craft_complete[0].exp_gain);
     try std.testing.expectEqualStrings("outputItem", w.craft_complete[0].recipeName());
-    w.tickResolved(0.5, testResolve, null, .{}); // second craft merges
+    w.tickResolved(0.5, testResolve, null, null, null, .{}); // second craft merges
     try std.testing.expectEqual(@as(u16, 6), w.output[0].count);
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     try std.testing.expectEqual(@as(u16, 6), w.craft_complete[0].item_count);
@@ -1059,11 +1085,11 @@ test "workstation stalls instead of dropping a craft when the output is full" {
     w.output_len = 1;
     w.output[0] = .{ .item_id = 8, .count = 5 }; // different item, no room to merge
     const last = w.queue_len - 1;
-    w.tickResolved(0.5, testResolve, null, .{});
+    w.tickResolved(0.5, testResolve, null, null, null, .{});
     try std.testing.expectEqual(@as(i16, 3), w.queue[last].multiplier);
     try std.testing.expectEqual(@as(u8, 0), w.craft_complete_n);
     w.output[0] = .{}; // room again → the stalled craft lands
-    w.tickResolved(0.1, testResolve, null, .{});
+    w.tickResolved(0.1, testResolve, null, null, null, .{});
     try std.testing.expectEqual(@as(i16, 2), w.queue[last].multiplier);
 }
 
@@ -1077,7 +1103,7 @@ test "workstation cycle shifts entries toward the end and carries the overrun" {
         .output_type = 70001,
         .output_count = 1,
     };
-    w.tickResolved(2.5, testResolve, null, .{}); // finishes slot `last`, cycles
+    w.tickResolved(2.5, testResolve, null, null, null, .{}); // finishes slot `last`, cycles
     try std.testing.expectEqual(@as(i32, 70001), w.queue[last].output_type);
     try std.testing.expect(w.queue[last].is_crafting);
     try std.testing.expectEqual(@as(i32, 0), w.queue[last - 1].output_type);
@@ -1111,13 +1137,13 @@ test "workstation fuel resolver: 0 means not fuel, no invented burn" {
     // leaves the item in the slot instead of applying the offline 10 s fallback.
     var w: Workstation = .{ .is_burning = true, .burn_time_left = 0.1 };
     w.fuel[0] = .{ .item_id = 4242, .count = 3 };
-    w.tickResolved(0.2, null, null, .{ .fuel_resolve = &Fx.zero });
+    w.tickResolved(0.2, null, null, null, null, .{ .fuel_resolve = &Fx.zero });
     try std.testing.expect(!w.is_burning);
     try std.testing.expectEqual(@as(u16, 3), w.fuel[0].count);
     // A resolver with a real value burns exactly that value.
     var w2: Workstation = .{ .is_burning = true, .burn_time_left = 0.1 };
     w2.fuel[0] = .{ .item_id = 4242, .count = 1 };
-    w2.tickResolved(0.2, null, null, .{ .fuel_resolve = &Fx.fifty });
+    w2.tickResolved(0.2, null, null, null, null, .{ .fuel_resolve = &Fx.fifty });
     try std.testing.expect(w2.is_burning);
     try std.testing.expectApproxEqAbs(@as(f32, 49.9), w2.burn_time_left, 0.01);
     try std.testing.expectEqual(@as(u16, 0), w2.fuel[0].count);
@@ -1198,12 +1224,12 @@ test "forge melt: scrap input melts into unit_* when burning" {
 
     // First tick only arms the timer (weight 1 × melt_time 0.25 = 0.25s);
     // stock subtracts on a later tick once melt >= 0.
-    w.tickResolved(0.1, null, null, meltCaps(&ctx));
+    w.tickResolved(0.1, null, null, null, null, meltCaps(&ctx));
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), w.melt[0], 1e-4);
     try std.testing.expectEqual(@as(u16, 2), w.input[0].count);
 
     // Cross zero: consume one scrap → +1 unit_iron in slot 1 (first material).
-    w.tickResolved(0.3, null, null, meltCaps(&ctx));
+    w.tickResolved(0.3, null, null, null, null, meltCaps(&ctx));
     try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
     try std.testing.expectEqual(@as(u16, 100), w.input[1].item_id);
     try std.testing.expectEqual(@as(u16, 1), w.input[1].count);
@@ -1236,7 +1262,7 @@ test "forge melt: the unit slot caps at the item's Stacknumber, not a flat const
 
     // Melt until the unit slot stops growing (weight 1 per scrap).
     var i: usize = 0;
-    while (i < 40) : (i += 1) w.tickResolved(0.3, null, null, caps);
+    while (i < 40) : (i += 1) w.tickResolved(0.3, null, null, null, null, caps);
 
     // Capped at the resolved stack of 3, and scrap is left over to prove the
     // stop came from the cap rather than from running out of input. The melt
@@ -1260,7 +1286,7 @@ test "forge melt: the unit slot caps at the item's Stacknumber, not a flat const
     w2.input[0] = .{ .item_id = 50, .count = 10 };
     w2.melt[0] = melt_idle_sentinel;
     i = 0;
-    while (i < 40) : (i += 1) w2.tickResolved(0.3, null, null, meltCaps(&ctx2));
+    while (i < 40) : (i += 1) w2.tickResolved(0.3, null, null, null, null, meltCaps(&ctx2));
     try std.testing.expect(w2.input[1].count > 3);
 }
 
@@ -1275,13 +1301,13 @@ test "forge melt: no-op without material_input module or resolvers" {
     };
     w.input[0] = .{ .item_id = 50, .count = 1 };
     w.melt[0] = melt_idle_sentinel;
-    w.tickResolved(1.0, null, null, .{});
+    w.tickResolved(1.0, null, null, null, null, .{});
     try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
     try std.testing.expectEqual(melt_idle_sentinel, w.melt[0]);
 
     // Module present but no Caps resolvers: still no-op (mat_n == 0).
     w.has_material_input = true;
-    w.tickResolved(1.0, null, null, .{});
+    w.tickResolved(1.0, null, null, null, null, .{});
     try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
 }
 
@@ -1297,7 +1323,7 @@ test "forge melt: waits for burning when fuel module is set" {
     };
     w.input[0] = .{ .item_id = 50, .count = 1 };
     w.melt[0] = melt_idle_sentinel;
-    w.tickResolved(1.0, null, null, meltCaps(&ctx));
+    w.tickResolved(1.0, null, null, null, null, meltCaps(&ctx));
     try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
     try std.testing.expectEqual(melt_idle_sentinel, w.melt[0]);
 }
@@ -1319,7 +1345,7 @@ test "forge melt: tools CraftingSmeltTime scales melt duration" {
     w.tools[0] = .{ .item_id = 60, .count = 1, .quality = 1 };
     w.melt[0] = melt_idle_sentinel;
 
-    w.tickResolved(0.1, null, null, meltCaps(&ctx));
+    w.tickResolved(0.1, null, null, null, null, meltCaps(&ctx));
     try std.testing.expectApproxEqAbs(@as(f32, 0.175), w.melt[0], 1e-4);
     try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
 }
@@ -1349,7 +1375,7 @@ test "client-written timers cannot stall or burst the tick" {
 
 test "craft complete list drains to what the client acknowledged" {
     var w = testStation(2, 0.4);
-    w.tickResolved(0.5, testResolve, null, .{});
+    w.tickResolved(0.5, testResolve, null, null, null, .{});
     try std.testing.expectEqual(@as(u8, 1), w.craft_complete_n);
     w.setCraftComplete(&.{});
     try std.testing.expectEqual(@as(u8, 0), w.craft_complete_n);

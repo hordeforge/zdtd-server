@@ -134,6 +134,31 @@ test "RecipeQueueItem carries a repair entry through the byte round trip" {
     try std.testing.expectEqualSlices(u8, q.repair_blob[0..q.repair_blob_len], back.repair_blob[0..back.repair_blob_len]);
 }
 
+test "a repair queue entry lowers the item use_times through the applier" {
+    // `RecipeQueueItem.RepairItem` (crafting-recipes.md:216) has no output
+    // stack: its work is lowering the item's `use_times`. The applier is the
+    // Game's inventory leg; here it is a counter so the test pins the call.
+    const Applier = struct {
+        var n: u32 = 0;
+        fn f(_: ?*anyopaque, _: i32, _: i32, _: u16) bool {
+            n += 1;
+            return true;
+        }
+    };
+    Applier.n = 0;
+    var w = workstations_mod.Workstation{};
+    var q: workstations_mod.QueueItem = .{};
+    q.repair_blob_len = 1;
+    q.amount_to_repair = 40;
+    q.multiplier = 1;
+    q.craft_time_left = -1;
+    q.one_item_craft_time = 0;
+    w.queue[0] = q;
+    w.queue_len = 1;
+    w.tickResolved(0.1, null, null, &Applier.f, null, .{});
+    try std.testing.expectEqual(@as(u32, 1), Applier.n);
+}
+
 test "workstation encoder drains the payload exactly" {
     // The check that would have caught the missing trailing lastInput array:
     // re-encoding the parsed body must reproduce it byte for byte.
