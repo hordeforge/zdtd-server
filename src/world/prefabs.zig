@@ -11,6 +11,7 @@ const maxdamage = @import("../assets/maxdamage.zig");
 const xml_util = @import("../assets/xml_util.zig");
 const deco_mirror = @import("deco_mirror.zig");
 const tts = @import("tts.zig");
+const blocktrigger = @import("blocktrigger.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const stock_paths = @import("../util/stock_paths.zig");
 
@@ -703,6 +704,24 @@ pub const Index = struct {
                 cb(ctx, wx, wy, wz, te.te_type, te.payload);
             }
         }
+    }
+
+    /// The trigger wiring at a world cell, or null when no stamped prefab has
+    /// any there (`Chunk.GetBlockTrigger` shape). Used by the BlockTrigger
+    /// relay to reject a claim the POI's wiring does not support (T36).
+    pub fn triggerAt(self: *Index, wx: i32, wy: i32, wz: i32) ?*const blocktrigger.BlockTrigger {
+        for (self.items, 0..) |_, i| {
+            const d = self.items[i];
+            if (isPart(d.name)) continue;
+            const tb = self.getTtsBlocks(d.name) orelse continue;
+            if (tb.triggers.n == 0) continue;
+            const origin_y = d.stampY();
+            for (tb.triggers.entries[0..tb.triggers.n]) |*e| {
+                const r = tts.rotateLocalXZ(e.x, e.z, tb.sx, tb.sz, d.rot);
+                if (d.x + r.x == wx and origin_y + e.y == wy and d.z + r.z == wz) return e;
+            }
+        }
+        return null;
     }
 };
 

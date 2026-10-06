@@ -46,6 +46,18 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
             self.harness.counters.inc(.bounds_rejects);
             return true;
         }
+        // T36 wiring check: when a stamped prefab has trigger wiring at the
+        // cell, the block must have `TriggersIndices` there. A claim on a
+        // cell with no wiring passes (the prefab may be unloaded), but a
+        // claim on a wired cell that does not fire is rejected.
+        if (self.world.prefabs) |*pf| {
+            if (pf.triggerAt(bx, by, bz)) |bt| {
+                if (!bt.hasAnyTriggers()) {
+                    self.harness.counters.inc(.phase_rejects);
+                    return true;
+                }
+            }
+        }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         try self.broadcastNear("NetPackageBlockTrigger", body, self.sim.transform[ps].x, self.sim.transform[ps].z, self.interest_range);
         return true;
