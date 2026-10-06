@@ -976,6 +976,15 @@ can the relay validate a claim. Do not fail closed on "no data loaded" -
 that would break working POI circuits; the validation is reject-when-data-
 present-and-inconsistent, not reject-when-absent.
 
+**Pinned format (2026-10-06, from the IL):** `Prefab.readTriggerData`
+(`Prefab.il.txt:5210`) is `i16 count`, then per entry `i16 blob_len`,
+`Vector3i local_pos`, then `blob_len` bytes of `BlockTrigger.Read`
+(`BlockTrigger.il.txt:116`): `u16 version`, `[v>=2] u8 NeedsTriggered`,
+`u8 n` + n x `u8 TriggersIndices`, `u8 n` + n x `u8 TriggeredByIndices`,
+`u8 n` + n x `u8 TriggeredValues`, `[v>=3] bool ExcludeIcon`,
+`[v>=4] bool UseOrForMultipleTriggers`, `[v>=5] bool Unlock`. Current
+writer emits version 5.
+
 **Grounding:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7.
 
 **Done when:** a trigger fire is validated against the prefab's actual
