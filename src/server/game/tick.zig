@@ -881,10 +881,20 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // HealthChangeOT, so the existing sink drains it. The rates are
             // Rules floors.
             const pl = &self.sim.player[ps];
-            const dot_ot = -(pl.infection * self.sim.rules.progression.infection_hp_per_second +
-                pl.bleeding * self.sim.rules.progression.bleeding_hp_per_second +
-                pl.poison * self.sim.rules.progression.poison_hp_per_second);
-            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot + dot_ot;
+            const dot_ot = -(pl.infection * prog.infection_hp_per_second +
+                pl.bleeding * prog.bleeding_hp_per_second +
+                pl.poison * prog.poison_hp_per_second);
+            // Core temperature (the Perk PARTIAL's fourth unmodelled stat):
+            // outside the comfort band the player loses HP scaled by the
+            // distance from the nearest edge. Inside the band there is no
+            // drain.
+            var temp_ot: f32 = 0;
+            if (pl.core_temp < prog.temp_comfort_low) {
+                temp_ot -= (prog.temp_comfort_low - pl.core_temp) * prog.temperature_hp_per_second;
+            } else if (pl.core_temp > prog.temp_comfort_high) {
+                temp_ot -= (pl.core_temp - prog.temp_comfort_high) * prog.temperature_hp_per_second;
+            }
+            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot + dot_ot + temp_ot;
             if (hp_ot > 0 and h.hp < h.max_hp and h.water_max > 0) {
                 hp_delta += hp_ot * (h.water / h.water_max) * secs;
             } else if (hp_ot < 0) {

@@ -80,6 +80,10 @@ pub const Player = struct {
     /// Poison level 0..1 (`buffPoisoned`): a third `HealthChangeOT` source.
     /// 0 = not poisoned.
     poison: f32 = 0,
+    /// Core temperature in degrees F (`stock_estats.zig:18` carries it on the
+    /// wire). Driven by the biome temperature (`world/weather.zig:45`); the
+    /// survival loop drains HP when it leaves the comfort band.
+    core_temp: f32 = 70,
     peer_slot: i32 = -1,
     /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
     /// active blood moon, cleared on respawn. Horde zombies skip these players

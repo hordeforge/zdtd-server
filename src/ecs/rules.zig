@@ -559,6 +559,13 @@ pub const Progression = struct {
     bleeding_hp_per_second: f32 = 0.2,
     /// HP per second a poison level of 1.0 drains (`HealthChangeOT`).
     poison_hp_per_second: f32 = 0.15,
+    /// Core-temperature comfort band in degrees F. Outside it the player
+    /// loses HP at `temperature_hp_per_second` (the survival loop).
+    temp_comfort_low: f32 = 50,
+    temp_comfort_high: f32 = 90,
+    /// HP per second lost per degree outside the comfort band (scaled by the
+    /// distance from the nearest edge). 0 disables the temperature drain.
+    temperature_hp_per_second: f32 = 0.05,
     /// V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
     /// skips the party XP share when `bTrapKillXP` is set. True = depart from
     /// stock and let trap kills party-share like normal kills.
@@ -1025,6 +1032,9 @@ pub const ProgressionOverlay = struct {
     infection_hp_per_second: ?f32 = null,
     bleeding_hp_per_second: ?f32 = null,
     poison_hp_per_second: ?f32 = null,
+    temp_comfort_low: ?f32 = null,
+    temp_comfort_high: ?f32 = null,
+    temperature_hp_per_second: ?f32 = null,
     trap_xp_party_share: ?bool = null,
 };
 

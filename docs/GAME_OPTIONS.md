@@ -333,6 +333,9 @@ test, so a retune cannot land silently).
 | `sprint_stale_seconds` | 0.5 | Policy (GAP 22): seconds without an EntitySpeeds update before the sprint latch lapses |
 | `survival_sync_seconds` | 2.0 | Policy: per-player survival S2C refresh throttle |
 | `bleeding_hp_per_second` | 0.2 | **Floor**: the HP per second a bleeding level of 1.0 drains, folded into `HealthChangeOT` beside the other DoTs (`tickSurvival`). 0 disables it. |
+| `temp_comfort_low` | 50 | **Floor**: the cold edge of the core-temperature comfort band (degrees F). Below it the player loses HP scaled by the distance. |
+| `temp_comfort_high` | 90 | **Floor**: the hot edge of the core-temperature comfort band (degrees F). Above it the player loses HP scaled by the distance. |
+| `temperature_hp_per_second` | 0.05 | **Floor**: HP lost per second per degree outside the comfort band (`tickSurvival`). 0 disables the temperature drain entirely. |
 | `poison_hp_per_second` | 0.15 | **Floor**: the HP per second a poison level of 1.0 drains, folded into `HealthChangeOT` beside the other DoTs (`tickSurvival`). 0 disables it. |
 | `infection_hp_per_second` | 0.1 | **Floor**: the HP per second an infection level of 1.0 drains, folded into `HealthChangeOT` beside the perk/buff/item sources (`tickSurvival`). 0 disables the drain entirely. The `Player.infection` counter is the source; `infection_chance` (the sandbox scale) gates its rise. |
 | `block_bite_damage` | 10.0 | **Floor**: the hand item's `DamageBlock` wins per class (zombie 8, feral 24), then this value, before the `BlockDamageAI/BM` percent. Struck on the stock `EAIBreakBlock` cadence of 1.0-1.8 s per zombie (`entity-ai.md` 1817-1825), each ally inside +-(1.7, 1.5, 1.7) adding 20% |
