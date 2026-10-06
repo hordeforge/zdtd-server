@@ -529,6 +529,15 @@ pub const Table = struct {
         return self.power_class_by_name.get(name);
     }
 
+    /// True when the block's resolved `Class` is `TrapDoor`
+    /// (`BlockTrapDoor`, block-shapes.md 7.3): its `OnTriggered` destroys
+    /// itself. Resolved through Extends like the other class facts.
+    pub fn isTrapDoor(self: *const Table, id: u16) bool {
+        const name = self.idName(id) orelse return false;
+        const cls = self.power_class_by_name.get(name) orelse return false;
+        return std.ascii.eqlIgnoreCase(cls, "TrapDoor");
+    }
+
     /// True when the block's resolved Class is Sleeper (authored POI sleeper
     /// spawn markers: prefabs store the marker block, and the stock scan is
     /// Block.IsSleeperBlock, not a name prefix).

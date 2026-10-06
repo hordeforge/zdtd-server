@@ -74,18 +74,22 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     return true;
                 }
                 wire.clearLatched();
-                // `Block.OnTriggered` -> `BlockTriggerDowngrade` (IL=15,
-                // block-shapes.md 7.3): `HandleDowngrade` - the block
-                // downgrades itself to its blocks.xml `DowngradeBlock`. The
-                // switch and door mutations are the other two classes; this is
-                // the one with a world write the relay can make.
+                // `Block.OnTriggered` (block-shapes.md 7.3): every mutating
+                // variant appends a `BlockChangeInfo` for the block position.
+                // The switch toggle and the door auto-close are the other two
+                // classes; these two are the world writes the relay can make.
                 const cur_id: u16 = @truncate(raw);
-                if (self.maxdamage.idName(cur_id)) |cname| {
-                    if (self.maxdamage.downgradeTarget(cname)) |target| {
-                        if (self.maxdamage.idByName(target)) |nid| {
-                            self.world.setBlockWorld(bx, by, bz, nid) catch {};
-                        }
+                const cname = self.maxdamage.idName(cur_id) orelse "";
+                // `BlockTriggerDowngrade` (IL=15): `HandleDowngrade` swaps the
+                // block to its blocks.xml `DowngradeBlock`.
+                if (self.maxdamage.downgradeTarget(cname)) |target| {
+                    if (self.maxdamage.idByName(target)) |nid| {
+                        self.world.setBlockWorld(bx, by, bz, nid) catch {};
                     }
+                } else if (self.maxdamage.isTrapDoor(cur_id)) {
+                    // `BlockTrapDoor` (IL=26): destroys itself, which is the
+                    // downgrade to air (`DamageBlock(MaxDamage - damage)`).
+                    self.world.setBlockWorld(bx, by, bz, 0) catch {};
                 }
             }
         }
