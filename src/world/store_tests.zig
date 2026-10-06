@@ -715,6 +715,40 @@ test "lightBrightnessAt splits the chnLight nibbles and falls back to ambient" {
     try std.testing.expectApproxEqAbs(@as(f32, 10.0 / 15.0), world.lightBrightnessAt(5, 70, 5, true), 0.001);
 }
 
+test "generateSunlight walks the column from 255 down to the surface" {
+    // `Chunk.RefreshSunlight` (`light-mesh-water.md`): the Sun nibble is 15
+    // above the surface and 0 below it. The Block nibble is left alone.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var world = try World.init(std.testing.allocator, dir);
+    defer world.deinit();
+    const c = try world.getOrCreate(.{ .x = 0, .z = 0 });
+    const lights = try std.testing.allocator.alloc(u8, c.planeCells());
+    @memset(lights, 0);
+    c.lights = lights;
+    defer {
+        std.testing.allocator.free(lights);
+        c.lights = null;
+    }
+    // Surface at y=70 for the (5, 5) column.
+    c.heights[5 + 5 * 16] = 70;
+    // Seed a Block nibble to prove the walk preserves it.
+    lights[5 + 5 * 16 + 71 * 256] = 3 << 4;
+    Chunk.generateSunlight(c);
+    // Above the surface: sun 15.
+    try std.testing.expectEqual(@as(u8, 15), lights[5 + 5 * 16 + 71 * 256] & 15);
+    try std.testing.expectEqual(@as(u8, 3), lights[5 + 5 * 16 + 71 * 256] >> 4);
+    // At and below the surface: sun 0.
+    try std.testing.expectEqual(@as(u8, 0), lights[5 + 5 * 16 + 70 * 256] & 15);
+    try std.testing.expectEqual(@as(u8, 0), lights[5 + 5 * 16 + 0 * 256] & 15);
+    // The query reads it back.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), world.lightBrightnessAt(5, 71, 5, true), 0.001);
+    // At the surface the sun is 0 and no block light was seeded, so the
+    // sample is 0 (not the ambient fallback - the chunk exists).
+    try std.testing.expectApproxEqAbs(@as(f32, 0), world.lightBrightnessAt(5, 70, 5, true), 0.001);
+}
+
 test "resolveTerrainIds seeds default stack from live dump ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

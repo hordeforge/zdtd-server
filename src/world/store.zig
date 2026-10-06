@@ -476,6 +476,30 @@ pub const Chunk = struct {
     /// Per-XZ-row: fill 16 column templates, then store each Y as a 16-wide
     /// `@Vector` write (plane layout is x + z*16 + y*256). Scalar equivalent
     /// is the per-column fillColumn + write loop in the golden test.
+    /// `Chunk.RefreshSunlight` (`light-mesh-water.md`): the sun column walk,
+    /// y from 255 down. The Sun nibble is 15 above the surface and 0 below it.
+    /// The surface is the opaque boundary: `heights` is the first solid cell
+    /// for a flat world, which is the same rule `fillBlocksFromStack` uses.
+    /// The Block nibble is left 0; the block-light spread is the deeper half.
+    pub fn generateSunlight(c: *Chunk) void {
+        const lights = c.lights orelse return;
+        var lz: i32 = 0;
+        while (lz < 16) : (lz += 1) {
+            var lx: i32 = 0;
+            while (lx < 16) : (lx += 1) {
+                const surface: i32 = c.heights[@intCast(lx + lz * 16)];
+                var y: i32 = 255;
+                while (y >= 0) : (y -= 1) {
+                    const idx: usize = @intCast(lx + lz * 16 + y * 256);
+                    if (idx >= lights.len) continue;
+                    const block: u8 = lights[idx] >> 4;
+                    const sun: u8 = if (y > surface) 15 else 0;
+                    lights[idx] = (block << 4) | sun;
+                }
+            }
+        }
+    }
+
     pub fn ensureBlocksWithStack(self: *Chunk, allocator: std.mem.Allocator, stack: biome_layers.Stack) !void {
         if (self.blocks != null) return;
         self.allocator = allocator;
