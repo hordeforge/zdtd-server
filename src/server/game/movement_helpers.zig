@@ -97,7 +97,17 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     // denies there, AUTHORITY.md "observe records but never denies") must not
     // count: the dashboard would claim protection observe does not provide
     // (T19). Correct mode clamps + snaps below.
-    self.noteEvidence(c, peer.local_id, entity_id, -1, .movement, .strong, .none, cap, cap);
+    // T22 attribution: a shove-off-a-roof shows up as a movement finding on
+    // the shoved player. Attribute it to the last attacker when one exists
+    // and the player was in combat recently; otherwise the reporter is the
+    // inducer (the common self-claim case). A wrong inducer is worse than
+    // none, so this only fires on a real recent hit.
+    var inducer: i32 = -1;
+    if (self.sim.playerByPeer(c.slot)) |ps| {
+        const p = &self.sim.player[ps];
+        if (p.last_attacker_id != 0 and c.combat_remaining_ticks > 0) inducer = p.last_attacker_id;
+    }
+    self.noteEvidence(c, peer.local_id, entity_id, inducer, .movement, .strong, .none, cap, cap);
     if (self.authority_mode != .correct) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }

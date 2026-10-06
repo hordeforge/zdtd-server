@@ -65,6 +65,10 @@ pub const NetworkId = struct {
 };
 
 pub const Player = struct {
+    /// Net id of the last entity that damaged this one (T22 attribution: a
+    /// finding induced by a shove attributes to the shover, not the shoved).
+    /// 0 = none. Set on every landed hit; the evidence path reads it.
+    last_attacker_id: i32 = 0,
     peer_slot: i32 = -1,
     /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
     /// active blood moon, cleared on respawn. Horde zombies skip these players

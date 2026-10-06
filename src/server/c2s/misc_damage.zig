@@ -177,6 +177,9 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                 if (foreign_resist > 0) {
                     _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
                 }
+                // T22 attribution: the victim's last attacker is the inducer
+                // of any movement finding that follows a shove.
+                self.sim.player[ei].last_attacker_id = self.sim.network_id[actor_slot].id;
                 self.fireAttackedSelf(ei, actor_slot, d.body_part);
                 // A self-fall claim (failing dtype, victim == the actor's own
                 // player) is the landing impact: fire the check buff's

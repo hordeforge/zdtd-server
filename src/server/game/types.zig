@@ -735,10 +735,6 @@ pub const Client = struct {
     /// `onCombatEntered` progression rows (Enforcer Criminal Pursuit, Batter
     /// Up Stealing Bases stamina buffs).
     combat_remaining_ticks: i32 = 0,
-    /// Net id of the last entity that damaged this one (T22 attribution: a
-    /// finding induced by a shove attributes to the shover, not the shoved).
-    /// 0 = none. Set on every landed hit; the evidence path reads it.
-    last_attacker_id: i32 = 0,
     /// onSelfEnteredGame fired for this client (stock fires it when the player
     /// entity enters the game; the buff catalog's check buffs carry the rows).
     entered_game_fired: bool = false,
