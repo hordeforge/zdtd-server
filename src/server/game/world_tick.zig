@@ -750,8 +750,8 @@ pub fn tickDrones(self: *Game, dt: f32) void {
         // T30: the state machine is the policy layer. A spawned drone starts
         // at `Idle`; `Follow` is the state this tick drives, `Teleport` the
         // recovery leg when travel fails (raycast-pathing.md 6b).
-        if (self.sim.drone_state[d] == .none) self.sim.drone_state[d] = .idle;
-        self.sim.drone_state_ticks[d] +|= 1;
+        if (self.sim.drone_state[d].state == .none) self.sim.drone_state[d].state = .idle;
+        self.sim.drone_state[d].tick(dt);
         const owner_slot = self.sim.entity_owner_slot[d];
         if (owner_slot < 0) continue;
         const os: usize = @intCast(owner_slot);
@@ -767,16 +767,16 @@ pub fn tickDrones(self: *Game, dt: f32) void {
         // distance, so a drone does not park just outside the band.
         if (flat <= follow_distance and @abs(dy) <= follow_distance) {
             // Arrived: `Follow` -> `Idle` (raycast-pathing.md 6b).
-            if (drone_state_mod.canTransition(self.sim.drone_state[d], .idle)) self.sim.drone_state[d] = .idle;
+            _ = self.sim.drone_state[d].setState(.idle);
             continue;
         }
         if (flat > teleport_distance) {
             // Travel fails: `Follow` -> `Teleport`, the recovery hop.
-            if (drone_state_mod.canTransition(self.sim.drone_state[d], .teleport)) self.sim.drone_state[d] = .teleport;
+            _ = self.sim.drone_state[d].setState(.teleport);
             self.sim.transform[d] = .{ .x = o.x, .y = o.y + hover, .z = o.z, .yaw = t.yaw };
-            if (drone_state_mod.canTransition(self.sim.drone_state[d], .idle)) self.sim.drone_state[d] = .idle;
+            _ = self.sim.drone_state[d].setState(.idle);
         } else {
-            if (drone_state_mod.canTransition(self.sim.drone_state[d], .follow)) self.sim.drone_state[d] = .follow;
+            _ = self.sim.drone_state[d].setState(.follow);
             const dist = @sqrt(dx * dx + dy * dy + dz * dz);
             if (dist <= 0.001) continue;
             // Stop at the follow distance rather than on the owner's head.
