@@ -946,6 +946,15 @@ guessing a decay curve.
 
 ## T36. `BlockTrigger` has no server-side authority
 
+**Status: landed 2026-10-06.** The record, codec and prefab parse are in
+`src/world/blocktrigger.zig` (pinned by two tests on the version-5 field order
+and the wrapper format), the loader hook reads `Prefab.readTriggerData` after
+the TE list (`tts.zig` `parseBlocks`), and the relay rejects both a malformed
+claim (`blocks_trigger.zig`, short body or out-of-range position) and a claim
+the POI wiring does not support (`Index.triggerAt` + `hasAnyTriggers`). The
+AND/OR combine and `Block.OnTriggered` mutations stay out of scope, as the task
+says.
+
 **Why:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7: stock's
 `BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel
 system (latch state, AND/OR combine, `Block.OnTriggered` mutating switches,
