@@ -211,6 +211,10 @@ Holding: item_id / slot index
 ### Work packages
 
 #### M11.1 Spatial hash interest **[partial 2026-10-06]**
+*(a scale milestone, not a parity gap: the objective is surface and
+behaviour, and a 64-128 bot capacity target is neither. It is scored here
+because the milestone covers the play path, not because a player can or
+cannot do something.)*
 The grid half ships: `interest.zig` `cellOf`/`cellsInRange` and the per-type
 `observerMask` / `observerMaskBlocks` word mask. **Still open:** the per-client
 entity-id set keyed on cell and the rebuild-on-cell-change only pass - there is
