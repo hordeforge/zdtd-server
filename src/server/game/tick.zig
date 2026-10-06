@@ -876,12 +876,15 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // fraction (regen = OT x water% x dt); the negative leg rides
             // DamageEntity per contributing buff instead. Composes with the
             // starvation/regen branches above.
-            // Infection (T28's sim-completeness gap): the counter contributes
-            // a negative HealthChangeOT, so the existing sink drains it. The
-            // rate is a Rules floor; `infection_chance` gates the rise.
-            const infect_ot = -self.sim.player[ps].infection *
-                self.sim.rules.progression.infection_hp_per_second;
-            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot + infect_ot;
+            // Infection, bleeding and poison (the Perk PARTIAL's sim-
+            // completeness gap): each counter contributes a negative
+            // HealthChangeOT, so the existing sink drains it. The rates are
+            // Rules floors.
+            const pl = &self.sim.player[ps];
+            const dot_ot = -(pl.infection * self.sim.rules.progression.infection_hp_per_second +
+                pl.bleeding * self.sim.rules.progression.bleeding_hp_per_second +
+                pl.poison * self.sim.rules.progression.poison_hp_per_second);
+            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot + dot_ot;
             if (hp_ot > 0 and h.hp < h.max_hp and h.water_max > 0) {
                 hp_delta += hp_ot * (h.water / h.water_max) * secs;
             } else if (hp_ot < 0) {

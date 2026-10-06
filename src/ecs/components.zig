@@ -74,6 +74,12 @@ pub const Player = struct {
     /// hp_ot sink drains it; `infection_chance` (the sandbox scale) gates the
     /// rise. 0 = clean.
     infection: f32 = 0,
+    /// Bleeding level 0..1 (`buffBleeding`): a second `HealthChangeOT` source.
+    /// 0 = not bleeding.
+    bleeding: f32 = 0,
+    /// Poison level 0..1 (`buffPoisoned`): a third `HealthChangeOT` source.
+    /// 0 = not poisoned.
+    poison: f32 = 0,
     peer_slot: i32 = -1,
     /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
     /// active blood moon, cleared on respawn. Horde zombies skip these players

@@ -270,7 +270,7 @@ No fields parsed.
 (ADR 0021).
 
 
-### `rules.systems` (`Systems`, `src/ecs/rules.zig:840`)
+### `rules.systems` (`Systems`, `src/ecs/rules.zig:844`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -286,7 +286,7 @@ No fields parsed.
 | `commands` | `bool` | `true` | 52 |
 
 
-### `rules.combat` (`Combat`, `src/ecs/rules.zig:841`)
+### `rules.combat` (`Combat`, `src/ecs/rules.zig:845`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -300,14 +300,14 @@ No fields parsed.
 | `knockback_seconds` | `f32` | `0.3` | 87 |
 
 
-### `rules.c2s` (`C2s`, `src/ecs/rules.zig:842`)
+### `rules.c2s` (`C2s`, `src/ecs/rules.zig:846`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
 | `eat_units_per_push` | `u8` | `4` | 98 |
 
 
-### `rules.glide` (`Glide`, `src/ecs/rules.zig:843`)
+### `rules.glide` (`Glide`, `src/ecs/rules.zig:847`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -316,7 +316,7 @@ No fields parsed.
 | `fall_sink_vy_mps` | `f32` | `0` | 117 |
 
 
-### `rules.ai` (`Ai`, `src/ecs/rules.zig:844`)
+### `rules.ai` (`Ai`, `src/ecs/rules.zig:848`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -420,7 +420,7 @@ No fields parsed.
 | `dig_budget_ticks` | `u8` | `90` | 411 |
 
 
-### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:845`)
+### `rules.bloodmoon` (`Bloodmoon`, `src/ecs/rules.zig:849`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -433,7 +433,7 @@ No fields parsed.
 | `wave_frac` | `f32` | `0.5` | 489 |
 
 
-### `rules.progression` (`Progression`, `src/ecs/rules.zig:846`)
+### `rules.progression` (`Progression`, `src/ecs/rules.zig:850`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -453,100 +453,102 @@ No fields parsed.
 | `kill_xp_fallback` | `f32` | `100` | 546 |
 | `trap_kill_xp_frac` | `f32` | `0.0` | 554 |
 | `infection_hp_per_second` | `f32` | `0.1` | 557 |
-| `trap_xp_party_share` | `bool` | `false` | 561 |
+| `bleeding_hp_per_second` | `f32` | `0.2` | 559 |
+| `poison_hp_per_second` | `f32` | `0.15` | 561 |
+| `trap_xp_party_share` | `bool` | `false` | 565 |
 
 
-### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:847`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `container_open_range` | `f32` | `8.0` | 569 |
-| `topsoil_all_broken` | `bool` | `false` | 575 |
-| `poi_unlock_grace_ticks` | `u32` | `2000` | 577 |
-
-
-### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:848`)
+### `rules.world` (`WorldGroup`, `src/ecs/rules.zig:851`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `sea_level` | `f32` | `64` | 594 |
-| `height_scale` | `f32` | `1.0` | 599 |
-| `height_offset` | `f32` | `0.0` | 601 |
-| `height_ceiling` | `u32` | `0` | 604 |
+| `container_open_range` | `f32` | `8.0` | 573 |
+| `topsoil_all_broken` | `bool` | `false` | 579 |
+| `poi_unlock_grace_ticks` | `u32` | `2000` | 581 |
 
 
-### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:849`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `base_height` | `f32` | `68` | 671 |
-| `height_amp` | `f32` | `24` | 673 |
-| `min_surface` | `u8` | `12` | 675 |
-| `max_surface` | `u8` | `200` | 676 |
-| `squash` | `f32` | `28` | 678 |
-| `noise_weight` | `f32` | `0.85` | 680 |
-| `y_scale` | `f32` | `2.0` | 682 |
-| `bedrock_h` | `i32` | `3` | 684 |
-
-
-### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:850`)
+### `rules.geometry` (`Geometry`, `src/ecs/rules.zig:852`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `accel_mps2` | `f32` | `14.0` | 643 |
-| `reverse_frac` | `f32` | `0.3` | 645 |
-| `coast_decay` | `f32` | `0.8` | 647 |
-| `steer_deg_per_s` | `f32` | `100.0` | 649 |
-| `min_turn_speed_frac` | `f32` | `0.15` | 651 |
-| `fuel_per_m` | `f32` | `0.02` | 653 |
-| `fuel_cap` | `f32` | `100` | 655 |
-| `refuel_reach` | `f32` | `3.0` | 657 |
-| `gravity` | `f32` | `-9.81` | 660 |
+| `sea_level` | `f32` | `64` | 598 |
+| `height_scale` | `f32` | `1.0` | 603 |
+| `height_offset` | `f32` | `0.0` | 605 |
+| `height_ceiling` | `u32` | `0` | 608 |
 
 
-### `rules.director` (`Director`, `src/ecs/rules.zig:851`)
+### `rules.worldgen` (`WorldgenGroup`, `src/ecs/rules.zig:853`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `wander_start_after` | `u64` | `28_000` | 715 |
-| `wander_min_gap` | `u64` | `12_000` | 717 |
-| `wander_max_gap` | `u64` | `24_000` | 718 |
-| `wandering_horde_size` | `u32` | `6` | 719 |
-| `wandering_spawn_dist` | `f32` | `92.0` | 720 |
-| `heat_spawn_threshold` | `f32` | `25.0` | 721 |
-| `heat_check_seconds` | `f32` | `5.0` | 722 |
-| `heat_spawn_chance` | `f32` | `0.2` | 726 |
-| `heat_cooldown_seconds` | `f32` | `240.0` | 730 |
-| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 734 |
-| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 739 |
-| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 743 |
-| `heat_scout_dist` | `f32` | `10.0` | 744 |
-| `heat_scout_count` | `u32` | `2` | 746 |
-| `heat_event_ticks` | `f32` | `720.0` | 749 |
-| `enemy_spawn_ring_min` | `f32` | `28.0` | 752 |
-| `enemy_spawn_ring_max` | `f32` | `54.0` | 753 |
-| `animal_spawn_ring_min` | `f32` | `48.0` | 756 |
-| `animal_spawn_ring_max` | `f32` | `70.0` | 757 |
-| `initial_population_frac` | `f32` | `0.25` | 762 |
-| `horde_drip_cd` | `f32` | `45.0` | 766 |
-| `scout_drip_cd` | `f32` | `120.0` | 769 |
-| `animal_drip_cd` | `f32` | `60.0` | 771 |
-| `bloodmoon_wave_cd` | `f32` | `6.0` | 773 |
-| `bloodmoon_hp_mult` | `f32` | `1.5` | 775 |
-| `difficulty_hp_0` | `f32` | `0.5` | 779 |
-| `difficulty_hp_1` | `f32` | `0.75` | 780 |
-| `difficulty_hp_2` | `f32` | `1.0` | 781 |
-| `difficulty_hp_3` | `f32` | `1.25` | 782 |
-| `difficulty_hp_4` | `f32` | `1.5` | 783 |
-| `difficulty_hp_5` | `f32` | `2.0` | 784 |
-| `move_scale_0` | `f32` | `0.5` | 787 |
-| `move_scale_1` | `f32` | `0.75` | 788 |
-| `move_scale_2` | `f32` | `1.0` | 789 |
-| `move_scale_3` | `f32` | `1.4` | 790 |
-| `move_scale_4` | `f32` | `1.7` | 791 |
+| `base_height` | `f32` | `68` | 675 |
+| `height_amp` | `f32` | `24` | 677 |
+| `min_surface` | `u8` | `12` | 679 |
+| `max_surface` | `u8` | `200` | 680 |
+| `squash` | `f32` | `28` | 682 |
+| `noise_weight` | `f32` | `0.85` | 684 |
+| `y_scale` | `f32` | `2.0` | 686 |
+| `bedrock_h` | `i32` | `3` | 688 |
 
 
-### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:852`)
+### `rules.vehicle` (`Vehicle`, `src/ecs/rules.zig:854`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `accel_mps2` | `f32` | `14.0` | 647 |
+| `reverse_frac` | `f32` | `0.3` | 649 |
+| `coast_decay` | `f32` | `0.8` | 651 |
+| `steer_deg_per_s` | `f32` | `100.0` | 653 |
+| `min_turn_speed_frac` | `f32` | `0.15` | 655 |
+| `fuel_per_m` | `f32` | `0.02` | 657 |
+| `fuel_cap` | `f32` | `100` | 659 |
+| `refuel_reach` | `f32` | `3.0` | 661 |
+| `gravity` | `f32` | `-9.81` | 664 |
+
+
+### `rules.director` (`Director`, `src/ecs/rules.zig:855`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `wander_start_after` | `u64` | `28_000` | 719 |
+| `wander_min_gap` | `u64` | `12_000` | 721 |
+| `wander_max_gap` | `u64` | `24_000` | 722 |
+| `wandering_horde_size` | `u32` | `6` | 723 |
+| `wandering_spawn_dist` | `f32` | `92.0` | 724 |
+| `heat_spawn_threshold` | `f32` | `25.0` | 725 |
+| `heat_check_seconds` | `f32` | `5.0` | 726 |
+| `heat_spawn_chance` | `f32` | `0.2` | 730 |
+| `heat_cooldown_seconds` | `f32` | `240.0` | 734 |
+| `heat_long_cooldown_seconds` | `f32` | `1320.0` | 738 |
+| `heat_neighbor_cooldown_seconds` | `f32` | `180.0` | 743 |
+| `heat_neighbor_long_cooldown_seconds` | `f32` | `720.0` | 747 |
+| `heat_scout_dist` | `f32` | `10.0` | 748 |
+| `heat_scout_count` | `u32` | `2` | 750 |
+| `heat_event_ticks` | `f32` | `720.0` | 753 |
+| `enemy_spawn_ring_min` | `f32` | `28.0` | 756 |
+| `enemy_spawn_ring_max` | `f32` | `54.0` | 757 |
+| `animal_spawn_ring_min` | `f32` | `48.0` | 760 |
+| `animal_spawn_ring_max` | `f32` | `70.0` | 761 |
+| `initial_population_frac` | `f32` | `0.25` | 766 |
+| `horde_drip_cd` | `f32` | `45.0` | 770 |
+| `scout_drip_cd` | `f32` | `120.0` | 773 |
+| `animal_drip_cd` | `f32` | `60.0` | 775 |
+| `bloodmoon_wave_cd` | `f32` | `6.0` | 777 |
+| `bloodmoon_hp_mult` | `f32` | `1.5` | 779 |
+| `difficulty_hp_0` | `f32` | `0.5` | 783 |
+| `difficulty_hp_1` | `f32` | `0.75` | 784 |
+| `difficulty_hp_2` | `f32` | `1.0` | 785 |
+| `difficulty_hp_3` | `f32` | `1.25` | 786 |
+| `difficulty_hp_4` | `f32` | `1.5` | 787 |
+| `difficulty_hp_5` | `f32` | `2.0` | 788 |
+| `move_scale_0` | `f32` | `0.5` | 791 |
+| `move_scale_1` | `f32` | `0.75` | 792 |
+| `move_scale_2` | `f32` | `1.0` | 793 |
+| `move_scale_3` | `f32` | `1.4` | 794 |
+| `move_scale_4` | `f32` | `1.7` | 795 |
+
+
+### `rules.difficulty` (`Difficulty`, `src/ecs/rules.zig:856`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
@@ -564,28 +566,28 @@ No fields parsed.
 | `entity_incoming_damage_5` | `f32` | `sandbox_presets.difficulty[5].entity_incoming_damage` | 452 |
 
 
-### `rules.water` (`Water`, `src/ecs/rules.zig:853`)
+### `rules.water` (`Water`, `src/ecs/rules.zig:857`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `edits_per_tick` | `u8` | `4` | 800 |
-| `spread_cap` | `u16` | `128` | 802 |
-| `puddle_cap` | `u8` | `8` | 806 |
+| `edits_per_tick` | `u8` | `4` | 804 |
+| `spread_cap` | `u16` | `128` | 806 |
+| `puddle_cap` | `u8` | `8` | 810 |
 
 
-### `rules.power` (`Power`, `src/ecs/rules.zig:854`)
-
-| Field | Type | Default | Line |
-|---|---|---|---|
-| `battery_capacity_scale` | `f32` | `10.0` | 814 |
-| `battery_initial_charge_frac` | `f32` | `0.5` | 816 |
-| `trigger_pulse_s` | `f32` | `0.5` | 819 |
-
-
-### `rules.trader` (`Trader`, `src/ecs/rules.zig:855`)
+### `rules.power` (`Power`, `src/ecs/rules.zig:858`)
 
 | Field | Type | Default | Line |
 |---|---|---|---|
-| `max_tier` | `i32` | `6` | 828 |
-| `default_quality_min` | `u8` | `1` | 833 |
-| `default_quality_max` | `u8` | `6` | 834 |
+| `battery_capacity_scale` | `f32` | `10.0` | 818 |
+| `battery_initial_charge_frac` | `f32` | `0.5` | 820 |
+| `trigger_pulse_s` | `f32` | `0.5` | 823 |
+
+
+### `rules.trader` (`Trader`, `src/ecs/rules.zig:859`)
+
+| Field | Type | Default | Line |
+|---|---|---|---|
+| `max_tier` | `i32` | `6` | 832 |
+| `default_quality_min` | `u8` | `1` | 837 |
+| `default_quality_max` | `u8` | `6` | 838 |

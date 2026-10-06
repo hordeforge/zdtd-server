@@ -555,6 +555,10 @@ pub const Progression = struct {
     /// HP per second an infection level of 1.0 drains (`HealthChangeOT` from
     /// the `buffInfectionMain` counter). 0 disables the drain entirely.
     infection_hp_per_second: f32 = 0.1,
+    /// HP per second a bleeding level of 1.0 drains (`HealthChangeOT`).
+    bleeding_hp_per_second: f32 = 0.2,
+    /// HP per second a poison level of 1.0 drains (`HealthChangeOT`).
+    poison_hp_per_second: f32 = 0.15,
     /// V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
     /// skips the party XP share when `bTrapKillXP` is set. True = depart from
     /// stock and let trap kills party-share like normal kills.
@@ -1019,6 +1023,8 @@ pub const ProgressionOverlay = struct {
     kill_xp_fallback: ?f32 = null,
     trap_kill_xp_frac: ?f32 = null,
     infection_hp_per_second: ?f32 = null,
+    bleeding_hp_per_second: ?f32 = null,
+    poison_hp_per_second: ?f32 = null,
     trap_xp_party_share: ?bool = null,
 };
 
