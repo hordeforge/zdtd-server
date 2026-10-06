@@ -4713,6 +4713,10 @@ a finer server encoding.
   `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
 - **Join-burst tick budget under concurrent load** `PARTIAL` `(measured 2026-09-28)`
+  *(a performance row, not a parity gap: the objective is surface and
+  behaviour, and a tick budget is neither. It is scored here because the
+  inventory covers the play path, not because a player can or cannot do
+  something.)*
   A join must not spend seconds on the tick. The spawn-area send is paced
   (`sendSpawnArea` sends the collision-mesh core synchronously and arms a
   per-client area; `drainSpawnArea` delivers the outer rings at
