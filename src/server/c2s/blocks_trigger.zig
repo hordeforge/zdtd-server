@@ -8,7 +8,23 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
+const world_mod = @import("../../world/root.zig");
 const blocktrigger = @import("../../world/blocktrigger.zig");
+
+/// `BlockLight.OnTriggered` (IL=26): toggle the block-light nibble at the
+/// cell. The source level is the block's blocks.xml `LightValue`; toggling
+/// means 0 when it is on and the level when it is off.
+fn toggleBlockLight(self: *Game, wx: i32, wy: i32, wz: i32) void {
+    const t = world_mod.store.World.worldToChunk(wx, wz);
+    const c = self.world.getOrCreate(t.pos) catch return;
+    const lights = c.lights orelse return;
+    if (wy < 0 or wy >= c.*.y_dim) return;
+    const idx: usize = @intCast(t.lx + t.lz * 16 + wy * 256);
+    if (idx >= lights.len) return;
+    const cur = lights[idx] >> 4;
+    const level: u8 = if (cur > 0) 0 else 15;
+    world_mod.store.Chunk.setLight(c, t.lx, wy, t.lz, level, false);
+}
 
 /// True when `name` is a trigger/water package and was handled.
 pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -90,6 +106,11 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     // `BlockTrapDoor` (IL=26): destroys itself, which is the
                     // downgrade to air (`DamageBlock(MaxDamage - damage)`).
                     self.world.setBlockWorld(bx, by, bz, 0) catch {};
+                } else if (self.maxdamage.lightValue(cname) > 0) {
+                    // `BlockLight.OnTriggered` (IL=26): `SetLightState(world,
+                    // pos, bv, !IsLightOn)` - toggles the block-light nibble
+                    // at the cell (light-mesh-water.md `Chunk.SetLight`).
+                    toggleBlockLight(self, bx, by, bz);
                 }
             }
         }
