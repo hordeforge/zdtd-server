@@ -4736,8 +4736,9 @@ a finer server encoding.
   sweep and a real three-join bench (`scenario join phases attribute the real
   join cost`, `login=9/0ns enter=6/0ns worldinfo=3/0ns spawn=3/4000000ns`).
   `join_spawn` is the attribution; `tick_total` after the burst is 4 ms on one
-  tick (`tick=1/4000000ns`). A loadgen bench is still needed for the 402 ms
-  p99, which is the concurrent case (multiple clients in one tick).
+  tick (`tick=1/4000000ns`) on an **empty tmpDir world**. The row's 402 ms p99
+  is on stock Pregen06k01 with a real map, so the two are not comparable: the
+  4 ms is the no-world case. A loadgen bench on a real map is still needed.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
