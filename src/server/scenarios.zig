@@ -14986,6 +14986,41 @@ test "scenario every registered package id survives dispatch with a malformed bo
     try std.testing.expect(js.count > 0);
 }
 
+test "scenario join phases attribute the real join cost" {
+    // GAP "Join-burst tick budget under concurrent load": the residual is
+    // attributed to one of the four join-phase sections. `attachJoinedClient`
+    // drives the real C2S path (PlayerLogin, RequestToEnterGame,
+    // RequestToSpawnPlayer through `onData`), so its per-phase max is the
+    // attribution the row asks for. Three joins, like the row's bench.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        const c = try g.attachJoinedClient(&cap);
+        try std.testing.expect(c.joined);
+    }
+    const prof = &g.harness.prof;
+    const jl = prof.histOf(.join_login);
+    const je = prof.histOf(.join_enter);
+    const jw = prof.histOf(.join_worldinfo);
+    const js = prof.histOf(.join_spawn);
+    std.debug.print(
+        "PASS join-attr: login={d}/{d}ns enter={d}/{d}ns worldinfo={d}/{d}ns spawn={d}/{d}ns\n",
+        .{ jl.count, jl.max_ns, je.count, je.max_ns, jw.count, jw.max_ns, js.count, js.max_ns },
+    );
+    try std.testing.expect(jl.count > 0);
+    try std.testing.expect(je.count > 0);
+    try std.testing.expect(jw.count > 0);
+    try std.testing.expect(js.count > 0);
+}
+
 test "scenario entities.zen vehicle kind byte is range-checked before the cast" {
     // VehicleKind is an exhaustive enum(u8) with five values, and the record
     // type-1 branch turns a raw disk byte into one. @enumFromInt panics on an

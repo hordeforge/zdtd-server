@@ -4732,8 +4732,11 @@ a finer server encoding.
   (`scenario every registered package id survives dispatch with a malformed
   body` asserts each scope's observation count and reports its max:
   `login=2082/0ns enter=2070/0ns worldinfo=2025/0ns spawn=1981/4000000ns`).
-  `join_spawn` is the only phase with a non-zero max on the malformed sweep;
-  a real-join bench is still needed to attribute the 402 ms p99.
+  `join_spawn` is the only phase with a non-zero max on both the malformed
+  sweep and a real three-join bench (`scenario join phases attribute the real
+  join cost`, `login=9/0ns enter=6/0ns worldinfo=3/0ns spawn=3/4000000ns`).
+  `join_spawn` is the attribution; a loadgen bench is still needed for the
+  402 ms p99 under concurrent load.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
