@@ -3760,8 +3760,14 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   revertibly like buffs. The original waiver said "waived until a progression
   runtime exists" - that runtime now exists, so this is an ordinary partial
   with a named shortfall rather than a waiver: the VM covers the tracked stats,
-  not every `passive_effect` row. Closing it is a scope question (which
-  stats to track), not a blocked dependency. Tracked FoodChangeOT/WaterChangeOT
+  not every `passive_effect` row. **2026-10-06: coverage is broader than the
+  row implies** - 13 tracked additive stats plus 10 named multiplicative
+  passives (`NoiseMultiplier`, `LightMultiplier`, `LootStage`, `LootQuantity`,
+  `ExperienceGain`, `ElectricalTrapXP`, `DismemberSelfChance`,
+  `BiomeGameStageModifier`, `GlobalGameStageModifier`,
+  `GlobalLootStageModifier`) folded through `namedPerkFold` /
+  `namedPassiveFold`. Closing it is still a scope question: a stat needs a
+  sim consumer to fold into, and the 13+10 set is what the sim models. Tracked FoodChangeOT/WaterChangeOT
   consumers closed 2026-09-17 (compose with Rules depletion in `tickSurvival`).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
