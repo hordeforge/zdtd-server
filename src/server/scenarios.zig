@@ -6121,11 +6121,12 @@ test "scenario observe mode records evidence but does not enforce (T19)" {
     const hack = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 600, 71, 100, 0, 0, 0, true);
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", hack));
 
-    // Not enforced: no reject counted, and the permissive apply keeps the
-    // client position in the sim.
+    // T19: the clamp runs in every mode (`observe` = "do not kick", not "do
+    // not protect"). No reject is counted and no S2S snap is sent, but the
+    // applied position is the clamped one, not the claimed 600.
     try std.testing.expectEqual(rejects_before, g.harness.counters.get(.movement_rejects));
     const idx = g.sim.slotOfNetId(c.entity_id) orelse return error.MissingEntity;
-    try std.testing.expect(g.sim.transform[idx].x > 500);
+    try std.testing.expect(g.sim.transform[idx].x < 500);
     // Observed: the evidence ring recorded the violation.
     try std.testing.expect(g.harness.counters.get(.evidence_events) > evidence_before);
     std.debug.print(
@@ -14612,6 +14613,42 @@ test "scenario fall_sink clamps player vertical delta without the glide flag (mo
     try std.testing.expect(r.applied);
     // max_dy = 1.5 * dt(1s) = 1.5; clamped y = 100 - 1.5 = 98.5.
     try std.testing.expectApproxEqAbs(@as(f32, 98.5), r.y, 0.5);
+}
+
+test "scenario the movement clamp runs in both authority modes (T19)" {
+    // T19: `observe` used to apply the client position unvalidated. The clamp
+    // is a Hard invariant on a server-owned quantity, so it runs in every mode;
+    // `observe` skips only the reject counter and the S2S snap ("do not kick",
+    // not "do not protect"). One over-envelope update per mode.
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    inline for ([_]game_mod.AuthorityMode{ .observe, .correct }) |mode| {
+        freshScenarioDir("worlds/zdtd_sc_t19");
+        const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_t19", 0, .{ .authority_mode = mode });
+        defer g.destroy();
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        var st: u64 = 0;
+        while (st < 25) : (st += 1) try g.step();
+        g.sim.setPos(c.entity_id, 100, 100, 100, 0);
+        game_movement_helpers.resetMoveEnvelopePeer(g, c.slot, 100, 100, 100);
+        c.move_valid = true;
+        c.move_tick = g.tick_n -| 20;
+        const rejects_before = g.harness.counters.get(.movement_rejects);
+        // A 100-block horizontal jump over 1 s is far past the 20 m/s cap.
+        const r = game_movement_helpers.applyMovementEnvelope(g, c, c.peer orelse return error.MissingPeer, c.entity_id, 200, 100, 100);
+        try std.testing.expect(r.applied);
+        // Both modes clamp: the applied x is not the claimed 200.
+        try std.testing.expect(r.x < 200);
+        const rejects_after = g.harness.counters.get(.movement_rejects);
+        if (mode == .correct) {
+            try std.testing.expect(rejects_after > rejects_before);
+        } else {
+            // `observe` records but never denies.
+            try std.testing.expectEqual(rejects_before, rejects_after);
+        }
+    }
 }
 
 test "scenario zombie kills reach the client on the PlayerStats wire" {

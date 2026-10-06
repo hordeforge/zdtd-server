@@ -108,8 +108,12 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
         if (p.last_attacker_id != 0 and c.combat_remaining_ticks > 0) inducer = p.last_attacker_id;
     }
     self.noteEvidence(c, peer.local_id, entity_id, inducer, .movement, .strong, .none, cap, cap);
+    // T19: the clamp runs in every mode. `observe` means "do not kick", not
+    // "do not protect" - the clamp is a Hard invariant on a server-owned
+    // quantity, and Hard invariants are what `correct` is defined to enforce.
+    // Only the reject counter, the log and the S2S snap stay `correct`-only.
     if (self.authority_mode != .correct) {
-        return .{ .x = x, .y = y, .z = z, .applied = true };
+        return .{ .x = clamp.x, .y = vclamp.y, .z = clamp.z, .applied = true };
     }
     self.harness.counters.inc(.movement_rejects);
     const n = self.harness.counters.get(.movement_rejects);

@@ -137,6 +137,14 @@ gaps, file them.
 
 ## T19. Make observe mode honest about movement
 
+**Status: landed 2026-10-06.** The clamp runs in every mode (`observe` = "do not
+kick", not "do not protect"): `applyMovementEnvelope` returns the clamped
+position regardless of `authority_mode`, and only the reject counter, the log
+and the S2S snap stay `correct`-only (`movement_helpers.zig:111`). AUTHORITY.md
+now says so in all three places it described the old behaviour. Proof:
+`scenario the movement clamp runs in both authority modes (T19)` asserts the
+applied position and the reject count per mode.
+
 **Why:** AUTHORITY.md documents that in `observe` mode the movement envelope
 counts `movement_rejects` **but still applies the client position**, with no
 clamp and no S2C snap. An operator reading "observe" reasonably expects
