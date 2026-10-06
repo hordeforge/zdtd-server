@@ -4725,12 +4725,10 @@ a finer server encoding.
   unpaced block in the phase, has a `join_deco` section and a per-chunk yield and
   measures **0.08 ms** over three joins, which retires it as the cause. What
   remains is unattributed inside the `join` handler and is high-variance run to
-  run (7.6 s and 23.5 s on identical benches, both `join_fail` 0). **2026-10-06:
-  the finer sections are now scoped** (`join_login`, `join_enter`,
-  `join_worldinfo`, `join_spawn` at the four C2S handlers in
-  `src/server/c2s/join_*.zig`, one `apm.profiler.scope` each). They were
-  declared in `src/apm/profiler.zig` but never scoped, so the residual stayed
-  unattributed. The next step is a bench that reads the four.
+  run (7.6 s and 23.5 s on identical benches, both `join_fail` 0). **2026-10-06: the finer sections are scoped**
+  at `src/server/c2s/join.zig:42-63`, one `apm.profiler.scope` per phase
+  (`join_login`, `join_enter`, `join_worldinfo`, `join_spawn`), nested in
+  `join`. The next step is a bench that reads the four.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
