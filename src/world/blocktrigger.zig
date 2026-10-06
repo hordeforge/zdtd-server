@@ -47,6 +47,32 @@ pub const BlockTrigger = struct {
     pub fn hasAnyTriggers(self: *const BlockTrigger) bool {
         return self.triggers_n > 0;
     }
+
+    /// `UseOrForMultipleTriggers` (block-shapes.md 7.1): the AND/OR combine
+    /// over the listened channels. A single listen channel is always "on"
+    /// when that channel is latched, regardless of the flag.
+    pub fn isOn(self: *const BlockTrigger) bool {
+        if (self.triggered_by_n == 0) return true;
+        var i: usize = 0;
+        while (i < self.triggered_by_n) : (i += 1) {
+            const latched = self.isLatched(self.triggered_by[i]);
+            if (self.use_or) {
+                if (latched) return true;
+            } else {
+                if (!latched) return false;
+            }
+        }
+        return !self.use_or;
+    }
+
+    /// `TriggeredValues` (block-shapes.md 7.1): the channels currently
+    /// toggled on (latched inputs).
+    pub fn isLatched(self: *const BlockTrigger, channel: u8) bool {
+        for (self.triggered_values[0..self.triggered_values_n]) |v| {
+            if (v == channel) return true;
+        }
+        return false;
+    }
 };
 
 /// Channel indices are bytes (the prefab editor's trigger layers).
@@ -148,6 +174,40 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "the AND/OR combine over the listened channels (UseOrForMultipleTriggers)" {
+    // `UseOrForMultipleTriggers` (block-shapes.md 7.1): OR fires when any
+    // listened channel is latched, AND when all are. A single channel is
+    // always "on" when it is latched.
+    var bt: BlockTrigger = .{};
+    bt.triggered_by = .{ 4, 5, 0, 0, 0, 0, 0, 0 };
+    bt.triggered_by_n = 2;
+    // No latched inputs: AND is off, OR is off.
+    try std.testing.expect(!bt.isOn());
+    bt.use_or = true;
+    try std.testing.expect(!bt.isOn());
+    // One latched: OR fires, AND does not.
+    bt.triggered_values = .{4} ++ .{0} ** 7;
+    bt.triggered_values_n = 1;
+    try std.testing.expect(bt.isOn());
+    bt.use_or = false;
+    try std.testing.expect(!bt.isOn());
+    // Both latched: both fire.
+    bt.triggered_values = .{ 4, 5, 0, 0, 0, 0, 0, 0 };
+    bt.triggered_values_n = 2;
+    try std.testing.expect(bt.isOn());
+    bt.use_or = true;
+    try std.testing.expect(bt.isOn());
+    // A single listen channel is "on" when it is latched, flag or no flag.
+    bt.triggered_by_n = 1;
+    bt.triggered_values = .{4} ++ .{0} ** 7;
+    bt.triggered_values_n = 1;
+    bt.use_or = false;
+    try std.testing.expect(bt.isOn());
+    // No listen channels: always on (the block is a pure source).
+    bt.triggered_by_n = 0;
+    try std.testing.expect(bt.isOn());
 }
 
 test "readTriggerTable follows the pinned wrapper format" {
