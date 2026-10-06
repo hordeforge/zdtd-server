@@ -15,6 +15,7 @@ pub const props = @import("props.zig");
 pub const workstations = @import("workstations.zig");
 pub const collectors = @import("collectors.zig");
 pub const doors = @import("doors.zig");
+pub const blocktrigger = @import("blocktrigger.zig");
 pub const vending = @import("vending.zig");
 pub const light_te = @import("light_te.zig");
 pub const dtm = @import("dtm.zig");
