@@ -243,7 +243,15 @@ the gate and policy layer, and ADR 0022 keeps guests out of both.
 
 ## T22. Attribution and suppression
 
-**Status: half landed 2026-10-06.** Suppression is real: the void-rescue path (`move_position.zig:25`, `move_state.zig:132`) resets the movement envelope so the server correction is not counted as a movement reject against a legit player, with the reason recorded in the code. **Still open: the attribution half** - every `noteEvidence` call site passes `peer.local_id`, the reporting peer, so a finding induced by a second player does not attribute to the inducer.
+**Status: half landed 2026-10-06.** Suppression is real: the void-rescue path (`move_position.zig:25`, `move_state.zig:132`) resets the movement envelope so the server correction is not counted as a movement reject against a legit player, with the reason recorded in the code. **Still open: the attribution half** - every `noteEvidence` call site passes
+`peer.local_id`, the reporting peer, so a finding induced by a second player
+does not attribute to the inducer. **2026-10-06 survey:** the eight call
+sites are all self-claims (the reporter *is* the inducer) except the
+shove-off-a-roof case the `Why` names, which is a movement finding on the
+shoved player. The fix is an `inducer` parameter on `noteEvidence`
+(`src/server/game/guard.zig:80`) plus a source for it: the last attacker,
+which the combat path already knows (`misc_damage.zig` `actor_slot`). Do
+not attribute on a guess - a wrong inducer is worse than none.
 **Why:** ADR 0022 decision 7. Without these two rules the anti-cheat becomes a
 grief weapon: a player who can shove someone off a roof farms movement findings
 against them, which is a worse outcome than the cheat being caught.
