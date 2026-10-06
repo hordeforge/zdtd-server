@@ -77,7 +77,7 @@ pub fn read(r: *std.Io.Reader) !BlockTrigger {
 /// entry `i16 blob_len`, `Vector3i local_pos`, then `blob_len` bytes of
 /// `BlockTrigger.Read`. The wrapper is the prefab's per-POI trigger table.
 pub const TriggerTable = struct {
-    entries: [max_triggers]BlockTrigger = .{.{}} ** max_triggers,
+    entries: [max_triggers]BlockTrigger = [_]BlockTrigger{.{}} ** max_triggers,
     n: u16 = 0,
 
     /// `Chunk.GetBlockTrigger(localPos)` shape: the wiring at a local cell, or
@@ -109,9 +109,10 @@ pub fn readTriggerTable(r: *std.Io.Reader) !TriggerTable {
         const y = std.mem.readInt(i32, pos[4..8], .little);
         const z = std.mem.readInt(i32, pos[8..12], .little);
         var blob: [256]u8 = undefined;
-        if (blob_len > blob.len) return error.InvalidData;
-        _ = try r.readSliceAll(blob[0..blob_len]);
-        var br = std.Io.Reader.fixed(blob[0..blob_len]);
+        const bl: usize = @intCast(blob_len);
+        if (bl > blob.len) return error.InvalidData;
+        _ = try r.readSliceAll(blob[0..bl]);
+        var br = std.Io.Reader.fixed(blob[0..bl]);
         var bt = try read(&br);
         bt.x = x;
         bt.y = y;
@@ -150,15 +151,16 @@ test "BlockTrigger.Read follows the pinned field order" {
 }
 
 test "readTriggerTable follows the pinned wrapper format" {
-    // One entry: blob_len=8, pos=(1,2,3), then the v5 BlockTrigger body.
+    // One entry: blob_len=10, pos=(1,2,3), then the v5 BlockTrigger body.
     const body = [_]u8{
         1, 0, // i16 count
-        8, 0, // i16 blob_len
+        10, 0, // i16 blob_len
         1, 0, 0, 0, // x
         2, 0, 0, 0, // y
         3, 0, 0, 0, // z
-        // BlockTrigger v5 (the body read() parses)
-        5, 0, 0, 1, 7, 0, 0, 0, 0,
+        // BlockTrigger v5: version, needs, triggers_n, trigger,
+        // triggered_by_n, triggered_values_n, exclude, use_or, unlock
+        5, 0, 0, 1, 7, 0, 0, 0, 0, 0,
     };
     var r = std.Io.Reader.fixed(&body);
     const tbl = try readTriggerTable(&r);

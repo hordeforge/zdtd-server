@@ -20,6 +20,7 @@ const assets_placeholders = @import("../assets/blockplaceholders.zig");
 const io_fs = @import("../util/io_fs.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const stock_paths = @import("../util/stock_paths.zig");
+const blocktrigger = @import("blocktrigger.zig");
 
 /// TTS block-paint blockId bitfield: child flag (RE: tts.zig header, Prefab.readBlockData).
 pub const child_bit: u32 = 0x4000_0000;
@@ -92,6 +93,9 @@ pub const TtsBlocks = struct {
     placeholders: []u16 = &.{},
     /// Prefab TE list (local coords). Payloads owned by same allocator.
     tile_entities: []TeEntry = &.{},
+    /// Prefab trigger wiring (stock `Prefab.readTriggerData`, read after the TE
+    /// list). Empty when the prefab has none.
+    triggers: blocktrigger.TriggerTable = .{},
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *TtsBlocks) void {
@@ -306,6 +310,15 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
         }
     }
 
+    // `Prefab.readTriggerData` (`Prefab.il.txt:5210`) follows the TE list.
+    var triggers: blocktrigger.TriggerTable = .{};
+    if (pos + 2 <= data.len) {
+        var tr = std.Io.Reader.fixed(data[pos..]);
+        if (blocktrigger.readTriggerTable(&tr)) |tbl| {
+            triggers = tbl;
+        } else |_| {}
+    }
+
     return .{
         .sx = sx,
         .sy = sy,
@@ -316,6 +329,7 @@ pub fn parseBlocks(allocator: std.mem.Allocator, data: []const u8) !TtsBlocks {
         .textures = textures,
         .water = water,
         .tile_entities = tile_entities,
+        .triggers = triggers,
         .allocator = allocator,
     };
 }
