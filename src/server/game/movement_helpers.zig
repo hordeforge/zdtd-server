@@ -9,6 +9,8 @@ const ln_peer = @import("../../litenet/peer.zig");
 const protocol = @import("../../protocol.zig");
 const movement = @import("../movement.zig");
 const packages = @import("../../wire/packages.zig");
+const ecs = @import("../../ecs/root.zig");
+const world_store_mod = @import("../../world/store.zig");
 const log = @import("../../util/log.zig");
 
 pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
@@ -36,6 +38,27 @@ fn tryActivateTriggerAtPlayer(self: *Game, x: f32, y: f32, z: f32) void {
     const bz: i32 = @floor(z);
     _ = self.sim.power.activateTriggerAt(bx, by - 1, bz);
     _ = self.sim.power.activateTriggerAt(bx, by, bz);
+}
+
+/// Emit the held item's light into the world grid (T29 moving lights).
+/// items.xml `LightValue` is a 0..1 float (torch .35, flashlight .55); the
+/// grid is 0..15, so the level is the scaled emission. Called per tick for
+/// each player holding a lit item. The block-light spread is the flood half.
+pub fn emitHeldLight(self: *Game, ps: ecs.Slot) void {
+    const inv = &self.sim.inventory[ps];
+    const held = inv.slots[self.sim.player[ps].held_slot];
+    if (held.count == 0) return;
+    const lv = self.items.lightValue(held.item_id);
+    if (lv <= 0) return;
+    const level: u8 = @intFromFloat(@round(@min(1.0, lv) * 15.0));
+    if (level == 0) return;
+    const tp = self.sim.transform[ps];
+    const wx: i32 = @intFromFloat(@round(tp.x));
+    const wy: i32 = @intFromFloat(@round(tp.y));
+    const wz: i32 = @intFromFloat(@round(tp.z));
+    const t = world_store_mod.World.worldToChunk(wx, wz);
+    const c = self.world.getOrCreate(t.pos) catch return;
+    world_store_mod.Chunk.spreadFrom(c, t.lx, wy, t.lz, level);
 }
 
 pub fn resetMoveEnvelopePeer(self: *Game, peer_slot: usize, x: f32, y: f32, z: f32) void {
