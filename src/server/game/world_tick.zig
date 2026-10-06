@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
+const drone_state_mod = @import("../../ecs/drone_state.zig");
 // The lock staleness rule is shared with the grant path so both agree on a
 // backwards clock (via the c2s facade, which owns the lock helpers).
 const c2s_misc_lock = @import("../c2s/misc_lock.zig");
@@ -746,6 +747,9 @@ pub fn tickDrones(self: *Game, dt: f32) void {
         // T30: the state machine is the policy layer. A spawned drone starts
         // at `Idle`; `Follow` is the state this tick drives. `Shutdown` and
         // `Teleport` are the recovery legs the RE names.
+        // T30: the state machine is the policy layer. A spawned drone starts
+        // at `Idle`; `Follow` is the state this tick drives, `Teleport` the
+        // recovery leg when travel fails (raycast-pathing.md 6b).
         if (self.sim.drone_state[d] == .none) self.sim.drone_state[d] = .idle;
         self.sim.drone_state_ticks[d] +|= 1;
         const owner_slot = self.sim.entity_owner_slot[d];
@@ -761,10 +765,18 @@ pub fn tickDrones(self: *Game, dt: f32) void {
         const flat = @sqrt(dx * dx + dz * dz);
         // The 7 m band only *starts* the follow; it settles at the 5 m follow
         // distance, so a drone does not park just outside the band.
-        if (flat <= follow_distance and @abs(dy) <= follow_distance) continue;
+        if (flat <= follow_distance and @abs(dy) <= follow_distance) {
+            // Arrived: `Follow` -> `Idle` (raycast-pathing.md 6b).
+            if (drone_state_mod.canTransition(self.sim.drone_state[d], .idle)) self.sim.drone_state[d] = .idle;
+            continue;
+        }
         if (flat > teleport_distance) {
+            // Travel fails: `Follow` -> `Teleport`, the recovery hop.
+            if (drone_state_mod.canTransition(self.sim.drone_state[d], .teleport)) self.sim.drone_state[d] = .teleport;
             self.sim.transform[d] = .{ .x = o.x, .y = o.y + hover, .z = o.z, .yaw = t.yaw };
+            if (drone_state_mod.canTransition(self.sim.drone_state[d], .idle)) self.sim.drone_state[d] = .idle;
         } else {
+            if (drone_state_mod.canTransition(self.sim.drone_state[d], .follow)) self.sim.drone_state[d] = .follow;
             const dist = @sqrt(dx * dx + dy * dy + dz * dz);
             if (dist <= 0.001) continue;
             // Stop at the follow distance rather than on the owner's head.
