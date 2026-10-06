@@ -356,8 +356,11 @@ pub const TraderTable = struct {
                     mod_names[mod_n] = mname;
                     mod_n += 1;
                     // Regular mods halve the chance; the first cosmetic goes to
-                    // CosmeticMods[0] and does not, but the trader stock path
-                    // has no cosmetic slot, so treat every install as regular.
+                    // CosmeticMods[0] and does not. ponytail: the trader stock
+                    // path has no cosmetic slot, so every install is treated as
+                    // regular and the chance halves on the first one too. Add a
+                    // cosmetic slot to StockEntry if a modded trader ever needs
+                    // the distinction.
                     chance *= 0.5;
                 }
             }
