@@ -14963,6 +14963,25 @@ test "scenario every registered package id survives dispatch with a malformed bo
         "PASS c2s-coverage: {d}/{d} registered packages reach a C2S handler\n",
         .{ handled_n, packages.default_mappings.len },
     );
+    // The four join-phase sections (c2s/join.zig:42-63) must actually fire:
+    // the Join-burst residual is attributed to one of them, so a scope that
+    // never opens leaves the residual unattributed again. The sweep above
+    // drives the join packages through the dispatch, which opens each scope.
+    const prof = &g.harness.prof;
+    const jl = prof.histOf(.join_login).count;
+    const je = prof.histOf(.join_enter).count;
+    const jw = prof.histOf(.join_worldinfo).count;
+    const js = prof.histOf(.join_spawn).count;
+    std.debug.print(
+        "PASS join-sections: login={d} enter={d} worldinfo={d} spawn={d}\n",
+        .{ jl, je, jw, js },
+    );
+    // Each phase scope opens on every dispatched package, so the sweep gives
+    // each a non-zero observation count.
+    try std.testing.expect(jl > 0);
+    try std.testing.expect(je > 0);
+    try std.testing.expect(jw > 0);
+    try std.testing.expect(js > 0);
 }
 
 test "scenario entities.zen vehicle kind byte is range-checked before the cast" {
