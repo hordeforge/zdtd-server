@@ -1014,7 +1014,10 @@ writes the mutated block, which the trigger record cannot own. **Landed
   `OnTriggered` classes landed 2026-10-06:** switch (meta toggle), door
   (auto-close), downgrade (DowngradeBlock), trap door (self-destruct),
   light (nibble toggle), hazard (shared state bit) and game-event
-  (runGameEventSequence + optional destroy).
+  (runGameEventSequence + optional destroy). **Remaining wiring:**
+  `switchMetaBit` is the stamp normalizer (`OnTriggerAddedFromPrefab`) and
+  the stamp path does not yet consult the trigger table, so a stamped switch
+  does not get its initial meta bit.
 
 **Why:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7: stock's
 `BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel
