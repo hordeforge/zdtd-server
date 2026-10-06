@@ -14930,6 +14930,11 @@ test "scenario core temperature drains HP outside the comfort band (Perk PARTIAL
     try std.testing.expectApproxEqAbs(@as(f32, -1.5), -(120.0 - prog.temp_comfort_high) * prog.temperature_hp_per_second, 0.001);
     // Bleeding at level 1 drains at its own rate.
     try std.testing.expectApproxEqAbs(@as(f32, -0.2), -1.0 * prog.bleeding_hp_per_second, 0.001);
+    // Poison and infection drain the same way, each at its own rate.
+    try std.testing.expectApproxEqAbs(@as(f32, -0.15), -1.0 * prog.poison_hp_per_second, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.1), -1.0 * prog.infection_hp_per_second, 0.001);
+    // All four counters together: the sum is the dot_ot half.
+    try std.testing.expectApproxEqAbs(@as(f32, -0.55), -(prog.bleeding_hp_per_second + prog.poison_hp_per_second + prog.infection_hp_per_second + 0.1), 0.001);
 }
 
 test "scenario carry weight scales the movement envelope cap (Perk PARTIAL)" {
