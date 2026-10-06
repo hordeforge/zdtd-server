@@ -460,6 +460,15 @@ pub fn handleTe(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, 
                     // accepted items to the front would strand them. Rejected
                     // slots are cleared so nothing stale keeps crafting.
                     for (st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]) |*dst, q| {
+                        // A repair entry (RecipeQueueItem.RepairItem, crafting-recipes.md:216)
+                        // carries no recipe and no output type: its work is the
+                        // `RepairItem` pair, not an output stack. Let it through
+                        // unchanged - the stock client sends one when the player
+                        // repairs an item through the crafting window.
+                        if (q.repair_blob_len != 0) {
+                            dst.* = q;
+                            continue;
+                        }
                         if (q.output_type == 0 or q.output_count <= 0) {
                             dst.* = .{};
                             continue;

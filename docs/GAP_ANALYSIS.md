@@ -3188,9 +3188,14 @@ consumption has no pinned C2S shape.
   (clamped, stack stays present as a broken repairable item); the dig and
   landed-hit call sites degrade the held tool (blocks.zig + misc.zig,
   scenario-tested); repair-by-combine lands stock MergeBest on drag
-  (round 34). Residual: repair-kit consumption has no validated C2S shape
-  (the kit UI path is not pinned in the RE corpus), so kits cannot restore
-  durability yet - recorded, not wired.
+  (round 34). **2026-10-06: the repair-kit wire path is wired.** `RecipeQueueItem.RepairItem`
+  (`../../7dtd-engine-research/docs/gameplay/crafting-recipes.md:216`) round-trips through the workstation TE sync and the
+  queue validation lets a repair entry through (it has no recipe and no output
+  type, so the craft-only check used to drop it). The C2S that requests a repair
+  is the workstation TE sync itself - `AddItemToRepairAtIndex` is client-side
+  only (`../../7dtd-engine-research/il/full-v3.2.0/_global/XUiC_CraftingQueue.il.txt:201`). Residual: the server does not yet
+  apply the repair (no `AddRepairItemToQueue` equivalent), so the entry is
+  carried and echoed but the item durability does not change.
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
   `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
   `src/server/c2s/misc.zig`
