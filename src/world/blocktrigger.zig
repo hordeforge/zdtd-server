@@ -73,6 +73,55 @@ pub fn read(r: *std.Io.Reader) !BlockTrigger {
     return out;
 }
 
+/// `Prefab.readTriggerData` (`Prefab.il.txt:5210`): `i16 count`, then per
+/// entry `i16 blob_len`, `Vector3i local_pos`, then `blob_len` bytes of
+/// `BlockTrigger.Read`. The wrapper is the prefab's per-POI trigger table.
+pub const TriggerTable = struct {
+    entries: [max_triggers]BlockTrigger = .{.{}} ** max_triggers,
+    n: u16 = 0,
+
+    /// `Chunk.GetBlockTrigger(localPos)` shape: the wiring at a local cell, or
+    /// null when the POI has none there.
+    pub fn at(self: *const TriggerTable, x: i32, y: i32, z: i32) ?*const BlockTrigger {
+        for (self.entries[0..self.n]) |*e| {
+            if (e.x == x and e.y == y and e.z == z) return e;
+        }
+        return null;
+    }
+};
+
+/// One POI's trigger table is bounded by its voxel count; 256 is far above any
+/// shipped prefab's wiring (the editor's trigger layers are sparse).
+pub const max_triggers: usize = 256;
+
+/// `Prefab.readTriggerData` (`Prefab.il.txt:5210`).
+pub fn readTriggerTable(r: *std.Io.Reader) !TriggerTable {
+    var out: TriggerTable = .{};
+    const count = try r.takeInt(i16, .little);
+    if (count < 0 or count > max_triggers) return error.InvalidData;
+    var i: i16 = 0;
+    while (i < count) : (i += 1) {
+        const blob_len = try r.takeInt(i16, .little);
+        if (blob_len < 0) return error.InvalidData;
+        var pos: [12]u8 = undefined;
+        _ = try r.readSliceAll(&pos);
+        const x = std.mem.readInt(i32, pos[0..4], .little);
+        const y = std.mem.readInt(i32, pos[4..8], .little);
+        const z = std.mem.readInt(i32, pos[8..12], .little);
+        var blob: [256]u8 = undefined;
+        if (blob_len > blob.len) return error.InvalidData;
+        _ = try r.readSliceAll(blob[0..blob_len]);
+        var br = std.Io.Reader.fixed(blob[0..blob_len]);
+        var bt = try read(&br);
+        bt.x = x;
+        bt.y = y;
+        bt.z = z;
+        out.entries[out.n] = bt;
+        out.n += 1;
+    }
+    return out;
+}
+
 test "BlockTrigger.Read follows the pinned field order" {
     // v5 record: needs_triggered=1, one fire channel (3), two listen channels
     // (4,5), one latched value (4), exclude_icon=false, use_or=true, unlock=false.
@@ -98,4 +147,24 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "readTriggerTable follows the pinned wrapper format" {
+    // One entry: blob_len=8, pos=(1,2,3), then the v5 BlockTrigger body.
+    const body = [_]u8{
+        1, 0, // i16 count
+        8, 0, // i16 blob_len
+        1, 0, 0, 0, // x
+        2, 0, 0, 0, // y
+        3, 0, 0, 0, // z
+        // BlockTrigger v5 (the body read() parses)
+        5, 0, 0, 1, 7, 0, 0, 0, 0,
+    };
+    var r = std.Io.Reader.fixed(&body);
+    const tbl = try readTriggerTable(&r);
+    try std.testing.expectEqual(@as(u16, 1), tbl.n);
+    const e = tbl.at(1, 2, 3).?;
+    try std.testing.expectEqual(@as(u8, 1), e.triggers_n);
+    try std.testing.expectEqual(@as(u8, 7), e.triggers[0]);
+    try std.testing.expect(tbl.at(9, 9, 9) == null);
 }
