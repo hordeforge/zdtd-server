@@ -4,6 +4,7 @@
 const std = @import("std");
 const test_tmp = @import("../util/test_tmp.zig");
 const game_mod = @import("game.zig");
+const ecs_rules = @import("../ecs/rules.zig");
 const stock_paths = @import("../util/stock_paths.zig");
 const Client = game_mod.Client;
 const game_bot = @import("game/bot.zig");
@@ -14914,6 +14915,21 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
         try std.testing.expectEqual(@as(f32, 0), ca.cvars.get("$itemHits"));
     }
     std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
+}
+
+test "scenario core temperature drains HP outside the comfort band (Perk PARTIAL)" {
+    // The composition is `hp_ot = perk + buff + item + dot_ot + temp_ot`
+    // (tickSurvival). This pins the arithmetic: inside the comfort band both
+    // halves are 0; outside it `temp_ot` scales with the distance from the
+    // nearest edge, and each counter contributes its own negative OT.
+    const rules = ecs_rules.Rules{};
+    const prog = rules.progression;
+    // Inside the band [50, 90]: no drain.
+    try std.testing.expect(70.0 >= prog.temp_comfort_low and 70.0 <= prog.temp_comfort_high);
+    // 120 is 30 over the 90 hot edge: 30 * 0.05 = 1.5 HP/s.
+    try std.testing.expectApproxEqAbs(@as(f32, -1.5), -(120.0 - prog.temp_comfort_high) * prog.temperature_hp_per_second, 0.001);
+    // Bleeding at level 1 drains at its own rate.
+    try std.testing.expectApproxEqAbs(@as(f32, -0.2), -1.0 * prog.bleeding_hp_per_second, 0.001);
 }
 
 test "scenario carry weight scales the movement envelope cap (Perk PARTIAL)" {
