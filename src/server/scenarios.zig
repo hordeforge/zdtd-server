@@ -15000,6 +15000,9 @@ test "scenario join phases attribute the real join cost" {
     const gpa = gpa_impl.allocator();
     const g = try game_mod.Game.create(gpa, dir, 0);
     defer g.destroy();
+    // Three joins back to back: the row measures a join burst, and the sim is
+    // single-threaded, so the burst is sequential join work in one process,
+    // not parallel threads.
     var cap: ln_peer.Capture = .{};
     var i: usize = 0;
     while (i < 3) : (i += 1) {
