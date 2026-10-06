@@ -48,7 +48,8 @@ build() {
 
 for m in core_announce core_killfeed core_damagegate core_pricegate \
          core_rewardgate core_lootgate core_tradefeed core_pvp \
-         core_questgate core_craftgate core_adminverbs core_perkgate; do
+         core_questgate core_craftgate core_adminverbs core_perkgate \
+         core_evidence; do
   build "$m"
 done
 

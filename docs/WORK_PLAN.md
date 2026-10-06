@@ -203,7 +203,9 @@ detector to earn the old label.
 
 ## T21. Ship the guest detector feed
 
-**Status: half landed 2026-10-06.** The host clamp is done: `PluginHost.evidence` (`src/plugin/host.zig:106-110`) is a `void`, read-only observer and the guest return is discarded, so the T20 ceiling already applied stands and a module cannot raise its own severity. The hook is wired end to end (`api.zig:66`, `wasm.zig:43` + `:713`). **Still open: the sample detector** - no `.wasm` under `mods/` or `plugins/` implements `on_evidence` yet.
+**Status: half landed 2026-10-06.** The host clamp is done: `PluginHost.evidence` (`src/plugin/host.zig:106-110`) is a `void`, read-only observer and the guest return is discarded, so the T20 ceiling already applied stands and a module cannot raise its own severity. The hook is wired end to end (`api.zig:66`, `wasm.zig:43` + `:713`). **2026-10-06: the sample detector landed** - `plugins/core_evidence/`
+implements `on_evidence` (the reference observer: logs each finding, does
+not judge or deny). T21 is complete.
 **Why:** ADR 0022 decision 3. Heuristics are the part operators most want to
 tune per server and the part that should never be able to stall a tick, which
 makes the detector layer the one place a guest belongs.

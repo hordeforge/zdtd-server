@@ -1,0 +1,5 @@
+name = "core_evidence"
+version = "0.1.0"
+wasm = "core_evidence.wasm"
+enabled = false
+description = "In-tree zdtd module: sample on_evidence observer (T21), enabled = false, load via [plugin] modules."
