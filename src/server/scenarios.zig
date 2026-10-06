@@ -14916,6 +14916,40 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
 }
 
+test "scenario a trigger fire is validated against the POI wiring (T36)" {
+    // T36 "Done when": a trigger fire is validated against the prefab's actual
+    // wiring and latch state before the server relays it. A cell with no
+    // wiring passes (the prefab may be unloaded); a wired cell that does not
+    // fire is rejected. The dispatch is the latch + the AND/OR combine.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    c.entered = true;
+    // A claim on a cell with no wiring: accepted and relayed (the prefab may
+    // be unloaded, so "no data" must not mean "rejected").
+    const rejects_before = g.harness.counters.get(.phase_rejects);
+    // `NetPackageBlockTrigger.read` (IL=10): `Vector3i blockPos` + `u32
+    // BlockValue.rawData`.
+    var body: [16]u8 = undefined;
+    std.mem.writeInt(i32, body[0..4], 5, .little);
+    std.mem.writeInt(i32, body[4..8], 70, .little);
+    std.mem.writeInt(i32, body[8..12], 5, .little);
+    std.mem.writeInt(u32, body[12..16], 0, .little);
+    try g.handlePackage(c, c.peer orelse return error.MissingPeer, packages.idOf("NetPackageBlockTrigger").?, &body);
+    try std.testing.expectEqual(rejects_before, g.harness.counters.get(.phase_rejects));
+    // A malformed claim (short body) is rejected, not relayed.
+    const before2 = g.harness.counters.get(.c2s_malformed);
+    try g.handlePackage(c, c.peer orelse return error.MissingPeer, packages.idOf("NetPackageBlockTrigger").?, &[_]u8{ 1, 2, 3 });
+    try std.testing.expect(g.harness.counters.get(.c2s_malformed) > before2);
+}
+
 test "scenario every registered package id survives dispatch with a malformed body" {
     // Two properties, both cheap and both real:
     //

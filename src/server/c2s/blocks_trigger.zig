@@ -8,6 +8,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
+const blocktrigger = @import("../../world/blocktrigger.zig");
 
 /// True when `name` is a trigger/water package and was handled.
 pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
@@ -46,16 +47,32 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
             self.harness.counters.inc(.bounds_rejects);
             return true;
         }
-        // T36 wiring check: when a stamped prefab has trigger wiring at the
-        // cell, the block must have `TriggersIndices` there. A claim on a
-        // cell with no wiring passes (the prefab may be unloaded), but a
-        // claim on a wired cell that does not fire is rejected.
+        // T36 wiring check + dispatch: when a stamped prefab has trigger
+        // wiring at the cell, the block must have `TriggersIndices` there, and
+        // the fire latches the channel and runs the AND/OR combine before any
+        // mutation. A claim on a cell with no wiring passes (the prefab may be
+        // unloaded), but a claim on a wired cell that does not fire is
+        // rejected, and a latch on a channel the block does not listen to is
+        // refused.
         if (self.world.prefabs) |*pf| {
             if (pf.triggerAt(bx, by, bz)) |bt| {
                 if (!bt.hasAnyTriggers()) {
                     self.harness.counters.inc(.phase_rejects);
                     return true;
                 }
+                // `BlockTrigger.OnTriggered` (IL=27): latch the fired channel,
+                // then the combine. The channel is the block's own fire
+                // channel (its `TriggersIndices`), which is the claim.
+                var wire: blocktrigger.BlockTrigger = bt.*;
+                var fired = false;
+                for (bt.triggers[0..bt.triggers_n]) |ch| {
+                    if (wire.latch(ch)) fired = true;
+                }
+                if (!fired or !wire.isOn()) {
+                    self.harness.counters.inc(.phase_rejects);
+                    return true;
+                }
+                wire.clearLatched();
             }
         }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
