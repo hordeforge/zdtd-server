@@ -966,6 +966,16 @@ unvalidated request.
 **Files:** `src/server/c2s/blocks.zig`, `src/world/prefabs.zig` (trigger
 wiring parse), a new component or table for channel/latch state.
 
+**2026-10-06 survey:** no trigger table exists anywhere (`store.zig`,
+`prefabs.zig` have none), and the prefab loader reads blocks, textures,
+density, damage and TE markers but not `Prefab.readTriggerData`. The first
+step is that parse: `PrefabTriggerData` is per-POI wiring (fires/listens/
+latched/AND-OR, `block-shapes.md` 7.1) and the chunk store needs a
+`BlockTrigger` table keyed by local pos (7.1 registry accessors). Only then
+can the relay validate a claim. Do not fail closed on "no data loaded" -
+that would break working POI circuits; the validation is reject-when-data-
+present-and-inconsistent, not reject-when-absent.
+
 **Grounding:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7.
 
 **Done when:** a trigger fire is validated against the prefab's actual
