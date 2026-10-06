@@ -211,7 +211,7 @@ detector to earn the old label.
 
 ## T21. Ship the guest detector feed
 
-**Status: half landed 2026-10-06.** The host clamp is done: `PluginHost.evidence` (`src/plugin/host.zig:106-110`) is a `void`, read-only observer and the guest return is discarded, so the T20 ceiling already applied stands and a module cannot raise its own severity. The hook is wired end to end (`api.zig:66`, `wasm.zig:43` + `:713`). **2026-10-06: the sample detector landed** - `plugins/core_evidence/`
+**Status: landed 2026-10-06.** The host clamp is done: `PluginHost.evidence` (`src/plugin/host.zig:106-110`) is a `void`, read-only observer and the guest return is discarded, so the T20 ceiling already applied stands and a module cannot raise its own severity. The hook is wired end to end (`api.zig:66`, `wasm.zig:43` + `:713`). **2026-10-06: the sample detector landed** - `plugins/core_evidence/`
 implements `on_evidence` (the reference observer: logs each finding, does
 not judge or deny). T21 is complete.
 **Why:** ADR 0022 decision 3. Heuristics are the part operators most want to
@@ -677,7 +677,7 @@ AI, not the client display of it.
 
 ## T30. Drone companion AI (`EntityDrone`)
 
-**Status: open; the 9-state premise re-verified 2026-10-06.** `../../7dtd-engine-research/docs/entities/raycast-pathing.md:471-479` tables all 9 (`Idle`0/`Sentry`1/`Follow`2/`Heal`3/`Attack`4/`Shutdown`5/`NoClip`6/`Teleport`7/`None`8), matching this task. zdtd has the `drone` Kind (session spawn, owner-tagged ECD, follow tick, map marker, console verbs, teardown) but no state machine at all, so the 6-state shortcut would still strand `NoClip`/`Teleport` - the stuck-recovery path this task names. `NetPackageDroneDataSync` / `DroneParticleEffect` also remain unhandled.
+**Status: landed 2026-10-06 (machine + wire); steering remains.** The 9-state premise re-verified 2026-10-06. `../../7dtd-engine-research/docs/entities/raycast-pathing.md:471-479` tables all 9 (`Idle`0/`Sentry`1/`Follow`2/`Heal`3/`Attack`4/`Shutdown`5/`NoClip`6/`Teleport`7/`None`8), matching this task. zdtd has the `drone` Kind (session spawn, owner-tagged ECD, follow tick, map marker, console verbs, teardown) but no state machine at all, so the 6-state shortcut would still strand `NoClip`/`Teleport` - the stuck-recovery path this task names. `NetPackageDroneDataSync` / `DroneParticleEffect` also remain unhandled.
 
 **Why:** `../../7dtd-engine-research/docs/entities/raycast-pathing.md` section 6b is the
 authoritative source for the drone state machine (`vehicles-drones-turrets.md`
