@@ -622,7 +622,12 @@ on it.
   by tests). `World.lightBrightnessAt` is the query with the ambient
   fallback. The light-refined groan threshold was already in
   `stealth.zig` (`stealthLightLevel` + the `canSensePlayer` light gate).
-  The light-entity dictionary (moving lights) stays open. **2026-10-06 survey:** the grid is fully
+  The light-entity dictionary (moving lights) stays open. **2026-10-06: the
+  primitive is in place** (`Chunk.spreadFrom` floods from any source cell at
+  any level); what is missing is the entity-side source - an entity that
+  lights the world around it. The held-item light is already modelled
+  (`stealthLightLevel` takes `selfLight`), so the gap is the world-side
+  emission, not the player-side visibility. **2026-10-06 survey:** the grid is fully
   pinned in `light-mesh-water.md` - `Chunk.GetLight(x,y,z,type)` reads one
   byte from `chnLight` and splits the nibbles (Sun = low 4, Block = high 4),
   `GetLightValue = max(sun - darkness, block)` (with the `== 15` fallback to
