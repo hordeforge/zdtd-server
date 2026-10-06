@@ -11,6 +11,16 @@ const packages = @import("../../wire/packages.zig");
 const world_mod = @import("../../world/root.zig");
 const blocktrigger = @import("../../world/blocktrigger.zig");
 
+/// `BlockHazard.OnTriggered` (IL=49): toggle the shared on/off state bit
+/// (meta bit 1) at the cell. The sound is client-side.
+fn toggleHazardState(self: *Game, wx: i32, wy: i32, wz: i32) void {
+    const cur: u32 = self.world.blockWorld(wx, wy, wz) catch return;
+    const meta: u32 = (cur >> 16) & 31;
+    const next = blocktrigger.BlockTrigger.setOnState(meta, !blocktrigger.BlockTrigger.isOnState(meta));
+    const raw = (cur & ~(@as(u32, 31) << 16)) | (next << 16);
+    self.world.setBlockWorld(wx, wy, wz, @truncate(raw)) catch {};
+}
+
 /// `BlockLight.OnTriggered` (IL=26): toggle the block-light nibble at the
 /// cell. The source level is the block's blocks.xml `LightValue`; toggling
 /// means 0 when it is on and the level when it is off.
@@ -111,6 +121,11 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     // pos, bv, !IsLightOn)` - toggles the block-light nibble
                     // at the cell (light-mesh-water.md `Chunk.SetLight`).
                     toggleBlockLight(self, bx, by, bz);
+                } else if (self.maxdamage.isHazard(cur_id)) {
+                    // `BlockHazard.OnTriggered` (IL=49): toggles the hazard
+                    // state (shared meta bit 1, block-shapes.md 7.3). The
+                    // Start/StopSound at the block center is client-side.
+                    toggleHazardState(self, bx, by, bz);
                 }
             }
         }
