@@ -15009,14 +15009,21 @@ test "scenario join phases attribute the real join cost" {
         const c = try g.attachJoinedClient(&cap);
         try std.testing.expect(c.joined);
     }
+    // One tick after the burst: `tick_total` is the row's residual metric, and
+    // it is empty until a tick runs.
+    try g.step();
     const prof = &g.harness.prof;
     const jl = prof.histOf(.join_login);
     const je = prof.histOf(.join_enter);
     const jw = prof.histOf(.join_worldinfo);
     const js = prof.histOf(.join_spawn);
+    // `tick_total` is the row's residual metric (p50 0.39 ms, p99 402 ms,
+    // max 9.6 s on three concurrent joins). Report it beside the four so the
+    // next bench compares like with like.
+    const tt = prof.histOf(.tick_total);
     std.debug.print(
-        "PASS join-attr: login={d}/{d}ns enter={d}/{d}ns worldinfo={d}/{d}ns spawn={d}/{d}ns\n",
-        .{ jl.count, jl.max_ns, je.count, je.max_ns, jw.count, jw.max_ns, js.count, js.max_ns },
+        "PASS join-attr: login={d}/{d}ns enter={d}/{d}ns worldinfo={d}/{d}ns spawn={d}/{d}ns tick={d}/{d}ns\n",
+        .{ jl.count, jl.max_ns, je.count, je.max_ns, jw.count, jw.max_ns, js.count, js.max_ns, tt.count, tt.max_ns },
     );
     try std.testing.expect(jl.count > 0);
     try std.testing.expect(je.count > 0);

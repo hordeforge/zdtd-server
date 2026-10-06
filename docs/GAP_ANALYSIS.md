@@ -4735,8 +4735,9 @@ a finer server encoding.
   `join_spawn` is the only phase with a non-zero max on both the malformed
   sweep and a real three-join bench (`scenario join phases attribute the real
   join cost`, `login=9/0ns enter=6/0ns worldinfo=3/0ns spawn=3/4000000ns`).
-  `join_spawn` is the attribution; a loadgen bench is still needed for the
-  402 ms p99 under concurrent load.
+  `join_spawn` is the attribution; `tick_total` after the burst is 4 ms on one
+  tick (`tick=1/4000000ns`). A loadgen bench is still needed for the 402 ms
+  p99, which is the concurrent case (multiple clients in one tick).
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
