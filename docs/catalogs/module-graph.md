@@ -34,7 +34,7 @@ Only imports of another package directory are counted; single-file imports
 | `wire` | `ecs` | 5 |
 | `wire` | `util` | 3 |
 | `wire` | `world` | 5 |
-| `world` | `assets` | 23 |
+| `world` | `assets` | 24 |
 | `world` | `ecs` | 6 |
 | `world` | `util` | 41 |
 

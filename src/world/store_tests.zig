@@ -777,6 +777,40 @@ test "setLight writes one nibble and keeps the other (Chunk.SetLight)" {
     try std.testing.expectEqual(@as(u8, 7), lights[5 + 5 * 16 + 70 * 256] & 15);
 }
 
+test "spreadBlockLight floods the Block nibble, losing 1 per step (T29)" {
+    // `SpreadLight` (`light-mesh-water.md`): each source spreads into the
+    // Block nibble of its 6 neighbours, losing 1 per step. Sun is untouched.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var world = try World.init(std.testing.allocator, dir);
+    defer world.deinit();
+    const c = try world.getOrCreate(.{ .x = 0, .z = 0 });
+    const lights = try std.testing.allocator.alloc(u8, c.planeCells());
+    @memset(lights, 0);
+    c.lights = lights;
+    defer {
+        std.testing.allocator.free(lights);
+        c.lights = null;
+    }
+    // Seed a source cell directly (the block table is the caller's concern).
+    Chunk.setLight(c, 5, 70, 5, 4, false);
+    // A 1-step spread from the source: the neighbours get 3.
+    Chunk.spreadFrom(c, 5, 70, 5, 4);
+    const idx = struct {
+        fn at(x: i32, y: i32, z: i32) usize {
+            return @intCast(x + z * 16 + y * 256);
+        }
+    }.at;
+    try std.testing.expectEqual(@as(u8, 4), lights[idx(5, 70, 5)] >> 4);
+    try std.testing.expectEqual(@as(u8, 3), lights[idx(6, 70, 5)] >> 4);
+    try std.testing.expectEqual(@as(u8, 3), lights[idx(5, 71, 5)] >> 4);
+    // Two steps out: 2.
+    try std.testing.expectEqual(@as(u8, 2), lights[idx(7, 70, 5)] >> 4);
+    // The Sun nibble is untouched.
+    try std.testing.expectEqual(@as(u8, 0), lights[idx(6, 70, 5)] & 15);
+}
+
 test "resolveTerrainIds seeds default stack from live dump ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

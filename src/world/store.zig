@@ -14,6 +14,7 @@ const worldgen_mod = @import("worldgen.zig");
 const parallel = @import("../util/parallel.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+const maxdamage = @import("../assets/maxdamage.zig");
 const weather_mod = @import("weather.zig");
 const io_fs = @import("../util/io_fs.zig");
 const chunk_flush = @import("chunk_flush.zig");
@@ -488,6 +489,62 @@ pub const Chunk = struct {
         const old = lights[idx];
         const v: u8 = intensity & 15;
         lights[idx] = if (is_sun) (old & 0xF0) | v else (v << 4) | (old & 0x0F);
+    }
+
+    /// `SpreadLight` (`light-mesh-water.md`): the block-light flood. Each
+    /// source cell at `LightValue` spreads into the Block nibble of its
+    /// neighbours, losing 1 per step, stopping at 0. The 6-neighbour flood is
+    /// the standard light rule and matches `GetLightValue`'s `max(sun,
+    /// blockLight)`. Sun is untouched.
+    pub fn spreadBlockLight(c: *Chunk, source: *const maxdamage.Table, idName: *const fn (?*anyopaque, u16) ?[]const u8, id_ctx: ?*anyopaque) void {
+        if (c.lights == null) return;
+        const blocks = c.blocks orelse return;
+        var lz: i32 = 0;
+        while (lz < 16) : (lz += 1) {
+            var lx: i32 = 0;
+            while (lx < 16) : (lx += 1) {
+                var y: i32 = 0;
+                while (y < c.*.y_dim) : (y += 1) {
+                    const idx: usize = @intCast(lx + lz * 16 + y * 256);
+                    if (idx >= blocks.len) continue;
+                    const name = idName(id_ctx, @truncate(blocks[idx])) orelse continue;
+                    const level = source.lightValue(name);
+                    if (level == 0) continue;
+                    spreadFrom(c, lx, y, lz, level);
+                }
+            }
+        }
+    }
+
+    /// One BFS from a source cell: fill the Block nibble of every reachable
+    /// cell with the remaining level, stopping at 0.
+    pub fn spreadFrom(c: *Chunk, sx: i32, sy: i32, sz: i32, level: u8) void {
+        const lights = c.lights orelse return;
+        var queue: [1024]struct { x: i32, y: i32, z: i32, lv: u8 } = undefined;
+        var head: usize = 0;
+        var tail: usize = 0;
+        queue[tail] = .{ .x = sx, .y = sy, .z = sz, .lv = level };
+        tail += 1;
+        while (head < tail) : (head += 1) {
+            const cur = queue[head];
+            const idx: usize = @intCast(cur.x + cur.z * 16 + cur.y * 256);
+            if (idx >= lights.len) continue;
+            const old = lights[idx] >> 4;
+            // Write only on a strictly brighter pass, but always spread: the
+            // source cell is enqueued at its own level and must still fan out
+            // to its neighbours.
+            if (cur.lv > old) lights[idx] = (cur.lv << 4) | (lights[idx] & 0x0F);
+            if (cur.lv <= 1) continue;
+            for ([_][3]i32{ .{ 1, 0, 0 }, .{ -1, 0, 0 }, .{ 0, 1, 0 }, .{ 0, -1, 0 }, .{ 0, 0, 1 }, .{ 0, 0, -1 } }) |d| {
+                const nx = cur.x + d[0];
+                const ny = cur.y + d[1];
+                const nz = cur.z + d[2];
+                if (nx < 0 or nx >= 16 or nz < 0 or nz >= 16 or ny < 0 or ny >= c.*.y_dim) continue;
+                if (tail >= queue.len) return;
+                queue[tail] = .{ .x = nx, .y = ny, .z = nz, .lv = cur.lv - 1 };
+                tail += 1;
+            }
+        }
     }
 
     /// `Chunk.RefreshSunlight` (`light-mesh-water.md`): the sun column walk,
