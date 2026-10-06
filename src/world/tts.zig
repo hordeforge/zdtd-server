@@ -442,6 +442,12 @@ pub const PlaceholderCtx = struct {
     /// cube rule, which is what every non-plant shape wants anyway.
     is_plant_id: ?*const fn (?*anyopaque, u16) bool = null,
     plant_ctx: ?*anyopaque = null,
+    /// `Block.OnTriggerAddedFromPrefab` (block-shapes.md 7.1): the meta bits to
+    /// OR into the block word at stamp time. A switch is "on" (meta bit 0)
+    /// only when its trigger has no `TriggeredBy` wiring. Optional: callers
+    /// without a trigger table stamp the block unchanged.
+    trigger_meta: ?*const fn (?*anyopaque, i32, i32, i32) u32 = null,
+    trigger_meta_ctx: ?*anyopaque = null,
 };
 
 pub fn paintDecoration(
@@ -538,7 +544,18 @@ pub fn paintDecoration(
             (if (p.is_plant_id) |f| f(p.plant_ctx, cell_id) else false)
         else
             false;
-        set_block(ctx, wx, wy, wz, rotateRawYPlant(raw, 4 -% (rot & 3), plant), tex, dens, dmg);
+        // `Block.OnTriggerAddedFromPrefab` (block-shapes.md 7.1): the switch
+        // normalizer ORs meta bit 0 into the block word when its trigger has
+        // no `TriggeredBy` wiring. The hook is optional: callers without a
+        // trigger table stamp the block unchanged.
+        var stamped = rotateRawYPlant(raw, 4 -% (rot & 3), plant);
+        if (ph) |p2| {
+            if (p2.trigger_meta) |f| {
+                const extra = f(p2.trigger_meta_ctx, wx, wy, wz);
+                stamped = (stamped & ~(@as(u32, 31) << 16)) | (((stamped >> 16) & 31 | extra) << 16);
+            }
+        }
+        set_block(ctx, wx, wy, wz, stamped, tex, dens, dmg);
     }
 }
 

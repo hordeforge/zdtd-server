@@ -7,6 +7,7 @@ const std = @import("std");
 const props_mod = @import("props.zig");
 const dtm = @import("dtm.zig");
 const prefabs_mod = @import("prefabs.zig");
+const blocktrigger = @import("blocktrigger.zig");
 pub const prefabs = prefabs_mod;
 const water_mod = @import("water.zig");
 const biomes_mod = @import("biomes.zig");
@@ -717,6 +718,15 @@ pub const max_step_up: i32 = 1;
 /// Deepest single-move drop a body takes voluntarily.
 pub const max_drop: i32 = 3;
 
+/// `Block.OnTriggerAddedFromPrefab` (block-shapes.md 7.1): the meta bits to
+/// OR into a stamped block. A switch is "on" (meta bit 0) only when its
+/// trigger has no `TriggeredBy` wiring.
+fn triggerMetaAt(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32) u32 {
+    const pf: *prefabs_mod.Index = @ptrCast(@alignCast(ctx.?));
+    const bt = pf.triggerAt(wx, wy, wz) orelse return 0;
+    return blocktrigger.BlockTrigger.switchMetaBit(bt);
+}
+
 /// Biome name at a world position for the blockplaceholders biome gate
 /// (stock compares the target's `biome` with `WorldBiomes.GetBiome(...)`'s
 /// name, case-insensitively). Unknown biome answers "" so a biome-gated target
@@ -1249,6 +1259,8 @@ pub const World = struct {
                             .biome_ctx = self,
                             .is_plant_id = self.is_plant_block,
                             .plant_ctx = self.plant_ctx,
+                            .trigger_meta = triggerMetaAt,
+                            .trigger_meta_ctx = &self.prefabs.?,
                         };
                         break :blk &ph_here;
                     } else null;
