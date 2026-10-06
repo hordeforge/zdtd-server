@@ -26,6 +26,26 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
+        // Trust boundary (rule 17/20): the body is `Vector3i blockPos` +
+        // `u32 BlockValue.rawData` (`NetPackageBlockTrigger.il.txt:16`). A
+        // short body or a position outside the world is a malformed claim,
+        // not a relay. T36 adds the wiring check on top of this: reject when
+        // the prefab's trigger table is present at the cell and the block has
+        // no `TriggersIndices` there.
+        if (body.len < 16) {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        }
+        const bx = std.mem.readInt(i32, body[0..4], .little);
+        const by = std.mem.readInt(i32, body[4..8], .little);
+        const bz = std.mem.readInt(i32, body[8..12], .little);
+        if (!game_mod.coordInRange(@floatFromInt(bx)) or
+            !game_mod.coordInRange(@floatFromInt(by)) or
+            !game_mod.coordInRange(@floatFromInt(bz)))
+        {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         try self.broadcastNear("NetPackageBlockTrigger", body, self.sim.transform[ps].x, self.sim.transform[ps].z, self.interest_range);
         return true;
