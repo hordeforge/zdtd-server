@@ -3769,8 +3769,13 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `namedPassiveFold`. Closing it is a **sim-completeness** question, not a
   passive-coverage one: the VM folds every stat the sim models (13+10), and
   a new stat needs a sim consumer first. The remaining stock rows are stats
-  the sim does not model (CoreTemp, carry weight, bleed, poison, infection),
-  so the gap is which of those the sim should gain. Tracked FoodChangeOT/WaterChangeOT
+  the sim does not model (CoreTemp, carry weight, bleed, poison, infection).
+  **Each needs its own subsystem**: CoreTemp a temperature-survival loop
+  (biome temp exists at `src/world/weather.zig:45`, player state does not),
+  carry weight an encumbrance effect, and bleed/poison/infection a per-player
+  counter with an HP drain (the catalog buffs exist; the sim state does not,
+  `src/server/game/types.zig:378` has only the `infection_chance` sandbox
+  scale). The gap is which of those the sim should gain. Tracked FoodChangeOT/WaterChangeOT
   consumers closed 2026-09-17 (compose with Rules depletion in `tickSurvival`).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
