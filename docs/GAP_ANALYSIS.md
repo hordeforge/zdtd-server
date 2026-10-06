@@ -4728,7 +4728,12 @@ a finer server encoding.
   run (7.6 s and 23.5 s on identical benches, both `join_fail` 0). **2026-10-06: the finer sections are scoped**
   at `src/server/c2s/join.zig:42-63`, one `apm.profiler.scope` per phase
   (`join_login`, `join_enter`, `join_worldinfo`, `join_spawn`), nested in
-  `join`. The next step is a bench that reads the four.
+  `join`. **2026-10-06: the four are now pinned by a runnable check**
+  (`scenario every registered package id survives dispatch with a malformed
+  body` asserts each scope's observation count and reports its max:
+  `login=2082/0ns enter=2070/0ns worldinfo=2025/0ns spawn=1981/4000000ns`).
+  `join_spawn` is the only phase with a non-zero max on the malformed sweep;
+  a real-join bench is still needed to attribute the 402 ms p99.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
