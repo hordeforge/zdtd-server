@@ -1217,8 +1217,9 @@ pub fn fireJump(self: *Game, ps: ecs.Slot) void {
 
 /// `onSelfTeleported` (minevents.md:100). The RE pins only the client
 /// delegate (`items.md:1056`), not a fire condition, so this fires on the
-/// paths that are unambiguously teleports: the admin `tp` verb and the void
-/// rescue. Spawn/respawn re-enter through their own triggers.
+/// one path that is unambiguously a teleport: the admin `tp` verb. The void
+/// rescue is a mesh-desync correction and does not fire it; spawn/respawn
+/// re-enter through their own triggers.
 pub fn fireTeleported(self: *Game, ps: ecs.Slot) void {
     const peer_slot = self.sim.player[ps].peer_slot;
     if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
