@@ -4758,7 +4758,11 @@ a finer server encoding.
   already paced (core rings synchronous, outer rings budgeted). What
   remains is proc gen off the tick: `getOrCreate` generating a chunk on the
   join path is the synchronous work the four sections attribute to
-  `join_spawn`. **The 402 ms p99 is a measurement, not a missing feature**: the four
+  `join_spawn`. **Scope check:** the outer rings are already budgeted and
+  the synchronous core (9 chunks) is necessary for the client to mesh before
+  `World.IsPositionAvailable`, so W2b has little left to move. The PARTIAL
+  is a measurement gap - the 402 ms p99 on a real map - rather than a
+  missing feature. **The 402 ms p99 is a measurement, not a missing feature**: the four
   sections attribute it and `join_spawn` is the phase. Closing the PARTIAL is
   W2b, a design change, not a parity gap.
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,
