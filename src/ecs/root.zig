@@ -20,6 +20,7 @@
 //! overrides without binder presence tracking.
 
 pub const entity = @import("entity.zig");
+pub const drone_state = @import("drone_state.zig");
 pub const components = @import("components.zig");
 pub const world = @import("world.zig");
 pub const world_tests = @import("world_tests.zig");
