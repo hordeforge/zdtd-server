@@ -93,6 +93,14 @@ pub const BlockTrigger = struct {
         return if (self.triggered_by_n == 0) 1 else 0;
     }
 
+    /// `BlockActivateSwitch.OnTriggered` (IL=24, block-shapes.md 7.3): the
+    /// switch toggle. `(meta & ~2) | 1` clears bit 1 and sets bit 0, so a
+    /// trigger firing flips the switch to "on" regardless of its prior state.
+    /// `meta` is the block word's meta bits; the return is the new meta.
+    pub fn switchToggleMeta(meta: u32) u32 {
+        return (meta & ~@as(u32, 2)) | 1;
+    }
+
     /// `BlockTrigger.OnTriggered` clears `TriggeredValues` after the
     /// combination fires.
     pub fn clearLatched(self: *BlockTrigger) void {
@@ -208,6 +216,19 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "the switch toggle sets meta bit 0 and clears bit 1" {
+    // `BlockActivateSwitch.OnTriggered` (IL=24, block-shapes.md 7.3):
+    // `(meta & ~2) | 1` clears bit 1 and sets bit 0, so a trigger firing flips
+    // the switch to "on" regardless of its prior state.
+    try std.testing.expectEqual(@as(u32, 1), BlockTrigger.switchToggleMeta(0));
+    try std.testing.expectEqual(@as(u32, 1), BlockTrigger.switchToggleMeta(1));
+    try std.testing.expectEqual(@as(u32, 1), BlockTrigger.switchToggleMeta(2));
+    // Other meta bits survive.
+    try std.testing.expectEqual(@as(u32, 5), BlockTrigger.switchToggleMeta(4));
+    // Bit 1 is cleared by the toggle, so a word with it set loses it.
+    try std.testing.expectEqual(@as(u32, 0b1101), BlockTrigger.switchToggleMeta(0b1111));
 }
 
 test "a switch is on only when its trigger has no TriggeredBy wiring" {
