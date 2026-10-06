@@ -141,6 +141,8 @@ pub const Table = struct {
     /// (block-shapes.md 2), so a rotated POI stamp must not give it the
     /// 24-orientation cube step.
     shape_plant_names: std.StringHashMapUnmanaged(void) = .empty,
+    /// blocks.xml `LightValue` per block name (0..15 emission). 0 = no emission.
+    light_value_by_name: std.StringHashMapUnmanaged(u8) = .empty,
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .empty,
@@ -374,6 +376,12 @@ pub const Table = struct {
     /// rotation is masked to 0..3 at 20 degree steps (block-shapes.md 2).
     pub fn isShapePlant(self: *const Table, name: []const u8) bool {
         return self.shape_plant_names.contains(name);
+    }
+
+    /// blocks.xml `LightValue` for a block name (0..15 emission). 0 = no
+    /// emission, which is the common case.
+    pub fn lightValue(self: *const Table, name: []const u8) u8 {
+        return self.light_value_by_name.get(name) orelse 0;
     }
 
     /// Falling-block massKg for a block name (RE EntityFallingBlock IL=232-250):
@@ -891,6 +899,11 @@ const DecoFacts = struct {
     /// `Shape == "BillboardPlant"`: rotation is `& 3` at 20 degree steps
     /// (BlockShapeBillboardPlant). Resolved through Extends like `shape45`.
     shape_plant: ?bool = null,
+    /// blocks.xml `LightValue` (stock `Block.GetLightValue`, exposed by
+    /// `BlockLight` / `BlockPoweredLight` / `BlockHazard`): the block-light
+    /// level this block emits into the grid, 0..15. Absent = no emission.
+    /// Resolved through Extends like the other properties.
+    light_value: ?u8 = null,
 };
 
 /// Resolve a per-block value through the Extends chain, honoring the `param1`
@@ -962,6 +975,7 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         if (out.show_model_on_fall == null and !xml.tagListContains(p1, "ShowModelOnFall")) out.show_model_on_fall = f.show_model_on_fall;
         if (out.shape45 == null and !xml.tagListContains(p1, "Shape")) out.shape45 = f.shape45;
         if (out.shape_plant == null and !xml.tagListContains(p1, "Shape")) out.shape_plant = f.shape_plant;
+        if (out.light_value == null and !xml.tagListContains(p1, "LightValue")) out.light_value = f.light_value;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
             out.show_model_on_fall != null and out.shape45 != null and
@@ -1265,6 +1279,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
             facts.shape45 = std.ascii.eqlIgnoreCase(shape, "DistantDecoTree");
             facts.shape_plant = std.ascii.eqlIgnoreCase(shape, "BillboardPlant");
         }
+        if (xml.propertyValue(body, "LightValue")) |lv| {
+            facts.light_value = @intCast(@min(15, std.fmt.parseInt(u8, std.mem.trim(u8, lv, " \t"), 10) catch 0));
+        }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
         // upgrade path). ToBlock appears only inside that class.
@@ -1302,6 +1319,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .empty;
     var shape45_names: std.StringHashMapUnmanaged(void) = .empty;
     var shape_plant_names: std.StringHashMapUnmanaged(void) = .empty;
+    var light_value_by_name: std.StringHashMapUnmanaged(u8) = .empty;
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -1417,6 +1435,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
         if (r.shape45 orelse false) try shape45_names.put(arena, e.key_ptr.*, {});
         if (r.shape_plant orelse false) try shape_plant_names.put(arena, e.key_ptr.*, {});
+        if (r.light_value) |lv| try light_value_by_name.put(arena, e.key_ptr.*, lv);
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -1466,6 +1485,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .no_show_model_on_fall = no_show_model_on_fall,
         .shape45_names = shape45_names,
         .shape_plant_names = shape_plant_names,
+        .light_value_by_name = light_value_by_name,
         .upgrade_to = upgrade_to_names,
         .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,
@@ -1579,6 +1599,24 @@ test "blocks.xml Shape=DistantDecoTree resolves the 45 degree rotation band" {
     try std.testing.expect(!t.has45Rotations("terrStone"));
     try std.testing.expect(!t.has45Rotations("plantShrub"));
     try std.testing.expect(!t.has45Rotations("treeCactus01"));
+}
+
+test "blocks.xml LightValue resolves through Extends (T29 block-light source)" {
+    // blocks.xml `LightValue` is the block-light level a light block emits
+    // into the grid (stock `Block.GetLightValue`, exposed by `BlockLight` /
+    // `BlockPoweredLight` / `BlockHazard`). The block-light spread needs it as
+    // the source level. Absent = no emission.
+    const path = stock_paths.configFile("blocks.xml");
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    // A block with no LightValue emits nothing.
+    try std.testing.expectEqual(@as(u8, 0), t.lightValue("terrStone"));
+    // Any block that does declare one is clamped to 0..15.
+    var it = t.light_value_by_name.iterator();
+    while (it.next()) |e| {
+        try std.testing.expect(e.value_ptr.* <= 15);
+    }
 }
 
 test "blocks.xml properties inherit through Extends with param1 exclusions" {
