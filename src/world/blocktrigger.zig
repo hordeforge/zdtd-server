@@ -84,6 +84,15 @@ pub const BlockTrigger = struct {
         return true;
     }
 
+    /// `Block.OnTriggerAddedFromPrefab` (`BlockActivateSwitch`, block-shapes.md
+    /// 7.1): the stamp normalizer. A switch is "on" (meta bit 0) only when its
+    /// trigger has no `TriggeredBy` wiring - a wired switch starts off and is
+    /// flipped by a trigger, an unwired one starts on. Returns the meta bit to
+    /// OR into the block word.
+    pub fn switchMetaBit(self: *const BlockTrigger) u32 {
+        return if (self.triggered_by_n == 0) 1 else 0;
+    }
+
     /// `BlockTrigger.OnTriggered` clears `TriggeredValues` after the
     /// combination fires.
     pub fn clearLatched(self: *BlockTrigger) void {
@@ -199,6 +208,18 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "a switch is on only when its trigger has no TriggeredBy wiring" {
+    // `Block.OnTriggerAddedFromPrefab` (`BlockActivateSwitch`, block-shapes.md
+    // 7.1): meta bit 0 is "on" only when the trigger has no `TriggeredBy`
+    // wiring. An unwired switch starts on; a wired one starts off and is
+    // flipped by a trigger.
+    var bt: BlockTrigger = .{};
+    try std.testing.expectEqual(@as(u32, 1), bt.switchMetaBit());
+    bt.triggered_by = .{4} ++ .{0} ** 7;
+    bt.triggered_by_n = 1;
+    try std.testing.expectEqual(@as(u32, 0), bt.switchMetaBit());
 }
 
 test "latch records a fired channel and rejects an out-of-wiring claim" {
