@@ -823,6 +823,11 @@ fn applyQueueRepair(ctx: ?*anyopaque, entity_id: i32, blob: []const u8, amount: 
             if (sl.count == 0 or sl.item_id != iid) continue;
             // `use_times` is the remaining wear; a repair lowers it toward 0
             // (items.md:1829). The stack stays present as a repairable item.
+            // ponytail: matches the first slot with the item type, not the
+            // exact `ItemValue` the repair targeted (stock's
+            // `AddRepairItemToQueue` carries the instance). Two stacks of the
+            // same tool repair the wrong one; match on quality/use_times too
+            // if that ever matters.
             sl.use_times = @max(0, sl.use_times - @as(f32, @floatFromInt(amount)));
             return true;
         }
