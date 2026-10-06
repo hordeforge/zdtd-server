@@ -239,7 +239,7 @@ A `WORKS` score means the feature is implemented and wire-correct. It does
 not mean zdtd behaves identically to stock: the places where it knowingly
 does not, and why, are in [DIVERGENCES.md](DIVERGENCES.md).
 
-300 features scored across nine areas (Total row below matches the live
+327 features scored across nine areas (Total row below matches the live
 per-feature markers; STATUS wins on conflict about what shipped, not about
 the arithmetic).
 
