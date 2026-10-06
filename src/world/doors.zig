@@ -30,7 +30,53 @@ pub const Door = struct {
     /// `autoCloseAtTickTime`: the tick the server closes this door at, 0 when
     /// no timer is armed (`SetOpen` stamps `ticks + AutoCloseTime * 20`).
     close_at: u64 = 0,
+    /// Whether the door is currently open (the block meta mirrors it; this is
+    /// the TE-side flag `TEFeatureDoor.IsOpen` reads).
+    is_open: bool = false,
+
+    /// `TEFeatureDoor.OnBlockTriggered` (tile-entities-power.md:61): a trigger
+    /// firing opens the door and arms the auto-close timer when the block
+    /// declares one. Returns true when the state changed.
+    pub fn onTriggered(self: *Door, now: u64, auto_close_seconds: u16) bool {
+        if (self.is_open) return false;
+        self.is_open = true;
+        if (auto_close_seconds > 0) {
+            self.close_at = now + @as(u64, auto_close_seconds) * 20;
+        }
+        return true;
+    }
+
+    /// The auto-close deadline reached: close the door and disarm the timer.
+    pub fn tickClose(self: *Door, now: u64) bool {
+        if (!self.is_open or self.close_at == 0 or now < self.close_at) return false;
+        self.is_open = false;
+        self.close_at = 0;
+        return true;
+    }
 };
+
+test "a trigger opens a door and the auto-close timer shuts it" {
+    // `TEFeatureDoor.OnBlockTriggered` (tile-entities-power.md:61): a trigger
+    // opens the door and arms the auto-close timer. The deadline reached
+    // closes it and disarms.
+    var d = Door{};
+    try std.testing.expect(d.onTriggered(100, 5));
+    try std.testing.expect(d.is_open);
+    try std.testing.expectEqual(@as(u64, 100 + 5 * 20), d.close_at);
+    // Already open: a second trigger changes nothing.
+    try std.testing.expect(!d.onTriggered(101, 5));
+    // Before the deadline the door stays open.
+    try std.testing.expect(!d.tickClose(150));
+    // At the deadline it closes and disarms.
+    try std.testing.expect(d.tickClose(200));
+    try std.testing.expect(!d.is_open);
+    try std.testing.expectEqual(@as(u64, 0), d.close_at);
+    // A door with no auto-close timer stays open until something else shuts it.
+    var open = Door{};
+    try std.testing.expect(open.onTriggered(0, 0));
+    try std.testing.expect(!open.tickClose(1_000_000));
+    try std.testing.expect(open.is_open);
+}
 
 pub const Store = struct {
     items: [max_doors]Door = undefined,

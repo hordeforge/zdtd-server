@@ -995,8 +995,11 @@ and the wrapper format), the loader hook reads `Prefab.readTriggerData` after
 the TE list (`tts.zig` `parseBlocks`), and the relay rejects both a malformed
 claim (`blocks_trigger.zig`, short body or out-of-range position) and a claim
 the POI wiring does not support (`Index.triggerAt` + `hasAnyTriggers`). The
-AND/OR combine and `Block.OnTriggered` mutations stay out of scope, as the task
-says.
+AND/OR combine (`BlockTrigger.isOn`), the latch pair (`latch`/`clearLatched`),
+the switch stamp normalizer (`switchMetaBit`) and the door mutation
+(`Door.onTriggered` + `tickClose`) all landed 2026-10-06 with tests. The
+remaining `Block.OnTriggered` classes (BlockTriggerDowngrade, powered
+lights, hazards) stay out of scope.
 
 **Why:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7: stock's
 `BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel
