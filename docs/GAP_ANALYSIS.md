@@ -3766,8 +3766,11 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `ExperienceGain`, `ElectricalTrapXP`, `DismemberSelfChance`,
   `BiomeGameStageModifier`, `GlobalGameStageModifier`,
   `GlobalLootStageModifier`) folded through `namedPerkFold` /
-  `namedPassiveFold`. Closing it is still a scope question: a stat needs a
-  sim consumer to fold into, and the 13+10 set is what the sim models. Tracked FoodChangeOT/WaterChangeOT
+  `namedPassiveFold`. Closing it is a **sim-completeness** question, not a
+  passive-coverage one: the VM folds every stat the sim models (13+10), and
+  a new stat needs a sim consumer first. The remaining stock rows are stats
+  the sim does not model (CoreTemp, carry weight, bleed, poison, infection),
+  so the gap is which of those the sim should gain. Tracked FoodChangeOT/WaterChangeOT
   consumers closed 2026-09-17 (compose with Rules depletion in `tickSurvival`).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
