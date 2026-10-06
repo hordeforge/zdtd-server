@@ -61,7 +61,7 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         const actor_slot = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.alive[actor_slot] or self.sim.health[actor_slot].hp <= 0) {
             self.harness.counters.inc(.bounds_rejects);
-            self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
+            self.noteEvidence(c, peer.local_id, d.entity_id, -1, .bounds, .strong, .damage, 0, 1);
             return true;
         }
         const target_slot = if (self.sim.slotOfNetId(d.entity_id)) |ts| ts else {
@@ -92,7 +92,7 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         };
         if (!self.sim.alive[target_slot]) {
             self.harness.counters.inc(.bounds_rejects);
-            self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, 0, 1);
+            self.noteEvidence(c, peer.local_id, d.entity_id, -1, .bounds, .strong, .damage, 0, 1);
             return true;
         }
         if (!self.sim.mask[actor_slot].transform or !self.sim.mask[target_slot].transform) return true;
@@ -104,7 +104,7 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
         const damage_d2 = damage_dx * damage_dx + damage_dy * damage_dy + damage_dz * damage_dz;
         if (damage_d2 > self.interest_range * self.interest_range) {
             self.harness.counters.inc(.bounds_rejects);
-            self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, @sqrt(damage_d2), self.interest_range);
+            self.noteEvidence(c, peer.local_id, d.entity_id, -1, .bounds, .strong, .damage, @sqrt(damage_d2), self.interest_range);
             return true;
         }
         const was_zombie = self.sim.kind[target_slot] == .zombie or self.sim.kind[target_slot] == .animal;

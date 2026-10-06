@@ -32,7 +32,7 @@ pub fn handlePackage(self: *Game, c: *Client, peer: *ln_peer.Peer, id: u16, body
         const phase = phase_gate.phaseOf(c.joined, c.entered);
         if (!phase_gate.allowed(phase, name)) {
             self.harness.counters.inc(.phase_rejects);
-            self.noteEvidence(c, peer.local_id, c.entity_id, .phase, .hard, .none, 1, 0);
+            self.noteEvidence(c, peer.local_id, c.entity_id, -1, .phase, .hard, .none, 1, 0);
             const n = self.harness.counters.get(.phase_rejects);
             log.warnEvery(n, "phase reject n={d} pkg={s} joined={} entered={} local_id={d}\n", .{ n, name, c.joined, c.entered, peer.local_id });
             return;

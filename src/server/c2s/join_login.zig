@@ -260,7 +260,7 @@ pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u
         self.harness.counters.inc(.join_ok);
         if (was_joined) {
             self.harness.counters.inc(.reconnects);
-            self.noteEvidence(c, peer.local_id, eid, .flood, .info, .none, 1, 0);
+            self.noteEvidence(c, peer.local_id, eid, -1, .flood, .info, .none, 1, 0);
         }
         // Name length only in logs (name stays on admin listplayers / webui).
         // local_id ties this line to the earlier "peer connected" / challenge logs.

@@ -40,7 +40,7 @@ pub fn rejectIfBeyondEditRange(
     const d2 = editRangeDistanceSq(px, py, pz, bx, by, bz);
     if (d2 <= self.max_edit_range * self.max_edit_range) return false;
     self.harness.counters.inc(.bounds_rejects);
-    noteEvidence(self, c, peer_local, entity_id, .bounds, .strong, surf, @sqrt(d2), self.max_edit_range);
+    noteEvidence(self, c, peer_local, entity_id, -1, .bounds, .strong, surf, @sqrt(d2), self.max_edit_range);
     return true;
 }
 
@@ -68,6 +68,7 @@ pub fn rejectIfNotSender(
         c,
         peer_local,
         claimed_entity,
+        -1,
         .ownership,
         .strong,
         surf,
@@ -77,7 +78,12 @@ pub fn rejectIfNotSender(
     return true;
 }
 
-pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
+/// `inducer` is the net id of the entity whose action caused the finding
+/// (T22 attribution). -1 = the reporter is the inducer, which is the common
+/// case: all eight call sites are self-claims except the shove-off-a-roof
+/// case. A wrong inducer is worse than none, so callers pass -1 rather than
+/// guess.
+pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, inducer: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
     if (self.loadShedding() and (sev == .info or sev == .soft)) {
         self.harness.counters.inc(.load_shed_drops);
         return;
@@ -94,7 +100,7 @@ pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, de
     }
     const out = guard_policy.evaluate(&c.guard, self.guard, self.tick_n, det, sev_eff, surf, self.authorityCorrects());
     if (out.record) {
-        self.evidence.record(.{ .tick = self.tick_n, .peer_local = peer_local, .entity_id = entity_id, .detector = det, .severity = sev_eff, .surface = surf, .observed = observed, .bound = bound });
+        self.evidence.record(.{ .tick = self.tick_n, .peer_local = peer_local, .entity_id = entity_id, .inducer = inducer, .detector = det, .severity = sev_eff, .surface = surf, .observed = observed, .bound = bound });
         self.harness.counters.inc(.evidence_events);
         // T21: stream the event to plugin guests (read-only observer; the
         // ceiling already ran, the guest return is discarded).
@@ -187,6 +193,7 @@ pub fn noteBlockBreak(self: *Game, c: *Client) void {
         c,
         peer_local,
         c.entity_id,
+        -1,
         .farming,
         .soft,
         .block,

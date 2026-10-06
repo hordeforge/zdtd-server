@@ -6168,7 +6168,7 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
 
     // A .hard bounds event (client-informed): downgraded, never trips hard.
     const downgrades_before = g.harness.counters.get(.hard_ceiling_downgrades);
-    g.noteEvidence(c, 0, c.entity_id, .bounds, .hard, .block, 100, 96);
+    g.noteEvidence(c, 0, c.entity_id, -1, .bounds, .hard, .block, 100, 96);
     try std.testing.expect(g.harness.counters.get(.hard_ceiling_downgrades) > downgrades_before);
     try std.testing.expectEqual(@as(u16, 0), c.guard.hard_n);
     // The observer saw the downgraded severity (.strong = 2) and the event.
@@ -6178,7 +6178,7 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
 
     // A .hard phase event (server-only): passes the ceiling untouched.
     const downgrades_mid = g.harness.counters.get(.hard_ceiling_downgrades);
-    g.noteEvidence(c, 0, c.entity_id, .phase, .hard, .none, 1, 0);
+    g.noteEvidence(c, 0, c.entity_id, -1, .phase, .hard, .none, 1, 0);
     try std.testing.expectEqual(downgrades_mid, g.harness.counters.get(.hard_ceiling_downgrades));
     try std.testing.expect(c.guard.hard_n >= 1);
     std.debug.print("PASS hard-ceiling: bounds .hard downgraded, phase .hard kept (hard_n={d})\n", .{c.guard.hard_n});
@@ -6241,9 +6241,9 @@ test "scenario guardreport shows the would-kick diff (T23)" {
 
     // Trip the gate with two distinct strong detectors (the default ladder:
     // 2 distinct strong in a window). The second detector is the cause.
-    g.noteEvidence(c, 0, c.entity_id, .bounds, .strong, .block, 100, 96);
+    g.noteEvidence(c, 0, c.entity_id, -1, .bounds, .strong, .block, 100, 96);
     try std.testing.expect(!c.guard.tripped);
-    g.noteEvidence(c, 0, c.entity_id, .movement, .strong, .none, 25, 20);
+    g.noteEvidence(c, 0, c.entity_id, -1, .movement, .strong, .none, 25, 20);
     try std.testing.expect(c.guard.tripped);
     try std.testing.expectEqualStrings("movement", @tagName(c.guard.tripped_det));
     try std.testing.expect(c.guard.tripped_tick > 0);

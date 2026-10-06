@@ -84,7 +84,7 @@ pub fn handleBuff(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8
         // `ValidEntityIdForSender`: the sender may only RPC its own entity.
         if (rpc.entity_id <= 0 or c.entity_id <= 0 or rpc.entity_id != c.entity_id) {
             self.harness.counters.inc(.ownership_rejects);
-            self.noteEvidence(c, peer.local_id, rpc.entity_id, .ownership, .strong, .block, @floatFromInt(rpc.entity_id), @floatFromInt(c.entity_id));
+            self.noteEvidence(c, peer.local_id, rpc.entity_id, -1, .ownership, .strong, .block, @floatFromInt(rpc.entity_id), @floatFromInt(c.entity_id));
             return true;
         }
         try self.broadcastExcept("NetPackageSimpleRPC", body, c.slot);

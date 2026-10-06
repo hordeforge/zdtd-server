@@ -66,6 +66,9 @@ pub const Event = struct {
     tick: u64 = 0,
     peer_local: i32 = -1,
     entity_id: i32 = -1,
+    /// Net id of the entity whose action caused the finding (T22 attribution).
+    /// -1 = the reporter is the inducer, which is the common case.
+    inducer: i32 = -1,
     detector: Detector = .other,
     severity: Severity = .info,
     surface: Surface = .none,
@@ -88,10 +91,11 @@ pub const Ring = struct {
 
     /// Format one event as JSONL into buf (no trailing newline).
     pub fn formatEvent(ev: Event, buf: []u8) ![]const u8 {
-        return std.fmt.bufPrint(buf, "{{\"v\":1,\"tick\":{d},\"peer\":{d},\"ent\":{d},\"det\":\"{s}\",\"sev\":\"{s}\",\"surf\":\"{s}\",\"obs\":{d:.3},\"bound\":{d:.3}}}", .{
+        return std.fmt.bufPrint(buf, "{{\"v\":1,\"tick\":{d},\"peer\":{d},\"ent\":{d},\"ind\":{d},\"det\":\"{s}\",\"sev\":\"{s}\",\"surf\":\"{s}\",\"obs\":{d:.3},\"bound\":{d:.3}}}", .{
             ev.tick,
             ev.peer_local,
             ev.entity_id,
+            ev.inducer,
             @tagName(ev.detector),
             @tagName(ev.severity),
             @tagName(ev.surface),

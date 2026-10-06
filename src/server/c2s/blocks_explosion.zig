@@ -28,7 +28,7 @@ pub fn handleExplosion(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []con
         if (self.quarantineDenies(c, .block)) return true;
         if (ex.entity_id > 0 and c.entity_id > 0 and ex.entity_id != c.entity_id) {
             self.harness.counters.inc(.ownership_rejects);
-            self.noteEvidence(c, peer.local_id, ex.entity_id, .ownership, .strong, .block, @floatFromInt(ex.entity_id), @floatFromInt(c.entity_id));
+            self.noteEvidence(c, peer.local_id, ex.entity_id, -1, .ownership, .strong, .block, @floatFromInt(ex.entity_id), @floatFromInt(c.entity_id));
             return true;
         }
         if (!self.takeBlockToken(c)) {

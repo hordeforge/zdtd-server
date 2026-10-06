@@ -2468,8 +2468,8 @@ pub const Game = struct {
         return game_guard.rejectIfNotSender(self, c, peer_local, claimed_entity, surf);
     }
 
-    pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
-        return game_guard.noteEvidence(self, c, peer_local, entity_id, det, sev, surf, observed, bound);
+    pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, inducer: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
+        return game_guard.noteEvidence(self, c, peer_local, entity_id, inducer, det, sev, surf, observed, bound);
     }
     pub fn adminReplyGameStage(self: *Game, maybe_slot: ?usize) void {
         admin_console.adminReplyGameStage(self, maybe_slot);

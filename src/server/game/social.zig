@@ -434,7 +434,7 @@ pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
     if (!own.eql(source)) {
         self.harness.counters.inc(.ownership_rejects);
         const peer_local: i32 = if (c.peer) |p| p.local_id else -1;
-        self.noteEvidence(c, peer_local, c.entity_id, .ownership, .strong, .none, 1, 0);
+        self.noteEvidence(c, peer_local, c.entity_id, -1, .ownership, .strong, .none, 1, 0);
         return;
     }
     const t = self.allies.processRequest(source, target, req.add_ally) catch {
