@@ -3193,9 +3193,11 @@ consumption has no pinned C2S shape.
   queue validation lets a repair entry through (it has no recipe and no output
   type, so the craft-only check used to drop it). The C2S that requests a repair
   is the workstation TE sync itself - `AddItemToRepairAtIndex` is client-side
-  only (`../../7dtd-engine-research/il/full-v3.2.0/_global/XUiC_CraftingQueue.il.txt:201`). Residual: the server does not yet
-  apply the repair (no `AddRepairItemToQueue` equivalent), so the entry is
-  carried and echoed but the item durability does not change.
+  only (`../../7dtd-engine-research/il/full-v3.2.0/_global/XUiC_CraftingQueue.il.txt:201`). **2026-10-06: the repair is applied too.**
+  `completeOneCraft` routes a repair entry through a `RepairApplier` and the
+  Game's applier lowers the matching slot's `use_times`
+  (`../../7dtd-engine-research/docs/gameplay/items.md:1829`), so a finished
+  repair restores durability the way stock's crafting queue does.
   *Anchors:* `src/wire/stock_inv.zig:48`, `src/ecs/components.zig:338-347`,
   `src/ecs/inventory.zig:243-257`, `src/server/c2s/blocks.zig`,
   `src/server/c2s/misc.zig`
