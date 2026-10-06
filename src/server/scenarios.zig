@@ -14968,20 +14968,22 @@ test "scenario every registered package id survives dispatch with a malformed bo
     // never opens leaves the residual unattributed again. The sweep above
     // drives the join packages through the dispatch, which opens each scope.
     const prof = &g.harness.prof;
-    const jl = prof.histOf(.join_login).count;
-    const je = prof.histOf(.join_enter).count;
-    const jw = prof.histOf(.join_worldinfo).count;
-    const js = prof.histOf(.join_spawn).count;
+    const jl = prof.histOf(.join_login);
+    const je = prof.histOf(.join_enter);
+    const jw = prof.histOf(.join_worldinfo);
+    const js = prof.histOf(.join_spawn);
+    // Counts prove the scopes fire; the max is the residual attribution the
+    // Join-burst row asks for (which phase pays for a multi-second join).
     std.debug.print(
-        "PASS join-sections: login={d} enter={d} worldinfo={d} spawn={d}\n",
-        .{ jl, je, jw, js },
+        "PASS join-sections: login={d}/{d}ns enter={d}/{d}ns worldinfo={d}/{d}ns spawn={d}/{d}ns\n",
+        .{ jl.count, jl.max_ns, je.count, je.max_ns, jw.count, jw.max_ns, js.count, js.max_ns },
     );
     // Each phase scope opens on every dispatched package, so the sweep gives
     // each a non-zero observation count.
-    try std.testing.expect(jl > 0);
-    try std.testing.expect(je > 0);
-    try std.testing.expect(jw > 0);
-    try std.testing.expect(js > 0);
+    try std.testing.expect(jl.count > 0);
+    try std.testing.expect(je.count > 0);
+    try std.testing.expect(jw.count > 0);
+    try std.testing.expect(js.count > 0);
 }
 
 test "scenario entities.zen vehicle kind byte is range-checked before the cast" {
