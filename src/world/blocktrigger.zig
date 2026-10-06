@@ -65,6 +65,31 @@ pub const BlockTrigger = struct {
         return !self.use_or;
     }
 
+    /// `SetTriggeredValueFlag` (`BlockTrigger.OnTriggered` IL=27): latch the
+    /// fired channel. Returns false when the channel is not one this block
+    /// listens on, which is an out-of-wiring claim.
+    pub fn latch(self: *BlockTrigger, channel: u8) bool {
+        var listens = false;
+        for (self.triggered_by[0..self.triggered_by_n]) |c| {
+            if (c == channel) {
+                listens = true;
+                break;
+            }
+        }
+        if (!listens) return false;
+        if (self.isLatched(channel)) return true;
+        if (self.triggered_values_n >= max_channels) return false;
+        self.triggered_values[self.triggered_values_n] = channel;
+        self.triggered_values_n += 1;
+        return true;
+    }
+
+    /// `BlockTrigger.OnTriggered` clears `TriggeredValues` after the
+    /// combination fires.
+    pub fn clearLatched(self: *BlockTrigger) void {
+        self.triggered_values_n = 0;
+    }
+
     /// `TriggeredValues` (block-shapes.md 7.1): the channels currently
     /// toggled on (latched inputs).
     pub fn isLatched(self: *const BlockTrigger, channel: u8) bool {
@@ -174,6 +199,32 @@ test "BlockTrigger.Read follows the pinned field order" {
     try std.testing.expect(t.use_or);
     try std.testing.expect(!t.unlock);
     try std.testing.expect(t.hasAnyTriggers());
+}
+
+test "latch records a fired channel and rejects an out-of-wiring claim" {
+    // `BlockTrigger.OnTriggered` (IL=27): latch the fired channel, combine,
+    // and clear `TriggeredValues` after the combination fires. A channel the
+    // block does not listen on is an out-of-wiring claim and is refused.
+    var bt: BlockTrigger = .{};
+    bt.triggered_by = .{ 4, 5, 0, 0, 0, 0, 0, 0 };
+    bt.triggered_by_n = 2;
+    try std.testing.expect(bt.latch(4));
+    try std.testing.expect(bt.isLatched(4));
+    // Two listen channels, AND mode: one latched is not enough.
+    try std.testing.expect(!bt.isOn());
+    // Latching twice is idempotent.
+    try std.testing.expect(bt.latch(4));
+    try std.testing.expectEqual(@as(u8, 1), bt.triggered_values_n);
+    // A channel this block does not listen on is refused.
+    try std.testing.expect(!bt.latch(9));
+    try std.testing.expectEqual(@as(u8, 1), bt.triggered_values_n);
+    // Latch the second channel: now the AND fires.
+    try std.testing.expect(bt.latch(5));
+    try std.testing.expect(bt.isOn());
+    // After the combination fires the latches clear.
+    bt.clearLatched();
+    try std.testing.expectEqual(@as(u8, 0), bt.triggered_values_n);
+    try std.testing.expect(!bt.isOn());
 }
 
 test "the AND/OR combine over the listened channels (UseOrForMultipleTriggers)" {
