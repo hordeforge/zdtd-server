@@ -732,6 +732,11 @@ pub const World = struct {
     /// 41 on the wearer). 0 = the item carries no row / not an armor item.
     armor_pdr_ctx: ?*anyopaque = null,
     armor_pdr_fn: ?*const fn (?*anyopaque, u16, u8) f32 = null,
+    /// ElementalDamageResist hook (T28 elemental half): the equipped armor's
+    /// summed ElementalDamageResist percent at its quality, matching
+    /// `armor_pdr_fn`'s shape.
+    armor_edr_ctx: ?*anyopaque = null,
+    armor_edr_fn: ?*const fn (?*anyopaque, u16, u8) f32 = null,
     /// Foreign-gated armor PDR (ctx, item_id, quality, attacker_slot): the
     /// piece's `target="other"` PhysicalDamageResist rows (Preacher vs
     /// zombies), evaluated where the attacker is known. Unset = no foreign

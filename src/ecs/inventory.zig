@@ -169,6 +169,26 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
     return @min(w.rules.combat.armor_mitigation_cap, item_mit + mod_mit + fallback + w.buff_phys_resist[ps] / 100.0);
 }
 
+/// ElementalDamageResist percent from the passive-effects VM (T28 elemental
+/// half). Same shape as `armorMitigation`, but over `ElementalDamageResist`
+/// (passive 43). A physical-only set therefore leaves elemental damage
+/// untouched, which is stock's behaviour (combat-damage.md 2.1).
+pub fn armorElementalMitigation(w: *const World, peer: usize) f32 {
+    const ps = w.playerByPeer(peer) orelse return 0;
+    if (!w.mask[ps].inventory) return 0;
+    var elem_edr: f32 = 0;
+    var i: usize = c.inv_equip_start;
+    while (i < c.max_inv_slots) : (i += 1) {
+        const slot = w.inventory[ps].slots[i];
+        if (slot.count > 0 and itemIsArmor(w, slot.item_id)) {
+            if (w.armor_edr_fn) |f| {
+                elem_edr += f(w.armor_edr_ctx, slot.item_id, slot.quality);
+            }
+        }
+    }
+    return @min(w.rules.combat.armor_mitigation_cap, elem_edr / 100.0);
+}
+
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
@@ -1007,6 +1027,32 @@ test "degradeUse wears the item's DegradationPerUse; armorMitigationVs applies h
     try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigation(&w, 0), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.02), armorMitigationVs(&w, 0, ps), 0.001); // x0.5
     try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigationVs(&w, 0, null), 0.001); // no attacker
+}
+
+fn testEdr(_: ?*anyopaque, _: u16, _: u8) f32 {
+    return 6;
+}
+
+test "a physical-only armor set leaves elemental damage untouched (T28)" {
+    // The elemental half is its own sum over `ElementalDamageResist` (passive
+    // 43). A set with only PhysicalDamageResist must not reduce elemental
+    // damage (combat-damage.md 2.1).
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].inventory = true;
+    w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    w.armor_pdr_ctx = null;
+    w.armor_pdr_fn = &testPdr; // 4% physical
+    w.armor_edr_ctx = null;
+    w.armor_edr_fn = null; // no elemental rating
+    try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigation(&w, 0), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), armorElementalMitigation(&w, 0), 0.001);
+    // A second piece with an elemental rating adds its own sum.
+    w.armor_edr_fn = &testEdr; // 6% elemental
+    try std.testing.expectApproxEqAbs(@as(f32, 0.06), armorElementalMitigation(&w, 0), 0.001);
 }
 
 fn testDegrad(_: ?*anyopaque, _: u16) f32 {

@@ -146,6 +146,12 @@ pub fn handleDamage(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const 
                             const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
                             amount *= (1.0 - mit);
                         } else {
+                            // T28 elemental half: a physical-only armor set
+                            // leaves elemental damage untouched (combat-damage.md
+                            // 2.1). The elemental rating is its own sum over
+                            // `ElementalDamageResist` (passive 43).
+                            const emit = invsys.armorElementalMitigation(&self.sim, @intCast(self.sim.player[ei].peer_slot));
+                            amount *= (1.0 - emit);
                             // ElementalDamageResist is a percentage on the
                             // victim; no penetration leg exists for it in stock.
                             amount *= (1.0 - self.elementalDamageResist(ei, protocol.damageTypeName(d.dtype)));
