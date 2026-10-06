@@ -998,14 +998,18 @@ the POI wiring does not support (`Index.triggerAt` + `hasAnyTriggers`). The
 AND/OR combine (`BlockTrigger.isOn`), the latch pair (`latch`/`clearLatched`),
 the switch stamp normalizer (`switchMetaBit`) and the door mutation
 (`Door.onTriggered` + `tickClose`) all landed 2026-10-06 with tests. The
-remaining `Block.OnTriggered` classes (BlockGameEvent, powered lights,
+remaining `Block.OnTriggered` classes (powered lights,
 hazards) stay out of scope. **2026-10-06: the switch/door/downgrade pieces
 are all in place** (`switchMetaBit`, `switchToggleMeta`, `Door.onTriggered`
 + `tickClose`, `maxdamage.downgradeTo`); what is left is the
 `Block.OnTriggered` dispatch at the trigger site - a world-level call that
 writes the mutated block, which the trigger record cannot own. **Landed
 2026-10-06:** the relay latches, combines and writes the downgraded block
-(`blocks_trigger.zig`), pinned by the T36 scenario test.
+(`blocks_trigger.zig`), pinned by the T36 scenario test. **All seven
+  `OnTriggered` classes landed 2026-10-06:** switch (meta toggle), door
+  (auto-close), downgrade (DowngradeBlock), trap door (self-destruct),
+  light (nibble toggle), hazard (shared state bit) and game-event
+  (runGameEventSequence + optional destroy).
 
 **Why:** `../../7dtd-engine-research/docs/world/block-shapes.md` section 7: stock's
 `BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel

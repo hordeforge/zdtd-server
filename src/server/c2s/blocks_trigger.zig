@@ -126,6 +126,14 @@ pub fn handleTrigger(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const
                     // state (shared meta bit 1, block-shapes.md 7.3). The
                     // Start/StopSound at the block center is client-side.
                     toggleHazardState(self, bx, by, bz);
+                } else if (self.maxdamage.onTriggeredEvent(cname)) |ev| {
+                    // `BlockGameEvent.OnTriggered` (IL=60): runs the block's
+                    // game-event sequence. `destroyOnEvent` destroys the block
+                    // after it runs (the same write as the trap door).
+                    _ = self.runGameEventSequence(c.slot, ev);
+                    if (self.maxdamage.destroyOnEvent(cname)) {
+                        self.world.setBlockWorld(bx, by, bz, 0) catch {};
+                    }
                 }
             }
         }

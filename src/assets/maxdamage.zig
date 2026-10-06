@@ -143,6 +143,10 @@ pub const Table = struct {
     shape_plant_names: std.StringHashMapUnmanaged(void) = .empty,
     /// blocks.xml `LightValue` per block name (0..15 emission). 0 = no emission.
     light_value_by_name: std.StringHashMapUnmanaged(u8) = .empty,
+    /// blocks.xml `onTriggeredEvent` per block name (the game-event sequence
+    /// a trigger fire runs). Absent = no event.
+    on_triggered_event_by_name: std.StringHashMapUnmanaged([]const u8) = .empty,
+    destroy_on_event_by_name: std.StringHashMapUnmanaged(void) = .empty,
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .empty,
@@ -533,6 +537,18 @@ pub const Table = struct {
     /// (`BlockHazard`, block-shapes.md 7.3): its `OnTriggered` toggles the
     /// shared on/off state bit. Resolved through Extends like the other class
     /// facts.
+    /// blocks.xml `onTriggeredEvent` for a block name: the game-event
+    /// sequence a trigger fire runs. Null = no event.
+    pub fn onTriggeredEvent(self: *const Table, name: []const u8) ?[]const u8 {
+        return self.on_triggered_event_by_name.get(name);
+    }
+
+    /// blocks.xml `destroyOnEvent` for a block name: the block is destroyed
+    /// after its `onTriggeredEvent` runs.
+    pub fn destroyOnEvent(self: *const Table, name: []const u8) bool {
+        return self.destroy_on_event_by_name.contains(name);
+    }
+
     pub fn isHazard(self: *const Table, id: u16) bool {
         const name = self.idName(id) orelse return false;
         const cls = self.power_class_by_name.get(name) orelse return false;
@@ -923,6 +939,11 @@ const DecoFacts = struct {
     /// level this block emits into the grid, 0..15. Absent = no emission.
     /// Resolved through Extends like the other properties.
     light_value: ?u8 = null,
+    /// blocks.xml `onTriggeredEvent` (`BlockGameEvent`, block-shapes.md 7.3):
+    /// the game-event sequence name this block runs when triggered. Absent =
+    /// no event. `destroyOnEvent` says the block is destroyed after it runs.
+    on_triggered_event: ?[]const u8 = null,
+    destroy_on_event: ?bool = null,
 };
 
 /// Resolve a per-block value through the Extends chain, honoring the `param1`
@@ -995,6 +1016,8 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         if (out.shape45 == null and !xml.tagListContains(p1, "Shape")) out.shape45 = f.shape45;
         if (out.shape_plant == null and !xml.tagListContains(p1, "Shape")) out.shape_plant = f.shape_plant;
         if (out.light_value == null and !xml.tagListContains(p1, "LightValue")) out.light_value = f.light_value;
+        if (out.on_triggered_event == null and !xml.tagListContains(p1, "onTriggeredEvent")) out.on_triggered_event = f.on_triggered_event;
+        if (out.destroy_on_event == null and !xml.tagListContains(p1, "destroyOnEvent")) out.destroy_on_event = f.destroy_on_event;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
             out.show_model_on_fall != null and out.shape45 != null and
@@ -1301,6 +1324,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "LightValue")) |lv| {
             facts.light_value = @intCast(@min(15, std.fmt.parseInt(u8, std.mem.trim(u8, lv, " \t"), 10) catch 0));
         }
+        if (xml.propertyValue(body, "onTriggeredEvent")) |oe| {
+            facts.on_triggered_event = try arena.dupe(u8, std.mem.trim(u8, oe, " \t"));
+        }
+        if (xml.propertyValue(body, "destroyOnEvent")) |de| {
+            facts.destroy_on_event = parseBool(de);
+        }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
         // upgrade path). ToBlock appears only inside that class.
@@ -1339,6 +1368,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var shape45_names: std.StringHashMapUnmanaged(void) = .empty;
     var shape_plant_names: std.StringHashMapUnmanaged(void) = .empty;
     var light_value_by_name: std.StringHashMapUnmanaged(u8) = .empty;
+    var on_triggered_event_by_name: std.StringHashMapUnmanaged([]const u8) = .empty;
+    var destroy_on_event_by_name: std.StringHashMapUnmanaged(void) = .empty;
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .empty;
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .empty;
@@ -1455,6 +1486,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.shape45 orelse false) try shape45_names.put(arena, e.key_ptr.*, {});
         if (r.shape_plant orelse false) try shape_plant_names.put(arena, e.key_ptr.*, {});
         if (r.light_value) |lv| try light_value_by_name.put(arena, e.key_ptr.*, lv);
+        if (r.on_triggered_event) |oe| try on_triggered_event_by_name.put(arena, e.key_ptr.*, oe);
+        if (r.destroy_on_event orelse false) try destroy_on_event_by_name.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -1505,6 +1538,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .shape45_names = shape45_names,
         .shape_plant_names = shape_plant_names,
         .light_value_by_name = light_value_by_name,
+        .on_triggered_event_by_name = on_triggered_event_by_name,
+        .destroy_on_event_by_name = destroy_on_event_by_name,
         .upgrade_to = upgrade_to_names,
         .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,
