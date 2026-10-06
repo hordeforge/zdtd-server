@@ -14916,6 +14916,39 @@ test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
 }
 
+test "scenario carry weight scales the movement envelope cap (Perk PARTIAL)" {
+    // The encumbrance effect: above `carry_comfort_kg` the player moves
+    // slower, and the movement envelope cap is the scaled one. Below it the
+    // cap is unchanged.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer g.destroy();
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // Under the comfort band: the cap is the plain one.
+    g.sim.player[ps].carry_weight = 10;
+    var st: u64 = 0;
+    while (st < 25) : (st += 1) try g.step();
+    g.sim.setPos(c.entity_id, 100, 100, 100, 0);
+    game_movement_helpers.resetMoveEnvelopePeer(g, c.slot, 100, 100, 100);
+    c.move_valid = true;
+    c.move_tick = g.tick_n -| 20;
+    const base = game_movement_helpers.applyMovementEnvelope(g, c, c.peer orelse return error.MissingPeer, c.entity_id, 200, 100, 100);
+    // Encumbered: the same claim clamps to a smaller x.
+    g.sim.player[ps].carry_weight = 100;
+    game_movement_helpers.resetMoveEnvelopePeer(g, c.slot, 100, 100, 100);
+    c.move_valid = true;
+    c.move_tick = g.tick_n -| 20;
+    const enc = game_movement_helpers.applyMovementEnvelope(g, c, c.peer orelse return error.MissingPeer, c.entity_id, 200, 100, 100);
+    try std.testing.expect(enc.x < base.x);
+}
+
 test "scenario a trigger fire is validated against the POI wiring (T36)" {
     // T36 "Done when": a trigger fire is validated against the prefab's actual
     // wiring and latch state before the server relays it. A cell with no
