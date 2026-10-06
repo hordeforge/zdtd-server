@@ -36,6 +36,7 @@ pub const subbiome_noise = @import("subbiome_noise.zig");
 
 test {
     _ = store;
+    _ = blocktrigger;
     _ = store_tests;
     _ = chunk_flush;
     _ = terrain_snapshot;

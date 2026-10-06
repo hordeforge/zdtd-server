@@ -77,6 +77,7 @@ pub const te_types = @import("te_types.zig");
 
 test {
     _ = binary;
+    _ = stock_drone;
     _ = frame;
     _ = packages;
     _ = platform_user;

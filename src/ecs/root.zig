@@ -69,6 +69,7 @@ pub const groupSlice = query.groupSlice;
 
 test {
     _ = entity;
+    _ = drone_state;
     _ = components;
     _ = world;
     _ = world_tests;
