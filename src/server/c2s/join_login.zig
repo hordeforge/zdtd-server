@@ -3,6 +3,7 @@
 //! Split out of c2s/join.zig (same code, moved verbatim).
 
 const std = @import("std");
+const apm = @import("../../apm/root.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -21,6 +22,8 @@ const sanitizePlayerName = c2s_text.sanitizePlayerName;
 
 /// True when `name` is a login package and was handled.
 pub fn handleLogin(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
+    const __join_scope = apm.profiler.scope(&self.harness.prof, .join_login);
+    defer __join_scope.end();
     const sp = self.world.primarySpawn();
     if (std.mem.eql(u8, name, "NetPackagePlayerLogin")) {
         // ServerPassword already enforced at LiteNet ConnectRequest (net.server_password).

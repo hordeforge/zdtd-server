@@ -4726,9 +4726,11 @@ a finer server encoding.
   measures **0.08 ms** over three joins, which retires it as the cause. What
   remains is unattributed inside the `join` handler and is high-variance run to
   run (7.6 s and 23.5 s on identical benches, both `join_fail` 0). **2026-10-06:
-  the finer sections already landed** (`join_login`, `join_enter`,
-  `join_worldinfo`, `join_spawn` in `src/apm/profiler.zig`), so the next step is
-  a bench that attributes the residual to one of the four, not more sections.
+  the finer sections are now scoped** (`join_login`, `join_enter`,
+  `join_worldinfo`, `join_spawn` at the four C2S handlers in
+  `src/server/c2s/join_*.zig`, one `apm.profiler.scope` each). They were
+  declared in `src/apm/profiler.zig` but never scoped, so the residual stayed
+  unattributed. The next step is a bench that reads the four.
   The deeper fix stays W2b: async chunk gen (proc gen and te_scan off the join
   tick).
   *Evidence:* APM `zdtd_apm` dumps (tick_total, `.join`, `.join_drain`,

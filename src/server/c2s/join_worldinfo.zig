@@ -3,6 +3,7 @@
 //! Split out of c2s/join.zig (same code, moved verbatim).
 
 const std = @import("std");
+const apm = @import("../../apm/root.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -12,6 +13,8 @@ const prefabs_mod = @import("../../world/prefabs.zig");
 
 /// True when `name` is a world-info package and was handled.
 pub fn handleWorldInfo(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
+    const __join_scope = apm.profiler.scope(&self.harness.prof, .join_worldinfo);
+    defer __join_scope.end();
     _ = body;
     const sp = self.world.primarySpawn();
     if (std.mem.eql(u8, name, "NetPackageSignDataRequest")) {
