@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): 325 of the 327 features WORK (325 WORKS, 2 PARTIAL,
+[scorecard](#2-scorecard): 326 of the 327 features WORK (326 WORKS, 1 PARTIAL,
 0 MISSING); the bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -163,7 +163,7 @@ counting the `- **name** \`TAG\`` bullets in sections 4-12 whose marker is
 exactly `WORKS`, `PARTIAL` or `MISSING`; a date inside the marker or a
 `(waived)` suffix makes the label ad-hoc and uncounted, as does a looser count
 that would read 341): the canonical set
-is **327 features (325 WORKS, 2 PARTIAL, 0 MISSING)** after later rescores.
+is **327 features (326 WORKS, 1 PARTIAL, 0 MISSING)** after later rescores.
 Re-counted 2026-10-03 with a machine rule that matches this paragraph: every
 `- **name** \`TAG\`` bullet in sections 4-12 whose tag is exactly `WORKS`, `PARTIAL` or
 `MISSING`, trailing prose after the tag allowed (the strict "tag at end of line" reading
@@ -3753,8 +3753,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `skill ledger: level-up awards SP; purchase validates, level gate and spends`,
   `override_cost replaces the curve and refuses past its end`
 
-- **Perk / attribute passive effects applied to gameplay** `PARTIAL`
-  (re-evaluated 2026-09-02; the `(waived)` qualifier is dropped)
+- **Perk / attribute passive effects applied to gameplay** `WORKS`
+  (promoted 2026-10-06; the `(waived)` qualifier dropped 2026-09-02)
   The bounded passive-effects VM shipped 2026-08-27: level-scaled perk passives
   fold over the tracked stats (armour resist + `HealthChangeOT` regen),
   revertibly like buffs. The original waiver said "waived until a progression
@@ -4639,7 +4639,7 @@ retired 2026-08-25: stock's surface density is binary and the wire heightmaps
 are `byte[256]`, so the client's smooth surface comes from its meshers, not from
 a finer server encoding.
 
-**48 WORKS · 1 PARTIAL · 0 MISSING**
+**49 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
