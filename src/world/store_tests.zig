@@ -687,6 +687,34 @@ test "procBiomeAt follows the surface fill field deterministically" {
     );
 }
 
+test "lightBrightnessAt splits the chnLight nibbles and falls back to ambient" {
+    // `Chunk.GetLight` reads one byte and splits it: Sun is the low 4 bits and
+    // Block the high 4 (`light-mesh-water.md`). A missing chunk or a missing
+    // plane falls back to `IsDaytime() ? 0.65 : 0.1`.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var world = try World.init(std.testing.allocator, dir);
+    defer world.deinit();
+    // No chunk at (0, 0): the ambient fallback.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.65), world.lightBrightnessAt(5, 70, 5, true), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), world.lightBrightnessAt(5, 70, 5, false), 0.001);
+    // A chunk with a light plane: sun=15, block=3 -> max(15, 3) = 15 -> 1.0.
+    const c = try world.getOrCreate(.{ .x = 0, .z = 0 });
+    const lights = try std.testing.allocator.alloc(u8, c.planeCells());
+    @memset(lights, 0);
+    c.lights = lights;
+    defer {
+        std.testing.allocator.free(lights);
+        c.lights = null;
+    }
+    lights[5 + 5 * 16 + 70 * 256] = (3 << 4) | 15;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), world.lightBrightnessAt(5, 70, 5, true), 0.001);
+    // sun=4, block=10 -> max(4, 10) = 10 -> 10/15.
+    lights[5 + 5 * 16 + 70 * 256] = (10 << 4) | 4;
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0 / 15.0), world.lightBrightnessAt(5, 70, 5, true), 0.001);
+}
+
 test "resolveTerrainIds seeds default stack from live dump ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

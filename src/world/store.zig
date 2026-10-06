@@ -251,6 +251,10 @@ pub const Chunk = struct {
     /// derived state, never persisted: computed once on first touch with
     /// reset + spread semantics (stock ResetStability + DistributeStability).
     stability: ?[]u8 = null,
+    /// Per-cell light byte (stock `chnLight`, `light-mesh-water.md`): the low
+    /// nibble is the Sun channel and the high nibble the Block channel.
+    /// Lazy derived state, never persisted: rebuilt by the light spread.
+    lights: ?[]u8 = null,
     dirty: bool = false,
     /// Runtime-only: server finished its one-time storage-TE scan of this chunk.
     te_scanned: bool = false,
@@ -1355,6 +1359,28 @@ pub const World = struct {
     /// no per-cell levels, flow directions or evaporation, only pours (never
     /// drains). Returns cells filled. Runs after sim edits each tick
     /// (Game.step).
+    /// `World.GetLightBrightness` (`light-mesh-water.md`): the light sample at
+    /// a world cell, normalized 0..1. A missing chunk (unloaded area) falls
+    /// back to the ambient constant `IsDaytime() ? 0.65 : 0.1`, which is the
+    /// sample `Entity.GetBrightness` takes at 66% of the entity's box height.
+    /// `is_day` is the caller's `IsTime()` result.
+    pub fn lightBrightnessAt(self: *World, wx: i32, wy: i32, wz: i32, is_day: bool) f32 {
+        const t = worldToChunk(wx, wz);
+        const cp = self.chunks.get(t.pos.hash()) orelse return if (is_day) 0.65 else 0.1;
+        const lights = cp.*.lights orelse return if (is_day) 0.65 else 0.1;
+        if (wy < 0 or wy >= cp.*.y_dim) return if (is_day) 0.65 else 0.1;
+        const idx: usize = @intCast(t.lx + t.lz * 16 + wy * 256);
+        if (idx >= lights.len) return if (is_day) 0.65 else 0.1;
+        const byte = lights[idx];
+        const sun: u8 = byte & 15;
+        const block: u8 = byte >> 4;
+        // `Chunk.GetLightValue(x, y, z, darkness)`: `max(sun - darkness,
+        // blockLight)`, with the `== 15` fallback to the max. The stealth
+        // query uses darkness 0 (`GetLightBrightness`).
+        const value: u8 = if (sun == 15) @max(sun, block) else @max(sun, block);
+        return @as(f32, @floatFromInt(value)) / 15.0;
+    }
+
     pub fn levelWaterTick(self: *World, edits: usize, spread: usize, puddle: usize) u32 {
         const water_id = self.terrain_ids.water;
         var filled: u32 = 0;
