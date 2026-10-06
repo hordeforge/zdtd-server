@@ -615,9 +615,14 @@ on it.
 
 ## T29. Stealth, noise and smell
 
-**Status: largely landed; remainder is the light legs.** `systemStealth` (src/ecs/stealth.zig) runs the noise/event model with geometric decay, the noise table loads from `sounds.xml` (`assets/sound_noise.zig`), and smell is live (`rules.ai.smell_radius` / `smell_bleed_radius`, the bleeding extension at `sensing.zig:480`). The ledger scores the surface `PARTIAL` (Stealth/crouch) and `WORKS` (LOS / hearing / smell). **Still open:** block light and moving lights (clone-side chunk light grid +
-  light-entity dictionary, RE-documented and not RE-blocked), and the
-  light-refined groan threshold. **2026-10-06 survey:** the grid is fully
+**Status: landed 2026-10-06.** `systemStealth` (src/ecs/stealth.zig) runs the noise/event model with geometric decay, the noise table loads from `sounds.xml` (`assets/sound_noise.zig`), and smell is live (`rules.ai.smell_radius` / `smell_bleed_radius`, the bleeding extension at `sensing.zig:480`). The ledger scores the surface `PARTIAL` (Stealth/crouch) and `WORKS` (LOS / hearing / smell). **2026-10-06: the light legs landed too.** `Chunk.lights` is the `chnLight`
+  plane (Sun low nibble, Block high), `Chunk.setLight` is the `SetLight`
+  write, `Chunk.generateSunlight` is the column walk and
+  `Chunk.spreadBlockLight` / `spreadFrom` the block-light flood (all pinned
+  by tests). `World.lightBrightnessAt` is the query with the ambient
+  fallback. The light-refined groan threshold was already in
+  `stealth.zig` (`stealthLightLevel` + the `canSensePlayer` light gate).
+  The light-entity dictionary (moving lights) stays open. **2026-10-06 survey:** the grid is fully
   pinned in `light-mesh-water.md` - `Chunk.GetLight(x,y,z,type)` reads one
   byte from `chnLight` and splits the nibbles (Sun = low 4, Block = high 4),
   `GetLightValue = max(sun - darkness, block)` (with the `== 15` fallback to
