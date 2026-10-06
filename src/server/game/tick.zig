@@ -6,6 +6,7 @@
 const std = @import("std");
 const apm = @import("../../apm/root.zig");
 const game_mod = @import("../game.zig");
+const game_movement_helpers = @import("movement_helpers.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const ecs = @import("../../ecs/root.zig");
@@ -472,6 +473,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
         if (!self.sim.mask[ps].health or !self.sim.mask[ps].transform) continue;
         var h = &self.sim.health[ps];
         if (h.max_hp <= 0) continue;
+        // T29 moving lights: a held torch or flashlight lights the world
+        // around the player (items.xml `LightValue` scaled to the 0..15 grid).
+        game_movement_helpers.emitHeldLight(self, ps);
         // Deferred ModifyStats refunds (`delay=` kill rows) land here.
         drainPendingMods(self, c.slot, ps);
         // Combat-engagement timer decays; stock re-fires onCombatEntered only

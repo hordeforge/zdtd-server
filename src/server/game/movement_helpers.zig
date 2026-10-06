@@ -46,9 +46,9 @@ fn tryActivateTriggerAtPlayer(self: *Game, x: f32, y: f32, z: f32) void {
 /// each player holding a lit item. The block-light spread is the flood half.
 pub fn emitHeldLight(self: *Game, ps: ecs.Slot) void {
     const inv = &self.sim.inventory[ps];
-    const held = inv.slots[self.sim.player[ps].held_slot];
+    const held = inv.heldItem();
     if (held.count == 0) return;
-    const lv = self.items.lightValue(held.item_id);
+    const lv = (self.items.byId(held.item_id) orelse return).light_value;
     if (lv <= 0) return;
     const level: u8 = @intFromFloat(@round(@min(1.0, lv) * 15.0));
     if (level == 0) return;
