@@ -69,6 +69,11 @@ pub const Player = struct {
     /// finding induced by a shove attributes to the shover, not the shoved).
     /// 0 = none. Set on every landed hit; the evidence path reads it.
     last_attacker_id: i32 = 0,
+    /// Infection level 0..1 (the `buffInfectionMain` counter the catalog
+    /// loads). It contributes a negative `HealthChangeOT`, so the existing
+    /// hp_ot sink drains it; `infection_chance` (the sandbox scale) gates the
+    /// rise. 0 = clean.
+    infection: f32 = 0,
     peer_slot: i32 = -1,
     /// Stock EntityPlayer.IsBloodMoonDead: set when the player dies during an
     /// active blood moon, cleared on respawn. Horde zombies skip these players

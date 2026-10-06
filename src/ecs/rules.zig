@@ -552,6 +552,9 @@ pub const Progression = struct {
     /// docs/adr/0023-perk-attribute-system.md), so this is a flat floor rather
     /// than a per-player perk lookup; 0.0 matches the stock no-perk default.
     trap_kill_xp_frac: f32 = 0.0,
+    /// HP per second an infection level of 1.0 drains (`HealthChangeOT` from
+    /// the `buffInfectionMain` counter). 0 disables the drain entirely.
+    infection_hp_per_second: f32 = 0.1,
     /// V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
     /// skips the party XP share when `bTrapKillXP` is set. True = depart from
     /// stock and let trap kills party-share like normal kills.
@@ -1015,6 +1018,7 @@ pub const ProgressionOverlay = struct {
     block_damage_range: ?f32 = null,
     kill_xp_fallback: ?f32 = null,
     trap_kill_xp_frac: ?f32 = null,
+    infection_hp_per_second: ?f32 = null,
     trap_xp_party_share: ?bool = null,
 };
 
