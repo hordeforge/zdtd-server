@@ -171,6 +171,14 @@ pub const QueueItem = struct {
     /// `HandleRecipeQueue` then dereferences (asm.il ~1331756 IL_006c).
     recipe: [recipe_blob_max]u8 = [_]u8{0} ** recipe_blob_max,
     recipe_len: u16 = 0,
+    /// `RecipeQueueItem.RepairItem` (crafting-recipes.md:216): an
+    /// `ItemValue.Write` frame plus `AmountToRepair:u16`. Empty when the entry
+    /// is a craft, which is the common case - stock writes `hasRepair = false`
+    /// for those. A repair entry has no Recipe (the trailing `Recipe` is
+    /// absent, matching `Read`).
+    repair_blob: [recipe_blob_max]u8 = [_]u8{0} ** recipe_blob_max,
+    repair_blob_len: u16 = 0,
+    amount_to_repair: u16 = 0,
 
     pub fn recipeBlob(self: *const QueueItem) []const u8 {
         return self.recipe[0..self.recipe_len];

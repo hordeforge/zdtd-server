@@ -13,6 +13,7 @@ const platform_user = @import("platform_user.zig");
 const unity_hash = @import("../assets/unity_hash.zig");
 const containers = @import("../world/containers.zig");
 const containers_mod = containers;
+const workstations_mod = @import("../world/workstations.zig");
 const blocks_mod = @import("../assets/blocks.zig");
 const workstations = @import("../world/workstations.zig");
 const PoweredTriggerTe = stock_te.PoweredTriggerTe;
@@ -91,6 +92,46 @@ test "workstation craft complete list roundtrips" {
     try std.testing.expectEqual(@as(u16, 1), p.craft_complete[0].used_count);
     try std.testing.expectEqual(@as(u16, 2), p.craft_complete[0].item_count);
     try std.testing.expectEqualStrings("meleeToolRepairT0StoneAxe", p.craft_complete[0].recipeName());
+}
+
+test "RecipeQueueItem carries a repair entry through the byte round trip" {
+    // `RepairItem` (crafting-recipes.md:216): `hasRepair:bool` + `ItemValue.Write`
+    // + `AmountToRepair:u16`. A craft entry writes `hasRepair = false`; a repair
+    // entry carries the pair. The writer used to hardcode `false`, so a repair
+    // entry could not round-trip at all.
+    var buf: [8192]u8 = undefined;
+    const body = try testWorkstationBody(&buf);
+    const p = try parseWorkstationTeBody(body);
+    var q = p.queue[p.queue_n - 1];
+    try std.testing.expectEqual(@as(u16, 0), q.repair_blob_len);
+    // Seed a repair entry: an ItemValue frame (type 9) + the amount.
+    var rb: [256]u8 = undefined;
+    var rw = binary.Writer{ .buf = &rb };
+    try stock_inv.writeItemValue(&rw, .{ .type_id = stock_inv.items_start_here + 9 });
+    try std.testing.expect(rw.pos > 0 and rw.pos <= q.repair_blob.len);
+    @memcpy(q.repair_blob[0..rw.pos], rb[0..rw.pos]);
+    q.repair_blob_len = @intCast(rw.pos);
+    q.amount_to_repair = 40;
+    q.recipe_len = 0;
+    var qbuf: [16]workstations_mod.QueueItem = undefined;
+    @memcpy(qbuf[0..p.queue_n - 1], p.queue[0..p.queue_n - 1]);
+    qbuf[p.queue_n - 1] = q;
+    var again: [8192]u8 = undefined;
+    _ = try buildWorkstationTeBody(&again, p.handle, p.world_x, p.world_y, p.world_z, p.block_id, .{
+        .fuel = p.fuel[0..p.fuel_n],
+        .input = p.input[0..p.input_n],
+        .tools = p.tools[0..p.tools_n],
+        .output = p.output[0..p.output_n],
+        .last_input_count = p.last_input_n,
+        .last_input = p.last_input[0..p.last_input_blob_len],
+        .queue = qbuf[0..p.queue_n],
+        .craft_complete = p.craft_complete[0..p.craft_complete_n],
+    });
+    const p2 = try parseWorkstationTeBody(&again);
+    const back = p2.queue[p2.queue_n - 1];
+    try std.testing.expectEqual(q.repair_blob_len, back.repair_blob_len);
+    try std.testing.expectEqual(@as(u16, 40), back.amount_to_repair);
+    try std.testing.expectEqualSlices(u8, q.repair_blob[0..q.repair_blob_len], back.repair_blob[0..back.repair_blob_len]);
 }
 
 test "workstation encoder drains the payload exactly" {

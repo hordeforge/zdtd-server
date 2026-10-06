@@ -705,7 +705,14 @@ fn writeQueueItem(w: *binary.Writer, q: QueueItem) !void {
     try w.writeI16(q.multiplier);
     try w.writeBool(q.is_crafting);
     try w.writeF32(q.craft_time_left);
-    try w.writeBool(false); // RepairItem null
+    // `RepairItem` (crafting-recipes.md:216): `hasRepair:bool` + `ItemValue.Write`
+    // + `AmountToRepair:u16`. A craft entry writes `hasRepair = false` and skips
+    // the pair, which is stock's shape for `Read` at version 2.
+    try w.writeBool(q.repair_blob_len != 0);
+    if (q.repair_blob_len != 0) {
+        try w.writeBytes(q.repair_blob[0..q.repair_blob_len]);
+        try w.writeU16(q.amount_to_repair);
+    }
     try w.writeByte(q.quality);
     try w.writeI32(q.starting_entity_id);
     try w.writeF32(q.one_item_craft_time);
@@ -1270,8 +1277,14 @@ fn readQueueItem(r: *binary.Reader) binary.ReadError!QueueItem {
     out.craft_time_left = try r.readF32();
     const has_repair = try r.readBool();
     if (has_repair) {
+        // `RepairItem` (crafting-recipes.md:216): `ItemValue.Write` + `AmountToRepair:u16`.
+        // Capture the pair so a repair entry round-trips through the echo.
+        const rs = r.pos;
         _ = try stock_inv.readItemValue(r);
-        _ = try r.readU16();
+        const blen: u16 = @intCast(@min(r.pos - rs, out.repair_blob.len));
+        @memcpy(out.repair_blob[0..blen], r.data[rs..][0..blen]);
+        out.repair_blob_len = blen;
+        out.amount_to_repair = try r.readU16();
     }
     out.quality = try r.readByte();
     out.starting_entity_id = try r.readI32();
