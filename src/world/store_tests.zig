@@ -749,6 +749,34 @@ test "generateSunlight walks the column from 255 down to the surface" {
     try std.testing.expectApproxEqAbs(@as(f32, 0), world.lightBrightnessAt(5, 70, 5, true), 0.001);
 }
 
+test "setLight writes one nibble and keeps the other (Chunk.SetLight)" {
+    // `Chunk.SetLight(x, y, z, intensity, type)` (`light-mesh-water.md`): type
+    // 1 is the Sun channel (low nibble) and 0 the Block channel (high nibble).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try test_tmp.rootOf(&tmp);
+    var world = try World.init(std.testing.allocator, dir);
+    defer world.deinit();
+    const c = try world.getOrCreate(.{ .x = 0, .z = 0 });
+    const lights = try std.testing.allocator.alloc(u8, c.planeCells());
+    @memset(lights, 0);
+    c.lights = lights;
+    defer {
+        std.testing.allocator.free(lights);
+        c.lights = null;
+    }
+    Chunk.setLight(c, 5, 70, 5, 7, true);
+    try std.testing.expectEqual(@as(u8, 7), lights[5 + 5 * 16 + 70 * 256] & 15);
+    try std.testing.expectEqual(@as(u8, 0), lights[5 + 5 * 16 + 70 * 256] >> 4);
+    Chunk.setLight(c, 5, 70, 5, 3, false);
+    try std.testing.expectEqual(@as(u8, 7), lights[5 + 5 * 16 + 70 * 256] & 15);
+    try std.testing.expectEqual(@as(u8, 3), lights[5 + 5 * 16 + 70 * 256] >> 4);
+    // Out of range is a no-op.
+    Chunk.setLight(c, 99, 70, 5, 1, true);
+    Chunk.setLight(c, 5, 999, 5, 1, true);
+    try std.testing.expectEqual(@as(u8, 7), lights[5 + 5 * 16 + 70 * 256] & 15);
+}
+
 test "resolveTerrainIds seeds default stack from live dump ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

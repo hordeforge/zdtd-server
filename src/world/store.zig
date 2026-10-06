@@ -476,6 +476,20 @@ pub const Chunk = struct {
     /// Per-XZ-row: fill 16 column templates, then store each Y as a 16-wide
     /// `@Vector` write (plane layout is x + z*16 + y*256). Scalar equivalent
     /// is the per-column fillColumn + write loop in the golden test.
+    /// `Chunk.SetLight(x, y, z, intensity, type)` (`light-mesh-water.md`): the
+    /// light-grid write. `type` 1 is the Sun channel (low nibble) and 0 the
+    /// Block channel (high nibble); each keeps the other nibble. Out-of-range
+    /// coordinates are a no-op, matching the chunk-local mask.
+    pub fn setLight(c: *Chunk, lx: i32, y: i32, lz: i32, intensity: u8, is_sun: bool) void {
+        if (lx < 0 or lx >= 16 or lz < 0 or lz >= 16 or y < 0 or y >= c.y_dim) return;
+        const lights = c.lights orelse return;
+        const idx: usize = @intCast(lx + lz * 16 + y * 256);
+        if (idx >= lights.len) return;
+        const old = lights[idx];
+        const v: u8 = intensity & 15;
+        lights[idx] = if (is_sun) (old & 0xF0) | v else (v << 4) | (old & 0x0F);
+    }
+
     /// `Chunk.RefreshSunlight` (`light-mesh-water.md`): the sun column walk,
     /// y from 255 down. The Sun nibble is 15 above the surface and 0 below it.
     /// The surface is the opaque boundary: `heights` is the first solid cell
